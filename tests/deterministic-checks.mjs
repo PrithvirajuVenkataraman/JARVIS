@@ -827,6 +827,7 @@ assert.equal(greetingSandbox.isCasualConversationQuery('No no so I am just gener
 assert.match(greetingSandbox.buildCasualConversationReply('how are you doing today'), /doing well/i);
 
 const fastSimpleSandbox = {
+    activeResponseRenderContext: null,
     isCasualConversationQuery: greetingSandbox.isCasualConversationQuery,
     isExplicitWebSearchRequest: () => false,
     isCurrentInfoQuery: text => /\b(current|latest|today|news)\b/i.test(String(text || '')),
@@ -837,6 +838,7 @@ const fastSimpleSandbox = {
     isLikelyLocationOrTravelQuery: text => /\b(nearby|museum|places to visit|restaurant|hotel)\b/i.test(String(text || ''))
 };
 vm.createContext(fastSimpleSandbox);
+vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'buildFrontendRouteContext'), fastSimpleSandbox);
 vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'isSimpleStableQuestion'), fastSimpleSandbox);
 vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'isFastSimpleQuery'), fastSimpleSandbox);
 vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'shouldUseMinimalThinking'), fastSimpleSandbox);
@@ -848,10 +850,12 @@ assert.equal(fastSimpleSandbox.isSimpleStableQuestion('museum near me'), false);
 assert.equal(fastSimpleSandbox.shouldUseMinimalThinking('what is recursion', 'fast_simple'), true);
 assert.doesNotMatch(SOURCE.appHtml, /voice-conversation-screen|voice-screen-/);
 assert.doesNotMatch(SOURCE.styles, /voice-conversation-screen|voice-screen-/);
-assert.match(SOURCE.appHtml, /const frontendRoute = decideFrontendRoute\(rawCommandText/);
-assert.match(SOURCE.appHtml, /if \(frontendRoute\.route === 'fast_simple'\) \{[\s\S]*handleFastSimpleQuery/);
 assert.match(SOURCE.appHtml, /const contextResolution = window\.JarvisConversation\?\.resolve/);
-assert.ok(SOURCE.appHtml.indexOf('const frontendRoute = decideFrontendRoute(rawCommandText') < SOURCE.appHtml.indexOf('const contextResolution = window.JarvisConversation?.resolve'));
+assert.match(SOURCE.appHtml, /const frontendRoute = decideFrontendRoute\(text/);
+assert.match(SOURCE.appHtml, /if \(frontendRoute\.route === 'fast_simple'\) \{[\s\S]*handleFastSimpleQuery/);
+assert.ok(SOURCE.appHtml.indexOf('const contextResolution = window.JarvisConversation?.resolve') < SOURCE.appHtml.indexOf('const frontendRoute = decideFrontendRoute(text'));
+assert.match(SOURCE.appHtml, /handleFastSimpleQuery\(text,[\s\S]*stream:\s*true/);
+assert.match(SOURCE.appHtml, /publishResolvedModelMessage\(userText,\s*answer,[\s\S]*fastFinalizeStreamed:\s*options\?\.stream === true/);
 assert.match(SOURCE.appHtml, /const activeSource = String\(fallbackTurn\?\.source \|\| activeResponseRenderContext\?\.source/);
 
 const fallbackCardSandbox = {
@@ -1041,6 +1045,7 @@ vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'compactVisionTextMention'
 vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'normalizeReadableVisionConfidence'), visionFormatSandbox);
 vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'cleanVisionDisplayText'), visionFormatSandbox);
 vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'formatVisionJsonToReadableText'), visionFormatSandbox);
+vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'formatVisionTranslationAnswer'), visionFormatSandbox);
 const richVisionText = visionFormatSandbox.formatVisionJsonToReadableText({
     answer: 'It appears to be a fixture phone based on the rear camera cluster.',
     brand: 'Fixture Brand',
@@ -1059,6 +1064,14 @@ assert.doesNotMatch(richVisionText, /\bconfidence\b/i);
 assert.doesNotMatch(richVisionText, /\bobjects\b/i);
 const messyVisionText = visionFormatSandbox.cleanVisionDisplayText('{ "objects": [{ "label": "laptop", "confidence": 0.98 }], "textDetected": ["JARVIS"], "answer": "A Lenovo laptop is visible." }');
 assert.doesNotMatch(messyVisionText, /\bobjects\b|confidence|textDetected|[{}[\]]/i);
+const translationVisionText = visionFormatSandbox.formatVisionTranslationAnswer('', {
+    fullText: 'வணக்கம்',
+    translation: {
+        detectedLanguage: 'Tamil',
+        englishText: 'Hello'
+    }
+});
+assert.match(translationVisionText, /^Original text:\nவணக்கம்\n\nEnglish translation:\nHello\n\nLanguage: Tamil$/);
 
 const titleSandbox = {};
 vm.createContext(titleSandbox);
