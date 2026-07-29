@@ -16822,23 +16822,6 @@ function isWakeGreetingText(text) {
             if (String(activeResponseRenderContext?.source || '').toLowerCase() === 'converse') {
                 setConverseUiState('submitting', 'command_received');
             }
-            const frontendRoute = decideFrontendRoute(rawCommandText, {
-                turnSource: activeResponseRenderContext?.source || 'text'
-            });
-            logRoutingDebug('processCommand route_decision', rawCommandText, { frontendRoute });
-            if (frontendRoute.route === 'fast_simple') {
-                logRoutingDebug('processCommand -> fast_simple', rawCommandText, {
-                    selectedHandler: 'handleFastSimpleQuery',
-                    frontendRoute
-                });
-                await handleFastSimpleQuery(rawCommandText, {
-                    stream: false,
-                    historyKey: rawCommandText,
-                    turnId: activeResponseRenderContext?.turnId || '',
-                    routeDecision: frontendRoute
-                });
-                return;
-            }
             syncConversationPendingState();
             const contextResolution = window.JarvisConversation?.resolve({ message: text }) || null;
             const activeTurnForResolution = getConversationTurn(activeResponseRenderContext?.turnId);
@@ -16873,6 +16856,23 @@ function isWakeGreetingText(text) {
                 return;
             }
             text = contextResolution?.resolvedMessage || text;
+            const frontendRoute = decideFrontendRoute(text, {
+                turnSource: activeResponseRenderContext?.source || 'text'
+            });
+            logRoutingDebug('processCommand route_decision', text, { frontendRoute, contextResolution });
+            if (frontendRoute.route === 'fast_simple') {
+                logRoutingDebug('processCommand -> fast_simple', text, {
+                    selectedHandler: 'handleFastSimpleQuery',
+                    frontendRoute
+                });
+                await handleFastSimpleQuery(text, {
+                    stream: true,
+                    historyKey: rawCommandText,
+                    turnId: activeResponseRenderContext?.turnId || '',
+                    routeDecision: frontendRoute
+                });
+                return;
+            }
             const lower = text.toLowerCase();
             const compact = String(text || '').trim();
             if (String(activeResponseRenderContext?.source || '').toLowerCase() === 'converse') {
@@ -19537,12 +19537,10 @@ function isSimpleStableQuestion(text) {
         return globalThis.JarvisFrontendRouting.isSimpleStableQuestion(text, buildFrontendRouteContext(text));
     }
     const t = String(text || '').trim();
-    const lower = t.toLowerCase();
     if (!t || t.length > 120) return false;
     if (isCasualConversationQuery(t)) return true;
-    if (isExplicitWebSearchRequest(t) || isCurrentInfoQuery(t) || isStrictLatestQuery(t) || isLiveRetrievalQuery(t)) return false;
-    if (isMedicalAdviceIntent(t) || isMedicalEmergencyIntent(t) || isLikelyLocationOrTravelQuery(t)) return false;
-    if (/\b(near me|nearby|museum|museums|restaurant|hotel|open now|directions|map|sources?|cite|latest|current|today|news|price|weather|stock|crypto|ceo|president|prime minister|chief minister|captain|coach)\b/.test(lower)) return false;
+    if (buildFrontendRouteContext(t).requiresSources || buildFrontendRouteContext(t).safetySensitive || buildFrontendRouteContext(t).placeGrounded) return false;
+    if (/\b(near me|nearby|open now|sources?|cite|latest|current|today|news|price|weather|stock|crypto|ceo|president|prime minister|chief minister|captain|coach)\b/i.test(t)) return false;
     return /^(?:what\s+is|what'?s|who\s+is|who\s+was|how\s+does|how\s+do|explain|define|tell\s+me\s+about)\s+[\w\s.'-]{2,80}\??$/i.test(t) ||
         /^(?:do|can|are|will)\s+you\b|^do\s+you\s+understand\s+[A-Za-z][A-Za-z\s-]{1,40}\??$/i.test(t);
 }
@@ -19592,24 +19590,14 @@ function decideFrontendRoute(text, context = {}) {
     if (globalThis.JarvisFrontendRouting?.decideFrontendRoute) {
         return globalThis.JarvisFrontendRouting.decideFrontendRoute(text, routeContext);
     }
+    const speakResponse = String(routeContext.turnSource || '').toLowerCase() === 'converse';
+    if (routeContext.requiresSources || routeContext.liveRetrieval || routeContext.placeGrounded) {
+        return { route: 'live_required', reason: 'source_or_freshness_required', risk: routeContext.risk || 'medium_risk', requiresSources: true, minimalThinking: false, speakResponse, sourcePolicy: 'required' };
+    }
     if (isFastSimpleQuery(text)) {
-        return {
-            route: 'fast_simple',
-            reason: isCasualConversationQuery(text) ? 'casual_conversation' : 'simple_stable_question',
-            risk: 'low_risk',
-            requiresSources: false,
-            minimalThinking: true,
-            speakResponse: String(routeContext.turnSource || '').toLowerCase() === 'converse',
-            sourcePolicy: 'none'
-        };
+        return { route: 'fast_simple', reason: isCasualConversationQuery(text) ? 'casual_conversation' : 'simple_stable_question', risk: 'low_risk', requiresSources: false, minimalThinking: true, speakResponse, sourcePolicy: 'none' };
     }
-    if (routeContext.placeGrounded) {
-        return { route: 'place_grounded', reason: 'place_query_requires_evidence', risk: routeContext.risk || 'medium_risk', requiresSources: true, minimalThinking: false, speakResponse: String(routeContext.turnSource || '').toLowerCase() === 'converse', sourcePolicy: 'place_grounded' };
-    }
-    if (routeContext.requiresSources || routeContext.liveRetrieval) {
-        return { route: 'live_required', reason: 'source_or_freshness_required', risk: routeContext.risk || 'medium_risk', requiresSources: true, minimalThinking: false, speakResponse: String(routeContext.turnSource || '').toLowerCase() === 'converse', sourcePolicy: 'required' };
-    }
-    return { route: 'chat_direct', reason: 'default_direct_chat', risk: routeContext.risk || 'low_risk', requiresSources: false, minimalThinking: false, speakResponse: String(routeContext.turnSource || '').toLowerCase() === 'converse', sourcePolicy: 'none' };
+    return { route: 'chat_direct', reason: 'default_direct_chat', risk: routeContext.risk || 'low_risk', requiresSources: false, minimalThinking: false, speakResponse, sourcePolicy: 'none' };
 }
 
 async function handleFastSimpleQuery(text, options = {}) {
@@ -19632,7 +19620,7 @@ async function handleFastSimpleQuery(text, options = {}) {
         addFeedbackButtons(userText, reply, messageId);
         return { response: reply, intent: 'casual_conversation', assistantMessageId: messageId };
     }
-    return await askGeminiAI(userText, {
+    const ai = await askGeminiAI(userText, {
         intent: 'fast_simple',
         fastExplainer: true,
         stream: options?.stream === true,
@@ -19640,6 +19628,17 @@ async function handleFastSimpleQuery(text, options = {}) {
         minimalThinking: true,
         routeDecision: options?.routeDecision || decideFrontendRoute(userText)
     });
+    if (ai?.aborted) return ai;
+    const answer = String(ai?.response || ai?.text || '').trim();
+    if (!answer) return ai;
+    await publishResolvedModelMessage(userText, answer, {
+        label: 'Model answer',
+        routing: ai?.routing || null,
+        existingAssistantMessageId: ai?.assistantMessageId || '',
+        fastFinalizeStreamed: options?.stream === true,
+        turnId: options?.turnId || activeResponseRenderContext?.turnId || ''
+    });
+    return ai;
 }
 
 function getMemoryManagerItems(query = '') {
@@ -21748,7 +21747,7 @@ async function handleContinuousVisionQuery(text) {
     showThinkingIndicator('Analyzing your view...');
     try {
         const isTextReadIntent = /\b(read|text|ocr|bill|receipt|invoice|sign|label|menu|document)\b/i.test(String(text || '')); 
-        const isTranslateIntent = /\b(translate|translation|convert to english|to english|in english|what does this say)\b/i.test(String(text || '')); 
+        const isTranslateIntent = isVisionTranslationIntent(text); 
         const isMathSolveIntent = /\b(solve|calculate|evaluate|find x|equation|integral|derivative|differentiate|simplify|factor|algebra|trigonometry|calculus|math problem|word problem|step by step)\b/i.test(String(text || '')); 
         const isWebsiteUiIntent = isWebsiteUiVisionIntent(text); 
         const isPaperOverlayIntent = isPaperAnswerOverlayIntent(text);
@@ -21803,11 +21802,15 @@ async function handleContinuousVisionQuery(text) {
             const textBlock = fullText || textDetected;
             answer = `Detected text:\n${textBlock}`;
         }
-        answer = normalizeVisionAnswerForChat(answer, details); 
+        answer = visionTask === 'translate_to_english'
+            ? formatVisionTranslationAnswer(answer, details)
+            : normalizeVisionAnswerForChat(answer, details); 
         if (isWebsiteUiIntent) {
             answer = refineWebsiteUiVisionAnswer(answer, details);
         }
-        answer = applyVisionReplyPreferences(answer);
+        answer = visionTask === 'translate_to_english'
+            ? answer
+            : applyVisionReplyPreferences(answer);
         if (!answer) answer = 'The frame was received, but I could not produce a reliable visual answer.'; 
         if (visionTask === 'paper_answer_overlay') {
             renderPaperAnswerOverlay(details, answer, text);
@@ -22053,6 +22056,27 @@ function applyVisionReplyPreferences(answer) {
     return out;
 }
 
+function formatVisionTranslationAnswer(answer, details = {}) {
+    const raw = String(answer || '').trim();
+    const sourceText = String(details?.fullText || '').trim();
+    const translation = details?.translation && typeof details.translation === 'object'
+        ? details.translation
+        : null;
+    const englishText = String(translation?.englishText || '').trim();
+    const detectedLanguage = String(translation?.detectedLanguage || '').trim();
+    if (sourceText || englishText) {
+        return [
+            sourceText ? `Original text:\n${sourceText}` : '',
+            englishText ? `English translation:\n${englishText}` : '',
+            detectedLanguage ? `Language: ${detectedLanguage}` : 'Language: Unknown'
+        ].filter(Boolean).join('\n\n').trim();
+    }
+    return raw
+        .replace(/^```(?:json)?\s*/i, '')
+        .replace(/\s*```$/i, '')
+        .trim();
+}
+
 function refineVisionAnswer(text) {
     let out = cleanVisionDisplayText(text);
     if (!out) return '';
@@ -22097,6 +22121,10 @@ function isContinuousVisionQuestion(text) {
     // Normalize common shorthand so "what do u see" routes to vision correctly.
     const t = raw.replace(/\bu\b/g, 'you');
 
+    if (isContinuousVisionActive && isVisionTranslationIntent(t)) {
+        return true;
+    }
+
     if (/\b(what (?:do|can) you see|what are you seeing|what am i looking at|what am i seeing|describe (?:what you see|the camera|the image|this image|the screen)|read (?:this image|the image|the text|this text|the screen)|analy[sz]e (?:this image|the image|the camera|the screen)|what(?:'s| is) (?:in front of me|on camera|in the camera|in this image|on the screen))\b/.test(t)) { 
         return true; 
     } 
@@ -22113,6 +22141,14 @@ function isContinuousVisionQuestion(text) {
     }
 
     return false;
+}
+
+function isVisionTranslationIntent(text) {
+    const t = String(text || '').toLowerCase();
+    if (!t.trim()) return false;
+    return /\b(translate|translation|convert to english|to english|in english|what does this say|what is written|meaning of this text)\b/.test(t) ||
+        /\b(hindi|kannada|malayalam|telugu|tamil|urdu|marathi|bengali|gujarati|punjabi)\b[\s\S]{0,80}\b(english|translate|meaning)\b/.test(t) ||
+        /\b(english|translate|meaning)\b[\s\S]{0,80}\b(hindi|kannada|malayalam|telugu|tamil|urdu|marathi|bengali|gujarati|punjabi)\b/.test(t);
 }
 
 // ============ MULTI-AGENT PERSONA DEBATE ============
