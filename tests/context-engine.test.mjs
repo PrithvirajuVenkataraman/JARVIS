@@ -323,4 +323,19 @@ for (const scenario of [
     assertUsesThread(generic, standaloneThread);
 }
 
+const fastSimpleContextEngine = createConversationEngine({ maxTurns: 10, maxContextChars: 1000 });
+let fastSimpleContext = fastSimpleContextEngine.resolve({ message: 'Tell me about fixture rockets' });
+const staleThread = fastSimpleContext.activeThread.id;
+recordExchange(fastSimpleContextEngine, staleThread, fastSimpleContext.resolvedMessage, 'Fixture rockets summary.');
+fastSimpleContext = fastSimpleContextEngine.resolve({ message: 'What is photosynthesis?' });
+assert.equal(fastSimpleContext.decisionReason, 'clear_new_intent');
+assertDoesNotUseThread(fastSimpleContext, staleThread, 'fast/simple stable questions must switch away from stale topics');
+const fastPhotosynthesisThread = fastSimpleContext.activeThread.id;
+recordExchange(fastSimpleContextEngine, fastPhotosynthesisThread, fastSimpleContext.resolvedMessage, 'Photosynthesis is how plants make food.');
+fastSimpleContext = fastSimpleContextEngine.resolve({ message: 'make it shorter' });
+assert.equal(fastSimpleContext.decisionReason, 'contextual_follow_up');
+assertUsesThread(fastSimpleContext, fastPhotosynthesisThread);
+assert.doesNotMatch(fastSimpleContext.resolvedMessage, /fixture rockets/i);
+assert.match(fastSimpleContext.resolvedMessage, /photosynthesis/i);
+
 console.log('context-engine-tests-ok');
