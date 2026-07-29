@@ -1928,6 +1928,75 @@ assert.equal(paperVisionCalls, 1);
 globalThis.fetch = ORIGINAL_FETCH;
 delete process.env.GEMINI_API_KEY;
 
+process.env.GEMINI_API_KEY = 'test-gemini-key';
+process.env.GROQ_API_KEY = 'test-groq-key';
+let geminiTranslateVisionCalls = 0;
+let groqTranslateVisionCalls = 0;
+let groqTranslateTextCalls = 0;
+globalThis.fetch = async (url, init) => {
+    const href = String(url);
+    const body = JSON.parse(String(init?.body || '{}'));
+    if (href.includes('generativelanguage.googleapis.com')) {
+        geminiTranslateVisionCalls += 1;
+        return new Response(JSON.stringify({ error: { message: 'fixture gemini unavailable' } }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' }
+        });
+    }
+    if (href.includes('api.groq.com')) {
+        const firstContent = body?.messages?.[0]?.content;
+        if (Array.isArray(firstContent)) {
+            groqTranslateVisionCalls += 1;
+            return okJson({
+                choices: [{
+                    message: {
+                        content: JSON.stringify({
+                            summary: 'Spanish greeting text.',
+                            textDetected: ['hola'],
+                            fullText: 'hola'
+                        })
+                    }
+                }]
+            });
+        }
+        groqTranslateTextCalls += 1;
+        assert.match(String(body?.messages?.[1]?.content || ''), /hola/);
+        return okJson({
+            choices: [{
+                message: {
+                    content: JSON.stringify({
+                        detectedLanguage: 'Spanish',
+                        englishText: 'Hello',
+                        notes: []
+                    })
+                }
+            }]
+        });
+    }
+    throw new Error(`unexpected translate vision URL ${href}`);
+};
+const translatedVision = await callHandler(visionHandler, request('/api/vision', {
+    task: 'translate_to_english',
+    prompt: 'translate this text to English',
+    mimeType: 'image/jpeg',
+    imageBase64: SAMPLE.imageBase64
+}));
+assert.equal(translatedVision.statusCode, 200);
+assert.equal(translatedVision.body.success, true);
+assert.equal(translatedVision.body.task, 'translate_to_english');
+assert.equal(translatedVision.body.details.pipeline, 'ocr-translate');
+assert.equal(translatedVision.body.details.fullText, 'hola');
+assert.equal(translatedVision.body.details.translation.englishText, 'Hello');
+assert.match(translatedVision.body.response, /Original text:\nhola/);
+assert.match(translatedVision.body.response, /English translation:\nHello/);
+assert.match(translatedVision.body.response, /Language: Spanish/);
+assert.ok(geminiTranslateVisionCalls >= 1);
+assert.equal(groqTranslateVisionCalls, 1);
+assert.equal(groqTranslateTextCalls, 1);
+globalThis.fetch = ORIGINAL_FETCH;
+delete process.env.GEMINI_API_KEY;
+delete process.env.GROQ_API_KEY;
+
 process.env.GROQ_API_KEY = 'test-groq-key';
 process.env.LIVE_RETRIEVAL_ENABLED = 'true';
 process.env.CRAWL4AI_URL = 'https://crawl4ai.example';
