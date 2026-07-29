@@ -2038,6 +2038,16 @@ import { extractWithCrawl4Ai } from './_lib/crawl4ai-client.js';
             elapsedMs: 0,
             externalVerification: false
         };
+        if (String(intent || '') === 'fast_explainer' && !shouldReviewFastExplainer(riskReasons)) {
+            return {
+                correctedResponse: '',
+                metadata: {
+                    ...baseMetadata,
+                    verdict: 'skipped_fast_explainer',
+                    reasons: riskReasons.length ? riskReasons : ['fast_explainer_low_risk']
+                }
+            };
+        }
         if (!riskReasons.length || !String(answer || '').trim()) {
             return { correctedResponse: '', metadata: baseMetadata };
         }
@@ -2093,6 +2103,22 @@ import { extractWithCrawl4Ai } from './_lib/crawl4ai-client.js';
                 elapsedMs: Date.now() - startedAt
             }
         };
+    }
+
+    function shouldReviewFastExplainer(riskReasons = []) {
+        const mustReview = new Set([
+            'always_on_review',
+            'explicit_verification',
+            'challenged_or_uncertain',
+            'model_uncertainty',
+            'source_like_claim_without_source',
+            'current_or_date_sensitive_claim',
+            'routing_uncertainty',
+            'high_stakes',
+            'code',
+            'calculation'
+        ]);
+        return (Array.isArray(riskReasons) ? riskReasons : []).some(reason => mustReview.has(String(reason || '')));
     }
 
     function getQualityRiskReasons(message, answer, intent, options = {}) {
@@ -2537,6 +2563,17 @@ import { extractWithCrawl4Ai } from './_lib/crawl4ai-client.js';
             ].filter(Boolean).join(' ');
             const maxTokens = clampInt(Math.round(wordSpec.maxWords * 2.2 + 220), 2500, 400, 12000);
             return { instruction, maxTokens, temperature: 0.7, wordSpec };
+        }
+
+        if (String(options?.intent || '') === 'fast_explainer') {
+            return {
+                instruction: 'Fast explainer mode: answer directly in 3-6 concise sentences. Avoid filler, source requests, and generic next steps.',
+                maxTokens: 900,
+                temperature: 0.5,
+                wordSpec: null,
+                timeoutMs: 9000,
+                retries: 0
+            };
         }
 
         const detail = inferDetailLevel(message);
