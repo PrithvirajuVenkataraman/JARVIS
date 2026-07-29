@@ -176,15 +176,17 @@ function getVisionProviders() {
 
 async function callVisionText({ providers, systemPrompt, mimeType, imageBase64 }) {
     if (providers?.geminiApiKey) {
-        const payload = await callGeminiVision({
-            apiKey: providers.geminiApiKey,
-            configuredModel: providers.geminiModel,
-            systemPrompt,
-            mimeType,
-            imageBase64
-        });
-        const text = extractGeminiText(payload);
-        if (text) return text;
+        try {
+            const payload = await callGeminiVision({
+                apiKey: providers.geminiApiKey,
+                configuredModel: providers.geminiModel,
+                systemPrompt,
+                mimeType,
+                imageBase64
+            });
+            const text = extractGeminiText(payload);
+            if (text) return text;
+        } catch (_) {}
     }
 
     if (providers?.groqApiKey) {
