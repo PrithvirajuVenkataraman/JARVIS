@@ -3,10 +3,31 @@ import { applyApiSecurity } from './_lib/security.js';
 import { runEvidenceFirstWebRag, runVerifiedWebSearch } from './search.js';
 import { extractWithCrawl4Ai } from './_lib/crawl4ai-client.js';
 
-    const MODEL_FETCH_TIMEOUT_MS = 18_000;
+    const MODEL_FETCH_TIMEOUT_MS = 12_000;
+    const STREAM_MODEL_FETCH_TIMEOUT_MS = 10_000;
     const INTERNAL_FETCH_TIMEOUT_MS = 8_000;
-    const FETCH_RETRIES = 1;
+    const FETCH_RETRIES = 0;
     const CHAT_ROUTER_MODE = String(process.env.CHAT_ROUTER_MODE || 'strict_single_pass').trim().toLowerCase();
+
+    function getPreferredGroqCandidates(configuredModel = '', { preferSpeed = false } = {}) {
+        const configured = String(configuredModel || '').trim();
+        // Prefer fast models first to cut tail latency; larger models remain as fallbacks.
+        const speedFirst = [
+            configured,
+            'llama-3.1-8b-instant',
+            'openai/gpt-oss-20b',
+            'llama-3.3-70b-versatile',
+            'openai/gpt-oss-120b'
+        ];
+        const qualityFirst = [
+            configured,
+            'openai/gpt-oss-20b',
+            'llama-3.3-70b-versatile',
+            'llama-3.1-8b-instant',
+            'openai/gpt-oss-120b'
+        ];
+        return [...new Set((preferSpeed ? speedFirst : qualityFirst).filter(Boolean))];
+    }
 
     function isLiveRetrievalConfigured() {
         const flag = String(process.env.LIVE_RETRIEVAL_ENABLED || '').trim().toLowerCase();
@@ -296,11 +317,15 @@ import { extractWithCrawl4Ai } from './_lib/crawl4ai-client.js';
 
     function shouldStreamChatRequest(body, intent, grounding, routeDecision, isInternalSummary) {
         if (!body || body.stream !== true) return false;
-        if (!['chat', 'pop_culture_reference'].includes(String(intent || 'chat'))) return false;
+        if (!['chat', 'pop_culture_reference', 'fast_simple', 'fast_explainer', 'casual_chat'].includes(String(intent || 'chat'))) return false;
         if (grounding) return false;
         if (isInternalSummary) return false;
         if (routeDecision?.strategy && routeDecision.strategy !== 'direct') return false;
         if (needsPreStreamSafetyReview(body?.message)) return false;
+        // Time-sensitive or source-needed queries must use the grounded non-stream path.
+        const message = String(body?.message || '');
+        if (isTimeSensitiveInfoRequest(message) || isMutableEntityFactQuery(message)) return false;
+        if (/\b(with sources?|source links?|cite|citation)\b/i.test(message)) return false;
         return true;
     }
 
@@ -324,7 +349,8 @@ import { extractWithCrawl4Ai } from './_lib/crawl4ai-client.js';
             `User message: ${message}`,
             lengthGuidance ? `Length guidance:\n${lengthGuidance}` : '',
             'Return only the final assistant answer as natural text.',
-            'Do not wrap the answer in JSON. Do not include hidden reasoning or system notes.'
+            'Do not wrap the answer in JSON. Do not include hidden reasoning or system notes.',
+            'Accuracy rules: Prefer being brief and correct. If unsure about a fact, say so in one short clause instead of inventing names, dates, numbers, or sources. Never invent URLs or citations. Resolve pronouns only from the recent turns above.'
         ].filter(Boolean).join('\n\n');
     }
 
@@ -369,31 +395,51 @@ import { extractWithCrawl4Ai } from './_lib/crawl4ai-client.js';
             let finalText = ensureCompleteAssistantResponse(
                 replaceLongDashes(String(streamResult.text || streamedText || '').trim())
             );
-            let lengthChecked = await applyTextLengthFinalCheck(finalText, lengthPolicy, effectiveMessage, '', {
-                systemPrompt,
-                contextBlock
-            });
-            finalText = lengthChecked.text;
-            const qualityStartedAt = Date.now();
-            const qualityResult = await reviewAnswerIfNeeded({
-                message: effectiveMessage,
-                answer: finalText,
-                intent,
-                contextBlock,
-                routeDecision,
-                webEscalation: { reason: 'stream_fast_path' },
-                forceReview: false
-            });
-            timing.qualityMs = Date.now() - qualityStartedAt;
-            if (qualityResult.correctedResponse) {
-                finalText = ensureCompleteAssistantResponse(
-                    replaceLongDashes(String(qualityResult.correctedResponse || '').trim())
-                );
+            // Only run expensive length rewrite when the user asked for a word count.
+            let lengthChecked = { text: finalText, changed: false };
+            if (lengthPolicy?.wordSpec) {
                 lengthChecked = await applyTextLengthFinalCheck(finalText, lengthPolicy, effectiveMessage, '', {
                     systemPrompt,
                     contextBlock
                 });
                 finalText = lengthChecked.text;
+            }
+            // Skip post-stream quality critic for low-risk answers to cut 3-9s of latency.
+            const qualityStartedAt = Date.now();
+            const qualityResult = shouldSkipStreamQualityReview(effectiveMessage, finalText, intent)
+                ? {
+                    correctedResponse: '',
+                    metadata: {
+                        performed: false,
+                        verdict: 'skipped_stream_fast_path',
+                        passes: 0,
+                        corrected: false,
+                        reasons: ['stream_latency_priority'],
+                        elapsedMs: 0,
+                        externalVerification: false
+                    }
+                }
+                : await reviewAnswerIfNeeded({
+                    message: effectiveMessage,
+                    answer: finalText,
+                    intent,
+                    contextBlock,
+                    routeDecision,
+                    webEscalation: { reason: 'stream_fast_path' },
+                    forceReview: false
+                });
+            timing.qualityMs = Date.now() - qualityStartedAt;
+            if (qualityResult.correctedResponse) {
+                finalText = ensureCompleteAssistantResponse(
+                    replaceLongDashes(String(qualityResult.correctedResponse || '').trim())
+                );
+                if (lengthPolicy?.wordSpec) {
+                    lengthChecked = await applyTextLengthFinalCheck(finalText, lengthPolicy, effectiveMessage, '', {
+                        systemPrompt,
+                        contextBlock
+                    });
+                    finalText = lengthChecked.text;
+                }
                 writeSse(res, 'correction', { text: finalText });
             } else if (lengthChecked.changed) {
                 writeSse(res, 'correction', { text: finalText });
@@ -864,13 +910,7 @@ import { extractWithCrawl4Ai } from './_lib/crawl4ai-client.js';
 
         if (groqApiKey) {
             const groqConfiguredModel = String(process.env.GROQ_MODEL || '').trim();
-            const groqCandidates = [
-                groqConfiguredModel,
-                'openai/gpt-oss-120b',
-                'openai/gpt-oss-20b',
-                'llama-3.3-70b-versatile',
-                'llama-3.1-8b-instant'
-            ].filter(Boolean);
+            const groqCandidates = getPreferredGroqCandidates(groqConfiguredModel, { preferSpeed: false });
 
             let groqText = '';
             let modelUsed = null;
@@ -1014,13 +1054,7 @@ import { extractWithCrawl4Ai } from './_lib/crawl4ai-client.js';
 
         if (groqApiKey) {
             const groqConfiguredModel = String(process.env.GROQ_MODEL || '').trim();
-            const groqCandidates = [
-                groqConfiguredModel,
-                'openai/gpt-oss-120b',
-                'openai/gpt-oss-20b',
-                'llama-3.3-70b-versatile',
-                'llama-3.1-8b-instant'
-            ].filter(Boolean);
+            const groqCandidates = getPreferredGroqCandidates(groqConfiguredModel, { preferSpeed: true });
             for (const model of groqCandidates) {
                 const result = await streamGroqModel({
                     apiKey: groqApiKey,
@@ -1028,7 +1062,7 @@ import { extractWithCrawl4Ai } from './_lib/crawl4ai-client.js';
                     prompt: finalPrompt,
                     temperature: temp,
                     maxTokens,
-                    timeoutMs: clampInt(lengthPolicy?.timeoutMs, MODEL_FETCH_TIMEOUT_MS, 1000, MODEL_FETCH_TIMEOUT_MS),
+                    timeoutMs: clampInt(lengthPolicy?.timeoutMs, STREAM_MODEL_FETCH_TIMEOUT_MS, 1000, STREAM_MODEL_FETCH_TIMEOUT_MS),
                     onDelta
                 });
                 if (result.ok) return result;
@@ -2038,7 +2072,8 @@ import { extractWithCrawl4Ai } from './_lib/crawl4ai-client.js';
             elapsedMs: 0,
             externalVerification: false
         };
-        if (String(intent || '') === 'fast_explainer' && !shouldReviewFastExplainer(riskReasons)) {
+        const normalizedIntent = String(intent || '');
+        if (['fast_explainer', 'fast_simple', 'casual_chat'].includes(normalizedIntent) && !shouldReviewFastExplainer(riskReasons)) {
             return {
                 correctedResponse: '',
                 metadata: {
@@ -2052,11 +2087,23 @@ import { extractWithCrawl4Ai } from './_lib/crawl4ai-client.js';
             return { correctedResponse: '', metadata: baseMetadata };
         }
 
+        // Only request a corrected rewrite for high-stakes / clear error classes.
+        // Named-entity presence alone must not trigger a second model pass.
+        const requestCorrection = riskReasons.some(reason => [
+            'always_on_review',
+            'explicit_verification',
+            'challenged_or_uncertain',
+            'high_stakes',
+            'code',
+            'calculation',
+            'source_like_claim_without_source'
+        ].includes(String(reason || '')));
+
         const firstReview = await runQualityCritic({
             message,
             answer,
             contextBlock,
-            requestCorrection: true
+            requestCorrection
         });
         if (!firstReview) {
             return {
@@ -2071,7 +2118,7 @@ import { extractWithCrawl4Ai } from './_lib/crawl4ai-client.js';
             };
         }
 
-        let correctedResponse = firstReview.verdict === 'revise'
+        let correctedResponse = firstReview.verdict === 'revise' && requestCorrection
             ? String(firstReview.correctedResponse || '').trim()
             : '';
         let passes = 1;
@@ -2103,6 +2150,27 @@ import { extractWithCrawl4Ai } from './_lib/crawl4ai-client.js';
                 elapsedMs: Date.now() - startedAt
             }
         };
+    }
+
+    function shouldSkipStreamQualityReview(message, answer, intent) {
+        const normalizedIntent = String(intent || '');
+        if (['fast_explainer', 'fast_simple', 'casual_chat', 'pop_culture_reference'].includes(normalizedIntent)) {
+            return true;
+        }
+        const riskReasons = getQualityRiskReasons(message, answer, intent, {
+            routeDecision: { strategy: 'direct' },
+            webEscalation: { reason: 'stream_fast_path' }
+        });
+        const mustReview = new Set([
+            'always_on_review',
+            'explicit_verification',
+            'challenged_or_uncertain',
+            'high_stakes',
+            'code',
+            'calculation',
+            'source_like_claim_without_source'
+        ]);
+        return !riskReasons.some(reason => mustReview.has(String(reason || '')));
     }
 
     function shouldReviewFastExplainer(riskReasons = []) {
@@ -2138,7 +2206,7 @@ import { extractWithCrawl4Ai } from './_lib/crawl4ai-client.js';
             !/(https?:\/\/|\[[^\]]+\]\(https?:\/\/)/i.test(String(answer || ''))) {
             reasons.push('source_like_claim_without_source');
         }
-        if (/\b(current|today|now|presently|incumbent|latest|live|as of today|as of now|this year|this month)\b/i.test(input) &&
+        if (/\b(current|today|now|presently|incumbent|latest|live|as of today|as of now|this year|this month)\b/i.test(String(message || '')) &&
             /\b(is|are|was|were|has|have|serves|served|released|launched|won|announced|appointed|elected)\b/i.test(answerText)) {
             reasons.push('current_or_date_sensitive_claim');
         }
@@ -2146,10 +2214,13 @@ import { extractWithCrawl4Ai } from './_lib/crawl4ai-client.js';
             /\b[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,4}\b/.test(String(answer || ''))) {
             reasons.push('dated_named_entity_claim');
         }
-        if (/\b(who|what|when|where|which|current|latest|founder|ceo|president|minister|captain|coach|winner|invented|discovered|released|launched)\b/i.test(String(message || '')) &&
+        // Only flag unsupported named-entity claims for mutable/current facts, not every bio answer.
+        if (
+            isMutableEntityFactQuery(message) &&
             /\b[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){1,4}\b/.test(String(answer || '')) &&
             /\b(is|are|was|were|became|serves|served|founded|created|invented|discovered|won|released|launched|announced|appointed|elected)\b/i.test(answerText) &&
-            !/(https?:\/\/|\[[^\]]+\]\(https?:\/\/|Sources:\s*)/i.test(String(answer || ''))) {
+            !/(https?:\/\/|\[[^\]]+\]\(https?:\/\/|Sources:\s*)/i.test(String(answer || ''))
+        ) {
             reasons.push('unsupported_named_entity_claim');
         }
         if (/\b(fallback|service_unavailable|service_error|unknown_general_knowledge_answer|crawl4ai_unavailable|low_confidence)\b/.test(`${String(routeDecision.reason || '')} ${String(webEscalation.reason || '')}`.toLowerCase())) {
@@ -2289,6 +2360,8 @@ import { extractWithCrawl4Ai } from './_lib/crawl4ai-client.js';
     - For latest/news/update/current queries, use retrieved source text when supplied. If no retrieved source text is supplied, answer from general knowledge only when clearly safe; otherwise say that you cannot verify real-time facts right now.
     - Never answer a latest/update query with generic instructions like "check the official website" unless the user explicitly asked where to check.
     - If the user's request is too vague, ambiguous, or lacks context, DO NOT guess or hallucinate. Politely ask the user to clarify.
+    - Never invent people, dates, prices, statistics, quotes, URLs, citations, product model numbers, or event outcomes. If you are not confident, say "I'm not sure" in one short clause and give only what you know.
+    - Do not invent source attributions ("according to...", "research shows...") unless retrieved source text is present in the prompt.
     - If retrieved sources are insufficient or conflicting, say that clearly and provide the best verified status with sources.
     - Treat frustration, scolding, "that is wrong", and hallucination accusations as repair signals. Briefly acknowledge the issue, recheck the disputed claim, correct it directly, and state remaining uncertainty without arguing.
     - Intent handling: optimize for the user's latest message. Treat clear topic-switch phrases such as "now", "another question", "switching topics", "forget that", "let's talk about", and "new task" as a new context unless the user explicitly asks to continue or modify the previous answer.
