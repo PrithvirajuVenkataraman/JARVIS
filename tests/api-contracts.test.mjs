@@ -144,6 +144,7 @@ const ORIGINAL_SERPER_KEY = process.env.SERPER_KEY;
 const ORIGINAL_EXA_API_KEY = process.env.EXA_API_KEY;
 const ORIGINAL_EXA_KEY = process.env.EXA_KEY;
 const ORIGINAL_LIVE_RETRIEVAL_ENABLED = process.env.LIVE_RETRIEVAL_ENABLED;
+const ORIGINAL_JARVIS_PUBLIC_FACT_SEARCH = process.env.JARVIS_PUBLIC_FACT_SEARCH;
 const ORIGINAL_GROQ_API_KEY = process.env.GROQ_API_KEY;
 const ORIGINAL_GEMINI_API_KEY = process.env.GEMINI_API_KEY; 
 const ORIGINAL_GOOGLE_API_KEY = process.env.GOOGLE_API_KEY; 
@@ -160,6 +161,7 @@ delete process.env.SERPER_KEY;
 delete process.env.EXA_API_KEY;
 delete process.env.EXA_KEY;
 delete process.env.LIVE_RETRIEVAL_ENABLED;
+delete process.env.JARVIS_PUBLIC_FACT_SEARCH;
 delete process.env.GROQ_API_KEY;
 delete process.env.GEMINI_API_KEY;
 delete process.env.GOOGLE_API_KEY; 
@@ -199,6 +201,7 @@ assert.equal(diagnostics.body.diagnostics.retrieval.exaConfigured, true);
 assert.equal(diagnostics.body.diagnostics.retrieval.nvidiaConfigured, true);
 assert.equal(diagnostics.body.diagnostics.retrieval.crawl4aiConfigured, true);
 assert.equal(diagnostics.body.diagnostics.retrieval.liveSearchEnabled, true);
+assert.equal(diagnostics.body.diagnostics.retrieval.publicFactSearchEnabled, true);
 assert.doesNotMatch(JSON.stringify(diagnostics.body), /secret-|crawl4ai\.example/);
 delete process.env.GROQ_API_KEY;
 delete process.env.GEMINI_API_KEY;
@@ -206,6 +209,7 @@ delete process.env.EXA_API_KEY;
 delete process.env.NVIDIA_API_KEY;
 delete process.env.CRAWL4AI_URL;
 delete process.env.LIVE_RETRIEVAL_ENABLED;
+delete process.env.JARVIS_PUBLIC_FACT_SEARCH;
 
 const pausedWebSearch = await callHandler(webSearchHandler, request('/api/web-search', { query: 'latest open source search' }));
 assert.equal(pausedWebSearch.statusCode, 503);
@@ -480,7 +484,11 @@ assert.equal(chatTest.classifyRoutingDecision(`latest news about ${fixtureSubjec
 assert.equal(chatTest.classifyRoutingDecision('explain the running nickname reference with sources', '', { intent: 'pop_culture_reference' }).strategy, 'live_first');
 delete process.env.SERPER_API_KEY;
 delete process.env.LIVE_RETRIEVAL_ENABLED;
+delete process.env.JARVIS_PUBLIC_FACT_SEARCH;
+assert.equal(chatTest.classifyRoutingDecision(roleQuery(ROLE_FIXTURES.president.role, ROLE_FIXTURES.president.jurisdiction), '', {}).strategy, 'live_first');
+process.env.JARVIS_PUBLIC_FACT_SEARCH = 'false';
 assert.equal(chatTest.classifyRoutingDecision(roleQuery(ROLE_FIXTURES.president.role, ROLE_FIXTURES.president.jurisdiction), '', {}).strategy, 'direct');
+delete process.env.JARVIS_PUBLIC_FACT_SEARCH;
 assert.equal(
     chatTest.resolveContextualLiveQuery(`Who is ${fixtureSubject('Person')}?`, [
         { role: 'user', text: `Tell me about ${fixtureSubject('Agency')}` },
@@ -579,6 +587,7 @@ assert.equal(confidentSearchCalls, 0);
 globalThis.fetch = ORIGINAL_FETCH;
 delete process.env.GROQ_API_KEY;
 delete process.env.LIVE_RETRIEVAL_ENABLED;
+delete process.env.JARVIS_PUBLIC_FACT_SEARCH;
 delete process.env.CHAT_ROUTER_MODE;
 
 process.env.GROQ_API_KEY = 'test-groq-key';
@@ -642,6 +651,7 @@ assert.match(uncertainStableChat.body.response, /Felix Hoffmann|extracted public
 globalThis.fetch = ORIGINAL_FETCH;
 delete process.env.GROQ_API_KEY;
 delete process.env.LIVE_RETRIEVAL_ENABLED;
+delete process.env.JARVIS_PUBLIC_FACT_SEARCH;
 delete process.env.CHAT_ROUTER_MODE;
 delete process.env.CRAWL4AI_URL;
 
@@ -675,6 +685,7 @@ assert.equal(unavailableModelCalls, 1);
 globalThis.fetch = ORIGINAL_FETCH;
 delete process.env.GROQ_API_KEY;
 delete process.env.LIVE_RETRIEVAL_ENABLED;
+delete process.env.JARVIS_PUBLIC_FACT_SEARCH;
 delete process.env.CHAT_ROUTER_MODE;
 
 const wrongMethod = await callHandler(currentFactsHandler, {
@@ -1843,6 +1854,7 @@ assert.equal(quotaError.retryable, false);
 globalThis.fetch = ORIGINAL_FETCH;
 delete process.env.SERPER_API_KEY;
 delete process.env.LIVE_RETRIEVAL_ENABLED;
+delete process.env.JARVIS_PUBLIC_FACT_SEARCH;
 
 const disabledMarkets = await callHandler(marketsHandler, request('/api/markets', {
     mode: 'markets',
@@ -2084,12 +2096,14 @@ assert.match(chatTest.ensureVerificationSourcesSection('How checked: Compared.',
 globalThis.fetch = ORIGINAL_FETCH;
 delete process.env.GROQ_API_KEY;
 delete process.env.LIVE_RETRIEVAL_ENABLED;
+delete process.env.JARVIS_PUBLIC_FACT_SEARCH;
 delete process.env.CRAWL4AI_URL;
 
 restoreEnv('GROQ_API_KEY', ORIGINAL_GROQ_API_KEY);
 restoreEnv('SERPER_API_KEY', ORIGINAL_SERPER_API_KEY);
 restoreEnv('SERPER_KEY', ORIGINAL_SERPER_KEY);
 restoreEnv('LIVE_RETRIEVAL_ENABLED', ORIGINAL_LIVE_RETRIEVAL_ENABLED);
+restoreEnv('JARVIS_PUBLIC_FACT_SEARCH', ORIGINAL_JARVIS_PUBLIC_FACT_SEARCH);
 restoreEnv('GEMINI_API_KEY', ORIGINAL_GEMINI_API_KEY); 
 restoreEnv('GOOGLE_API_KEY', ORIGINAL_GOOGLE_API_KEY); 
 restoreEnv('GEMINI_SEARCH_MODEL', ORIGINAL_GEMINI_SEARCH_MODEL); 
