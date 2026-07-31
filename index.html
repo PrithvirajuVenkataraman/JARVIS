@@ -350,9 +350,38 @@
 })();
 
 const TRUST_LEVEL = {VERIFIED: 'verified', GENERATED: 'generated'};
-const LIVE_RETRIEVAL_ENABLED = globalThis.JARVIS_LIVE_RETRIEVAL_ENABLED === true;
-const STRUCTURED_CURRENT_FACTS_ENABLED = globalThis.JARVIS_STRUCTURED_CURRENT_FACTS_ENABLED === true;
 const LIVE_DISABLED_MESSAGE = 'Live search is off for now.';
+
+function isLiveRetrievalEnabled() {
+    return globalThis.JARVIS_LIVE_RETRIEVAL_ENABLED === true;
+}
+
+function isPublicFactSearchEnabled() {
+    return globalThis.JARVIS_PUBLIC_FACT_SEARCH_ENABLED !== false;
+}
+
+function isStructuredCurrentFactsEnabled() {
+    return globalThis.JARVIS_STRUCTURED_CURRENT_FACTS_ENABLED !== false;
+}
+
+function isFactSearchEnabled() {
+    return isLiveRetrievalEnabled() || isPublicFactSearchEnabled();
+}
+
+async function syncRetrievalFlagsFromDiagnostics() {
+    try {
+        const data = await window.JarvisApi?.postJson?.('/api/diagnostics', {}, { timeoutMs: 8000 });
+        const retrieval = data?.diagnostics?.retrieval || {};
+        if (retrieval.liveSearchEnabled === true) {
+            globalThis.JARVIS_LIVE_RETRIEVAL_ENABLED = true;
+        }
+        if (retrieval.publicFactSearchEnabled === false) {
+            globalThis.JARVIS_PUBLIC_FACT_SEARCH_ENABLED = false;
+        }
+    } catch (_) {
+        // Keep client defaults when diagnostics is unavailable.
+    }
+}
 const SUPPORT_MODE_HINTS = {
     balanced: 'Be clear, practical, and warm. Keep a neutral supportive tone.',
     supportive: 'Use an empathetic and motivating tone while staying concrete and direct.',
@@ -2576,7 +2605,7 @@ async function processUserQuery(text, options = {}) {
         riskLevel,
         broadFactualWeb
     });
-    if (LIVE_RETRIEVAL_ENABLED && isExplicitWebSearchRequest(t)) {
+    if (isFactSearchEnabled() && isExplicitWebSearchRequest(t)) {
         logRoutingDebug('processUserQuery -> live_retrieval explicit_web', t, {
             selectedHandler: 'handleLiveRetrievalQuery',
             normalizedQuery: normalizeExplicitWebSearchQuery(t),
@@ -2587,7 +2616,7 @@ async function processUserQuery(text, options = {}) {
         await handleLiveRetrievalQuery(normalizeExplicitWebSearchQuery(t));
         return { intent: 'live_retrieval' };
     }
-    if (LIVE_RETRIEVAL_ENABLED && isStrictLatestQuery(t)) {
+    if (isFactSearchEnabled() && isStrictLatestQuery(t)) {
         logRoutingDebug('processUserQuery -> strict_latest', t, {
             selectedHandler: 'handleStrictLatestQuery',
             liveIntent,
@@ -2620,7 +2649,7 @@ async function processUserQuery(text, options = {}) {
         return await askGeminiAI(t);
     }
 
-    if (LIVE_RETRIEVAL_ENABLED && (isHeadlineListQuery(t) || shouldUseNewsEndpointForCurrentQuery(t) || isNewsworthyLiveTopic(t))) {
+    if (isFactSearchEnabled() && (isHeadlineListQuery(t) || shouldUseNewsEndpointForCurrentQuery(t) || isNewsworthyLiveTopic(t))) {
         logRoutingDebug('processUserQuery -> news', t, {
             selectedHandler: 'fetchAndDisplayNews',
             liveIntent,
@@ -2631,7 +2660,7 @@ async function processUserQuery(text, options = {}) {
         return { intent: 'news' };
     }
 
-    if (LIVE_RETRIEVAL_ENABLED && broadFactualWeb) {
+    if (isFactSearchEnabled() && broadFactualWeb) {
         if (entityIntent?.isEntityFact) {
             logRoutingDebug('processUserQuery -> entity_fact broad_factual', t, {
                 selectedHandler: 'handleUniversalEntityFactQuery',
@@ -2655,7 +2684,7 @@ async function processUserQuery(text, options = {}) {
     }
 
     if (
-        LIVE_RETRIEVAL_ENABLED &&
+        isFactSearchEnabled() &&
         riskLevel !== 'low_risk' &&
         (isCurrentInfoQuery(t) || isLiveRetrievalQuery(t) || isUniversalEntityFactQuestion(t) || isProfileOrIdentityQuery(t))
     ) {
@@ -3037,7 +3066,7 @@ ${snippets}`
 }
 
 async function buildNewsSearchFallback(query, signal) {
-    if (!LIVE_RETRIEVAL_ENABLED) return null;
+    if (!isFactSearchEnabled()) return null;
 
     showThinkingIndicator('Web search in progress...');
     const response = await fetch('/api/search', {
@@ -3074,7 +3103,7 @@ async function buildNewsSearchFallback(query, signal) {
 
 // ========== NEWS FETCHING FUNCTION ==========
 async function fetchAndDisplayNews(query) {
-    if (!LIVE_RETRIEVAL_ENABLED) {
+    if (!isFactSearchEnabled()) {
         return publishLiveDisabledMessage(query);
     }
 
@@ -3199,7 +3228,7 @@ async function fetchAndDisplayNews(query) {
 // ========== END NEWS FETCHING FUNCTION ==========
 
 async function handleTamilJokeSearch(queryText) {
-    if (!LIVE_RETRIEVAL_ENABLED) return false;
+    if (!isFactSearchEnabled()) return false;
 
     showThinkingIndicator('Searching web for a Tamil joke...');
     try {
@@ -3668,7 +3697,7 @@ function extractEntityCandidate(text) {
 }
 
 async function buildSearchFallbackAnswer(userMessage) {
-    if (!LIVE_RETRIEVAL_ENABLED) return null;
+    if (!isFactSearchEnabled()) return null;
 
     const resolvedMessage = String(userMessage || '').trim();
     const lowSignal = String(resolvedMessage || '').trim();
@@ -3920,7 +3949,7 @@ function asksUserToProvideSources(text) {
 
 async function resolveFinalAssistantAnswer(userMessage, answerText) {
     if (asksUserToProvideSources(answerText)) {
-        if (!LIVE_RETRIEVAL_ENABLED) {
+        if (!isFactSearchEnabled()) {
             const cleanAnswer = sanitizeWeakModelAnswer(answerText, userMessage);
             if (cleanAnswer) return cleanAnswer;
             return String(answerText || '').trim();
@@ -3929,7 +3958,7 @@ async function resolveFinalAssistantAnswer(userMessage, answerText) {
     const safeAnswer = sanitizeWeakModelAnswer(answerText, userMessage);
     if (safeAnswer) return safeAnswer;
 
-    if (LIVE_RETRIEVAL_ENABLED) {
+    if (isFactSearchEnabled()) {
         const searchFallback = await buildSearchFallbackAnswer(userMessage);
         if (searchFallback) return searchFallback;
     }
@@ -5022,6 +5051,7 @@ let showRoutingDebugBadge = false;
             loadUserData();  
             loadAssistantModes(); 
             enforceDarkMode();
+            void syncRetrievalFlagsFromDiagnostics();
             setupInputHistoryNavigation();
             initChatScrollLock();
             initKeyboardShortcuts();
@@ -9287,7 +9317,7 @@ async function fetchLiveSearchJson(query, options = {}) {
 }
 
 async function fetchCurrentFactJson(query, options = {}) {
-    if (!LIVE_RETRIEVAL_ENABLED || !STRUCTURED_CURRENT_FACTS_ENABLED) {
+    if (!isFactSearchEnabled() || !isStructuredCurrentFactsEnabled()) {
         const error = new Error('Structured current-fact resolver is disabled.');
         error.status = 503;
         error.data = { success: false, disabled: true, resolved: false, error: 'Structured current-fact resolver is disabled.', answer: '', sources: [] };
@@ -9378,7 +9408,7 @@ function isVerificationRefusalText(text) {
 }
 
 async function handleExchangeRateLookup(text) {
-    if (!LIVE_RETRIEVAL_ENABLED) {
+    if (!isFactSearchEnabled()) {
         return publishLiveDisabledMessage(text);
     }
 
@@ -9445,7 +9475,7 @@ async function handleExchangeRateLookup(text) {
 }
 
 async function handleMarketLookup(text) {
-    if (!LIVE_RETRIEVAL_ENABLED) {
+    if (!isFactSearchEnabled()) {
         return publishLiveDisabledMessage(text);
     }
 
@@ -9622,7 +9652,7 @@ function extractTravelLocationOrFallback(text) {
 }
 
 async function buildTopPlaceSuggestions(type, location, userText = '') {
-    if (!LIVE_RETRIEVAL_ENABLED) return null;
+    if (!isFactSearchEnabled()) return null;
 
     const kind = String(type || '').toLowerCase();
     if (kind !== 'hotel') return null;
@@ -10281,7 +10311,7 @@ function extractMotivationStoryProfile(text) {
 }
 
 async function buildMotivationStoryFromWeb(userText) {
-    if (!LIVE_RETRIEVAL_ENABLED) return '';
+    if (!isFactSearchEnabled()) return '';
 
     const profile = extractMotivationStoryProfile(userText);
     const queryByCategory = {
@@ -11596,7 +11626,7 @@ Rules:
 }
 
 async function fetchSongsFromVerifiedSources(artist, requestedCount) {
-    if (!LIVE_RETRIEVAL_ENABLED) return { items: [], sources: [] };
+    if (!isFactSearchEnabled()) return { items: [], sources: [] };
 
     const safeArtist = String(artist || '').trim();
     if (!safeArtist) return { items: [], sources: [] };
@@ -11819,7 +11849,7 @@ async function handleArtistSongRequest(text) {
         // Fall through to web-search and AI fallbacks.
     }
 
-    if (!LIVE_RETRIEVAL_ENABLED) {
+    if (!isFactSearchEnabled()) {
         try {
             const aiFallbackItems = await buildSongListFromAIFallback(artist, requestedCount, wantsLatest ? 'latest/recent songs' : 'top/best songs');
             const fallbackReply = formatMusicSongReply(artist, requestedCount, aiFallbackItems, true, wantsLatest ? 'latest' : 'top');
@@ -12080,7 +12110,7 @@ async function answerYesNoOnly(questionText) {
 }
 
 async function handleComparisonWithReliableSources(userText) {
-    if (!LIVE_RETRIEVAL_ENABLED) return false;
+    if (!isFactSearchEnabled()) return false;
 
     const entities = extractComparisonEntities(userText);
     if (!entities) return false;
@@ -12541,7 +12571,7 @@ async function publishStrictLatestFailure(userText, intent, options = {}) {
 }
 
 async function handleStrictLatestQuery(userText) {
-    if (!LIVE_RETRIEVAL_ENABLED) {
+    if (!isFactSearchEnabled()) {
         return publishLiveDisabledMessage(userText);
     }
 
@@ -13169,23 +13199,24 @@ function decideAnswerPath(classification) {
     const flags = classification.flags || {};
 
     if (flags.inappropriate) return 'moderation';
-    if (flags.highRiskMentalHealth) return 'high_risk_mental_health'; 
+    if (flags.highRiskMentalHealth) return 'high_risk_mental_health';
     if (flags.medicalEmergency) return 'medical_emergency';
     if (flags.medicalAdvice) return 'medical_advice';
-    if (flags.artistSong) return 'artist_song'; 
-    if (flags.explicitWebSearch) return 'default_model';
-    if (flags.universalEntityFact) return 'default_model';
-    if (flags.profileIdentity || flags.stableBiography) return 'default_model';
-    if (flags.currentInfo) return 'default_model';
-    if (flags.broadFactualWeb) return 'default_model';
+    if (flags.artistSong) return 'artist_song';
+    if (flags.explicitWebSearch) return 'web_search';
+    if (flags.broadFactualWeb) return 'broad_factual_web';
+    if (flags.universalEntityFact) return 'entity_fact';
+    if (flags.stableBiography) return 'entity_fact';
+    if (flags.profileIdentity) return 'live_retrieval';
+    if (flags.currentInfo) return 'current_info';
+    if (flags.news) return 'news';
+    if (flags.exchangeRate) return 'exchange_rate';
+    if (flags.marketPrice) return 'market_price';
+    if (flags.liveRetrieval) return 'live_retrieval';
 
     if (flags.vagueAdvice) return 'vague_advice';
     if (flags.songMoodGame) return 'song_mood_game';
     if (flags.comparison) return 'comparison';
-    if (flags.news) return 'default_model';
-    if (flags.exchangeRate) return 'default_model';
-    if (flags.marketPrice) return 'default_model';
-    if (flags.liveRetrieval) return 'default_model';
     if (flags.tamilJoke) return 'tamil_joke';
     if (flags.seriesRefJoke) return 'series_ref_joke';
     if (flags.generalJoke) return 'general_joke';
@@ -15279,7 +15310,7 @@ async function publishUniversalModelFallback(pipeline, label = 'Model fallback')
 }
 
 async function fetchHybridCitationSources(userText, intent, controller) {
-    if (!LIVE_RETRIEVAL_ENABLED) return [];
+    if (!isFactSearchEnabled()) return [];
 
     const query = String(userText || '').trim();
     if (!query) return [];
@@ -15339,7 +15370,7 @@ async function handleAnswerThenCiteQuery(userText, classification) {
         return false;
     }
 
-    if (!LIVE_RETRIEVAL_ENABLED) {
+    if (!isFactSearchEnabled()) {
         await publishResolvedModelMessage(query, answer, { label: 'Model answer', routing: ai?.routing || null });
         return true;
     }
@@ -15381,7 +15412,7 @@ async function handleChatFirstCurrentQuery(userText, classification) {
         return true;
     }
 
-    if (!LIVE_RETRIEVAL_ENABLED) {
+    if (!isFactSearchEnabled()) {
         return publishLiveDisabledMessage(query);
     }
 
@@ -15545,7 +15576,7 @@ Steps:
 }
 
 async function retrieveUniversalEntitySources(pipeline, controller) {
-    if (!LIVE_RETRIEVAL_ENABLED) return [];
+    if (!isFactSearchEnabled()) return [];
 
     const queries = buildUniversalEntityQueries(pipeline.userText, pipeline.intent);
     const resultSets = await Promise.all(
@@ -15958,7 +15989,7 @@ ${snippets}`
 async function handleUniversalEntityFactQuery(userText, liveIntent = null) { 
     const pipeline = buildUniversalFactPipelineContext(userText, liveIntent);
     const roleHolderQuery = isCurrentRoleHolderLiveQuery(pipeline.userText, pipeline.intent, pipeline.entityIntent);
-    if (!LIVE_RETRIEVAL_ENABLED && !isPublicSourceSearchAllowedWhenLiveDisabled(pipeline.userText, pipeline.intent, pipeline.entityIntent)) {
+    if (!isFactSearchEnabled() && !isPublicSourceSearchAllowedWhenLiveDisabled(pipeline.userText, pipeline.intent, pipeline.entityIntent)) {
         return publishLiveDisabledMessage(userText);
     }
     const riskLevel = getRiskTierForQuery(pipeline.userText, pipeline.intent, pipeline.entityIntent);
@@ -16193,7 +16224,7 @@ async function handleLiveRetrievalQuery(userText, options = {}) {
     const initialIntent = extractLiveQueryIntent(initialQuery);
     const initialEntityIntent = extractUniversalEntityIntent(initialQuery, initialIntent);
     const publicSourceAllowed = isPublicSourceSearchAllowedWhenLiveDisabled(initialQuery, initialIntent, initialEntityIntent);
-    if (!LIVE_RETRIEVAL_ENABLED && !publicSourceAllowed) {
+    if (!isFactSearchEnabled() && !publicSourceAllowed) {
         return publishLiveDisabledMessage(userText);
     }
 
@@ -17337,7 +17368,7 @@ function isWakeGreetingText(text) {
                 if (handled) return;
             }
 
-            if (LIVE_RETRIEVAL_ENABLED && liveSourceRequired) {
+            if (isFactSearchEnabled() && liveSourceRequired) {
                 logRoutingDebug('processCommand -> live_source_required', cleanText, {
                     selectedHandler: 'handleLiveRetrievalQuery',
                     answerPath,
@@ -17351,7 +17382,7 @@ function isWakeGreetingText(text) {
                 if (handled) return;
             }
 
-            if (LIVE_RETRIEVAL_ENABLED && isStrictLatestQuery(cleanText)) {
+            if (isFactSearchEnabled() && isStrictLatestQuery(cleanText)) {
                 logRoutingDebug('processCommand -> strict_latest', cleanText, {
                     selectedHandler: 'handleStrictLatestQuery',
                     answerPath,
@@ -17389,7 +17420,7 @@ function isWakeGreetingText(text) {
                 if (handled) return;
             }
 
-            if (LIVE_RETRIEVAL_ENABLED && answerPath === 'entity_fact') {
+            if (isFactSearchEnabled() && answerPath === 'entity_fact') {
                 const entityFactIntent = classification.liveIntent;
                 logRoutingDebug('processCommand -> entity_fact', cleanText, {
                     selectedHandler: 'handleUniversalEntityFactQuery',
@@ -17412,7 +17443,7 @@ function isWakeGreetingText(text) {
             }
 
             if (answerPath !== 'entity_fact' &&
-                LIVE_RETRIEVAL_ENABLED &&
+                isFactSearchEnabled() &&
                 hybridMode === 'verify_first' &&
                 !isStableBiographyQuestion(cleanText) &&
                 fallbackEntityIntent?.isEntityFact) {
@@ -17427,7 +17458,7 @@ function isWakeGreetingText(text) {
                 if (handled) return;
             }
 
-            if (LIVE_RETRIEVAL_ENABLED && answerPath === 'current_info') {
+            if (isFactSearchEnabled() && answerPath === 'current_info') {
                 logRoutingDebug('processCommand -> current_info', cleanText, {
                     selectedHandler: 'current_info_router',
                     answerPath,
@@ -17478,7 +17509,7 @@ function isWakeGreetingText(text) {
                 if (handled) return;
             }
 
-            if (LIVE_RETRIEVAL_ENABLED && answerPath === 'web_search') {
+            if (isFactSearchEnabled() && answerPath === 'web_search') {
                 const normalizedWebQuery = normalizeExplicitWebSearchQuery(cleanText);
                 logRoutingDebug('processCommand -> web_search', cleanText, {
                     selectedHandler: 'handleLiveRetrievalQuery',
@@ -17491,7 +17522,7 @@ function isWakeGreetingText(text) {
                 if (handled) return;
             }
 
-            if (LIVE_RETRIEVAL_ENABLED && answerPath === 'broad_factual_web') {
+            if (isFactSearchEnabled() && answerPath === 'broad_factual_web') {
                 logRoutingDebug('processCommand -> broad_factual_web', cleanText, {
                     selectedHandler: fallbackEntityIntent?.isEntityFact ? 'handleUniversalEntityFactQuery' : 'handleLiveRetrievalQuery',
                     answerPath,
@@ -17526,12 +17557,12 @@ function isWakeGreetingText(text) {
                 if (handled) return;
             }
 
-            if (LIVE_RETRIEVAL_ENABLED && answerPath === 'news') {
+            if (isFactSearchEnabled() && answerPath === 'news') {
                 await fetchAndDisplayNews(cleanText);
                 return;
             }
 
-            if (LIVE_RETRIEVAL_ENABLED && answerPath === 'live_retrieval') {
+            if (isFactSearchEnabled() && answerPath === 'live_retrieval') {
                 if (!liveSourceRequired && hybridMode === 'answer_then_cite') {
                     const handled = await handleAnswerThenCiteQuery(cleanText, classification);
                     if (handled) return;
@@ -18306,7 +18337,7 @@ Quick recap: ...
                 
                 // Do web search first to get real places
                 let placeSearchResults = '';
-                if (itineraryLocation && LIVE_RETRIEVAL_ENABLED) {
+                if (itineraryLocation && isFactSearchEnabled()) {
                     try {
                         const searchQueries = [
                             `top tourist places in ${itineraryLocation}`,
