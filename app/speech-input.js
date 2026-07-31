@@ -445,6 +445,7 @@ export function installSpeechInputUI(options = {}) {
                 }
             }
             options.onStateChanged?.(state);
+            globalThis.updateComposerPlaceholder?.();
         },
         onError(message) {
             setStatusText(message);
