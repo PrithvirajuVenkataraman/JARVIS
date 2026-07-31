@@ -13,6 +13,7 @@ import * as JarvisInstantReplies from './instant-replies.js';
 import * as JarvisSourceTransparency from './source-transparency.js';
 import * as JarvisContextCopilotUi from './context-copilot-ui.js';
 import * as JarvisMemoryQuality from './memory-quality.js';
+import * as JarvisAttachments from './attachments.js';
 
 const engine = createConversationEngine({
     maxTurns: 12,
@@ -34,6 +35,7 @@ globalThis.JarvisInstantReplies = Object.freeze({ ...JarvisInstantReplies });
 globalThis.JarvisSourceTransparency = Object.freeze({ ...JarvisSourceTransparency });
 globalThis.JarvisContextCopilotUi = Object.freeze({ ...JarvisContextCopilotUi });
 globalThis.JarvisMemoryQuality = Object.freeze({ ...JarvisMemoryQuality });
+globalThis.JarvisAttachments = Object.freeze({ ...JarvisAttachments });
 
 function initializeSpeechInput() {
     if (globalThis.JarvisSpeechInput) return;
