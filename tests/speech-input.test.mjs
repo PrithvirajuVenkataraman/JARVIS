@@ -232,5 +232,7 @@ assert.match(source, /const toggled = toggleConverseController\(\)/);
 assert.match(source, /stopActiveGeneration\?\.\('converse_stop'\)/);
 assert.match(source, /interrupt:\s*processing/);
 assert.match(source, /transcriptCompleteReason/);
+assert.match(source, /Voice input needs HTTPS or localhost/);
+assert.match(source, /const secureContext = globalThis\.isSecureContext === true/);
 
 console.log('speech-input-tests-ok');
