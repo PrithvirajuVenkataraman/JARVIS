@@ -59,3 +59,27 @@ export function shouldShowFailureFallbackCard(failureOrReason, userText, context
     if (/\b(what do you mean|clarify|did you mean|not sure|could you provide more context)\b/.test(text)) return false;
     return ['network_timeout', 'model_empty', 'retrieval_empty', 'permission_blocked'].includes(failure.code);
 }
+
+export function buildUserFacingErrorMessage(failureOrReason, context = {}) {
+    const failure = classifyFailure(failureOrReason, context);
+    switch (failure.code) {
+        case 'network_timeout':
+            return 'The answer is taking longer than expected. You can retry, or ask a shorter follow-up.';
+        case 'model_empty':
+            return 'I could not generate a reliable answer for that. Please try again with a bit more detail.';
+        case 'retrieval_empty':
+            return 'I could not find enough current sources to answer that confidently.';
+        case 'permission_blocked':
+            return 'That action was blocked by browser permissions. Please allow access and try again.';
+        case 'aborted':
+            return '';
+        default:
+            return 'I hit a temporary issue while processing that. Please try again.';
+    }
+}
+
+export function shouldPreservePartialStream(error, accumulated = '') {
+    if (!String(accumulated || '').trim()) return false;
+    const failure = classifyFailure(error);
+    return failure.code !== 'aborted';
+}
