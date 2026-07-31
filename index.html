@@ -217,7 +217,36 @@
     <div id="input-bar-container" class="fixed bottom-0 left-0 right-0 floating-input-bar z-40 bg-white dark:bg-slate-900 pb-4">
         <div class="max-w-5xl mx-auto px-3 py-1">
             <div class="max-w-xl sm:max-w-3xl mx-auto">
+            <div id="composer-attachment-tray" class="composer-attachment-tray hidden" aria-live="polite"></div>
             <div id="input-bar-inner" class="flex items-center gap-1.5 modern-input px-2 py-1">
+                <div class="composer-actions">
+                    <button
+                        id="composer-plus-btn"
+                        type="button"
+                        class="composer-plus-btn"
+                        onclick="toggleComposerActionsMenu()"
+                        aria-expanded="false"
+                        aria-haspopup="menu"
+                        aria-controls="composer-actions-menu"
+                        aria-label="Add photos or files"
+                        title="Add photos or files">+</button>
+                    <div id="composer-actions-menu" class="composer-actions-menu hidden" role="menu" aria-label="Composer actions">
+                        <div class="composer-action-group" data-composer-group="root">
+                            <button type="button" class="composer-action-item" data-composer-nav="photos" role="menuitem">Photos</button>
+                            <button type="button" class="composer-action-item" data-composer-nav="files" role="menuitem">Files</button>
+                            <button type="button" class="composer-action-item" onclick="handleComposerAction('vision')" role="menuitem">Live Vision</button>
+                        </div>
+                        <div class="composer-action-group hidden" data-composer-group="photos">
+                            <button type="button" class="composer-action-item composer-action-back" data-composer-nav="root" role="menuitem">Back</button>
+                            <button type="button" class="composer-action-item" data-composer-action="photo-camera" role="menuitem">Take Photo</button>
+                            <button type="button" class="composer-action-item" data-composer-action="photo-library" role="menuitem">Photo Library</button>
+                        </div>
+                        <div class="composer-action-group hidden" data-composer-group="files">
+                            <button type="button" class="composer-action-item composer-action-back" data-composer-nav="root" role="menuitem">Back</button>
+                            <button type="button" class="composer-action-item" data-composer-action="file-browse" role="menuitem">Browse Files</button>
+                        </div>
+                    </div>
+                </div>
                 <textarea
                     id="text-input"
                     rows="1"
@@ -257,6 +286,9 @@
             <div class="speech-input-meta">
                 <span id="speech-input-status" role="status" aria-live="polite"></span>
             </div>
+            <input type="file" id="composer-photo-library-input" class="hidden" accept="image/*" multiple>
+            <input type="file" id="composer-photo-camera-input" class="hidden" accept="image/*" capture="environment">
+            <input type="file" id="composer-file-input" class="hidden" accept="*/*" multiple>
             <p id="footer-disclaimer" class="mt-2 text-xs text-gray-400 font-medium text-center">AI can make mistakes. Check important info.</p>
             <!-- Footer controls -->
             <div class="mt-2 space-y-2">
@@ -8202,10 +8234,48 @@ function normalizeUiTokens(text) {
             menu.classList.toggle('hidden', !willOpen);
             btn.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
             btn.classList.toggle('is-open', willOpen);
+            if (willOpen) {
+                window.JarvisAttachments?.showComposerMenuGroup?.(menu, 'root');
+            }
         }
 
         function closeComposerActionsMenu() {
             toggleComposerActionsMenu(false);
+        }
+
+        function refreshComposerAttachmentTray() {
+            const tray = document.getElementById('composer-attachment-tray');
+            window.JarvisAttachments?.renderAttachmentTray?.(
+                tray,
+                window.JarvisAttachments?.getPendingAttachments?.() || [],
+                id => {
+                    window.JarvisAttachments?.removePendingAttachment?.(id);
+                    refreshComposerAttachmentTray();
+                    toggleSendButton();
+                }
+            );
+        }
+
+        async function handleComposerAttachmentSelection(files) {
+            const result = await window.JarvisAttachments?.addFilesToComposer?.(files);
+            if (result?.errors?.length) {
+                showTemporaryMessage(result.errors[0]);
+            }
+            refreshComposerAttachmentTray();
+            toggleSendButton();
+        }
+
+        function triggerComposerFilePicker(kind) {
+            closeComposerActionsMenu();
+            const map = {
+                'photo-library': 'composer-photo-library-input',
+                'photo-camera': 'composer-photo-camera-input',
+                'file-browse': 'composer-file-input'
+            };
+            const input = document.getElementById(map[kind] || '');
+            if (!input) return;
+            input.value = '';
+            input.click();
         }
 
         function handleComposerAction(action) {
@@ -8218,17 +8288,49 @@ function normalizeUiTokens(text) {
         function initComposerActionsMenu() {
             if (window.__composerActionsMenuInit) return;
             window.__composerActionsMenuInit = true;
+
+            const menu = document.getElementById('composer-actions-menu');
+            menu?.addEventListener('click', event => {
+                const nav = event.target?.closest?.('[data-composer-nav]');
+                if (nav) {
+                    event.preventDefault();
+                    const group = nav.getAttribute('data-composer-nav') || 'root';
+                    window.JarvisAttachments?.showComposerMenuGroup?.(menu, group);
+                    return;
+                }
+                const actionBtn = event.target?.closest?.('[data-composer-action]');
+                if (!actionBtn) return;
+                event.preventDefault();
+                triggerComposerFilePicker(actionBtn.getAttribute('data-composer-action'));
+            });
+
+            const wireInput = (id) => {
+                const input = document.getElementById(id);
+                if (!input) return;
+                input.addEventListener('change', () => {
+                    if (input.files?.length) {
+                        void handleComposerAttachmentSelection(input.files);
+                    }
+                });
+            };
+            wireInput('composer-photo-library-input');
+            wireInput('composer-photo-camera-input');
+            wireInput('composer-file-input');
+
             document.addEventListener('mousedown', (event) => {
-                const menu = document.getElementById('composer-actions-menu');
+                const menuEl = document.getElementById('composer-actions-menu');
                 const trigger = document.getElementById('composer-plus-btn');
-                if (!menu || menu.classList.contains('hidden')) return;
-                if (menu.contains(event.target) || trigger?.contains(event.target)) return;
+                if (!menuEl || menuEl.classList.contains('hidden')) return;
+                if (menuEl.contains(event.target) || trigger?.contains(event.target)) return;
                 closeComposerActionsMenu();
             });
             document.addEventListener('keydown', (event) => {
                 if (event.key !== 'Escape') return;
                 closeComposerActionsMenu();
             });
+
+            window.toggleComposerActionsMenu = toggleComposerActionsMenu;
+            window.handleComposerAction = handleComposerAction;
         }
 
         function normalizeCameraRotation(deg) {
@@ -8633,7 +8735,8 @@ ${code}
             }
             const input = document.getElementById('text-input');
             const hasInput = !!(input && input.value.trim().length > 0);
-            const shouldSend = hasInput;
+            const hasAttachments = window.JarvisAttachments?.hasPendingAttachments?.() === true;
+            const shouldSend = hasInput || hasAttachments;
 
             if (shouldSend) {
                 setPrimaryActionButtonToSend();
@@ -8731,9 +8834,10 @@ async function sendTextInput(submission = {}) {
             const input = document.getElementById('text-input');
             if (!input) return;
             const text = input.value.trim();
+            const pendingAttachments = window.JarvisAttachments?.getPendingAttachments?.() || [];
             const inputSource = String(submission?.source || input.dataset.inputSource || 'text').trim() || 'text';
             if (activeRequestController || isAssistantProcessing()) {
-                if (inputSource !== 'converse' || submission?.interrupt !== true || !text) {
+                if (inputSource !== 'converse' || submission?.interrupt !== true || (!text && !pendingAttachments.length)) {
                     stopActiveGeneration();
                     return;
                 }
@@ -8741,7 +8845,7 @@ async function sendTextInput(submission = {}) {
                 await waitForAssistantIdle();
                 if (queuedSubmissionId !== converseQueuedSubmissionSequence) return;
             }
-            if (text) {
+            if (text || pendingAttachments.length) {
                 if (handleLocalVoiceCommand(text, inputSource)) {
                     input.value = '';
                     delete input.dataset.inputSource;
@@ -8753,10 +8857,10 @@ async function sendTextInput(submission = {}) {
                     ? { ...pendingSelectionGrounding }
                     : null;
                 if (selectionGrounding) pendingSelectionGrounding = null;
-                const fingerprint = String(text || '')
-                    .toLowerCase()
-                    .replace(/\s+/g, ' ')
-                    .trim();
+                const fingerprint = [
+                    String(text || '').toLowerCase().replace(/\s+/g, ' ').trim(),
+                    pendingAttachments.map(item => item.name).join('|')
+                ].filter(Boolean).join('::');
                 const now = Date.now();
                 if (
                     fingerprint &&
@@ -8773,11 +8877,15 @@ async function sendTextInput(submission = {}) {
                 lastSubmissionTimestamp = now;
 
                 const outgoingText = text;
+                const attachmentSummary = pendingAttachments.length
+                    ? `\n\n[${pendingAttachments.length} attachment${pendingAttachments.length === 1 ? '' : 's'}: ${pendingAttachments.map(item => item.name).join(', ')}]`
+                    : '';
+                const displayOutgoingText = outgoingText || `Attached ${pendingAttachments.length} file${pendingAttachments.length === 1 ? '' : 's'}`;
                 learnAnswerStyleFromUserMessage(outgoingText);
-                const normalizedOutgoingText = isLikelyCodeInput(outgoingText)
+                const normalizedOutgoingText = outgoingText && isLikelyCodeInput(outgoingText)
                     ? outgoingText
-                    : normalizeIntentTypos(outgoingText);
-                const turn = createConversationTurn(outgoingText, normalizedOutgoingText, inputSource, {
+                    : (outgoingText ? normalizeIntentTypos(outgoingText) : displayOutgoingText);
+                const turn = createConversationTurn(displayOutgoingText, normalizedOutgoingText, inputSource, {
                     sourceContext: {
                         transcriptId: String(submission?.transcriptId || ''),
                         recognitionSessionId: Number(submission?.recognitionSessionId) || null,
@@ -8793,10 +8901,12 @@ async function sendTextInput(submission = {}) {
                     ? 'Converse mode is listening...'
                     : 'Ask anything...';
                 toggleSendButton();
-                setLastVisibleUserMessage(outgoingText);
-                addVisibleInputHistory(outgoingText);
+                setLastVisibleUserMessage(displayOutgoingText);
+                addVisibleInputHistory(displayOutgoingText);
                 inputHistoryIndex = -1;
-                addChatMessage(outgoingText, true, null, { turnId: turn.id });
+                addChatMessage(`${displayOutgoingText}${attachmentSummary}`, true, null, { turnId: turn.id });
+                const attachmentsForSend = window.JarvisAttachments?.takePendingForSend?.() || [];
+                refreshComposerAttachmentTray();
 
                 if (isDiagnosticsCommand(outgoingText)) {
                     beginAssistantProcessing();
@@ -8810,9 +8920,33 @@ async function sendTextInput(submission = {}) {
                 }
 
                 beginAssistantProcessing();
-                showThinkingIndicator('Thinking');
+                showThinkingIndicator(attachmentsForSend.length ? 'Reading attachments...' : 'Thinking');
                 try {
-                    if (waitingForName) {
+                    if (attachmentsForSend.length) {
+                        const attachmentContext = await window.JarvisAttachments?.ingestAllForMessage?.(
+                            attachmentsForSend,
+                            outgoingText || 'Please analyze the attached file(s).'
+                        );
+                        const attachmentPrompt = outgoingText || 'Please analyze the attached file(s).';
+                        const result = await askGeminiAI(attachmentPrompt, {
+                            intent: 'selection_custom',
+                            grounding: attachmentContext?.grounding,
+                            displayUserMessage: displayOutgoingText
+                        });
+                        if (result?.aborted) return;
+                        const answer = String(result?.response || result?.text || '').trim();
+                        if (answer) {
+                            const methodNote = Array.isArray(attachmentContext?.methods) && attachmentContext.methods.length
+                                ? `\n\n_Read via: ${attachmentContext.methods.map(item => `${item.name} (${item.method})`).join(', ')}_`
+                                : '';
+                            await publishResolvedModelMessage(displayOutgoingText, `${answer}${methodNote}`, {
+                                label: 'Attachment answer',
+                                routing: result?.routing || null
+                            });
+                        } else {
+                            addChatMessage('I could not analyze the attachment(s). Please try another file or add a clearer prompt.', false);
+                        }
+                    } else if (waitingForName) {
                         await handleNameInput(outgoingText);
                     } else if (waitingForLocation) {
 
