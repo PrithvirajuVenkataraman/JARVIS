@@ -296,6 +296,7 @@
             <button type="button" class="continuous-vision-zoom-reset" onclick="resetContinuousVisionZoom()" aria-label="Reset live vision zoom">Reset</button>
         </div>
         <p id="continuous-vision-status" class="continuous-vision-status" role="status">Camera inactive</p>
+        <div id="continuous-vision-guidance" class="continuous-vision-guidance hidden" aria-hidden="true">Hold steady and point at the main object</div>
         <p id="continuous-vision-hint" class="continuous-vision-hint">Camera is on. Ask: "What do you see?"</p>
     </div>
     <canvas id="continuous-vision-canvas" class="hidden"></canvas>
@@ -995,6 +996,9 @@ function findRelevantSavedMemory(text, limit = 3) {
 
 function buildRelevantSavedMemoryContext(text) {
     const relevant = findRelevantSavedMemory(text, 3);
+    if (typeof globalThis !== 'undefined') {
+        globalThis.__lastUsedMemoryKeys = relevant.map(item => item.key);
+    }
     if (!relevant.length) return '';
     const lines = relevant.map(item => `- ${item.key}: ${item.value}`);
     return `\n\nRelevant saved memory:\n${lines.join('\n')}`;
@@ -2828,6 +2832,11 @@ function buildRoutingSnapshot(text, overrides = {}) {
 }
 
 function logRoutingDebug(stage, text, details = {}) {
+    try {
+        const route = details?.frontendRoute?.route || details?.route || '';
+        const reason = details?.frontendRoute?.reason || details?.reason || '';
+        if (route) window.JarvisObservability?.trackRoute?.(route, reason, { stage, text: String(text || '').slice(0, 120) });
+    } catch (_) {}
     if (!showRoutingDebugBadge) return;
     const payload = simplifyForRoutingLog({
         at: new Date().toISOString(),
@@ -4214,6 +4223,11 @@ function countAssistantWords(text) {
 
 function logLatencyTrace(eventName, details = {}) {
     try {
+        if (details?.totalMs || details?.apiMs || details?.deltaMs) {
+            window.JarvisObservability?.trackLatency?.(eventName, details.totalMs || details.apiMs || details.deltaMs, details);
+        } else {
+            window.JarvisObservability?.trackEvent?.(eventName, details);
+        }
         console.debug('[JARVIS latency]', eventName, details);
     } catch (_) {}
 }
@@ -4329,6 +4343,23 @@ async function streamChatCompletion(payload, options = {}) {
     } catch (error) {
         if (isAbortError(error) && assistantMessageId) {
             discardStreamingAssistantMessage(assistantMessageId);
+            throw error;
+        }
+        if (window.JarvisFailurePolicy?.shouldPreservePartialStream?.(error, accumulated) && assistantMessageId && accumulated.trim()) {
+            finalizeStreamingAssistantMessage(assistantMessageId, accumulated, {
+                userMessage,
+                route: options?.routeDecision?.route || '',
+                routeReason: options?.routeDecision?.reason || '',
+                failureCode: window.JarvisFailurePolicy?.classifyFailure?.(error)?.code || 'stream_error'
+            });
+            return {
+                ...(donePayload || {}),
+                response: accumulated.trim(),
+                streamedToChat: true,
+                assistantMessageId,
+                partialRecovery: true,
+                intent: 'partial_stream_recovery'
+            };
         }
         throw error;
     }
@@ -4444,7 +4475,7 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
         if (minimalThinking) return;
         showThinkingIndicator('Generating answer...');
         autoIndicatorShown = true;
-    }, 260);
+    }, minimalThinking ? 0 : 80);
     try { 
         const engineContext = requestOptions?.grounding
             || minimalThinking
@@ -4969,8 +5000,29 @@ let showRoutingDebugBadge = false;
             window.addEventListener('offline', updateOnlineStatus);
             updateOnlineStatus();
             autoResizeComposerTextarea();
-
+            const draft = window.JarvisSessionRecovery?.restoreComposerDraft?.() || '';
+            const input = document.getElementById('text-input');
+            if (input && draft && !input.value.trim()) {
+                input.value = draft;
+                handleComposerInput();
+            }
+            document.addEventListener('click', handleContextClarificationClick);
         };
+
+        function handleContextClarificationClick(event) {
+            const button = event?.target?.closest?.('[data-context-choice]');
+            if (!button) return;
+            const card = button.closest('.context-clarification-card');
+            const choice = button.getAttribute('data-context-choice');
+            const original = card?.getAttribute('data-original') || '';
+            const topic = card?.querySelector('.context-clarification-topic strong')?.textContent || '';
+            const resolved = window.JarvisContextCopilotUi?.resolveContextClarificationChoice?.(choice, {
+                originalMessage: original,
+                activeThread: { topic, entity: topic }
+            }) || original;
+            card?.remove();
+            if (resolved) void sendTextInput({ text: resolved, source: 'context_clarification' });
+        }
 
         // Jump-to-latest behavior is managed by the unified chat scroll-lock module below.
 
@@ -5523,7 +5575,7 @@ let showRoutingDebugBadge = false;
                 if (activeRequestController === controller && !controller.signal?.aborted) {
                     showResponseRecoveryCard(window.__lastUserMessage || '');
                 }
-            }, 30000);
+            }, 20000);
         }
 
         function clearResponseRecoveryPrompt() {
@@ -7938,14 +7990,24 @@ function normalizeUiTokens(text) {
             window.speechSynthesis.speak(utterance);
         }
 
-        function formatVerifiedSourceBadge(label = 'Verified live sources') {
-            const safe = String(label || 'Verified live sources').trim();
-            return safe ? `[${safe}]` : '[Verified live sources]';
+        function formatModelSourceBadge(label = 'Model answer') {
+            return window.JarvisSourceTransparency?.buildSourceTransparencyHtml?.({
+                sourceType: 'model',
+                routeReason: label
+            }) || '';
         }
 
         function addVerifiedAssistantMessage(text, label = 'Verified live sources', meta = {}) {
             const body = String(text || '').trim();
-            const finalText = normalizeVerifiedLiveMessage(body);
+            const normalized = normalizeVerifiedLiveMessage(body);
+            const badge = window.JarvisSourceTransparency?.buildSourceTransparencyHtml?.({
+                sourceType: 'verified',
+                verified: true,
+                text: normalized,
+                routeReason: label,
+                ...meta
+            }) || '';
+            const finalText = badge ? `${badge}\n${normalized}`.trim() : normalized;
             return addChatMessage(finalText, false, null, {
                 ...meta,
                 sourceType: 'verified'
@@ -7999,14 +8061,11 @@ function normalizeUiTokens(text) {
             return `${answer}\n\nSources:\n${sources.join('\n')}`.trim();
         }
 
-        function formatModelSourceBadge(label = 'Model answer') {
-            return '';
-        }
-
         function addModelAssistantMessage(text, label = 'Model answer', meta = {}) {
             const badge = formatModelSourceBadge(label);
             const body = String(text || '').trim();
-            const finalText = badge ? `${badge}\n${body}`.trim() : body;
+            const memoryNote = window.JarvisMemoryQuality?.formatUsedMemoryNote?.(globalThis.__lastUsedMemoryKeys || []) || '';
+            const finalText = badge ? `${badge}\n${body}${memoryNote}`.trim() : `${body}${memoryNote}`.trim();
             return addChatMessage(finalText, false, null, {
                 ...meta,
                 sourceType: 'model',
@@ -8522,6 +8581,7 @@ ${code}
 
         function handleComposerInput() {
             const input = document.getElementById('text-input');
+            if (input) window.JarvisSessionRecovery?.saveComposerDraft?.(input.value);
             if (input && input.value.trim() !== '/') {
                 closeSlashCommandPicker();
             }
@@ -8592,6 +8652,7 @@ ${code}
             if (!current || submitted.includes(current)) {
                 input.value = '';
                 delete input.dataset.inputSource;
+                window.JarvisSessionRecovery?.clearComposerDraft?.();
                 input.placeholder = window.JarvisSpeechInput?.getState?.().converseEnabled
                     ? 'Converse mode is listening...'
                     : 'Ask anything...';
@@ -8795,8 +8856,9 @@ async function sendTextInput(submission = {}) {
                     }
                 } catch (error) {
                     console.error('sendTextInput failed:', error);
-                    const fallback = 'I hit a temporary issue while processing that. Please try again.';
-                    addChatMessage(fallback, false);
+                    const fallback = window.JarvisFailurePolicy?.buildUserFacingErrorMessage?.(error) ||
+                        'I hit a temporary issue while processing that. Please try again.';
+                    if (fallback) addChatMessage(fallback, false);
                 } finally {
                     logLatencyTrace('send_complete', {
                         requestId: sendTrace.requestId,
@@ -8807,6 +8869,7 @@ async function sendTextInput(submission = {}) {
                         source: inputSource
                     });
                     clearSubmittedPromptBox(outgoingText, normalizedOutgoingText);
+                    window.JarvisSessionRecovery?.clearComposerDraft?.();
                     restoreResponseRenderContext(previousRenderContext);
                     endAssistantProcessing();
                     resetPrimaryActionButtonWhenIdle();
@@ -16821,12 +16884,12 @@ function isWakeGreetingText(text) {
         }
 
         function buildAmbiguousShortContextReply(contextResolution) {
-            const topic = String(contextResolution?.activeThread?.entity || contextResolution?.activeThread?.topic || '').trim();
-            const original = String(contextResolution?.originalMessage || '').trim();
-            if (topic) {
-                return `Did you mean "${original}" as a new topic, or as a follow-up about ${topic}?`;
-            }
-            return `Did you mean "${original}" as a new topic, or as a follow-up to the previous answer?`;
+            return window.JarvisContextCopilotUi?.buildAmbiguousContextMessage?.(contextResolution) ||
+                `Did you mean "${String(contextResolution?.originalMessage || '').trim()}" as a new topic, or as a follow-up?`;
+        }
+
+        function buildAmbiguousContextClarificationHtml(contextResolution) {
+            return window.JarvisContextCopilotUi?.buildContextClarificationHtml?.(contextResolution) || '';
         }
 
         async function processCommand(text) {
@@ -16863,7 +16926,8 @@ function isWakeGreetingText(text) {
             }
             if (['ambiguous_short_context', 'ambiguous_reference_context'].includes(contextResolution?.decisionReason)) {
                 const clarification = buildAmbiguousShortContextReply(contextResolution);
-                addChatMessage(clarification, false);
+                const chips = buildAmbiguousContextClarificationHtml(contextResolution);
+                addChatMessage(`${clarification}${chips}`, false);
                 // Record the clarification exchange so the next reply can bind correctly.
                 saveToHistory(text, clarification, { recordContext: true });
                 window.JarvisConversation?.setPending?.({
@@ -16872,6 +16936,34 @@ function isWakeGreetingText(text) {
                     threadId: contextResolution?.activeThread?.id || '',
                     options: ['new topic', 'follow-up']
                 });
+                return;
+            }
+            const instantReply = window.JarvisInstantReplies?.getInstantReply?.(text);
+            if (instantReply) {
+                const messageId = addModelAssistantMessage(instantReply, 'Instant reply', {
+                    turnId: activeResponseRenderContext?.turnId || '',
+                    route: 'fast_simple',
+                    routeReason: 'instant_local_reply'
+                });
+                saveToHistory(text, instantReply);
+                addFeedbackButtons(text, instantReply, messageId);
+                return;
+            }
+            if (window.JarvisMemoryQuality?.isForgetMemoryRequest?.(text)) {
+                const forgetKey = window.JarvisMemoryQuality?.extractForgetMemoryKey?.(text);
+                const result = window.JarvisMemoryQuality?.forgetMemoryKey?.(memoryStore, forgetKey);
+                if (result?.removed) {
+                    saveUserData();
+                    const reply = `I forgot the saved memory for "${result.key}".`;
+                    addChatMessage(reply, false);
+                    saveToHistory(text, reply);
+                    return;
+                }
+                const reply = forgetKey
+                    ? `I could not find saved memory for "${forgetKey}".`
+                    : 'Tell me which memory to forget, for example: "forget memory about my keys".';
+                addChatMessage(reply, false);
+                saveToHistory(text, reply);
                 return;
             }
             text = contextResolution?.resolvedMessage || text;
@@ -20347,6 +20439,7 @@ function startNewChatSession(options = {}) {
     }
     const session = createChatSession();
     activeChatSessionId = session.id;
+    persistActiveSessionSnapshot();
     chatSessions.push(session);
     conversationHistory = [];
     if (!options.keepVisible) {
@@ -20366,7 +20459,24 @@ function startNewChatSession(options = {}) {
     return session;
 }
 
+function persistActiveSessionSnapshot(turnId = '') {
+    window.JarvisSessionRecovery?.saveActiveSessionSnapshot?.({
+        chatId: activeChatSessionId,
+        turnId: String(turnId || '').trim()
+    });
+}
+
 function initializeActiveChatSessionForStartup() {
+    const snapshot = window.JarvisSessionRecovery?.restoreActiveSessionSnapshot?.();
+    const savedSessionId = String(snapshot?.chatId || '').trim();
+    if (savedSessionId) {
+        const savedSession = chatSessions.find(item => item.id === savedSessionId && !item.deleted);
+        if (savedSession && chatSessionHasUserMessage(savedSession)) {
+            activeChatSessionId = savedSession.id;
+            restoreChatSession(savedSession.id);
+            return savedSession;
+        }
+    }
     const draft = loadActiveEmptyChatDraft();
     if (draft) {
         activeChatSessionId = draft.id;
@@ -20651,6 +20761,7 @@ function recordActiveChatMessage(role, text, turnId = '') {
     }
     forgetActiveEmptyChatDraft();
     saveChatSessions();
+    persistActiveSessionSnapshot(turnId);
     renderChatSidebarList();
     if (normalizedRole === 'assistant') scheduleChatTitleGeneration(session);
 }
@@ -20716,6 +20827,7 @@ function restoreChatSession(sessionId) {
     }
     closeChatSidebar();
     renderChatSidebarList();
+    persistActiveSessionSnapshot();
     const query = pendingChatRestoreSearchQuery;
     pendingChatRestoreSearchQuery = '';
     if (query) setTimeout(() => scrollToRestoredChatMatch(query), 80);
@@ -21722,6 +21834,12 @@ function captureVisionFrame(options = {}) {
 }
 
 function captureBestVisionFrame() {
+    const guidance = document.getElementById('continuous-vision-guidance');
+    if (guidance) {
+        guidance.classList.remove('hidden');
+        guidance.setAttribute('aria-hidden', 'false');
+        guidance.textContent = 'Hold steady...';
+    }
     let best = null;
     for (let i = 0; i < 3; i += 1) {
         const frame = captureVisionFrame({
@@ -21732,7 +21850,24 @@ function captureBestVisionFrame() {
             best = frame;
         }
     }
+    if (guidance) {
+        guidance.classList.add('hidden');
+        guidance.setAttribute('aria-hidden', 'true');
+    }
     return best?.base64 || null;
+}
+
+function updateContinuousVisionGuidance(message, visible = false) {
+    const guidance = document.getElementById('continuous-vision-guidance');
+    if (!guidance) return;
+    if (!visible) {
+        guidance.classList.add('hidden');
+        guidance.setAttribute('aria-hidden', 'true');
+        return;
+    }
+    guidance.textContent = String(message || 'Hold steady and point at the main object');
+    guidance.classList.remove('hidden');
+    guidance.setAttribute('aria-hidden', 'false');
 }
 
 async function waitForContinuousVisionReady(timeoutMs = 1600) {
@@ -21781,14 +21916,17 @@ function isCanvasFrameBlank(ctx, width, height) {
 
 async function handleContinuousVisionQuery(text) {
     updateContinuousVisionStatus('Preparing frame...', 'loading');
+    updateContinuousVisionGuidance('Hold steady and point at the main object', true);
     await waitForContinuousVisionReady();
     let base64 = captureBestVisionFrame();
     if (!base64) {
         await waitForContinuousVisionReady(900);
+        updateContinuousVisionGuidance('Try brighter lighting and hold the camera steady', true);
         base64 = captureBestVisionFrame();
     }
+    updateContinuousVisionGuidance('', false);
     if (!base64) {
-        const msg = 'I cannot see anything. Make sure the camera is active and has permissions.';
+        const msg = 'I cannot see anything. Make sure the camera is active, well lit, and held steady.';
         recentVisionError = msg;
         updateContinuousVisionStatus('Frame unclear or too dark', 'warning');
         addVisionRecoveryMessage(msg, text);
