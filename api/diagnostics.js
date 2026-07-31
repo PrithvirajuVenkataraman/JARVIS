@@ -9,6 +9,12 @@ function isEnabled(name) {
     return ['1', 'true', 'yes', 'on'].includes(String(process.env[name] || '').trim().toLowerCase());
 }
 
+function isPublicFactSearchEnabled() {
+    const flag = String(process.env.JARVIS_PUBLIC_FACT_SEARCH || '').trim().toLowerCase();
+    if (['0', 'false', 'no', 'off'].includes(flag)) return false;
+    return true;
+}
+
 export function buildDiagnosticsStatus() {
   const costControls = getCostControls();
     return {
@@ -24,6 +30,7 @@ export function buildDiagnosticsStatus() {
         },
         retrieval: {
             liveSearchEnabled: isEnabled('LIVE_RETRIEVAL_ENABLED'),
+            publicFactSearchEnabled: isPublicFactSearchEnabled(),
             exaConfigured: hasEnv('EXA_API_KEY') || hasEnv('EXA_KEY'),
             nvidiaConfigured: hasEnv('NVIDIA_API_KEY') || hasEnv('NVIDIA_NIM_API_KEY'),
             crawl4aiConfigured: hasEnv('CRAWL4AI_URL') || hasEnv('CRAWL4AI_ENDPOINT')
