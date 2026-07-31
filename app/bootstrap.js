@@ -7,6 +7,12 @@ import * as JarvisFrontendRouting from './frontend-routing.js';
 import * as JarvisFailurePolicy from './failure-policy.js';
 import * as JarvisPlaceGrounding from './place-grounding.js';
 import * as JarvisConverseState from './converse-state.js';
+import * as JarvisObservability from './observability.js';
+import * as JarvisSessionRecovery from './session-recovery.js';
+import * as JarvisInstantReplies from './instant-replies.js';
+import * as JarvisSourceTransparency from './source-transparency.js';
+import * as JarvisContextCopilotUi from './context-copilot-ui.js';
+import * as JarvisMemoryQuality from './memory-quality.js';
 
 const engine = createConversationEngine({
     maxTurns: 12,
@@ -22,6 +28,12 @@ globalThis.JarvisFrontendRouting = Object.freeze({ ...JarvisFrontendRouting });
 globalThis.JarvisFailurePolicy = Object.freeze({ ...JarvisFailurePolicy });
 globalThis.JarvisPlaceGrounding = Object.freeze({ ...JarvisPlaceGrounding });
 globalThis.JarvisConverseState = Object.freeze({ ...JarvisConverseState });
+globalThis.JarvisObservability = Object.freeze({ ...JarvisObservability });
+globalThis.JarvisSessionRecovery = Object.freeze({ ...JarvisSessionRecovery });
+globalThis.JarvisInstantReplies = Object.freeze({ ...JarvisInstantReplies });
+globalThis.JarvisSourceTransparency = Object.freeze({ ...JarvisSourceTransparency });
+globalThis.JarvisContextCopilotUi = Object.freeze({ ...JarvisContextCopilotUi });
+globalThis.JarvisMemoryQuality = Object.freeze({ ...JarvisMemoryQuality });
 
 function initializeSpeechInput() {
     if (globalThis.JarvisSpeechInput) return;
