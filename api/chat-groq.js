@@ -30,9 +30,23 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
         return [...new Set((preferSpeed ? speedFirst : qualityFirst).filter(Boolean))];
     }
 
-    function isLiveRetrievalConfigured() {
-        const flag = String(process.env.LIVE_RETRIEVAL_ENABLED || '').trim().toLowerCase();
+    function isEnvFlagEnabled(name, defaultValue = false) {
+        const flag = String(process.env[name] ?? '').trim().toLowerCase();
+        if (!flag) return defaultValue;
+        if (['0', 'false', 'no', 'off'].includes(flag)) return false;
         return ['1', 'true', 'yes', 'on'].includes(flag);
+    }
+
+    function isLiveRetrievalConfigured() {
+        return isEnvFlagEnabled('LIVE_RETRIEVAL_ENABLED', false);
+    }
+
+    function isPublicFactSearchConfigured() {
+        return isEnvFlagEnabled('JARVIS_PUBLIC_FACT_SEARCH', true);
+    }
+
+    function isFactSearchConfigured() {
+        return isLiveRetrievalConfigured() || isPublicFactSearchConfigured();
     }
 
     export default async function handler(req, res) {
@@ -1313,7 +1327,7 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
             };
         }
 
-        if (!isLiveRetrievalConfigured()) {
+        if (!isFactSearchConfigured()) {
             return {
                 strategy: 'direct',
                 reason: 'live_retrieval_disabled',
@@ -1472,7 +1486,7 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
     }
 
     async function buildLiveRagContext(message, req, contextTurns = []) {
-        if (!isLiveRetrievalConfigured()) return { ragText: '', sources: [] };
+        if (!isFactSearchConfigured()) return { ragText: '', sources: [] };
         const query = resolveContextualLiveQuery(message, contextTurns);
         const queries = buildChatLiveSearchQueries(query, contextTurns);
         const allResults = [];
