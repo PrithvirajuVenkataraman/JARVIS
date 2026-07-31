@@ -370,6 +370,7 @@ export function installSpeechInputUI(options = {}) {
     if (!input || !vttButton) return null;
 
     const Recognition = globalThis.SpeechRecognition || globalThis.webkitSpeechRecognition;
+    const secureContext = globalThis.isSecureContext === true;
     let committedText = '';
 
     function setStatusText(message = '') {
@@ -426,12 +427,14 @@ export function installSpeechInputUI(options = {}) {
         onState(state) {
             vttButton.classList.toggle('is-listening', state.mode === 'dictation' && state.listening);
             vttButton.setAttribute('aria-pressed', state.mode === 'dictation' && state.listening ? 'true' : 'false');
-            vttButton.disabled = !state.supported || state.processing || state.converseEnabled;
+            vttButton.disabled = !state.supported || !secureContext || state.processing || state.converseEnabled;
             input.placeholder = state.converseEnabled
                 ? (state.processing ? 'Thinking' : 'Listening...')
                 : (state.mode === 'dictation' && state.listening ? 'Listening...' : 'Ask anything...');
             if (status) {
-                if (!state.supported) {
+                if (!secureContext) {
+                    setStatusText('Voice input needs HTTPS or localhost.');
+                } else if (!state.supported) {
                     setStatusText('Voice input is unavailable in this browser.');
                 } else if (state.converseEnabled) {
                     setStatusText(state.processing ? 'Thinking' : 'Listening...');
@@ -451,10 +454,20 @@ export function installSpeechInputUI(options = {}) {
     const toggleConverseController = controller.toggleConverse;
 
     globalThis.toggleVoiceToText = () => {
+        if (!secureContext) {
+            setStatusText('Voice input needs HTTPS or localhost.');
+            options.onError?.('Voice input needs HTTPS or localhost.');
+            return false;
+        }
         committedText = input.value.trim();
         return controller.toggleDictation();
     };
     globalThis.toggleConverseMode = () => {
+        if (!secureContext) {
+            setStatusText('Voice input needs HTTPS or localhost.');
+            options.onError?.('Voice input needs HTTPS or localhost.');
+            return false;
+        }
         const wasConverseEnabled = controller.getState().converseEnabled;
         committedText = '';
         input.value = '';
