@@ -2,6 +2,7 @@
 import { applyApiSecurity } from './_lib/security.js';
 import { runEvidenceFirstWebRag, runVerifiedWebSearch } from './search.js';
 import { extractWithCrawl4Ai } from './_lib/crawl4ai-client.js';
+import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-controls.js';
 
     const MODEL_FETCH_TIMEOUT_MS = 12_000;
     const STREAM_MODEL_FETCH_TIMEOUT_MS = 10_000;
@@ -119,7 +120,10 @@ import { extractWithCrawl4Ai } from './_lib/crawl4ai-client.js';
                 intent,
                 isInternalSummary
             });
-            const lengthPolicy = buildLengthPolicy(effectiveMessage, '', { isInternalSummary, intent });
+            const lengthPolicy = applyCostCapToLengthPolicy(
+                buildLengthPolicy(effectiveMessage, '', { isInternalSummary, intent }),
+                { intent, stream: shouldStreamChatRequest(req.body, intent, grounding, routeDecision, isInternalSummary) }
+            );
             if (shouldStreamChatRequest(req.body, intent, grounding, routeDecision, isInternalSummary)) {
                 return await handleStreamingChatRequest(res, {
                     requestId,
@@ -2072,6 +2076,17 @@ import { extractWithCrawl4Ai } from './_lib/crawl4ai-client.js';
             elapsedMs: 0,
             externalVerification: false
         };
+        const costControls = getCostControls();
+        if (!costControls.qualityCriticEnabled && !forceReview) {
+            return {
+                correctedResponse: '',
+                metadata: {
+                    ...baseMetadata,
+                    verdict: 'skipped_cost_control',
+                    reasons: ['quality_critic_disabled']
+                }
+            };
+        }
         const normalizedIntent = String(intent || '');
         if (['fast_explainer', 'fast_simple', 'casual_chat'].includes(normalizedIntent) && !shouldReviewFastExplainer(riskReasons)) {
             return {
@@ -2153,6 +2168,8 @@ import { extractWithCrawl4Ai } from './_lib/crawl4ai-client.js';
     }
 
     function shouldSkipStreamQualityReview(message, answer, intent) {
+        const costControls = getCostControls();
+        if (!costControls.streamQualityReviewEnabled) return true;
         const normalizedIntent = String(intent || '');
         if (['fast_explainer', 'fast_simple', 'casual_chat', 'pop_culture_reference'].includes(normalizedIntent)) {
             return true;
