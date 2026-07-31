@@ -5,6 +5,7 @@ import searchHandler from './search.js';
 import visionHandler from './vision.js';
 import extractUrlHandler from './extract-url.js';
 import diagnosticsHandler from './diagnostics.js';
+import ingestAttachmentHandler from './ingest-attachment.js';
 
 const ROUTES = new Map([
     ['/api/chat-groq', chatGroqHandler],
@@ -13,7 +14,8 @@ const ROUTES = new Map([
     ['/api/search', searchHandler],
     ['/api/extract-url', extractUrlHandler],
     ['/api/vision', visionHandler],
-    ['/api/diagnostics', diagnosticsHandler]
+    ['/api/diagnostics', diagnosticsHandler],
+    ['/api/ingest-attachment', ingestAttachmentHandler]
 ]);
 
 const RETIRED_ROUTES = new Map([
