@@ -38,21 +38,24 @@ globalThis.JarvisMemoryQuality = Object.freeze({ ...JarvisMemoryQuality });
 globalThis.JarvisAttachments = Object.freeze({ ...JarvisAttachments });
 
 function initializeSpeechInput() {
-    if (globalThis.JarvisSpeechInput) return;
-    installSpeechInputUI({
+    if (globalThis.__jarvisSpeechInputInstalled) return;
+    const controller = installSpeechInputUI({
         onComposerChanged() {
             globalThis.handleComposerInput?.();
         },
         onStateChanged() {
             globalThis.toggleSendButton?.();
         },
-        onSubmit(submission) {
+        async onSubmit(submission) {
             return globalThis.sendTextInput?.(submission);
         },
         onError(message) {
             globalThis.showTemporaryMessage?.(message);
         }
     });
+    if (controller) {
+        globalThis.__jarvisSpeechInputInstalled = true;
+    }
 }
 
 if (document.readyState === 'loading') {
@@ -60,5 +63,7 @@ if (document.readyState === 'loading') {
 } else {
     initializeSpeechInput();
 }
+globalThis.addEventListener('jarvis:app-ready', initializeSpeechInput, { once: true });
+window.addEventListener('load', initializeSpeechInput, { once: true });
 
 globalThis.dispatchEvent(new CustomEvent('jarvis:modules-ready'));
