@@ -1,4 +1,5 @@
 import { applyApiSecurity } from './_lib/security.js';
+import { getCostControls } from './_lib/cost-controls.js';
 
 function hasEnv(name) {
     return String(process.env[name] || '').trim().length > 0;
@@ -9,6 +10,7 @@ function isEnabled(name) {
 }
 
 export function buildDiagnosticsStatus() {
+  const costControls = getCostControls();
     return {
         model: {
             groqConfigured: hasEnv('GROQ_API_KEY'),
@@ -25,7 +27,8 @@ export function buildDiagnosticsStatus() {
             exaConfigured: hasEnv('EXA_API_KEY') || hasEnv('EXA_KEY'),
             nvidiaConfigured: hasEnv('NVIDIA_API_KEY') || hasEnv('NVIDIA_NIM_API_KEY'),
             crawl4aiConfigured: hasEnv('CRAWL4AI_URL') || hasEnv('CRAWL4AI_ENDPOINT')
-        }
+        },
+        costControls
     };
 }
 
