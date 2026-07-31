@@ -47,6 +47,19 @@ function setDefaultSecurityHeaders(res) {
     res.setHeader('Referrer-Policy', 'no-referrer');
     res.setHeader('Permissions-Policy', 'camera=(), geolocation=()');
     res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+    const csp = String(process.env.JARVIS_CSP || '').trim() ||
+        "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self' https:; frame-src https://maps.google.com https://www.google.com https://openstreetmap.org; base-uri 'self'; form-action 'self'";
+    res.setHeader('Content-Security-Policy', csp);
+}
+
+function looksLikeAbusivePayload(body) {
+    const text = JSON.stringify(body || {});
+    if (text.length > 500000) return true;
+    if (/(?:\b(?:ignore|forget)\s+(?:all|previous)\s+instructions\b|\bact as\b|\bsystem prompt\b)/i.test(text) && text.length > 12000) {
+        return true;
+    }
+    if (/(?:<script|javascript:|onerror=|onload=)/i.test(text)) return true;
+    return false;
 }
 
 function applyCors(req, res) {
@@ -159,6 +172,11 @@ export function applyApiSecurity(req, res, options = {}) {
     const actualBytes = parseBodyBytes(req);
     if (actualBytes > maxBodyBytes) {
         sendSecurityError(res, 413, 'request_too_large', 'Request body too large.');
+        return { handled: true };
+    }
+
+    if (looksLikeAbusivePayload(req?.body)) {
+        sendSecurityError(res, 400, 'abusive_payload', 'Request payload was rejected.');
         return { handled: true };
     }
 
