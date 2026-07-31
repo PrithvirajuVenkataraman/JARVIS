@@ -24,8 +24,9 @@ const SOURCE = Object.freeze({
     embeddingsApi: fs.readFileSync(new URL('../api/_lib/embeddings.js', import.meta.url), 'utf8'),
     visionApi: fs.readFileSync(new URL('../api/vision.js', import.meta.url), 'utf8'),
     chatGroqApi: fs.readFileSync(new URL('../api/chat-groq.js', import.meta.url), 'utf8'),
-    speechInput: fs.readFileSync(new URL('../app/speech-input.js', import.meta.url), 'utf8') 
-}); 
+    speechInput: fs.readFileSync(new URL('../app/speech-input.js', import.meta.url), 'utf8'),
+    bootstrap: fs.readFileSync(new URL('../app/bootstrap.js', import.meta.url), 'utf8')
+});
 
 const SAMPLE = Object.freeze({
     sciA: '6.022e23',
@@ -688,7 +689,9 @@ assert.match(SOURCE.appHtml, /id="composer-attachment-tray"/);
 assert.match(SOURCE.appHtml, /JarvisAttachments/);
 assert.match(SOURCE.apiIndex, /\/api\/ingest-attachment/);
 assert.match(SOURCE.appHtml, /showThinkingIndicator\(attachmentsForSend\.length \? 'Reading attachments\.\.\.' : 'Thinking'\)/);
-assert.match(SOURCE.appHtml, /app\/bootstrap\.js/); 
+assert.match(SOURCE.appHtml, /app\/bootstrap\.js/);
+assert.match(SOURCE.appHtml, /jarvis:app-ready/);
+assert.match(SOURCE.bootstrap, /jarvis:app-ready/); 
 assertContracts(SOURCE.appHtml, FEATURE_CONTRACTS); 
 assert.match(SOURCE.visionApi, /function shouldEscalateMathOcrSolve/);
 assert.match(SOURCE.visionApi, /pipeline:\s*'fast-math-ocr-solve'/);
@@ -997,10 +1000,10 @@ assert.doesNotMatch(extractFunctionSource(SOURCE.appHtml, 'showResponseRecoveryC
 assert.doesNotMatch(SOURCE.appHtml, /Response paused|Last request|response-recovery-title|response-recovery-btn/);
 assert.match(SOURCE.appHtml, /function isWeakAssistantAnswerForRetry/);
 assert.match(SOURCE.appHtml, /chat_weak_answer_retry/);
-assert.match(SOURCE.appHtml, /Understanding your request/);
-assert.match(SOURCE.appHtml, /Writing the answer/);
-assert.match(SOURCE.appHtml, /Checking sources/);
-assert.match(SOURCE.appHtml, /Polishing the response/);
+assert.match(SOURCE.appHtml, /assistant-thinking-minimal/);
+assert.match(SOURCE.appHtml, /function stripInlineCitationMarkers/);
+assert.doesNotMatch(SOURCE.appHtml, /Polishing the response/);
+assert.doesNotMatch(SOURCE.appHtml, /Understanding your request/);
 assert.match(SOURCE.appHtml, /function normalizePastedPromptText/);
 assert.match(SOURCE.appHtml, /data-assistant-action="save_memory"/);
 assert.match(SOURCE.appHtml, /function saveAssistantMessageToMemory/);
