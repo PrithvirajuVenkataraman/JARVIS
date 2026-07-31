@@ -2352,7 +2352,7 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
         const userName = String(preferences?.userName || '').trim().slice(0, 80);
         const responseLength = ['short', 'normal', 'detailed'].includes(preferences?.responseLength)
             ? preferences.responseLength
-            : 'normal';
+            : 'detailed';
         const responseFormat = ['paragraph', 'bullet', 'steps'].includes(preferences?.responseFormat)
             ? preferences.responseFormat
             : 'paragraph';
@@ -2631,10 +2631,13 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
 
     function inferDetailLevel(message) {
         const q = String(message || '').toLowerCase();
-        if (!q) return 'normal';
-        if (/\b(one line|one-liner|brief|briefly|short|tldr|in short|quickly)\b/.test(q)) return 'short';
-        if (/\b(explain|detailed|detail|in depth|deep dive|comprehensive|step by step|walk me through|elaborate|why|how)\b/.test(q)) return 'detailed';
-        return 'normal';
+        const wordSpec = parseWordCountRequest(message);
+        if (wordSpec && wordSpec.maxWords <= 80) return 'short';
+        if (!q) return 'detailed';
+        if (/\b(one line|one-liner|brief|briefly|short|tldr|tl;dr|in short|quickly|quick answer|concise|few words|keep it short|make it short)\b/.test(q)) {
+            return 'short';
+        }
+        return 'detailed';
     }
 
     function buildLengthPolicy(message, clientSystemPrompt, options = {}) {
@@ -2708,7 +2711,12 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
         if (detail === 'short') {
             return { instruction: 'Keep the response brief and direct.', maxTokens: 900, temperature: 0.5, wordSpec: null };
         }
-        return { instruction: 'Match response length to the user intent; concise for simple asks, fuller when needed.', maxTokens: 2500, temperature: 0.7, wordSpec: null };
+        return {
+            instruction: 'Provide a complete, well-structured answer with enough depth to fully satisfy the question. Finish all sections, lists, and steps cleanly—do not stop mid-thought or mid-list.',
+            maxTokens: 7000,
+            temperature: 0.7,
+            wordSpec: null
+        };
     }
 
     function isRecipeGenerationRequest(message) {
