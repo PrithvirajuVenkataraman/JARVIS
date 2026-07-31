@@ -2992,13 +2992,22 @@ function buildVerificationSnapshot(items, domain = 'general', riskLevel = 'mediu
     };
 }
 
+function stripInlineCitationMarkers(text) {
+    return String(text || '')
+        .replace(/\s*【\d+】/g, '')
+        .replace(/\s*\[\d+\](?=\s|[.,;:!?)]|$)/g, '')
+        .replace(/\s+\(\d+\)(?=\s|[.,;:!?]|$)/g, '');
+}
+
 function cleanLiveAnswerText(text) {
-    return normalizeAssistantTextStyle(String(text || ''))
-        .replace(/^\s*(?:\*\*)?Direct answer:(?:\*\*)?\s*/i, '')
-        .replace(/\n\s*Confidence:\s*[^\n]*/gi, '')
-        .replace(/\n\s*Verified sources checked:\s*[^\n]*/gi, '')
-        .replace(/\n{3,}/g, '\n\n')
-        .trim();
+    return stripInlineCitationMarkers(
+        normalizeAssistantTextStyle(String(text || ''))
+            .replace(/^\s*(?:\*\*)?Direct answer:(?:\*\*)?\s*/i, '')
+            .replace(/\n\s*Confidence:\s*[^\n]*/gi, '')
+            .replace(/\n\s*Verified sources checked:\s*[^\n]*/gi, '')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim()
+    );
 }
 
 function getNewsVerificationThreshold(mode = 'strict') {
@@ -5483,13 +5492,14 @@ let showRoutingDebugBadge = false;
             if (!btn) return;
             const state = window.JarvisSpeechInput?.getState?.() || {};
             const active = !!state.converseEnabled;
+            const secureContext = window.isSecureContext === true;
             btn.dataset.mode = 'converse';
             btn.onclick = togglePrimaryConverseMode;
             btn.innerHTML = getConverseIconSvg();
             btn.classList.remove('is-send-ready');
             btn.classList.add('is-converse-ready');
             btn.classList.toggle('is-converse-active', active);
-            btn.disabled = state.supported === false;
+            btn.disabled = state.supported === false || !secureContext;
             btn.setAttribute('aria-label', active ? 'Stop Converse mode' : 'Start Converse mode');
             btn.title = active ? 'Stop Converse mode' : 'Start Converse mode';
         }
@@ -5521,6 +5531,10 @@ let showRoutingDebugBadge = false;
             const input = document.getElementById('text-input');
             if (input?.value?.trim()) {
                 void sendTextInput();
+                return;
+            }
+            if (window.isSecureContext !== true) {
+                showTemporaryMessage('Voice input needs HTTPS or localhost.');
                 return;
             }
             const toggled = window.JarvisSpeechInput?.toggleConverse?.();
@@ -7677,7 +7691,9 @@ let showRoutingDebugBadge = false;
                 const messageId = createAssistantMessageId();
                 const sourceTurn = getConversationTurn(messageTurnId);
                 const priorUserPrompt = String(meta?.userMessage || sourceTurn?.rawPrompt || '').trim();
-                const plainMessageText = hasHtmlContent ? stripAssistantHtmlForText(displayText) : String(displayText || '').trim();
+                const plainMessageText = hasHtmlContent
+                    ? stripAssistantHtmlForText(displayText)
+                    : stripInlineCitationMarkers(String(readableText || displayText || '').trim());
                 const sourceLabel = sourceType === 'verified' 
                     ? 'Verified source reply' 
                     : (sourceType === 'model' ? 'Model answer' : (sourceType === 'tool' ? 'Tool-generated reply' : 'Assistant reply')); 
@@ -8095,7 +8111,7 @@ function normalizeUiTokens(text) {
         function normalizeVerifiedLiveMessage(input) {
             const raw = String(input || '').trim();
             if (!raw) return raw;
-            const normalized = raw
+            const normalized = stripInlineCitationMarkers(raw
                 .replace(/sources:\s*sources:/gi, 'Sources:')
                 .replace(/(?:^|\n)\s*Sources:\s*(?=\n\s*Sources:\s*)/gi, '\n')
                 .replace(/^\s*\[[^\]]+\]\s*/gim, '')
@@ -9161,7 +9177,14 @@ function isMarketMoversQuery(text) {
 function formatVerifiedSourcesList(sources) {
     return (Array.isArray(sources) ? sources : [])
         .slice(0, 5)
-        .map((item, i) => `${i + 1}. [${item.title}](${item.url})`)
+        .map((item, i) => {
+            const title = String(item?.title || 'Source')
+                .replace(/\)+$/g, '')
+                .replace(/\s+/g, ' ')
+                .trim();
+            const url = String(item?.url || '').trim();
+            return url ? `${i + 1}. [${title}](${url})` : `${i + 1}. ${title}`;
+        })
         .join('\n');
 }
 
@@ -21369,12 +21392,10 @@ function showThinkingIndicator(message = 'Thinking') {
     if (!chatContainer) return;
 
     let row = document.getElementById('chat-thinking-indicator');
-    const statusText = String(message || 'Thinking').replace(/\s+/g, ' ').trim() || 'Thinking';
-    const phase = resolveThinkingPhase(statusText);
+    const phase = resolveThinkingPhase(message);
     const visualMode = phase.key === 'searching' ? 'ring' : 'dots';
     const visualModeClass = visualMode === 'ring' ? 'assistant-thinking-ring-mode' : 'assistant-thinking-dots';
-    const phaseLabel = phase.label;
-    const searchLabelClass = phase.key === 'searching' ? 'assistant-thinking-text is-searching' : 'assistant-thinking-text';
+    const phaseLabel = 'Thinking';
     if (!row) {
         row = document.createElement('div');
         row.id = 'chat-thinking-indicator';
@@ -21383,23 +21404,25 @@ function showThinkingIndicator(message = 'Thinking') {
         row.innerHTML = `
             <div class="w-full max-w-3xl">
                 <div class="flex items-start gap-2">
-                    <div class="chat-bubble-assistant assistant-thinking-bubble" role="status" aria-live="polite" aria-label="${escapeHtml(phaseLabel)}">
+                    <div class="chat-bubble-assistant assistant-thinking-bubble assistant-thinking-minimal" role="status" aria-live="polite" aria-label="${escapeHtml(phaseLabel)}">
                         <span class="assistant-thinking-pulse ${visualModeClass}" aria-hidden="true">
                             <span class="assistant-thinking-dot"></span>
                             <span class="assistant-thinking-dot"></span>
                             <span class="assistant-thinking-dot"></span>
                             <span class="assistant-thinking-ring"></span>
                         </span>
-                        <span class="${searchLabelClass}" data-thinking-label>${escapeHtml(phaseLabel)}</span>
+                        <span class="assistant-thinking-text" data-thinking-label hidden>${escapeHtml(phaseLabel)}</span>
                     </div>
                 </div>
             </div>
         `;
         chatContainer.appendChild(row);
-        startThinkingPhaseTimeline(row, phase.key);
     } else {
         const bubble = row.querySelector('.assistant-thinking-bubble');
-        if (bubble) bubble.setAttribute('aria-label', phaseLabel);
+        if (bubble) {
+            bubble.classList.add('assistant-thinking-minimal');
+            bubble.setAttribute('aria-label', phaseLabel);
+        }
         const pulse = row.querySelector('.assistant-thinking-pulse');
         if (pulse) {
             pulse.classList.toggle('assistant-thinking-dots', visualMode === 'dots');
@@ -21408,51 +21431,25 @@ function showThinkingIndicator(message = 'Thinking') {
         const label = row.querySelector('[data-thinking-label]');
         if (label) {
             label.textContent = phaseLabel;
-            label.className = searchLabelClass;
+            label.hidden = true;
         }
     }
     maybeAutoScroll(chatContainer);
 }
 
-function startThinkingPhaseTimeline(row, initialKey = 'thinking') {
-    if (thinkingPhaseTimer) clearInterval(thinkingPhaseTimer);
-    if (!row || initialKey === 'searching') return;
-    row.dataset.thinkingStartedAt = String(Date.now());
-    thinkingPhaseTimer = setInterval(() => {
-        const currentRow = document.getElementById('chat-thinking-indicator');
-        if (!currentRow) {
-            clearInterval(thinkingPhaseTimer);
-            thinkingPhaseTimer = null;
-            return;
-        }
-        const startedAt = Number(currentRow.dataset.thinkingStartedAt || Date.now());
-        const elapsed = Date.now() - startedAt;
-        const label = currentRow.querySelector('[data-thinking-label]');
-        if (!label) return;
-        const bubble = currentRow.querySelector('.assistant-thinking-bubble');
-        let nextLabel = 'Understanding your request';
-        if (elapsed > 3200) {
-            nextLabel = 'Polishing the response';
-        } else if (elapsed > 1100) {
-            nextLabel = 'Writing the answer';
-        }
-        label.textContent = nextLabel;
-        if (bubble) bubble.setAttribute('aria-label', nextLabel);
-    }, 250);
+function startThinkingPhaseTimeline() {
+    if (thinkingPhaseTimer) {
+        clearInterval(thinkingPhaseTimer);
+        thinkingPhaseTimer = null;
+    }
 }
 
 function resolveThinkingPhase(message = '') {
     const lower = String(message || '').toLowerCase();
     if (/\b(web search|search|sources?|retriev|fetch|look(?:ing)?\s+up|checking verified|checking reliable|checking current)\b/.test(lower)) {
-        return { key: 'searching', label: 'Checking sources' };
+        return { key: 'searching', label: 'Thinking' };
     }
-    if (/\b(final|finaliz|polish|format)\b/.test(lower)) {
-        return { key: 'finalizing', label: 'Polishing the response' };
-    }
-    if (/\b(draft|generat|answer|write)\b/.test(lower)) {
-        return { key: 'drafting', label: 'Writing the answer' };
-    }
-    return { key: 'thinking', label: 'Understanding your request' };
+    return { key: 'thinking', label: 'Thinking' };
 }
 
 function hideThinkingIndicator() {
@@ -22619,6 +22616,12 @@ loadChatSessions();
 initializeActiveChatSessionForStartup();
 ensureStartupGreeting(false);
 setTimeout(() => ensureStartupGreeting(false), 900);
+
+globalThis.sendTextInput = sendTextInput;
+globalThis.handleComposerInput = handleComposerInput;
+globalThis.toggleSendButton = toggleSendButton;
+globalThis.stopActiveGeneration = stopActiveGeneration;
+globalThis.dispatchEvent(new CustomEvent('jarvis:app-ready'));
 
 </script>
 
