@@ -3469,3 +3469,95 @@ button:hover {
     border-color: #ffffff !important;
     box-shadow: inset 0 0 0 2px #000000, 0 0 0 2px #ffffff !important;
 }
+
+.source-transparency-badge {
+    margin-bottom: 0.5rem;
+    padding: 0.45rem 0.65rem;
+    border-radius: 0.65rem;
+    border: 1px solid rgba(56, 189, 248, 0.35);
+    background: rgba(14, 116, 144, 0.18);
+    font-size: 0.75rem;
+    line-height: 1.35;
+}
+
+.source-transparency-badge[data-verified="true"] {
+    border-color: rgba(74, 222, 128, 0.35);
+    background: rgba(22, 101, 52, 0.22);
+}
+
+.source-transparency-label {
+    display: block;
+    font-weight: 600;
+}
+
+.source-transparency-reason {
+    display: block;
+    opacity: 0.8;
+    margin-top: 0.15rem;
+}
+
+.source-transparency-list {
+    margin: 0.35rem 0 0;
+    padding-left: 1rem;
+}
+
+.context-clarification-card {
+    margin-top: 0.5rem;
+    padding: 0.65rem;
+    border-radius: 0.75rem;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(15, 23, 42, 0.55);
+}
+
+.context-clarification-topic {
+    font-size: 0.8rem;
+    margin-bottom: 0.5rem;
+    opacity: 0.9;
+}
+
+.context-clarification-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+}
+
+.context-clarification-btn {
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: rgba(255, 255, 255, 0.06);
+    color: inherit;
+    border-radius: 999px;
+    padding: 0.35rem 0.7rem;
+    font-size: 0.78rem;
+}
+
+.continuous-vision-guidance {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    color: #fff;
+    font-size: 0.82rem;
+    text-align: center;
+    padding: 0.75rem;
+    background: rgba(0, 0, 0, 0.28);
+}
+
+@media (max-width: 640px) {
+    #input-bar-container {
+        padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+    }
+
+    #input-bar-inner {
+        min-height: 44px;
+    }
+
+    #text-input {
+        font-size: 16px;
+    }
+
+    .chat-sidebar-panel {
+        width: min(92vw, 360px);
+    }
+}
