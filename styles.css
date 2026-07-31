@@ -1121,6 +1121,97 @@ option {
     border-color: var(--ui-border);
 }
 
+.composer-action-back {
+    opacity: 0.85;
+    font-weight: 500 !important;
+}
+
+.composer-attachment-tray {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin: 0 0 0.55rem;
+    padding: 0 0.15rem;
+}
+
+.composer-attachment-tray.hidden {
+    display: none;
+}
+
+.composer-attachment-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    max-width: min(100%, 280px);
+    padding: 0.35rem 0.45rem 0.35rem 0.35rem;
+    border-radius: 12px;
+    border: 1px solid var(--ui-border);
+    background: var(--ui-surface-muted);
+}
+
+.composer-attachment-thumb {
+    width: 34px;
+    height: 34px;
+    object-fit: cover;
+    border-radius: 8px;
+    flex: 0 0 auto;
+}
+
+.composer-attachment-icon {
+    width: 34px;
+    height: 34px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.06);
+    flex: 0 0 auto;
+}
+
+.composer-attachment-meta {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+}
+
+.composer-attachment-name,
+.composer-attachment-size {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.composer-attachment-name {
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.composer-attachment-size {
+    font-size: 11px;
+    opacity: 0.7;
+}
+
+.composer-attachment-remove {
+    border: 0;
+    background: transparent;
+    color: inherit;
+    opacity: 0.75;
+    font-size: 18px;
+    line-height: 1;
+    padding: 0 0.15rem;
+    cursor: pointer;
+}
+
+.composer-attachment-remove:hover {
+    opacity: 1;
+}
+
+body.dark .composer-attachment-chip {
+    background: rgba(255, 255, 255, 0.05);
+}
+
 body.dark .composer-plus-btn {
     background: #0f172a;
     color: #cbd5e1;
