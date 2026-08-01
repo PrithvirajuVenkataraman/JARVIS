@@ -1,52 +1,101 @@
-const DEFAULT_FAILURE = Object.freeze({
-    code: 'unknown_failure',
-    stage: 'unknown',
-    recoverable: false,
-    userActions: [],
-    debugReason: 'unknown'
-});
-
 function compactText(value) {
     return String(value || '').replace(/\s+/g, ' ').trim();
 }
 
-export function classifyFailure(input, context = {}) {
-    if (input && typeof input === 'object' && input.code) {
+function asErrorText(failureOrReason) {
+    if (failureOrReason && typeof failureOrReason === 'object') {
+        return `${String(failureOrReason.name || '')} ${String(failureOrReason.message || failureOrReason.code || '')} ${String(failureOrReason.reason || '')}`.toLowerCase();
+    }
+    return String(failureOrReason || '').toLowerCase();
+}
+
+export function classifyFailure(failureOrReason, context = {}) {
+    const text = asErrorText(failureOrReason);
+    const codeHint = String(failureOrReason?.code || context?.code || '').toLowerCase();
+
+    if (codeHint === 'aborted' || /abort/.test(text)) {
         return {
-            ...DEFAULT_FAILURE,
-            ...input,
-            userActions: Array.isArray(input.userActions) ? input.userActions.map(String) : []
+            code: 'aborted',
+            recoverable: false,
+            userActions: [],
+            message: 'Request aborted.'
         };
     }
-    const details = context || {};
-    const raw = compactText(`${input?.name || ''} ${input?.message || input || ''}`).toLowerCase();
-    const stage = String(details.stage || 'request');
-    if (details.aborted === true || /abort/.test(raw)) {
-        return { code: 'aborted', stage, recoverable: false, userActions: [], debugReason: raw || 'aborted' };
+
+    if (
+        codeHint === 'network_timeout' ||
+        /timeout|timed out|network|failed to fetch|service unavailable|temporar|rate limit|429|5\d\d/.test(text)
+    ) {
+        return {
+            code: 'network_timeout',
+            recoverable: true,
+            userActions: ['retry', 'web_search'],
+            message: 'Network or timeout failure.'
+        };
     }
-    if (/permission|notallowed|not allowed|denied/.test(raw)) {
-        return { code: 'permission_blocked', stage, recoverable: true, userActions: ['retry'], debugReason: raw };
+
+    if (codeHint === 'permission_blocked' || /permission|not-allowed|denied|microphone|camera/.test(text)) {
+        return {
+            code: 'permission_blocked',
+            recoverable: true,
+            userActions: ['retry'],
+            message: 'Browser permission blocked the action.'
+        };
     }
-    if (/speech|synthesis|voice/.test(raw) || details.speechBlocked === true) {
-        return { code: 'speech_blocked', stage: 'speech', recoverable: true, userActions: ['enable_voice'], debugReason: raw || 'speech_blocked' };
+
+    if (
+        codeHint === 'retrieval_empty' ||
+        context?.retrievalEmpty === true ||
+        /no (?:usable )?(?:sources?|results?)|retrieval.?empty|could not find enough/.test(text)
+    ) {
+        return {
+            code: 'retrieval_empty',
+            recoverable: true,
+            userActions: ['retry', 'web_search'],
+            message: 'Not enough live sources were found.'
+        };
     }
-    if (/unsupported/.test(raw) || details.unsupportedTool === true) {
-        return { code: 'unsupported_tool', stage, recoverable: false, userActions: [], debugReason: raw || 'unsupported_tool' };
+
+    if (
+        codeHint === 'model_empty' ||
+        context?.emptyAnswer === true ||
+        context?.weakAnswer === true ||
+        /empty answer|model.?empty|no response|blank response/.test(text)
+    ) {
+        return {
+            code: 'model_empty',
+            recoverable: true,
+            userActions: ['retry'],
+            message: 'The model returned an empty or weak answer.'
+        };
     }
-    if (details.retrievalEmpty === true) {
-        return { code: 'retrieval_empty', stage: 'retrieval', recoverable: true, userActions: ['retry', 'web_search'], debugReason: 'retrieval_empty' };
+
+    if (codeHint === 'transient_failure' || failureOrReason === 'transient_failure') {
+        return {
+            code: 'network_timeout',
+            recoverable: true,
+            userActions: ['retry', 'web_search'],
+            message: 'Transient failure.'
+        };
     }
-    if (details.emptyAnswer === true || /empty answer|model_empty|no response/.test(raw)) {
-        return { code: 'model_empty', stage: 'model', recoverable: true, userActions: ['retry'], debugReason: raw || 'model_empty' };
-    }
-    if (/timeout|timed out|network|failed to fetch|service unavailable|temporar|rate limit|429|5\d\d/.test(raw)) {
-        return { code: 'network_timeout', stage, recoverable: true, userActions: ['retry', 'web_search'], debugReason: raw || 'network_timeout' };
-    }
-    return { ...DEFAULT_FAILURE, stage, debugReason: raw || 'non_transient' };
+
+    return {
+        code: 'unknown',
+        recoverable: true,
+        userActions: ['retry'],
+        message: 'Unexpected failure.'
+    };
 }
 
 export function getFallbackFailureReason(error, context = {}) {
-    return classifyFailure(error, context).code;
+    const failure = classifyFailure(error, context);
+    if (failure.code === 'aborted') return 'aborted';
+    if (failure.code === 'network_timeout') return 'transient_failure';
+    if (failure.code === 'model_empty') {
+        return context?.weakAnswer === true ? 'weak_answer' : 'empty_answer';
+    }
+    if (failure.code === 'retrieval_empty') return 'empty_answer';
+    return 'non_transient';
 }
 
 export function shouldShowFailureFallbackCard(failureOrReason, userText, context = {}) {
