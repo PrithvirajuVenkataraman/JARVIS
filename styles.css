@@ -3811,6 +3811,52 @@ button:hover {
     font-size: 0.78rem;
 }
 
+.location-permission-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.7rem;
+    max-width: min(100%, 420px);
+    padding: 0.85rem 0.95rem;
+    border: 1px solid rgba(255, 255, 255, 0.28);
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.location-permission-copy {
+    margin: 0;
+    font-size: 0.92rem;
+    line-height: 1.45;
+    color: #f3f4f6;
+}
+
+.location-permission-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.location-permission-btn {
+    border: 1px solid rgba(255, 255, 255, 0.34) !important;
+    background: #000000 !important;
+    color: #ffffff !important;
+    border-radius: 999px !important;
+    padding: 0.4rem 0.85rem !important;
+    font-size: 0.8rem !important;
+    line-height: 1.2 !important;
+    cursor: pointer;
+}
+
+.location-permission-btn-primary {
+    background: #ffffff !important;
+    color: #000000 !important;
+    border-color: #ffffff !important;
+}
+
+.location-permission-btn:hover,
+.location-permission-btn:focus-visible {
+    border-color: #ffffff !important;
+}
+
 .continuous-vision-guidance {
     position: absolute;
     inset: 0;
