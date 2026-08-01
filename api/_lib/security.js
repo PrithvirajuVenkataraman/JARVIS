@@ -45,7 +45,7 @@ function setDefaultSecurityHeaders(res) {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('Referrer-Policy', 'no-referrer');
-    res.setHeader('Permissions-Policy', 'camera=(), geolocation=()');
+    res.setHeader('Permissions-Policy', 'camera=(self), microphone=(self), geolocation=(self)');
     res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
     const csp = String(process.env.JARVIS_CSP || '').trim() ||
         "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self' https:; frame-src https://maps.google.com https://www.google.com https://openstreetmap.org; base-uri 'self'; form-action 'self'";
