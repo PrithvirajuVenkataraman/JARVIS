@@ -262,18 +262,6 @@
                     oninput="handleComposerInput()"></textarea>
                 <div class="composer-trailing">
                     <button
-                        type="button"
-                        id="composer-model-btn"
-                        class="composer-model-btn"
-                        onclick="showHelpModal()"
-                        aria-label="Assistant info"
-                        title="JARVIS assistant">
-                        <span class="composer-model-label">JARVIS</span>
-                        <svg class="composer-model-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
-                            <path d="m6 9 6 6 6-6"></path>
-                        </svg>
-                    </button>
-                    <button
                         id="voice-to-text-btn"
                         type="button"
                         class="composer-icon-btn speech-input-btn"
@@ -290,14 +278,15 @@
                     <button
                         id="send-message-btn"
                         type="button"
-                        onclick="sendTextInput()"
-                        disabled
-                        class="composer-send-btn footer-action-btn"
-                        title="Send message"
-                        aria-label="Send message">
+                        class="composer-send-btn footer-action-btn is-converse-ready"
+                        title="Start Converse mode"
+                        aria-label="Start Converse mode">
                         <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" aria-hidden="true">
-                            <path d="M22 2 11 13"></path>
-                            <path d="m22 2-7 20-4-9-9-4Z"></path>
+                            <path d="M4 12h2"></path>
+                            <path d="M8 7v10"></path>
+                            <path d="M12 4v16"></path>
+                            <path d="M16 8v8"></path>
+                            <path d="M20 12h-2"></path>
                         </svg>
                     </button>
                 </div>
@@ -4904,6 +4893,7 @@ let showRoutingDebugBadge = false;
             selectionRange: null
         };
         let pendingSelectionGrounding = null;
+        let lastMultimodalGrounding = null;
         let assistantMessageCounter = 0;
         const assistantMessageMeta = new Map();
         let conversationTurnCounter = 0;
@@ -5053,11 +5043,9 @@ let showRoutingDebugBadge = false;
         function ensureStartupGreeting(forceSpeak = false) {
             if (hasAnyRenderedChatMessages()) return false;
             const welcomeOptions = [
-                'Hi! How can I help today?',
-                'Hello! How can I help today?',
-                'Hola, amigo! How can I help today?',
-                'Vanakkam! How can I help today?',
-                'Hey there! How can I help today?'
+                'JARVIS here — ask a current fact, point your camera, or attach a file.',
+                'Live facts, vision, and memory. What do you need?',
+                'I can check sources, read screenshots, and remember what you save. Try me.'
             ];
             const welcomeMessage = welcomeOptions[Math.floor(Math.random() * welcomeOptions.length)];
             addInitialGreetingMessage(welcomeMessage);
@@ -5087,6 +5075,8 @@ let showRoutingDebugBadge = false;
                 input.value = draft;
                 handleComposerInput();
             }
+            toggleSendButton();
+            updateComposerPlaceholder();
             document.addEventListener('click', handleContextClarificationClick);
         };
 
@@ -8084,17 +8074,156 @@ function normalizeUiTokens(text) {
                 if (activeConverseSpeechUtterance === utterance) activeConverseSpeechUtterance = null;
                 setConverseUiState('listening', 'speech_finished');
                 logLatencyTrace('speech_end', { source: 'converse' });
+                window.JarvisSpeechInput?.setProcessing?.(false);
             };
             utterance.onerror = event => {
                 if (activeConverseSpeechUtterance === utterance) activeConverseSpeechUtterance = null;
                 setConverseUiState('recovering', `speech_blocked:${String(event?.error || 'unknown')}`);
                 logLatencyTrace('speech_blocked', { stage: 'synthesis', error: String(event?.error || 'unknown') });
+                window.JarvisSpeechInput?.setProcessing?.(false);
                 showConverseSpeechUnlockPrompt();
             };
             activeConverseSpeechUtterance = utterance;
             setConverseUiState('speaking', 'speech_start');
             logLatencyTrace('speech_start', { source: 'converse', chars: spokenText.length });
             window.speechSynthesis.speak(utterance);
+        }
+
+        function rememberMultimodalGrounding(payload = {}) {
+            const summary = String(payload.summary || payload.selectedText || payload.sourceAnswer || '').trim();
+            if (!summary) return;
+            lastMultimodalGrounding = {
+                kind: String(payload.kind || 'multimodal'),
+                summary: summary.slice(0, 4000),
+                selectedText: String(payload.selectedText || summary).slice(0, 4000),
+                sourceAnswer: String(payload.sourceAnswer || summary).slice(0, 4000),
+                savedAt: Date.now()
+            };
+        }
+
+        function getActiveMultimodalGrounding() {
+            if (!lastMultimodalGrounding) return null;
+            if ((Date.now() - Number(lastMultimodalGrounding.savedAt || 0)) > 20 * 60 * 1000) {
+                lastMultimodalGrounding = null;
+                return null;
+            }
+            return lastMultimodalGrounding;
+        }
+
+        async function handleMultimodalFollowup(userText) {
+            const grounding = getActiveMultimodalGrounding();
+            if (!grounding || !window.JarvisAgentWorkflows?.isMultimodalFollowup?.(userText)) return false;
+            const follow = window.JarvisAgentWorkflows.buildMultimodalFollowupPrompt(userText, grounding);
+            if (follow.action === 'save_memory') {
+                const key = grounding.kind === 'vision' ? 'last vision note' : 'last attachment note';
+                const value = String(grounding.summary || '').slice(0, 280);
+                memoryStore[key] = {
+                    value,
+                    category: 'note',
+                    createdAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString(),
+                    sourcePhrase: userText
+                };
+                saveUserData();
+                const reply = `Saved to memory as "${key}".`;
+                addChatMessage(reply, false);
+                saveToHistory(userText, reply);
+                return true;
+            }
+            if (follow.action === 'verify') {
+                showThinkingIndicator('Verifying...');
+                const result = await askGeminiAI(follow.prompt, {
+                    intent: 'selection_custom',
+                    grounding: {
+                        selectedText: grounding.selectedText,
+                        sourceAnswer: grounding.sourceAnswer,
+                        customInstruction: 'Verify the grounded context and state what is confirmed vs uncertain.'
+                    },
+                    minimalThinking: true,
+                    stream: true
+                });
+                if (result?.aborted) return true;
+                await publishResolvedModelMessage(userText, result?.response || result?.text, {
+                    label: 'Verified from context',
+                    routing: result?.routing || null
+                });
+                return true;
+            }
+            showThinkingIndicator('Continuing from context...');
+            const result = await askGeminiAI(follow.prompt, {
+                intent: 'selection_custom',
+                grounding: {
+                    selectedText: grounding.selectedText,
+                    sourceAnswer: grounding.sourceAnswer,
+                    customInstruction: follow.prompt
+                },
+                stream: true
+            });
+            if (result?.aborted) return true;
+            const answer = String(result?.response || result?.text || '').trim();
+            if (answer) {
+                rememberMultimodalGrounding({
+                    kind: grounding.kind,
+                    summary: answer,
+                    selectedText: grounding.selectedText,
+                    sourceAnswer: answer
+                });
+            }
+            await publishResolvedModelMessage(userText, answer, {
+                label: grounding.kind === 'vision' ? 'Vision follow-up' : 'Attachment follow-up',
+                routing: result?.routing || null
+            });
+            return true;
+        }
+
+        async function handleAgentWorkflow(userText) {
+            const workflow = window.JarvisAgentWorkflows?.detectAgentWorkflow?.(userText);
+            if (!workflow) return false;
+            const stepLine = Array.isArray(workflow.steps)
+                ? `\n\n<div class="workflow-chip" role="note">${escapeHtml(workflow.label)}: ${workflow.steps.map(escapeHtml).join(' → ')}</div>`
+                : '';
+            showThinkingIndicator(workflow.label || 'Working...');
+            const pendingAttachments = window.JarvisAttachments?.getPendingAttachments?.() || [];
+            let grounding = null;
+            if (pendingAttachments.length || workflow.id === 'compare_docs' || workflow.id === 'fix_from_screen') {
+                const attachmentsForSend = window.JarvisAttachments?.takePendingForSend?.() || [];
+                if (attachmentsForSend.length) {
+                    const attachmentContext = await window.JarvisAttachments?.ingestAllForMessage?.(
+                        attachmentsForSend,
+                        workflow.prompt
+                    );
+                    grounding = attachmentContext?.grounding || null;
+                    if (grounding) {
+                        rememberMultimodalGrounding({
+                            kind: 'attachment',
+                            summary: grounding.selectedText || grounding.sourceAnswer || '',
+                            selectedText: grounding.selectedText || '',
+                            sourceAnswer: grounding.sourceAnswer || grounding.selectedText || ''
+                        });
+                    }
+                } else if (workflow.id === 'fix_from_screen' && isContinuousVisionActive) {
+                    // Vision path will handle camera; fall through with workflow prompt.
+                } else if (workflow.id === 'compare_docs') {
+                    addChatMessage(`Attach 2 files first, then ask me to compare them.${stepLine}`, false);
+                    return true;
+                }
+            }
+            if (workflow.id === 'fix_from_screen' && isContinuousVisionActive && !grounding) {
+                await handleContinuousVisionQuery(workflow.prompt);
+                return true;
+            }
+            const result = await askGeminiAI(workflow.prompt, {
+                intent: grounding ? 'selection_custom' : 'chat',
+                grounding,
+                stream: true
+            });
+            if (result?.aborted) return true;
+            const answer = `${String(result?.response || result?.text || '').trim()}${stepLine}`.trim();
+            await publishResolvedModelMessage(userText, answer, {
+                label: workflow.label || 'Workflow',
+                routing: result?.routing || null
+            });
+            return true;
         }
 
         function formatModelSourceBadge(label = 'Model answer') {
@@ -9019,6 +9148,14 @@ async function sendTextInput(submission = {}) {
                                 label: 'Attachment answer',
                                 routing: result?.routing || null
                             });
+                            if (answer) {
+                                rememberMultimodalGrounding({
+                                    kind: 'attachment',
+                                    summary: answer,
+                                    selectedText: attachmentContext?.grounding?.selectedText || answer,
+                                    sourceAnswer: answer
+                                });
+                            }
                         } else {
                             addChatMessage('I could not analyze the attachment(s). Please try another file or add a clearer prompt.', false);
                         }
@@ -17167,6 +17304,12 @@ function isWakeGreetingText(text) {
                 addFeedbackButtons(text, instantReply, messageId);
                 return;
             }
+            if (await handleMultimodalFollowup(text)) {
+                return;
+            }
+            if (await handleAgentWorkflow(text)) {
+                return;
+            }
             if (window.JarvisMemoryQuality?.isForgetMemoryRequest?.(text)) {
                 const forgetKey = window.JarvisMemoryQuality?.extractForgetMemoryKey?.(text);
                 const result = window.JarvisMemoryQuality?.forgetMemoryKey?.(memoryStore, forgetKey);
@@ -17189,6 +17332,13 @@ function isWakeGreetingText(text) {
                 turnSource: activeResponseRenderContext?.source || 'text'
             });
             logRoutingDebug('processCommand route_decision', text, { frontendRoute, contextResolution });
+            if (frontendRoute.route === 'live_required' || frontendRoute.requiresSources) {
+                showThinkingIndicator('Checking sources...');
+                logLatencyTrace('latency_floor_live', { route: frontendRoute.route });
+            } else if (frontendRoute.route === 'fast_simple' || frontendRoute.minimalThinking) {
+                // Keep the bubble minimal; stream starts immediately.
+                logLatencyTrace('latency_floor_fast', { route: frontendRoute.route });
+            }
             if (frontendRoute.route === 'fast_simple') {
                 logRoutingDebug('processCommand -> fast_simple', text, {
                     selectedHandler: 'handleFastSimpleQuery',
@@ -22198,6 +22348,12 @@ async function handleContinuousVisionQuery(text) {
         }
         recentVisionError = '';
         updateContinuousVisionStatus('Camera ready', 'ready');
+        rememberMultimodalGrounding({
+            kind: 'vision',
+            summary: answer,
+            selectedText: [fullText, textDetected, answer].filter(Boolean).join('\n\n').slice(0, 4000),
+            sourceAnswer: answer
+        });
         addChatMessage(answer, false);
         saveToHistory(text, answer);
     } catch(e) {
