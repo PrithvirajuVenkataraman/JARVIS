@@ -2557,9 +2557,9 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
 
     function replaceLongDashes(text) {
         return String(text || '')
-            .replace(/[—–]/g, '-')
+            .replace(/[\u2012\u2013\u2014\u2015]/g, '-')
+            .replace(/[\u2010\u2011]/g, '-')
             .replace(/[\u00a0\u202f]/g, ' ')
-            .replace(/[\u2010-\u2015]/g, '-')
             .replace(/[“”]/g, '"')
             .replace(/[‘’]/g, "'");
     }
@@ -2713,7 +2713,7 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
             return { instruction: 'Keep the response brief and direct.', maxTokens: 900, temperature: 0.5, wordSpec: null };
         }
         return {
-            instruction: 'Provide a complete, well-structured answer with enough depth to fully satisfy the question. Finish all sections, lists, and steps cleanly—do not stop mid-thought or mid-list.',
+            instruction: 'Provide a complete, well-structured answer with enough depth to fully satisfy the question. Finish all sections, lists, and steps cleanly - do not stop mid-thought or mid-list.',
             maxTokens: 7000,
             temperature: 0.7,
             wordSpec: null
