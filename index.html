@@ -3926,10 +3926,19 @@ function sanitizeWeakModelAnswer(answerText, userMessage) {
     return raw;
 }
 
+function answerAsksForMissingAttachment(answerText) {
+    const lower = String(answerText || '').toLowerCase();
+    if (!lower) return false;
+    return /\b(could you|can you|please)\b[\s\S]{0,40}\b(share|provide|send|paste|upload)\b[\s\S]{0,60}\b(text|content|document|file|pdf|resume|docx)\b/.test(lower) ||
+        /\b(share|provide|send|paste|upload)\b[\s\S]{0,40}\b(the )?(text|content|document|file|pdf|resume)\b[\s\S]{0,40}\b(you('d| would)? like me to analyze|to analyze)\b/.test(lower) ||
+        /\bi (do not|don't|cannot|can't) (see|have|access)\b[\s\S]{0,40}\b(attachment|document|file|pdf|resume)\b/.test(lower);
+}
+
 function isWeakAssistantAnswerForRetry(answerText, userMessage = '') {
     const answer = String(answerText || '').trim();
     if (!answer) return true;
     const lower = answer.toLowerCase();
+    if (answerAsksForMissingAttachment(answer)) return true;
     if (answer.length < 28 && /\b(sorry|unclear|unsure|not sure|cannot help|can't help)\b/.test(lower)) return true;
     const weakPatterns = [
         /\bi'?m not sure\b/,
@@ -4631,7 +4640,7 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
             })
             : await window.JarvisApi.postJson('/api/chat-groq', requestPayload, {
                 signal: controller.signal,
-                timeoutMs: 25000
+                timeoutMs: Number(requestOptions?.timeoutMs) > 0 ? Number(requestOptions.timeoutMs) : 25000
             });
         latencyTrace.apiEndedAt = performance.now();
         logLatencyTrace('chat_api_complete', {
@@ -8207,15 +8216,17 @@ function normalizeUiTokens(text) {
                         attachmentsForSend,
                         workflow.prompt
                     );
-                    grounding = attachmentContext?.grounding || null;
-                    if (grounding) {
-                        rememberMultimodalGrounding({
-                            kind: 'attachment',
-                            summary: grounding.selectedText || grounding.sourceAnswer || '',
-                            selectedText: grounding.selectedText || '',
-                            sourceAnswer: grounding.sourceAnswer || grounding.selectedText || ''
-                        });
+                    grounding = attachmentContext?.anyReadable ? (attachmentContext?.grounding || null) : null;
+                    if (!grounding) {
+                        addChatMessage(`I could not extract readable text from the attached file(s). Try a clearer PDF, DOCX, or image.${stepLine}`, false);
+                        return true;
                     }
+                    rememberMultimodalGrounding({
+                        kind: 'attachment',
+                        summary: grounding.selectedText || grounding.sourceAnswer || '',
+                        selectedText: grounding.selectedText || '',
+                        sourceAnswer: grounding.sourceAnswer || grounding.selectedText || ''
+                    });
                 } else if (workflow.id === 'fix_from_screen' && isContinuousVisionActive) {
                     // Vision path will handle camera; fall through with workflow prompt.
                 } else if (workflow.id === 'compare_docs') {
@@ -9175,35 +9186,70 @@ async function sendTextInput(submission = {}) {
                 showThinkingIndicator(attachmentsForSend.length ? 'Reading attachments...' : 'Thinking');
                 try {
                     if (attachmentsForSend.length) {
+                        showThinkingIndicator('Reading attachments...');
                         const attachmentContext = await window.JarvisAttachments?.ingestAllForMessage?.(
                             attachmentsForSend,
                             outgoingText || 'Please analyze the attached file(s).'
                         );
-                        const attachmentPrompt = outgoingText || 'Please analyze the attached file(s).';
-                        const result = await askGeminiAI(attachmentPrompt, {
+                        if (!attachmentContext?.anyReadable || !attachmentContext?.grounding) {
+                            addChatMessage(
+                                'I could not extract readable text from that file. If it is a scanned PDF, try a clearer photo of the pages, or upload a DOCX/TXT version.',
+                                false
+                            );
+                            return;
+                        }
+                        const attachmentPrompt = [
+                            outgoingText || 'Please analyze the attached file(s).',
+                            '',
+                            'The attached document text is already provided below. Analyze it now. Do not ask me to share, paste, or upload it again.',
+                            '',
+                            String(attachmentContext.combinedText || '').slice(0, 28000)
+                        ].join('\n');
+                        let result = await askGeminiAI(attachmentPrompt, {
                             intent: 'selection_custom',
-                            grounding: attachmentContext?.grounding,
-                            displayUserMessage: displayOutgoingText
+                            grounding: attachmentContext.grounding,
+                            displayUserMessage: displayOutgoingText,
+                            timeoutMs: 45000
                         });
                         if (result?.aborted) return;
-                        const answer = String(result?.response || result?.text || '').trim();
+                        let answer = String(result?.response || result?.text || '').trim();
+                        if (answerAsksForMissingAttachment(answer)) {
+                            showThinkingIndicator('Re-reading the document...');
+                            const retryPrompt = [
+                                'Analyze the attached document now using only the content below.',
+                                'Do not ask for the file, paste, upload, or text again.',
+                                `User request: ${outgoingText || 'Analyze this document.'}`,
+                                '',
+                                String(attachmentContext.combinedText || '').slice(0, 28000)
+                            ].join('\n');
+                            result = await askGeminiAI(retryPrompt, {
+                                intent: 'selection_custom',
+                                grounding: {
+                                    ...attachmentContext.grounding,
+                                    customInstruction: 'The document text is already present. Produce the analysis immediately. Never ask the user to provide the document.'
+                                },
+                                displayUserMessage: displayOutgoingText,
+                                timeoutMs: 45000
+                            });
+                            if (result?.aborted) return;
+                            answer = String(result?.response || result?.text || '').trim();
+                            if (answerAsksForMissingAttachment(answer)) {
+                                answer = '';
+                            }
+                        }
                         if (answer) {
                             await publishResolvedModelMessage(displayOutgoingText, answer, {
                                 label: 'Attachment answer',
                                 routing: result?.routing || null
                             });
-                            if (answer) {
-                                rememberMultimodalGrounding({
-                                    kind: 'attachment',
-                                    summary: answer,
-                                    selectedText: attachmentContext?.grounding?.selectedText || answer,
-                                    sourceAnswer: answer
-                                });
-                            }
-                        } else if (attachmentContext?.anyReadable === false) {
-                            addChatMessage('I could not read enough text from that file. Try a clearer PDF, DOCX, PPTX, or image.', false);
+                            rememberMultimodalGrounding({
+                                kind: 'attachment',
+                                summary: answer,
+                                selectedText: attachmentContext?.grounding?.selectedText || answer,
+                                sourceAnswer: answer
+                            });
                         } else {
-                            addChatMessage('I could not analyze the attachment(s). Please try another file or add a clearer prompt.', false);
+                            addChatMessage('I could not analyze that attachment. Try another file format or a clearer scan.', false);
                         }
                     } else if (waitingForName) {
                         await handleNameInput(outgoingText);
