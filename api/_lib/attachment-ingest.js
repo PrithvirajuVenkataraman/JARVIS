@@ -82,7 +82,7 @@ export async function ingestAttachmentPayload(payload = {}) {
 
     if (isPdf(mimeType, filename)) {
         const pdfText = extractPdfTextBasic(buffer);
-        const useful = String(pdfText || '').replace(/\s+/g, ' ').trim().length >= 40;
+        const useful = hasUsefulServerText(pdfText);
         attempts.push({ stage: 'pdf_text_layer', ok: useful, method: 'pdf_text_layer' });
         if (useful) {
             return buildResult({
@@ -161,13 +161,13 @@ export async function ingestAttachmentPayload(payload = {}) {
     const metadata = describeBinaryFile(buffer, filename, mimeType);
     return buildResult({
         ok: false,
-        text: metadata,
+        text: '',
         method: 'metadata_only',
         provider: 'server',
         filename,
         mimeType,
         partial: true,
-        message: `Could not extract readable text from ${filename}.`,
+        message: metadata || `Could not extract readable text from ${filename}.`,
         attempts
     });
 }
@@ -191,6 +191,13 @@ function clipText(text) {
     const value = String(text || '').replace(/\u0000/g, '').trim();
     if (!value) return '';
     return value.length > MAX_EXTRACT_CHARS ? `${value.slice(0, MAX_EXTRACT_CHARS)}\n\n[Truncated]` : value;
+}
+
+function hasUsefulServerText(text) {
+    const value = String(text || '').replace(/\s+/g, ' ').trim();
+    if (value.length < 40) return false;
+    const letters = (value.match(/[A-Za-z\u00C0-\u024F]/g) || []).length;
+    return letters >= 24;
 }
 
 function tryUtf8Extract(buffer, mimeType, filename) {
