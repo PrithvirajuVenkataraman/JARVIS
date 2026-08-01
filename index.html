@@ -7659,7 +7659,8 @@ let showRoutingDebugBadge = false;
             updateComposerPlaceholder();
             const rawDisplayText = normalizeUiTokens(String(text ?? ''));
             const allowEmptyAssistant = !isUser && meta?.allowEmpty === true;
-            if (isUser && !rawDisplayText.trim()) return;
+            const hasAttachments = Array.isArray(meta?.attachments) && meta.attachments.length > 0;
+            if (isUser && !rawDisplayText.trim() && !hasAttachments) return;
             if (!isUser && !rawDisplayText.trim() && !allowEmptyAssistant) return '';
             const displayText = isUser || /<(iframe|div|img|table)\s/i.test(rawDisplayText)
                 ? rawDisplayText
@@ -7681,9 +7682,11 @@ let showRoutingDebugBadge = false;
 
             if (isUser) {
                 const formattedText = escapeHtml(displayText).replace(/\n/g, '<br>');
+                const attachmentHtml = buildUserMessageAttachmentsHtml(meta?.attachments);
                 messageDiv.innerHTML = `
                     <div class="chat-bubble-user text-white relative group">
-                        <p class="text-sm font-medium">${formattedText}</p>
+                        ${displayText.trim() ? `<p class="text-sm font-medium">${formattedText}</p>` : ''}
+                        ${attachmentHtml}
                         <button onclick="editMessage(this)" data-message="${encodeURIComponent(displayText)}" class="hidden group-hover:flex absolute -top-2 -right-2 bg-blue-500 text-white rounded-full w-6 h-6 text-xs hover:bg-blue-600 transition-all shadow-lg items-center justify-center" title="Edit message">&#9998;</button>
                     </div>
                 `;
@@ -7879,7 +7882,9 @@ let showRoutingDebugBadge = false;
             maybeAutoScroll(chatContainer);
             if (!meta?.skipRecord) {
                 chatHistory.push({ text: displayText, isUser });
-                recordActiveChatMessage(isUser ? 'user' : 'assistant', displayText, messageTurnId);
+                recordActiveChatMessage(isUser ? 'user' : 'assistant', displayText, messageTurnId, {
+                    attachments: meta?.attachments
+                });
             }
             return '';
         }
@@ -8456,6 +8461,38 @@ function normalizeUiTokens(text) {
                     toggleSendButton();
                 }
             );
+        }
+
+        function buildUserMessageAttachmentsHtml(attachments = []) {
+            const items = Array.isArray(attachments) ? attachments : [];
+            if (!items.length) return '';
+            const cards = items.map(item => {
+                const name = escapeHtml(item?.name || 'attachment');
+                const size = Number(item?.size) > 0
+                    ? escapeHtml(window.JarvisAttachments?.formatBytes?.(item.size) || `${item.size} B`)
+                    : '';
+                const kind = String(item?.kind || 'file').toLowerCase();
+                if (kind === 'image' && item?.previewUrl) {
+                    return `
+                        <div class="chat-attachment-card is-image">
+                            <img src="${escapeHtml(item.previewUrl)}" alt="${name}" class="chat-attachment-image">
+                            <div class="chat-attachment-meta">
+                                <span class="chat-attachment-name">${name}</span>
+                                ${size ? `<span class="chat-attachment-size">${size}</span>` : ''}
+                            </div>
+                        </div>`;
+                }
+                const icon = kind === 'pdf' ? 'PDF' : (kind === 'doc' ? 'DOC' : (kind === 'ppt' ? 'PPT' : 'FILE'));
+                return `
+                    <div class="chat-attachment-card">
+                        <span class="chat-attachment-badge" aria-hidden="true">${icon}</span>
+                        <div class="chat-attachment-meta">
+                            <span class="chat-attachment-name">${name}</span>
+                            ${size ? `<span class="chat-attachment-size">${size}</span>` : ''}
+                        </div>
+                    </div>`;
+            }).join('');
+            return `<div class="chat-attachment-list">${cards}</div>`;
         }
 
         async function handleComposerAttachmentSelection(files) {
@@ -9080,10 +9117,19 @@ async function sendTextInput(submission = {}) {
                 lastSubmissionTimestamp = now;
 
                 const outgoingText = text;
-                const attachmentSummary = pendingAttachments.length
-                    ? `\n\n[${pendingAttachments.length} attachment${pendingAttachments.length === 1 ? '' : 's'}: ${pendingAttachments.map(item => item.name).join(', ')}]`
-                    : '';
-                const displayOutgoingText = outgoingText || `Attached ${pendingAttachments.length} file${pendingAttachments.length === 1 ? '' : 's'}`;
+                const attachmentsForSend = window.JarvisAttachments?.takePendingForSend?.() || [];
+                const attachmentMeta = window.JarvisAttachments?.buildChatAttachmentMeta?.(attachmentsForSend) ||
+                    attachmentsForSend.map(item => ({
+                        id: item.id,
+                        name: item.name,
+                        mimeType: item.mimeType,
+                        size: item.size,
+                        kind: /\.pdf$/i.test(item.name) ? 'pdf' : (/^image\//i.test(item.mimeType || '') ? 'image' : 'file'),
+                        previewUrl: item.previewUrl || ''
+                    }));
+                const displayOutgoingText = outgoingText || (attachmentMeta.length
+                    ? `Attached ${attachmentMeta.length} file${attachmentMeta.length === 1 ? '' : 's'}`
+                    : '');
                 learnAnswerStyleFromUserMessage(outgoingText);
                 const normalizedOutgoingText = outgoingText && isLikelyCodeInput(outgoingText)
                     ? outgoingText
@@ -9094,7 +9140,8 @@ async function sendTextInput(submission = {}) {
                         recognitionSessionId: Number(submission?.recognitionSessionId) || null,
                         preservedTranscript: preserveTranscript,
                         transcriptFinal: submission?.transcriptFinal === true,
-                        transcriptCompleteReason: String(submission?.transcriptCompleteReason || '')
+                        transcriptCompleteReason: String(submission?.transcriptCompleteReason || ''),
+                        attachments: attachmentMeta.map(item => ({ name: item.name, mimeType: item.mimeType, size: item.size, kind: item.kind }))
                     }
                 });
                 const previousRenderContext = beginResponseRenderContext(turn);
@@ -9107,8 +9154,10 @@ async function sendTextInput(submission = {}) {
                 setLastVisibleUserMessage(displayOutgoingText);
                 addVisibleInputHistory(displayOutgoingText);
                 inputHistoryIndex = -1;
-                addChatMessage(`${displayOutgoingText}${attachmentSummary}`, true, null, { turnId: turn.id });
-                const attachmentsForSend = window.JarvisAttachments?.takePendingForSend?.() || [];
+                addChatMessage(displayOutgoingText, true, null, {
+                    turnId: turn.id,
+                    attachments: attachmentMeta
+                });
                 refreshComposerAttachmentTray();
 
                 if (isDiagnosticsCommand(outgoingText)) {
@@ -9139,10 +9188,7 @@ async function sendTextInput(submission = {}) {
                         if (result?.aborted) return;
                         const answer = String(result?.response || result?.text || '').trim();
                         if (answer) {
-                            const methodNote = Array.isArray(attachmentContext?.methods) && attachmentContext.methods.length
-                                ? `\n\n_Read via: ${attachmentContext.methods.map(item => `${item.name} (${item.method})`).join(', ')}_`
-                                : '';
-                            await publishResolvedModelMessage(displayOutgoingText, `${answer}${methodNote}`, {
+                            await publishResolvedModelMessage(displayOutgoingText, answer, {
                                 label: 'Attachment answer',
                                 routing: result?.routing || null
                             });
@@ -9154,6 +9200,8 @@ async function sendTextInput(submission = {}) {
                                     sourceAnswer: answer
                                 });
                             }
+                        } else if (attachmentContext?.anyReadable === false) {
+                            addChatMessage('I could not read enough text from that file. Try a clearer PDF, DOCX, PPTX, or image.', false);
                         } else {
                             addChatMessage('I could not analyze the attachment(s). Please try another file or add a clearer prompt.', false);
                         }
@@ -20737,9 +20785,17 @@ function normalizeChatSession(raw) {
                 role: item?.role === 'assistant' ? 'assistant' : 'user',
                 text: String(item?.text || '').trim(),
                 timestamp: String(item?.timestamp || raw.updatedAt || new Date().toISOString()),
-                turnId: String(item?.turnId || '').trim()
+                turnId: String(item?.turnId || '').trim(),
+                attachments: Array.isArray(item?.attachments)
+                    ? item.attachments.map(att => ({
+                        name: String(att?.name || 'attachment'),
+                        mimeType: String(att?.mimeType || ''),
+                        size: Number(att?.size) || 0,
+                        kind: String(att?.kind || 'file')
+                    }))
+                    : []
             }))
-            .filter(item => item.text)
+            .filter(item => item.text || (Array.isArray(item.attachments) && item.attachments.length))
             .slice(-CHAT_SESSION_MAX_MESSAGES)
         : [];
     return {
@@ -20864,7 +20920,15 @@ function compactChatSessionForStorage(session, options = {}) {
                 role: item?.role === 'assistant' ? 'assistant' : 'user',
                 text: String(item?.text || '').slice(0, maxChars),
                 timestamp: String(item?.timestamp || ''),
-                turnId: String(item?.turnId || '')
+                turnId: String(item?.turnId || ''),
+                attachments: Array.isArray(item?.attachments)
+                    ? item.attachments.map(att => ({
+                        name: String(att?.name || 'attachment').slice(0, 180),
+                        mimeType: String(att?.mimeType || '').slice(0, 120),
+                        size: Number(att?.size) || 0,
+                        kind: String(att?.kind || 'file').slice(0, 20)
+                    }))
+                    : []
             })),
         createdAt: session.createdAt,
         updatedAt: session.updatedAt,
@@ -21472,19 +21536,28 @@ function deriveChatTitleFromMessages(messages = []) {
     return firstAssistant ? deriveChatTitleFromAssistantText(firstAssistant.text) : 'New chat';
 }
 
-function recordActiveChatMessage(role, text, turnId = '') {
+function recordActiveChatMessage(role, text, turnId = '', extra = {}) {
     if (isRestoringChatSession) return;
     const cleanText = String(text || '').trim();
-    if (!cleanText) return;
+    const attachments = Array.isArray(extra?.attachments)
+        ? extra.attachments.map(item => ({
+            name: String(item?.name || 'attachment'),
+            mimeType: String(item?.mimeType || ''),
+            size: Number(item?.size) || 0,
+            kind: String(item?.kind || 'file')
+        }))
+        : [];
+    if (!cleanText && !attachments.length) return;
     const session = getActiveChatSession();
     const normalizedRole = role === 'assistant' ? 'assistant' : 'user';
     if (normalizedRole === 'assistant' && !chatSessionHasUserMessage(session)) return;
     const now = new Date().toISOString();
     session.messages.push({
         role: normalizedRole,
-        text: cleanText,
+        text: cleanText || (attachments.length ? `Attached ${attachments.length} file${attachments.length === 1 ? '' : 's'}` : ''),
         timestamp: now,
-        turnId: String(turnId || '').trim()
+        turnId: String(turnId || '').trim(),
+        attachments
     });
     session.messages = session.messages.slice(-CHAT_SESSION_MAX_MESSAGES);
     session.updatedAt = now;
@@ -21551,7 +21624,8 @@ function restoreChatSession(sessionId) {
             addChatMessage(item.text, item.role === 'user', false, {
                 turnId: item.turnId || '',
                 detached: true,
-                restored: true
+                restored: true,
+                attachments: Array.isArray(item.attachments) ? item.attachments : []
             });
         });
     } finally {
