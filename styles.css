@@ -3341,6 +3341,51 @@ svg [fill]:not([fill="none"]) {
     fill: currentColor !important;
 }
 
+/* Send / stop / active converse sit on a white chip — keep icons dark. */
+#send-message-btn.is-send-ready,
+#send-message-btn.composer-send-stop,
+#send-message-btn.is-converse-active {
+    background: #ffffff !important;
+    border-color: #ffffff !important;
+    color: #000000 !important;
+}
+
+#send-message-btn.is-send-ready svg,
+#send-message-btn.is-send-ready svg *,
+#send-message-btn.composer-send-stop svg,
+#send-message-btn.composer-send-stop svg *,
+#send-message-btn.is-converse-active svg,
+#send-message-btn.is-converse-active svg * {
+    color: #000000 !important;
+    stroke: #000000 !important;
+}
+
+#send-message-btn.is-send-ready svg [fill]:not([fill="none"]),
+#send-message-btn.composer-send-stop svg [fill]:not([fill="none"]),
+#send-message-btn.is-converse-active svg [fill]:not([fill="none"]) {
+    fill: #000000 !important;
+}
+
+#send-message-btn.is-converse-ready:not(.is-converse-active):not(.is-send-ready) {
+    background: #1a1a1a !important;
+    border-color: #52525b !important;
+    color: #f3f4f6 !important;
+}
+
+#send-message-btn.is-converse-ready:not(.is-converse-active):not(.is-send-ready) svg,
+#send-message-btn.is-converse-ready:not(.is-converse-active):not(.is-send-ready) svg * {
+    color: #f3f4f6 !important;
+    stroke: #f3f4f6 !important;
+}
+
+#send-message-btn.is-send-ready:hover,
+#send-message-btn.composer-send-stop:hover,
+#send-message-btn.is-converse-active:hover {
+    background: #f3f4f6 !important;
+    border-color: #f3f4f6 !important;
+    color: #000000 !important;
+}
+
 .jarvis-sidebar-logo,
 .jarvis-sidebar-logo * {
     color: unset !important;
