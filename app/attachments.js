@@ -63,6 +63,7 @@ export async function ingestAllForMessage(attachments = [], userText = '') {
 
     const sections = [];
     const methods = [];
+    let anyReadable = false;
     for (const attachment of items) {
         const result = await ingestAttachmentWithFallback(attachment);
         methods.push({
@@ -72,28 +73,38 @@ export async function ingestAllForMessage(attachments = [], userText = '') {
             ok: result.ok
         });
         const header = `### ${attachment.name} (${attachment.mimeType || 'unknown'})`;
-        if (result.text) {
+        if (result.text && hasUsefulExtractedText(result.text)) {
+            anyReadable = true;
             sections.push(`${header}\nExtraction: ${result.method}\n\n${clipText(result.text)}`);
         } else {
-            sections.push(`${header}\nExtraction failed. ${result.message || 'No readable text found.'}`);
+            sections.push(`${header}\nExtraction failed or returned too little readable text. ${result.message || 'No readable text found.'}`);
         }
     }
 
     const combined = sections.join('\n\n---\n\n').trim();
     const prompt = String(userText || '').trim() || 'Please analyze the attached file(s).';
+    const readableSections = anyReadable
+        ? sections.filter(section => !/Extraction failed or returned too little readable text/i.test(section)).join('\n\n---\n\n').trim()
+        : '';
     return {
-        grounding: {
-            selectedText: combined,
-            sourceAnswer: combined,
-            originalRequest: prompt,
-            customInstruction: [
-                'Answer the user using only the attached file content below.',
-                'If extraction is partial or missing, say what you can and cannot verify from the attachment.',
-                'Do not invent content that is not present in the attachment text.'
-            ].join(' ')
-        },
+        grounding: anyReadable
+            ? {
+                kind: 'attachment',
+                selectedText: readableSections || combined,
+                sourceAnswer: readableSections || combined,
+                originalRequest: prompt,
+                customInstruction: [
+                    'The content below is the attached document(s).',
+                    'Answer the user request using this attachment content.',
+                    'Do not ask the user to upload, paste, share, or provide the same file again.',
+                    'If the user asked to analyze/review/summarize a resume or document, provide a useful analysis now.',
+                    'Do not invent content that is not present in the attachment text.'
+                ].join(' ')
+            }
+            : null,
         methods,
-        combinedText: combined
+        combinedText: readableSections || combined,
+        anyReadable
     };
 }
 
@@ -109,11 +120,11 @@ export async function ingestAttachmentWithFallback(attachment) {
         attempts: [{ stage: 'client', ok: false, method: 'client_error', error: String(error?.message || error) }]
     }));
     attempts.push(...(localText.attempts || []));
-    if (localText?.text) {
-        return { ...localText, attempts };
+    if (hasUsefulExtractedText(localText?.text)) {
+        return { ...localText, ok: true, attempts };
     }
 
-    const server = await ingestOnServer(attachment, localText).catch(error => ({
+    const server = await ingestOnServer(attachment, localResultSafe(localText)).catch(error => ({
         ok: false,
         text: '',
         method: 'server',
@@ -122,31 +133,50 @@ export async function ingestAttachmentWithFallback(attachment) {
         attempts: [{ stage: 'server', ok: false, method: 'server_error', error: String(error?.message || error) }]
     }));
     attempts.push(...(server.attempts || []));
-    if (server?.text && (server.ok || server.partial)) {
-        return { ...server, attempts };
+    if (hasUsefulExtractedText(server?.text) && !isMetadataOnlyExtract(server?.text)) {
+        return { ...server, ok: true, attempts };
     }
 
-    if (isImageAttachment(attachment)) {
-        const vision = await ingestViaVision(attachment).catch(error => ({
-            ok: false,
-            text: '',
-            method: 'vision_ocr',
-            provider: 'vision',
-            message: String(error?.message || error)
-        }));
-        attempts.push({ stage: 'vision_ocr', ok: Boolean(vision?.text), method: vision?.method || 'vision_ocr' });
-        if (vision?.text) return { ...vision, attempts };
+    if (isImageAttachment(attachment) || isPdfFile(attachment?.file || attachment)) {
+        const vision = isPdfFile(attachment?.file || attachment)
+            ? await extractPdfViaVision(attachment).catch(error => ({
+                ok: false,
+                text: '',
+                method: 'pdf_vision_ocr',
+                provider: 'vision',
+                message: String(error?.message || error)
+            }))
+            : await ingestViaVision(attachment).catch(error => ({
+                ok: false,
+                text: '',
+                method: 'vision_ocr',
+                provider: 'vision',
+                message: String(error?.message || error)
+            }));
+        attempts.push({
+            stage: vision?.method || 'vision_ocr',
+            ok: hasUsefulExtractedText(vision?.text),
+            method: vision?.method || 'vision_ocr'
+        });
+        if (hasUsefulExtractedText(vision?.text)) {
+            return { ...vision, ok: true, attempts };
+        }
     }
 
     return {
         ok: false,
-        text: server?.text || localText?.text || '',
-        partial: Boolean(server?.partial),
+        text: '',
+        partial: false,
         method: 'none',
         provider: 'none',
         message: server?.message || localText?.message || `Could not extract readable content from ${attachment.name}.`,
         attempts
     };
+}
+
+function localResultSafe(localText) {
+    if (hasUsefulExtractedText(localText?.text) && !isMetadataOnlyExtract(localText?.text)) return localText;
+    return { text: '', method: localText?.method || 'client' };
 }
 
 async function extractLocally(attachment) {
@@ -166,17 +196,28 @@ async function extractLocally(attachment) {
 
     if (isPdfFile(file)) {
         const pdfText = await extractPdfTextClient(file).catch(() => '');
-        attempts.push({ stage: 'client_pdf', ok: Boolean(pdfText), method: 'client_pdf' });
-        if (pdfText) {
+        const useful = hasUsefulExtractedText(pdfText);
+        attempts.push({ stage: 'client_pdf', ok: useful, method: 'client_pdf' });
+        if (useful) {
             return { ok: true, text: pdfText, method: 'client_pdf', provider: 'client', attempts };
         }
     }
 
     if (isDocxFile(file)) {
         const docxText = await extractDocxTextClient(file).catch(() => '');
-        attempts.push({ stage: 'client_docx', ok: Boolean(docxText), method: 'client_docx' });
-        if (docxText) {
+        const useful = hasUsefulExtractedText(docxText);
+        attempts.push({ stage: 'client_docx', ok: useful, method: 'client_docx' });
+        if (useful) {
             return { ok: true, text: docxText, method: 'client_docx', provider: 'client', attempts };
+        }
+    }
+
+    if (isPptxFile(file)) {
+        const pptxText = await extractPptxTextClient(file).catch(() => '');
+        const useful = hasUsefulExtractedText(pptxText);
+        attempts.push({ stage: 'client_pptx', ok: useful, method: 'client_pptx' });
+        if (useful) {
+            return { ok: true, text: pptxText, method: 'client_pptx', provider: 'client', attempts };
         }
     }
 
@@ -189,11 +230,11 @@ async function ingestOnServer(attachment, localResult = {}) {
         filename: attachment.name,
         mimeType: attachment.mimeType,
         base64,
-        clientText: '',
-        clientMethod: ''
+        clientText: hasUsefulExtractedText(localResult?.text) ? String(localResult.text || '') : '',
+        clientMethod: String(localResult?.method || '')
     }, { timeoutMs: 45000 });
     return {
-        ok: Boolean(data?.ok || data?.success),
+        ok: Boolean(data?.ok || data?.success) && hasUsefulExtractedText(data?.text),
         text: String(data?.text || ''),
         partial: data?.partial === true,
         method: String(data?.method || 'server'),
@@ -255,18 +296,65 @@ function isTextLikeFile(file) {
         ['application/json', 'application/xml', 'application/javascript'].includes(file.type || '');
 }
 
-function isPdfFile(file) {
-    return file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+function isPdfFile(fileOrAttachment) {
+    const file = fileOrAttachment?.file || fileOrAttachment;
+    const name = file?.name || fileOrAttachment?.name || fileOrAttachment?.filename || '';
+    const type = file?.type || fileOrAttachment?.type || fileOrAttachment?.mimeType || '';
+    return type === 'application/pdf' || /\.pdf$/i.test(name);
 }
 
 function isDocxFile(file) {
     return file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || /\.docx$/i.test(file.name);
 }
 
+function isPptxFile(file) {
+    return file.type === 'application/vnd.openxmlformats-officedocument.presentationml.presentation' || /\.pptx$/i.test(file.name);
+}
+
 function isImageAttachment(attachment) {
     const mimeType = attachment?.mimeType || '';
     const name = attachment?.name || '';
     return /^image\//i.test(mimeType) || IMAGE_EXTENSIONS.test(name);
+}
+
+function hasUsefulExtractedText(text) {
+    const value = String(text || '').replace(/\s+/g, ' ').trim();
+    if (value.length < 40) return false;
+    if (isMetadataOnlyExtract(value)) return false;
+    const letters = (value.match(/[A-Za-z\u00C0-\u024F]/g) || []).length;
+    return letters >= 24;
+}
+
+function isMetadataOnlyExtract(text) {
+    const value = String(text || '').toLowerCase();
+    if (!value) return true;
+    return /no readable text could be extracted|extraction failed|attached file:\s*.+\s*type:\s*|could not extract readable/.test(value) &&
+        !/\b(experience|education|skills|resume|curriculum|project|internship|objective|summary|email|phone|@)\b/i.test(value);
+}
+
+export function buildChatAttachmentMeta(attachments = []) {
+    return (Array.isArray(attachments) ? attachments : []).map(item => {
+        const mimeType = item?.mimeType || guessMimeFromName(item?.name || '');
+        const name = String(item?.name || 'attachment');
+        const isImage = /^image\//i.test(mimeType) || IMAGE_EXTENSIONS.test(name);
+        const kind = isImage
+            ? 'image'
+            : (/\.pdf$/i.test(name) || mimeType === 'application/pdf'
+                ? 'pdf'
+                : (/\.docx?$/i.test(name) ? 'doc' : (/\.pptx?$/i.test(name) ? 'ppt' : 'file')));
+        let previewUrl = '';
+        if (isImage) {
+            previewUrl = item.previewUrl || (item.base64 ? `data:${normalizeImageMime(mimeType, name)};base64,${item.base64}` : '');
+        }
+        return {
+            id: String(item?.id || ''),
+            name,
+            mimeType,
+            size: Number(item?.size) || 0,
+            kind,
+            previewUrl
+        };
+    });
 }
 
 function normalizeImageMime(mimeType, filename) {
@@ -282,6 +370,7 @@ function guessMimeFromName(filename) {
     const lower = String(filename || '').toLowerCase();
     if (lower.endsWith('.pdf')) return 'application/pdf';
     if (lower.endsWith('.docx')) return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    if (lower.endsWith('.pptx')) return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
     if (/\.(jpe?g)$/.test(lower)) return 'image/jpeg';
     if (lower.endsWith('.png')) return 'image/png';
     if (lower.endsWith('.webp')) return 'image/webp';
@@ -326,6 +415,53 @@ async function extractPdfTextClient(file) {
     return clipText(parts.join('\n\n'));
 }
 
+async function extractPdfViaVision(attachment) {
+    const file = attachment?.file;
+    if (!file) {
+        return { ok: false, text: '', method: 'pdf_vision_ocr', provider: 'vision', message: 'Missing PDF file.' };
+    }
+    const pdfjs = await loadPdfJs();
+    const doc = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
+    const pageCount = Math.min(doc.numPages || 0, 3);
+    const parts = [];
+    for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
+        const page = await doc.getPage(pageNumber);
+        const viewport = page.getViewport({ scale: 1.6 });
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.floor(viewport.width));
+        canvas.height = Math.max(1, Math.floor(viewport.height));
+        const context = canvas.getContext('2d', { alpha: false });
+        if (!context) continue;
+        await page.render({ canvasContext: context, viewport }).promise;
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
+        const base64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
+        if (!base64) continue;
+        const data = await postJson('/api/vision', {
+            task: 'text_extract',
+            prompt: `Extract all readable text from page ${pageNumber} of PDF "${attachment.name}". Preserve names, dates, emails, phone numbers, and section headings.`,
+            mimeType: 'image/jpeg',
+            imageBase64: base64
+        }, { timeoutMs: 45000 });
+        const details = data?.details && typeof data.details === 'object' ? data.details : {};
+        const fullText = String(details?.fullText || '').trim();
+        const snippets = Array.isArray(details?.textDetected)
+            ? details.textDetected.map(item => String(item || '').trim()).filter(Boolean).join('\n').trim()
+            : '';
+        const pageText = fullText || snippets || String(data?.response || '').trim();
+        if (hasUsefulExtractedText(pageText) || pageText.length >= 40) {
+            parts.push(pageText);
+        }
+    }
+    const text = clipText(parts.join('\n\n'));
+    return {
+        ok: hasUsefulExtractedText(text),
+        text,
+        method: 'pdf_vision_ocr',
+        provider: 'vision',
+        message: hasUsefulExtractedText(text) ? '' : 'PDF vision OCR found little readable text.'
+    };
+}
+
 async function extractDocxTextClient(file) {
     const JSZip = await loadJsZip();
     const buffer = await file.arrayBuffer();
@@ -337,6 +473,32 @@ async function extractDocxTextClient(file) {
         .map(match => decodeXmlEntities(match[1] || ''))
         .filter(Boolean);
     return clipText(pieces.join(' ').replace(/\s+/g, ' '));
+}
+
+async function extractPptxTextClient(file) {
+    const JSZip = await loadJsZip();
+    const buffer = await file.arrayBuffer();
+    const zip = await JSZip.loadAsync(buffer);
+    const slideFiles = Object.keys(zip.files || {})
+        .filter(name => /^ppt\/slides\/slide\d+\.xml$/i.test(name))
+        .sort((a, b) => {
+            const na = Number((a.match(/slide(\d+)/i) || [])[1] || 0);
+            const nb = Number((b.match(/slide(\d+)/i) || [])[1] || 0);
+            return na - nb;
+        })
+        .slice(0, 30);
+    const parts = [];
+    for (const slideName of slideFiles) {
+        const entry = zip.file(slideName);
+        if (!entry) continue;
+        const xml = await entry.async('text');
+        const pieces = Array.from(xml.matchAll(/<a:t[^>]*>([\s\S]*?)<\/a:t>/g))
+            .map(match => decodeXmlEntities(match[1] || ''))
+            .filter(Boolean);
+        const text = pieces.join(' ').replace(/\s+/g, ' ').trim();
+        if (text) parts.push(text);
+    }
+    return clipText(parts.join('\n\n'));
 }
 
 async function loadPdfJs() {
