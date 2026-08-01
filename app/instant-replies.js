@@ -22,8 +22,8 @@ export function getInstantReply(text) {
         }
     }
 
-    if (/^what can you do\??$/i.test(lower)) { 
-        return 'I am JARVIS — a live-fact and vision helper. I can check current sources, read your camera or attachments, remember what you save, verify answers, and help with planning or fixes from screenshots.';
+    if (/^what can you do\??$/i.test(lower)) {
+        return 'I am JARVIS - a live-fact and vision helper. I can check current sources, read your camera or attachments, remember what you save, verify answers, and help with planning or fixes from screenshots.';
     }
 
     if (/^do you understand tamil\??$/i.test(lower)) {
@@ -36,4 +36,3 @@ export function getInstantReply(text) {
 
     return null;
 }
- 
