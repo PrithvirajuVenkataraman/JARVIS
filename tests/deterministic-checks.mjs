@@ -25,7 +25,8 @@ const SOURCE = Object.freeze({
     visionApi: fs.readFileSync(new URL('../api/vision.js', import.meta.url), 'utf8'),
     chatGroqApi: fs.readFileSync(new URL('../api/chat-groq.js', import.meta.url), 'utf8'),
     speechInput: fs.readFileSync(new URL('../app/speech-input.js', import.meta.url), 'utf8'),
-    bootstrap: fs.readFileSync(new URL('../app/bootstrap.js', import.meta.url), 'utf8')
+    bootstrap: fs.readFileSync(new URL('../app/bootstrap.js', import.meta.url), 'utf8'),
+    agentWorkflows: fs.readFileSync(new URL('../app/agent-workflows.js', import.meta.url), 'utf8')
 });
 
 const SAMPLE = Object.freeze({
@@ -686,11 +687,20 @@ assert.match(SOURCE.appHtml, /\['balanced', 'witty', 'chatty', 'supportive', 'de
 assert.match(SOURCE.appHtml, /const normalizedOutgoingText = outgoingText && isLikelyCodeInput\(outgoingText\)/);
 assert.match(SOURCE.appHtml, /id="composer-plus-btn"/);
 assert.match(SOURCE.appHtml, /class="composer-shell modern-input"/);
-assert.match(SOURCE.appHtml, /id="composer-model-btn"/);
+assert.doesNotMatch(SOURCE.appHtml, /id="composer-model-btn"/);
 assert.match(SOURCE.appHtml, /Send follow-up/);
 assert.match(SOURCE.appHtml, /function updateComposerPlaceholder/);
+assert.match(SOURCE.appHtml, /function rememberMultimodalGrounding/);
+assert.match(SOURCE.appHtml, /function handleAgentWorkflow/);
+assert.match(SOURCE.appHtml, /live-fact and vision helper|Live facts, vision, and memory/);
 assert.match(SOURCE.appHtml, /return 'detailed';/);
 assert.match(SOURCE.styles, /\.composer-shell/);
+assert.match(SOURCE.styles, /\.composer-icon-btn\.speech-input-btn/);
+assert.match(SOURCE.styles, /\.memory-used-chip/);
+assert.match(SOURCE.bootstrap, /JarvisAgentWorkflows/);
+assert.match(SOURCE.agentWorkflows, /detectAgentWorkflow/);
+assert.match(SOURCE.agentWorkflows, /isMultimodalFollowup/);
+assert.match(SOURCE.agentWorkflows, /plan_weekend/);
 assert.match(SOURCE.appHtml, /id="composer-attachment-tray"/);
 assert.match(SOURCE.appHtml, /JarvisAttachments/);
 assert.match(SOURCE.apiIndex, /\/api\/ingest-attachment/);
