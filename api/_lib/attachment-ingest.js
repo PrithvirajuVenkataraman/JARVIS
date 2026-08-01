@@ -82,8 +82,9 @@ export async function ingestAttachmentPayload(payload = {}) {
 
     if (isPdf(mimeType, filename)) {
         const pdfText = extractPdfTextBasic(buffer);
-        attempts.push({ stage: 'pdf_text_layer', ok: Boolean(pdfText), method: 'pdf_text_layer' });
-        if (pdfText) {
+        const useful = String(pdfText || '').replace(/\s+/g, ' ').trim().length >= 40;
+        attempts.push({ stage: 'pdf_text_layer', ok: useful, method: 'pdf_text_layer' });
+        if (useful) {
             return buildResult({
                 ok: true,
                 text: clipText(pdfText),
@@ -104,6 +105,22 @@ export async function ingestAttachmentPayload(payload = {}) {
                 ok: true,
                 text: clipText(docxText),
                 method: 'docx_xml',
+                provider: 'server',
+                filename,
+                mimeType,
+                attempts
+            });
+        }
+    }
+
+    if (isPptx(mimeType, filename)) {
+        const pptxText = await extractPptxText(buffer).catch(() => '');
+        attempts.push({ stage: 'pptx_xml', ok: Boolean(pptxText), method: 'pptx_xml' });
+        if (pptxText) {
+            return buildResult({
+                ok: true,
+                text: clipText(pptxText),
+                method: 'pptx_xml',
                 provider: 'server',
                 filename,
                 mimeType,
@@ -195,6 +212,10 @@ function isDocx(mimeType, filename) {
     return mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || /\.docx$/i.test(filename);
 }
 
+function isPptx(mimeType, filename) {
+    return mimeType === 'application/vnd.openxmlformats-officedocument.presentationml.presentation' || /\.pptx$/i.test(filename);
+}
+
 function isImage(mimeType, filename) {
     if (IMAGE_MIMES.has(mimeType) || /^image\//i.test(mimeType)) return true;
     return /\.(jpe?g|png|gif|webp|bmp|tiff?)$/i.test(filename);
@@ -213,6 +234,7 @@ function guessMimeFromName(filename) {
     const lower = String(filename || '').toLowerCase();
     if (lower.endsWith('.pdf')) return 'application/pdf';
     if (lower.endsWith('.docx')) return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    if (lower.endsWith('.pptx')) return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
     if (lower.endsWith('.json')) return 'application/json';
     if (/\.(jpe?g)$/.test(lower)) return 'image/jpeg';
     if (lower.endsWith('.png')) return 'image/png';
@@ -250,6 +272,60 @@ async function extractDocxText(buffer) {
         .map(match => decodeXmlEntities(match[1] || ''))
         .filter(Boolean);
     return pieces.join(' ').replace(/\s+/g, ' ').trim();
+}
+
+async function extractPptxText(buffer) {
+    const slides = await listZipEntries(buffer, /^ppt\/slides\/slide\d+\.xml$/i);
+    const parts = [];
+    for (const slide of slides.slice(0, 30)) {
+        const xml = slide.toString('utf8');
+        const pieces = Array.from(xml.matchAll(/<a:t[^>]*>([\s\S]*?)<\/a:t>/g))
+            .map(match => decodeXmlEntities(match[1] || ''))
+            .filter(Boolean);
+        const text = pieces.join(' ').replace(/\s+/g, ' ').trim();
+        if (text) parts.push(text);
+    }
+    return parts.join('\n\n').trim();
+}
+
+async function listZipEntries(buffer, namePattern) {
+    const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+    const eocdOffset = findEndOfCentralDirectory(buffer);
+    if (eocdOffset < 0) return [];
+    const totalEntries = view.getUint16(eocdOffset + 10, true);
+    const centralDirOffset = view.getUint32(eocdOffset + 16, true);
+    let offset = centralDirOffset;
+    const matches = [];
+    for (let i = 0; i < totalEntries; i += 1) {
+        if (view.getUint32(offset, true) !== 0x02014b50) break;
+        const compression = view.getUint16(offset + 10, true);
+        const compressedSize = view.getUint32(offset + 20, true);
+        const nameLength = view.getUint16(offset + 28, true);
+        const extraLength = view.getUint16(offset + 30, true);
+        const commentLength = view.getUint16(offset + 32, true);
+        const localHeaderOffset = view.getUint32(offset + 42, true);
+        const name = buffer.toString('utf8', offset + 46, offset + 46 + nameLength);
+        offset += 46 + nameLength + extraLength + commentLength;
+        if (!namePattern.test(name)) continue;
+        const localNameLength = view.getUint16(localHeaderOffset + 26, true);
+        const localExtraLength = view.getUint16(localHeaderOffset + 28, true);
+        const dataStart = localHeaderOffset + 30 + localNameLength + localExtraLength;
+        const compressed = buffer.subarray(dataStart, dataStart + compressedSize);
+        let data = null;
+        if (compression === 0) data = Buffer.from(compressed);
+        else if (compression === 8) {
+            const { inflateRawSync } = await import('node:zlib');
+            data = inflateRawSync(compressed);
+        }
+        if (data) matches.push({ name, data });
+    }
+    return matches
+        .sort((a, b) => {
+            const na = Number((a.name.match(/slide(\d+)/i) || [])[1] || 0);
+            const nb = Number((b.name.match(/slide(\d+)/i) || [])[1] || 0);
+            return na - nb;
+        })
+        .map(item => item.data);
 }
 
 async function readZipEntry(buffer, targetName) {
@@ -313,5 +389,6 @@ export const __test = {
     guessMimeFromName,
     isImage,
     isPdf,
-    isDocx
+    isDocx,
+    isPptx
 };
