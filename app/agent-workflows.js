@@ -3,6 +3,8 @@ const COMPARE_DOCS_PATTERN = /\bcompare\s+(?:these|the|my|both|two)?\s*(?:files?
 const FIX_FROM_SCREEN_PATTERN = /\b(?:fix|debug|solve|resolve)\s+(?:this|the|my)?\s*(?:error|bug|issue|exception|stack\s*trace|problem)\b/i;
 const VISION_FOLLOWUP_PATTERN = /^(?:what about (?:that|this|it)|explain (?:that|this|it)(?: more)?|tell me more(?: about (?:that|this|it))?|zoom in on (?:that|this|it)|is (?:that|this) (?:safe|correct|right)|save (?:that|this)|verify (?:that|this|it)|check (?:that|this|it)|what(?:'s| is) (?:the )?(?:brand|model|text|error))\??$/i;
 const ATTACH_FOLLOWUP_PATTERN = /^(?:summarize (?:that|this|it)|key points(?: from (?:that|this|it))?|extract (?:the )?(?:dates?|names?|numbers?)|what does (?:that|this|it) say|verify (?:that|this|it)|save (?:that|this))\??$/i;
+const DOC_REFERENCE_PATTERN = /\b(?:this|that|the|my|our)\s+(?:resume|cv|document|file|pdf|attachment|docx?|pptx?|image|photo|screenshot|scan)\b/i;
+const DOC_IMPROVE_PATTERN = /\b(?:improv\w*|feedback|critique|review|rewrite|edit|strengthen|weak(?:ness(?:es)?)?|gaps?|missing|suggest(?:ions?)?|recommend(?:ations?)?|better|fix(?:es)?)\b/i;
 
 export function detectAgentWorkflow(text) {
     const raw = String(text || '').trim();
@@ -67,17 +69,27 @@ export function detectAgentWorkflow(text) {
     return null;
 }
 
-export function isMultimodalFollowup(text) {
+export function isMultimodalFollowup(text, grounding = null) {
     const raw = String(text || '').trim();
-    if (!raw || raw.length > 120) return false;
-    return VISION_FOLLOWUP_PATTERN.test(raw) || ATTACH_FOLLOWUP_PATTERN.test(raw);
+    if (!raw || raw.length > 320) return false;
+    if (VISION_FOLLOWUP_PATTERN.test(raw) || ATTACH_FOLLOWUP_PATTERN.test(raw)) return true;
+
+    const kind = String(grounding?.kind || '').toLowerCase();
+    if (kind !== 'attachment' && kind !== 'vision') return false;
+
+    if (DOC_REFERENCE_PATTERN.test(raw)) return true;
+    if (/\b(resume|cv|document|file|pdf|attachment)\b/i.test(raw) && DOC_IMPROVE_PATTERN.test(raw)) return true;
+    if (kind === 'vision' && /\b(image|photo|picture|screen|screenshot|camera|frame)\b/i.test(raw)) return true;
+    if (/\b(this|that|it|these|those)\b/i.test(raw) && DOC_IMPROVE_PATTERN.test(raw)) return true;
+    if (/\b(this|that|it)\b/i.test(raw) && raw.length <= 160) return true;
+    return false;
 }
 
 export function classifyMultimodalFollowup(text) {
     const raw = String(text || '').trim().toLowerCase();
     if (/^save\b/.test(raw)) return 'save_memory';
     if (/^verify\b|^check\b/.test(raw)) return 'verify';
-    if (/brand|model|text|error|zoom|explain|tell me more|what about|what does|summarize|key points|extract/.test(raw)) {
+    if (/brand|model|text|error|zoom|explain|tell me more|what about|what does|summarize|key points|extract|improv|feedback|critique|review|rewrite|edit|weak/.test(raw)) {
         return 'continue';
     }
     return 'continue';
@@ -85,15 +97,26 @@ export function classifyMultimodalFollowup(text) {
 
 export function buildMultimodalFollowupPrompt(text, grounding) {
     const kind = String(grounding?.kind || 'multimodal');
-    const summary = String(grounding?.summary || grounding?.selectedText || '').trim().slice(0, 1800);
+    const documentText = String(grounding?.selectedText || '').trim().slice(0, 28000);
+    const priorNote = String(grounding?.summary || grounding?.sourceAnswer || '').trim().slice(0, 1800);
     const action = classifyMultimodalFollowup(text);
+    const isAttachment = kind === 'attachment';
     return {
         action,
         prompt: [
-            `Continue from the previous ${kind} context.`,
-            summary ? `Previous grounded context:\n${summary}` : '',
+            isAttachment
+                ? 'Continue from the previously attached document. Use that document as the primary source of truth.'
+                : `Continue from the previous ${kind} context.`,
+            documentText
+                ? `${isAttachment ? 'Attached document content' : 'Grounded context'}:\n${documentText}`
+                : '',
+            priorNote && priorNote !== documentText
+                ? `Previous assistant note:\n${priorNote}`
+                : '',
             `User follow-up: ${String(text || '').trim()}`,
-            'Answer using the grounded context first. If the context is insufficient, say what is missing.'
+            isAttachment
+                ? 'Answer specifically about this document. Do not give generic resume/document advice that ignores the provided content. Cite concrete details from the document when relevant.'
+                : 'Answer using the grounded context first. If the context is insufficient, say what is missing.'
         ].filter(Boolean).join('\n\n')
     };
 }
