@@ -31,5 +31,13 @@ export function forgetMemoryKey(memoryStore, key) {
 export function formatUsedMemoryNote(keys = []) {
     const list = (Array.isArray(keys) ? keys : []).map(String).filter(Boolean).slice(0, 3);
     if (!list.length) return '';
-    return `\n\nUsed saved memory: ${list.join(', ')}`;
+    return `\n\n<div class="memory-used-chip" role="note">Used memory: ${list.map(escapeHtml).join(', ')}</div>`;
+}
+
+function escapeHtml(value) {
+    return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
 }
