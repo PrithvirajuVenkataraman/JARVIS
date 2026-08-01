@@ -1086,35 +1086,6 @@ option {
     -webkit-text-fill-color: #f3f4f6 !important;
 }
 
-.composer-model-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 2px;
-    height: 34px;
-    padding: 0 8px;
-    border: none;
-    border-radius: 10px;
-    background: transparent;
-    color: #d1d5db;
-    font-size: 13px;
-    font-weight: 600;
-    line-height: 1;
-    cursor: pointer;
-    white-space: nowrap;
-}
-
-.composer-model-btn:hover,
-.composer-model-btn:focus-visible {
-    background: rgba(255, 255, 255, 0.06);
-    color: #f9fafb;
-}
-
-.composer-model-chevron {
-    width: 14px;
-    height: 14px;
-    opacity: 0.8;
-}
-
 .composer-icon-btn,
 .composer-send-btn {
     width: 34px !important;
@@ -1127,6 +1098,17 @@ option {
     justify-content: center !important;
     flex: 0 0 auto;
     line-height: 1 !important;
+}
+
+.composer-icon-btn.speech-input-btn {
+    width: 28px !important;
+    min-width: 28px !important;
+    height: 28px !important;
+}
+
+.composer-icon-btn.speech-input-btn svg {
+    width: 15px !important;
+    height: 15px !important;
 }
 
 .composer-icon-btn {
@@ -1185,8 +1167,24 @@ option {
     color: rgba(156, 163, 175, 0.85);
 }
 
-.composer-disclaimer {
-    pointer-events: auto;
+.memory-used-chip,
+.workflow-chip {
+    display: inline-flex;
+    align-items: center;
+    margin-top: 0.55rem;
+    padding: 0.28rem 0.55rem;
+    border-radius: 999px;
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    background: rgba(15, 23, 42, 0.72);
+    color: #cbd5e1;
+    font-size: 11px;
+    font-weight: 650;
+    line-height: 1.3;
+}
+
+.workflow-chip {
+    border-color: rgba(59, 130, 246, 0.45);
+    color: #bfdbfe;
 }
 
 .composer-actions {
@@ -1976,10 +1974,6 @@ button[aria-label^="Back"],
         gap: 6px;
         padding: 5px 6px 5px 5px;
         border-radius: 24px !important;
-    }
-
-    .composer-model-btn {
-        display: none;
     }
 
     .composer-trailing {
