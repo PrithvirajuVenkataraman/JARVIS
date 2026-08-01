@@ -315,7 +315,9 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
                 '- Use Title Case, 3 to 6 words, and preferably 40 characters or fewer.',
                 '- Do not use quotes, punctuation at the end, markdown, explanations, or prefixes such as Title:.',
                 '- Do not use generic titles like New Chat, Untitled, Conversation, Help, Question, or Chat.',
-                '- Prefer the most significant or final user goal over greetings or small talk.'
+                '- Prefer the most significant or final user goal over greetings or small talk.',
+                '- Prefer concrete nouns such as place names, products, topics, or tasks.',
+                '- For weather about a place, include the place (example: Weather In Ooty).'
             ].join('\n');
         }
         if (String(intent || '') !== 'pop_culture_reference') return '';
