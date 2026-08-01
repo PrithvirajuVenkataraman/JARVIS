@@ -9138,13 +9138,19 @@ async function sendTextInput(submission = {}) {
                         kind: /\.pdf$/i.test(item.name) ? 'pdf' : (/^image\//i.test(item.mimeType || '') ? 'image' : 'file'),
                         previewUrl: item.previewUrl || ''
                     }));
+                const attachmentDefaultPrompt = attachmentMeta.length
+                    ? (attachmentMeta.length === 1
+                        ? `Analyze the attached file (${attachmentMeta[0].name}).`
+                        : `Analyze the attached files (${attachmentMeta.map(item => item.name).join(', ')}).`)
+                    : '';
+                const effectiveOutgoingText = outgoingText || attachmentDefaultPrompt;
                 const displayOutgoingText = outgoingText || (attachmentMeta.length
                     ? `Attached ${attachmentMeta.length} file${attachmentMeta.length === 1 ? '' : 's'}`
                     : '');
-                learnAnswerStyleFromUserMessage(outgoingText);
-                const normalizedOutgoingText = outgoingText && isLikelyCodeInput(outgoingText)
-                    ? outgoingText
-                    : (outgoingText ? normalizeIntentTypos(outgoingText) : displayOutgoingText);
+                learnAnswerStyleFromUserMessage(effectiveOutgoingText);
+                const normalizedOutgoingText = effectiveOutgoingText && isLikelyCodeInput(effectiveOutgoingText)
+                    ? effectiveOutgoingText
+                    : (effectiveOutgoingText ? normalizeIntentTypos(effectiveOutgoingText) : displayOutgoingText);
                 const turn = createConversationTurn(displayOutgoingText, normalizedOutgoingText, inputSource, {
                     sourceContext: {
                         transcriptId: String(submission?.transcriptId || ''),
@@ -9187,9 +9193,10 @@ async function sendTextInput(submission = {}) {
                 try {
                     if (attachmentsForSend.length) {
                         showThinkingIndicator('Reading attachments...');
+                        const attachmentRequest = effectiveOutgoingText || attachmentDefaultPrompt || 'Please analyze the attached file(s).';
                         const attachmentContext = await window.JarvisAttachments?.ingestAllForMessage?.(
                             attachmentsForSend,
-                            outgoingText || 'Please analyze the attached file(s).'
+                            attachmentRequest
                         );
                         if (!attachmentContext?.anyReadable || !attachmentContext?.grounding) {
                             addChatMessage(
@@ -9199,7 +9206,7 @@ async function sendTextInput(submission = {}) {
                             return;
                         }
                         const attachmentPrompt = [
-                            outgoingText || 'Please analyze the attached file(s).',
+                            attachmentRequest,
                             '',
                             'The attached document text is already provided below. Analyze it now. Do not ask me to share, paste, or upload it again.',
                             '',
@@ -9218,7 +9225,7 @@ async function sendTextInput(submission = {}) {
                             const retryPrompt = [
                                 'Analyze the attached document now using only the content below.',
                                 'Do not ask for the file, paste, upload, or text again.',
-                                `User request: ${outgoingText || 'Analyze this document.'}`,
+                                `User request: ${attachmentRequest}`,
                                 '',
                                 String(attachmentContext.combinedText || '').slice(0, 28000)
                             ].join('\n');
