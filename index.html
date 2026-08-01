@@ -8114,13 +8114,17 @@ function normalizeUiTokens(text) {
         }
 
         function rememberMultimodalGrounding(payload = {}) {
-            const summary = String(payload.summary || payload.selectedText || payload.sourceAnswer || '').trim();
-            if (!summary) return;
+            const kind = String(payload.kind || 'multimodal');
+            const documentLimit = kind === 'attachment' ? 60000 : 4000;
+            const summaryLimit = kind === 'attachment' ? 8000 : 4000;
+            const documentText = String(payload.selectedText || payload.documentText || '').trim();
+            const summary = String(payload.summary || payload.sourceAnswer || documentText || '').trim();
+            if (!summary && !documentText) return;
             lastMultimodalGrounding = {
-                kind: String(payload.kind || 'multimodal'),
-                summary: summary.slice(0, 4000),
-                selectedText: String(payload.selectedText || summary).slice(0, 4000),
-                sourceAnswer: String(payload.sourceAnswer || summary).slice(0, 4000),
+                kind,
+                summary: summary.slice(0, summaryLimit),
+                selectedText: (documentText || summary).slice(0, documentLimit),
+                sourceAnswer: String(payload.sourceAnswer || summary).slice(0, summaryLimit),
                 savedAt: Date.now()
             };
         }
@@ -8136,7 +8140,7 @@ function normalizeUiTokens(text) {
 
         async function handleMultimodalFollowup(userText) {
             const grounding = getActiveMultimodalGrounding();
-            if (!grounding || !window.JarvisAgentWorkflows?.isMultimodalFollowup?.(userText)) return false;
+            if (!grounding || !window.JarvisAgentWorkflows?.isMultimodalFollowup?.(userText, grounding)) return false;
             const follow = window.JarvisAgentWorkflows.buildMultimodalFollowupPrompt(userText, grounding);
             if (follow.action === 'save_memory') {
                 const key = grounding.kind === 'vision' ? 'last vision note' : 'last attachment note';
@@ -8159,12 +8163,15 @@ function normalizeUiTokens(text) {
                 const result = await askGeminiAI(follow.prompt, {
                     intent: 'selection_custom',
                     grounding: {
+                        kind: grounding.kind === 'attachment' ? 'attachment' : 'selection',
                         selectedText: grounding.selectedText,
-                        sourceAnswer: grounding.sourceAnswer,
+                        sourceAnswer: grounding.sourceAnswer || grounding.summary,
+                        originalRequest: userText,
                         customInstruction: 'Verify the grounded context and state what is confirmed vs uncertain.'
                     },
                     minimalThinking: true,
-                    stream: true
+                    stream: false,
+                    timeoutMs: 45000
                 });
                 if (result?.aborted) return true;
                 await publishResolvedModelMessage(userText, result?.response || result?.text, {
@@ -8173,15 +8180,23 @@ function normalizeUiTokens(text) {
                 });
                 return true;
             }
-            showThinkingIndicator('Continuing from context...');
+            showThinkingIndicator(grounding.kind === 'attachment' ? 'Using the attached document...' : 'Continuing from context...');
             const result = await askGeminiAI(follow.prompt, {
                 intent: 'selection_custom',
                 grounding: {
+                    kind: grounding.kind === 'attachment' ? 'attachment' : 'selection',
                     selectedText: grounding.selectedText,
-                    sourceAnswer: grounding.sourceAnswer,
-                    customInstruction: follow.prompt
+                    sourceAnswer: grounding.selectedText || grounding.sourceAnswer || grounding.summary,
+                    originalRequest: userText,
+                    customInstruction: [
+                        follow.prompt,
+                        grounding.kind === 'attachment'
+                            ? 'This is a follow-up about the attached document already provided. Answer specifically from that document. Do not give generic advice that ignores it.'
+                            : ''
+                    ].filter(Boolean).join('\n')
                 },
-                stream: true
+                stream: false,
+                timeoutMs: 45000
             });
             if (result?.aborted) return true;
             const answer = String(result?.response || result?.text || '').trim();
@@ -9252,7 +9267,9 @@ async function sendTextInput(submission = {}) {
                             rememberMultimodalGrounding({
                                 kind: 'attachment',
                                 summary: answer,
-                                selectedText: attachmentContext?.grounding?.selectedText || answer,
+                                selectedText: attachmentContext?.grounding?.selectedText ||
+                                    attachmentContext?.combinedText ||
+                                    answer,
                                 sourceAnswer: answer
                             });
                         } else {
