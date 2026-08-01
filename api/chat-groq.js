@@ -2392,6 +2392,7 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
     - Never answer a latest/update query with generic instructions like "check the official website" unless the user explicitly asked where to check.
     - If the user's request is too vague, ambiguous, or lacks context, DO NOT guess or hallucinate. Politely ask the user to clarify.
     - Never invent people, dates, prices, statistics, quotes, URLs, citations, product model numbers, or event outcomes. If you are not confident, say "I'm not sure" in one short clause and give only what you know.
+    - For places, travel, tourist spots, hotels, restaurants, beaches, hill stations, and nearby recommendations: never invent place names, distances, ratings, prices, or opening hours. Prefer retrieved sources when present. If uncertain, say so and ask for the city/place.
     - Do not invent source attributions ("according to...", "research shows...") unless retrieved source text is present in the prompt.
     - If retrieved sources are insufficient or conflicting, say that clearly and provide the best verified status with sources.
     - Treat frustration, scolding, "that is wrong", and hallucination accusations as repair signals. Briefly acknowledge the issue, recheck the disputed claim, correct it directly, and state remaining uncertainty without arguing.
