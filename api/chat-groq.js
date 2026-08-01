@@ -86,6 +86,10 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
                     .join('\n')
                 : '';
             const effectiveMessage = buildGroundedUserMessage(message, intent, grounding);
+            const isAttachmentGrounding = isAttachmentGroundingPayload(grounding, intent);
+            const routingMessage = isAttachmentGrounding
+                ? String(grounding?.originalRequest || message || 'Analyze the attached file(s).').trim()
+                : effectiveMessage;
             const isInternalSummary = isInternalSummarizerPrompt(effectiveMessage, '');
             if (intent === 'verify_answer') {
                 return await handleVerifyAnswerRequest(res, {
@@ -95,7 +99,7 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
                     preferences
                 });
             }
-            const stableFactAnswer = getStableFactAnswer(effectiveMessage);
+            const stableFactAnswer = isAttachmentGrounding ? '' : getStableFactAnswer(routingMessage);
             if (stableFactAnswer) {
                 return res.status(200).json({
                     success: true,
@@ -130,12 +134,13 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
                     }
                 });
             }
-            const routeDecision = classifyRoutingDecision(effectiveMessage, '', {
+            const routeDecision = classifyRoutingDecision(routingMessage, '', {
                 intent,
-                isInternalSummary
+                isInternalSummary,
+                isAttachmentGrounding
             });
             const lengthPolicy = applyCostCapToLengthPolicy(
-                buildLengthPolicy(effectiveMessage, '', {
+                buildLengthPolicy(routingMessage, '', {
                     isInternalSummary,
                     intent,
                     preferences,
@@ -157,7 +162,7 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
                 });
             }
 
-            const safetyDecision = await classifySafetyWithGroq(effectiveMessage, { isInternalSummary });
+            const safetyDecision = await classifySafetyWithGroq(routingMessage, { isInternalSummary });
             if (safetyDecision.blocked) {
                 return res.status(200).json({
                     success: true,
@@ -176,7 +181,7 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
 
             // Route path: live_first can pre-load web context before the first model call.
             let preloadedLiveRag = { ragText: '', sources: [] };
-            if (routeDecision.strategy === 'live_first') {
+            if (routeDecision.strategy === 'live_first' && !isAttachmentGrounding) {
                 preloadedLiveRag = await buildLiveRagContext(effectiveMessage, req, context);
             }
 
@@ -205,17 +210,19 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
 
             let selectedPass = firstPass;
             let liveRag = preloadedLiveRag;
-            const escalation = resolveRouteEscalation(routeDecision, effectiveMessage, firstPass.parsedResponse?.response || '', {
-                strictMode: isStrictSinglePassRouter()
-            });
+            const escalation = isAttachmentGrounding
+                ? { escalate: false, reason: 'attachment_grounded_direct' }
+                : resolveRouteEscalation(routeDecision, routingMessage, firstPass.parsedResponse?.response || '', {
+                    strictMode: isStrictSinglePassRouter()
+                });
             let webEscalationReason = escalation.reason;
             let webEscalationExtractor = '';
 
             // Pass 2: do live search only when strategy allows second-pass escalation.
             if (escalation.escalate) {
                 liveRag = escalation.reason === 'unknown_general_knowledge_answer'
-                    ? await buildCrawl4AiFallbackContext(effectiveMessage, context)
-                    : await buildLiveRagContext(effectiveMessage, req, context);
+                    ? await buildCrawl4AiFallbackContext(routingMessage, context)
+                    : await buildLiveRagContext(routingMessage, req, context);
                 if (liveRag.extractor) {
                     webEscalationExtractor = liveRag.extractor;
                     webEscalationReason = liveRag.ragText ? 'crawl4ai_grounding_used' : 'crawl4ai_unavailable';
@@ -238,18 +245,33 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
                 }
             }
 
-            let finalParsed = enforceLiveAnswerStyle(selectedPass.parsedResponse, effectiveMessage, liveRag.sources);
+            let finalParsed = isAttachmentGrounding
+                ? selectedPass.parsedResponse
+                : enforceLiveAnswerStyle(selectedPass.parsedResponse, routingMessage, liveRag.sources);
             finalParsed = applyResponseLengthPostCheck(finalParsed, lengthPolicy, effectiveMessage, '');
             const qualityStartedAt = Date.now();
-            const qualityResult = await reviewAnswerIfNeeded({
-                message: effectiveMessage,
-                answer: finalParsed?.response,
-                intent,
-                contextBlock,
-                routeDecision,
-                webEscalation: escalation,
-                forceReview: false
-            });
+            const qualityResult = isAttachmentGrounding
+                ? {
+                    correctedResponse: '',
+                    metadata: {
+                        performed: false,
+                        verdict: 'skipped_attachment_grounding',
+                        passes: 0,
+                        corrected: false,
+                        reasons: ['attachment_grounded_direct'],
+                        elapsedMs: 0,
+                        externalVerification: false
+                    }
+                }
+                : await reviewAnswerIfNeeded({
+                    message: effectiveMessage,
+                    answer: finalParsed?.response,
+                    intent,
+                    contextBlock,
+                    routeDecision,
+                    webEscalation: escalation,
+                    forceReview: false
+                });
             timing.qualityMs = Date.now() - qualityStartedAt;
             if (qualityResult.correctedResponse) {
                 finalParsed = { ...finalParsed, response: qualityResult.correctedResponse };
@@ -274,7 +296,7 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
                     preloadedSources: Array.isArray(preloadedLiveRag.sources) ? preloadedLiveRag.sources.length : 0
                 },
                 webEscalation: {
-                    considered: isWebCheckCandidateQuery(effectiveMessage),
+                    considered: !isAttachmentGrounding && isWebCheckCandidateQuery(routingMessage),
                     escalated: Boolean(escalation.escalate && liveRag.ragText),
                     reason: webEscalationReason,
                     sourceCount: Array.isArray(liveRag.sources) ? liveRag.sources.length : 0,
@@ -1320,8 +1342,11 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
 
     function asksUserToProvideSources(text) {
         const t = String(text || '').toLowerCase();
-        return /\b(?:provide|share|give|send|paste)\b[\s\S]{0,60}\b(?:source|sources|link|links|url|urls)\b/.test(t) ||
-            /\b(?:upload|attach)\b[\s\S]{0,60}\b(?:source|sources|document|link|links|url|urls)\b/.test(t);
+        // Only treat as "needs live verification" when the model refuses and asks the user for sources.
+        // Resume/doc feedback like "share links to your portfolio" must not match.
+        return /\b(?:could you|can you|please)\b[\s\S]{0,40}\b(?:provide|share|give|send|paste)\b[\s\S]{0,60}\b(?:source|sources|link|links|url|urls)\b/.test(t) ||
+            /\bi (?:need|require|don'?t have|do not have)\b[\s\S]{0,40}\b(?:source|sources|link|links|url|urls)\b/.test(t) ||
+            /\b(?:upload|attach)\b[\s\S]{0,40}\b(?:source|sources|link|links|url|urls)\b/.test(t);
     }
 
     function isStrictSinglePassRouter() {
@@ -1333,6 +1358,13 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
             return {
                 strategy: 'direct',
                 reason: 'chat_title_generation',
+                webEligible: false
+            };
+        }
+        if (options?.isAttachmentGrounding || String(options?.intent || '').startsWith('selection_')) {
+            return {
+                strategy: 'direct',
+                reason: 'attachment_or_selection_grounded',
                 webEligible: false
             };
         }
@@ -1738,6 +1770,8 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
     }
 
     function enforceLiveAnswerStyle(parsedResponse, message, liveSources) {
+        // Attachment/resume feedback often says "share links" / "provide sources" as advice.
+        // Never rewrite those answers into live-verification failures.
         if (asksUserToProvideSources(parsedResponse?.response || '')) {
             if (Array.isArray(liveSources) && liveSources.length) {
                 return {
@@ -1763,6 +1797,16 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
             response: buildLiveUpdateResponse(message, liveSources),
             action: parsedResponse?.action ?? null
         };
+    }
+
+    function isAttachmentGroundingPayload(grounding, intent = '') {
+        if (!grounding || typeof grounding !== 'object') return false;
+        if (String(grounding.kind || '').toLowerCase() === 'attachment') return true;
+        if (!String(intent || '').startsWith('selection_')) return false;
+        const selectedText = String(grounding.selectedText || grounding.sourceAnswer || '');
+        const customInstruction = String(grounding.customInstruction || '');
+        return /\battached (?:file|document|resume|pdf|image)s?\b/i.test(customInstruction) ||
+            /^###\s+.+\nExtraction:/m.test(selectedText);
     }
 
     function buildLiveUpdateResponse(message, liveSources) {
