@@ -23,7 +23,7 @@ export function getInstantReply(text) {
     }
 
     if (/^what can you do\??$/i.test(lower)) {
-        return 'I can chat, explain topics, translate, help with planning, weather, memory, vision from your camera, and verify answers against sources when live search is enabled.';
+        return 'I am JARVIS — a live-fact and vision helper. I can check current sources, read your camera or attachments, remember what you save, verify answers, and help with planning or fixes from screenshots.';
     }
 
     if (/^do you understand tamil\??$/i.test(lower)) {
