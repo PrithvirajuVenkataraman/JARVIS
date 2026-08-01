@@ -36,7 +36,7 @@ export function trackLatency(name, ms, extra = {}) {
         ms: Math.round(Number(ms) || 0),
         ...extra
     });
-}
+} 
 
 export function getRecentEvents(limit = 20) {
     return getStore().slice(-Math.max(1, Number(limit) || 20));
