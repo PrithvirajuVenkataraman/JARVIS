@@ -5043,9 +5043,11 @@ let showRoutingDebugBadge = false;
         function ensureStartupGreeting(forceSpeak = false) {
             if (hasAnyRenderedChatMessages()) return false;
             const welcomeOptions = [
-                'Ask a current fact, point your camera, or attach a file.',
-                'Live facts, vision, and memory. What do you need?',
-                'I can check sources, read screenshots, and remember what you save. Try me.'
+                'Hi.',
+                'Hello.',
+                'Hey.',
+                'Hi there.',
+                'Hello — how can I help?'
             ];
             const welcomeMessage = welcomeOptions[Math.floor(Math.random() * welcomeOptions.length)];
             addInitialGreetingMessage(welcomeMessage);
