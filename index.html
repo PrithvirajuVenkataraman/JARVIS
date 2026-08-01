@@ -8280,7 +8280,7 @@ function normalizeUiTokens(text) {
                 .replace(/^\s*Verification snapshot:\s*.*$/gim, '')
                 .replace(/^\s*strictLatest:\s*.*$/gim, '')
                 .replace(/\n{3,}/g, '\n\n')
-                .trim();
+                .trim());
 
             const sourceMatch = normalized.match(/(?:^|\n)Sources:\s*\n?/i);
             if (!sourceMatch) return normalized;
