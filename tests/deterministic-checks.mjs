@@ -1123,6 +1123,8 @@ vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'buildChatTitlePrompt'), t
 vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'stripChatTitlePromptFiller'), titleSandbox);
 vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'deriveChatTitleFromText'), titleSandbox);
 vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'isVagueChatTitlePrompt'), titleSandbox);
+vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'isShortChatTitleFollowUp'), titleSandbox);
+vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'pickPreferredChatTitleUserMessage'), titleSandbox);
 vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'deriveChatTitleFromAssistantText'), titleSandbox);
 vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'deriveChatTitleFromMessages'), titleSandbox);
 assert.equal(titleSandbox.deriveChatTitleFromMessages([
@@ -1141,8 +1143,21 @@ assert.equal(titleSandbox.deriveChatTitleFromMessages([
     { role: 'user', text: 'can you fix my speech input bug' },
     { role: 'assistant', text: 'I will inspect the speech input path.' }
 ]), 'Fix speech input bug');
+assert.equal(titleSandbox.deriveChatTitleFromMessages([
+    { role: 'user', text: 'how can the weather be in Ooty' },
+    { role: 'assistant', text: 'In Ooty it is cool and misty.' }
+]), 'Weather in Ooty');
+assert.equal(titleSandbox.deriveChatTitleFromMessages([
+    { role: 'user', text: 'Tell me about Ooty' },
+    { role: 'assistant', text: 'Ooty is a hill station.' },
+    { role: 'user', text: 'nearby beaches' },
+    { role: 'assistant', text: 'There are coastal options a drive away.' }
+]), 'Ooty');
 assert.equal(titleSandbox.normalizeGeneratedChatTitle('"Title: python recursion debugging."'), 'Python Recursion Debugging');
 assert.equal(titleSandbox.normalizeGeneratedChatTitle('New Chat', 'Fallback Title'), 'Fallback Title');
+assert.match(SOURCE.appHtml, /function writeChatSessionsWithQuotaRecovery/);
+assert.match(SOURCE.appHtml, /installChatSessionPersistenceGuards/);
+assert.doesNotMatch(SOURCE.appHtml, /function saveChatSessions\(\) \{\s*if \(!persistMemoryToDevice\) return;/);
 assert.doesNotMatch(titleSandbox.buildChatTitlePrompt([
     { role: 'assistant', text: 'Hi! How can I help today?', systemGreeting: true },
     { role: 'user', text: 'Hey Jarvis' },
