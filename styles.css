@@ -1567,13 +1567,12 @@ body.dark .composer-action-item:hover {
     flex-shrink: 0;
 }
 
-.assistant-source-badge {
-    border: 1px solid var(--ui-border) !important;
-    border-radius: 999px !important;
-    background: var(--ui-surface-muted) !important;
-    color: var(--ui-text-muted) !important;
-    font-size: 10px !important;
-    letter-spacing: 0.02em !important;
+.assistant-source-badge,
+.source-transparency-badge,
+.source-transparency-label,
+.source-transparency-reason,
+.source-transparency-list {
+    display: none !important;
 }
 
 /* Buttons */
@@ -3775,35 +3774,12 @@ button:hover {
     box-shadow: inset 0 0 0 2px #000000, 0 0 0 2px #ffffff !important;
 }
 
-.source-transparency-badge {
-    margin-bottom: 0.5rem;
-    padding: 0.45rem 0.65rem;
-    border-radius: 0.65rem;
-    border: 1px solid rgba(56, 189, 248, 0.35);
-    background: rgba(14, 116, 144, 0.18);
-    font-size: 0.75rem;
-    line-height: 1.35;
-}
-
-.source-transparency-badge[data-verified="true"] {
-    border-color: rgba(74, 222, 128, 0.35);
-    background: rgba(22, 101, 52, 0.22);
-}
-
-.source-transparency-label {
-    display: block;
-    font-weight: 600;
-}
-
-.source-transparency-reason {
-    display: block;
-    opacity: 0.8;
-    margin-top: 0.15rem;
-}
-
+.source-transparency-badge,
+.source-transparency-badge[data-verified="true"],
+.source-transparency-label,
+.source-transparency-reason,
 .source-transparency-list {
-    margin: 0.35rem 0 0;
-    padding-left: 1rem;
+    display: none !important;
 }
 
 .context-clarification-card {
