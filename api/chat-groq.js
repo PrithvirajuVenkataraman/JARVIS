@@ -135,7 +135,13 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
                 isInternalSummary
             });
             const lengthPolicy = applyCostCapToLengthPolicy(
-                buildLengthPolicy(effectiveMessage, '', { isInternalSummary, intent }),
+                buildLengthPolicy(effectiveMessage, '', {
+                    isInternalSummary,
+                    intent,
+                    preferences,
+                    responseStyle: preferences?.responseStyle,
+                    responseLength: preferences?.responseLength
+                }),
                 { intent, stream: shouldStreamChatRequest(req.body, intent, grounding, routeDecision, isInternalSummary) }
             );
             if (shouldStreamChatRequest(req.body, intent, grounding, routeDecision, isInternalSummary)) {
@@ -563,7 +569,7 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
             'Do not ask the user to provide links. If supplied source evidence is missing or weak, say so clearly.'
         ].filter(Boolean).join('\n');
 
-        const lengthPolicy = { instruction: 'Keep the verification report concise and complete.', maxTokens: 1800, temperature: 0.2 };
+        const lengthPolicy = { instruction: 'Keep the verification report concise and complete.', maxTokens: 4000, temperature: 0.2 };
         const modelResult = await runModelWithFallback(verificationPrompt, lengthPolicy);
         let finalParsed = modelResult.ok
             ? normalizeAssistantResponseStyle(modelResult.parsedResponse)
@@ -921,7 +927,7 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
 
     async function runModelWithFallback(finalPrompt, lengthPolicy = {}) {
         const temp = Number.isFinite(Number(lengthPolicy?.temperature)) ? Number(lengthPolicy.temperature) : 0.7;
-        const maxTokens = clampInt(lengthPolicy?.maxTokens, 2500, 256, 12000);
+        const maxTokens = clampInt(lengthPolicy?.maxTokens, 8000, 256, 16000);
         let groqFailureDetail = '';
         let groqTriedModels = [];
         const groqApiKey = process.env.GROQ_API_KEY || process.env.GROQ_KEY;
@@ -1067,7 +1073,7 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
 
     async function streamModelWithFallback(finalPrompt, lengthPolicy = {}, onDelta = () => {}) {
         const temp = Number.isFinite(Number(lengthPolicy?.temperature)) ? Number(lengthPolicy.temperature) : 0.7;
-        const maxTokens = clampInt(lengthPolicy?.maxTokens, 2500, 256, 12000);
+        const maxTokens = clampInt(lengthPolicy?.maxTokens, 8000, 256, 16000);
         const groqApiKey = process.env.GROQ_API_KEY || process.env.GROQ_KEY;
 
         if (groqApiKey) {
@@ -2630,23 +2636,70 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
         return null;
     }
 
-    function inferDetailLevel(message) {
+    function inferDetailLevel(message, preferences = {}) {
         const q = String(message || '').toLowerCase();
         const wordSpec = parseWordCountRequest(message);
         if (wordSpec && wordSpec.maxWords <= 80) return 'short';
+        const prefLength = String(preferences?.responseLength || '').toLowerCase();
+        if (prefLength === 'short') return 'short';
+        if (prefLength === 'detailed') return 'detailed';
         if (!q) return 'detailed';
         if (/\b(one line|one-liner|brief|briefly|short|tldr|tl;dr|in short|quickly|quick answer|concise|few words|keep it short|make it short)\b/.test(q)) {
             return 'short';
         }
+        if (/\b(detailed|in depth|in-depth|comprehensive|thorough|elaborate|long answer|explain fully|deep dive)\b/.test(q)) {
+            return 'detailed';
+        }
         return 'detailed';
+    }
+
+    function isCreativeAnswerRequest(message) {
+        const q = String(message || '').toLowerCase();
+        return /\b(poem|poetry|story|stories|fiction|creative|brainstorm|imagine|roleplay|role play|lyrics|song|rap|joke|humor|witty|write a scene|short story|fairy tale|screenplay)\b/.test(q);
+    }
+
+    function isFactualAnswerRequest(message, intent = '') {
+        const q = String(message || '').toLowerCase();
+        if (['verify_answer', 'chat_title'].includes(String(intent || ''))) return true;
+        return /\b(who is|what is|when did|where is|define|definition|calculate|math|prove|formula|code|debug|fact|facts|capital of|population of|ceo of)\b/.test(q);
+    }
+
+    function resolveResponseTemperature({ message, intent, responseStyle, detail, structured = false } = {}) {
+        if (structured || String(intent || '') === 'chat_title') return 0.2;
+        if (String(intent || '') === 'verify_answer') return 0.2;
+        if (String(intent || '') === 'fast_explainer') return 0.4;
+        if (isCreativeAnswerRequest(message)) return 0.92;
+        if (isFactualAnswerRequest(message, intent)) return 0.35;
+
+        const style = String(responseStyle || 'balanced').toLowerCase();
+        const styleTemp = {
+            balanced: 0.6,
+            witty: 0.88,
+            chatty: 0.82,
+            supportive: 0.72,
+            debate: 0.78
+        }[style] || 0.6;
+
+        if (detail === 'short') return Math.min(styleTemp, 0.5);
+        return styleTemp;
     }
 
     function buildLengthPolicy(message, clientSystemPrompt, options = {}) {
         const internalSummary = Boolean(options?.isInternalSummary);
-        if (String(options?.intent || '') === 'chat_title') {
+        const preferences = options?.preferences && typeof options.preferences === 'object'
+            ? options.preferences
+            : {};
+        const responseStyle = ['balanced', 'witty', 'chatty', 'supportive', 'debate'].includes(options?.responseStyle)
+            ? options.responseStyle
+            : (['balanced', 'witty', 'chatty', 'supportive', 'debate'].includes(preferences?.responseStyle)
+                ? preferences.responseStyle
+                : 'balanced');
+        const intent = String(options?.intent || '');
+
+        if (intent === 'chat_title') {
             return {
                 instruction: 'Return only the final title, no markdown and no explanation.',
-                maxTokens: 80,
+                maxTokens: 120,
                 temperature: 0.2,
                 wordSpec: null,
                 timeoutMs: 12000,
@@ -2655,7 +2708,12 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
         }
         const structured = hasStructuredOutputConstraint(clientSystemPrompt, message);
         if (internalSummary || structured) {
-            return { instruction: 'Keep output strictly in the requested machine-readable format.', maxTokens: 900, temperature: 0.3, wordSpec: null };
+            return {
+                instruction: 'Keep output strictly in the requested machine-readable format.',
+                maxTokens: 2000,
+                temperature: resolveResponseTemperature({ message, intent, responseStyle, detail: 'short', structured: true }),
+                wordSpec: null
+            };
         }
 
         const wordSpec = parseWordCountRequest(message);
@@ -2669,53 +2727,72 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
                 wordSpec.mode === 'target' ? `Aim for about ${wordSpec.targetWords} words.` : '',
                 'Do not add filler; keep content substantive.'
             ].filter(Boolean).join(' ');
-            const maxTokens = clampInt(Math.round(wordSpec.maxWords * 2.2 + 220), 2500, 400, 12000);
-            return { instruction, maxTokens, temperature: 0.7, wordSpec };
+            const maxTokens = clampInt(Math.round(wordSpec.maxWords * 2.6 + 400), 4000, 600, 16000);
+            return {
+                instruction,
+                maxTokens,
+                temperature: resolveResponseTemperature({
+                    message,
+                    intent,
+                    responseStyle,
+                    detail: wordSpec.maxWords <= 80 ? 'short' : 'detailed'
+                }),
+                wordSpec
+            };
         }
 
-        if (String(options?.intent || '') === 'fast_explainer') {
+        if (intent === 'fast_explainer') {
             return {
                 instruction: 'Fast explainer mode: answer directly in 3-6 concise sentences. Avoid filler, source requests, and generic next steps.',
-                maxTokens: 900,
-                temperature: 0.5,
+                maxTokens: 2000,
+                temperature: resolveResponseTemperature({ message, intent, responseStyle, detail: 'short' }),
                 wordSpec: null,
                 timeoutMs: 9000,
                 retries: 0
             };
         }
 
-        const detail = inferDetailLevel(message);
+        const detail = inferDetailLevel(message, {
+            responseLength: options?.responseLength || preferences?.responseLength
+        });
+        const temperature = resolveResponseTemperature({ message, intent, responseStyle, detail });
+
         if (isRecipeGenerationRequest(message)) {
             return {
                 instruction: 'User asked for a recipe. Provide the complete recipe with all required sections and finish every step cleanly. Keep it concise but do not truncate the final cooking/resting step.',
-                maxTokens: 5000,
-                temperature: 0.6,
+                maxTokens: 10000,
+                temperature,
                 wordSpec: null
             };
         }
         if (isLongTravelPlanningRequest(message)) {
             return {
                 instruction: 'User asked for a substantial travel plan. Provide the full itinerary without truncating: use clear day-by-day sections, practical timing, transit, food guidance, and concise bullets for each stop.',
-                maxTokens: 9000,
-                temperature: 0.7,
+                maxTokens: 14000,
+                temperature,
                 wordSpec: null
             };
         }
         if (detail === 'detailed') {
             return {
                 instruction: 'User asked for detail. Provide a structured, in-depth explanation with enough depth to fully answer.',
-                maxTokens: 7000,
-                temperature: 0.7,
+                maxTokens: 12000,
+                temperature,
                 wordSpec: null
             };
         }
         if (detail === 'short') {
-            return { instruction: 'Keep the response brief and direct.', maxTokens: 900, temperature: 0.5, wordSpec: null };
+            return {
+                instruction: 'Keep the response brief and direct.',
+                maxTokens: 2000,
+                temperature,
+                wordSpec: null
+            };
         }
         return {
             instruction: 'Provide a complete, well-structured answer with enough depth to fully satisfy the question. Finish all sections, lists, and steps cleanly - do not stop mid-thought or mid-list.',
-            maxTokens: 7000,
-            temperature: 0.7,
+            maxTokens: 12000,
+            temperature,
             wordSpec: null
         };
     }
@@ -2767,7 +2844,10 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
         resolveRouteEscalation,
         isCrawl4AiFallbackCandidate,
         shouldStreamChatRequest,
-        needsPreStreamSafetyReview
+        needsPreStreamSafetyReview,
+        buildLengthPolicy,
+        resolveResponseTemperature,
+        inferDetailLevel
     };
 
     function applyResponseLengthPostCheck(parsedResponse, lengthPolicy, message, clientSystemPrompt) {
@@ -2826,8 +2906,8 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
         try {
             const result = await runModelWithFallback(prompt, {
                 instruction: `Rewrite to exactly ${target} words without filler.`,
-                maxTokens: clampInt(Math.round(target * 2.5 + 160), 500, 200, 5000),
-                temperature: 0.4,
+                maxTokens: clampInt(Math.round(target * 2.8 + 240), 1200, 400, 8000),
+                temperature: 0.35,
                 wordSpec: null
             });
             const text = String(result?.parsedResponse?.response || result?.text || '').trim();
