@@ -447,11 +447,19 @@ function getUserIntent(text) {
 }
 
 function isWeatherIntentText(text) {
-    const t = (text || '').toLowerCase();
-    return /\b(weather|climate|temperature|forecast|humidity|humid|rain|raining|drizzle|snow|snowing|hot|cold|wind|windy|sunny|cloudy|overcast|storm|thunder|heat|chilly|freezing|degrees?|umbrella|jacket)\b/.test(t) ||
-        /\b(how'?s?\s+it\s+(?:outside|out(?:side)?|where\s+i\s+am)|what'?s?\s+it\s+like\s+(?:outside|where\s+i\s+am)|is\s+it\s+(?:raining|snowing|hot|cold|windy|sunny|cloudy|humid)\b)\b/.test(t) ||
-        /\b(?:outside|here|around me|near me|my current location|current location|my location|where i am|my area|my place)\b/.test(t) &&
-        /\b(?:forecast|temperature|rain|snow|hot|cold|wind|sunny|cloudy|humid|weather)\b/.test(t);
+    const t = (text || '').toLowerCase().trim();
+    if (!t) return false;
+    // Avoid health/small-talk false positives like "I have a cold" / "I'm hot under the collar".
+    if (/\b(i(?:'| a)?m|i have|i got|feeling|feel)\b/.test(t) && /\b(cold|fever|cough|sick|chills)\b/.test(t) && !/\b(weather|forecast|outside|temperature)\b/.test(t)) {
+        return false;
+    }
+    return /\b(weather|climate|temperature|forecast|humidity|humid|rain|raining|drizzle|snow|snowing|wind|windy|sunny|cloudy|overcast|storm|thunder|chilly|freezing|umbrella|jacket|aqi|air quality)\b/.test(t) ||
+        /\b(how(?:'?s|\s+is|\s+can|\s+could|\s+would|\s+might)?\s+(?:the\s+)?(?:weather|climate|temperature|forecast)\b)/.test(t) ||
+        /\b(what(?:'?s|\s+is|\s+will|\s+would)\s+(?:the\s+)?(?:weather|climate|temperature|forecast)\b)/.test(t) ||
+        /\b(will\s+it\s+(?:rain|snow|be\s+(?:hot|cold|humid|sunny|cloudy|windy))|is\s+it\s+(?:raining|snowing|hot|cold|windy|sunny|cloudy|humid)\b)/.test(t) ||
+        /\b(how(?:'?s|\s+is)\s+it\s+(?:outside|out(?:side)?|where\s+i\s+am)|what(?:'?s|\s+is)\s+it\s+like\s+(?:outside|where\s+i\s+am))\b/.test(t) ||
+        (/\b(?:outside|here|around me|near me|my current location|current location|my location|where i am|my area|my place)\b/.test(t) &&
+            /\b(?:forecast|temperature|rain|snow|hot|cold|wind|sunny|cloudy|humid|weather|climate)\b/.test(t));
 }
 
 function isPersonalHealthStatement(text) {
@@ -466,8 +474,8 @@ function isCurrentLocationIntentText(text) {
     const t = String(text || '').toLowerCase().trim();
     if (!t) return false;
     if (/\b(share|send|nearest|nearby|hospital|police|pharmacy|atm)\b/.test(t)) return false;
-    if (/\b(weather|forecast|temperature|rain|snow|wind|sunny|cloudy|humid)\b/.test(t)) return false;
-    return /\b(where\s+am\s+i|where\s+m\s+i|where\s+i\s+am|where\s+am\s+i\s+now|what\s+is\s+my\s+location|what'?s\s+my\s+location|my\s+current\s+location|current\s+location|my\s+coordinates?|current\s+coordinates?|my\s+gps|where'?s\s+my\s+location|latitude|longitude|coords?)\b/.test(t);
+    if (/\b(weather|forecast|temperature|rain|snow|wind|sunny|cloudy|humid|climate)\b/.test(t)) return false;
+    return /\b(where\s+am\s+i|where\s+m\s+i|wheres\s+am\s+i|whereami|where\s+i\s+am(?:\s+right\s+now)?|where\s+am\s+i\s+now|what\s+is\s+my\s+(?:exact\s+)?location|what'?s\s+my\s+(?:exact\s+)?location|my\s+current\s+location|current\s+location|find\s+my\s+location|locate\s+me|my\s+coordinates?|current\s+coordinates?|my\s+gps|where'?s\s+my\s+location|pin\s+my\s+location|latitude|longitude|coords?)\b/.test(t);
 }
 
 function isTamilJokeRequest(text) {
@@ -9171,6 +9179,7 @@ async function sendTextInput(submission = {}) {
                             return;
                         }
                         waitingForLocation = false;
+                        window.__jarvisPendingLocationAction = null;
                         await getWeatherByCity(cleanLocation);
                     } else if (selectionGrounding) {
                         const result = await askGeminiAI(normalizedOutgoingText, {
@@ -17263,6 +17272,7 @@ function detectInputLanguageHint(text) {
             window.pendingLocationDisambiguation = null;
             window.pendingLocationQueryType = null;
             window.pendingTransportSuggestionCity = null;
+            window.__jarvisPendingLocationAction = null;
             if (translatorMode) {
                 translatorMode = false;
                 translatorLanguage = null;
@@ -18379,6 +18389,7 @@ Quick recap: ...
                 }
                 
                 waitingForLocation = false;
+                window.__jarvisPendingLocationAction = null;
                 await getWeatherByCity(cleanLocation);
                 return;
             }
@@ -19053,88 +19064,226 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
             }
         }
 
-        async function handleCurrentLocationWeatherRequest(originalQuery = '') {
-            showThinkingIndicator();
+        async function getGeolocationPermissionState() {
+            if (!navigator.geolocation) return 'unsupported';
+            try {
+                if (navigator.permissions?.query) {
+                    const status = await navigator.permissions.query({ name: 'geolocation' });
+                    const state = String(status?.state || '').toLowerCase();
+                    if (state === 'granted' || state === 'denied' || state === 'prompt') return state;
+                }
+            } catch (_) {}
+            return 'prompt';
+        }
 
-            if (navigator.geolocation) {
-                navigator.geolocation.getCurrentPosition(
-                    async (position) => {
-                        const lat = position.coords.latitude;
-                        const lon = position.coords.longitude;
+        function buildLocationPermissionCardHtml(featureLabel = 'this') {
+            const label = escapeHtml(featureLabel);
+            return `
+<div class="location-permission-card" role="group" aria-label="Location permission">
+  <p class="location-permission-copy">I need your location permission for ${label}. Allow access in the browser prompt, or type a city instead.</p>
+  <div class="location-permission-actions">
+    <button type="button" class="location-permission-btn location-permission-btn-primary" onclick="return allowJarvisLocationAccess()">Allow location</button>
+    <button type="button" class="location-permission-btn" onclick="return declineJarvisLocationAccess()">I will type a city</button>
+  </div>
+</div>`;
+        }
 
-                        try {
-                            const reverseResponse = await fetch(
-                                `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`,
-                                { headers: { 'User-Agent': 'JARVISAssistant/1.0' } }
-                            );
-                            const reverseData = await reverseResponse.json();
-                            const addr = reverseData.address || {};
-
-                            let cityName = addr.city ||
-                                           addr.town ||
-                                           addr.municipality ||
-                                           addr.county ||
-                                           addr.village ||
-                                           addr.hamlet ||
-                                           addr.suburb ||
-                                           addr.neighbourhood ||
-                                           addr.state_district ||
-                                           null;
-
-                            if (cityName) {
-                                if (addr.country_code === 'us' && addr.state) {
-                                    cityName = `${cityName}, ${addr.state}`;
-                                } else if (addr.state && addr.state !== cityName) {
-                                    cityName = `${cityName}, ${addr.state}, ${addr.country}`;
-                                } else if (addr.country && addr.country_code !== 'us') {
-                                    cityName = `${cityName}, ${addr.country}`;
-                                }
-                            } else {
-                                cityName = addr.state || addr.country || 'your location';
-                            }
-
-                            await fetchWeather(lat, lon, cityName, originalQuery);
-                        } catch (error) {
-                            await fetchWeather(lat, lon, 'your location', originalQuery);
-                        }
-                    },
-                    async (error) => {
-                        hideThinkingIndicator();
-                        let askMsg;
-                        if (error.code === 1) {
-                            askMsg = "Location permission was denied. Please tell me your city, or check your browser settings to enable location access.";
-                        } else if (error.code === 2) {
-                            askMsg = "I couldn't determine your location. Where are you? Just say your city!";
-                        } else if (error.code === 3) {
-                            askMsg = "Location detection is taking too long. Where are you located?";
-                        } else {
-                            askMsg = "I couldn't detect your location. Where are you?";
-                        }
-                        await deliverApiReply('location_manual_prompt', {
-                            reason: 'geolocation_error',
-                            detail: askMsg
-                        }, {
-                            fallbackText: askMsg
-                        });
-                        waitingForLocation = true;
-                    },
-                    {
-                        enableHighAccuracy: false,
-                        timeout: 15000,
-                        maximumAge: 300000
-                    }
-                );
-            } else {
-                hideThinkingIndicator();
-                const fallbackMsg = "This device doesn't support location detection. Please tell me your city.";
-                await deliverApiReply('location_manual_prompt', {
-                    reason: 'browser_no_geolocation',
-                    detail: fallbackMsg
-                }, {
-                    fallbackText: fallbackMsg
-                });
+        function setPendingLocationPermissionAction(action) {
+            window.__jarvisPendingLocationAction = action && typeof action === 'object' ? action : null;
+            if (action?.type === 'weather') {
                 waitingForLocation = true;
             }
+        }
+
+        async function continuePendingLocationAction(position) {
+            const action = window.__jarvisPendingLocationAction;
+            window.__jarvisPendingLocationAction = null;
+            waitingForLocation = false;
+            if (!action) return;
+            if (action.type === 'whereami') {
+                await completeCurrentLocationRequest(position, action.query || '');
+                return;
+            }
+            if (action.type === 'weather') {
+                await completeCurrentLocationWeatherRequest(position, action.query || '');
+            }
+        }
+
+        async function allowJarvisLocationAccess() {
+            const action = window.__jarvisPendingLocationAction;
+            if (!action) {
+                showTemporaryMessage('No pending location request.');
+                return false;
+            }
+            showThinkingIndicator(action.type === 'weather' ? 'Getting your local weather...' : 'Checking your current location...');
+            try {
+                const position = await getCurrentPositionAsync({
+                    enableHighAccuracy: action.type === 'whereami',
+                    timeout: 15000,
+                    maximumAge: action.type === 'whereami' ? 60000 : 300000
+                });
+                hideThinkingIndicator();
+                await continuePendingLocationAction(position);
+            } catch (error) {
+                hideThinkingIndicator();
+                await handleGeolocationFailure(error, action);
+            }
+            return false;
+        }
+
+        async function declineJarvisLocationAccess() {
+            const action = window.__jarvisPendingLocationAction;
+            window.__jarvisPendingLocationAction = null;
+            if (action?.type === 'weather') {
+                waitingForLocation = true;
+                await deliverApiReply('location_manual_prompt', {
+                    reason: 'user_declined_permission',
+                    detail: 'Type your city and I will check the weather there.'
+                }, {
+                    fallbackText: 'No problem. Type your city and I will check the weather there.'
+                });
+            } else {
+                waitingForLocation = false;
+                await deliverApiReply('gps_access_error', {
+                    feature: 'current_location',
+                    reason: 'user_declined_permission'
+                }, {
+                    fallbackText: 'Okay. Enable location permission in your browser settings, then ask "where am I" again.'
+                });
+            }
+            return false;
+        }
+
+        async function handleGeolocationFailure(error, action = null) {
+            const pending = action || window.__jarvisPendingLocationAction;
+            window.__jarvisPendingLocationAction = null;
+            const code = Number(error?.code || 0);
+            let askMsg;
+            if (code === 1 || /denied/i.test(String(error?.message || ''))) {
+                askMsg = pending?.type === 'whereami'
+                    ? 'Location permission was denied. Enable it in your browser settings, then ask "where am I" again.'
+                    : 'Location permission was denied. Tell me your city, or enable location access in browser settings.';
+            } else if (code === 2) {
+                askMsg = pending?.type === 'whereami'
+                    ? 'I could not determine your location. Check GPS/network and try again, or tell me your city for weather.'
+                    : 'I could not determine your location. Where are you? Just say your city.';
+            } else if (code === 3) {
+                askMsg = pending?.type === 'whereami'
+                    ? 'Location detection timed out. Try again, or enable precise location and ask once more.'
+                    : 'Location detection is taking too long. Where are you located?';
+            } else if (/not supported|unsupported/i.test(String(error?.message || ''))) {
+                askMsg = pending?.type === 'whereami'
+                    ? 'This device does not support location detection.'
+                    : 'This device does not support location detection. Please tell me your city.';
+            } else {
+                askMsg = pending?.type === 'whereami'
+                    ? 'I could not access your current location. Please enable location permission and try again.'
+                    : 'I could not detect your location. Where are you?';
+            }
+
+            if (pending?.type === 'weather' || !pending) {
+                waitingForLocation = true;
+                await deliverApiReply('location_manual_prompt', {
+                    reason: 'geolocation_error',
+                    detail: askMsg
+                }, {
+                    fallbackText: askMsg
+                });
+            } else {
+                waitingForLocation = false;
+                await deliverApiReply('gps_access_error', {
+                    feature: 'current_location',
+                    reason: 'geolocation_error'
+                }, {
+                    historyKey: pending?.query || 'where am i',
+                    fallbackText: askMsg
+                });
+            }
+        }
+
+        async function requestLocationForFeature(action) {
+            const featureLabel = action?.type === 'weather' ? 'local weather' : 'finding where you are';
+            const state = await getGeolocationPermissionState();
+
+            if (state === 'unsupported') {
+                await handleGeolocationFailure(new Error('Geolocation is not supported in this browser.'), action);
+                return;
+            }
+
+            if (state === 'denied') {
+                await handleGeolocationFailure({ code: 1, message: 'denied' }, action);
+                return;
+            }
+
+            if (state === 'granted') {
+                showThinkingIndicator(action?.type === 'weather' ? 'Getting your local weather...' : 'Checking your current location...');
+                try {
+                    const position = await getCurrentPositionAsync({
+                        enableHighAccuracy: action?.type === 'whereami',
+                        timeout: 15000,
+                        maximumAge: action?.type === 'whereami' ? 60000 : 300000
+                    });
+                    hideThinkingIndicator();
+                    window.__jarvisPendingLocationAction = action;
+                    await continuePendingLocationAction(position);
+                } catch (error) {
+                    hideThinkingIndicator();
+                    await handleGeolocationFailure(error, action);
+                }
+                return;
+            }
+
+            // Permission not decided yet: ask explicitly, then wait for Allow / city.
+            setPendingLocationPermissionAction(action);
+            addChatMessage(buildLocationPermissionCardHtml(featureLabel), false, false);
+        }
+
+        async function completeCurrentLocationWeatherRequest(position, originalQuery = '') {
+            const lat = position.coords.latitude;
+            const lon = position.coords.longitude;
+            showThinkingIndicator('Getting your local weather...');
+            try {
+                const reverseResponse = await fetch(
+                    `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`,
+                    { headers: { 'User-Agent': 'JARVISAssistant/1.0' } }
+                );
+                const reverseData = await reverseResponse.json();
+                const addr = reverseData.address || {};
+
+                let cityName = addr.city ||
+                    addr.town ||
+                    addr.municipality ||
+                    addr.county ||
+                    addr.village ||
+                    addr.hamlet ||
+                    addr.suburb ||
+                    addr.neighbourhood ||
+                    addr.state_district ||
+                    null;
+
+                if (cityName) {
+                    if (addr.country_code === 'us' && addr.state) {
+                        cityName = `${cityName}, ${addr.state}`;
+                    } else if (addr.state && addr.state !== cityName) {
+                        cityName = `${cityName}, ${addr.state}, ${addr.country}`;
+                    } else if (addr.country && addr.country_code !== 'us') {
+                        cityName = `${cityName}, ${addr.country}`;
+                    }
+                } else {
+                    cityName = addr.state || addr.country || 'your location';
+                }
+
+                await fetchWeather(lat, lon, cityName, originalQuery);
+            } catch (error) {
+                await fetchWeather(lat, lon, 'your location', originalQuery);
+            }
+        }
+
+        async function handleCurrentLocationWeatherRequest(originalQuery = '') {
+            await requestLocationForFeature({
+                type: 'weather',
+                query: String(originalQuery || '').trim()
+            });
         }
 
         function extractLocationFromSentence(text) {
@@ -19152,7 +19301,7 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
                 }
             }
 
-            if (/^\s*(?:what'?s|what is|how'?s|how is)?\s*(?:the\s+)?(?:weather|forecast|temperature|climate|conditions?)\b[\s?!.,]*$/i.test(text)) {
+            if (/^\s*(?:what'?s|what is|how'?s|how is|how can|how could|how would|how might)?\s*(?:the\s+)?(?:weather|forecast|temperature|climate|conditions?)\b[\s?!.,]*$/i.test(text)) {
                 return null;
             }
 
@@ -19160,25 +19309,29 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
             if (explicitLocation) return explicitLocation;
             
             let cleanText = text;
-            const timeWords = ['right now', 'now', 'today', 'tomorrow', 'tonight', 'currently', 'at the moment'];
+            const timeWords = ['right now', 'now', 'today', 'tomorrow', 'tonight', 'currently', 'at the moment', 'this morning', 'this afternoon', 'this evening', 'this weekend', 'next week'];
             timeWords.forEach(word => {
                 cleanText = cleanText.replace(new RegExp(word, 'gi'), '');
             });
             
             const patterns = [
-                /(?:how'?s?|what'?s?|how is|what is)\s+(?:the\s+)?(?:weather|climate|temperature|humidity|forecast|conditions?)\s+(?:in|at|for|around|near)\s+([^?]+)/i,
-                /(?:weather|climate|temperature|humidity|rain|snow|hot|cold|forecast|conditions?|wind|windy)\s+(?:in|at|for|around|near)\s+([^?]+)/i,
+                /(?:how(?:'?s|\s+is|\s+can|\s+could|\s+would|\s+might)?)\s+(?:the\s+)?(?:weather|climate|temperature|humidity|forecast|conditions?)(?:\s+be)?(?:\s+like)?\s+(?:in|at|for|around|near|of)\s+([^?]+)/i,
+                /(?:what(?:'?s|\s+is|\s+will|\s+would))\s+(?:the\s+)?(?:weather|climate|temperature|humidity|forecast|conditions?)(?:\s+be)?(?:\s+like)?\s+(?:in|at|for|around|near|of)\s+([^?]+)/i,
+                /(?:will\s+it\s+(?:rain|snow|be\s+(?:hot|cold|humid|sunny|cloudy|windy))|is\s+it\s+(?:raining|snowing|hot|cold|windy|sunny|cloudy|humid))\s+(?:in|at|for|around|near)\s+([^?]+)/i,
+                /(?:how'?s?|what'?s?|how is|what is)\s+(?:the\s+)?(?:weather|climate|temperature|humidity|forecast|conditions?)\s+(?:in|at|for|around|near|of)\s+([^?]+)/i,
+                /(?:weather|climate|temperature|humidity|rain|snow|hot|cold|forecast|conditions?|wind|windy|aqi|air quality)\s+(?:in|at|for|around|near|of)\s+([^?]+)/i,
                 /(?:in|at|around|near)\s+([^?]+?)\s*(?:weather|climate|temperature|humidity|rain|snow|hot|cold|forecast|conditions?|wind|windy)/i,
-                /(?:forecast|temperature|weather)\s+(?:for)\s+([^?]+)/i,
-                /(?:weather|forecast|temperature)\s+([a-zA-Z][^?.,!]+)$/i,
-                /^([a-zA-Z][a-zA-Z\s.'-]{1,60})\s+(?:weather|forecast|temperature)$/i
+                /(?:forecast|temperature|weather|climate)\s+(?:for|of)\s+([^?]+)/i,
+                /(?:weather|forecast|temperature|climate)\s+([A-Za-z][A-Za-z\s.'-]{1,80})$/i,
+                /^([A-Za-z][A-Za-z\s.'-]{1,60})\s+(?:weather|forecast|temperature|climate)$/i
             ];
             
             for (const pattern of patterns) {
                 const match = cleanText.match(pattern);
                 if (match && match[1]) {
                     let location = cleanGenericQueryTarget(match[1].trim());
-                    location = location.replace(/^(?:the\s+)?(?:weather|forecast|temperature)\s+(?:in|at|for)\s+/i, '').trim();
+                    location = location.replace(/^(?:the\s+)?(?:weather|forecast|temperature|climate)\s+(?:in|at|for|of)\s+/i, '').trim();
+                    location = location.replace(/\b(?:be|like|looking|feel|feels|seem|seems)\b/gi, ' ').replace(/\s+/g, ' ').trim();
                     location = location.replace(/[?.!,;]$/g, '').trim();
                     
                     const locationLower = location.toLowerCase();
@@ -19191,6 +19344,8 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
                     if (/^(?:the\s+)?(?:weather|forecast|temperature|climate|conditions?)$/i.test(location)) {
                         return null;
                     }
+                    if (location.length < 2 || location.length > 80) continue;
+                    if (/^(?:the|a|an|it|this|that|there|here)$/i.test(location)) continue;
                     
                     if (location.length > 0) return location;
                 }
@@ -19203,8 +19358,9 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
             if (!raw) return '';
 
             const patterns = [
-                /\b(?:in|at|for|near)\s+([A-Za-z][A-Za-z\s.',-]{1,100})(?=\s*(?:around|about|in|during|for|on|today|tomorrow|tonight|now|right now|currently|at the moment|this morning|this afternoon|this evening|next week|next month|next year)?\b|[?.!,]*$)/i,
-                /\b(?:weather|forecast|temperature|climate|conditions?)\s+(?:in|at|for|near)\s+([A-Za-z][A-Za-z\s.',-]{1,100})/i
+                /\b(?:how(?:\s+can|\s+could|\s+would|\s+might)?(?:\s+the)?\s+weather(?:\s+be)?(?:\s+like)?\s+(?:in|at|for|around|near|of))\s+([A-Za-z][A-Za-z\s.',-]{1,100})/i,
+                /\b(?:in|at|for|near|around|of)\s+([A-Za-z][A-Za-z\s.',-]{1,100})(?=\s*(?:around|about|in|during|for|on|today|tomorrow|tonight|now|right now|currently|at the moment|this morning|this afternoon|this evening|next week|next month|next year)?\b|[?.!,]*$)/i,
+                /\b(?:weather|forecast|temperature|climate|conditions?)\s+(?:in|at|for|near|around|of)\s+([A-Za-z][A-Za-z\s.',-]{1,100})/i
             ];
 
             for (const pattern of patterns) {
@@ -19213,13 +19369,16 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
                 let location = match[1]
                     .replace(/\b(?:around|about|in|during|for|on)\s+(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|summer|winter|spring|autumn|fall|monsoon|rainy season|dry season)\b.*$/i, '')
                     .replace(/\b(?:today|tomorrow|tonight|now|right now|currently|at the moment|this morning|this afternoon|this evening|next week|next month|next year)\b.*$/gi, '')
+                    .replace(/\b(?:be|like|looking)\b/gi, ' ')
                     .replace(/[?.!,;]$/g, '')
+                    .replace(/\s+/g, ' ')
                     .trim();
                 location = cleanGenericQueryTarget(location);
                 if (!location) continue;
                 const lowerLocation = location.toLowerCase();
                 if (currentLocationKeywords.some(keyword => lowerLocation.includes(keyword))) continue;
                 if (/^(?:the\s+)?(?:weather|forecast|temperature|climate|conditions?)$/i.test(location)) continue;
+                if (/^(?:the|a|an|it|this|that|there|here)$/i.test(location)) continue;
                 return location;
             }
 
@@ -19374,7 +19533,7 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
                     ? `Air Quality Index (US AQI): ${aqi.usAqi} (${aqi.label || 'Unknown'})`
                     : 'Air Quality Index (US AQI): unavailable right now';
                 const weatherFallback = [
-                    `In ${displayLocation}, it's ${celsius}Â°C (${fahrenheit}Â°F) with ${advice}.`,
+                    `In ${displayLocation}, it's ${celsius}°C (${fahrenheit}°F) with ${advice}.`,
                     isCurrentLocationAsk ? aqiLine : ''
                 ].filter(Boolean).join('\n');
                 await deliverApiReply('weather_result', {
@@ -19633,14 +19792,9 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
             });
         }
 
-        async function handleCurrentLocationRequest(originalText = '') {
+        async function completeCurrentLocationRequest(position, originalText = '') {
             showThinkingIndicator('Checking your current location...');
             try {
-                const position = await getCurrentPositionAsync({
-                    enableHighAccuracy: true,
-                    timeout: 12000,
-                    maximumAge: 60000
-                });
                 const lat = position.coords.latitude;
                 const lon = position.coords.longitude;
                 let locationName = 'your current location';
@@ -19665,10 +19819,8 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
                             addr.state_district ||
                             null;
 
-                        if (cityName) {
-                        }
                         exactAddress = reverseData?.display_name || '';
-                        locationName = exactAddress || 'your current location';
+                        locationName = exactAddress || cityName || 'your current location';
                     }
                 } catch (error) {}
 
@@ -19698,16 +19850,16 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
 </div>
 <p class="text-xs mt-2 text-slate-600 dark:text-slate-300">Exact location pin: ${escapeHtml(exactAddress || locationName)} (${latitude}, ${longitude}) - <a href="${mapsUrl}" target="_blank" rel="noopener noreferrer" class="underline">Open in Google Maps</a></p>`;
                 addChatMessage(embeddedMap, false, false);
-            } catch (error) {
-                await deliverApiReply('gps_access_error', {
-                    feature: 'current_location'
-                }, {
-                    historyKey: originalText || 'where am i',
-                    fallbackText: 'I could not access your current location. Please enable location permission and try again.'
-                });
             } finally {
                 hideThinkingIndicator();
             }
+        }
+
+        async function handleCurrentLocationRequest(originalText = '') {
+            await requestLocationForFeature({
+                type: 'whereami',
+                query: String(originalText || '').trim()
+            });
         }
 
         function isLikelyPersonalName(value) {
@@ -22894,6 +23046,8 @@ globalThis.handleComposerInput = handleComposerInput;
 globalThis.toggleSendButton = toggleSendButton;
 globalThis.stopActiveGeneration = stopActiveGeneration;
 globalThis.updateComposerPlaceholder = updateComposerPlaceholder;
+globalThis.allowJarvisLocationAccess = allowJarvisLocationAccess;
+globalThis.declineJarvisLocationAccess = declineJarvisLocationAccess;
 globalThis.dispatchEvent(new CustomEvent('jarvis:app-ready'));
 
 </script>
