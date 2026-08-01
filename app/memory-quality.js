@@ -23,7 +23,7 @@ export function forgetMemoryKey(memoryStore, key) {
     const fuzzy = Object.keys(memoryStore).find(item => item.toLowerCase().includes(normalized) || normalized.includes(item.toLowerCase()));
     if (fuzzy) {
         delete memoryStore[fuzzy];
-        return { removed: true, key: fuzzy };
+        return { removed: true, key: fuzzy }; 
     }
     return { removed: false, key: '' };
 }
