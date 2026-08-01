@@ -2,7 +2,7 @@ import { extractTextFromImage } from './vision-extract.js';
 
 const MAX_EXTRACT_CHARS = 120000;
 const TEXT_EXTENSIONS = /\.(txt|md|markdown|json|jsonl|csv|tsv|xml|html|htm|css|js|mjs|cjs|ts|tsx|jsx|py|java|cpp|c|h|cs|go|rs|rb|php|sh|yaml|yml|toml|ini|log|sql|rtf)$/i;
-const IMAGE_MIMES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/bmp', 'image/tiff']);
+const IMAGE_MIMES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/bmp', 'image/tiff','image/jpg']);
 
 export async function ingestAttachmentPayload(payload = {}) {
     const filename = String(payload.filename || 'attachment').trim() || 'attachment';
