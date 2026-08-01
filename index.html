@@ -8229,24 +8229,13 @@ function normalizeUiTokens(text) {
         }
 
         function formatModelSourceBadge(label = 'Model answer') {
-            return window.JarvisSourceTransparency?.buildSourceTransparencyHtml?.({
-                sourceType: 'model',
-                routeReason: label
-            }) || '';
+            return '';
         }
 
         function addVerifiedAssistantMessage(text, label = 'Verified live sources', meta = {}) {
             const body = String(text || '').trim();
             const normalized = normalizeVerifiedLiveMessage(body);
-            const badge = window.JarvisSourceTransparency?.buildSourceTransparencyHtml?.({
-                sourceType: 'verified',
-                verified: true,
-                text: normalized,
-                routeReason: label,
-                ...meta
-            }) || '';
-            const finalText = badge ? `${badge}\n${normalized}`.trim() : normalized;
-            return addChatMessage(finalText, false, null, {
+            return addChatMessage(normalized, false, null, {
                 ...meta,
                 sourceType: 'verified'
             });
@@ -8300,10 +8289,9 @@ function normalizeUiTokens(text) {
         }
 
         function addModelAssistantMessage(text, label = 'Model answer', meta = {}) {
-            const badge = formatModelSourceBadge(label);
             const body = String(text || '').trim();
             const memoryNote = window.JarvisMemoryQuality?.formatUsedMemoryNote?.(globalThis.__lastUsedMemoryKeys || []) || '';
-            const finalText = badge ? `${badge}\n${body}${memoryNote}`.trim() : `${body}${memoryNote}`.trim();
+            const finalText = `${body}${memoryNote}`.trim();
             return addChatMessage(finalText, false, null, {
                 ...meta,
                 sourceType: 'model',
