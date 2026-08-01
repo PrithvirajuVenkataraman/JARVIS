@@ -5047,7 +5047,7 @@ let showRoutingDebugBadge = false;
                 'Hello.',
                 'Hey.',
                 'Hi there.',
-                'Hello — how can I help?'
+                'Hello. How can I help?'
             ];
             const welcomeMessage = welcomeOptions[Math.floor(Math.random() * welcomeOptions.length)];
             addInitialGreetingMessage(welcomeMessage);
@@ -7898,7 +7898,7 @@ let showRoutingDebugBadge = false;
             const linkClass = isDarkTheme
                 ? 'text-sky-300 hover:text-sky-200 underline font-medium'
                 : 'text-indigo-700 hover:text-indigo-900 underline font-medium';
-            const readableText = formatAssistantTextForReadability(String(text || ''));
+            const readableText = formatAssistantTextForReadability(normalizeAssistantTextStyle(String(text || '')));
             const formatted = sanitizeAssistantMarkup(renderAssistantMarkdown(readableText, linkClass));
             textElement.classList.toggle('is-streaming', options?.streaming === true);
             textElement.innerHTML = formatted;
@@ -21823,7 +21823,12 @@ function normalizeItineraryTextForReadability(rawText) {
 }
 
 function normalizeAssistantTextStyle(text) {
-    return String(text || '').replace(/[â€”â€“]/g, '-');
+    return String(text || '')
+        .replace(/[\u2014\u2013\u2012\u2015]/g, '-') // em, en, figure, horizontal bar
+        .replace(/\u2010|\u2011/g, '-') // hyphen / non-breaking hyphen
+        .replace(/\u00A0|\u202F/g, ' ')
+        .replace(/[\u201C\u201D]/g, '"')
+        .replace(/[\u2018\u2019]/g, "'");
 }
 
 function autoBulletizeProcedureText(rawText) {
