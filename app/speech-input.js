@@ -8,8 +8,8 @@ const ERROR_MESSAGES = {
 const enqueueMicrotask = globalThis.queueMicrotask || (callback => Promise.resolve().then(callback)); 
 const TEXT_ONLY_LANGUAGE_NOTICE = 'Non-English languages are supported by text translation only. Voice input uses English transcription.';
 const CONVERSE_DUPLICATE_WINDOW_MS = 8000;
-const DEFAULT_CONVERSE_SILENCE_MS = 800;
-const DEFAULT_CONVERSE_MAX_WAIT_MS = 2800;
+const DEFAULT_CONVERSE_SILENCE_MS = 650;
+const DEFAULT_CONVERSE_MAX_WAIT_MS = 2400;
 
 function normalizeVoiceInputLanguage(language = '') {
     const value = String(language || '').trim();
