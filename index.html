@@ -9810,14 +9810,23 @@ function getLocationFromRecentContext() {
         return cachedLocation;
     }
 
+    const threadPlace = String(
+        window.JarvisConversation?.getState?.()?.activeThread?.entity ||
+        window.JarvisConversation?.getState?.()?.activeThread?.topic ||
+        ''
+    ).trim();
+    if (threadPlace && !isInvalidLocationCandidate(threadPlace) && !/\b(?:weather|forecast|news|price)\b/i.test(threadPlace)) {
+        return threadPlace;
+    }
+
     const recent = (conversationContext || []) 
         .filter(m => m && m.role === 'user') 
         .slice(-10) 
         .map(m => m.text || '') 
         .join(' '); 
-    const matches = recent.match(/\b(?:in|at|near|to)\s+([A-Za-z][A-Za-z\s,.-]{1,80})/ig) || [];
+    const matches = recent.match(/\b(?:in|at|near|to|about)\s+([A-Za-z][A-Za-z\s,.-]{1,80})/ig) || [];
     for (let i = matches.length - 1; i >= 0; i--) {
-        const m = matches[i].match(/\b(?:in|at|near|to)\s+([A-Za-z][A-Za-z\s,.-]{1,80})/i);
+        const m = matches[i].match(/\b(?:in|at|near|to|about)\s+([A-Za-z][A-Za-z\s,.-]{1,80})/i);
         const loc = m?.[1]?.trim().replace(/[?.!,]$/, '');
         if (loc && !isInvalidLocationCandidate(loc)) {
             return loc;
@@ -9839,6 +9848,81 @@ function extractTravelLocationOrFallback(text) {
     const fromContext = getLocationFromRecentContext();
     if (fromContext && !isInvalidLocationCandidate(fromContext)) return fromContext;
     return '';
+}
+
+function isPlaceRelativeTouristQuery(text) {
+    const t = String(text || '').toLowerCase();
+    if (!t) return false;
+    if (/\b(nearby|near by|around (?:there|here)|tourist (?:places?|spots?|attractions?)|sightseeing|things to do|places to (?:visit|see)|what to see|where to go)\b/.test(t)) {
+        return true;
+    }
+    // Short category follow-ups after a place thread: "beaches", "hill stations"
+    return /^(?:nearby\s+)?(?:hill stations?|beaches?|waterfalls?|temples?|parks?|lakes?|viewpoints?|attractions?)\b/.test(t.trim()) &&
+        !/^(?:what|who|how|why|define|explain)\b/.test(t);
+}
+
+async function handlePlaceRelativeTouristQuery(userText, boundPlace = '') {
+    if (!isPlaceRelativeTouristQuery(userText)) return false;
+    const location = String(boundPlace || '').trim() || extractTravelLocationOrFallback(userText);
+    if (!location || isInvalidLocationCandidate(location)) {
+        addChatMessage('Which place should I use for nearby tourist suggestions? Example: "nearby beaches near Goa".', false);
+        saveToHistory(userText, 'Which place should I use for nearby tourist suggestions?');
+        return true;
+    }
+    setLastResolvedTravelLocation(location);
+    showThinkingIndicator('Checking sources...');
+    const kindMatch = String(userText || '').toLowerCase().match(
+        /\b(hill stations?|beaches?|waterfalls?|temples?|parks?|lakes?|viewpoints?|hotels?|restaurants?|tourist (?:places?|spots?|attractions?)|attractions?|things to do|places to visit)\b/
+    );
+    const kind = kindMatch?.[1] || 'tourist places';
+    const searchQuery = `${kind} near ${location}`;
+    try {
+        const data = await fetchLiveSearchJson(searchQuery, {
+            maxResults: 8,
+            answer: true
+        });
+        const results = Array.isArray(data?.results) ? data.results.filter(Boolean) : [];
+        const directAnswer = cleanLiveAnswerText(String(data?.answer || '').trim());
+        if (data?.verified === true && directAnswer && results.length) {
+            const sourceLines = results.slice(0, 5).map((r, i) => `${i + 1}. [${r.title}](${r.url})`).join('\n');
+            const finalMsg = `${directAnswer}\n\nSources:\n${sourceLines}`;
+            addVerifiedAssistantMessage(finalMsg, 'Verified place sources');
+            saveToHistory(userText, finalMsg);
+            return true;
+        }
+        if (results.length) {
+            const lines = results.slice(0, 6).map((r, i) => {
+                const desc = String(r.description || '').trim().slice(0, 140);
+                return `${i + 1}. [${r.title}](${r.url})${desc ? ` - ${desc}` : ''}`;
+            }).join('\n');
+            const finalMsg = `Here are source-backed options for ${kind} near ${location}:\n\n${lines}\n\nI avoided inventing places beyond these sources.`;
+            addVerifiedAssistantMessage(finalMsg, 'Place search sources');
+            saveToHistory(userText, finalMsg);
+            return true;
+        }
+    } catch (_) {
+        // Fall through to grounded model answer with explicit uncertainty.
+    }
+
+    const grounded = await askGeminiAI(
+        `User asked about "${kind}" related to ${location}.
+Use only well-known, real places near ${location}.
+If you are not sure a place exists near ${location}, omit it.
+Do not invent hotels, distances, ticket prices, or opening hours.
+Start with places near ${location}, then give a short caution that details can change.`,
+        { stream: true, minimalThinking: true }
+    );
+    if (grounded?.aborted) return true;
+    const answer = String(grounded?.response || grounded?.text || '').trim();
+    if (answer) {
+        await publishResolvedModelMessage(userText, answer, {
+            label: 'Place suggestions',
+            routing: grounded?.routing || null
+        });
+        return true;
+    }
+    addChatMessage(`I could not verify nearby ${kind} for ${location} from current sources. Please try a more specific place name.`, false);
+    return true;
 }
 
 async function buildTopPlaceSuggestions(type, location, userText = '') {
@@ -17328,6 +17412,13 @@ function isWakeGreetingText(text) {
                 return;
             }
             text = contextResolution?.resolvedMessage || text;
+            const boundPlace = String(contextResolution?.activeThread?.entity || contextResolution?.activeThread?.topic || '').trim();
+            if (boundPlace && !isInvalidLocationCandidate(boundPlace)) {
+                setLastResolvedTravelLocation(boundPlace);
+            }
+            if (await handlePlaceRelativeTouristQuery(text, boundPlace)) {
+                return;
+            }
             const frontendRoute = decideFrontendRoute(text, {
                 turnSource: activeResponseRenderContext?.source || 'text'
             });
