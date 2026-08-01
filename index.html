@@ -20828,18 +20828,98 @@ function loadChatSessions() {
 }
 
 function saveChatSessions() {
-    if (!persistMemoryToDevice) return;
     try {
-        const visibleOrActive = chatSessions
+        const sessions = chatSessions
             .filter(session => session && !isDeletedChatSession(session) && chatSessionHasUserMessage(session))
             .slice(-80);
-        localStorage.setItem(CHAT_SESSIONS_STORAGE_KEY, JSON.stringify(visibleOrActive));
-        chatSessions = visibleOrActive;
+        const payload = sessions.map(compactChatSessionForStorage);
+        if (!writeChatSessionsWithQuotaRecovery(payload)) return;
+        // Keep full in-memory sessions; only the persisted payload is compacted.
+        chatSessions = sessions.concat(
+            chatSessions.filter(session => session && !isDeletedChatSession(session) && !chatSessionHasUserMessage(session))
+        );
     } catch (_) {}
 }
 
+function isStorageQuotaError(error) {
+    const name = String(error?.name || '');
+    const code = Number(error?.code || 0);
+    const message = String(error?.message || '').toLowerCase();
+    return name === 'QuotaExceededError' ||
+        name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
+        code === 22 ||
+        code === 1014 ||
+        /quota|storage full|exceeded the quota/i.test(message);
+}
+
+function compactChatSessionForStorage(session, options = {}) {
+    const maxMessages = Math.max(12, Number(options.maxMessages) || 80);
+    const maxChars = Math.max(400, Number(options.maxChars) || 5000);
+    return {
+        id: session.id,
+        title: String(session.title || 'New chat').slice(0, 80),
+        messages: (Array.isArray(session.messages) ? session.messages : [])
+            .slice(-maxMessages)
+            .map(item => ({
+                role: item?.role === 'assistant' ? 'assistant' : 'user',
+                text: String(item?.text || '').slice(0, maxChars),
+                timestamp: String(item?.timestamp || ''),
+                turnId: String(item?.turnId || '')
+            })),
+        createdAt: session.createdAt,
+        updatedAt: session.updatedAt,
+        autoTitle: session.autoTitle !== false,
+        titleEdited: session.titleEdited === true,
+        pinned: session.pinned === true,
+        deleted: false
+    };
+}
+
+function writeChatSessionsWithQuotaRecovery(sessions) {
+    let list = Array.isArray(sessions) ? sessions.slice() : [];
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+        try {
+            localStorage.setItem(CHAT_SESSIONS_STORAGE_KEY, JSON.stringify(list));
+            return true;
+        } catch (error) {
+            if (!isStorageQuotaError(error)) return false;
+            if (!list.length) {
+                try { localStorage.removeItem(CHAT_SESSIONS_STORAGE_KEY); } catch (_) {}
+                return false;
+            }
+            // Drop oldest unpinned session first, then shrink remaining payloads.
+            const dropIdx = list.findIndex(item => !item?.pinned);
+            if (dropIdx >= 0) list.splice(dropIdx, 1);
+            else list.shift();
+            const shrinkFactor = Math.max(0.45, 1 - (attempt * 0.08));
+            list = list.map(item => compactChatSessionForStorage(item, {
+                maxMessages: Math.max(12, Math.floor(60 * shrinkFactor)),
+                maxChars: Math.max(500, Math.floor(2500 * shrinkFactor))
+            }));
+        }
+    }
+    return false;
+}
+
+function flushChatSessionsToDevice() {
+    try {
+        saveChatSessions();
+    } catch (_) {}
+}
+
+function installChatSessionPersistenceGuards() {
+    if (globalThis.__jarvisChatPersistGuardsInstalled) return;
+    globalThis.__jarvisChatPersistGuardsInstalled = true;
+    const flush = () => flushChatSessionsToDevice();
+    window.addEventListener('pagehide', flush);
+    window.addEventListener('beforeunload', flush);
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') flush();
+    });
+}
+
 function rememberActiveEmptyChatDraft(session) {
-    if (!persistMemoryToDevice || !session || session.deleted || chatSessionHasUserMessage(session)) return;
+    if (!session || session.deleted || chatSessionHasUserMessage(session)) return;
     try {
         localStorage.setItem(CHAT_ACTIVE_DRAFT_STORAGE_KEY, JSON.stringify({
             id: session.id,
@@ -20858,7 +20938,6 @@ function forgetActiveEmptyChatDraft() {
 }
 
 function loadActiveEmptyChatDraft() {
-    if (!persistMemoryToDevice) return null;
     try {
         const saved = localStorage.getItem(CHAT_ACTIVE_DRAFT_STORAGE_KEY);
         const parsed = saved ? JSON.parse(saved) : null;
@@ -21192,6 +21271,9 @@ function buildChatTitlePrompt(messages = []) {
         '- Use Title Case.',
         '- Keep it between 3 and 6 words.',
         '- Keep it under 40 characters whenever possible.',
+        '- Prefer concrete nouns: place names, products, topics, or tasks.',
+        '- For weather or travel about a place, include the place name (example: Weather In Ooty).',
+        '- For coding or debugging, name the technology or bug area.',
         '- Do not include quotation marks.',
         '- Do not end with punctuation.',
         '- Do not include emojis.',
@@ -21213,7 +21295,10 @@ function shouldGenerateModelChatTitle(session) {
     const userCount = messages.filter(item => item.role === 'user').length;
     const assistantCount = messages.filter(item => item.role === 'assistant').length;
     if (!userCount || !assistantCount) return false;
-    return messages.length <= 10 || isGenericChatTitle(session.title);
+    if (isGenericChatTitle(session.title)) return true;
+    // Refine title after the first and second substantive exchanges.
+    if (userCount <= 3 && messages.length <= 12) return true;
+    return false;
 }
 
 async function generateModelChatTitle(session, fallbackTitle = '') {
@@ -21293,6 +21378,30 @@ function deriveChatTitleFromText(text) {
         .replace(/^(please|hey|hi|hello|jarvis)[,\s]+/i, '')
         .trim();
     if (!cleaned) return 'New chat';
+
+    if (/\bwhere\s+am\s+i\b|\bwhat(?:'?s|\s+is)\s+my\s+(?:exact\s+)?location\b|\bmy\s+current\s+location\b/i.test(cleaned)) {
+        return 'Where Am I';
+    }
+
+    const weatherPlace =
+        cleaned.match(/\b(?:how(?:\s+can|\s+could|\s+would|\s+might)?(?:\s+the)?\s+weather(?:\s+be)?(?:\s+like)?)\s+(?:in|at|for|around|near|of)\s+([A-Za-z][A-Za-z\s.',-]{1,40})/i) ||
+        cleaned.match(/\b(?:weather|forecast|temperature|climate)\b.*?\b(?:in|at|for|around|near|of)\s+([A-Za-z][A-Za-z\s.',-]{1,40})/i) ||
+        cleaned.match(/\bwill\s+it\s+(?:rain|snow|be\s+(?:hot|cold|sunny|cloudy|humid|windy))\s+(?:in|at|for|near)\s+([A-Za-z][A-Za-z\s.',-]{1,40})/i) ||
+        cleaned.match(/\b(?:in|at|for|near)\s+([A-Za-z][A-Za-z\s.',-]{1,40}).*\b(?:weather|forecast|temperature|climate)\b/i);
+    if (weatherPlace?.[1]) {
+        const place = weatherPlace[1]
+            .replace(/\b(?:today|tomorrow|tonight|now|right now|currently|this morning|this afternoon|this evening|next week)\b.*$/i, '')
+            .replace(/[?.!,;:]+$/g, '')
+            .trim();
+        if (place && !/^(?:the|a|an|here|there|my|me)$/i.test(place)) {
+            return normalizeChatTitleCandidate(`Weather in ${place}`, { maxWords: 6 });
+        }
+    }
+
+    if (/\b(?:weather|forecast|temperature|climate)\b/i.test(cleaned) && !/\b(?:in|at|for|near|of)\s+[A-Za-z]/i.test(cleaned)) {
+        return 'Local Weather';
+    }
+
     const algebra = typeof findPrimaryLinearEquation === 'function' ? findPrimaryLinearEquation(cleaned) : null;
     if (algebra?.equation) {
         return `Solve ${algebra.equation}`.slice(0, 60);
@@ -21300,6 +21409,14 @@ function deriveChatTitleFromText(text) {
     const withoutFiller = stripChatTitlePromptFiller(cleaned);
     const withoutQuestion = withoutFiller.replace(/[?.!,;:]+$/g, '').trim();
     return normalizeChatTitleCandidate(withoutQuestion);
+}
+
+function isShortChatTitleFollowUp(text) {
+    const cleaned = String(text || '').replace(/[?.!,;:]+$/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+    if (!cleaned) return true;
+    if (/^(yes|yeah|yep|ok|okay|sure|no|nope|thanks|thank you|continue|go on|more|and|then|next)$/i.test(cleaned)) return true;
+    const words = cleaned.split(/\s+/).filter(Boolean);
+    return words.length <= 3 && /\b(nearby|near|around|more|details|explain|continue|that|this|those|it)\b/.test(cleaned);
 }
 
 function isVagueChatTitlePrompt(text) {
@@ -21328,12 +21445,26 @@ function deriveChatTitleFromAssistantText(text) {
     return normalizeChatTitleCandidate(cleaned);
 }
 
+function pickPreferredChatTitleUserMessage(userMessages = []) {
+    const list = Array.isArray(userMessages) ? userMessages.filter(item => item?.text) : [];
+    if (!list.length) return null;
+    if (list.length === 1) return list[0];
+    for (let i = list.length - 1; i >= 0; i -= 1) {
+        const candidate = list[i];
+        if (!isVagueChatTitlePrompt(candidate.text) && !isShortChatTitleFollowUp(candidate.text)) {
+            return candidate;
+        }
+    }
+    return list[list.length - 1];
+}
+
 function deriveChatTitleFromMessages(messages = []) {
     const titleMessages = getChatTitleMessages(messages);
-    const firstUser = titleMessages.find(item => item.role === 'user' && item.text);
+    const userMessages = titleMessages.filter(item => item.role === 'user' && item.text);
+    const preferredUser = pickPreferredChatTitleUserMessage(userMessages);
     const firstAssistant = titleMessages.find(item => item.role === 'assistant' && item.text);
-    const userTitle = firstUser ? deriveChatTitleFromText(firstUser.text) : 'New chat';
-    if (firstUser && isVagueChatTitlePrompt(firstUser.text) && firstAssistant) {
+    const userTitle = preferredUser ? deriveChatTitleFromText(preferredUser.text) : 'New chat';
+    if (preferredUser && isVagueChatTitlePrompt(preferredUser.text) && firstAssistant) {
         const assistantTitle = deriveChatTitleFromAssistantText(firstAssistant.text);
         if (assistantTitle && assistantTitle !== 'New chat') return assistantTitle;
     }
@@ -21724,8 +21855,10 @@ function getHistoryStorageKey() {
 
 function saveConversationHistory() {
     if (!persistMemoryToDevice) return;
-    const historyKey = getHistoryStorageKey();
-    localStorage.setItem(historyKey, JSON.stringify(conversationHistory));
+    try {
+        const historyKey = getHistoryStorageKey();
+        localStorage.setItem(historyKey, JSON.stringify(conversationHistory));
+    } catch (_) {}
 }
 
 function normalizeHistoryUserMessage(userMessage) {
@@ -23037,6 +23170,7 @@ function endARSession() {
 }
 
 loadChatSessions();
+installChatSessionPersistenceGuards();
 initializeActiveChatSessionForStartup();
 ensureStartupGreeting(false);
 setTimeout(() => ensureStartupGreeting(false), 900);
