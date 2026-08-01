@@ -1,6 +1,6 @@
 const CASUAL_FILLER_PATTERN = /\b(?:no|nope|nah|just|generally|actually|i'?m|im|i am|asking|so|well|um|uh|like)\b/g;
 const LIVE_SIGNAL_PATTERN = /\b(latest|current|currently|today|tonight|now|recent|new|news|update|updates|as of|live|real[-\s]?time|open now|near me|nearby|weather|price|stock|crypto|score|sources?|cite|citation|web|search)\b/i;
-const PLACE_SIGNAL_PATTERN = /\b(museum|museums|landmark|landmarks|attraction|attractions|restaurant|restaurants|hotel|hotels|near me|nearby|directions|map|places to visit|tourist|tourism)\b/i;
+const PLACE_SIGNAL_PATTERN = /\b(museum|museums|landmark|landmarks|attraction|attractions|restaurant|restaurants|hotel|hotels|near me|nearby|directions|map|places to visit|tourist|tourism|beach|beaches|hill station|hill stations|waterfall|temple|park|sightseeing|things to do)\b/i;
 const SAFETY_SIGNAL_PATTERN = /\b(medical|medicine|diagnosis|symptom|dose|dosage|drug|treatment|legal|lawyer|contract|court|tax|investment|financial advice|self[-\s]?harm|suicide|weapon|malware)\b/i;
 const CURRENT_ROLE_PATTERN = /\b(ceo|cfo|cto|president|prime minister|chief minister|governor|mayor|minister|captain|coach|founder|founded|head of|leader)\b/i;
 const SIMPLE_STABLE_PATTERN = /^(?:what\s+is|what'?s|who\s+is|who\s+was|how\s+does|how\s+do|explain|define|tell\s+me\s+about)\s+[\w\s.'-]{2,80}\??$/i;
