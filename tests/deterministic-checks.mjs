@@ -688,7 +688,7 @@ assert.match(SOURCE.appHtml, /const normalizedOutgoingText = outgoingText && isL
 assert.match(SOURCE.appHtml, /id="composer-plus-btn"/);
 assert.match(SOURCE.appHtml, /class="composer-shell modern-input"/);
 assert.doesNotMatch(SOURCE.appHtml, /id="composer-model-btn"/);
-assert.match(SOURCE.appHtml, /Send follow-up/);
+assert.match(SOURCE.appHtml, /Type something/);
 assert.match(SOURCE.appHtml, /function updateComposerPlaceholder/);
 assert.match(SOURCE.appHtml, /function rememberMultimodalGrounding/);
 assert.match(SOURCE.appHtml, /function handleAgentWorkflow/);
