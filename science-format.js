@@ -5,8 +5,8 @@
     const HEX_RE = /\b0x[0-9A-Fa-f]+\b/g;
     const LONG_DECIMAL_RE = /(?<![\w.])[-+]?\d+\.\d{4,}(?:\s*[A-Za-z][A-Za-z0-9^*/().-]*)?/g;
     const ISOTOPE_RE = /\b(?:[A-Z][a-z]?)-\d{1,3}\b/g;
-    const CHEM_RE = /\b(?:[A-Z][a-z]?\d*){2,}(?:[+-])?\b/g;
-    const TOKEN_RE = /(?<![\w.])[-+]?(?:\d+(?:\.\d*)?|\.\d+)[eE][-+]?\d+(?:\s*[A-Za-z][A-Za-z0-9^*/().-]*)?|\b0x[0-9A-Fa-f]+\b|\b(?:[A-Z][a-z]?)-\d{1,3}\b|(?<![\w.])[-+]?\d+\.\d{4,}(?:\s*[A-Za-z][A-Za-z0-9^*/().-]*)?|\b(?:[A-Z][a-z]?\d*){2,}(?:[+-])?\b/g;
+    const CHEM_RE = /\b(?=[A-Za-z0-9]*\d)(?:[A-Z][a-z]?\d*){2,}(?:[+-])?\b/g;
+    const TOKEN_RE = /(?<![\w.])[-+]?(?:\d+(?:\.\d*)?|\.\d+)[eE][-+]?\d+(?:\s*[A-Za-z][A-Za-z0-9^*/().-]*)?|\b0x[0-9A-Fa-f]+\b|\b(?:[A-Z][a-z]?)-\d{1,3}\b|(?<![\w.])[-+]?\d+\.\d{4,}(?:\s*[A-Za-z][A-Za-z0-9^*/().-]*)?|\b(?=[A-Za-z0-9]*\d)(?:[A-Z][a-z]?\d*){2,}(?:[+-])?\b/g;
 
     function escapeHtml(value) {
         return String(value || '')
@@ -29,6 +29,8 @@
 
     function wrapToken(token) {
         const raw = String(token || '');
+        // Skip all-caps letter runs (JARVIS, NASA, etc.) that CHEM_RE can false-positive.
+        if (/^[A-Z]{2,}$/.test(raw)) return escapeHtml(raw);
         return `<span class="science-value science-value-${classifyToken(raw)}">${escapeHtml(raw)}</span>`;
     }
 
@@ -66,7 +68,7 @@
         if (!parts) return match;
         const mantissa = parts[1];
         const exponent = String(Number(parts[2]));
-        const unit = normalizeUnitSpeech(parts[3] || '');
+        const unit = normalizeUnitText(parts[3] || '');
         return `${mantissa} times 10 to the ${exponent}${unit ? ` ${unit}` : ''}`;
     }
 
@@ -74,7 +76,7 @@
         return `hex ${String(match || '').slice(2).toUpperCase().split('').join(' ')}`;
     }
 
-    function normalizeUnitSpeech(unit) {
+    function normalizeUnitText(unit) {
         return String(unit || '')
             .trim()
             .replace(/\bm\/s\^?2\b/g, 'meters per second squared')
@@ -98,7 +100,7 @@
             .trim();
     }
 
-    function normalizeScienceSpeech(text) {
+    function normalizeScienceText(text) {
         return String(text || '')
             .replace(SCI_RE, normalizeScientificNotation)
             .replace(HEX_RE, normalizeHex)
@@ -111,9 +113,9 @@
     }
 
     const api = {
-        enhancePlainText,
+        enhancePlainText, 
         enhanceHtml,
-        normalizeScienceSpeech
+        normalizeScienceText
     };
 
     global.JarvisScienceFormat = api;
