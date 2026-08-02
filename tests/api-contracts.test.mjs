@@ -5,7 +5,7 @@ import chatHandler, { __test as chatTest } from '../api/chat-groq.js';
 import currentFactsHandler from '../api/current-facts.js';
 import marketsHandler from '../api/markets.js';
 import searchHandler, { __test as searchTest } from '../api/search.js'; 
-import visionHandler from '../api/vision.js'; 
+import visionHandler, { __test as visionTest } from '../api/vision.js'; 
 import diagnosticsHandler from '../api/diagnostics.js';
 import { webSearchHandler, __test as webSearchTest } from '../api/_lib/web-search-core.js';
 import extractUrlHandler, { __test as extractUrlTest } from '../api/extract-url.js';
@@ -1957,6 +1957,42 @@ const invalidVisionMime = await callHandler(visionHandler, request('/api/vision'
 }));
 assert.equal(invalidVisionMime.statusCode, 415);
 assert.equal(invalidVisionMime.body.error.code, 'unsupported_media_type');
+
+assert.match(visionTest.buildVisionPrompt('what animal is that', 'animal_detect'), /scene understanding vision engine/);
+assert.match(visionTest.buildVisionPrompt('read this sign', 'text_extract'), /OCR and document vision engine/);
+assert.equal(visionTest.isSceneVisionTask('animal_detect'), true);
+assert.equal(visionTest.isTextFocusedVisionQuery('what do you see'), false);
+
+const animalSceneAnswer = visionTest.formatVisionResponse({
+    answer: '',
+    summary: '',
+    animals: [{ label: 'dog', count: 1, confidence: 0.93 }],
+    objects: [{ label: 'sign', count: 1, confidence: 0.95 }],
+    textDetected: ['OPEN 24 HOURS'],
+    fullText: 'OPEN 24 HOURS'
+}, 'animal_detect', 'what animal is that');
+assert.match(animalSceneAnswer, /dog/i);
+assert.doesNotMatch(animalSceneAnswer, /OPEN 24|Detected text|Readable text/i);
+
+const vehicleSceneAnswer = visionTest.formatVisionResponse({
+    answer: 'A red sedan is parked on the street.',
+    animals: [],
+    objects: [{ label: 'car', count: 1, confidence: 0.91 }, { label: 'sign', count: 1, confidence: 0.88 }],
+    textDetected: ['NO PARKING'],
+    fullText: 'NO PARKING'
+}, 'object_detect', 'what vehicle is this');
+assert.match(vehicleSceneAnswer, /car|sedan/i);
+assert.doesNotMatch(vehicleSceneAnswer, /NO PARKING|Detected text|Readable text/i);
+
+const generalSceneAnswer = visionTest.formatVisionResponse({
+    answer: '',
+    animals: [{ label: 'cat', count: 1, confidence: 0.9 }],
+    objects: [{ label: 'poster', count: 1, confidence: 0.8 }],
+    textDetected: ['ADOPT TODAY'],
+    fullText: 'ADOPT TODAY'
+}, 'general_vision', 'what do you see');
+assert.match(generalSceneAnswer, /cat/i);
+assert.doesNotMatch(generalSceneAnswer, /ADOPT TODAY|Readable text/i);
 
 process.env.GEMINI_API_KEY = 'test-gemini-key';
 let paperVisionCalls = 0;
