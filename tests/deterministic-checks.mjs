@@ -503,7 +503,7 @@ assert.match(SOURCE.appHtml, /Relevant saved memory:/);
 assert.doesNotMatch(SOURCE.appHtml, /alwaysShowContextCopilotBadge\s*=\s*true/);
 assert.match(SOURCE.appHtml, /function splitReadableSentences\(text\)/);
 assert.ok(SOURCE.appHtml.includes("char === '.' && /\\d/.test(prev) && /\\d/.test(next)"));
-assert.match(SOURCE.appHtml, /if \(isUser && !rawDisplayText\.trim\(\)\) return/);
+assert.match(SOURCE.appHtml, /if \(isUser && !rawDisplayText\.trim\(\) && !hasAttachments\) return/);
 assert.doesNotMatch(SOURCE.appHtml, /rawText\.match\(\s*\/\[\^\.\!\?\]\+\[\.\!\?\]\+\/g/);
 assert.match(SOURCE.appHtml, /const targeted = raw[\s\S]*\.replace\(\/\\bcief\\b\/gi, 'chief'\)/);
 assert.doesNotMatch(extractFunctionSource(SOURCE.appHtml, 'normalizeKnowledgeSubject'), /typoMap|knownArtistCorrections/);
@@ -684,7 +684,7 @@ assert.equal(currentFactsApi.body.sources[0].source, `${cachedNewsSubject} News`
 
 assert.match(SOURCE.appHtml, /let responseStyle = 'balanced'/);
 assert.match(SOURCE.appHtml, /\['balanced', 'witty', 'chatty', 'supportive', 'debate'\]/);
-assert.match(SOURCE.appHtml, /const normalizedOutgoingText = outgoingText && isLikelyCodeInput\(outgoingText\)/);
+assert.match(SOURCE.appHtml, /const normalizedOutgoingText = effectiveOutgoingText && isLikelyCodeInput\(effectiveOutgoingText\)/);
 assert.match(SOURCE.appHtml, /id="composer-plus-btn"/);
 assert.match(SOURCE.appHtml, /class="composer-shell modern-input"/);
 assert.doesNotMatch(SOURCE.appHtml, /id="composer-model-btn"/);
@@ -719,6 +719,15 @@ assert.match(SOURCE.appHtml, /app\/bootstrap\.js/);
 assert.match(SOURCE.appHtml, /jarvis:app-ready/);
 assert.match(SOURCE.bootstrap, /jarvis:app-ready/); 
 assertContracts(SOURCE.appHtml, FEATURE_CONTRACTS); 
+assert.match(SOURCE.visionApi, /scene understanding vision engine/);
+assert.match(SOURCE.visionApi, /Do NOT lead with background signs/);
+assert.match(SOURCE.visionApi, /function mergeSceneSubjects/);
+assert.match(SOURCE.visionApi, /export const __test/);
+assert.match(SOURCE.appHtml, /function resolveContinuousVisionTask/);
+assert.match(SOURCE.appHtml, /animal_detect/);
+assert.match(SOURCE.appHtml, /object_detect/);
+assert.match(SOURCE.appHtml, /What animal is that/);
+assert.match(SOURCE.appHtml, /What vehicle is this/);
 assert.match(SOURCE.visionApi, /function shouldEscalateMathOcrSolve/);
 assert.match(SOURCE.visionApi, /pipeline:\s*'fast-math-ocr-solve'/);
 assert.match(SOURCE.visionApi, /pipeline:\s*'planner-critic-solver'/);
@@ -1092,6 +1101,22 @@ vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'normalizeReadableVisionCo
 vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'cleanVisionDisplayText'), visionFormatSandbox);
 vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'formatVisionJsonToReadableText'), visionFormatSandbox);
 vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'formatVisionTranslationAnswer'), visionFormatSandbox);
+vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'resolveContinuousVisionTask'), visionFormatSandbox);
+visionFormatSandbox.isPaperAnswerOverlayIntent = () => false;
+visionFormatSandbox.isVisionTranslationIntent = () => false;
+assert.equal(visionFormatSandbox.resolveContinuousVisionTask('what animal is that'), 'animal_detect');
+assert.equal(visionFormatSandbox.resolveContinuousVisionTask('what vehicle is this'), 'object_detect');
+assert.equal(visionFormatSandbox.resolveContinuousVisionTask('read this sign'), 'text_extract');
+assert.equal(visionFormatSandbox.resolveContinuousVisionTask('what do you see'), 'general_vision');
+const animalVisionText = visionFormatSandbox.formatVisionJsonToReadableText({
+    answer: '',
+    animals: [{ label: 'dog', count: 1, confidence: 0.92 }],
+    objects: [{ label: 'sign', count: 1, confidence: 0.95 }],
+    textDetected: ['OPEN 24 HOURS'],
+    fullText: 'OPEN 24 HOURS'
+});
+assert.match(animalVisionText, /dog/i);
+assert.doesNotMatch(animalVisionText, /OPEN 24|Readable text/i);
 const richVisionText = visionFormatSandbox.formatVisionJsonToReadableText({
     answer: 'It appears to be a fixture phone based on the rear camera cluster.',
     brand: 'Fixture Brand',
@@ -1284,7 +1309,7 @@ assert.match(SOURCE.appHtml, /callAIWithTyping\(itineraryPrompt,[\s\S]*directMod
 assert.match(SOURCE.appHtml, /callAIWithTyping\(specialtyPrompt,[\s\S]*directModel:\s*true,[\s\S]*stream:\s*true,[\s\S]*displayUserMessage:\s*text/);
 assert.match(SOURCE.appHtml, /recipeResponse\?\.assistantMessageId[\s\S]*discardStreamingAssistantMessage\(recipeResponse\.assistantMessageId\)/);
 assert.match(SOURCE.appHtml, /aiResponse\?\.assistantMessageId[\s\S]*discardStreamingAssistantMessage\(aiResponse\.assistantMessageId\)/);
-assert.match(SOURCE.appHtml, /medicalResponse = await callAIWithTyping\(medicalPrompt,[\s\S]*directModel:\s*true\s*\}\)/);
+assert.match(SOURCE.appHtml, /medicalResponse = await callAIWithTyping\(medicalPrompt,[\s\S]*directModel:\s*true,[\s\S]*stream:\s*true,[\s\S]*displayUserMessage:\s*text/);
 assert.match(SOURCE.chatGroqApi, /if \(shouldStreamChatRequest\(req\.body, intent, grounding, routeDecision, isInternalSummary\)\)[\s\S]*handleStreamingChatRequest/);
 assert.match(SOURCE.chatGroqApi, /function needsPreStreamSafetyReview\(message\)/);
 assert.match(SOURCE.styles, /\.chat-delete-dialog\s*\{/);
