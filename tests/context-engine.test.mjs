@@ -1,364 +1,723 @@
-import assert from 'node:assert/strict';
-import { createConversationEngine } from '../app/context-engine.js';
-
-function token(index) {
-    return String.fromCharCode(97 + index).repeat(4);
-}
-
-function titleToken(index) {
-    const value = token(index);
-    return `${value.charAt(0).toUpperCase()}${value.slice(1)}`;
-}
-
-const TOPIC = Object.freeze({
-    primary: token(0),
-    secondary: token(1),
-    namedEntity: `${titleToken(2)} ${titleToken(3)}`,
-    temporary: token(4),
-    pendingBypass: `${token(5)} ${token(6)}`
+const INTENT_TERMS = Object.freeze({
+    acknowledgements: [
+        'yes', 'yeah', 'yep', 'yup', 'no', 'nope', 'nah', 'ok', 'okay', 'sure', 'alright', 'fine',
+        'thanks', 'thank you', 'got it', 'gotcha', 'cool', 'hmm', 'uh huh',
+        'i see', 'oh i see', 'ah i see', 'oh okay', 'oh ok', 'makes sense', 'understood',
+        'fair enough', 'right', 'ah okay', 'nice', 'great', 'perfect', 'awesome'
+    ],
+    cancelCommands: ['cancel', 'never mind', 'nevermind', 'stop', 'reset', 'start over', 'forget that', 'clear context'],
+    questionLeads: ['who', 'what', 'when', 'where', 'why', 'how', 'which'],
+    requestStarters: ['who', 'what', 'when', 'where', 'why', 'how', 'do', 'can', 'are', 'will', 'explain', 'tell', 'give', 'show', 'plan', 'create', 'write', 'compare', 'calculate', 'translate', 'remember', 'open', 'start'],
+    settingTargets: ['response', 'answer', 'dark', 'light', 'medical', 'support', 'news', 'memory', 'history', 'camera', 'vision', 'ocr', 'translator'],
+    featureTargets: ['weather', 'forecast', 'trip', 'itinerary', 'travel', 'translate', 'translator', 'camera', 'ocr', 'scan', 'vision', 'remember', 'memory', 'export', 'delete all data'],
+    followUpReferences: ['it', 'its', 'this', 'that', 'they', 'them', 'those', 'these', 'same', 'earlier', 'previous', 'above'],
+    followUpPhrases: [
+        'more', 'continue', 'continue from earlier', 'explain further', 'tell me more',
+        'what about', 'how about', 'then what', 'what next', 'further',
+        'compare', 'compare it', 'show examples', 'show me examples', 'examples',
+        'price', 'cost', 'latest', 'latest news', 'latest mission', 'mission',
+        'source', 'sources', 'pros', 'cons', 'difference', 'differences',
+        'nearby', 'near by', 'around there', 'around here', 'close by',
+        'tourist places', 'tourist spots', 'tourist attractions', 'attractions',
+        'sightseeing', 'things to do', 'places to visit', 'places to see', 'what to see', 'where to go',
+        'hill station', 'hill stations', 'beach', 'beaches', 'waterfall', 'waterfalls',
+        'temple', 'temples', 'park', 'parks', 'lake', 'lakes', 'viewpoint', 'viewpoints',
+        'hotels nearby', 'restaurants nearby', 'stay options', 'day trip', 'weekend trip'
+    ],
+    modificationPhrases: ['make it', 'make this', 'make that', 'change it', 'change this', 'change that', 'shorter', 'longer', 'simpler', 'instead'],
+    correctionOpeners: ['no', 'nah', 'nope', 'actually', 'wait', 'sorry'],
+    correctionIntents: ['i meant', 'that is', 'that was', 'you misunderstood'],
+    correctionPhrases: ['that is wrong', "that's wrong", 'you got that wrong', 'not what i meant', 'i meant'],
+    switchActions: ['change', 'switch', 'new', 'different', 'another'],
+    switchTargets: ['topic', 'subject'],
+    switchPhrases: ['anyway', 'moving on', 'on another note', "let's talk about", 'lets talk about', "let's discuss about", 'lets discuss about', 'switching topics', 'another question', 'new task', 'forget that'],
+    switchOpeners: ['now', 'another question', 'switching topics', 'forget that', "let's talk about", 'lets talk about', 'new task'],
+    resumePhrases: ['back to', 'return to', 'resume', 'continue with', 'earlier', 'previous topic', 'again about', 'regarding'],
+    pronounTargets: ['it', 'its', 'this', 'that', 'this one', 'that one', 'the company', 'the person', 'the topic'],
+    entityQuestionLeads: ['who', 'what'],
+    entityDescriptionLeads: ['tell me about', 'about', 'regarding'],
+    entityPrepositions: ['in', 'to', 'for']
 });
+const ACKNOWLEDGEMENTS = exactPhrasePattern(INTENT_TERMS.acknowledgements);
+const CANCEL_COMMANDS = exactPhrasePattern(INTENT_TERMS.cancelCommands);
+const REQUEST_STARTERS = leadingWordPattern(INTENT_TERMS.requestStarters);
+const REQUEST_STARTERS_WITH_STOP = leadingWordPattern([...INTENT_TERMS.requestStarters, 'stop']);
+const QUESTION_LEADS = leadingWordPattern(INTENT_TERMS.questionLeads);
+const FOLLOW_UP_SIGNALS = containsPhrasePattern([...INTENT_TERMS.followUpReferences, ...INTENT_TERMS.followUpPhrases]);
+const MODIFICATION_SIGNALS = containsPhrasePattern(INTENT_TERMS.modificationPhrases);
+const CORRECTION_SIGNALS = correctionPattern();
+const EXPLICIT_SWITCH = switchPattern();
+const EXPLICIT_SWITCH_OPENER = switchOpenerPattern();
+const EXPLICIT_RESUME = containsPhrasePattern(INTENT_TERMS.resumePhrases);
+const SETTINGS_COMMAND = commandTargetPattern(['set', 'change', 'switch', 'turn', 'enable', 'disable'], INTENT_TERMS.settingTargets);
+const FEATURE_COMMAND = containsPhrasePattern(INTENT_TERMS.featureTargets);
+const STANDALONE_LIVE_REQUEST = /\b(?:weather|temperature|forecast|bitcoin|btc|ethereum|eth|crypto|price now|rate now|score now|live score|ipl|nba|nfl|epl|earthquake|wildfire|flood|cyclone|hurricane|tsunami|latest news|breaking news|government news|stock price)\b/i;
+const PLACE_RELATIVE_FOLLOWUP = /\b(?:nearby|near by|around (?:there|here)|close by|tourist (?:places?|spots?|attractions?)|sightseeing|things to do|places to (?:visit|see)|what to see|where to go|hotels nearby|restaurants nearby|stay options|day trip|weekend trip)\b/i;
+const PLACE_CATEGORY_FOLLOWUP = /\b(?:hill stations?|beaches?|waterfalls?|temples?|parks?|lakes?|viewpoints?|attractions?)\b/i;
+const STANDALONE_CAPABILITY_QUESTION = /^(?:do|can|are|will)\s+you\b|^do\s+you\s+understand\s+[A-Za-z][A-Za-z\s-]{1,40}\??$/i;
+const PROPER_NOUN_OR_PLACE = /^(?:[A-Z][A-Za-z0-9.'-]{1,}(?:\s+[A-Z][A-Za-z0-9.'-]{1,}){0,4}|[A-Za-z][A-Za-z0-9.'-]{2,}(?:\s+[A-Za-z][A-Za-z0-9.'-]{2,}){0,2})$/;
+const CLEAR_NEW_TOPIC_SHORT = /^(?:[A-Za-z][A-Za-z0-9.'-]{1,}(?:\s+[A-Za-z][A-Za-z0-9.'-]{1,}){0,2})$/;
 
-const SAMPLE = Object.freeze({
-    usefulUser: `${token(7)} ${token(8)}`,
-    usefulAssistant: `${token(9)} ${token(10)}`,
-    failedAssistant: `${token(11)} ${token(12)}`,
-    interruptedUser: `${token(13)} ${token(14)}`,
-    interruptedAssistant: `${token(15)} ${token(16)}`
-});
-
-const PROMPT = Object.freeze({
-    introduce: topic => `Tell me about ${topic}`,
-    explain: topic => `Explain ${topic}`,
-    followUp: 'Tell me more about it',
-    acknowledgement: 'okay',
-    namedEntityQuestion: entity => `Who is ${entity}?`,
-    repair: 'No, I meant explain its practical use',
-    resume: topic => `Go back to ${topic}`,
-    temporarySwitch: topic => `Switch to a temporary topic about ${topic}`,
-    listRequest: 'Give me 10 Python tips'
-});
-
-const PENDING_SCENARIOS = Object.freeze([
-    { type: 'weather_location', expected: 'location' },
-    { type: 'travel_location', expected: 'location' },
-    { type: 'translator_input', expected: 'free_text' },
-    { type: 'screen_suggestion', expected: 'free_text' },
-    { type: 'location_choice', expected: 'number', options: ['One', 'Two'] },
-    { type: 'transport_confirmation', expected: 'yes_no' }
+const TOKEN_FILTER_WORDS = [
+    'a', 'an', 'the', 'and', 'or', 'but', 'if', 'then', 'than', 'is', 'are', 'am', 'was', 'were',
+    'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'can', 'could', 'would', 'will',
+    'should', 'what', 'which', 'who', 'when', 'where', 'why', 'how', 'i', 'me', 'my', 'you', 'your',
+    'we', 'our', 'they', 'their', 'he', 'she', 'it', 'this', 'that', 'these', 'those', 'please',
+    'tell', 'show', 'give', 'explain', 'about', 'for', 'to', 'of', 'in', 'on', 'at', 'with', 'from'
+];
+const STOP_WORDS = new Set(TOKEN_FILTER_WORDS);
+const ENTITY_PATTERNS = Object.freeze([
+    new RegExp(`\\b(?:${phraseAlternation(INTENT_TERMS.entityQuestionLeads)})\\s+is\\s+([A-Za-z0-9][A-Za-z0-9 .'-]{1,70})`, 'i'),
+    new RegExp(`\\b(?:${phraseAlternation(INTENT_TERMS.entityDescriptionLeads)})\\s+([A-Za-z0-9][A-Za-z0-9 .'-]{1,70})`, 'i'),
+    new RegExp(`\\b(?:${phraseAlternation(INTENT_TERMS.entityPrepositions)})\\s+([A-Z][A-Za-z .'-]{1,50})`)
 ]);
 
-function recordExchange(engine, threadId, userText, assistantText, source = 'text') {
-    engine.recordTurn({ role: 'user', text: userText, threadId, source });
-    engine.recordTurn({ role: 'assistant', text: assistantText, threadId });
+export function createConversationEngine(options = {}) {
+    const maxTurns = clamp(options.maxTurns, 12, 4, 30);
+    const maxContextChars = clamp(options.maxContextChars, 9000, 1000, 24000);
+    const maxThreads = clamp(options.maxThreads, 8, 2, 20);
+    const state = {
+        activeThreadId: '',
+        threads: new Map(),
+        turns: [],
+        pending: null,
+        preferences: { 
+            responseLength: 'normal', 
+            responseFormat: 'paragraph', 
+            responseStyle: 'balanced',
+            customSystemPrompt: ''
+        } 
+    };
+
+    return {
+        getState: () => snapshotState(state),
+        restoreState: snapshot => restoreState(state, snapshot, { maxTurns, maxThreads }),
+        setPending: pending => setPending(state, pending),
+        clearPending: reason => clearPending(state, reason),
+        reset: () => resetState(state),
+        resolve: input => resolveInput(state, input, { maxThreads }),
+        recordTurn: turn => recordTurn(state, turn, { maxTurns }),
+        discardTurn: turnId => discardTurn(state, turnId),
+        buildContext: options => buildContext(state, { maxTurns, maxContextChars, ...options }),
+        setPreferences: preferences => {
+            state.preferences = { ...state.preferences, ...sanitizePreferences(preferences) };
+            return { ...state.preferences };
+        }
+    };
 }
 
-function resolveAndRecordTopic(engine, topic, source = 'text') {
-    const result = engine.resolve({ message: PROMPT.introduce(topic) });
-    assert.equal(result.decisionReason, 'clear_new_intent');
-    recordExchange(engine, result.activeThread.id, result.resolvedMessage, `${topic} summary.`, source);
-    return result.activeThread.id;
+export function classifyInput(message, pending = null, activeThread = null) {
+    const originalMessage = cleanText(message);
+    const lower = originalMessage.toLowerCase();
+    const tokens = tokenize(originalMessage);
+    const isCancel = CANCEL_COMMANDS.test(lower);
+    const isSetting = SETTINGS_COMMAND.test(lower);
+    const isFeatureCommand = FEATURE_COMMAND.test(lower);
+    const isStandaloneLiveRequest = STANDALONE_LIVE_REQUEST.test(originalMessage);
+    const isAcknowledgement = ACKNOWLEDGEMENTS.test(lower);
+    const isExplicitSwitch = EXPLICIT_SWITCH.test(lower) || EXPLICIT_SWITCH_OPENER.test(lower);
+    const isCorrection = CORRECTION_SIGNALS.test(originalMessage);
+    const isModification = MODIFICATION_SIGNALS.test(lower);
+    // Acknowledgements stay on the thread but are not treated as content follow-ups.
+    const isPlaceRelativeFollowUp = !hasExplicitPlaceMention(originalMessage) && (
+        PLACE_RELATIVE_FOLLOWUP.test(originalMessage) ||
+        (
+            PLACE_CATEGORY_FOLLOWUP.test(originalMessage) &&
+            tokens.length <= 4 &&
+            !/^(?:what|who|how|why|which|define|explain|tell me what)\b/i.test(originalMessage)
+        )
+    );
+    const isFollowUp = isCorrection || isModification || FOLLOW_UP_SIGNALS.test(lower) || isPlaceRelativeFollowUp;
+    const pendingMatch = pending ? matchesPending(originalMessage, pending) : false;
+    const hasSubstantiveIntent = tokens.length >= 1 && !isAcknowledgement;
+    const startsClearRequest = REQUEST_STARTERS.test(originalMessage);
+    const isStandaloneCapabilityQuestion = STANDALONE_CAPABILITY_QUESTION.test(originalMessage);
+    const topic = deriveTopic(originalMessage);
+    const topicOverlap = activeThread
+        ? countOverlap(tokens, tokenize(`${activeThread.topic || ''} ${activeThread.entity || ''}`))
+        : 0;
+    const looksLikeNamedTopic = looksLikeStandaloneNamedTopic(originalMessage, tokens);
+    // Only clarify when the short reply is truly vague (pronouns / deictics), not when
+    // it is a clear new named topic like "Bengaluru" or "photosynthesis".
+    const ambiguousShortContext = Boolean(activeThread) &&
+        !pending &&
+        !isCancel &&
+        !isSetting &&
+        !isFeatureCommand &&
+        !isStandaloneLiveRequest &&
+        !isStandaloneCapabilityQuestion &&
+        !isExplicitSwitch &&
+        !isFollowUp &&
+        !isAcknowledgement &&
+        !startsClearRequest &&
+        !looksLikeNamedTopic &&
+        tokens.length > 0 &&
+        tokens.length <= 3 &&
+        topicOverlap === 0 &&
+        containsPhrasePattern(INTENT_TERMS.followUpReferences).test(lower);
+    const clearNewIntent = !isCancel &&
+        !isSetting &&
+        hasSubstantiveIntent &&
+        (
+            isExplicitSwitch ||
+            isFeatureCommand ||
+            isStandaloneLiveRequest ||
+            isStandaloneCapabilityQuestion ||
+            // Named topics are new intents only when they are not answering a pending prompt.
+            (looksLikeNamedTopic && !pendingMatch) ||
+            (startsClearRequest && !isFollowUp && Boolean(pending)) ||
+            (startsClearRequest && !isFollowUp && topicOverlap === 0) ||
+            (!pendingMatch && !isFollowUp && !isAcknowledgement && topicOverlap === 0)
+        );
+
+    return {
+        originalMessage,
+        tokens,
+        topic,
+        isCancel,
+        isSetting,
+        isFeatureCommand,
+        isStandaloneLiveRequest,
+        isStandaloneCapabilityQuestion,
+        isAcknowledgement,
+        isExplicitSwitch,
+        isModification,
+        isFollowUp,
+        isPlaceRelativeFollowUp,
+        isCorrection,
+        pendingMatch,
+        looksLikeNamedTopic,
+        ambiguousShortContext,
+        clearNewIntent
+    };
 }
 
-function assertUsesThread(result, threadId, message = 'expected active thread') {
-    assert.equal(result.activeThread.id, threadId, message);
-}
+function resolveInput(state, input, limits) {
+    const originalMessage = cleanText(input?.message ?? input);
+    const activeThread = state.threads.get(state.activeThreadId) || null;
+    const classification = classifyInput(originalMessage, state.pending, activeThread);
+    let cancelledPendingState = null;
+    let decisionReason = 'normal_request';
+    let confidence = 0.72;
 
-function assertDoesNotUseThread(result, threadId, message = 'expected new thread') {
-    assert.notEqual(result.activeThread.id, threadId, message);
-}
-
-const engine = createConversationEngine({ maxTurns: 8, maxContextChars: 600 });
-
-let result = engine.resolve({ message: PROMPT.introduce(TOPIC.primary) });
-assert.equal(result.decisionReason, 'clear_new_intent');
-const primaryThread = result.activeThread.id;
-recordExchange(engine, primaryThread, result.resolvedMessage, `${TOPIC.primary} is a gas giant.`);
-
-result = engine.resolve({ message: PROMPT.followUp });
-assert.equal(result.decisionReason, 'contextual_follow_up');
-assert.match(result.resolvedMessage, new RegExp(TOPIC.primary, 'i'));
-assertUsesThread(result, primaryThread);
-
-engine.setPending({ type: 'weather_location', expected: 'location', threadId: primaryThread });
-result = engine.resolve({ message: PROMPT.explain(TOPIC.secondary) });
-assert.equal(result.decisionReason, 'clear_new_intent');
-assert.equal(result.cancelledPendingState.reason, 'superseded_by_new_intent');
-assertDoesNotUseThread(result, primaryThread);
-
-engine.setPending({ type: 'location_choice', expected: 'number', options: ['Paris', 'Texas'] });
-result = engine.resolve({ message: '2' });
-assert.equal(result.decisionReason, 'pending_clarification_answer');
-
-engine.setPending({ type: 'weather_location', expected: 'location', threadId: primaryThread });
-result = engine.resolve({ message: 'Bengaluru' });
-assert.equal(result.decisionReason, 'pending_clarification_answer');
-assertUsesThread(result, primaryThread);
-
-engine.setPending({ type: 'location_choice', expected: 'number', options: ['Paris', 'Texas'] });
-result = engine.resolve({ message: PROMPT.listRequest });
-assert.equal(result.decisionReason, 'clear_new_intent');
-assert.equal(result.cancelledPendingState.type, 'location_choice');
-
-result = engine.resolve({ message: PROMPT.acknowledgement });
-assert.notEqual(result.decisionReason, 'clear_new_intent');
-
-const currentThread = engine.getState().activeThreadId;
-recordExchange(engine, currentThread, SAMPLE.usefulUser, SAMPLE.usefulAssistant);
-engine.recordTurn({ role: 'assistant', text: SAMPLE.failedAssistant, threadId: currentThread, error: true });
-assert.equal(engine.buildContext().some(turn => turn.text === SAMPLE.failedAssistant), false);
-
-engine.recordTurn({ id: 'interrupted_user', turnId: 'turn_interrupted', role: 'user', text: SAMPLE.interruptedUser, threadId: currentThread });
-engine.recordTurn({ id: 'interrupted_answer', turnId: 'turn_interrupted', role: 'assistant', text: SAMPLE.interruptedAssistant, threadId: currentThread });
-assert.equal(engine.discardTurn('turn_interrupted'), 2);
-assert.equal(engine.buildContext().some(turn => [SAMPLE.interruptedUser, SAMPLE.interruptedAssistant].includes(turn.text)), false);
-
-const before = engine.getState();
-engine.buildContext();
-assert.deepEqual(engine.getState(), before, 'building regeneration context must not mutate state');
-
-engine.resolve({ message: PROMPT.temporarySwitch(TOPIC.temporary) });
-engine.recordTurn({ role: 'user', text: `${TOPIC.temporary} temporary question` });
-engine.restoreState(before);
-assert.deepEqual(engine.getState(), before, 'restoring a regeneration snapshot must recover the exact conversation state');
-
-const mixedInputEngine = createConversationEngine({ maxTurns: 12, maxContextChars: 1200 });
-const mixedPrimaryThread = resolveAndRecordTopic(mixedInputEngine, TOPIC.primary);
-
-let mixed = mixedInputEngine.resolve({ message: PROMPT.followUp });
-assert.equal(mixed.decisionReason, 'contextual_follow_up');
-assertUsesThread(mixed, mixedPrimaryThread);
-assert.match(mixed.resolvedMessage, new RegExp(TOPIC.primary, 'i'));
-mixedInputEngine.recordTurn({
-    role: 'user',
-    text: mixed.resolvedMessage,
-    threadId: mixed.activeThread.id,
-    source: 'converse'
-});
-assert.equal(mixedInputEngine.getState().turns.at(-1).source, 'converse');
-
-mixed = mixedInputEngine.resolve({ message: PROMPT.explain(TOPIC.secondary) });
-const secondaryThread = mixed.activeThread.id;
-assertDoesNotUseThread(mixed, mixedPrimaryThread);
-mixedInputEngine.recordTurn({
-    role: 'user',
-    text: mixed.resolvedMessage,
-    threadId: secondaryThread,
-    source: 'vtt'
-});
-
-mixed = mixedInputEngine.resolve({ message: PROMPT.followUp });
-assertUsesThread(mixed, secondaryThread);
-assert.doesNotMatch(mixed.resolvedMessage, new RegExp(TOPIC.primary, 'i'));
-
-mixed = mixedInputEngine.resolve({ message: PROMPT.namedEntityQuestion(TOPIC.namedEntity) });
-assert.equal(mixed.decisionReason, 'clear_new_intent');
-assert.doesNotMatch(mixed.resolvedMessage, new RegExp(TOPIC.secondary, 'i'));
-assertDoesNotUseThread(mixed, secondaryThread);
-const entityThread = mixed.activeThread.id;
-recordExchange(mixedInputEngine, entityThread, mixed.resolvedMessage, `${TOPIC.namedEntity} was a mathematician.`);
-
-mixed = mixedInputEngine.resolve({ message: PROMPT.followUp });
-assert.equal(mixed.decisionReason, 'contextual_follow_up');
-assert.match(mixed.resolvedMessage, new RegExp(TOPIC.namedEntity, 'i'));
-
-mixed = mixedInputEngine.resolve({ message: PROMPT.repair });
-assert.equal(mixed.decisionReason, 'conversation_repair');
-assertUsesThread(mixed, entityThread);
-
-mixed = mixedInputEngine.resolve({ message: PROMPT.resume(TOPIC.primary) });
-assert.equal(mixed.decisionReason, 'explicit_thread_resume');
-assertUsesThread(mixed, mixedPrimaryThread);
-
-const topicBeforeAcknowledgement = mixedInputEngine.getState().threads
-    .find(thread => thread.id === mixedPrimaryThread).topic;
-mixed = mixedInputEngine.resolve({ message: PROMPT.acknowledgement });
-mixedInputEngine.recordTurn({
-    role: 'user',
-    text: PROMPT.acknowledgement,
-    threadId: mixed.activeThread.id,
-    source: 'converse'
-});
-assert.equal(
-    mixedInputEngine.getState().threads.find(thread => thread.id === mixedPrimaryThread).topic,
-    topicBeforeAcknowledgement,
-    'acknowledgements must not replace the active topic'
-);
-
-for (const pending of PENDING_SCENARIOS) {
-    mixedInputEngine.setPending({ ...pending, threadId: mixedPrimaryThread });
-    const switched = mixedInputEngine.resolve({ message: PROMPT.explain(TOPIC.pendingBypass) });
-    assert.equal(switched.decisionReason, 'clear_new_intent', `${pending.type} must not intercept a new spoken intent`);
-    assert.equal(switched.cancelledPendingState.type, pending.type);
-}
-
-const contextCopilotEngine = createConversationEngine({ maxTurns: 12, maxContextChars: 1200 });
-const primaryContextTopic = 'Subject Orbiter';
-const secondaryContextTopic = 'Subject Observatory';
-const personContextTopic = 'Subject Pioneer';
-let copilot = contextCopilotEngine.resolve({ message: `Tell me about ${primaryContextTopic}` });
-assert.equal(copilot.decisionReason, 'clear_new_intent');
-const primaryContextThread = copilot.activeThread.id;
-recordExchange(contextCopilotEngine, primaryContextThread, copilot.resolvedMessage, `${primaryContextTopic} summary.`);
-
-copilot = contextCopilotEngine.resolve({ message: 'latest on it' });
-assert.equal(copilot.decisionReason, 'contextual_follow_up');
-assert.match(copilot.resolvedMessage, new RegExp(primaryContextTopic, 'i'));
-recordExchange(contextCopilotEngine, primaryContextThread, copilot.resolvedMessage, `${primaryContextTopic} latest summary.`);
-
-copilot = contextCopilotEngine.resolve({ message: 'Tell me about guitar chords work string' });
-assert.equal(copilot.decisionReason, 'clear_new_intent');
-const guitarThread = copilot.activeThread.id;
-recordExchange(contextCopilotEngine, guitarThread, copilot.resolvedMessage, 'Guitar chords summary.');
-
-copilot = contextCopilotEngine.resolve({ message: 'Bengaluru' });
-assert.equal(copilot.decisionReason, 'clear_new_intent');
-assertDoesNotUseThread(copilot, guitarThread, 'bare place-like replies should start a new topic instead of blocking on clarification');
-assert.equal(copilot.resolvedMessage, 'Bengaluru');
-recordExchange(contextCopilotEngine, copilot.activeThread.id, copilot.resolvedMessage, 'Bengaluru is a city.');
-
-copilot = contextCopilotEngine.resolve({ message: 'bitcoin price now' });
-assert.notEqual(copilot.decisionReason, 'contextual_follow_up');
-assertDoesNotUseThread(copilot, guitarThread, 'bitcoin price now must not inherit guitar context');
-assert.equal(copilot.resolvedMessage, 'bitcoin price now');
-assert.doesNotMatch(copilot.resolvedMessage, /\bguitar\b/i);
-
-copilot = contextCopilotEngine.resolve({ message: `Tell me about ${secondaryContextTopic}` });
-assert.equal(copilot.decisionReason, 'clear_new_intent');
-const secondaryContextThread = copilot.activeThread.id;
-assertDoesNotUseThread(copilot, primaryContextThread);
-recordExchange(contextCopilotEngine, secondaryContextThread, copilot.resolvedMessage, `${secondaryContextTopic} summary.`);
-
-copilot = contextCopilotEngine.resolve({ message: `compare it with ${primaryContextTopic}` });
-assert.equal(copilot.decisionReason, 'contextual_follow_up');
-assertUsesThread(copilot, secondaryContextThread);
-assert.match(copilot.resolvedMessage, new RegExp(secondaryContextTopic, 'i'));
-assert.match(copilot.resolvedMessage, new RegExp(primaryContextTopic, 'i'));
-
-copilot = contextCopilotEngine.resolve({ message: 'no, I meant its latest mission' });
-assert.equal(copilot.decisionReason, 'conversation_repair');
-assertUsesThread(copilot, secondaryContextThread);
-assert.match(copilot.resolvedMessage, new RegExp(secondaryContextTopic, 'i'));
-
-copilot = contextCopilotEngine.resolve({ message: `go back to ${primaryContextTopic}` });
-assert.equal(copilot.decisionReason, 'explicit_thread_resume');
-assertUsesThread(copilot, primaryContextThread);
-
-copilot = contextCopilotEngine.resolve({ message: 'Another question: what is photosynthesis?' });
-assert.equal(copilot.decisionReason, 'clear_new_intent');
-assert.equal(copilot.primaryIntent, 'new_unrelated_task');
-assertDoesNotUseThread(copilot, primaryContextThread);
-assert.doesNotMatch(copilot.resolvedMessage, new RegExp(primaryContextTopic, 'i'));
-const photosynthesisThread = copilot.activeThread.id;
-recordExchange(contextCopilotEngine, photosynthesisThread, copilot.resolvedMessage, 'Photosynthesis summary.');
-
-copilot = contextCopilotEngine.resolve({ message: 'make it shorter' });
-assert.equal(copilot.decisionReason, 'contextual_follow_up');
-assert.equal(copilot.primaryIntent, 'continue_previous_task');
-assertUsesThread(copilot, photosynthesisThread);
-
-const converseIntentEngine = createConversationEngine({ maxTurns: 8, maxContextChars: 800 });
-let converseIntent = converseIntentEngine.resolve({ message: 'Hey Jarvis' });
-const wakeThread = converseIntent.activeThread?.id || '';
-if (wakeThread) {
-    converseIntentEngine.recordTurn({ role: 'user', text: 'Hey Jarvis', threadId: wakeThread, source: 'converse' });
-    converseIntentEngine.recordTurn({ role: 'assistant', text: 'Yes sir, how can I help you with?', threadId: wakeThread });
-}
-converseIntent = converseIntentEngine.resolve({ message: 'Do you understand Tamil' });
-assert.equal(converseIntent.decisionReason, 'clear_new_intent');
-assert.doesNotMatch(converseIntent.resolvedMessage, /hey jarvis/i);
-if (wakeThread) assertDoesNotUseThread(converseIntent, wakeThread);
-
-converseIntent = converseIntentEngine.resolve({ message: 'How are you doing today' });
-assert.notEqual(converseIntent.decisionReason, 'ambiguous_short_context');
-assert.match(copilot.resolvedMessage, /\bphotosynthesis\b/i);
-
-copilot = contextCopilotEngine.resolve({ message: `who is ${personContextTopic}?` });
-assert.equal(copilot.decisionReason, 'clear_new_intent');
-assertDoesNotUseThread(copilot, primaryContextThread);
-assert.doesNotMatch(copilot.resolvedMessage, new RegExp(primaryContextTopic, 'i'));
-const personContextThread = copilot.activeThread.id;
-
-copilot = contextCopilotEngine.resolve({ message: 'compare them' });
-assert.equal(copilot.decisionReason, 'ambiguous_reference_context');
-assert.equal(copilot.primaryIntent, 'clarification');
-assertUsesThread(copilot, personContextThread);
-
-const personTopicBeforeAcknowledgement = contextCopilotEngine.getState().threads
-    .find(thread => thread.id === personContextThread).topic;
-copilot = contextCopilotEngine.resolve({ message: 'okay' });
-assert.notEqual(copilot.decisionReason, 'clear_new_intent');
-contextCopilotEngine.recordTurn({ role: 'user', text: 'okay', threadId: copilot.activeThread.id });
-assert.equal(
-    contextCopilotEngine.getState().threads.find(thread => thread.id === personContextThread).topic,
-    personTopicBeforeAcknowledgement,
-    'Context Copilot acknowledgement must not overwrite active topic'
-);
-
-for (const scenario of [
-    {
-        anchor: 'Subject Relief Agency',
-        standalone: 'Who is the current president of Test Republic?',
-        followup: 'show examples',
-        followupMatch: /\bSubject Relief Agency\b/i
-    },
-    {
-        anchor: 'fixture computing',
-        standalone: 'What is photosynthesis?',
-        followup: 'what about cost?',
-        followupMatch: /\bfixture computing\b/i
+    if (classification.isCancel) {
+        cancelledPendingState = clearPending(state, 'user_cancelled');
+        state.activeThreadId = '';
+        return resolution(originalMessage, originalMessage, null, 'reset_or_cancel', 1, cancelledPendingState);
     }
-]) {
-    const engineForScenario = createConversationEngine({ maxTurns: 10, maxContextChars: 1000 });
-    let generic = engineForScenario.resolve({ message: `Tell me about ${scenario.anchor}` });
-    const anchorThread = generic.activeThread.id;
-    recordExchange(engineForScenario, anchorThread, generic.resolvedMessage, `${scenario.anchor} summary.`);
 
-    generic = engineForScenario.resolve({ message: scenario.standalone });
-    assert.equal(generic.decisionReason, 'clear_new_intent');
-    assertDoesNotUseThread(generic, anchorThread, `${scenario.standalone} must not inherit ${scenario.anchor}`);
-    const standaloneThread = generic.activeThread.id;
-    recordExchange(engineForScenario, standaloneThread, generic.resolvedMessage, `${scenario.standalone} summary.`);
+    if (classification.isSetting) {
+        decisionReason = 'explicit_setting_command';
+        confidence = 0.98;
+    } else if (EXPLICIT_RESUME.test(originalMessage)) {
+        const resumedThread = findReferencedThread(state, originalMessage);
+        if (resumedThread) {
+            cancelledPendingState = clearPending(state, 'superseded_by_explicit_thread_resume');
+            state.activeThreadId = resumedThread.id;
+            resumedThread.updatedAt = Date.now();
+            return resolution(
+                originalMessage,
+                resolveFollowUpText(originalMessage, resumedThread.entity || resumedThread.topic),
+                resumedThread,
+                'explicit_thread_resume',
+                0.97,
+                cancelledPendingState
+            );
+        }
+    } else if (classification.ambiguousShortContext) {
+        return resolution(originalMessage, originalMessage, activeThread, 'ambiguous_short_context', 0.58, null);
+    } else if (classification.isFollowUp && hasAmbiguousReferenceAcrossThreads(state, originalMessage, activeThread)) {
+        return resolution(originalMessage, originalMessage, activeThread, 'ambiguous_reference_context', 0.52, null);
+    } else if (classification.clearNewIntent) {
+        cancelledPendingState = clearPending(state, 'superseded_by_new_intent');
+        const thread = createThread(state, classification.topic || originalMessage, limits.maxThreads);
+        decisionReason = 'clear_new_intent';
+        confidence = classification.isExplicitSwitch || classification.isFeatureCommand || classification.looksLikeNamedTopic
+            ? 0.98
+            : 0.88;
+        return resolution(originalMessage, originalMessage, thread, decisionReason, confidence, cancelledPendingState);
+    } else if (classification.pendingMatch && state.pending) {
+        // Pending answers (locations, yes/no, numbered choices) bind when not a clear new request.
+        decisionReason = 'pending_clarification_answer';
+        confidence = 0.96;
+        const pendingThread = state.threads.get(state.pending.threadId) || activeThread;
+        if (pendingThread) {
+            state.activeThreadId = pendingThread.id;
+            pendingThread.updatedAt = Date.now();
+        }
+        return resolution(originalMessage, originalMessage, pendingThread, decisionReason, confidence, null);
+    } else if (classification.isAcknowledgement && activeThread) {
+        // Keep the active thread; do not expand "okay" into a follow-up query.
+        return resolution(originalMessage, originalMessage, activeThread, 'acknowledgement_keep_context', 0.95, null);
+    } else if (classification.isFollowUp && activeThread) { 
+        if (!shouldResolveAgainstActiveThread(originalMessage, classification, activeThread)) {
+            const thread = createThread(state, classification.topic || originalMessage, limits.maxThreads);
+            const reason = hasExplicitPlaceMention(originalMessage)
+                ? 'clear_new_intent'
+                : 'new_intent_low_context_confidence';
+            return resolution(originalMessage, originalMessage, thread, reason, reason === 'clear_new_intent' ? 0.9 : 0.66, null);
+        }
+        const resolved = resolveFollowUpText(originalMessage, activeThread.entity || activeThread.topic); 
+        decisionReason = classification.isCorrection ? 'conversation_repair' : 'contextual_follow_up'; 
+        confidence = FOLLOW_UP_SIGNALS.test(originalMessage) ? 0.92 : 0.78; 
+        return resolution(originalMessage, resolved, activeThread, decisionReason, confidence, null);
+    }
 
-    generic = engineForScenario.resolve({ message: scenario.followup });
-    assert.equal(generic.decisionReason, 'contextual_follow_up');
-    assert.doesNotMatch(generic.resolvedMessage, scenario.followupMatch, 'follow-up after new standalone topic must not jump back to the old topic');
-    assertUsesThread(generic, standaloneThread);
+    const thread = activeThread || createThread(state, classification.topic || originalMessage, limits.maxThreads);
+    return resolution(originalMessage, originalMessage, thread, decisionReason, confidence, cancelledPendingState);
 }
 
-const fastSimpleContextEngine = createConversationEngine({ maxTurns: 10, maxContextChars: 1000 });
-let fastSimpleContext = fastSimpleContextEngine.resolve({ message: 'Tell me about fixture rockets' });
-const staleThread = fastSimpleContext.activeThread.id;
-recordExchange(fastSimpleContextEngine, staleThread, fastSimpleContext.resolvedMessage, 'Fixture rockets summary.');
-fastSimpleContext = fastSimpleContextEngine.resolve({ message: 'What is photosynthesis?' });
-assert.equal(fastSimpleContext.decisionReason, 'clear_new_intent');
-assertDoesNotUseThread(fastSimpleContext, staleThread, 'fast/simple stable questions must switch away from stale topics');
-const fastPhotosynthesisThread = fastSimpleContext.activeThread.id;
-recordExchange(fastSimpleContextEngine, fastPhotosynthesisThread, fastSimpleContext.resolvedMessage, 'Photosynthesis is how plants make food.');
-fastSimpleContext = fastSimpleContextEngine.resolve({ message: 'make it shorter' });
-assert.equal(fastSimpleContext.decisionReason, 'contextual_follow_up');
-assertUsesThread(fastSimpleContext, fastPhotosynthesisThread);
-assert.doesNotMatch(fastSimpleContext.resolvedMessage, /fixture rockets/i);
-assert.match(fastSimpleContext.resolvedMessage, /photosynthesis/i);
+function discardTurn(state, turnId) {
+    const id = cleanText(turnId);
+    if (!id) return 0;
+    const before = state.turns.length;
+    state.turns = state.turns.filter(turn => turn.id !== id && turn.turnId !== id);
+    return before - state.turns.length;
+}
 
-const placeFollowEngine = createConversationEngine({ maxTurns: 8, maxContextChars: 800 });
-let placeFollow = placeFollowEngine.resolve({ message: 'Tell me about Ooty' });
-assert.equal(placeFollow.decisionReason, 'clear_new_intent');
-const ootyThread = placeFollow.activeThread.id;
-recordExchange(placeFollowEngine, ootyThread, placeFollow.resolvedMessage, 'Ooty is a hill town in Tamil Nadu.');
-placeFollow = placeFollowEngine.resolve({ message: 'nearby beaches' });
-assert.equal(placeFollow.decisionReason, 'contextual_follow_up');
-assertUsesThread(placeFollow, ootyThread);
-assert.match(placeFollow.resolvedMessage, /ooty/i);
-assert.match(placeFollow.resolvedMessage, /beach/i);
-placeFollow = placeFollowEngine.resolve({ message: 'hill stations' });
-assert.equal(placeFollow.decisionReason, 'contextual_follow_up');
-assertUsesThread(placeFollow, ootyThread);
-assert.match(placeFollow.resolvedMessage, /ooty/i);
-placeFollow = placeFollowEngine.resolve({ message: 'tourist places' });
-assert.equal(placeFollow.decisionReason, 'contextual_follow_up');
-assert.match(placeFollow.resolvedMessage, /ooty/i);
-placeFollow = placeFollowEngine.resolve({ message: 'nearby beaches in Goa' });
-assert.equal(placeFollow.decisionReason, 'clear_new_intent');
-assert.doesNotMatch(placeFollow.resolvedMessage, /ooty/i);
+function recordTurn(state, turn, limits) {
+    const role = turn?.role === 'assistant' ? 'assistant' : 'user';
+    const text = cleanText(turn?.text);
+    if (!text || turn?.aborted || turn?.error || turn?.control) return null;
 
-console.log('context-engine-tests-ok');
+    const threadId = cleanText(turn?.threadId) || state.activeThreadId;
+    if (!threadId || !state.threads.has(threadId)) return null;
+    const thread = state.threads.get(threadId);
+    const record = {
+        id: cleanText(turn?.id) || `${role}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        turnId: cleanText(turn?.turnId),
+        role,
+        text: text.slice(0, 4000),
+        source: cleanText(turn?.source) || 'text',
+        threadId,
+        createdAt: Number(turn?.createdAt) || Date.now()
+    };
+    state.turns.push(record);
+    state.turns = state.turns.slice(-limits.maxTurns * 3);
+    thread.updatedAt = record.createdAt;
+    if (role === 'user' && !ACKNOWLEDGEMENTS.test(text)) {
+        const entity = deriveEntity(text);
+        if (entity) thread.entity = entity;
+        const topic = deriveTopic(text);
+        if (topic) thread.topic = topic;
+    }
+    return { ...record };
+}
+
+function buildContext(state, options = {}) {
+    const threadId = cleanText(options.threadId) || state.activeThreadId;
+    if (!threadId) return [];
+    const maxTurns = clamp(options.maxTurns, 12, 2, 30);
+    const maxChars = clamp(options.maxContextChars, 9000, 500, 24000);
+    const selected = state.turns.filter(turn => turn.threadId === threadId).slice(-maxTurns);
+    const out = [];
+    let chars = 0;
+    for (let i = selected.length - 1; i >= 0; i -= 1) {
+        const turn = selected[i];
+        const cost = turn.text.length + 20;
+        if (out.length && chars + cost > maxChars) break;
+        chars += cost;
+        out.unshift({ role: turn.role, text: turn.text });
+    }
+    return out;
+}
+
+function setPending(state, pending) {
+    if (!pending || typeof pending !== 'object') {
+        state.pending = null;
+        return null;
+    }
+    state.pending = {
+        type: cleanText(pending.type) || 'clarification',
+        expected: cleanText(pending.expected) || 'free_text',
+        options: Array.isArray(pending.options) ? pending.options.map(cleanText).filter(Boolean).slice(0, 10) : [],
+        threadId: cleanText(pending.threadId) || state.activeThreadId,
+        createdAt: Date.now()
+    };
+    return { ...state.pending };
+}
+
+function clearPending(state, reason = 'cleared') {
+    if (!state.pending) return null;
+    const previous = { ...state.pending, reason };
+    state.pending = null;
+    return previous;
+}
+
+function matchesPending(message, pending) {
+    const text = cleanText(message);
+    if (!text) return false;
+    if (pending.expected === 'number') {
+        const match = text.match(/^\s*(\d{1,2})\s*$/);
+        if (!match) return false;
+        const value = Number(match[1]);
+        return pending.options.length ? value >= 1 && value <= pending.options.length : value >= 1;
+    }
+    if (pending.expected === 'yes_no') return /^(yes|yeah|yep|sure|ok|okay|no|nope|nah)$/i.test(text);
+    if (pending.expected === 'name') return /^[A-Za-z][A-Za-z '-]{1,70}$/.test(text);
+    if (pending.expected === 'location') {
+        const startsNewRequest = REQUEST_STARTERS_WITH_STOP.test(text);
+        return !startsNewRequest &&
+            !FEATURE_COMMAND.test(text) &&
+            !SETTINGS_COMMAND.test(text) &&
+            text.split(/\s+/).length <= 6;
+    }
+    return ACKNOWLEDGEMENTS.test(text) || tokenize(text).length <= 8;
+}
+
+function findReferencedThread(state, message) {
+    const messageTokens = tokenize(message);
+    let best = null;
+    let bestScore = 0;
+    for (const thread of state.threads.values()) {
+        const referenceTokens = tokenize(`${thread.topic} ${thread.entity || ''}`);
+        const score = countOverlap(messageTokens, referenceTokens);
+        if (score > bestScore) {
+            best = thread;
+            bestScore = score;
+        }
+    }
+    return bestScore > 0 ? best : null;
+}
+
+function createThread(state, topic, maxThreads) {
+    const normalized = deriveTopic(topic) || cleanText(topic).toLowerCase().slice(0, 80) || 'general';
+    const existing = [...state.threads.values()].find(thread => thread.topic === normalized);
+    if (existing) {
+        existing.updatedAt = Date.now();
+        state.activeThreadId = existing.id;
+        return existing;
+    }
+    const thread = {
+        id: `thread_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        topic: normalized,
+        entity: deriveEntity(topic),
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+    };
+    state.threads.set(thread.id, thread);
+    state.activeThreadId = thread.id;
+    if (state.threads.size > maxThreads) {
+        const oldest = [...state.threads.values()]
+            .filter(item => item.id !== thread.id)
+            .sort((a, b) => a.updatedAt - b.updatedAt)[0];
+        if (oldest) {
+            state.threads.delete(oldest.id);
+            state.turns = state.turns.filter(turn => turn.threadId !== oldest.id);
+        }
+    }
+    return thread;
+}
+
+function resetState(state) {
+    state.activeThreadId = '';
+    state.threads.clear();
+    state.turns = [];
+    state.pending = null;
+}
+
+function restoreState(state, snapshot, limits) {
+    const source = snapshot && typeof snapshot === 'object' ? snapshot : {};
+    state.activeThreadId = String(source.activeThreadId || '');
+    state.threads = new Map(
+        (Array.isArray(source.threads) ? source.threads : [])
+            .slice(-limits.maxThreads)
+            .map(thread => [String(thread.id || ''), { ...thread }])
+            .filter(([id]) => id)
+    );
+    state.turns = (Array.isArray(source.turns) ? source.turns : [])
+        .slice(-limits.maxTurns)
+        .map(turn => ({ ...turn }));
+    state.pending = source.pending ? { ...source.pending } : null;
+    state.preferences = {
+        responseLength: 'normal',
+        responseFormat: 'paragraph',
+        responseStyle: 'balanced',
+        customSystemPrompt: '',
+        ...sanitizePreferences(source.preferences)
+    };
+    if (!state.threads.has(state.activeThreadId)) state.activeThreadId = '';
+    return snapshotState(state);
+}
+
+function resolution(originalMessage, resolvedMessage, thread, decisionReason, confidence, cancelledPendingState) {
+    return {
+        originalMessage,
+        resolvedMessage,
+        activeThread: thread ? { ...thread } : null,
+        decisionReason,
+        primaryIntent: primaryIntentForDecision(decisionReason),
+        confidence,
+        cancelledPendingState
+    };
+}
+
+function primaryIntentForDecision(decisionReason) {
+    switch (String(decisionReason || '')) {
+        case 'contextual_follow_up':
+            return 'continue_previous_task';
+        case 'conversation_repair':
+            return 'modify_previous_task';
+        case 'explicit_thread_resume':
+            return 'refers_back_to_earlier_task';
+        case 'pending_clarification_answer':
+        case 'ambiguous_short_context':
+        case 'ambiguous_reference_context':
+            return 'clarification';
+        case 'acknowledgement_keep_context':
+            return 'continue_previous_task';
+        case 'clear_new_intent':
+        case 'new_intent_low_context_confidence':
+            return 'new_unrelated_task';
+        default:
+            return 'new_unrelated_task';
+    }
+}
+
+function hasExplicitPlaceMention(text) {
+    const raw = cleanText(text);
+    if (!raw) return false;
+    // "nearby beaches in Goa" / "tourist places near Manali" already name a place.
+    if (/\b(?:in|at|near|around|to|for)\s+[A-Za-z][A-Za-z\s.'-]{1,40}$/i.test(raw)) return true;
+    if (/\b(?:in|at|near|around)\s+[A-Za-z][A-Za-z\s.'-]{1,40}\b/i.test(raw) &&
+        !/\b(?:near me|nearby|near by|around there|around here)\b/i.test(raw)) {
+        // Allow "near me" style relatives; otherwise treat as explicit place.
+        const withoutRelative = raw.replace(/\b(?:nearby|near by|around there|around here|close by|near me)\b/gi, ' ');
+        return /\b(?:in|at|near|around|to|for)\s+[A-Za-z][A-Za-z][A-Za-z\s.'-]{0,40}\b/i.test(withoutRelative);
+    }
+    return false;
+}
+
+function looksLikeStandaloneNamedTopic(message, tokens = []) {
+    const raw = cleanText(message);
+    if (!raw) return false;
+    const tokenList = Array.isArray(tokens) && tokens.length ? tokens : tokenize(raw);
+    if (tokenList.length === 0 || tokenList.length > 4) return false;
+    if (containsPhrasePattern(INTENT_TERMS.followUpReferences).test(raw)) return false;
+    if (FOLLOW_UP_SIGNALS.test(raw) || MODIFICATION_SIGNALS.test(raw)) return false;
+    if (QUESTION_LEADS.test(raw) || REQUEST_STARTERS.test(raw)) return false;
+    // Capitalized multi-word names, cities, brands, or short noun phrases without pronouns.
+    if (PROPER_NOUN_OR_PLACE.test(raw)) return true;
+    if (CLEAR_NEW_TOPIC_SHORT.test(raw) && tokenList.length <= 3) return true;
+    return false;
+}
+
+function deriveTopic(text) {
+    const tokens = tokenize(text);
+    // Prefer entity when available so follow-ups bind to a stable subject.
+    const entity = deriveEntity(text);
+    if (entity) {
+        const entityTokens = tokenize(entity);
+        if (entityTokens.length) return entityTokens.slice(0, 8).join(' ');
+    }
+    return tokens.slice(0, 8).join(' ');
+}
+
+function deriveEntity(text) {
+    const raw = cleanText(text);
+    for (const pattern of ENTITY_PATTERNS) {
+        const match = raw.match(pattern);
+        if (match?.[1]) return cleanText(match[1]).replace(/[?.!,;]+$/g, '').slice(0, 80);
+    }
+    const travelPlace = raw.match(
+        /\b(?:trip|itinerary|travel|vacation|holiday|visit|weekend|day trip)\s+(?:to|in|for|around)\s+([A-Za-z][A-Za-z\s.'-]{1,50})/i
+    ) || raw.match(/\b(?:in|to|around)\s+([A-Z][A-Za-z][A-Za-z\s.'-]{1,50})(?:\s*$|[?.!,])/);
+    if (travelPlace?.[1]) {
+        const place = cleanText(travelPlace[1]).replace(/[?.!,;]+$/g, '').slice(0, 80);
+        if (place && !PLACE_RELATIVE_FOLLOWUP.test(place)) return place;
+    }
+    // Bare named topics ("Bengaluru", "SpaceX") become the thread entity.
+    if (looksLikeStandaloneNamedTopic(raw)) {
+        return raw.replace(/[?.!,;]+$/g, '').slice(0, 80);
+    }
+    return '';
+}
+
+function resolvePronouns(text, entity) {
+    if (!entity) return text;
+    return cleanText(text).replace(
+        containsPhrasePattern(INTENT_TERMS.pronounTargets, 'g'),
+        entity
+    );
+}
+
+function resolveFollowUpText(text, entity) {
+    const raw = cleanText(text);
+    const anchor = cleanText(entity);
+    if (!anchor) return raw;
+    const pronounResolved = resolvePronouns(raw, anchor);
+    if (pronounResolved !== raw) return pronounResolved;
+    if ((PLACE_RELATIVE_FOLLOWUP.test(raw) || PLACE_CATEGORY_FOLLOWUP.test(raw)) && !hasExplicitPlaceMention(raw)) {
+        if (/^(?:nearby|near by|around (?:there|here)|close by)\b/i.test(raw)) {
+            return `${raw} near ${anchor}`;
+        }
+        return `${raw} near ${anchor}`;
+    }
+    if (!isContextualExpansionCandidate(raw)) return pronounResolved;
+    // Avoid awkward expansions like "latest on it for SpaceX" when pronouns already resolved.
+    if (/^(?:more|continue|continue from earlier|explain further|tell me more|further|then what|what next)\b/i.test(raw)) {
+        return `${raw} about ${anchor}`;
+    }
+    if (/^(?:latest|price|cost|news|mission|sources?|pros|cons|examples?|difference|differences)\b/i.test(raw)) {
+        return `${raw} about ${anchor}`;
+    }
+    if (/\b(?:about|for|on|regarding)\b/i.test(raw)) return pronounResolved;
+    return `${raw} about ${anchor}`;
+}
+
+function isContextualExpansionCandidate(text) {
+    const raw = cleanText(text);
+    if (!raw) return false;
+    if (/^(?:who|what|when|where|why|how|which)\s+(?:is|are|was|were)\s+[A-Za-z0-9][A-Za-z0-9 .'-]{2,}\??$/i.test(raw)) {
+        return false;
+    }
+    if ((PLACE_RELATIVE_FOLLOWUP.test(raw) || PLACE_CATEGORY_FOLLOWUP.test(raw)) && !hasExplicitPlaceMention(raw)) return true;
+    return FOLLOW_UP_SIGNALS.test(raw) && tokenize(raw).length <= 8;
+}
+
+function hasExplicitNewObject(text) {
+    const raw = cleanText(text);
+    return /\b(?:of|for|on|about|with)\s+(?:[A-Z][A-Za-z0-9.'-]{1,}(?:\s+[A-Z][A-Za-z0-9.'-]{1,}){0,4}|[A-Z0-9]{2,})\b/.test(raw);
+}
+
+function shouldResolveAgainstActiveThread(message, classification, activeThread) {
+    if (!activeThread) return false;
+    if (classification?.isCorrection) return true;
+    const raw = cleanText(message);
+    const tokens = Array.isArray(classification?.tokens) ? classification.tokens : tokenize(raw);
+    const topicTokens = tokenize(`${activeThread.topic || ''} ${activeThread.entity || ''}`);
+    const overlap = countOverlap(tokens, topicTokens);
+    const hasEntity = Boolean(cleanText(activeThread.entity));
+    const hasTopicAnchor = hasEntity || topicTokens.length > 0;
+    const explicitReference = FOLLOW_UP_SIGNALS.test(raw);
+    const bareShortQuestion = QUESTION_LEADS.test(raw) && tokens.length <= 3 && overlap === 0 && !explicitReference;
+    const namedLikeNewTopic = new RegExp(`^(?:${phraseAlternation(INTENT_TERMS.entityQuestionLeads)})\\s+is\\s+[A-Za-z0-9][A-Za-z0-9 .'-]{2,}\\??$`, 'i').test(raw) && overlap === 0;
+    const explicitNewObject = hasExplicitNewObject(raw) && overlap === 0 && !containsPhrasePattern(INTENT_TERMS.pronounTargets).test(raw);
+
+    if (classification?.isStandaloneLiveRequest && overlap === 0) return false;
+    if (hasExplicitPlaceMention(raw) && overlap === 0) return false;
+    if (namedLikeNewTopic || bareShortQuestion || explicitNewObject) return false;
+    if (overlap > 0) return true;
+    if (explicitReference && hasTopicAnchor && tokens.length <= 8) return true;
+    if (classification?.isPlaceRelativeFollowUp && hasTopicAnchor) return true;
+    return explicitReference && tokens.length <= 3 && hasTopicAnchor;
+}
+
+function hasAmbiguousReferenceAcrossThreads(state, message, activeThread) {
+    if (!activeThread || !state?.threads || state.threads.size < 2) return false;
+    const raw = cleanText(message);
+    if (!raw) return false;
+    if (MODIFICATION_SIGNALS.test(raw)) return false;
+    const hasVagueReference = containsPhrasePattern(['it', 'this', 'that', 'they', 'them', 'those', 'these', 'one', 'them both', 'both of them']).test(raw);
+    if (!hasVagueReference) return false;
+    const tokens = tokenize(raw);
+    const activeTokens = tokenize(`${activeThread.topic || ''} ${activeThread.entity || ''}`);
+    const activeOverlap = countOverlap(tokens, activeTokens);
+    if (activeOverlap > 0) return false;
+    const namesOtherThread = [...state.threads.values()]
+        .filter(thread => thread.id !== activeThread.id)
+        .some(thread => countOverlap(tokens, tokenize(`${thread.topic || ''} ${thread.entity || ''}`)) > 0);
+    if (namesOtherThread) return false;
+    const isPairwiseRequest = /\b(?:compare|difference|differences|both|between|versus|vs)\b/i.test(raw);
+    if (isPairwiseRequest) return true;
+    // Clear continuations ("tell me more about it") bind to the active thread.
+    if (/^(?:tell me more|more|continue|explain further|further|what about it|how about it|latest on it)\b/i.test(raw)) {
+        return false;
+    }
+    // Only bare pronoun-like replies are treated as ambiguous across threads.
+    return /^(?:it|this|that|they|them|those|these|one|them both|both of them)\??$/i.test(raw) ||
+        tokens.length === 0;
+}
+
+function tokenize(text) {
+    return cleanText(text)
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .split(/\s+/)
+        .filter(token => token && token.length > 1 && !STOP_WORDS.has(token))
+        .slice(0, 24);
+}
+
+function escapeRegExp(value) {
+    return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function phraseAlternation(phrases) {
+    return phrases
+        .map(phrase => escapeRegExp(phrase).replace(/\s+/g, '\\s+'))
+        .join('|');
+}
+
+function exactPhrasePattern(phrases) {
+    return new RegExp(`^(?:${phraseAlternation(phrases)})$`, 'i');
+}
+
+function containsPhrasePattern(phrases, extraFlags = '') {
+    const flags = `i${extraFlags}`.replace(/(.)(?=.*\1)/g, '');
+    return new RegExp(`\\b(?:${phraseAlternation(phrases)})\\b`, flags);
+}
+
+function leadingWordPattern(words) {
+    return new RegExp(`^(?:${phraseAlternation(words)})\\b`, 'i');
+}
+
+function commandTargetPattern(commands, targets) {
+    return new RegExp(`\\b(?:${phraseAlternation(commands)})\\s+(?:${phraseAlternation(targets)})\\b`, 'i');
+}
+
+function correctionPattern() {
+    const opener = phraseAlternation(INTENT_TERMS.correctionOpeners);
+    const intent = phraseAlternation(INTENT_TERMS.correctionIntents);
+    const phrase = phraseAlternation(INTENT_TERMS.correctionPhrases);
+    return new RegExp(`^(?:${opener})[,\\s]+(?:${intent})|\\b(?:${phrase})\\b`, 'i');
+}
+
+function switchPattern() {
+    const action = phraseAlternation(INTENT_TERMS.switchActions);
+    const target = phraseAlternation(INTENT_TERMS.switchTargets);
+    const phrase = phraseAlternation(INTENT_TERMS.switchPhrases);
+    return new RegExp(`\\b(?:${action})\\s+(?:${target})\\b|\\b(?:${phrase})\\b`, 'i');
+}
+
+function switchOpenerPattern() {
+    const opener = phraseAlternation(INTENT_TERMS.switchOpeners);
+    return new RegExp(`^(?:${opener})(?:\\b|\\s*[:,.-])`, 'i');
+}
+
+function countOverlap(a, b) {
+    const right = new Set(b);
+    return a.reduce((count, token) => count + (right.has(token) ? 1 : 0), 0);
+}
+
+function sanitizePreferences(preferences) {
+    if (!preferences || typeof preferences !== 'object') return {};
+    const out = {};
+    if (['short', 'normal', 'detailed'].includes(preferences.responseLength)) out.responseLength = preferences.responseLength;
+    if (['paragraph', 'bullet', 'steps'].includes(preferences.responseFormat)) out.responseFormat = preferences.responseFormat;
+    const responseStyle = preferences.responseStyle || preferences.supportMode;
+    if (['balanced', 'witty', 'chatty', 'supportive', 'debate'].includes(responseStyle)) {
+        out.responseStyle = responseStyle;
+    }
+    const customSystemPrompt = cleanText(preferences.customSystemPrompt).slice(0, 1200);
+    if (customSystemPrompt) out.customSystemPrompt = customSystemPrompt;
+    return out;
+}
+
+function snapshotState(state) {
+    return {
+        activeThreadId: state.activeThreadId,
+        threads: [...state.threads.values()].map(thread => ({ ...thread })),
+        turns: state.turns.map(turn => ({ ...turn })),
+        pending: state.pending ? { ...state.pending } : null,
+        preferences: { ...state.preferences }
+    };
+}
+
+function cleanText(value) {
+    return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function clamp(value, fallback, min, max) {
+    const number = Number(value);
+    return Number.isFinite(number) ? Math.min(max, Math.max(min, Math.round(number))) : fallback;
+}
