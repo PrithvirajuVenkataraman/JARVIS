@@ -217,6 +217,15 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
                 });
             let webEscalationReason = escalation.reason;
             let webEscalationExtractor = '';
+            if (
+                !isAttachmentGrounding &&
+                routeDecision.strategy === 'live_first' &&
+                Array.isArray(preloadedLiveRag.sources) &&
+                preloadedLiveRag.sources.length === 0 &&
+                !preloadedLiveRag.ragText
+            ) {
+                webEscalationReason = 'live_retrieval_no_usable_sources';
+            }
 
             // Pass 2: do live search only when strategy allows second-pass escalation.
             if (escalation.escalate) {
@@ -247,7 +256,11 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
 
             let finalParsed = isAttachmentGrounding
                 ? selectedPass.parsedResponse
-                : enforceLiveAnswerStyle(selectedPass.parsedResponse, routingMessage, liveRag.sources);
+                : enforceLiveAnswerStyle(selectedPass.parsedResponse, routingMessage, liveRag.sources, {
+                    routeDecision,
+                    retrievalAttempted: routeDecision.strategy === 'live_first' || Boolean(escalation.escalate),
+                    webEscalationReason
+                });
             finalParsed = applyResponseLengthPostCheck(finalParsed, lengthPolicy, effectiveMessage, '');
             const qualityStartedAt = Date.now();
             const qualityResult = isAttachmentGrounding
@@ -300,6 +313,11 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
                     escalated: Boolean(escalation.escalate && liveRag.ragText),
                     reason: webEscalationReason,
                     sourceCount: Array.isArray(liveRag.sources) ? liveRag.sources.length : 0,
+                    retrievalAttempted: !isAttachmentGrounding && (
+                        routeDecision.strategy === 'live_first' ||
+                        Boolean(escalation.escalate) ||
+                        webEscalationReason === 'live_retrieval_no_usable_sources'
+                    ),
                     requestType: isInternalSummary ? 'internal_summary' : 'user_query',
                     extractor: webEscalationExtractor || undefined
                 },
@@ -1344,6 +1362,9 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
         const t = String(text || '').toLowerCase();
         // Only treat as "needs live verification" when the model refuses and asks the user for sources.
         // Resume/doc feedback like "share links to your portfolio" must not match.
+        if (/\b(?:share|provide|give)\b[\s\S]{0,40}\b(?:links?|urls?)\b[\s\S]{0,40}\b(?:portfolio|github|linkedin|resume|cv|project)\b/.test(t)) {
+            return false;
+        }
         return /\b(?:could you|can you|please)\b[\s\S]{0,40}\b(?:provide|share|give|send|paste)\b[\s\S]{0,60}\b(?:source|sources|link|links|url|urls)\b/.test(t) ||
             /\bi (?:need|require|don'?t have|do not have)\b[\s\S]{0,40}\b(?:source|sources|link|links|url|urls)\b/.test(t) ||
             /\b(?:upload|attach)\b[\s\S]{0,40}\b(?:source|sources|link|links|url|urls)\b/.test(t);
@@ -1769,32 +1790,54 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
         return isTimeSensitiveInfoRequest(q) || isFactualQuery(q);
     }
 
-    function enforceLiveAnswerStyle(parsedResponse, message, liveSources) {
-        // Attachment/resume feedback often says "share links" / "provide sources" as advice.
-        // Never rewrite those answers into live-verification failures.
-        if (asksUserToProvideSources(parsedResponse?.response || '')) {
-            if (Array.isArray(liveSources) && liveSources.length) {
+    function enforceLiveAnswerStyle(parsedResponse, message, liveSources, options = {}) {
+        const sources = Array.isArray(liveSources) ? liveSources.filter(item => String(item?.url || '').trim()) : [];
+        const routeStrategy = String(options?.routeDecision?.strategy || '');
+        const retrievalAttempted = options?.retrievalAttempted === true;
+        const answerText = String(parsedResponse?.response || '').trim();
+
+        // Skip live rewrite on direct routes that never attempted retrieval.
+        if (routeStrategy === 'direct' && !retrievalAttempted && !sources.length) {
+            return parsedResponse;
+        }
+
+        if (asksUserToProvideSources(answerText)) {
+            if (sources.length) {
                 return {
                     ...parsedResponse,
                     intent: 'live_update',
-                    response: buildLiveUpdateResponse(message, liveSources),
+                    response: buildLiveUpdateResponse(message, sources),
                     action: parsedResponse?.action ?? null
                 };
             }
-            return {
-                ...parsedResponse,
-                intent: 'verification_unavailable',
-                response: 'I could not verify this from live sources right now.',
-                action: parsedResponse?.action ?? null
-            };
+            if (retrievalAttempted || routeStrategy === 'live_first') {
+                return {
+                    ...parsedResponse,
+                    intent: 'verification_unavailable',
+                    response: 'I checked live sources but could not find usable public evidence for this yet. Please try a more specific query.',
+                    action: parsedResponse?.action ?? null
+                };
+            }
+            // Do not wipe a normal model answer when live retrieval was never attempted.
+            return parsedResponse;
         }
         if (!isTimeSensitiveInfoRequest(message)) return parsedResponse;
-        if (!Array.isArray(liveSources) || !liveSources.length) return parsedResponse;
+        if (!sources.length) {
+            if (retrievalAttempted && isTimeSensitiveInfoRequest(message) && !answerText) {
+                return {
+                    ...parsedResponse,
+                    intent: 'verification_unavailable',
+                    response: 'I checked live sources but could not find usable public evidence for this yet.',
+                    action: parsedResponse?.action ?? null
+                };
+            }
+            return parsedResponse;
+        }
 
         return {
             ...parsedResponse,
             intent: 'live_update',
-            response: buildLiveUpdateResponse(message, liveSources),
+            response: buildLiveUpdateResponse(message, sources),
             action: parsedResponse?.action ?? null
         };
     }
@@ -1812,8 +1855,14 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
     function buildLiveUpdateResponse(message, liveSources) {
         const now = new Date();
         const asOf = now.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
-        const rankedForLead = rankLeadSources(message, liveSources).filter(item => shouldUseAsFinalSource(message, item));
-        const top = rankedForLead.slice(0, 3);
+        const ranked = rankLeadSources(message, liveSources);
+        let top = ranked.filter(item => shouldUseAsFinalSource(message, item)).slice(0, 3);
+        // Never emit a sourceless live update when ranked RAG URLs exist.
+        if (!top.length) {
+            top = ranked
+                .filter(item => String(item?.url || '').trim() && !isGoogleNewsRedirect(item.url))
+                .slice(0, 3);
+        }
         const lead = top[0] || {};
         const title = normalizeLeadTitle(message, lead);
         const description = String(lead?.description || '').trim();
@@ -1821,7 +1870,13 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
 
         const lines = [`As of ${asOf}, ${updateLine}`, '', 'Sources:'];
         for (const item of top) {
-            lines.push(`- ${String(item.url || '').trim()}`);
+            const url = String(item.url || '').trim();
+            if (!url) continue;
+            const label = String(item.title || item.sourceLabel || item.domain || url).trim();
+            lines.push(`- [${label}](${url})`);
+        }
+        if (lines[lines.length - 1] === 'Sources:') {
+            lines.push('- No usable public source links were available.');
         }
         return lines.join('\n');
     }
@@ -1852,16 +1907,21 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
 
             const title = String(item?.title || '');
             const desc = String(item?.description || '');
-            const hay = `${title} ${desc}`.toLowerCase();
+            const domain = String(item?.domain || getHost(url) || '').toLowerCase();
+            const hay = `${title} ${desc} ${domain}`.toLowerCase();
             const overlap = queryTerms.reduce((acc, term) => acc + (hay.includes(term) ? 1 : 0), 0);
 
             let score = 0;
             if (overlap > 0) {
                 score += overlap * 2;
             } else if (queryTerms.length > 0) {
-                score -= 8;
+                // Soft penalty only — keep paraphrased titles instead of discarding them.
+                score -= 2;
             }
 
+            if (item?.trusted || item?.sourceType === 'official_source' || item?.sourceType === 'trusted_news') score += 3;
+            if (item?.pageFetched) score += 2;
+            if (item?.sourceType === 'official_source' && !item?.pageFetched) score -= 1;
             if (/\b(latest|today|update|updates|current|now|recent)\b/.test(hay)) score += 2;
             if (/\b(reuters|the hindu|indian express|bbc|ap news)\b/.test(hay)) score += 2;
 
@@ -1878,9 +1938,10 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
         }
 
         scored.sort((a, b) => (b.__score || 0) - (a.__score || 0));
-        const relevant = scored.filter(item => (item.__termOverlap || 0) > 0 && (item.__score || 0) >= 0);
-        if (relevant.length >= 2) return relevant;
-        return scored.filter(item => (item.__score || 0) >= 0);
+        const relevant = scored.filter(item => (item.__termOverlap || 0) > 0 || (item.__score || 0) >= 0);
+        if (relevant.length >= 1) return relevant;
+        // Last resort: keep top scored URLs even with weak overlap so RAG is not empty.
+        return scored.slice(0, 4);
     }
 
     function rankLeadSources(query, sources) {
@@ -1890,15 +1951,17 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
             const title = String(item?.title || '');
             const desc = String(item?.description || '');
             const url = String(item?.url || '');
-            const hay = `${title} ${desc}`.toLowerCase();
+            const domain = String(item?.domain || getHost(url) || '').toLowerCase();
+            const hay = `${title} ${desc} ${domain}`.toLowerCase();
             const overlap = queryTerms.reduce((acc, term) => acc + (hay.includes(term) ? 1 : 0), 0);
             let score = 0;
             if (overlap > 0) {
                 score += overlap * 2;
             } else if (queryTerms.length > 0) {
-                score -= 6;
+                score -= 2;
             }
-            return { ...item, __leadScore: score };
+            if (item?.trusted || item?.sourceType === 'official_source') score += 2;
+            return { ...item, __leadScore: score, __termOverlap: overlap };
         });
         withScore.sort((a, b) => (b.__leadScore || 0) - (a.__leadScore || 0));
         return withScore;
@@ -2070,26 +2133,47 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
     function shouldUseAsFinalSource(message, item) {
         const title = String(item?.title || '');
         const desc = String(item?.description || '');
-        const hay = `${title} ${desc}`.toLowerCase();
         const url = String(item?.url || '');
+        const domain = String(item?.domain || getHost(url) || '');
+        const hay = `${title} ${desc} ${domain}`.toLowerCase();
+        if (!url.trim()) return false;
         if (isGoogleNewsRedirect(url)) return false;
         const queryTerms = tokenizeRelevanceTerms(message);
         if (!queryTerms.length) return true;
-        return queryTerms.some(term => hay.includes(term));
+        if (queryTerms.some(term => hay.includes(term))) return true;
+        // Keep trusted/official URLs even when the snippet paraphrases the query.
+        if (item?.trusted || item?.sourceType === 'official_source' || item?.sourceType === 'trusted_news') {
+            return true;
+        }
+        return false;
     }
 
     function isAnswerEvidenceSource(item) {
         const sourceType = String(item?.sourceType || '').trim();
-        if (!sourceType || /^(reference_lookup|archive_lookup|community_discussion)$/.test(sourceType)) return false;
-        const title = String(item?.title || '').trim().toLowerCase();
-        const url = String(item?.url || '').trim().toLowerCase();
+        if (/^(archive_lookup|community_discussion)$/.test(sourceType)) return false;
+        const title = String(item?.title || '').trim();
+        const url = String(item?.url || '').trim();
         const domain = String(item?.domain || getHost(url)).trim().toLowerCase();
-        if (/search:|webcache|\/search(?:[/?#]|$)|[?&]q=/.test(`${title} ${url}`)) return false;
-        if (/archive\.(today|ph|is)|webcache/.test(domain || url)) return false;
-        if (sourceType === 'official_source' && !item?.pageFetched) return false;
+        if (!url) return false;
+        if (isGoogleNewsRedirect(url)) return false;
+        if (/search:|webcache|\/search(?:[/?#]|$)|[?&]q=/.test(`${title} ${url}`.toLowerCase())) return false;
+        if (/archive\.(today|ph|is)|webcache/.test(domain || url.toLowerCase())) return false;
         if (item?.evidenceLevel === 'structured_claim') return true;
+
         const description = String(item?.description || '').trim();
-        return sourceType === 'official_source' || description.length >= 20;
+        // Official sources without a fetched page are secondary evidence, not hard-dropped.
+        if (sourceType === 'official_source') return Boolean(title || description || url);
+        if (sourceType === 'reference_lookup') {
+            return description.length >= 40 || title.length >= 12;
+        }
+        if (/^(trusted_news|public_news|trusted_web|web|exa_trusted_web|exa_web|encyclopedia|structured_reference|cached_latest|crawl4ai_grounded_source)$/.test(sourceType)) {
+            return description.length >= 12 || title.length >= 8;
+        }
+        // Unknown/missing sourceType: keep answer-bearing snippets with a usable title or short description.
+        if (!sourceType) {
+            return description.length >= 12 || title.length >= 8;
+        }
+        return description.length >= 20 || title.length >= 12;
     }
 
     function normalizeLeadTitle(message, lead) {
@@ -2918,7 +3002,14 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
         needsPreStreamSafetyReview,
         buildLengthPolicy,
         resolveResponseTemperature,
-        inferDetailLevel
+        inferDetailLevel,
+        asksUserToProvideSources,
+        enforceLiveAnswerStyle,
+        buildLiveUpdateResponse,
+        isAnswerEvidenceSource,
+        shouldUseAsFinalSource,
+        rankLiveSources,
+        rankLeadSources
     };
 
     function applyResponseLengthPostCheck(parsedResponse, lengthPolicy, message, clientSystemPrompt) {
