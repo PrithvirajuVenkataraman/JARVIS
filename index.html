@@ -4604,13 +4604,14 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
             ? ''
             : buildRelevantSavedMemoryContext(normalizedUserMessage);
         const learnedStyleHint = buildLearnedAnswerStyleHint();
+        const learnedPreferenceHint = buildLearnedPreferenceHint();
         // Keep the user message lean on the fast/stream path so the model starts sooner.
         const leanHints = requestOptions?.stream === true || minimalThinking || requestOptions?.fastExplainer === true;
         const effectiveMessage = requestOptions?.grounding
             ? normalizedUserMessage
             : (leanHints
                 ? `${normalizedUserMessage}${relevantSavedMemoryContext}${conciseFactHint ? `\n${conciseFactHint}` : ''}${fastExplainerHint ? `\n${fastExplainerHint}` : ''}${languageReplyHint}`
-                : `${normalizedUserMessage}${relevantSavedMemoryContext}\n\nResponse length requested: ${responseMode}. ${responseHint}\nResponse format preference: ${formatMode}. ${formatHint}\nPrompt-requested explanation style: ${activeLearningMode}. ${learningHint}${languageReplyHint}\n${conciseFactHint}\n${directExplainerHint}\n${fastExplainerHint}${learnedStyleHint}\n\nStyle requirements: Be specific, avoid repetition, and stay natural. Do not invent facts, dates, numbers, quotes, or sources.`); 
+                : `${normalizedUserMessage}${relevantSavedMemoryContext}\n\nResponse length requested: ${responseMode}. ${responseHint}\nResponse format preference: ${formatMode}. ${formatHint}\nPrompt-requested explanation style: ${activeLearningMode}. ${learningHint}${languageReplyHint}\n${conciseFactHint}\n${directExplainerHint}\n${fastExplainerHint}${learnedStyleHint}${learnedPreferenceHint ? `\n${learnedPreferenceHint}` : ''}\n\nStyle requirements: Be specific, avoid repetition, and stay natural. Do not invent facts, dates, numbers, quotes, or sources.`); 
 
          
         const requestPayload = { 
