@@ -324,7 +324,7 @@
         </div>
         <p id="continuous-vision-status" class="continuous-vision-status" role="status">Camera inactive</p>
         <div id="continuous-vision-guidance" class="continuous-vision-guidance hidden" aria-hidden="true">Hold steady and point at the main object</div>
-        <p id="continuous-vision-hint" class="continuous-vision-hint">Camera is on. Ask: "What do you see?"</p>
+        <p id="continuous-vision-hint" class="continuous-vision-hint">Camera is on. Ask: "What do you see?", "What animal is that?", or "What vehicle is this?"</p>
     </div>
     <canvas id="continuous-vision-canvas" class="hidden"></canvas>
 
@@ -22690,7 +22690,7 @@ async function toggleContinuousVision() {
             applyContinuousVisionRotation();
             videoEl.classList.remove('hidden');
             setContinuousVisionMinimized(false);
-            if (hintEl) hintEl.textContent = 'Camera is on. Ask: "What do you see?"';
+            if (hintEl) hintEl.textContent = 'Camera is on. Ask: "What do you see?", "What animal is that?", or "What vehicle is this?"';
             await videoEl.play().catch(() => {});
             await waitForContinuousVisionReady(1800);
             previewShell?.classList.remove('hidden');
@@ -22714,7 +22714,7 @@ async function toggleContinuousVision() {
 
             isContinuousVisionActive = true;
             btn.classList.add('bg-blue-100', 'text-blue-600', 'dark:bg-blue-900/30');
-            showTemporaryMessage('Continuous Vision activated! Ask "What do you see?" or "What am I looking at?"');
+            showTemporaryMessage('Continuous Vision activated! Ask about the scene, an animal, a vehicle, or readable text.');
         } catch (e) {
             recentVisionError = String(e?.message || 'Camera access denied or unavailable.').slice(0, 180);
             updateContinuousVisionStatus('Camera unavailable', 'error');
@@ -22836,6 +22836,53 @@ function isCanvasFrameBlank(ctx, width, height) {
     return scoreCanvasFrameQuality(ctx, width, height) < 0.08;
 }
 
+function resolveContinuousVisionTask(text) {
+    const query = String(text || '');
+    if (isPaperAnswerOverlayIntent(query)) return 'paper_answer_overlay';
+    if (/\b(solve|calculate|evaluate|find x|equation|integral|derivative|differentiate|simplify|factor|algebra|trigonometry|calculus|math problem|word problem|step by step)\b/i.test(query)) {
+        return 'math_ocr_solve';
+    }
+    if (isVisionTranslationIntent(query)) return 'translate_to_english';
+    if (/\b(animal|animals|dog|cat|bird|pet|pets|species|breed|wildlife|horse|cow|elephant|tiger|lion|monkey|fish)\b/i.test(query)
+        || /\bwhat\s+(?:kind of\s+)?(?:animal|pet|species|breed)\b/i.test(query)) {
+        return 'animal_detect';
+    }
+    if (/\b(vehicle|vehicles|car|cars|bike|bicycle|motorcycle|bus|truck|van|scooter|auto rickshaw|autorickshaw)\b/i.test(query)
+        || /\bwhat\s+(?:kind of\s+)?(?:car|vehicle|bike|truck|bus)\b/i.test(query)) {
+        return 'object_detect';
+    }
+    if (/\b(read|text|ocr|bill|receipt|invoice|sign|label|menu|document|what does it say|written)\b/i.test(query)) {
+        return 'text_extract';
+    }
+    return 'general_vision';
+}
+
+function buildContinuousVisionPrompt(text, visionTask) {
+    const query = String(text || '').trim();
+    if (visionTask === 'paper_answer_overlay') {
+        return `Read the visible paper, worksheet, or form. Solve/fill every readable question or blank field the user is asking about, and return overlay-ready answers. If this appears to be a graded exam or active assessment, provide guidance/hints instead of direct final answers. User query: "${query}".`;
+    }
+    if (visionTask === 'math_ocr_solve') {
+        return `Read the math problem from the image and solve it accurately with clear steps. User query: "${query}".`;
+    }
+    if (visionTask === 'translate_to_english') {
+        return `Extract all readable text and translate it to English. User query: "${query}".`;
+    }
+    if (isWebsiteUiVisionIntent(query)) {
+        return `Identify the website, web app, mobile app, or UI shown in the image using only visible evidence. First use visible branding, logo, page title, header, or app chrome. If branding is unclear, inspect visible URL/address-bar/domain/tab text and extract the likely site or app name. Do not guess or use web search. If no brand or URL is visible, describe the UI normally and say the site name is not visible. User query: "${query}". Respond in 1-2 short sentences.`;
+    }
+    if (visionTask === 'animal_detect') {
+        return `Identify the animal(s) in the image. Name species or breed when visible. Focus on the animal, not background signs or printed text unless that text helps identify it. User query: "${query}".`;
+    }
+    if (visionTask === 'object_detect') {
+        return `Identify the main object or vehicle in the image. Name type/make only with visible evidence. Do not lead with unrelated background text. User query: "${query}".`;
+    }
+    if (visionTask === 'text_extract') {
+        return `Extract the readable text from the image accurately. User query: "${query}".`;
+    }
+    return `Describe the main scene subject relevant to the user query. Vision detail preference: ${visionDetailLevel}. Evidence display preference: ${visionShowEvidence ? 'include visible evidence when useful' : 'hide evidence unless needed for uncertainty'}. Focus on the most prominent foreground subject first (animal, person, vehicle, product, or object). Do not let background signs or small printed text dominate. Only name a brand/model when a logo, readable text, or unmistakable hardware cue is visible; otherwise describe shape/color/parts and say the exact model is not visible. Never invent text that is not readable. User query: "${query}".`;
+}
+
 async function handleContinuousVisionQuery(text) {
     updateContinuousVisionStatus('Preparing frame...', 'loading');
     updateContinuousVisionGuidance('Hold steady and point at the main object', true);
@@ -22857,25 +22904,9 @@ async function handleContinuousVisionQuery(text) {
     updateContinuousVisionStatus('Analyzing frame...', 'loading');
     showThinkingIndicator('Analyzing your view...');
     try {
-        const isTextReadIntent = /\b(read|text|ocr|bill|receipt|invoice|sign|label|menu|document)\b/i.test(String(text || '')); 
-        const isTranslateIntent = isVisionTranslationIntent(text); 
-        const isMathSolveIntent = /\b(solve|calculate|evaluate|find x|equation|integral|derivative|differentiate|simplify|factor|algebra|trigonometry|calculus|math problem|word problem|step by step)\b/i.test(String(text || '')); 
-        const isWebsiteUiIntent = isWebsiteUiVisionIntent(text); 
-        const isPaperOverlayIntent = isPaperAnswerOverlayIntent(text);
-        const visionTask = isPaperOverlayIntent
-            ? 'paper_answer_overlay'
-            : (isMathSolveIntent 
-            ? 'math_ocr_solve' 
-            : (isTranslateIntent ? 'translate_to_english' : (isTextReadIntent ? 'text_extract' : 'general_vision'))); 
-        const visionPrompt = isPaperOverlayIntent
-            ? `Read the visible paper, worksheet, or form. Solve/fill every readable question or blank field the user is asking about, and return overlay-ready answers. If this appears to be a graded exam or active assessment, provide guidance/hints instead of direct final answers. User query: "${text}".`
-            : (isMathSolveIntent 
-            ? `Read the math problem from the image and solve it accurately with clear steps. User query: "${text}".` 
-            : (isTranslateIntent 
-                ? `Extract all readable text and translate it to English. User query: "${text}".` 
-                : (isWebsiteUiIntent
-                    ? `Identify the website, web app, mobile app, or UI shown in the image using only visible evidence. First use visible branding, logo, page title, header, or app chrome. If branding is unclear, inspect visible URL/address-bar/domain/tab text and extract the likely site or app name. Do not guess or use web search. If no brand or URL is visible, describe the UI normally and say the site name is not visible. User query: "${text}". Respond in 1-2 short sentences.`
-                    : `Describe what is relevant to the user query. Vision detail preference: ${visionDetailLevel}. Evidence display preference: ${visionShowEvidence ? 'include visible evidence when useful' : 'hide evidence unless needed for uncertainty'}. Focus on the most prominent foreground object first. Only name a brand/model when a logo, readable text, or unmistakable hardware cue is visible; otherwise describe shape/color/parts and say the exact model is not visible. Never invent text that is not readable. User query: "${text}".`))); 
+        const isWebsiteUiIntent = isWebsiteUiVisionIntent(text);
+        const visionTask = resolveContinuousVisionTask(text);
+        const visionPrompt = buildContinuousVisionPrompt(text, visionTask);
         const response = await fetch('/api/vision', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -22909,7 +22940,7 @@ async function handleContinuousVisionQuery(text) {
             : '';
         const fullText = String(details?.fullText || '').trim();
         let answer = String(data.response || details?.summary || '').trim();
-        if (!answer && (fullText || textDetected)) {
+        if (!answer && (fullText || textDetected) && visionTask === 'text_extract') {
             const textBlock = fullText || textDetected;
             answer = `Detected text:\n${textBlock}`;
         }
@@ -22981,13 +23012,27 @@ function formatVisionJsonToReadableText(payload) {
         : [];
     const uncertainty = String(payload.uncertainty || '').trim();
     const objects = Array.isArray(payload.objects) ? payload.objects : [];
+    const animals = Array.isArray(payload.animals) ? payload.animals : [];
+    const people = Array.isArray(payload.people) ? payload.people : [];
+    const sceneSubjects = [
+        ...animals.map(item => ({
+            label: String(item?.label || 'animal').trim(),
+            count: Math.max(1, Number(item?.count || 1)),
+            confidence: Number(item?.confidence || 0.78)
+        })),
+        ...people.map(item => ({
+            label: String(item?.description || 'person').trim() || 'person',
+            count: Math.max(1, Number(item?.count || 1)),
+            confidence: 0.7
+        })),
+        ...objects
+    ];
     const fullText = String(payload.fullText || '').trim();
     const textDetected = Array.isArray(payload.textDetected)
         ? payload.textDetected.map(v => String(v || '').trim()).filter(Boolean)
         : [];
     const compactText = fullText || textDetected.slice(0, 12).join('\n');
-    const objectLabel = pickReadableVisionObject(objects);
-    const objectMeta = pickReadableVisionObjectMeta(objects);
+    const objectLabel = pickReadableVisionObject(sceneSubjects);
     const parts = [];
     const identity = [brand, model].filter(Boolean).join(' ').trim();
 
@@ -23018,14 +23063,27 @@ function formatVisionJsonToReadableText(payload) {
         parts.push(`Uncertainty: ${uncertainty}`);
     }
 
-    if (compactText) {
+    // Prefer scene subjects over OCR; only mention text when no clear subject is present.
+    if (compactText && !objectLabel && !animals.length) {
         parts.push(`Readable text: "${compactVisionTextMention(compactText)}."`);
     }
 
     if (parts.length) return cleanVisionDisplayText(parts.join(' '));
 
-    if (objects.length) {
-        const objectLine = objects
+    if (animals.length) {
+        const animalLine = animals
+            .slice(0, 4)
+            .map(item => {
+                const label = String(item?.label || 'animal').trim();
+                const count = Number(item?.count || 1);
+                return `${label} x${Math.max(1, count)}`;
+            })
+            .join(', ');
+        return `Visible animals: ${animalLine}`;
+    }
+
+    if (sceneSubjects.length) {
+        const objectLine = sceneSubjects
             .slice(0, 4)
             .map(item => {
                 const label = String(item?.label || 'object').trim();
@@ -23045,7 +23103,7 @@ function pickReadableVisionObject(objects) {
 
 function pickReadableVisionObjectMeta(objects) {
     if (!Array.isArray(objects) || !objects.length) return '';
-    const skip = /^(text|words|lettering|logo|label|screen|display|brand|writing|document|paper)$/i;
+    const skip = /^(text|words|lettering|logo|label|screen|display|brand|writing|document|paper|sign|poster|banner|wallpaper)$/i;
     const candidates = objects
         .map(item => ({
             label: String(item?.label || '').trim(),
