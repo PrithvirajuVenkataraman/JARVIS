@@ -26,6 +26,10 @@ export function getInstantReply(text) {
         return 'I am JARVIS - a live-fact and vision helper. I can check current sources, read your camera or attachments, remember what you save, verify answers, and help with planning or fixes from screenshots.';
     }
 
+    if (/^(i see|oh i see|ah i see|got it|gotcha|makes sense|understood|oh okay|oh ok)\.?$/i.test(lower)) {
+        return 'Got it. What would you like to do next?';
+    }
+
     if (/^do you understand tamil\??$/i.test(lower)) {
         return CAPABILITY_REPLIES.tamil;
     }
