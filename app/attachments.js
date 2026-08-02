@@ -1,5 +1,5 @@
 const MAX_ATTACHMENTS = 6;
-const MAX_FILE_BYTES = 10 * 1024 * 1024;
+const MAX_FILE_BYTES = 4 * 1024 * 1024;
 const MAX_EXTRACT_CHARS = 120000;
 const TEXT_EXTENSIONS = /\.(txt|md|markdown|json|jsonl|csv|tsv|xml|html|htm|css|js|mjs|cjs|ts|tsx|jsx|py|java|cpp|c|h|cs|go|rs|rb|php|sh|yaml|yml|toml|ini|log|sql|rtf)$/i;
 const IMAGE_EXTENSIONS = /\.(jpe?g|png|gif|webp|bmp|tiff?)$/i;
@@ -83,9 +83,12 @@ export async function ingestAllForMessage(attachments = [], userText = '') {
 
     const combined = sections.join('\n\n---\n\n').trim();
     const prompt = String(userText || '').trim() || 'Please analyze the attached file(s).';
-    const readableSections = anyReadable
+    let readableSections = anyReadable
         ? sections.filter(section => !/Extraction failed or returned too little readable text/i.test(section)).join('\n\n---\n\n').trim()
         : '';
+    if (anyReadable && readableSections && String(userText || '').trim()) {
+        readableSections = await rankAttachmentTextForQuery(prompt, readableSections).catch(() => readableSections);
+    }
     return {
         grounding: anyReadable
             ? {
@@ -106,6 +109,28 @@ export async function ingestAllForMessage(attachments = [], userText = '') {
         combinedText: readableSections || combined,
         anyReadable
     };
+}
+
+async function rankAttachmentTextForQuery(query, text) {
+    const source = String(text || '').trim();
+    if (!source || source.length < 900) return source;
+    try {
+        const data = await postJson('/api/rank-texts', {
+            query: String(query || '').trim(),
+            text: source,
+            limit: 6,
+            maxChunks: 16,
+            useRerank: true
+        }, { timeoutMs: 15000 });
+        if (!data?.available || !Array.isArray(data?.ranked) || !data.ranked.length) return source;
+        const rankedText = data.ranked
+            .map(item => String(item?.text || '').trim())
+            .filter(Boolean)
+            .join('\n\n');
+        return rankedText || source;
+    } catch (_) {
+        return source;
+    }
 }
 
 export async function ingestAttachmentWithFallback(attachment) {
