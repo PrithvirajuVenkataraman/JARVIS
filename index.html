@@ -3673,9 +3673,9 @@ function normalizeEntityText(value) {
 }
 
 function isAcknowledgementUtterance(text) {
-    const t = String(text || '').toLowerCase().trim();
+    const t = String(text || '').toLowerCase().replace(/[.!?]+$/g, '').trim();
     if (!t) return false;
-    return /^(yes|yeah|yep|yup|no|nope|nah|ok|okay|sure|alright|fine|thanks|thank you|got it|cool|hi|hello|hey|hmm|uh huh|huh)$/i.test(t);
+    return /^(yes|yeah|yep|yup|no|nope|nah|ok|okay|sure|alright|fine|thanks|thank you|got it|gotcha|cool|hi|hello|hey|hmm|uh huh|i see|oh i see|ah i see|oh okay|oh ok|makes sense|understood|fair enough|right|ah okay|nice|great|perfect|awesome)$/i.test(t);
 }
 
 function isGenericNonEntity(text) {
@@ -17450,6 +17450,13 @@ function isWakeGreetingText(text) {
                 `Did you mean "${String(contextResolution?.originalMessage || '').trim()}" as a new topic, or as a follow-up?`;
         }
 
+        function buildAcknowledgementReply(text) {
+            const t = String(text || '').toLowerCase().replace(/[.!?]+$/g, '').trim();
+            if (/^(thanks|thank you)\b/.test(t)) return 'You are welcome. Ask anytime.';
+            if (/^(nice|great|perfect|awesome)\b/.test(t)) return 'Glad that helped. What should we do next?';
+            return 'Got it. What would you like to do next?';
+        }
+
         function buildAmbiguousContextClarificationHtml(contextResolution) {
             return window.JarvisContextCopilotUi?.buildContextClarificationHtml?.(contextResolution) || '';
         }
@@ -17498,6 +17505,12 @@ function isWakeGreetingText(text) {
                     threadId: contextResolution?.activeThread?.id || '',
                     options: ['new topic', 'follow-up']
                 });
+                return;
+            }
+            if (contextResolution?.decisionReason === 'acknowledgement_keep_context' || isAcknowledgementUtterance(text)) {
+                const reply = buildAcknowledgementReply(text);
+                addChatMessage(reply, false);
+                saveToHistory(text, reply, { recordContext: true });
                 return;
             }
             const instantReply = window.JarvisInstantReplies?.getInstantReply?.(text);
@@ -18747,9 +18760,11 @@ Quick recap: ...
                      cleanText.toLowerCase().includes('visit') && cleanText.toLowerCase().match(/\b(to|in|for)\b/) ||
                      (cleanText.toLowerCase().includes('plan') && (cleanText.toLowerCase().includes('travel') || cleanText.toLowerCase().includes('visit')))) {
                 
+                // Always plan from the full original user request, not a shortened/resolved rewrite.
+                const itineraryUserRequest = String(rawCommandText || text || '').trim();
                 // Extract location for web search
-                const locationMatch = text.match(/(?:in|to|for|at)\s+([^,?.!]+)/i);
-                const itineraryLocation = (locationMatch ? locationMatch[1].trim() : '') || extractTravelLocationOrFallback(text);
+                const locationMatch = itineraryUserRequest.match(/\b(?:in|to)\s+([A-Za-z][A-Za-z\s.'-]{1,40}?)(?=$|[?,!.]|\s+from\b|\s+for\b|\s+on\b|\s+between\b)/i);
+                const itineraryLocation = (locationMatch ? locationMatch[1].trim() : '') || extractTravelLocationOrFallback(itineraryUserRequest);
                 if (itineraryLocation && !isInvalidLocationCandidate(itineraryLocation)) {
                     setLastResolvedTravelLocation(itineraryLocation);
                 }
@@ -18801,10 +18816,17 @@ Quick recap: ...
                 }
 
                 showThinkingIndicator('[Plan] Writing your itinerary...');
-                const itineraryPrompt = `${userName ? `The user's name is ${userName}.` : ''} Create a rich, engaging, practical itinerary for: "${text}".
+                const itineraryPrompt = `${userName ? `The user's name is ${userName}.` : ''} Create a rich, engaging, practical itinerary for the user's full request below.
+
+USER REQUEST:
+"""
+${itineraryUserRequest}
+"""
 
 LOCATION: ${itineraryLocation}
 ${placeSearchResults}
+
+Read and use the full USER REQUEST (dates, origin city, preferences, constraints). Do not ignore any part of it.
 
 IMPORTANT STYLE TARGET:
 - Match a premium travel-assistant tone (warm opening + practical details)
@@ -18831,7 +18853,7 @@ FORMAT TO FOLLOW:
   Evening - ...
 - For each main stop include:
   - Why visit (short line)
-  - What not to miss (2-4 bullets)
+  - What not to miss: place1, place2, place3 (comma-separated on one line; never use bullets for this line)
   - Best time (if relevant)
   - Time needed
   - Transit hint from previous stop
@@ -18859,8 +18881,8 @@ If user asks for 2 days, provide both days with balanced pacing.`;
                 const aiResponse = await callAIWithTyping(itineraryPrompt, '[Plan] Writing your itinerary...', {
                     directModel: true,
                     stream: true,
-                    displayUserMessage: text,
-                    routingMessage: text
+                    displayUserMessage: itineraryUserRequest,
+                    routingMessage: itineraryUserRequest
                 });
                 if (aiResponse?.aborted) return;
                 if (/\bfallback\b/i.test(String(aiResponse?.intent || ''))) {
@@ -18876,7 +18898,7 @@ If user asks for 2 days, provide both days with balanced pacing.`;
                 }
                 const itineraryAnswer = postProcessAssistantResponse(
                     String(aiResponse?.response || aiResponse?.text || '').trim(),
-                    text
+                    itineraryUserRequest
                 );
                 if (!itineraryAnswer) {
                     if (aiResponse?.assistantMessageId) {
@@ -18889,7 +18911,7 @@ If user asks for 2 days, provide both days with balanced pacing.`;
                     });
                     return;
                 }
-                await publishResolvedModelMessage(text, itineraryAnswer, {
+                await publishResolvedModelMessage(itineraryUserRequest, itineraryAnswer, {
                     label: 'Itinerary plan',
                     routing: aiResponse?.routing || null,
                     existingAssistantMessageId: aiResponse?.assistantMessageId || '',
@@ -22266,6 +22288,24 @@ function normalizeItineraryTextForReadability(rawText) {
     text = text.replace(
         /\s+(\*{0,2}(?:Why visit|What not to miss|Best time|Time needed|Transit|Food|Tip)\*{0,2}\s*:)/gi,
         '\n- $1'
+    );
+
+    // Keep "What not to miss" as a comma-separated line, not nested bullets.
+    text = text.replace(
+        /(What not to miss\s*:\s*)(?:\n\s*[-*•]\s*)?([\s\S]*?)(?=\n\s*(?:[-*•]\s*)?(?:\*{0,2}(?:Why visit|Best time|Time needed|Transit|Food|Tip|Morning|Afternoon|Evening|Lunch|Dinner|Day\s*\d+|Quick\s+Tips)\b)|$)/gi,
+        (match, label, body) => {
+            const items = String(body || '')
+                .split(/\n+/)
+                .map(line => line.replace(/^\s*[-*•]\s*/, '').trim())
+                .filter(Boolean)
+                .flatMap(line => line.split(/\s*,\s*/).map(part => part.trim()).filter(Boolean));
+            const unique = [];
+            for (const item of items) {
+                if (!unique.some(existing => existing.toLowerCase() === item.toLowerCase())) unique.push(item);
+            }
+            if (!unique.length) return `${label}`.trimEnd();
+            return `${label}${unique.join(', ')}`;
+        }
     );
 
     text = text
