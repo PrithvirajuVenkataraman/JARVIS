@@ -7,7 +7,7 @@ import { searchItems } from './_lib/latest/latest-cache.js';
 import { ingestLatestSources } from './_lib/latest/latest-ingest.js';
 import { runFreeLiveSearch } from './_lib/free-live/providers.js';
 import { extractWithCrawl4Ai } from './_lib/crawl4ai-client.js';
-import { rankTextsByEmbedding, chunkTextForEmbedding, hasNvidiaEmbeddingKey } from './_lib/embeddings.js';
+import { rankTextsByEmbedding, chunkTextForEmbedding, hasNvidiaEmbeddingKey, rerankTexts, getNvidiaRerankModel } from './_lib/embeddings.js';
 import { cleanQueryTarget, extractQueryTargetMetadata } from './_lib/query-target-cleanup.js';
 
 const SERPER_SEARCH_URL = 'https://google.serper.dev/search';
@@ -118,20 +118,6 @@ const OFFICIAL_GOVERNMENT_PORTALS = Object.freeze([
     { pattern: /\b(?:south africa|south african government)\b/i, label: 'South African Government official', url: 'https://www.gov.za/' },
     { pattern: /\b(?:european union|eu commission|eu parliament|eu\b)\b/i, label: 'European Union official', url: 'https://european-union.europa.eu/' },
     { pattern: /\b(?:united nations|un\b)\b/i, label: 'United Nations official', url: 'https://www.un.org/' }
-]);
-
-const OFFICIAL_SOURCE_SHORTCUTS = Object.freeze([
-    { pattern: /\bisro|indian space research/i, label: 'ISRO official', url: 'https://www.isro.gov.in/', query: 'ISRO latest official update' },
-    { pattern: /\bnasa\b/i, label: 'NASA official', url: 'https://www.nasa.gov/', query: 'NASA latest official update' },
-    { pattern: /\bWHO\b|[Ww]orld\s+[Hh]ealth\s+[Oo]rganization/, label: 'WHO official', url: 'https://www.who.int/', query: 'WHO latest official update' },
-    { pattern: /\bcdc\b|centers for disease control/i, label: 'CDC official', url: 'https://www.cdc.gov/', query: 'CDC latest official update' },
-    { pattern: /\brbi\b|reserve bank of india/i, label: 'RBI official', url: 'https://www.rbi.org.in/', query: 'RBI latest official update' },
-    { pattern: /\bsec\b|securities and exchange commission/i, label: 'SEC official', url: 'https://www.sec.gov/', query: 'SEC latest official update' },
-    { pattern: /\bimf\b|international monetary fund/i, label: 'IMF official', url: 'https://www.imf.org/', query: 'IMF latest official update' },
-    { pattern: /\bworld bank\b/i, label: 'World Bank official', url: 'https://www.worldbank.org/', query: 'World Bank latest official update' },
-    { pattern: /\bnoaa\b|hurricane|climate|weather alert/i, label: 'NOAA official', url: 'https://www.noaa.gov/', query: 'NOAA latest official update' },
-    { pattern: /\busa\.gov|us government|u\.s\. government/i, label: 'USA.gov official', url: 'https://www.usa.gov/', query: 'USA.gov official update' },
-    { pattern: /\bgov\.uk|uk government|british government/i, label: 'GOV.UK official', url: 'https://www.gov.uk/', query: 'GOV.UK official update' }
 ]);
 
 export default async function handler(req, res) {
@@ -414,8 +400,7 @@ export async function searchPublicSources(query, options = {}) {
     const querySet = Array.from(new Set([
         normalizedQuery,
         ...deterministicQueries,
-        ...plannedQueries.map(item => normalizeSearchQuery(item)).filter(Boolean),
-        ...getOfficialSourceShortcuts(normalizedQuery).map(item => item.query)
+        ...plannedQueries.map(item => normalizeSearchQuery(item)).filter(Boolean)
     ])).slice(0, 7);
     const settled = await Promise.allSettled(querySet.flatMap(candidate => [
         searchWikipedia(candidate, { limit: Math.min(4, limit) }),
@@ -722,6 +707,8 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
     let finalPhase = 0;
     let embeddingUsed = false;
     let embeddingModel = '';
+    let rerankUsed = false;
+    let rerankModel = '';
 
     for (let i = 0; i < phases.length; i += 1) {
         const phaseQueries = phases[i];
@@ -758,6 +745,15 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
             embeddingModel = embeddingRank.model || embeddingModel;
             allResults = embeddingRank.ranked.slice(0, Math.max(limit, 8));
         }
+        const rerankResult = await rerankRagResults(normalizedQuery, allResults).catch(error => {
+            warnings.push(`nvidia_rerank_failed:${String(error?.status || error?.message || 'unknown')}`);
+            return { available: false, ranked: allResults, model: '' };
+        });
+        if (rerankResult.available) {
+            rerankUsed = true;
+            rerankModel = rerankResult.model || rerankModel;
+            allResults = rerankResult.ranked.slice(0, Math.max(limit, 8));
+        }
         finalGate = evaluateWebRagEvidence(normalizedQuery, allResults);
         finalPhase = i + 1;
         if (finalGate.pass) {
@@ -792,6 +788,8 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
             geminiEnhanced: false,
             embeddingEnhanced: embeddingUsed,
             embeddingModel: embeddingModel || undefined,
+            rerankEnhanced: rerankUsed,
+            rerankModel: rerankModel || undefined,
             ragPhaseCount: finalPhase,
             warnings: Array.from(new Set([...warnings, gate.reason].filter(Boolean)))
         };
@@ -822,6 +820,8 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
         geminiEnhanced: Boolean(finalAnswer.modelAssisted),
         embeddingEnhanced: embeddingUsed,
         embeddingModel: embeddingModel || undefined,
+        rerankEnhanced: rerankUsed,
+        rerankModel: rerankModel || undefined,
         ragPhaseCount: finalPhase,
         warnings: Array.from(new Set(warnings.filter(Boolean)))
     };
@@ -1339,7 +1339,7 @@ function buildReferenceLookupResults(query, offset = 0) {
 async function normalizeOfficialSourceCandidate(item, query, index) {
     const domain = getDomainFromUrl(item.url);
     const exactShortcutMatch = Boolean(item.pattern?.test?.(query));
-    const allowHtmlFallback = item.discoverySignal === 'official_shortcut';
+    const allowHtmlFallback = false;
     const page = await fetchOfficialPageContent(item.url, query, { allowHtmlFallback }).catch(() => null);
     const roleEvidence = page?.text ? extractOfficialCurrentRoleEvidence(page.text, query, item.url) : null;
     return {
@@ -1832,6 +1832,41 @@ async function rankRagResultsWithEmbeddings(query, results = []) {
     };
 }
 
+async function rerankRagResults(query, results = []) {
+    if (!Array.isArray(results) || results.length < 1) {
+        return { available: false, ranked: results, model: getNvidiaRerankModel() };
+    }
+    const candidates = results.slice(0, 20).map(item => ({
+        ...item,
+        text: String(item.embeddingChunk || item.extractedText || item.description || item.title || '')
+            .replace(/\s+/g, ' ')
+            .trim()
+    }));
+    const reranked = await rerankTexts(query, candidates);
+    if (!reranked.available) {
+        return { available: false, ranked: results, model: reranked.model || getNvidiaRerankModel() };
+    }
+    const seen = new Set();
+    const ranked = [];
+    for (const item of reranked.ranked) {
+        const key = String(item.url || item.title || '').trim();
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        ranked.push(item);
+    }
+    for (const item of results) {
+        const key = String(item.url || item.title || '').trim();
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        ranked.push(item);
+    }
+    return {
+        available: true,
+        ranked,
+        model: reranked.model
+    };
+}
+
 function isStrongRagEvidenceSource(item) {
     const sourceType = String(item?.sourceType || '').trim();
     const domain = String(item?.domain || '').toLowerCase();
@@ -2031,10 +2066,6 @@ function extractJsonObject(text) {
     return null;
 }
 
-function getOfficialSourceShortcuts(query) {
-    return OFFICIAL_SOURCE_SHORTCUTS.filter(item => item.pattern.test(query));
-}
-
 async function discoverOfficialSourceCandidates(query, options = {}) {
     const cleanQuery = normalizeSearchQuery(query);
     if (!cleanQuery) return [];
@@ -2056,9 +2087,6 @@ async function discoverOfficialSourceCandidates(query, options = {}) {
         });
     };
 
-    for (const shortcut of getOfficialSourceShortcuts(cleanQuery)) {
-        add({ ...shortcut, discoverySignal: 'official_shortcut', officialConfidence: 'high' });
-    }
     for (const portal of OFFICIAL_GOVERNMENT_PORTALS.filter(item => item.pattern.test(cleanQuery))) {
         add({ ...portal, discoverySignal: 'official_registry', officialConfidence: 'medium' });
     }
@@ -2142,7 +2170,7 @@ function isOfficialGovernmentUrl(url) {
 function inferOfficialConfidence(url, item = {}) {
     const domain = getDomainFromUrl(url);
     if (!domain) return 'low';
-    if (item?.discoverySignal === 'wikidata_official_website' || item?.discoverySignal === 'official_shortcut') return 'high';
+    if (item?.discoverySignal === 'wikidata_official_website') return 'high';
     if (/(\.gov$|\.gov\.[a-z]{2}$|^gov\.|\.go\.[a-z]{2}$|gc\.ca$|europa\.eu$|un\.org$)/i.test(domain)) return 'medium';
     return 'low';
 }
