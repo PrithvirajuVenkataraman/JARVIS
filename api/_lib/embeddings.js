@@ -1,6 +1,9 @@
 const NVIDIA_EMBEDDINGS_URL = 'https://integrate.api.nvidia.com/v1/embeddings';
+const NVIDIA_RERANK_URL = 'https://integrate.api.nvidia.com/v1/ranking';
 const DEFAULT_NVIDIA_EMBEDDING_MODEL = 'nvidia/nv-embedcode-7b-v1';
+const DEFAULT_NVIDIA_RERANK_MODEL = 'nvidia/llama-3.2-nv-rerankqa-1b-v2';
 const EMBEDDING_TIMEOUT_MS = 8000;
+const RERANK_TIMEOUT_MS = 10000;
 
 export function hasNvidiaEmbeddingKey() {
     return Boolean(getNvidiaEmbeddingKey());
@@ -8,6 +11,15 @@ export function hasNvidiaEmbeddingKey() {
 
 export function getNvidiaEmbeddingModel() {
     return String(process.env.NVIDIA_EMBEDDING_MODEL || DEFAULT_NVIDIA_EMBEDDING_MODEL).trim();
+}
+
+export function getNvidiaRerankModel() {
+    return String(process.env.NVIDIA_RERANK_MODEL || DEFAULT_NVIDIA_RERANK_MODEL).trim();
+}
+
+export function isNvidiaRerankEnabled() {
+    const flag = String(process.env.NVIDIA_RERANK_ENABLED || 'true').trim().toLowerCase();
+    return flag !== '0' && flag !== 'false' && flag !== 'off' && hasNvidiaEmbeddingKey();
 }
 
 export async function embedTexts(texts, options = {}) {
@@ -70,6 +82,141 @@ export async function rankTextsByEmbedding(query, items, options = {}) {
     };
 }
 
+export async function rerankTexts(query, items, options = {}) {
+    const list = Array.isArray(items) ? items : [];
+    const queryText = String(query || '').trim();
+    const model = String(options.model || getNvidiaRerankModel()).trim();
+    if (!queryText || !list.length || !isNvidiaRerankEnabled()) {
+        return { available: false, ranked: list, model };
+    }
+
+    const passages = list.map(item => ({
+        text: String(item?.text || item?.description || item?.title || item?.embeddingChunk || '')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, 1800) || ' '
+    }));
+
+    const response = await fetchWithTimeout(NVIDIA_RERANK_URL, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${getNvidiaEmbeddingKey()}`,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            model,
+            query: { text: queryText.slice(0, 1000) },
+            passages,
+            truncate: 'END'
+        })
+    }, Number(options.timeoutMs) || RERANK_TIMEOUT_MS);
+
+    if (!response.ok) {
+        const detail = await response.text().catch(() => '');
+        const error = new Error(`NVIDIA rerank failed with HTTP ${response.status}`);
+        error.status = response.status;
+        error.detail = detail.slice(0, 300);
+        throw error;
+    }
+
+    const data = await response.json();
+    const rankings = Array.isArray(data?.rankings) ? data.rankings : [];
+    if (!rankings.length) {
+        return { available: false, ranked: list, model: String(data?.model || model).trim() };
+    }
+
+    const ordered = rankings
+        .map(row => ({
+            index: Number(row?.index),
+            logit: Number(row?.logit)
+        }))
+        .filter(row => Number.isInteger(row.index) && row.index >= 0 && row.index < list.length)
+        .sort((a, b) => {
+            const scoreDiff = (Number.isFinite(b.logit) ? b.logit : -Infinity) - (Number.isFinite(a.logit) ? a.logit : -Infinity);
+            if (scoreDiff !== 0) return scoreDiff;
+            return a.index - b.index;
+        });
+
+    const seen = new Set();
+    const ranked = [];
+    for (const row of ordered) {
+        if (seen.has(row.index)) continue;
+        seen.add(row.index);
+        ranked.push({
+            ...list[row.index],
+            rerankScore: Number.isFinite(row.logit) ? row.logit : 0
+        });
+    }
+    for (let i = 0; i < list.length; i += 1) {
+        if (seen.has(i)) continue;
+        ranked.push(list[i]);
+    }
+
+    return {
+        available: true,
+        ranked,
+        model: String(data?.model || model).trim()
+    };
+}
+
+export async function rankTextsByRelevance(query, items, options = {}) {
+    const list = Array.isArray(items) ? items : [];
+    const embedResult = await rankTextsByEmbedding(query, list, options);
+    const candidates = embedResult.available
+        ? embedResult.ranked.slice(0, Math.max(1, Number(options.rerankLimit) || 20))
+        : list.slice(0, Math.max(1, Number(options.rerankLimit) || 20));
+
+    if (options.useRerank === false || !isNvidiaRerankEnabled()) {
+        return {
+            available: embedResult.available,
+            ranked: embedResult.available ? embedResult.ranked : list,
+            embeddingModel: embedResult.model,
+            rerankModel: '',
+            embeddingEnhanced: embedResult.available,
+            rerankEnhanced: false
+        };
+    }
+
+    try {
+        const rerankResult = await rerankTexts(query, candidates, options);
+        if (!rerankResult.available) {
+            return {
+                available: embedResult.available,
+                ranked: embedResult.available ? embedResult.ranked : list,
+                embeddingModel: embedResult.model,
+                rerankModel: rerankResult.model,
+                embeddingEnhanced: embedResult.available,
+                rerankEnhanced: false
+            };
+        }
+        const rankedKeys = new Set(rerankResult.ranked.map(itemRelevanceKey));
+        const remainder = (embedResult.available ? embedResult.ranked : list)
+            .filter(item => !rankedKeys.has(itemRelevanceKey(item)));
+        return {
+            available: true,
+            ranked: [...rerankResult.ranked, ...remainder],
+            embeddingModel: embedResult.model,
+            rerankModel: rerankResult.model,
+            embeddingEnhanced: embedResult.available,
+            rerankEnhanced: true
+        };
+    } catch (error) {
+        return {
+            available: embedResult.available,
+            ranked: embedResult.available ? embedResult.ranked : list,
+            embeddingModel: embedResult.model,
+            rerankModel: getNvidiaRerankModel(),
+            embeddingEnhanced: embedResult.available,
+            rerankEnhanced: false,
+            warning: String(error?.message || 'rerank_failed')
+        };
+    }
+}
+
+function itemRelevanceKey(item) {
+    return String(item?.id || item?.key || item?.url || item?.text || item?.title || '').trim();
+}
+
 export function chunkTextForEmbedding(text, options = {}) {
     const clean = String(text || '').replace(/\s+/g, ' ').trim();
     if (!clean) return [];
@@ -125,7 +272,12 @@ async function fetchWithTimeout(url, init, timeoutMs) {
 
 export const __test = {
     NVIDIA_EMBEDDINGS_URL,
+    NVIDIA_RERANK_URL,
     DEFAULT_NVIDIA_EMBEDDING_MODEL,
+    DEFAULT_NVIDIA_RERANK_MODEL,
     chunkTextForEmbedding,
-    cosineSimilarity
+    cosineSimilarity,
+    rerankTexts,
+    rankTextsByRelevance,
+    isNvidiaRerankEnabled
 };
