@@ -2564,6 +2564,7 @@ async function callAIWithTyping(message, loadingMessage = 'Assistant is thinking
                 intent: options?.intent || undefined,
                 stream: options?.stream === true,
                 displayUserMessage: options?.displayUserMessage || '',
+                routingMessage: options?.routingMessage || options?.displayUserMessage || '',
                 minimalThinking: options?.minimalThinking === true,
                 routeDecision: options?.routeDecision || null
             })
@@ -4372,6 +4373,7 @@ async function streamChatCompletion(payload, options = {}) {
             accumulated += delta;
             if (!firstDeltaLogged) {
                 firstDeltaLogged = true;
+                hideThinkingIndicator();
                 latencyTrace.firstDeltaAt = performance.now();
                 logLatencyTrace('chat_first_delta', {
                     requestId: latencyTrace.requestId || '',
@@ -4625,7 +4627,9 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
                     customSystemPrompt
                 },
                 intent: requestOptions?.intent || (requestOptions?.fastExplainer === true ? 'fast_explainer' : 'chat'),
-                grounding: requestOptions?.grounding || null
+                grounding: requestOptions?.grounding || null,
+                routingMessage: String(requestOptions?.routingMessage || requestOptions?.displayUserMessage || '').trim() || undefined,
+                displayUserMessage: String(requestOptions?.displayUserMessage || '').trim() || undefined
             };
         latencyTrace.apiStartedAt = performance.now();
         logLatencyTrace('chat_api_start', {
@@ -18206,7 +18210,12 @@ Format:
 - What you can do now: <2-4 practical steps>
 - Get urgent help if: <red flags>
 - Safer next step: <when to contact a doctor/pharmacist>`;
-                const medicalResponse = await callAIWithTyping(medicalPrompt, 'Preparing safe medical guidance...', { directModel: true });
+                const medicalResponse = await callAIWithTyping(medicalPrompt, 'Preparing safe medical guidance...', {
+                    directModel: true,
+                    stream: true,
+                    displayUserMessage: text,
+                    routingMessage: text
+                });
                 if (medicalResponse?.aborted) return;
                 await publishResolvedModelMessage(text, medicalResponse.response, {
                     label: 'Model answer',
@@ -18252,7 +18261,12 @@ Important:
 - Be concrete and specific, not vague
 - Avoid repeating stock phrases used in prior messages
 - Keep it concise and human`;
-                const mhResponse = await callAIWithTyping(mhPrompt, 'I am here with you...', { directModel: true });
+                const mhResponse = await callAIWithTyping(mhPrompt, 'I am here with you...', {
+                    directModel: true,
+                    stream: true,
+                    displayUserMessage: text,
+                    routingMessage: text
+                });
                 if (mhResponse?.aborted) return;
                 const upliftingFallback = "You are not failing, you are recovering your energy one step at a time. Take one small win right now: drink water, breathe slowly for 60 seconds, and do one tiny task.";
                 await publishResolvedModelMessage(text, mhResponse.response || upliftingFallback, {
@@ -18749,40 +18763,44 @@ Quick recap: ...
                     return;
                 }
                 
-                // Do web search first to get real places
+                // Do a short place search first, then stream the itinerary as tokens arrive.
                 let placeSearchResults = '';
                 if (itineraryLocation && isFactSearchEnabled()) {
+                    showThinkingIndicator(`Finding places in ${itineraryLocation}...`);
                     try {
                         const searchQueries = [
                             `top tourist places in ${itineraryLocation}`,
                             `things to do in ${itineraryLocation}`,
                             `${itineraryLocation} attractions must visit`
                         ];
-                        
-                        const searchPromises = searchQueries.map(async (query) => {
-                            try {
-                                const response = await fetch('/api/search', {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ query })
-                                });
-                                const data = await response.json();
-                                return data.results || [];
-                            } catch (e) {
-                                return [];
-                            }
-                        });
-                        
-                        const allResults = await Promise.all(searchPromises);
+                        const searchWithTimeout = (query, timeoutMs = 2800) => Promise.race([
+                            (async () => {
+                                try {
+                                    const response = await fetch('/api/search', {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ query })
+                                    });
+                                    const data = await response.json();
+                                    return data.results || [];
+                                } catch (_) {
+                                    return [];
+                                }
+                            })(),
+                            new Promise(resolve => setTimeout(() => resolve([]), timeoutMs))
+                        ]);
+
+                        const allResults = await Promise.all(searchQueries.map(query => searchWithTimeout(query)));
                         const combinedResults = allResults.flat().slice(0, 8);
-                        
+
                         if (combinedResults.length > 0) {
-                            placeSearchResults = '\n\nWEB SEARCH RESULTS - USE THESE REAL PLACES:\n' + 
-                                combinedResults.map((r, i) => `${i+1}. ${r.title}: ${r.description}`).join('\n');
+                            placeSearchResults = '\n\nWEB SEARCH RESULTS - USE THESE REAL PLACES:\n' +
+                                combinedResults.map((r, i) => `${i + 1}. ${r.title}: ${r.description}`).join('\n');
                         }
                     } catch (e) {}
                 }
-                
+
+                showThinkingIndicator('[Plan] Writing your itinerary...');
                 const itineraryPrompt = `${userName ? `The user's name is ${userName}.` : ''} Create a rich, engaging, practical itinerary for: "${text}".
 
 LOCATION: ${itineraryLocation}
@@ -18837,11 +18855,12 @@ STRICTLY AVOID:
 
 If the user asks for 1 day, return only Day 1.
 If user asks for 2 days, provide both days with balanced pacing.`;
-                
-                const aiResponse = await callAIWithTyping(itineraryPrompt, '[Plan] Planning your itinerary...', {
+
+                const aiResponse = await callAIWithTyping(itineraryPrompt, '[Plan] Writing your itinerary...', {
                     directModel: true,
                     stream: true,
-                    displayUserMessage: text
+                    displayUserMessage: text,
+                    routingMessage: text
                 });
                 if (aiResponse?.aborted) return;
                 if (/\bfallback\b/i.test(String(aiResponse?.intent || ''))) {
@@ -18929,7 +18948,8 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
                 const aiResponse = await callAIWithTyping(specialtyPrompt, 'Assistant is thinking...', {
                     directModel: true,
                     stream: true,
-                    displayUserMessage: text
+                    displayUserMessage: text,
+                    routingMessage: text
                 });
                 if (aiResponse?.aborted) return;
                 await publishResolvedModelMessage(text, aiResponse.response, {
@@ -19080,7 +19100,11 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
             
             else {
 
-                const aiResponse = await callAIWithTyping(text, 'Assistant is thinking...', { stream: true });
+                const aiResponse = await callAIWithTyping(text, 'Assistant is thinking...', {
+                    stream: true,
+                    displayUserMessage: text,
+                    routingMessage: text
+                });
                 if (aiResponse?.aborted) return;
                 const inferredLocation = detectPrimaryLocationFromText(text);
                 const finalizedResponse = await resolveFinalAssistantAnswer(text, aiResponse?.response || aiResponse?.text || '');
