@@ -480,8 +480,28 @@ const rankedKeep = chatTest.rankLiveSources('latest ISRO update', [
         domain: 'isro.gov.in'
     }
 ]);
+assert.equal(chatTest.isStreamPreferredGenerationRequest(
+    'Give me a detailed itenary in goa. I am going from bangalore from October 1-5.'
+), true);
+assert.equal(chatTest.shouldStreamChatRequest(
+    {
+        stream: true,
+        message: 'Create a rich, engaging, practical itinerary for: Goa',
+        routingMessage: 'Give me a detailed itinerary in Goa'
+    },
+    'chat',
+    null,
+    { strategy: 'live_first' },
+    false
+), true);
+assert.equal(chatTest.shouldStreamChatRequest(
+    { stream: true, message: 'latest news today', routingMessage: 'latest news today' },
+    'chat',
+    null,
+    { strategy: 'live_first' },
+    false
+), false);
 assert.ok(rankedKeep.length >= 1);
-
 const grounded = chatTest.buildGroundedUserMessage(
     validSelection.value.message,
     validSelection.value.intent,
