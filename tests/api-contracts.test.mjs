@@ -7,6 +7,7 @@ import marketsHandler from '../api/markets.js';
 import searchHandler, { __test as searchTest } from '../api/search.js'; 
 import visionHandler, { __test as visionTest } from '../api/vision.js'; 
 import diagnosticsHandler from '../api/diagnostics.js';
+import rankTextsHandler from '../api/rank-texts.js';
 import { webSearchHandler, __test as webSearchTest } from '../api/_lib/web-search-core.js';
 import extractUrlHandler, { __test as extractUrlTest } from '../api/extract-url.js';
 import { clearItems, saveItems } from '../api/_lib/latest/latest-cache.js';
@@ -1654,6 +1655,7 @@ delete process.env.GEMINI_API_KEY;
 process.env.GEMINI_API_KEY = 'test-gemini-key';
 process.env.NVIDIA_API_KEY = 'test-nvidia-key';
 let nvidiaEmbeddingCalls = 0;
+let nvidiaRerankCalls = 0;
 globalThis.fetch = async (url, init = {}) => {
     const href = String(url);
     if (href.includes('integrate.api.nvidia.com/v1/embeddings')) {
@@ -1667,6 +1669,16 @@ globalThis.fetch = async (url, init = {}) => {
                 index,
                 embedding: index === 0 ? [1, 0, 0] : [0.95, 0.05, 0]
             }))
+        });
+    }
+    if (href.includes('integrate.api.nvidia.com/v1/ranking')) {
+        nvidiaRerankCalls += 1;
+        assert.match(String(init?.headers?.Authorization || ''), /^Bearer test-nvidia-key$/);
+        const body = JSON.parse(String(init?.body || '{}'));
+        const passages = Array.isArray(body.passages) ? body.passages : [];
+        return okJson({
+            model: 'nvidia/llama-3.2-nv-rerankqa-1b-v2',
+            rankings: passages.map((_, index) => ({ index, logit: passages.length - index }))
         });
     }
     if (href.includes('generativelanguage.googleapis.com')) {
@@ -1704,9 +1716,60 @@ assert.equal(embeddingRagSearch.statusCode, 200);
 assert.equal(embeddingRagSearch.body.verified, true);
 assert.equal(embeddingRagSearch.body.embeddingEnhanced, true);
 assert.equal(embeddingRagSearch.body.embeddingModel, 'nvidia/nv-embedcode-7b-v1');
+assert.equal(embeddingRagSearch.body.rerankEnhanced, true);
+assert.equal(embeddingRagSearch.body.rerankModel, 'nvidia/llama-3.2-nv-rerankqa-1b-v2');
 assert.ok(nvidiaEmbeddingCalls >= 1);
+assert.ok(nvidiaRerankCalls >= 1);
 globalThis.fetch = ORIGINAL_FETCH;
 delete process.env.GEMINI_API_KEY;
+delete process.env.NVIDIA_API_KEY;
+
+process.env.NVIDIA_API_KEY = 'test-nvidia-key';
+let rankTextsEmbeddingCalls = 0;
+let rankTextsRerankCalls = 0;
+globalThis.fetch = async (url, init = {}) => {
+    const href = String(url);
+    if (href.includes('integrate.api.nvidia.com/v1/embeddings')) {
+        rankTextsEmbeddingCalls += 1;
+        const body = JSON.parse(String(init?.body || '{}'));
+        const count = Array.isArray(body.input) ? body.input.length : 0;
+        return okJson({
+            model: 'nvidia/nv-embedcode-7b-v1',
+            data: Array.from({ length: count }, (_, index) => ({
+                index,
+                embedding: index === 0 ? [1, 0] : (index === 1 ? [0.99, 0.01] : [0.1, 0.9])
+            }))
+        });
+    }
+    if (href.includes('integrate.api.nvidia.com/v1/ranking')) {
+        rankTextsRerankCalls += 1;
+        const body = JSON.parse(String(init?.body || '{}'));
+        const passages = Array.isArray(body.passages) ? body.passages : [];
+        return okJson({
+            model: 'nvidia/llama-3.2-nv-rerankqa-1b-v2',
+            rankings: passages.map((_, index) => ({ index, logit: index === 0 ? 4 : 1 }))
+        });
+    }
+    throw new Error(`unexpected URL ${href}`);
+};
+const rankTexts = await callHandler(rankTextsHandler, request('/api/rank-texts', {
+    query: 'kitchen keys',
+    items: [
+        { id: 'keys', key: 'keys', value: 'on the kitchen counter', text: 'keys: on the kitchen counter' },
+        { id: 'passport', key: 'passport', value: 'in the drawer', text: 'passport: in the drawer' }
+    ],
+    limit: 2,
+    useRerank: true
+}));
+assert.equal(rankTexts.statusCode, 200);
+assert.equal(rankTexts.body.success, true);
+assert.equal(rankTexts.body.available, true);
+assert.equal(rankTexts.body.embeddingEnhanced, true);
+assert.equal(rankTexts.body.rerankEnhanced, true);
+assert.equal(rankTexts.body.ranked[0].key, 'keys');
+assert.ok(rankTextsEmbeddingCalls >= 1);
+assert.ok(rankTextsRerankCalls >= 1);
+globalThis.fetch = ORIGINAL_FETCH;
 delete process.env.NVIDIA_API_KEY;
 
 process.env.GEMINI_API_KEY = 'test-gemini-key';
