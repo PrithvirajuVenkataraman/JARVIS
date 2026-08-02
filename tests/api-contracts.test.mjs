@@ -423,6 +423,65 @@ assert.equal(chatTest.enforceWordSpec(
     'one two',
     { mode: 'exact', targetWords: 4, minWords: 4, maxWords: 4 }
 ), 'one two');
+
+// Retrieved-sources reliability helpers
+assert.equal(chatTest.isAnswerEvidenceSource({
+    title: 'ISRO launch update',
+    description: 'Short note',
+    url: 'https://www.isro.gov.in/launch',
+    sourceType: 'official_source',
+    pageFetched: false
+}), true);
+assert.equal(chatTest.isAnswerEvidenceSource({
+    title: 'Brief headline',
+    description: 'Twelve chars',
+    url: 'https://www.reuters.com/world/example',
+    sourceType: 'trusted_news'
+}), true);
+assert.equal(chatTest.isAnswerEvidenceSource({
+    title: 'Forum thread',
+    description: 'Long enough discussion text about anything',
+    url: 'https://reddit.com/r/example',
+    sourceType: 'community_discussion'
+}), false);
+assert.equal(chatTest.asksUserToProvideSources('Share links to your portfolio and GitHub projects.'), false);
+assert.equal(chatTest.asksUserToProvideSources('Could you please provide sources for this claim?'), true);
+const preservedLive = chatTest.enforceLiveAnswerStyle(
+    { response: 'Share links to your portfolio.', intent: 'chat', action: null },
+    'latest ISRO update',
+    [],
+    { routeDecision: { strategy: 'direct' }, retrievalAttempted: false }
+);
+assert.match(String(preservedLive.response || ''), /Share links to your portfolio/i);
+const liveFallback = chatTest.buildLiveUpdateResponse('latest ISRO update', [
+    {
+        title: 'Mission overview',
+        description: 'Agency published the mission overview page.',
+        url: 'https://www.isro.gov.in/missions',
+        sourceType: 'official_source',
+        domain: 'isro.gov.in'
+    }
+]);
+assert.match(liveFallback, /Sources:/i);
+assert.match(liveFallback, /https:\/\/www\.isro\.gov\.in\/missions/i);
+assert.equal(chatTest.shouldUseAsFinalSource('latest ISRO update', {
+    title: 'Mission overview',
+    description: 'Agency published the mission overview page.',
+    url: 'https://www.isro.gov.in/missions',
+    sourceType: 'official_source',
+    domain: 'isro.gov.in'
+}), true);
+const rankedKeep = chatTest.rankLiveSources('latest ISRO update', [
+    {
+        title: 'Space agency posts mission note',
+        description: 'Official mission note published today.',
+        url: 'https://www.isro.gov.in/note',
+        sourceType: 'official_source',
+        domain: 'isro.gov.in'
+    }
+]);
+assert.ok(rankedKeep.length >= 1);
+
 const grounded = chatTest.buildGroundedUserMessage(
     validSelection.value.message,
     validSelection.value.intent,
