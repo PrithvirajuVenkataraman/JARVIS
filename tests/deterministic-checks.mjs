@@ -410,7 +410,19 @@ assert.match(SOURCE.searchApi, /rankRagResultsWithEmbeddings\(normalizedQuery,\s
 assert.match(SOURCE.searchApi, /embeddingEnhanced:\s*embeddingUsed/);
 assert.match(SOURCE.embeddingsApi, /NVIDIA_API_KEY/);
 assert.match(SOURCE.embeddingsApi, /integrate\.api\.nvidia\.com\/v1\/embeddings/);
+assert.match(SOURCE.embeddingsApi, /integrate\.api\.nvidia\.com\/v1\/ranking/);
+assert.match(SOURCE.embeddingsApi, /function rerankTexts/);
+assert.match(SOURCE.embeddingsApi, /function rankTextsByRelevance/);
+assert.match(SOURCE.searchApi, /rerankEnhanced:\s*rerankUsed/);
+assert.match(SOURCE.searchApi, /async function rerankRagResults/);
+assert.match(SOURCE.apiIndex, /\/api\/rank-texts/);
+assert.match(SOURCE.appHtml, /function buildRelevantSavedMemoryContextAsync/);
+assert.match(SOURCE.appHtml, /function rankSavedMemorySemantically/);
+assert.match(fs.readFileSync(new URL('../app/attachments.js', import.meta.url), 'utf8'), /rankAttachmentTextForQuery|\/api\/rank-texts/);
+assert.match(SOURCE.readme, /NVIDIA_RERANK_MODEL/);
+assert.match(SOURCE.readme, /do not replace Context Copilot routing/);
 assert.doesNotMatch(SOURCE.appHtml, /NVIDIA_API_KEY|integrate\.api\.nvidia\.com\/v1\/embeddings/);
+assert.doesNotMatch(fs.readFileSync(new URL('../app/context-engine.js', import.meta.url), 'utf8'), /rank-texts|NVIDIA_RERANK|embedTexts/);
 assert.match(SOURCE.appHtml, /mode:\s*'rag'/);
 assert.match(SOURCE.appHtml, /answerData\?\.verified === true/);
 assert.equal(searchTest.extractSearchTargetQuery(`Search the web for ${reviewQuery}`), reviewQuery);
@@ -971,6 +983,7 @@ vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'normalizeMemoryStoreRecor
 vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'memorySearchTokens'), memorySandbox);
 vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'scoreMemoryMatch'), memorySandbox);
 vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'findRelevantSavedMemory'), memorySandbox);
+vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'formatRelevantSavedMemoryContext'), memorySandbox);
 vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'buildRelevantSavedMemoryContext'), memorySandbox);
 memorySandbox.memoryStore.keys = memorySandbox.createExplicitMemoryRecord('keys', 'on the kitchen counter', 'my keys are on the kitchen counter');
 assert.equal(memorySandbox.memoryStore.keys.category, 'location');
