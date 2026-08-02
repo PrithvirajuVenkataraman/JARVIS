@@ -1058,18 +1058,90 @@ function findRelevantSavedMemory(text, limit = 3) {
             key: item.key,
             value: getMemoryRecordValue(item.record),
             category: item.record?.category || 'location',
-            updatedAt: item.record?.updatedAt || ''
+            updatedAt: item.record?.updatedAt || '',
+            score: item.score
         }));
 }
 
-function buildRelevantSavedMemoryContext(text) {
-    const relevant = findRelevantSavedMemory(text, 3);
+function formatRelevantSavedMemoryContext(relevant) {
+    const items = Array.isArray(relevant) ? relevant : [];
     if (typeof globalThis !== 'undefined') {
-        globalThis.__lastUsedMemoryKeys = relevant.map(item => item.key);
+        globalThis.__lastUsedMemoryKeys = items.map(item => item.key);
     }
-    if (!relevant.length) return '';
-    const lines = relevant.map(item => `- ${item.key}: ${item.value}`);
+    if (!items.length) return '';
+    const lines = items.map(item => `- ${item.key}: ${item.value}`);
     return `\n\nRelevant saved memory:\n${lines.join('\n')}`;
+}
+
+function buildRelevantSavedMemoryContext(text) {
+    return formatRelevantSavedMemoryContext(findRelevantSavedMemory(text, 3));
+}
+
+async function rankSavedMemorySemantically(text, limit = 3) {
+    const query = String(text || '').trim();
+    if (!query || !memoryStore) return [];
+    normalizeMemoryStoreRecords();
+    const items = Object.entries(memoryStore)
+        .map(([key, record]) => {
+            const value = getMemoryRecordValue(record);
+            if (!key || !value) return null;
+            return {
+                id: key,
+                key,
+                text: `${key}: ${value}`,
+                value,
+                category: record?.category || 'location',
+                updatedAt: record?.updatedAt || ''
+            };
+        })
+        .filter(Boolean)
+        .slice(0, 40);
+    if (!items.length) return [];
+    try {
+        const response = await fetch('/api/rank-texts', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                query,
+                items,
+                limit: Math.max(limit, 5),
+                useRerank: true
+            })
+        });
+        const data = await response.json().catch(() => null);
+        if (!response.ok || !data?.available || !Array.isArray(data?.ranked)) return [];
+        return data.ranked
+            .map(item => ({
+                key: String(item.key || item.id || '').trim(),
+                value: String(item.value || '').trim() || String(item.text || '').replace(/^[^:]+:\s*/, '').trim(),
+                category: item.category || 'location',
+                updatedAt: item.updatedAt || '',
+                score: Number(item.rerankScore ?? item.embeddingScore ?? 0)
+            }))
+            .filter(item => item.key && item.value)
+            .slice(0, limit);
+    } catch (_) {
+        return [];
+    }
+}
+
+function mergeRelevantMemoryHits(lexicalHits, semanticHits, limit = 3) {
+    const merged = [];
+    const seen = new Set();
+    for (const item of [...(semanticHits || []), ...(lexicalHits || [])]) {
+        const key = String(item?.key || '').trim();
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        merged.push(item);
+        if (merged.length >= limit) break;
+    }
+    return merged;
+}
+
+async function buildRelevantSavedMemoryContextAsync(text) {
+    const lexical = findRelevantSavedMemory(text, 3);
+    const semantic = await rankSavedMemorySemantically(text, 3);
+    return formatRelevantSavedMemoryContext(mergeRelevantMemoryHits(lexical, semantic, 3));
 }
 
 // ========== CONTENT MODERATION ==========
@@ -4604,7 +4676,7 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
             : '';
         const relevantSavedMemoryContext = requestOptions?.grounding
             ? ''
-            : buildRelevantSavedMemoryContext(normalizedUserMessage);
+            : await buildRelevantSavedMemoryContextAsync(normalizedUserMessage);
         const learnedStyleHint = buildLearnedAnswerStyleHint();
         const learnedPreferenceHint = buildLearnedPreferenceHint();
         // Keep the user message lean on the fast/stream path so the model starts sooner.
