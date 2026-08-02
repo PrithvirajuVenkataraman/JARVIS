@@ -87,9 +87,10 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
                 : '';
             const effectiveMessage = buildGroundedUserMessage(message, intent, grounding);
             const isAttachmentGrounding = isAttachmentGroundingPayload(grounding, intent);
+            const clientRoutingProbe = String(req.body?.routingMessage || req.body?.displayUserMessage || '').trim();
             const routingMessage = isAttachmentGrounding
                 ? String(grounding?.originalRequest || message || 'Analyze the attached file(s).').trim()
-                : effectiveMessage;
+                : (clientRoutingProbe || effectiveMessage);
             const isInternalSummary = isInternalSummarizerPrompt(effectiveMessage, '');
             if (intent === 'verify_answer') {
                 return await handleVerifyAnswerRequest(res, {
@@ -134,11 +135,19 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
                     }
                 });
             }
-            const routeDecision = classifyRoutingDecision(routingMessage, '', {
-                intent,
-                isInternalSummary,
-                isAttachmentGrounding
-            });
+            const prefersStreamGeneration = req.body?.stream === true &&
+                !isAttachmentGrounding &&
+                (
+                    isStreamPreferredGenerationRequest(clientRoutingProbe) ||
+                    isStreamPreferredGenerationRequest(effectiveMessage)
+                );
+            const routeDecision = prefersStreamGeneration
+                ? { strategy: 'direct', reason: 'stream_preferred_generation', webEligible: false }
+                : classifyRoutingDecision(routingMessage, '', {
+                    intent,
+                    isInternalSummary,
+                    isAttachmentGrounding
+                });
             const lengthPolicy = applyCostCapToLengthPolicy(
                 buildLengthPolicy(routingMessage, '', {
                     isInternalSummary,
@@ -386,13 +395,30 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
         if (!['chat', 'pop_culture_reference', 'fast_simple', 'fast_explainer', 'casual_chat'].includes(String(intent || 'chat'))) return false;
         if (grounding) return false;
         if (isInternalSummary) return false;
+        const routingProbe = String(body.routingMessage || body.displayUserMessage || body.message || '');
+        const generationMessage = String(body.message || '');
+        if (needsPreStreamSafetyReview(routingProbe) || needsPreStreamSafetyReview(generationMessage)) return false;
+        // Long generative answers (itineraries, recipes, drafting) should stream even when the
+        // expanded prompt contains live-looking words from place-search snippets.
+        if (isStreamPreferredGenerationRequest(routingProbe) || isStreamPreferredGenerationRequest(generationMessage)) {
+            return true;
+        }
         if (routeDecision?.strategy && routeDecision.strategy !== 'direct') return false;
-        if (needsPreStreamSafetyReview(body?.message)) return false;
         // Time-sensitive or source-needed queries must use the grounded non-stream path.
-        const message = String(body?.message || '');
-        if (isTimeSensitiveInfoRequest(message) || isMutableEntityFactQuery(message)) return false;
-        if (/\b(with sources?|source links?|cite|citation)\b/i.test(message)) return false;
+        if (isTimeSensitiveInfoRequest(routingProbe) || isMutableEntityFactQuery(routingProbe)) return false;
+        if (/\b(with sources?|source links?|cite|citation)\b/i.test(routingProbe)) return false;
         return true;
+    }
+
+    function isStreamPreferredGenerationRequest(text) {
+        const value = String(text || '').toLowerCase();
+        if (!value.trim()) return false;
+        if (isLongTravelPlanningRequest(value) || isRecipeGenerationRequest(value)) return true;
+        if (/\b(itinerary|itenary|itenarary|travel plan|trip plan|day[- ]by[- ]day|vacation plan)\b/.test(value)) return true;
+        if (/\bcreate a rich, engaging, practical itinerary\b/.test(value)) return true;
+        if (/\b(write|draft|compose)\b[\s\S]{0,40}\b(email|essay|story|letter|blog|itinerary)\b/.test(value)) return true;
+        if (/\b(detailed|comprehensive|full)\b/.test(value) && /\b(trip|travel|visit|goa|plan)\b/.test(value)) return true;
+        return false;
     }
 
     function needsPreStreamSafetyReview(message) {
@@ -2962,12 +2988,17 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
     }
 
     function isLongTravelPlanningRequest(message) {
-        const text = String(message || '').toLowerCase();
+        const text = String(message || '')
+            .toLowerCase()
+            .replace(/\b(itenary|itenarary)\b/g, 'itinerary');
         if (!text.trim()) return false;
-        const travelPlan = /\b(itinerary|travel plan|trip plan|plan (?:a|an|my)?\s*trip|day plan)\b/.test(text);
+        const travelPlan = /\b(itinerary|travel plan|trip plan|plan (?:a|an|my)?\s*trip|day plan|vacation)\b/.test(text) ||
+            (/\b(detailed|comprehensive|full)\b/.test(text) && /\b(trip|travel|visit|plan)\b/.test(text));
         if (!travelPlan) return false;
         const detailed = /\b(detailed|comprehensive|full|complete|in depth|deep)\b/.test(text);
         const dayMatch = text.match(/\b(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+days?\b/);
+        const dateRange = /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{1,2}\s*(?:-|–|to)\s*\d{1,2}\b/.test(text);
+        if (dateRange) return true;
         if (!dayMatch) return detailed;
         const dayWordMap = {
             one: 1, two: 2, three: 3, four: 4, five: 5, six: 6,
@@ -2999,6 +3030,9 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
         resolveRouteEscalation,
         isCrawl4AiFallbackCandidate,
         shouldStreamChatRequest,
+        isStreamPreferredGenerationRequest,
+        isLongTravelPlanningRequest,
+        isRecipeGenerationRequest,
         needsPreStreamSafetyReview,
         buildLengthPolicy,
         resolveResponseTemperature,
