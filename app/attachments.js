@@ -2,7 +2,7 @@ const MAX_ATTACHMENTS = 6;
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
 const MAX_EXTRACT_CHARS = 120000;
 const TEXT_EXTENSIONS = /\.(txt|md|markdown|json|jsonl|csv|tsv|xml|html|htm|css|js|mjs|cjs|ts|tsx|jsx|py|java|cpp|c|h|cs|go|rs|rb|php|sh|yaml|yml|toml|ini|log|sql|rtf)$/i;
-const IMAGE_EXTENSIONS = /\.(jpe?g|png|gif|webp|bmp|tiff?)$/i;
+const IMAGE_EXTENSIONS = /\.(jpe?g|png|jpg|gif|webp|bmp|tiff?)$/i;
 
 const pendingAttachments = [];
 
