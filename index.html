@@ -216,6 +216,7 @@
     <!-- ChatGPT-style Input at Bottom - Enhanced -->
     <div id="input-bar-container" class="fixed bottom-0 left-0 right-0 floating-input-bar z-40">
         <div class="composer-wrap">
+            <div id="context-topic-chip-host" class="context-topic-chip-host hidden" aria-live="polite"></div>
             <div id="composer-attachment-tray" class="composer-attachment-tray hidden" aria-live="polite"></div>
             <div id="input-bar-inner" class="composer-shell modern-input">
                 <div class="composer-leading">
@@ -1892,15 +1893,22 @@ function showFailureFallbackCard(userMessage, options = {}) {
     const chatContainer = document.getElementById('chat-container');
     if (!chatContainer) return;
 
+    document.getElementById('response-recovery-card')?.remove();
+    const safeMessage = String(message || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    const actions = Array.isArray(failure?.userActions) ? failure.userActions : ['retry', 'web_search'];
     const card = document.createElement('div');
     card.className = 'flex justify-start fade-in';
     card.innerHTML = `
-        <div class="max-w-2xl w-full p-3 rounded-xl border border-amber-300 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-700">
-            <p class="text-sm font-semibold text-amber-800 dark:text-amber-200 mb-2">I hit a temporary issue. Try one of these:</p>
-            <div class="flex flex-wrap gap-2">
-                <button onclick="retryLastRequest()" class="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold">Retry</button>
-                ${Array.isArray(failure?.userActions) && failure.userActions.includes('maps') ? `<a href="${mapsUrl}" target="_blank" rel="noopener noreferrer" class="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold">Open Maps</a>` : ''}
-                ${Array.isArray(failure?.userActions) && failure.userActions.includes('web_search') ? `<a href="${searchUrl}" target="_blank" rel="noopener noreferrer" class="px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-800 text-white text-xs font-semibold">Web Search</a>` : ''}
+        <div id="response-recovery-card" class="response-recovery-card" role="status">
+            <p>${safeMessage}</p>
+            <div class="response-recovery-actions">
+                ${actions.includes('retry') ? '<button type="button" onclick="retryLastRequest()" class="response-recovery-btn">Retry</button>' : ''}
+                ${actions.includes('maps') ? `<a href="${mapsUrl}" target="_blank" rel="noopener noreferrer" class="response-recovery-btn secondary">Open Maps</a>` : ''}
+                ${actions.includes('web_search') ? `<a href="${searchUrl}" target="_blank" rel="noopener noreferrer" class="response-recovery-btn secondary">Search web</a>` : ''}
             </div>
         </div>
     `;
@@ -5177,6 +5185,17 @@ let showRoutingDebugBadge = false;
         };
 
         function handleContextClarificationClick(event) {
+            const topicAction = event?.target?.closest?.('[data-context-topic-action]');
+            if (topicAction) {
+                const action = topicAction.getAttribute('data-context-topic-action');
+                if (action === 'clear' || action === 'new_topic') {
+                    clearContextTopicChip();
+                    window.JarvisConversation?.reset?.();
+                    window.JarvisState?.resetConversationState?.();
+                    showTemporaryMessage(action === 'new_topic' ? 'Starting a new topic.' : 'Cleared active topic.');
+                }
+                return;
+            }
             const button = event?.target?.closest?.('[data-context-choice]');
             if (!button) return;
             const card = button.closest('.context-clarification-card');
@@ -5188,7 +5207,50 @@ let showRoutingDebugBadge = false;
                 activeThread: { topic, entity: topic }
             }) || original;
             card?.remove();
+            if (choice === 'follow_up' && topic) updateContextTopicChip(topic);
+            else clearContextTopicChip();
             if (resolved) void sendTextInput({ text: resolved, source: 'context_clarification' });
+        }
+
+        function updateContextTopicChip(topic) {
+            const host = document.getElementById('context-topic-chip-host');
+            if (!host) return;
+            const clean = String(topic || '').trim();
+            if (!clean) {
+                clearContextTopicChip();
+                return;
+            }
+            const html = window.JarvisContextCopilotUi?.buildActiveTopicChipHtml?.(clean) || '';
+            if (!html) {
+                clearContextTopicChip();
+                return;
+            }
+            host.innerHTML = html;
+            host.classList.remove('hidden');
+        }
+
+        function clearContextTopicChip() {
+            const host = document.getElementById('context-topic-chip-host');
+            if (!host) return;
+            host.innerHTML = '';
+            host.classList.add('hidden');
+        }
+
+        function syncContextTopicChipFromResolution(contextResolution) {
+            if (!contextResolution) return;
+            if (contextResolution.decisionReason === 'reset_or_cancel') {
+                clearContextTopicChip();
+                return;
+            }
+            if (['ambiguous_short_context', 'ambiguous_reference_context'].includes(contextResolution.decisionReason)) {
+                return;
+            }
+            const topic = String(
+                contextResolution?.activeThread?.entity ||
+                contextResolution?.activeThread?.topic ||
+                ''
+            ).trim();
+            if (topic) updateContextTopicChip(topic);
         }
 
         // Jump-to-latest behavior is managed by the unified chat scroll-lock module below.
@@ -7785,7 +7847,9 @@ let showRoutingDebugBadge = false;
                 // Check if message contains HTML elements (like iframes, divs)
                 const hasHtmlContent = /<(iframe|div|img|table)\s/i.test(displayText);
 
-                const readableText = allowEmptyAssistant ? '' : formatAssistantTextForReadability(displayText);
+                const sourcePresentation = prepareAssistantSourcePresentation(displayText, meta);
+                const bodyForRender = sourcePresentation.answerText;
+                const readableText = allowEmptyAssistant ? '' : formatAssistantTextForReadability(bodyForRender);
 
                 // Render markdown-rich assistant text for professional readability.
                 let formattedText;
@@ -7805,6 +7869,7 @@ let showRoutingDebugBadge = false;
                 const sourceType = meta?.sourceType || (hasMap ? 'tool' : 'default');
                 const routeBadgeHtml = buildRoutingDebugBadgeHtml(meta?.routing, sourceType);
                 const avatarHtml = '';
+                const sourceFooterHtml = allowEmptyAssistant ? '' : (sourcePresentation.footerHtml || '');
 
                 const messageId = createAssistantMessageId();
                 const sourceTurn = getConversationTurn(messageTurnId);
@@ -7822,6 +7887,7 @@ let showRoutingDebugBadge = false;
                     turnId: messageTurnId, 
                     sourceType, 
                     sourceLabel, 
+                    sources: sourcePresentation.sources || [],
                     routing: meta?.routing || null, 
                     route: meta?.route || meta?.routing?.route || '',
                     routeReason: meta?.routeReason || meta?.routing?.reason || '',
@@ -7840,7 +7906,8 @@ let showRoutingDebugBadge = false;
                         ${avatarHtml}
                         <div class="min-w-0 flex-1 overflow-hidden ${hasMap ? 'map-message' : ''}"> 
                             <div class="${hasMap ? '' : 'chat-bubble-assistant'}"> 
-                                <div class="assistant-message-text typewriter-text text-sm leading-relaxed text-left" data-message-id="${messageId}"></div> 
+                                <div class="assistant-message-text typewriter-text text-sm leading-relaxed text-left" data-message-id="${messageId}"></div>
+                                ${sourceFooterHtml}
                             </div> 
                         </div> 
                         ${meta?.systemGreeting ? '' : buildAssistantActionsHtml(messageId, !!sourceTurn?.rawPrompt)} 
@@ -7997,28 +8064,34 @@ let showRoutingDebugBadge = false;
             const linkClass = isDarkTheme
                 ? 'text-sky-300 hover:text-sky-200 underline font-medium'
                 : 'text-indigo-700 hover:text-indigo-900 underline font-medium';
-            const readableText = formatAssistantTextForReadability(normalizeAssistantTextStyle(String(text || '')));
+            const presentation = prepareAssistantSourcePresentation(text, options?.meta || {});
+            const readableText = formatAssistantTextForReadability(normalizeAssistantTextStyle(String(presentation.answerText || '')));
             const formatted = sanitizeAssistantMarkup(renderAssistantMarkdown(readableText, linkClass));
             textElement.classList.toggle('is-streaming', options?.streaming === true);
             textElement.innerHTML = formatted;
+            if (options?.streaming !== true) {
+                applyAssistantSourceFooter(textElement.closest('.chat-row') || textElement.parentElement, text, options?.meta || {});
+            }
         }
 
         function updateStreamingAssistantMessage(messageId, text, meta = {}) {
             const row = findAssistantMessageRow(messageId);
             if (!row) return;
             const textElement = row.querySelector('.assistant-message-text');
-            renderAssistantTextIntoElement(textElement, text, { streaming: meta?.streaming === true });
+            renderAssistantTextIntoElement(textElement, text, { streaming: meta?.streaming === true, meta });
             const cleanText = String(text || '').trim();
             const existing = getAssistantMessageMeta(messageId) || {};
             const turnId = String(existing.turnId || meta?.turnId || activeResponseRenderContext?.turnId || '').trim();
             const priorUserPrompt = String(meta?.userMessage || existing.priorUserPrompt || '').trim();
+            const presentation = prepareAssistantSourcePresentation(cleanText, { ...existing, ...meta });
             registerAssistantMessageMeta(messageId, {
                 ...existing,
                 text: cleanText,
                 priorUserPrompt,
                 turnId,
-                sourceType: 'model',
-                sourceLabel: 'Model answer',
+                sourceType: meta?.sourceType || existing.sourceType || 'model',
+                sourceLabel: meta?.sourceLabel || existing.sourceLabel || 'Model answer',
+                sources: presentation.sources || existing.sources || [],
                 routing: meta?.routing || existing.routing || null,
                 route: meta?.route || existing.route || '',
                 routeReason: meta?.routeReason || existing.routeReason || '',
@@ -8304,10 +8377,18 @@ function normalizeUiTokens(text) {
             if (pendingAttachments.length || workflow.id === 'compare_docs' || workflow.id === 'fix_from_screen') {
                 const attachmentsForSend = window.JarvisAttachments?.takePendingForSend?.() || [];
                 if (attachmentsForSend.length) {
-                    const attachmentContext = await window.JarvisAttachments?.ingestAllForMessage?.(
-                        attachmentsForSend,
-                        workflow.prompt
-                    );
+                    const tray = document.getElementById('composer-attachment-tray');
+                    window.JarvisAttachments?.setAttachmentTrayReading?.(tray, true);
+                    let attachmentContext = null;
+                    try {
+                        attachmentContext = await window.JarvisAttachments?.ingestAllForMessage?.(
+                            attachmentsForSend,
+                            workflow.prompt
+                        );
+                    } finally {
+                        window.JarvisAttachments?.setAttachmentTrayReading?.(tray, false);
+                        refreshComposerAttachmentTray();
+                    }
                     grounding = attachmentContext?.anyReadable ? (attachmentContext?.grounding || null) : null;
                     if (!grounding) {
                         addChatMessage(`I could not extract readable text from the attached file(s). Try a clearer PDF, DOCX, or image.${stepLine}`, false);
@@ -8430,6 +8511,49 @@ function normalizeUiTokens(text) {
 
         function buildRoutingDebugBadgeHtml(routing, sourceType = 'default') {
             return '';
+        }
+
+        function prepareAssistantSourcePresentation(text, meta = {}) {
+            const raw = String(text || '');
+            const split = window.JarvisSourceTransparency?.splitAnswerAndSources?.(raw) || { answer: raw, sources: [] };
+            const sources = Array.isArray(meta?.sources) && meta.sources.length
+                ? meta.sources
+                : (Array.isArray(meta?.evidenceUsed) && meta.evidenceUsed.length
+                    ? meta.evidenceUsed
+                    : (Array.isArray(meta?.evidenceSources) && meta.evidenceSources.length
+                        ? meta.evidenceSources
+                        : split.sources));
+            const footerMeta = {
+                ...meta,
+                sources,
+                sourceType: meta?.sourceType || '',
+                verified: meta?.verified === true || String(meta?.sourceType || '').toLowerCase() === 'verified',
+                reason: meta?.reason || meta?.sourceReason || ''
+            };
+            const footerHtml = window.JarvisSourceTransparency?.buildSourceTransparencyHtml?.(footerMeta, raw) || '';
+            const shouldStripSources = Boolean(footerHtml) && Array.isArray(split.sources) && split.sources.length > 0;
+            return {
+                answerText: shouldStripSources ? (split.answer || raw) : raw,
+                footerHtml,
+                sources
+            };
+        }
+
+        function applyAssistantSourceFooter(row, text, meta = {}) {
+            if (!row) return;
+            const bubble = row.querySelector('.chat-bubble-assistant') || row.querySelector('.min-w-0');
+            if (!bubble) return;
+            let footer = bubble.querySelector('.source-transparency');
+            const { footerHtml } = prepareAssistantSourcePresentation(text, meta);
+            if (!footerHtml) {
+                footer?.remove();
+                return;
+            }
+            if (!footer) {
+                footer = document.createElement('div');
+                bubble.appendChild(footer);
+            }
+            footer.outerHTML = footerHtml;
         }
 
         function isSafeAssistantUrl(url) {
@@ -9285,11 +9409,19 @@ async function sendTextInput(submission = {}) {
                 try {
                     if (attachmentsForSend.length) {
                         showThinkingIndicator('Reading attachments...');
+                        const tray = document.getElementById('composer-attachment-tray');
+                        window.JarvisAttachments?.setAttachmentTrayReading?.(tray, true);
                         const attachmentRequest = effectiveOutgoingText || attachmentDefaultPrompt || 'Please analyze the attached file(s).';
-                        const attachmentContext = await window.JarvisAttachments?.ingestAllForMessage?.(
-                            attachmentsForSend,
-                            attachmentRequest
-                        );
+                        let attachmentContext = null;
+                        try {
+                            attachmentContext = await window.JarvisAttachments?.ingestAllForMessage?.(
+                                attachmentsForSend,
+                                attachmentRequest
+                            );
+                        } finally {
+                            window.JarvisAttachments?.setAttachmentTrayReading?.(tray, false);
+                            refreshComposerAttachmentTray();
+                        }
                         if (!attachmentContext?.anyReadable || !attachmentContext?.grounding) {
                             addChatMessage(
                                 'I could not extract readable text from that file. If it is a scanned PDF, try a clearer photo of the pages, or upload a DOCX/TXT version.',
@@ -17562,9 +17694,11 @@ function isWakeGreetingText(text) {
             if (contextResolution?.decisionReason === 'reset_or_cancel') {
                 clearSupersededConversationState();
                 window.JarvisState?.resetConversationState();
+                clearContextTopicChip();
                 addChatMessage('Context cleared. Start a new topic whenever you are ready.', false);
                 return;
             }
+            syncContextTopicChipFromResolution(contextResolution);
             if (['ambiguous_short_context', 'ambiguous_reference_context'].includes(contextResolution?.decisionReason)) {
                 const clarification = buildAmbiguousShortContextReply(contextResolution);
                 const chips = buildAmbiguousContextClarificationHtml(contextResolution);
@@ -21366,6 +21500,7 @@ function startNewChatSession(options = {}) {
         }
         window.JarvisConversation?.reset?.();
         window.JarvisState?.resetConversationState?.();
+        clearContextTopicChip();
         rememberActiveEmptyChatDraft(existingEmptySession);
         renderChatSidebarList();
         return existingEmptySession;
@@ -21382,6 +21517,7 @@ function startNewChatSession(options = {}) {
     }
     window.JarvisConversation?.reset?.();
     window.JarvisState?.resetConversationState?.();
+    clearContextTopicChip();
     if (options.persistEmpty === true || chatSessionHasUserMessage(session)) {
         forgetActiveEmptyChatDraft();
         saveChatSessions();
