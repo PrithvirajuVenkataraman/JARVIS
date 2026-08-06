@@ -912,6 +912,8 @@ function buildVisionPrompt(userPrompt, task) {
         '- For phones, tablets, laptops, earbuds, watches, and other consumer electronics: only fill brand/model when a logo, printed text, or unmistakable hardware cue is visible.',
         '- If brand/model is not clearly supported by visible evidence, leave brand and model as empty strings and describe the object instead. Prefer "not visible" over guessing.',
         '- Never invent SKUs, generation names, release years, or prices.',
+        '- For "why is this like this", "what happened here", "is this normal", or similar questions, identify the visible subject first, then explain only visible condition, posture, damage, environment, growth stage, UI state, or other observable clues.',
+        '- If the cause cannot be known from the image alone, put the best visible explanation in likelyReason and qualify it in uncertainty.',
         'If text appears, preserve character accuracy, punctuation, and line order.',
         'Detect visible objects including products, people, animals, food, devices, vehicles, and common items.',
         'Put animals in animals[]. Put vehicles/cars/bikes/buses/trucks in objects[] with clear labels like "car", "motorcycle", "bus".',
@@ -924,6 +926,11 @@ function buildVisionPrompt(userPrompt, task) {
         '{',
         '  "summary": "short useful summary",',
         '  "answer": "direct concise answer to user prompt",',
+        '  "mainSubject": "most important visible subject, object, living thing, part, product, or scene item",',
+        '  "subjectType": "animal|person|vehicle|device|product|plant|food|document|scene|object|unknown",',
+        '  "conditionOrState": "visible condition, posture, damage, growth stage, UI state, arrangement, or empty string",',
+        '  "likelyReason": "visible-evidence explanation for why it looks like this, or empty string",',
+        '  "careOrSafetyNote": "brief practical note only when useful for living things, damaged items, hazards, or empty string",',
         '  "brand": "visible brand only when supported, otherwise empty string",',
         '  "model": "visible model only when supported, otherwise empty string",',
         '  "modelEvidence": ["visible clue supporting the brand/model"],',
@@ -951,6 +958,7 @@ function buildVisionPrompt(userPrompt, task) {
         '- Confidence values must be between 0 and 1.',
         '- Keep summary under 45 words.',
         '- Keep answer under 140 words for product/object identification, otherwise under 80 words.',
+        '- For why/explanation questions, keep the final answer direct: identity first, visible condition second, likely reason third.',
         '- Do not fabricate unreadable text; only include likely readable snippets.',
         isTextTask
             ? '- For OCR tasks: prioritize exact text extraction first. Preserve row order, numbers, totals, units, and symbols exactly.'
@@ -1093,6 +1101,11 @@ function formatVisionResponse(data, task, userPrompt = '') {
     const compactText = fullText || textDetected.slice(0, 12).join('\n');
     const brand = String(data?.brand || '').trim();
     const model = String(data?.model || '').trim();
+    const mainSubject = String(data?.mainSubject || '').trim();
+    const subjectType = String(data?.subjectType || '').trim();
+    const conditionOrState = String(data?.conditionOrState || '').trim();
+    const likelyReason = String(data?.likelyReason || '').trim();
+    const careOrSafetyNote = String(data?.careOrSafetyNote || '').trim();
     const modelEvidence = Array.isArray(data?.modelEvidence) ? data.modelEvidence.map(v => String(v || '').trim()).filter(Boolean) : [];
     const distinctiveFeatures = Array.isArray(data?.distinctiveFeatures) ? data.distinctiveFeatures.map(v => String(v || '').trim()).filter(Boolean) : [];
     const uncertainty = String(data?.uncertainty || '').trim();
@@ -1151,6 +1164,11 @@ function formatVisionResponse(data, task, userPrompt = '') {
         directAnswer,
         summary,
         objects: sceneSubjects,
+        mainSubject,
+        subjectType,
+        conditionOrState,
+        likelyReason,
+        careOrSafetyNote,
         brand,
         model,
         modelEvidence,
@@ -1168,7 +1186,7 @@ function formatVisionResponse(data, task, userPrompt = '') {
     return conciseVisionFallback(directAnswer, summary, sceneSubjects);
 }
 
-function buildObjectFirstVisionAnswer({ directAnswer, summary, objects, brand, model, modelEvidence, distinctiveFeatures, uncertainty, compactText, explainIntent, detailedIntent, includeText }) {
+function buildObjectFirstVisionAnswer({ directAnswer, summary, objects, mainSubject, subjectType, conditionOrState, likelyReason, careOrSafetyNote, brand, model, modelEvidence, distinctiveFeatures, uncertainty, compactText, explainIntent, detailedIntent, includeText }) {
     const topObject = pickTopObjectLabel(objects);
     const topObjectMeta = pickTopObjectMeta(objects);
     const answer = removeDetectedTextLead(compactSingleLine(directAnswer || summary));
@@ -1178,12 +1196,17 @@ function buildObjectFirstVisionAnswer({ directAnswer, summary, objects, brand, m
     const safeBrand = evidenceBacked ? String(brand || '').trim() : '';
     const safeModel = evidenceBacked ? String(model || '').trim() : '';
     const identity = [safeBrand, safeModel].filter(Boolean).join(' ').trim();
+    const subject = compactSingleLine(mainSubject) || topObject;
+    const type = compactSingleLine(subjectType);
 
     if (identity) {
         const qualified = uncertainty ? `likely ${identity}` : identity;
-        parts.push(`Likely item: ${topObject ? `${qualified} (${topObject})` : qualified}.`);
-    } else if (topObject) {
-        parts.push(detailedIntent || explainIntent ? `Likely item: ${topObject}.` : `Visible item: ${topObject}.`);
+        parts.push(`Likely item: ${subject ? `${qualified} (${subject})` : qualified}.`);
+    } else if (subject) {
+        const subjectLabel = type && !new RegExp(`\\b${escapeRegExp(type)}\\b`, 'i').test(subject)
+            ? `${subject} (${type})`
+            : subject;
+        parts.push(detailedIntent || explainIntent ? `Likely item: ${subjectLabel}.` : `Visible item: ${subjectLabel}.`);
     } else if (answer) {
         parts.push(answer);
     }
@@ -1200,6 +1223,18 @@ function buildObjectFirstVisionAnswer({ directAnswer, summary, objects, brand, m
         parts.push(`Visible details: ${distinctiveFeatures.slice(0, 4).join('; ')}.`);
     }
 
+    if ((explainIntent || conditionOrState) && conditionOrState) {
+        parts.push(`Visible condition: ${compactSingleLine(conditionOrState)}.`);
+    }
+
+    if ((explainIntent || likelyReason) && likelyReason) {
+        parts.push(`Likely reason: ${compactSingleLine(likelyReason)}.`);
+    }
+
+    if (careOrSafetyNote) {
+        parts.push(`Note: ${compactSingleLine(careOrSafetyNote)}.`);
+    }
+
     if (uncertainty) {
         parts.push(`Uncertainty: ${uncertainty}`);
     }
@@ -1213,6 +1248,10 @@ function buildObjectFirstVisionAnswer({ directAnswer, summary, objects, brand, m
 
 function pickTopObjectLabel(objects) {
     return pickTopObjectMeta(objects)?.label || '';
+}
+
+function escapeRegExp(value = '') {
+    return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function pickTopObjectMeta(objects) {
@@ -1244,7 +1283,7 @@ function cleanVisionDisplayText(text) {
         .replace(/^```(?:json)?\s*/i, '')
         .replace(/\s*```$/i, '')
         .replace(/\b"?(?:objects|people|animals|textDetected|modelEvidence|distinctiveFeatures|confidence)"?\s*:\s*(?:\[[\s\S]*?\]|\{[\s\S]*?\}|[0-9.]+|"[^"]*")\s*,?/gi, ' ')
-        .replace(/"(?:answer|summary|brand|model|uncertainty|fullText|label|count)"\s*:\s*"?/gi, ' ')
+        .replace(/"(?:answer|summary|mainSubject|subjectType|conditionOrState|likelyReason|careOrSafetyNote|brand|model|uncertainty|fullText|label|count)"\s*:\s*"?/gi, ' ')
         .replace(/\bConfidence:\s*[^\n.]+\.?/gi, ' ')
         .replace(/[{}[\]]/g, ' ')
         .replace(/"\s*,\s*"/g, ' ')
@@ -1300,7 +1339,7 @@ function conciseVisionFallback(directAnswer, summary, objects) {
 
 function isObjectExplanationIntent(userPrompt) {
     const text = String(userPrompt || '').toLowerCase();
-    return /\b(what is this|what's this|what is that|identify|explain|about this|about that|product|part|component|use|used for|purpose|how it works|what phone|which phone|what model|which model|brand)\b/.test(text);
+    return /\b(what is this|what's this|what is that|what is it|what's it|identify|explain|about this|about that|why is it like this|why is this like this|why does it look|what happened here|how did this happen|is this normal|is it safe|product|part|component|use|used for|purpose|how it works|what phone|which phone|what model|which model|brand)\b/.test(text);
 }
 
 function normalizeDetected(list) {
