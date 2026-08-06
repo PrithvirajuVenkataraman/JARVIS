@@ -216,7 +216,6 @@
     <!-- ChatGPT-style Input at Bottom - Enhanced -->
     <div id="input-bar-container" class="fixed bottom-0 left-0 right-0 floating-input-bar z-40">
         <div class="composer-wrap">
-            <div id="context-topic-chip-host" class="context-topic-chip-host hidden" aria-live="polite"></div>
             <div id="composer-attachment-tray" class="composer-attachment-tray hidden" aria-live="polite"></div>
             <div id="input-bar-inner" class="composer-shell modern-input">
                 <div class="composer-leading">
@@ -4996,6 +4995,7 @@ let showRoutingDebugBadge = false;
         };
         let pendingSelectionGrounding = null;
         let lastMultimodalGrounding = null;
+        let lastVisionContext = null;
         let assistantMessageCounter = 0;
         const assistantMessageMeta = new Map();
         let conversationTurnCounter = 0;
@@ -5185,17 +5185,6 @@ let showRoutingDebugBadge = false;
         };
 
         function handleContextClarificationClick(event) {
-            const topicAction = event?.target?.closest?.('[data-context-topic-action]');
-            if (topicAction) {
-                const action = topicAction.getAttribute('data-context-topic-action');
-                if (action === 'clear' || action === 'new_topic') {
-                    clearContextTopicChip();
-                    window.JarvisConversation?.reset?.();
-                    window.JarvisState?.resetConversationState?.();
-                    showTemporaryMessage(action === 'new_topic' ? 'Starting a new topic.' : 'Cleared active topic.');
-                }
-                return;
-            }
             const button = event?.target?.closest?.('[data-context-choice]');
             if (!button) return;
             const card = button.closest('.context-clarification-card');
@@ -5207,50 +5196,7 @@ let showRoutingDebugBadge = false;
                 activeThread: { topic, entity: topic }
             }) || original;
             card?.remove();
-            if (choice === 'follow_up' && topic) updateContextTopicChip(topic);
-            else clearContextTopicChip();
             if (resolved) void sendTextInput({ text: resolved, source: 'context_clarification' });
-        }
-
-        function updateContextTopicChip(topic) {
-            const host = document.getElementById('context-topic-chip-host');
-            if (!host) return;
-            const clean = String(topic || '').trim();
-            if (!clean) {
-                clearContextTopicChip();
-                return;
-            }
-            const html = window.JarvisContextCopilotUi?.buildActiveTopicChipHtml?.(clean) || '';
-            if (!html) {
-                clearContextTopicChip();
-                return;
-            }
-            host.innerHTML = html;
-            host.classList.remove('hidden');
-        }
-
-        function clearContextTopicChip() {
-            const host = document.getElementById('context-topic-chip-host');
-            if (!host) return;
-            host.innerHTML = '';
-            host.classList.add('hidden');
-        }
-
-        function syncContextTopicChipFromResolution(contextResolution) {
-            if (!contextResolution) return;
-            if (contextResolution.decisionReason === 'reset_or_cancel') {
-                clearContextTopicChip();
-                return;
-            }
-            if (['ambiguous_short_context', 'ambiguous_reference_context'].includes(contextResolution.decisionReason)) {
-                return;
-            }
-            const topic = String(
-                contextResolution?.activeThread?.entity ||
-                contextResolution?.activeThread?.topic ||
-                ''
-            ).trim();
-            if (topic) updateContextTopicChip(topic);
         }
 
         // Jump-to-latest behavior is managed by the unified chat scroll-lock module below.
@@ -6813,76 +6759,6 @@ let showRoutingDebugBadge = false;
             return raw.split(/[.?!]/)[0].trim().slice(0, 80);
         }
 
-        function shouldShowContextCopilotBadge(reason) {
-            return [
-                'conversation_repair',
-                'explicit_thread_resume',
-                'pending_clarification_answer',
-                'new_intent_low_context_confidence'
-            ].includes(String(reason || ''));
-        }
-
-        function getContextCopilotTopic(context = {}) {
-            return String(
-                context.activeThreadEntity ||
-                context.activeThreadTopic ||
-                context.resolvedUserText ||
-                ''
-            ).replace(/\s+/g, ' ').trim().slice(0, 80);
-        }
-
-        function getContextCopilotSummary(context = {}) {
-            const reason = String(context.contextDecisionReason || '');
-            const action = String(context.programmaticAction || '');
-            const topic = getContextCopilotTopic(context);
-            if (action === 'verify_answer') return 'Verifying answer';
-            if (reason === 'conversation_repair') return topic ? `Correction applied: ${topic}` : 'Correction applied';
-            if (reason === 'explicit_thread_resume') return topic ? `Returned to earlier topic: ${topic}` : 'Returned to earlier topic';
-            if (reason === 'pending_clarification_answer') return 'Clarification answer understood';
-            if (reason === 'new_intent_low_context_confidence') return 'New topic detected';
-            return '';
-        }
-
-        function buildContextCopilotBadgeHtml(context = {}) {
-            const reason = String(context.contextDecisionReason || '');
-            if (!shouldShowContextCopilotBadge(reason)) return '';
-            const summary = getContextCopilotSummary(context);
-            if (!summary) return '';
-            const confidence = Math.round((Number(context.contextConfidence) || 0) * 100);
-            const original = String(context.originalUserText || '').trim();
-            const resolved = String(context.resolvedUserText || '').trim();
-            const compactOriginal = original.length > 220 ? `${original.slice(0, 220).trim()}...` : original;
-            const compactResolved = resolved.length > 220 ? `${resolved.slice(0, 220).trim()}...` : resolved;
-            const primaryIntent = String(context.primaryIntent || '').trim();
-            return `
-                <details class="context-copilot-badge">
-                    <summary>
-                        <span class="context-copilot-dot" aria-hidden="true"></span>
-                        <span>${escapeHtml(summary)}</span>
-                    </summary>
-                    <div class="context-copilot-details">
-                        ${compactOriginal ? `<div><strong>Original:</strong> ${escapeHtml(compactOriginal)}</div>` : ''}
-                        ${compactResolved ? `<div><strong>Understood as:</strong> ${escapeHtml(compactResolved)}</div>` : ''}
-                        ${primaryIntent ? `<div><strong>Intent:</strong> ${escapeHtml(primaryIntent)}</div>` : ''}
-                        <div><strong>Reason:</strong> ${escapeHtml(reason)}</div>
-                        ${confidence ? `<div><strong>Confidence:</strong> ${confidence}%</div>` : ''}
-                    </div>
-                </details>
-            `;
-        }
-
-        function updateContextCopilotBadge(turnId) {
-            const turn = getConversationTurn(turnId);
-            if (!turn?.sourceContext) return;
-            const html = buildContextCopilotBadgeHtml(turn.sourceContext);
-            const row = document.querySelector(`.chat-row[data-role="user"][data-turn-id="${CSS.escape(String(turnId || ''))}"]`);
-            const bubble = row?.querySelector('.chat-bubble-user');
-            if (!bubble) return;
-            bubble.querySelector('.context-copilot-badge')?.remove();
-            if (!html) return;
-            bubble.insertAdjacentHTML('beforeend', html);
-        }
-
         function getActionIconSvg(name) {
             const icons = {
                 copy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>',
@@ -8277,6 +8153,93 @@ function normalizeUiTokens(text) {
                 sourceAnswer: String(payload.sourceAnswer || summary).slice(0, summaryLimit),
                 savedAt: Date.now()
             };
+        }
+
+        function clearVisionContext() {
+            lastVisionContext = null;
+            if (lastMultimodalGrounding?.kind === 'vision') {
+                lastMultimodalGrounding = null;
+            }
+        }
+
+        function compactVisionContextValue(value, limit = 220) {
+            return String(value || '')
+                .replace(/\s+/g, ' ')
+                .trim()
+                .slice(0, limit);
+        }
+
+        function pickVisionContextSubject(details = {}, answer = '') {
+            const explicit = compactVisionContextValue(details?.mainSubject || details?.summary || '', 90);
+            if (explicit) return explicit;
+            const buckets = [
+                ...(Array.isArray(details?.animals) ? details.animals : []),
+                ...(Array.isArray(details?.objects) ? details.objects : []),
+                ...(Array.isArray(details?.people) ? details.people : [])
+            ];
+            const labeled = buckets
+                .map(item => compactVisionContextValue(item?.label || item?.description || '', 80))
+                .filter(Boolean);
+            if (labeled.length) return labeled[0];
+            return compactVisionContextValue(answer, 90).replace(/^(?:likely|visible)\s+item:\s*/i, '');
+        }
+
+        function rememberVisionContext({ prompt = '', task = '', answer = '', details = {} } = {}) {
+            const subject = pickVisionContextSubject(details, answer);
+            const objects = Array.isArray(details?.objects)
+                ? details.objects.map(item => compactVisionContextValue(item?.label || item?.description || '', 60)).filter(Boolean).slice(0, 6)
+                : [];
+            const animals = Array.isArray(details?.animals)
+                ? details.animals.map(item => compactVisionContextValue(item?.label || item?.description || '', 60)).filter(Boolean).slice(0, 6)
+                : [];
+            const textDetected = Array.isArray(details?.textDetected)
+                ? details.textDetected.map(item => compactVisionContextValue(item, 80)).filter(Boolean).slice(0, 4)
+                : [];
+            lastVisionContext = {
+                prompt: compactVisionContextValue(prompt, 260),
+                task: compactVisionContextValue(task, 80),
+                subject,
+                subjectType: compactVisionContextValue(details?.subjectType || '', 80),
+                conditionOrState: compactVisionContextValue(details?.conditionOrState || '', 180),
+                likelyReason: compactVisionContextValue(details?.likelyReason || '', 220),
+                answer: compactVisionContextValue(answer, 600),
+                objects,
+                animals,
+                textDetected,
+                savedAt: Date.now()
+            };
+        }
+
+        function getActiveVisionContext() {
+            if (!lastVisionContext) return null;
+            if ((Date.now() - Number(lastVisionContext.savedAt || 0)) > 10 * 60 * 1000) {
+                lastVisionContext = null;
+                return null;
+            }
+            return lastVisionContext;
+        }
+
+        function isVisionContextFollowup(text) {
+            const t = String(text || '').toLowerCase().replace(/[?.!,;:]+$/g, '').trim();
+            if (!t) return false;
+            return /^(?:why|why is it like this|why is this like this|what is this|what's this|what is it|what's it|what is this part|what part is this|what happened here|how did this happen|is this normal|is it safe|what should i do|explain this|tell me about this|this|that|it)$/i.test(t) ||
+                /\b(?:why|what|which|how|explain|identify|normal|safe|happened|part|use|purpose)\b[\s\S]{0,40}\b(?:this|that|it|object|thing|item|part)\b/i.test(t);
+        }
+
+        function buildVisionContextNote(context = null) {
+            if (!context) return '';
+            const lines = [
+                context.subject ? `Previous visible subject: ${context.subject}` : '',
+                context.subjectType ? `Subject type: ${context.subjectType}` : '',
+                context.conditionOrState ? `Visible state: ${context.conditionOrState}` : '',
+                context.likelyReason ? `Previous likely reason: ${context.likelyReason}` : '',
+                context.objects?.length ? `Previously detected objects: ${context.objects.join(', ')}` : '',
+                context.animals?.length ? `Previously detected animals: ${context.animals.join(', ')}` : '',
+                context.textDetected?.length ? `Previously readable text: ${context.textDetected.join(' | ')}` : '',
+                context.answer ? `Previous answer: ${context.answer}` : ''
+            ].filter(Boolean);
+            if (!lines.length) return '';
+            return `Recent Live Vision context for this follow-up:\n${lines.join('\n')}\nUse this only if the current frame still appears related; otherwise answer from the current frame and say the previous context may not apply.`;
         }
 
         function getActiveMultimodalGrounding() {
@@ -17686,7 +17649,6 @@ function isWakeGreetingText(text) {
                     activeThreadTopic: String(contextResolution.activeThread?.topic || ''),
                     activeThreadEntity: String(contextResolution.activeThread?.entity || '')
                 };
-                updateContextCopilotBadge(activeTurnForResolution.id);
             }
             if (contextResolution?.cancelledPendingState) {
                 clearSupersededConversationState();
@@ -17694,11 +17656,9 @@ function isWakeGreetingText(text) {
             if (contextResolution?.decisionReason === 'reset_or_cancel') {
                 clearSupersededConversationState();
                 window.JarvisState?.resetConversationState();
-                clearContextTopicChip();
                 addChatMessage('Context cleared. Start a new topic whenever you are ready.', false);
                 return;
             }
-            syncContextTopicChipFromResolution(contextResolution);
             if (['ambiguous_short_context', 'ambiguous_reference_context'].includes(contextResolution?.decisionReason)) {
                 const clarification = buildAmbiguousShortContextReply(contextResolution);
                 const chips = buildAmbiguousContextClarificationHtml(contextResolution);
@@ -21500,7 +21460,7 @@ function startNewChatSession(options = {}) {
         }
         window.JarvisConversation?.reset?.();
         window.JarvisState?.resetConversationState?.();
-        clearContextTopicChip();
+        clearVisionContext();
         rememberActiveEmptyChatDraft(existingEmptySession);
         renderChatSidebarList();
         return existingEmptySession;
@@ -21517,7 +21477,7 @@ function startNewChatSession(options = {}) {
     }
     window.JarvisConversation?.reset?.();
     window.JarvisState?.resetConversationState?.();
-    clearContextTopicChip();
+    clearVisionContext();
     if (options.persistEmpty === true || chatSessionHasUserMessage(session)) {
         forgetActiveEmptyChatDraft();
         saveChatSessions();
@@ -22874,6 +22834,7 @@ async function toggleContinuousVision() {
             continuousVisionStream.getTracks().forEach(t => t.stop());
         }
         clearPaperAnswerOverlay();
+        clearVisionContext();
         continuousVisionTrack = null;
         videoEl.srcObject = null;
         continuousVisionRotationDeg = 0;
@@ -23059,6 +23020,9 @@ function resolveContinuousVisionTask(text) {
         || /\bwhat\s+(?:kind of\s+)?(?:car|vehicle|bike|truck|bus)\b/i.test(query)) {
         return 'object_detect';
     }
+    if (/\b(what(?:'s| is)\s+(?:this|that|it|this part|that part)|what am i holding|what is in my hand|what do i have|why(?: is| does)?\s+(?:this|that|it)|why is it like this|why is this like this|what happened here|how did this happen|is this normal|is it safe|what should i do with this|identify this|explain this)\b/i.test(query)) {
+        return 'object_detect';
+    }
     if (/\b(read|text|ocr|bill|receipt|invoice|sign|label|menu|document|what does it say|written)\b/i.test(query)) {
         return 'text_extract';
     }
@@ -23067,28 +23031,31 @@ function resolveContinuousVisionTask(text) {
 
 function buildContinuousVisionPrompt(text, visionTask) {
     const query = String(text || '').trim();
+    const visionContext = isVisionContextFollowup(query) ? getActiveVisionContext() : null;
+    const contextNote = buildVisionContextNote(visionContext);
+    const contextSuffix = contextNote ? `\n\n${contextNote}` : '';
     if (visionTask === 'paper_answer_overlay') {
-        return `Read the visible paper, worksheet, or form. Solve/fill every readable question or blank field the user is asking about, and return overlay-ready answers. If this appears to be a graded exam or active assessment, provide guidance/hints instead of direct final answers. User query: "${query}".`;
+        return `Read the visible paper, worksheet, or form. Solve/fill every readable question or blank field the user is asking about, and return overlay-ready answers. If this appears to be a graded exam or active assessment, provide guidance/hints instead of direct final answers. User query: "${query}".${contextSuffix}`;
     }
     if (visionTask === 'math_ocr_solve') {
-        return `Read the math problem from the image and solve it accurately with clear steps. User query: "${query}".`;
+        return `Read the math problem from the image and solve it accurately with clear steps. User query: "${query}".${contextSuffix}`;
     }
     if (visionTask === 'translate_to_english') {
-        return `Extract all readable text and translate it to English. User query: "${query}".`;
+        return `Extract all readable text and translate it to English. User query: "${query}".${contextSuffix}`;
     }
     if (isWebsiteUiVisionIntent(query)) {
-        return `Identify the website, web app, mobile app, or UI shown in the image using only visible evidence. First use visible branding, logo, page title, header, or app chrome. If branding is unclear, inspect visible URL/address-bar/domain/tab text and extract the likely site or app name. Do not guess or use web search. If no brand or URL is visible, describe the UI normally and say the site name is not visible. User query: "${query}". Respond in 1-2 short sentences.`;
+        return `Identify the website, web app, mobile app, or UI shown in the image using only visible evidence. First use visible branding, logo, page title, header, or app chrome. If branding is unclear, inspect visible URL/address-bar/domain/tab text and extract the likely site or app name. Do not guess or use web search. If no brand or URL is visible, describe the UI normally and say the site name is not visible. User query: "${query}". Respond in 1-2 short sentences.${contextSuffix}`;
     }
     if (visionTask === 'animal_detect') {
-        return `Identify the animal(s) in the image. Name species or breed when visible. Focus on the animal, not background signs or printed text unless that text helps identify it. User query: "${query}".`;
+        return `Identify the animal(s) in the image. Name species or breed when visible. Focus on the animal, not background signs or printed text unless that text helps identify it. If the user asks why it looks or behaves a certain way, explain only visible condition, posture, environment, or likely species traits, and state uncertainty. User query: "${query}".${contextSuffix}`;
     }
     if (visionTask === 'object_detect') {
-        return `Identify the main object or vehicle in the image. Name type/make only with visible evidence. Do not lead with unrelated background text. User query: "${query}".`;
+        return `Identify the main object, part, product, living thing, device, vehicle, food, plant, or everyday item in the image. Answer broad object explanation questions such as "what is this", "why is it like this", "what is this part", and "what happened here" from visible evidence only. Name type/make/model only when supported by visible logo, text, hardware, shape, or distinctive features. Do not lead with unrelated background text. User query: "${query}".${contextSuffix}`;
     }
     if (visionTask === 'text_extract') {
-        return `Extract the readable text from the image accurately. User query: "${query}".`;
+        return `Extract the readable text from the image accurately. User query: "${query}".${contextSuffix}`;
     }
-    return `Describe the main scene subject relevant to the user query. Vision detail preference: ${visionDetailLevel}. Evidence display preference: ${visionShowEvidence ? 'include visible evidence when useful' : 'hide evidence unless needed for uncertainty'}. Focus on the most prominent foreground subject first (animal, person, vehicle, product, or object). Do not let background signs or small printed text dominate. Only name a brand/model when a logo, readable text, or unmistakable hardware cue is visible; otherwise describe shape/color/parts and say the exact model is not visible. Never invent text that is not readable. User query: "${query}".`;
+    return `Describe the main scene subject relevant to the user query. Vision detail preference: ${visionDetailLevel}. Evidence display preference: ${visionShowEvidence ? 'include visible evidence when useful' : 'hide evidence unless needed for uncertainty'}. Focus on the most prominent foreground subject first (animal, person, vehicle, product, device, plant, food, or object). For "why is it like this" questions, identify the subject first, then explain the visible condition or likely cause without pretending to know hidden causes. Do not let background signs or small printed text dominate. Only name a brand/model when a logo, readable text, or unmistakable hardware cue is visible; otherwise describe shape/color/parts and say the exact model is not visible. Never invent text that is not readable. User query: "${query}".${contextSuffix}`;
 }
 
 async function handleContinuousVisionQuery(text) {
@@ -23167,6 +23134,12 @@ async function handleContinuousVisionQuery(text) {
         }
         recentVisionError = '';
         updateContinuousVisionStatus('Camera ready', 'ready');
+        rememberVisionContext({
+            prompt: text,
+            task: visionTask,
+            answer,
+            details
+        });
         rememberMultimodalGrounding({
             kind: 'vision',
             summary: answer,
@@ -23219,6 +23192,11 @@ function formatVisionJsonToReadableText(payload) {
         ? payload.distinctiveFeatures.map(v => String(v || '').trim()).filter(Boolean)
         : [];
     const uncertainty = String(payload.uncertainty || '').trim();
+    const mainSubject = String(payload.mainSubject || '').trim();
+    const subjectType = String(payload.subjectType || '').trim();
+    const conditionOrState = String(payload.conditionOrState || '').trim();
+    const likelyReason = String(payload.likelyReason || '').trim();
+    const careOrSafetyNote = String(payload.careOrSafetyNote || '').trim();
     const objects = Array.isArray(payload.objects) ? payload.objects : [];
     const animals = Array.isArray(payload.animals) ? payload.animals : [];
     const people = Array.isArray(payload.people) ? payload.people : [];
@@ -23241,14 +23219,18 @@ function formatVisionJsonToReadableText(payload) {
         : [];
     const compactText = fullText || textDetected.slice(0, 12).join('\n');
     const objectLabel = pickReadableVisionObject(sceneSubjects);
+    const subject = mainSubject.replace(/\s+/g, ' ').trim() || objectLabel;
     const parts = [];
     const identity = [brand, model].filter(Boolean).join(' ').trim();
 
     if (identity) {
         const qualified = uncertainty ? `likely ${identity}` : identity;
-        parts.push(`Likely item: ${objectLabel ? `${qualified} (${objectLabel})` : qualified}.`);
-    } else if (objectLabel) {
-        parts.push(`Visible item: ${objectLabel}.`);
+        parts.push(`Likely item: ${subject ? `${qualified} (${subject})` : qualified}.`);
+    } else if (subject) {
+        const type = subjectType && !new RegExp(`\\b${escapeVisionRegex(subjectType)}\\b`, 'i').test(subject)
+            ? ` (${subjectType})`
+            : '';
+        parts.push(`Visible item: ${subject}${type}.`);
     } else if (directAnswer) {
         parts.push(directAnswer.replace(/\s+/g, ' ').trim().slice(0, 280));
     } else if (summary) {
@@ -23267,12 +23249,24 @@ function formatVisionJsonToReadableText(payload) {
         parts.push(`Visible details: ${distinctiveFeatures.slice(0, 4).join('; ')}.`);
     }
 
+    if (conditionOrState) {
+        parts.push(`Visible condition: ${conditionOrState.replace(/\s+/g, ' ').trim().slice(0, 220)}.`);
+    }
+
+    if (likelyReason) {
+        parts.push(`Likely reason: ${likelyReason.replace(/\s+/g, ' ').trim().slice(0, 260)}.`);
+    }
+
+    if (careOrSafetyNote) {
+        parts.push(`Note: ${careOrSafetyNote.replace(/\s+/g, ' ').trim().slice(0, 220)}.`);
+    }
+
     if (uncertainty) {
         parts.push(`Uncertainty: ${uncertainty}`);
     }
 
     // Prefer scene subjects over OCR; only mention text when no clear subject is present.
-    if (compactText && !objectLabel && !animals.length) {
+    if (compactText && !subject && !animals.length) {
         parts.push(`Readable text: "${compactVisionTextMention(compactText)}."`);
     }
 
@@ -23485,7 +23479,7 @@ function cleanVisionDisplayText(text) {
         .replace(/^```(?:json)?\s*/i, '')
         .replace(/\s*```$/i, '')
         .replace(/\b"?(?:objects|people|animals|textDetected|modelEvidence|distinctiveFeatures|confidence)"?\s*:\s*(?:\[[\s\S]*?\]|\{[\s\S]*?\}|[0-9.]+|"[^"]*")\s*,?/gi, ' ')
-        .replace(/"(?:answer|summary|brand|model|uncertainty|fullText|label|count)"\s*:\s*"?/gi, ' ')
+        .replace(/"(?:answer|summary|mainSubject|subjectType|conditionOrState|likelyReason|careOrSafetyNote|brand|model|uncertainty|fullText|label|count)"\s*:\s*"?/gi, ' ')
         .replace(/\bConfidence:\s*[^\n.]+\.?/gi, ' ')
         .replace(/[{}[\]]/g, ' ')
         .replace(/"\s*,\s*"/g, ' ')
@@ -23516,7 +23510,10 @@ function isContinuousVisionQuestion(text) {
     }
 
     // Fallback for short camera-context prompts only while continuous vision is active.
-    if (isContinuousVisionActive && /\b(what is this|what's this|what is it|what's it|read it|solve this|scan this|translate this|what am i holding|what is in my hand|what do i have)\b/.test(t)) {
+    if (isContinuousVisionActive && /\b(what is this|what's this|what is it|what's it|read it|solve this|scan this|translate this|what am i holding|what is in my hand|what do i have|why is it like this|why is this like this|what is this part|what happened here|how did this happen|is this normal|is it safe|explain this)\b/.test(t)) {
+        return true;
+    }
+    if (isContinuousVisionActive && getActiveVisionContext() && isVisionContextFollowup(t)) {
         return true;
     }
     if (isContinuousVisionActive && /\b(what|can you|please|tell me)\b/.test(t) && /\b(see|read|look(?:ing)? at|describe|analy[sz]e|front|camera|image|screen|text)\b/.test(t)) {
