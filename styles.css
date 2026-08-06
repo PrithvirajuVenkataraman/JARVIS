@@ -3951,7 +3951,6 @@ button:hover {
 
 @media (prefers-reduced-motion: reduce) {
     .source-transparency,
-    .context-topic-chip,
     .response-recovery-card,
     .composer-attachment-status::before {
         animation: none !important;
@@ -3985,56 +3984,6 @@ button:hover {
     border-radius: 999px;
     padding: 0.35rem 0.7rem;
     font-size: 0.78rem;
-}
-
-.context-topic-chip-host {
-    width: min(100%, 720px);
-    margin: 0 auto 0.45rem;
-    padding: 0 0.25rem;
-}
-
-.context-topic-chip-host.hidden,
-.context-topic-chip.hidden {
-    display: none !important;
-}
-
-.context-topic-chip {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.4rem 0.55rem;
-    padding: 0.4rem 0.65rem;
-    border-radius: 999px;
-    border: 1px solid rgba(56, 189, 248, 0.28);
-    background: rgba(8, 47, 73, 0.55);
-    color: #e0f2fe;
-    font-size: 0.78rem;
-    animation: jarvis-topic-chip-in 0.28s ease both;
-}
-
-.context-topic-label strong {
-    font-weight: 700;
-}
-
-.context-topic-clear,
-.context-topic-new {
-    border: 1px solid rgba(255, 255, 255, 0.16);
-    background: rgba(255, 255, 255, 0.06);
-    color: #e2e8f0;
-    border-radius: 999px;
-    padding: 0.18rem 0.55rem;
-    font-size: 0.72rem;
-    line-height: 1.2;
-}
-
-.context-topic-clear:hover,
-.context-topic-new:hover {
-    background: rgba(255, 255, 255, 0.12);
-}
-
-@keyframes jarvis-topic-chip-in {
-    from { opacity: 0; transform: translateY(6px); }
-    to { opacity: 1; transform: translateY(0); }
 }
 
 .response-recovery-card {
