@@ -30,19 +30,6 @@ export function buildContextClarificationHtml(contextResolution = {}) {
     `.trim();
 }
 
-export function buildActiveTopicChipHtml(topic = '') {
-    const clean = String(topic || '').trim();
-    if (!clean) return '';
-    const safeTopic = escapeHtml(clean);
-    return `
-        <div class="context-topic-chip" role="status" aria-live="polite">
-            <span class="context-topic-label">Following: <strong>${safeTopic}</strong></span>
-            <button type="button" class="context-topic-clear" data-context-topic-action="clear" aria-label="Clear active topic">Clear</button>
-            <button type="button" class="context-topic-new" data-context-topic-action="new_topic" aria-label="Start a new topic">New topic</button>
-        </div>
-    `.trim();
-}
-
 export function resolveContextClarificationChoice(choice, contextResolution = {}) {
     const original = String(contextResolution?.originalMessage || '').trim();
     const topic = String(contextResolution?.activeThread?.entity || contextResolution?.activeThread?.topic || '').trim();
