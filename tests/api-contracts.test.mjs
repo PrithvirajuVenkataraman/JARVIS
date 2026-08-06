@@ -2023,6 +2023,8 @@ assert.equal(invalidVisionMime.body.error.code, 'unsupported_media_type');
 
 assert.match(visionTest.buildVisionPrompt('what animal is that', 'animal_detect'), /scene understanding vision engine/);
 assert.match(visionTest.buildVisionPrompt('read this sign', 'text_extract'), /OCR and document vision engine/);
+assert.match(visionTest.buildVisionPrompt('why is this like this', 'object_detect'), /conditionOrState/);
+assert.match(visionTest.buildVisionPrompt('why is this like this', 'object_detect'), /likelyReason/);
 assert.equal(visionTest.isSceneVisionTask('animal_detect'), true);
 assert.equal(visionTest.isTextFocusedVisionQuery('what do you see'), false);
 
@@ -2056,6 +2058,35 @@ const generalSceneAnswer = visionTest.formatVisionResponse({
 }, 'general_vision', 'what do you see');
 assert.match(generalSceneAnswer, /cat/i);
 assert.doesNotMatch(generalSceneAnswer, /ADOPT TODAY|Readable text/i);
+
+const objectExplanationAnswer = visionTest.formatVisionResponse({
+    answer: 'The leaf looks curled because it may be dry.',
+    mainSubject: 'curled plant leaf',
+    subjectType: 'plant',
+    conditionOrState: 'the leaf edges are curled and slightly brown',
+    likelyReason: 'it may be drying out or stressed, but the exact cause is not certain from the image alone',
+    careOrSafetyNote: 'Check soil moisture and avoid overwatering.',
+    objects: [{ label: 'plant leaf', count: 1, confidence: 0.88 }],
+    textDetected: ['PLANT CARE'],
+    fullText: 'PLANT CARE'
+}, 'object_detect', 'why is this like this');
+assert.match(objectExplanationAnswer, /curled plant leaf/i);
+assert.match(objectExplanationAnswer, /Visible condition:/);
+assert.match(objectExplanationAnswer, /Likely reason:/);
+assert.match(objectExplanationAnswer, /Note: Check soil moisture/);
+assert.doesNotMatch(objectExplanationAnswer, /PLANT CARE|Readable text/i);
+
+const unsupportedBrandAnswer = visionTest.formatVisionResponse({
+    answer: 'A smartphone is visible, but the exact model is not visible.',
+    mainSubject: 'smartphone',
+    subjectType: 'device',
+    brand: 'Fixture Brand',
+    model: 'Fixture Model',
+    modelEvidence: [],
+    objects: [{ label: 'smartphone', count: 1, confidence: 0.9 }]
+}, 'object_detect', 'what phone is this');
+assert.match(unsupportedBrandAnswer, /smartphone/i);
+assert.doesNotMatch(unsupportedBrandAnswer, /Fixture Brand|Fixture Model/);
 
 process.env.GEMINI_API_KEY = 'test-gemini-key';
 let paperVisionCalls = 0;
