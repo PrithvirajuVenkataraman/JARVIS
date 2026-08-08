@@ -2,7 +2,7 @@ const MAX_ATTACHMENTS = 6;
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
 const MAX_EXTRACT_CHARS = 120000;
 const TEXT_EXTENSIONS = /\.(txt|md|markdown|json|jsonl|csv|tsv|xml|html|htm|css|js|mjs|cjs|ts|tsx|jsx|py|java|cpp|c|h|cs|go|rs|rb|php|sh|yaml|yml|toml|ini|log|sql|rtf)$/i;
-const IMAGE_EXTENSIONS = /\.(jpe?g|png|jpg|gif|webp|bmp|tiff?)$/i;
+const IMAGE_EXTENSIONS = /\.(jpe?g|png|gif|webp|bmp|tiff?)$/i;
 
 const pendingAttachments = [];
 
@@ -272,9 +272,13 @@ async function ingestOnServer(attachment, localResult = {}) {
 async function ingestViaVision(attachment) {
     const base64 = attachment?.base64 || await fileToBase64(attachment.file);
     const mimeType = normalizeImageMime(attachment.mimeType, attachment.name);
+    // Detect if user wants object/scene detection vs pure text extraction
+    const isSceneTask = detectSceneTask(attachment);
     const data = await postJson('/api/vision', {
-        task: 'text_extract',
-        prompt: `Extract all readable text from this attachment (${attachment.name}). Preserve line order and numbers.`,
+        task: isSceneTask ? 'general_vision' : 'text_extract',
+        prompt: isSceneTask
+            ? `Analyze this image (${attachment.name}). Identify the main subject, objects, animals, people, and any visible text. Describe what you see.`
+            : `Extract all readable text from this attachment (${attachment.name}). Preserve line order and numbers.`,
         mimeType,
         imageBase64: base64
     }, { timeoutMs: 45000 });
@@ -448,35 +452,22 @@ async function extractPdfViaVision(attachment) {
     const pdfjs = await loadPdfJs();
     const doc = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
     const pageCount = Math.min(doc.numPages || 0, 3);
-    const parts = [];
+
+    // Process pages in parallel for speed (max 3 concurrent)
+    const pagePromises = [];
     for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
-        const page = await doc.getPage(pageNumber);
-        const viewport = page.getViewport({ scale: 1.6 });
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.max(1, Math.floor(viewport.width));
-        canvas.height = Math.max(1, Math.floor(viewport.height));
-        const context = canvas.getContext('2d', { alpha: false });
-        if (!context) continue;
-        await page.render({ canvasContext: context, viewport }).promise;
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
-        const base64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
-        if (!base64) continue;
-        const data = await postJson('/api/vision', {
-            task: 'text_extract',
-            prompt: `Extract all readable text from page ${pageNumber} of PDF "${attachment.name}". Preserve names, dates, emails, phone numbers, and section headings.`,
-            mimeType: 'image/jpeg',
-            imageBase64: base64
-        }, { timeoutMs: 45000 });
-        const details = data?.details && typeof data.details === 'object' ? data.details : {};
-        const fullText = String(details?.fullText || '').trim();
-        const snippets = Array.isArray(details?.textDetected)
-            ? details.textDetected.map(item => String(item || '').trim()).filter(Boolean).join('\n').trim()
-            : '';
-        const pageText = fullText || snippets || String(data?.response || '').trim();
-        if (hasUsefulExtractedText(pageText) || pageText.length >= 40) {
-            parts.push(pageText);
+        pagePromises.push(processPdfPageVision(attachment, pdfjs, doc, pageNumber));
+    }
+
+    // Wait for all pages with a shorter overall timeout
+    const results = await Promise.allSettled(pagePromises);
+    const parts = [];
+    for (const result of results) {
+        if (result.status === 'fulfilled' && result.value) {
+            parts.push(result.value);
         }
     }
+
     const text = clipText(parts.join('\n\n'));
     return {
         ok: hasUsefulExtractedText(text),
@@ -485,6 +476,46 @@ async function extractPdfViaVision(attachment) {
         provider: 'vision',
         message: hasUsefulExtractedText(text) ? '' : 'PDF vision OCR found little readable text.'
     };
+}
+
+async function processPdfPageVision(attachment, pdfjs, doc, pageNumber) {
+    try {
+        const page = await doc.getPage(pageNumber);
+        // Use lower scale (1.2 instead of 1.6) for faster rendering
+        const viewport = page.getViewport({ scale: 1.2 });
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.floor(viewport.width));
+        canvas.height = Math.max(1, Math.floor(viewport.height));
+        const context = canvas.getContext('2d', { alpha: false });
+        if (!context) return '';
+        await page.render({ canvasContext: context, viewport }).promise;
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.75); // Lower quality for speed
+        const base64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
+        if (!base64) return '';
+
+        // Reduced timeout for per-page vision calls
+        const data = await postJson('/api/vision', {
+            task: 'text_extract',
+            prompt: `Extract all readable text from page ${pageNumber} of PDF "${attachment.name}". Preserve names, dates, emails, phone numbers, and section headings.`,
+            mimeType: 'image/jpeg',
+            imageBase64: base64
+        }, { timeoutMs: 15000 }); // Reduced from 45000 to 15000
+
+        const details = data?.details && typeof data.details === 'object' ? data.details : {};
+        const fullText = String(details?.fullText || '').trim();
+        const snippets = Array.isArray(details?.textDetected)
+            ? details.textDetected.map(item => String(item || '').trim()).filter(Boolean).join('\n').trim()
+            : '';
+        const pageText = fullText || snippets || String(data?.response || '').trim();
+
+        if (hasUsefulExtractedText(pageText) || pageText.length >= 40) {
+            return pageText;
+        }
+        return '';
+    } catch (error) {
+        console.warn(`PDF page ${pageNumber} vision OCR failed:`, error);
+        return '';
+    }
 }
 
 async function extractDocxTextClient(file) {
@@ -569,7 +600,7 @@ export function formatBytes(bytes) {
     return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function renderAttachmentTray(container, attachments, onRemove) {
+export function renderAttachmentTray(container, attachments, onRemove, options = {}) {
     if (!container) return;
     const items = Array.isArray(attachments) ? attachments : [];
     if (!items.length) {
@@ -578,10 +609,16 @@ export function renderAttachmentTray(container, attachments, onRemove) {
         return;
     }
     container.classList.remove('hidden');
-    container.innerHTML = items.map(item => {
+    const reading = Boolean(options?.reading);
+    container.classList.toggle('is-reading', reading);
+    const statusHtml = reading
+        ? `<div class="composer-attachment-status" role="status">Reading attachments…</div>`
+        : '';
+    const fileIcon = `<span class="composer-attachment-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path></svg></span>`;
+    container.innerHTML = statusHtml + items.map(item => {
         const preview = item.previewUrl
             ? `<img src="${escapeHtml(item.previewUrl)}" alt="" class="composer-attachment-thumb">`
-            : `<span class="composer-attachment-icon" aria-hidden="true">📄</span>`;
+            : fileIcon;
         return `
             <div class="composer-attachment-chip" data-attachment-id="${escapeHtml(item.id)}">
                 ${preview}
@@ -600,6 +637,42 @@ export function renderAttachmentTray(container, attachments, onRemove) {
             if (id) onRemove?.(id);
         });
     });
+}
+
+export function setAttachmentTrayReading(container, reading = true) {
+    if (!container) return;
+    if (reading) {
+        container.classList.remove('hidden');
+        container.classList.add('is-reading');
+        if (!container.querySelector('.composer-attachment-status')) {
+            container.insertAdjacentHTML('afterbegin', `<div class="composer-attachment-status" role="status">Reading attachments…</div>`);
+        }
+        return;
+    }
+    container.classList.remove('is-reading');
+    container.querySelector('.composer-attachment-status')?.remove();
+    if (!container.querySelector('.composer-attachment-chip')) {
+        container.innerHTML = '';
+        container.classList.add('hidden');
+    }
+}
+
+function detectSceneTask(attachment) {
+    const name = (attachment?.name || '').toLowerCase();
+    const mimeType = (attachment?.mimeType || '').toLowerCase();
+
+    // Use scene understanding for images that are likely photos/scenes, not documents
+    const isLikelyPhoto = /\.(jpe?g|png|webp|gif|bmp|tiff?)$/i.test(name) &&
+        !/(scan|document|receipt|invoice|bill|statement|form|page|slide|screenshot)/i.test(name);
+
+    // Check if user text suggests they want to know "what is this" vs "read this"
+    const userText = (globalThis?.currentUserText || '').toLowerCase();
+    const wantsSceneAnalysis = /\b(what is this|what's this|identify|what do you see|what animal|what object|what vehicle|describe|analyze|scene|photo|picture)\b/i.test(userText);
+
+    // For PDFs, check if it's likely a scanned document vs a presentation with images
+    const isPdf = mimeType === 'application/pdf' || /\.pdf$/i.test(name);
+
+    return (isLikelyPhoto || wantsSceneAnalysis) && !isPdf;
 }
 
 function escapeHtml(value) {
