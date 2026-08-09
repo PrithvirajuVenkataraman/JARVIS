@@ -2,9 +2,9 @@ const PLAN_WEEKEND_PATTERN = /\b(?:plan|suggest|build)\s+(?:my\s+|a\s+|the\s+)?(
 const COMPARE_DOCS_PATTERN = /\bcompare\s+(?:these|the|my|both|two)?\s*(?:files?|docs?|documents?|pdfs?|attachments?|versions?)\b/i;
 const FIX_FROM_SCREEN_PATTERN = /\b(?:fix|debug|solve|resolve)\s+(?:this|the|my)?\s*(?:error|bug|issue|exception|stack\s*trace|problem)\b/i;
 const VISION_FOLLOWUP_PATTERN = /^(?:what about (?:that|this|it)|explain (?:that|this|it)(?: more)?|tell me more(?: about (?:that|this|it))?|zoom in on (?:that|this|it)|is (?:that|this) (?:safe|correct|right)|save (?:that|this)|verify (?:that|this|it)|check (?:that|this|it)|what(?:'s| is) (?:the )?(?:brand|model|text|error))\??$/i;
-const ATTACH_FOLLOWUP_PATTERN = /^(?:summarize (?:that|this|it)|key points(?: from (?:that|this|it))?|extract (?:the )?(?:dates?|names?|numbers?)|what does (?:that|this|it) say|verify (?:that|this|it)|save (?:that|this))\??$/i;
-const DOC_REFERENCE_PATTERN = /\b(?:this|that|the|my|our)\s+(?:resume|cv|document|file|pdf|attachment|docx?|pptx?|image|photo|screenshot|scan)\b/i;
-const DOC_IMPROVE_PATTERN = /\b(?:improv\w*|feedback|critique|review|rewrite|edit|strengthen|weak(?:ness(?:es)?)?|gaps?|missing|suggest(?:ions?)?|recommend(?:ations?)?|better|fix(?:es)?)\b/i;
+const ATTACH_FOLLOWUP_PATTERN = /^(?:summari[sz]e (?:that|this|it|the above|the document)|key points(?: from (?:that|this|it|the above|the document))?|extract (?:the )?(?:dates?|names?|numbers?|text|details)|what does (?:that|this|it|the above|the document) say|verify (?:that|this|it|the above)|save (?:that|this|it)|explain (?:that|this|it|the above)|compare (?:that|this|it|the above)|make (?:that|this|it) better)\??$/i;
+const DOC_REFERENCE_PATTERN = /\b(?:this|that|the|my|our|above|previous)\s+(?:resume|cv|document|file|pdf|attachment|docx?|pptx?|image|photo|screenshot|scan|page|form|table|chart)\b/i;
+const DOC_IMPROVE_PATTERN = /\b(?:improv\w*|feedback|critique|review|rewrite|edit|strengthen|weak(?:ness(?:es)?)?|gaps?|missing|suggest(?:ions?)?|recommend(?:ations?)?|better|fix(?:es)?|polish|score|grade|rate|compare|explain|summari[sz]e|extract)\b/i;
 
 export function detectAgentWorkflow(text) {
     const raw = String(text || '').trim();
@@ -78,9 +78,11 @@ export function isMultimodalFollowup(text, grounding = null) {
     if (kind !== 'attachment' && kind !== 'vision') return false;
 
     if (DOC_REFERENCE_PATTERN.test(raw)) return true;
+    if (/\b(?:above|previous|earlier|same)\b/i.test(raw) && DOC_IMPROVE_PATTERN.test(raw)) return true;
     if (/\b(resume|cv|document|file|pdf|attachment)\b/i.test(raw) && DOC_IMPROVE_PATTERN.test(raw)) return true;
     if (kind === 'vision' && /\b(image|photo|picture|screen|screenshot|camera|frame)\b/i.test(raw)) return true;
     if (/\b(this|that|it|these|those)\b/i.test(raw) && DOC_IMPROVE_PATTERN.test(raw)) return true;
+    if (kind === 'attachment' && /\b(?:what about|how about|compare|explain|summari[sz]e|extract|make|rewrite|review|rate|score)\b/i.test(raw) && /\b(?:it|this|that|above|same|them|those)\b/i.test(raw)) return true;
     if (/\b(this|that|it)\b/i.test(raw) && raw.length <= 160) return true;
     return false;
 }
@@ -89,7 +91,7 @@ export function classifyMultimodalFollowup(text) {
     const raw = String(text || '').trim().toLowerCase();
     if (/^save\b/.test(raw)) return 'save_memory';
     if (/^verify\b|^check\b/.test(raw)) return 'verify';
-    if (/brand|model|text|error|zoom|explain|tell me more|what about|what does|summarize|key points|extract|improv|feedback|critique|review|rewrite|edit|weak/.test(raw)) {
+    if (/brand|model|text|error|zoom|explain|tell me more|what about|what does|summari[sz]e|key points|extract|improv|feedback|critique|review|rewrite|edit|weak|above|previous|compare|score|rate|polish/.test(raw)) {
         return 'continue';
     }
     return 'continue';
