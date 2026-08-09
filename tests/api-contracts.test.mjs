@@ -8,6 +8,7 @@ import searchHandler, { __test as searchTest } from '../api/search.js';
 import visionHandler, { __test as visionTest } from '../api/vision.js'; 
 import diagnosticsHandler from '../api/diagnostics.js';
 import rankTextsHandler from '../api/rank-texts.js';
+import ingestAttachmentHandler from '../api/ingest-attachment.js';
 import { webSearchHandler, __test as webSearchTest } from '../api/_lib/web-search-core.js';
 import extractUrlHandler, { __test as extractUrlTest } from '../api/extract-url.js';
 import { clearItems, saveItems } from '../api/_lib/latest/latest-cache.js';
@@ -26,6 +27,16 @@ const SAMPLE = Object.freeze({
     budgetQuery: 'Plan 3 days under INR 12000',
     imageBase64: 'eA=='
 });
+
+const emptyAttachmentIngest = await callHandler(ingestAttachmentHandler, request('/api/ingest-attachment', {
+    filename: 'empty.pdf',
+    mimeType: 'application/pdf',
+    base64: '',
+    clientText: ''
+}));
+assert.equal(emptyAttachmentIngest.statusCode, 400);
+assert.equal(emptyAttachmentIngest.body.error.code, 'invalid_request');
+assert.deepEqual(emptyAttachmentIngest.body.error.details.missing, ['base64', 'clientText']);
 
 function fixtureSubject(kind, id = '') {
     return ['Subject', kind, id].filter(Boolean).join(' ');
