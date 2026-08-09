@@ -10,7 +10,8 @@ export default async function handler(req, res) {
         methods: ['POST'],
         routeKey: 'ingest-attachment',
         maxBodyBytes: 9 * 1024 * 1024,
-        rateLimit: { max: 20, windowMs: 60 * 1000 }
+        rateLimit: { max: 20, windowMs: 60 * 1000 },
+        skipAbusiveCheck: true
     });
     if (guard.handled) return;
 
@@ -23,7 +24,15 @@ export default async function handler(req, res) {
     if (!clientText && !base64) {
         return res.status(400).json({
             success: false,
-            error: { code: 'invalid_request', message: 'Attachment data is required.' }
+            error: {
+                code: 'invalid_request',
+                message: 'Attachment data is required.',
+                details: {
+                    missing: ['base64', 'clientText'],
+                    filename,
+                    mimeType: mimeType || 'unknown'
+                }
+            }
         });
     }
     if (base64 && (base64.length > MAX_BASE64_CHARS || !/^[A-Za-z0-9+/]+={0,2}$/.test(base64))) {
