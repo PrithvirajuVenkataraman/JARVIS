@@ -67,14 +67,6 @@
                 </svg>
                 <span>Search chats</span>
             </button>
-            <button type="button" class="chat-sidebar-nav-item" onclick="openSidebarQuickAction('vision')">
-                <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" aria-hidden="true">
-                    <rect x="4" y="6" width="12" height="12" rx="2"></rect>
-                    <path d="m16 10 4-2v8l-4-2"></path>
-                    <path d="M8 11.5h4"></path>
-                </svg>
-                <span>Vision Analysis</span>
-            </button>
             <button type="button" class="chat-sidebar-nav-item" onclick="openSidebarQuickAction('memory')">
                 <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" aria-hidden="true">
                     <path d="M12 3a7 7 0 0 0-7 7c0 4.5 4.1 7.2 6 9.5a1.3 1.3 0 0 0 2 0c1.9-2.3 6-5 6-9.5a7 7 0 0 0-7-7z"></path>
@@ -239,7 +231,6 @@
                             <div class="composer-action-group" data-composer-group="root">
                                 <button type="button" class="composer-action-item" data-composer-nav="photos" role="menuitem">Photos</button>
                                 <button type="button" class="composer-action-item" data-composer-nav="files" role="menuitem">Files</button>
-                                <button type="button" class="composer-action-item" onclick="handleComposerAction('vision')" role="menuitem">Live Vision</button>
                             </div>
                             <div class="composer-action-group hidden" data-composer-group="photos">
                                 <button type="button" class="composer-action-item composer-action-back" data-composer-nav="root" role="menuitem">Back</button>
@@ -5400,7 +5391,6 @@ let showRoutingDebugBadge = false;
         const slashCommandChoices = Object.freeze([
             { id: 'translate', label: 'Translate', hint: 'Translate a phrase', template: 'translate "..." to Tamil', select: [11, 14] },
             { id: 'verify', label: 'Verify', hint: 'Check a claim or answer', template: 'verify this: ' },
-            { id: 'vision', label: 'Vision', hint: 'Open Live Vision' },
             { id: 'summarize', label: 'Summarize', hint: 'Summarize pasted text', template: 'summarize this: ' },
             { id: 'professional', label: 'Professional', hint: 'Polish wording', template: 'make this professional: ' },
             { id: 'study', label: 'Study', hint: 'Teach or quiz a topic', template: 'teach me this topic: ' }
@@ -5475,10 +5465,6 @@ let showRoutingDebugBadge = false;
             const choice = slashCommandChoices.find(item => item.id === commandId) || slashCommandChoices[slashCommandPickerIndex];
             if (!choice) return;
             closeSlashCommandPicker();
-            if (choice.id === 'vision') {
-                toggleContinuousVision();
-                return;
-            }
             const input = document.getElementById('text-input');
             if (!input) return;
             input.value = choice.template || '';
@@ -8255,6 +8241,15 @@ function normalizeUiTokens(text) {
             const grounding = getActiveMultimodalGrounding();
             if (!grounding || !window.JarvisAgentWorkflows?.isMultimodalFollowup?.(userText, grounding)) return false;
             const follow = window.JarvisAgentWorkflows.buildMultimodalFollowupPrompt(userText, grounding);
+            const recentContext = (conversationContext || [])
+                .slice(-6)
+                .map(item => `${item?.role === 'user' ? 'User' : 'Assistant'}: ${String(item?.text || '').slice(0, 1200)}`)
+                .filter(Boolean)
+                .join('\n');
+            const groundedFollowPrompt = [
+                follow.prompt,
+                recentContext ? `Recent chat turns for continuity:\n${recentContext}` : ''
+            ].filter(Boolean).join('\n\n');
             if (follow.action === 'save_memory') {
                 const key = grounding.kind === 'vision' ? 'last vision note' : 'last attachment note';
                 const value = String(grounding.summary || '').slice(0, 280);
@@ -8273,14 +8268,14 @@ function normalizeUiTokens(text) {
             }
             if (follow.action === 'verify') {
                 showThinkingIndicator('Verifying...');
-                const result = await askGeminiAI(follow.prompt, {
+                const result = await askGeminiAI(groundedFollowPrompt, {
                     intent: 'selection_custom',
                     grounding: {
                         kind: grounding.kind === 'attachment' ? 'attachment' : 'selection',
                         selectedText: grounding.selectedText,
                         sourceAnswer: grounding.sourceAnswer || grounding.summary,
                         originalRequest: userText,
-                        customInstruction: 'Verify the grounded context and state what is confirmed vs uncertain.'
+                        customInstruction: 'Verify the grounded context and recent chat continuity. State what is confirmed vs uncertain.'
                     },
                     minimalThinking: true,
                     stream: false,
@@ -8294,7 +8289,7 @@ function normalizeUiTokens(text) {
                 return true;
             }
             showThinkingIndicator(grounding.kind === 'attachment' ? 'Using the attached document...' : 'Continuing from context...');
-            const result = await askGeminiAI(follow.prompt, {
+            const result = await askGeminiAI(groundedFollowPrompt, {
                 intent: 'selection_custom',
                 grounding: {
                     kind: grounding.kind === 'attachment' ? 'attachment' : 'selection',
@@ -8302,7 +8297,7 @@ function normalizeUiTokens(text) {
                     sourceAnswer: grounding.selectedText || grounding.sourceAnswer || grounding.summary,
                     originalRequest: userText,
                     customInstruction: [
-                        follow.prompt,
+                        groundedFollowPrompt,
                         grounding.kind === 'attachment'
                             ? 'This is a follow-up about the attached document already provided. Answer specifically from that document. Do not give generic advice that ignores it.'
                             : ''
