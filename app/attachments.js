@@ -1,6 +1,7 @@
 const MAX_ATTACHMENTS = 6;
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
 const MAX_EXTRACT_CHARS = 120000;
+const PDF_VISUAL_PAGE_LIMIT = 4;
 const TEXT_EXTENSIONS = /\.(txt|md|markdown|json|jsonl|csv|tsv|xml|html|htm|css|js|mjs|cjs|ts|tsx|jsx|py|java|cpp|c|h|cs|go|rs|rb|php|sh|yaml|yml|toml|ini|log|sql|rtf)$/i;
 const IMAGE_EXTENSIONS = /\.(jpe?g|png|gif|webp|bmp|tiff?)$/i;
 
@@ -86,7 +87,7 @@ export async function ingestAllForMessage(attachments = [], userText = '') {
     let readableSections = anyReadable
         ? sections.filter(section => !/Extraction failed or returned too little readable text/i.test(section)).join('\n\n---\n\n').trim()
         : '';
-    if (anyReadable && readableSections && String(userText || '').trim()) {
+    if (anyReadable && readableSections && shouldRankAttachmentText(prompt)) {
         readableSections = await rankAttachmentTextForQuery(prompt, readableSections).catch(() => readableSections);
     }
     return {
@@ -133,6 +134,15 @@ async function rankAttachmentTextForQuery(query, text) {
     }
 }
 
+function shouldRankAttachmentText(query) {
+    const value = String(query || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    if (!value) return false;
+    if (/\b(analy[sz]e|review|summari[sz]e|explain|understand|read|see everything|whole|entire|full|overall|all pages?|attached file|attached document|pdf)\b/.test(value)) {
+        return false;
+    }
+    return /\b(find|extract|where|when|who|which|specific|date|dates|name|names|number|numbers|email|phone|address|section|clause|quote)\b/.test(value);
+}
+
 export async function ingestAttachmentWithFallback(attachment) {
     const attempts = [];
 
@@ -145,6 +155,9 @@ export async function ingestAttachmentWithFallback(attachment) {
         attempts: [{ stage: 'client', ok: false, method: 'client_error', error: String(error?.message || error) }]
     }));
     attempts.push(...(localText.attempts || []));
+    if (isPdfFile(attachment?.file || attachment)) {
+        return await ingestPdfAttachmentWithVisuals(attachment, localText, attempts);
+    }
     if (hasUsefulExtractedText(localText?.text)) {
         return { ...localText, ok: true, attempts };
     }
@@ -195,6 +208,57 @@ export async function ingestAttachmentWithFallback(attachment) {
         method: 'none',
         provider: 'none',
         message: server?.message || localText?.message || `Could not extract readable content from ${attachment.name}.`,
+        attempts
+    };
+}
+
+async function ingestPdfAttachmentWithVisuals(attachment, localText, attempts) {
+    let server = null;
+    if (!hasUsefulExtractedText(localText?.text) || isMetadataOnlyExtract(localText?.text)) {
+        server = await ingestOnServer(attachment, localResultSafe(localText)).catch(error => ({
+            ok: false,
+            text: '',
+            method: 'server',
+            provider: 'server',
+            message: String(error?.message || error),
+            attempts: [{ stage: 'server', ok: false, method: 'server_error', error: String(error?.message || error) }]
+        }));
+        attempts.push(...(server.attempts || []));
+    }
+
+    const vision = await extractPdfViaVision(attachment).catch(error => ({
+        ok: false,
+        text: '',
+        method: 'pdf_visual_analysis',
+        provider: 'vision',
+        message: String(error?.message || error)
+    }));
+    attempts.push({
+        stage: vision?.method || 'pdf_visual_analysis',
+        ok: hasUsefulExtractedText(vision?.text) || String(vision?.text || '').trim().length >= 40,
+        method: vision?.method || 'pdf_visual_analysis'
+    });
+
+    const sections = [];
+    if (hasUsefulExtractedText(localText?.text)) {
+        sections.push(`PDF text layer (${localText.method || 'client_pdf'}):\n${String(localText.text || '').trim()}`);
+    }
+    if (hasUsefulExtractedText(server?.text) && !isDuplicateText(server.text, localText?.text)) {
+        sections.push(`Server text extraction (${server.method || 'server_pdf'}):\n${String(server.text || '').trim()}`);
+    }
+    if (String(vision?.text || '').trim()) {
+        sections.push(`Rendered page visual analysis (${vision.method || 'pdf_visual_analysis'}):\n${String(vision.text || '').trim()}`);
+    }
+
+    const combined = clipText(dedupeSections(sections).join('\n\n'));
+    const ok = hasUsefulExtractedText(combined) || combined.length >= 40;
+    return {
+        ok,
+        text: combined,
+        partial: vision?.partial === true || server?.partial === true,
+        method: sections.length > 1 ? 'pdf_text_plus_visual' : (localText?.method || server?.method || vision?.method || 'pdf'),
+        provider: sections.length > 1 ? 'client+vision' : (localText?.provider || server?.provider || vision?.provider || 'client'),
+        message: ok ? '' : (vision?.message || server?.message || localText?.message || `Could not extract readable content from ${attachment?.name || 'PDF'}.`),
         attempts
     };
 }
@@ -250,12 +314,17 @@ async function extractLocally(attachment) {
 }
 
 async function ingestOnServer(attachment, localResult = {}) {
-    const base64 = attachment?.base64 || await fileToBase64(attachment.file);
+    const clientText = hasUsefulExtractedText(localResult?.text) ? String(localResult.text || '') : '';
+    const base64 = await resolveAttachmentBase64(attachment, { allowEmpty: Boolean(clientText) });
+    if (!clientText && !base64) {
+        throw new Error(`Attachment payload is empty for ${attachment?.name || 'attachment'}. Please reattach the file and try again.`);
+    }
+    logAttachmentIngestDiagnostics(attachment, { base64, clientText });
     const data = await postJson('/api/ingest-attachment', {
         filename: attachment.name,
         mimeType: attachment.mimeType,
         base64,
-        clientText: hasUsefulExtractedText(localResult?.text) ? String(localResult.text || '') : '',
+        clientText,
         clientMethod: String(localResult?.method || '')
     }, { timeoutMs: 45000 });
     return {
@@ -270,7 +339,7 @@ async function ingestOnServer(attachment, localResult = {}) {
 }
 
 async function ingestViaVision(attachment) {
-    const base64 = attachment?.base64 || await fileToBase64(attachment.file);
+    const base64 = await resolveAttachmentBase64(attachment);
     const mimeType = normalizeImageMime(attachment.mimeType, attachment.name);
     // Detect if user wants object/scene detection vs pure text extraction
     const isSceneTask = detectSceneTask(attachment);
@@ -294,6 +363,37 @@ async function ingestViaVision(attachment) {
         method: 'vision_ocr',
         provider: 'vision'
     };
+}
+
+async function resolveAttachmentBase64(attachment, options = {}) {
+    const existing = String(attachment?.base64 || '').trim();
+    if (existing) return existing;
+    const file = attachment?.file;
+    if (!file) {
+        if (options.allowEmpty) return '';
+        throw new Error(`Missing file data for ${attachment?.name || 'attachment'}. Please reattach the file and try again.`);
+    }
+    const encoded = String(await fileToBase64(file) || '').trim();
+    if (!encoded && !options.allowEmpty) {
+        throw new Error(`Could not encode ${attachment?.name || file.name || 'attachment'}. Please reattach the file and try again.`);
+    }
+    return encoded;
+}
+
+function logAttachmentIngestDiagnostics(attachment, payload = {}) {
+    try {
+        const host = String(globalThis?.location?.hostname || '');
+        const isDev = host === 'localhost' || host === '127.0.0.1' || host.endsWith('.local');
+        if (!isDev) return;
+        console.info('[attachments] ingest request', {
+            filename: attachment?.name || 'attachment',
+            mimeType: attachment?.mimeType || '',
+            size: Number(attachment?.size) || Number(attachment?.file?.size) || 0,
+            hasBase64: Boolean(payload.base64),
+            base64Length: String(payload.base64 || '').length,
+            hasClientText: Boolean(payload.clientText)
+        });
+    } catch (_) {}
 }
 
 function validateFile(file) {
@@ -361,6 +461,20 @@ function isMetadataOnlyExtract(text) {
         !/\b(experience|education|skills|resume|curriculum|project|internship|objective|summary|email|phone|@)\b/i.test(value);
 }
 
+function isDuplicateText(left, right) {
+    const a = String(left || '').replace(/\s+/g, ' ').trim().slice(0, 1200);
+    const b = String(right || '').replace(/\s+/g, ' ').trim().slice(0, 1200);
+    return Boolean(a && b && (a === b || a.includes(b.slice(0, 300)) || b.includes(a.slice(0, 300))));
+}
+
+function dedupeSections(sections = []) {
+    const out = [];
+    for (const section of sections.map(item => String(item || '').trim()).filter(Boolean)) {
+        if (!out.some(existing => isDuplicateText(existing, section))) out.push(section);
+    }
+    return out;
+}
+
 export function buildChatAttachmentMeta(attachments = []) {
     return (Array.isArray(attachments) ? attachments : []).map(item => {
         const mimeType = item?.mimeType || guessMimeFromName(item?.name || '');
@@ -418,6 +532,10 @@ function readFileAsText(file) {
 
 function fileToBase64(file) {
     return new Promise((resolve, reject) => {
+        if (!file) {
+            reject(new Error('Missing file.'));
+            return;
+        }
         const reader = new FileReader();
         reader.onload = () => {
             const result = String(reader.result || '');
@@ -451,7 +569,7 @@ async function extractPdfViaVision(attachment) {
     }
     const pdfjs = await loadPdfJs();
     const doc = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
-    const pageCount = Math.min(doc.numPages || 0, 3);
+    const pageCount = Math.min(doc.numPages || 0, PDF_VISUAL_PAGE_LIMIT);
 
     // Process pages in parallel for speed (max 3 concurrent)
     const pagePromises = [];
@@ -495,8 +613,8 @@ async function processPdfPageVision(attachment, pdfjs, doc, pageNumber) {
 
         // Reduced timeout for per-page vision calls
         const data = await postJson('/api/vision', {
-            task: 'text_extract',
-            prompt: `Extract all readable text from page ${pageNumber} of PDF "${attachment.name}". Preserve names, dates, emails, phone numbers, and section headings.`,
+            task: 'general_vision',
+            prompt: `Analyze page ${pageNumber} of PDF "${attachment.name}" like a multimodal document reader. Extract all readable text, but also describe visible tables, charts, diagrams, screenshots, handwriting, layout, labels, stamps, signatures, and relationships between visual elements. Preserve important names, dates, emails, phone numbers, amounts, headings, and page structure. If a page is mostly visual, describe what is visible instead of saying no text was found.`,
             mimeType: 'image/jpeg',
             imageBase64: base64
         }, { timeoutMs: 15000 }); // Reduced from 45000 to 15000
@@ -506,10 +624,13 @@ async function processPdfPageVision(attachment, pdfjs, doc, pageNumber) {
         const snippets = Array.isArray(details?.textDetected)
             ? details.textDetected.map(item => String(item || '').trim()).filter(Boolean).join('\n').trim()
             : '';
-        const pageText = fullText || snippets || String(data?.response || '').trim();
+        const pageText = [fullText || snippets, String(data?.response || '').trim()]
+            .filter(Boolean)
+            .join('\n\n')
+            .trim();
 
         if (hasUsefulExtractedText(pageText) || pageText.length >= 40) {
-            return pageText;
+            return `Page ${pageNumber} visual observations:\n${pageText}`;
         }
         return '';
     } catch (error) {
