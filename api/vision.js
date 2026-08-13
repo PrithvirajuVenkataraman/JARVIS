@@ -946,6 +946,8 @@ function buildVisionPrompt(userPrompt, task) {
         isSceneTask
             ? '- Do NOT lead with background signs, wall posters, small labels, or unrelated printed text unless the user asked to read text.'
             : '- Ignore wall color/background/decor unless user explicitly asks for background.',
+        '- SCREEN & DEVICE DISPLAY RULE: If the image depicts an electronic device (such as an iPad, tablet, smartphone, laptop, or computer monitor) displaying an application, website, or UI interface, identify the physical device (e.g., "iPad", "tablet", "smartphone") and the screen application as the primary subject.',
+        '- DO NOT misidentify wallpapers, app icons, stock graphics, or UI artwork inside a screen display as real-world physical environments (such as real mountains, forests, or outdoor scenery).',
         '- If a clear product or object is prominent, name it in answer and summary using only visible evidence.',
         '- For phones, tablets, laptops, earbuds, watches, and other consumer electronics: only fill brand/model when a logo, printed text, or unmistakable hardware cue is visible.',
         '- If brand/model is not clearly supported by visible evidence, leave brand and model as empty strings and describe the object instead. Prefer "not visible" over guessing.',
