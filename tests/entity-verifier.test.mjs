@@ -10,64 +10,68 @@ import {
 console.log('--- Testing Entity Verifier ---');
 
 // 1. Hostname & Domain Checks
-assert.equal(extractHostname('https://en.wikipedia.org/wiki/Tamil_Nadu'), 'en.wikipedia.org');
-assert.equal(extractHostname('https://www.reuters.com/world/india/article'), 'reuters.com');
+assert.equal(extractHostname('https://en.wikipedia.org/wiki/Main_Page'), 'en.wikipedia.org');
+assert.equal(extractHostname('https://www.reuters.com/world/news-item'), 'reuters.com');
 assert.equal(isTrustedDomain('en.wikipedia.org'), true);
 assert.equal(isTrustedDomain('reuters.com'), true);
-assert.equal(isTrustedDomain('tn.gov.in'), true);
+assert.equal(isTrustedDomain('state.gov'), true);
 assert.equal(isTrustedDomain('untrusted-blog.xyz'), false);
 
 // 2. Entity Target Extraction
-const t1 = extractEntityTarget('Who is the CM of Tamil Nadu?');
+const t1 = extractEntityTarget('Who is the CM of Region Alpha?');
 assert.equal(t1?.role, 'Chief Minister');
-assert.equal(t1?.jurisdiction, 'Tamil Nadu');
+assert.equal(t1?.jurisdiction, 'Region Alpha');
 
-const t2 = extractEntityTarget('Who is the Prime Minister of India?');
+const t2 = extractEntityTarget('Who is the Prime Minister of France?');
 assert.equal(t2?.role, 'Prime Minister');
-assert.equal(t2?.jurisdiction, 'India');
+assert.equal(t2?.jurisdiction, 'France');
 
 const t3 = extractEntityTarget('What is the weather today?');
 assert.equal(t3, null);
 
-// 3. Temporal Status Classification
+function fixtureSubject(value) {
+    return String(value || '');
+}
+
+// 3. Temporal Status Classification (Generic Synthetic Fixtures)
 const mockSnippets = [
     {
-        title: 'M. K. Stalin - Wikipedia',
-        description: 'M. K. Stalin is an Indian politician who is the current and 8th Chief Minister of Tamil Nadu, serving since May 7, 2021.'
+        title: fixtureSubject('Reference'),
+        description: fixtureSubject('Alex Rivera is the current Chief Minister of Region Alpha, in office since May 2021.')
     },
     {
-        title: 'Vijay (actor) - TVK',
-        description: 'In February 2024, Vijay founded the political party Tamilaga Vettri Kazhagam (TVK) as candidate to contest the 2026 assembly elections.'
+        title: fixtureSubject('Review Source'),
+        description: fixtureSubject('Jordan Lee is a candidate campaigning for Chief Minister in the 2026 assembly elections.')
     }
 ];
 
-const stalinStatus = classifyTemporalStatus('M. K. Stalin', 'Chief Minister', mockSnippets, 2026);
-assert.equal(stalinStatus.status, 'incumbent');
-assert.ok(stalinStatus.confidence >= 0.7);
+const incumbentStatus = classifyTemporalStatus(fixtureSubject('Alex Rivera'), 'Chief Minister', mockSnippets, 2026);
+assert.equal(incumbentStatus.status, 'incumbent');
+assert.ok(incumbentStatus.confidence >= 0.7);
 
-const vijayStatus = classifyTemporalStatus('Vijay', 'Chief Minister', mockSnippets, 2026);
-assert.equal(vijayStatus.status, 'candidate');
-assert.ok(vijayStatus.confidence >= 0.7);
+const candidateStatus = classifyTemporalStatus(fixtureSubject('Jordan Lee'), 'Chief Minister', mockSnippets, 2026);
+assert.equal(candidateStatus.status, 'candidate');
+assert.ok(candidateStatus.confidence >= 0.7);
 
 // 4. Response Validation & Verified Source Payload
 const validation = validateEntityResponse(
-    'Who is the CM of Tamil Nadu?',
-    'M. K. Stalin is the Chief Minister of Tamil Nadu.',
+    'Who is the CM of Region Alpha?',
+    fixtureSubject('Alex Rivera is the Chief Minister of Region Alpha.'),
     [
         {
-            title: 'Tamil Nadu Ministers',
-            url: 'https://en.wikipedia.org/wiki/Tamil_Nadu_Council_of_Ministers',
-            description: 'M. K. Stalin is the serving Chief Minister of Tamil Nadu.'
+            title: fixtureSubject('Reference'),
+            url: 'https://en.wikipedia.org/wiki/Region_Alpha_Council',
+            description: fixtureSubject('Alex Rivera is the serving Chief Minister of Region Alpha.')
         }
     ],
     2026
 );
 
 assert.equal(validation.entityTarget?.role, 'Chief Minister');
-assert.equal(validation.entityTarget?.jurisdiction, 'Tamil Nadu');
+assert.equal(validation.entityTarget?.jurisdiction, 'Region Alpha');
 assert.ok(validation.verifiedSourceData);
 assert.equal(validation.verifiedSourceData.role, 'Chief Minister');
-assert.equal(validation.verifiedSourceData.jurisdiction, 'Tamil Nadu');
+assert.equal(validation.verifiedSourceData.jurisdiction, 'Region Alpha');
 assert.equal(validation.verifiedSourceData.temporalAnchorYear, 2026);
 assert.ok(validation.verifiedSourceData.sources.length > 0);
 
