@@ -18,7 +18,7 @@ export function getInstantReply(text) {
     }
 
     if (/^what can you do\??$/i.test(lower)) {
-        return 'I am JARVIS - a live-fact and vision helper. I can check current sources, read your camera or attachments, remember what you save, verify answers, and help with planning or fixes from screenshots.';
+        return 'I am JARVIS — your hybrid, verified multilingual AI copilot.\n\n• ⚡ Hybrid Local Vision Engine: Instant local image classification & ROI document cropping (works offline & without API keys).\n• 🛡️ Verified Live Intelligence: Real-time web search citations, 3-day weather forecasts, and schema-validated SQL query drafting.\n• 🗣️ Native Indic Multilingual Voice: Hands-free voice conversation & TTS in Tamil, Telugu, Kannada, Hindi, and English.';
     }
 
     if (/^(i see|oh i see|ah i see|got it|gotcha|makes sense|understood|oh okay|oh ok)\.?$/i.test(lower)) {
