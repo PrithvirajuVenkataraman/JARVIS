@@ -85,15 +85,15 @@ export function extractEntityTarget(text) {
         }
     }
 
-    // Direct role keyword fallback
-    if (/\b(?:cm|chief minister)\b/i.test(t) && /\btamil\s*nadu\b/i.test(t)) {
-        return { role: 'Chief Minister', jurisdiction: 'Tamil Nadu' };
-    }
-    if (/\b(?:pm|prime minister)\b/i.test(t) && /\bindia\b/i.test(t)) {
-        return { role: 'Prime Minister', jurisdiction: 'India' };
-    }
-    if (/\b(?:president)\b/i.test(t) && /\b(?:usa|united states|america)\b/i.test(t)) {
-        return { role: 'President', jurisdiction: 'United States' };
+    // Dynamic abbreviation & reversed pattern: "<Jurisdiction> CM/PM"
+    const abbrMatch = t.match(/\b(?:who is|what is|tell me|who's)?\s*(?:the\s+)?([a-z\s]+?)\s+(cm|pm|chief minister|prime minister|president|governor|mayor)\b/i);
+    if (abbrMatch && abbrMatch[1] && abbrMatch[2]) {
+        const rawRole = abbrMatch[2].trim().toLowerCase();
+        const role = rawRole === 'cm' ? 'Chief Minister' : (rawRole === 'pm' ? 'Prime Minister' : formatName(rawRole));
+        const rawPlace = abbrMatch[1].replace(/\b(?:current|the|who is|what is|who's|tell me)\b/gi, '').trim();
+        if (rawPlace.length >= 2 && rawPlace.length <= 40) {
+            return { role, jurisdiction: formatName(rawPlace) };
+        }
     }
 
     return null;
@@ -181,16 +181,15 @@ export function validateEntityResponse(query, responseText, liveSources = [], ca
     const trustedSources = sources.filter(s => isTrustedDomain(extractHostname(s?.url || s?.domain)));
     const activeSources = trustedSources.length > 0 ? trustedSources : sources;
 
-    // Detect mentioned names
-    const mentionedEntities = [];
-    const textLower = String(responseText || '').toLowerCase();
-    const queryLower = String(query || '').toLowerCase();
+    // Dynamically extract proper noun entities mentioned in response, query, or top source snippets
+    const combinedCorpus = `${responseText} ${query} ${activeSources.map(s => `${s.title || ''} ${s.description || ''}`).join(' ')}`;
+    const properNounMatches = combinedCorpus.match(/\b[A-Z][a-zA-Z.\s]{2,30}\b/g) || [];
+    const candidatePool = Array.from(new Set(properNounMatches.map(n => n.trim()))).filter(n =>
+        n.length >= 3 &&
+        !['Chief', 'Minister', 'Prime', 'President', 'Governor', 'Mayor', 'Wikipedia', 'Source', 'News', 'Article', 'India', 'Tamil', 'Nadu'].includes(n)
+    );
 
-    // Check specific known entities in regional context
-    if (target.jurisdiction === 'Tamil Nadu' && target.role === 'Chief Minister') {
-        if (textLower.includes('stalin') || queryLower.includes('stalin')) mentionedEntities.push('M. K. Stalin');
-        if (textLower.includes('vijay') || queryLower.includes('vijay')) mentionedEntities.push('Vijay');
-    }
+    const mentionedEntities = candidatePool.slice(0, 6);
 
     const entityStatuses = {};
     for (const ent of mentionedEntities) {
@@ -210,6 +209,7 @@ export function validateEntityResponse(query, responseText, liveSources = [], ca
         entityBreakdown: entityStatuses
     };
 
+    const textLower = String(responseText || '').toLowerCase();
     const isIncumbentAssertion = new RegExp(`\\bis the (?:current )?${target.role.toLowerCase()}\\b`, 'i').test(textLower);
     return {
         discrepancyDetected: Object.values(entityStatuses).some(s => s.status === 'candidate' && isIncumbentAssertion),
