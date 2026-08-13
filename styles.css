@@ -3256,7 +3256,9 @@ body.dark .response-action-btn {
 }
 
 .assistant-thinking-minimal .assistant-thinking-text {
-    display: none !important;
+    display: inline-flex !important;
+    align-items: center;
+    gap: 4px;
 }
 
 @keyframes jarvis-thinking-pulse {
