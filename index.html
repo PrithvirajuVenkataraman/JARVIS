@@ -4456,7 +4456,9 @@ async function streamChatCompletion(payload, options = {}) {
             const delta = String(event.data?.text || '');
             if (!delta) return;
             accumulated += delta;
-            if (!firstDeltaLogged) {
+            // Strip <think> reasoning tags from streaming output
+            const displayAccumulated = accumulated.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/^<think>[\s\S]*$/gi, '').replace(/<\/?think>/gi, '').trim();
+            if (!firstDeltaLogged && displayAccumulated) {
                 firstDeltaLogged = true;
                 hideThinkingIndicator();
                 latencyTrace.firstDeltaAt = performance.now();
@@ -4466,19 +4468,20 @@ async function streamChatCompletion(payload, options = {}) {
                     totalMs: Math.round(latencyTrace.firstDeltaAt - (latencyTrace.submittedAt || latencyTrace.firstDeltaAt))
                 });
             }
+            if (!displayAccumulated) return;
             const id = ensureStreamMessage();
-            updateStreamingAssistantMessage(id, accumulated, { userMessage, streaming: true });
+            updateStreamingAssistantMessage(id, displayAccumulated, { userMessage, streaming: true });
             return;
         }
         if (event.event === 'correction') {
-            accumulated = String(event.data?.text || accumulated || '');
+            accumulated = String(event.data?.text || accumulated || '').replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/^<think>[\s\S]*$/gi, '').replace(/<\/?think>/gi, '').trim();
             const id = ensureStreamMessage();
             updateStreamingAssistantMessage(id, accumulated, { userMessage, streaming: true });
             return;
         }
         if (event.event === 'done') {
             donePayload = event.data || {};
-            accumulated = String(donePayload.response || accumulated || '').trim();
+            accumulated = String(donePayload.response || accumulated || '').replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/^<think>[\s\S]*$/gi, '').replace(/<\/?think>/gi, '').trim();
             if (accumulated) {
                 const id = ensureStreamMessage();
                 updateStreamingAssistantMessage(id, accumulated, {
@@ -10161,10 +10164,14 @@ function isInvalidLocationCandidate(candidate) {
     const blocked = [
         'there', 'here', 'somewhere', 'anywhere',
         'about', 'good', 'best', 'restaurants', 'restaurant',
-        'hotels', 'hotel', 'food', 'trip', 'travel', 'place', 'places'
+        'hotels', 'hotel', 'food', 'trip', 'travel', 'place', 'places',
+        'database', 'table', 'schema', 'production', 'staging', 'server',
+        'cluster', 'query', 'results', 'codebase', 'repository', 'evening',
+        'morning', 'afternoon', 'night', 'today', 'yesterday', 'tomorrow'
     ];
     if (blocked.includes(c)) return true;
-    if (/\b(about|good|best|restaurant|restaurants|hotel|hotels|food|trip|travel)\b/i.test(c) && !/,/.test(c)) {
+    if (/\b(last|past|next)\s+\d+\s+(days?|weeks?|months?|years?)\b/i.test(c)) return true;
+    if (/\b(about|good|best|restaurant|restaurants|hotel|hotels|food|trip|travel|database|table|schema|query)\b/i.test(c) && !/,/.test(c)) {
         return true;
     }
     return false;
@@ -18958,7 +18965,8 @@ Quick recap: ...
             }
 
             // ========== NEWS HANDLING ==========
-            else if (lower.match(/\b(news|headlines?|what'?s happening|current events?|latest updates?)\b/i) &&
+            else if ((lower.match(/\b(news|headlines?|what'?s happening|current events?)\b/i) ||
+                      (lower.match(/\blatest updates?\b/i) && !/\b(react|node|js|javascript|python|sql|code|api|version|dependency|framework|package|model|library)\b/i.test(lower))) &&
                      !lower.includes('good news') && !lower.includes('bad news') && !lower.includes('some news')) {
                 await fetchAndDisplayNews(cleanText);
                 return;
@@ -18977,9 +18985,11 @@ Quick recap: ...
                 return; 
             }
             
-            else if (cleanText.toLowerCase().match(/what (can you do|are your features?|features?|do you have|is your feature)/i) ||
-                     cleanText.toLowerCase().match(/\b(help|capabilities|what are you)\b/i) ||
-                     cleanText.toLowerCase().match(/what (do|can) you (do|offer|provide)/i)) {
+            else if ((cleanText.toLowerCase().match(/what (can you do|are your features?|features?|do you have|is your feature)/i) ||
+                      cleanText.toLowerCase().match(/\b(capabilities|what are you)\b/i) ||
+                      cleanText.toLowerCase().match(/^(help|show help|help menu|help overview)$/i) ||
+                      cleanText.toLowerCase().match(/what (do|can) you (do|offer|provide)/i)) &&
+                     !/\b(help\s+(me|with|to|debug|write|create|find|build|fix|solve|generate|analyze|code|query|sql|run))\b/i.test(cleanText)) {
                 await deliverApiReply('help_overview', {
                     features: [
                         'travel planning',
@@ -18995,13 +19005,12 @@ Quick recap: ...
                 return; 
             }
             
-            else if (cleanText.toLowerCase().includes('trip') || 
-                     cleanText.toLowerCase().includes('itinerary') || 
-                     cleanText.toLowerCase().includes('itenarary') ||
-                     cleanText.toLowerCase().includes('itenary') ||
-                     cleanText.toLowerCase().includes('vacation') ||
-                     cleanText.toLowerCase().includes('visit') && cleanText.toLowerCase().match(/\b(to|in|for)\b/) ||
-                     (cleanText.toLowerCase().includes('plan') && (cleanText.toLowerCase().includes('travel') || cleanText.toLowerCase().includes('visit')))) {
+            else if (!isSqlDataQuery && (
+                     cleanText.toLowerCase().match(/\b(itinerary|itenarary|itenary|vacation)\b/i) ||
+                     cleanText.toLowerCase().match(/\btrip\b/i) ||
+                     (cleanText.toLowerCase().match(/\bvisit\b/i) && cleanText.toLowerCase().match(/\b(to|in|for)\b/) && !/\b(website|site|page|doc|docs|link|url)\b/i.test(cleanText)) ||
+                     (cleanText.toLowerCase().match(/\bplan\b/i) && cleanText.toLowerCase().match(/\b(travel|visit)\b/i))
+                    )) {
                 
                 // Always plan from the full original user request, not a shortened/resolved rewrite.
                 const itineraryUserRequest = String(rawCommandText || text || '').trim();
