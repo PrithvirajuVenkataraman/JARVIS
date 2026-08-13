@@ -22486,11 +22486,10 @@ function showThinkingIndicator(message = 'Thinking') {
     const chatContainer = document.getElementById('chat-container');
     if (!chatContainer) return;
 
-    let row = document.getElementById('chat-thinking-indicator');
     const phase = resolveThinkingPhase(message);
-    const visualMode = phase.key === 'searching' ? 'ring' : 'dots';
-    const visualModeClass = visualMode === 'ring' ? 'assistant-thinking-ring-mode' : 'assistant-thinking-dots';
-    const phaseLabel = 'Thinking';
+    const displayLabel = String(message || 'Thinking').trim();
+
+    let row = document.getElementById('chat-thinking-indicator');
     if (!row) {
         row = document.createElement('div');
         row.id = 'chat-thinking-indicator';
@@ -22499,35 +22498,21 @@ function showThinkingIndicator(message = 'Thinking') {
         row.innerHTML = `
             <div class="w-full max-w-3xl">
                 <div class="flex items-start gap-2">
-                    <div class="chat-bubble-assistant assistant-thinking-bubble assistant-thinking-minimal flex items-center gap-2" role="status" aria-live="polite" aria-label="${escapeHtml(phaseLabel)}">
-                        <span class="assistant-thinking-pulse ${visualModeClass}" aria-hidden="true">
-                            <span class="assistant-thinking-dot"></span>
-                            <span class="assistant-thinking-dot"></span>
-                            <span class="assistant-thinking-dot"></span>
-                            <span class="assistant-thinking-ring"></span>
-                        </span>
-                        <span class="assistant-thinking-text font-semibold uppercase tracking-wider text-xs text-neutral-300 flex items-center gap-1" data-thinking-label>THINKING<span class="inline-block animate-pulse">...</span></span>
+                    <div class="chat-bubble-assistant assistant-thinking-bubble assistant-thinking-minimal" role="status" aria-live="polite" aria-label="${escapeHtml(displayLabel)}">
+                        <div class="assistant-message-text is-streaming thinking-inline-text" data-thinking-inline>${escapeHtml(displayLabel)}</div>
                     </div>
                 </div>
             </div>
         `;
         chatContainer.appendChild(row);
     } else {
-        const bubble = row.querySelector('.assistant-thinking-bubble');
-        if (bubble) {
-            bubble.classList.add('assistant-thinking-minimal');
-            bubble.setAttribute('aria-label', phaseLabel);
+        const textEl = row.querySelector('[data-thinking-inline]');
+        if (textEl) {
+            textEl.textContent = displayLabel;
+            textEl.classList.add('is-streaming');
         }
-        const pulse = row.querySelector('.assistant-thinking-pulse');
-        if (pulse) {
-            pulse.classList.toggle('assistant-thinking-dots', visualMode === 'dots');
-            pulse.classList.toggle('assistant-thinking-ring-mode', visualMode === 'ring');
-        }
-        const label = row.querySelector('[data-thinking-label]');
-        if (label) {
-            label.innerHTML = `THINKING<span class="inline-block animate-pulse">...</span>`;
-            label.hidden = false;
-        }
+        const bubble = row.querySelector('.chat-bubble-assistant');
+        if (bubble) bubble.setAttribute('aria-label', displayLabel);
     }
     maybeAutoScroll(chatContainer);
 }
