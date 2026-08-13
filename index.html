@@ -22487,7 +22487,7 @@ function showThinkingIndicator(message = 'Thinking') {
     if (!chatContainer) return;
 
     const phase = resolveThinkingPhase(message);
-    const displayLabel = String(message || 'Thinking').trim();
+    const displayLabel = phase.label;
 
     let row = document.getElementById('chat-thinking-indicator');
     if (!row) {
@@ -22526,10 +22526,16 @@ function startThinkingPhaseTimeline() {
 
 function resolveThinkingPhase(message = '') {
     const lower = String(message || '').toLowerCase();
-    if (/\b(web search|search|sources?|retriev|fetch|look(?:ing)?\s+up|checking verified|checking reliable|checking current)\b/.test(lower)) {
-        return { key: 'searching', label: 'Thinking' };
+    if (/\b(web search|search|sources?|retriev|fetch|look(?:ing)?\s+up|checking verified|checking reliable|checking current|finding|lookup)\b/.test(lower)) {
+        return { key: 'searching', label: 'SEARCHING' };
     }
-    return { key: 'thinking', label: 'Thinking' };
+    if (/\b(attachment|reading|image|document|pdf|file|view)\b/.test(lower)) {
+        return { key: 'reading', label: 'ANALYZING' };
+    }
+    if (/\b(translat|language)\b/.test(lower)) {
+        return { key: 'translating', label: 'TRANSLATING' };
+    }
+    return { key: 'thinking', label: 'THINKING' };
 }
 
 function hideThinkingIndicator() {
