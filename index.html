@@ -142,8 +142,12 @@
     <div class="page-shell">
         <div class="app-shell max-w-5xl mx-auto relative z-10 p-6">
             <!-- Header - Enhanced -->
-            <div class="header-enhanced mb-6">
+            <div class="header-enhanced mb-6 text-center">
                 <h1 id="title" class="jarvis-top-title">JARVIS</h1>
+                <div class="hero-badge mt-2 inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-cyan-950/60 border border-cyan-500/30 text-xs font-semibold text-cyan-300 tracking-wide shadow-sm">
+                    <span class="inline-block w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
+                    <span>Hybrid Vision • Verified Live Facts • 5 Indic Languages</span>
+                </div>
                 <p id="subtitle" class="hidden"></p>
             </div>
 
@@ -19013,15 +19017,14 @@ Quick recap: ...
                      !/\b(help\s+(me|with|to|debug|write|create|find|build|fix|solve|generate|analyze|code|query|sql|run))\b/i.test(cleanText)) {
                 await deliverApiReply('help_overview', {
                     features: [
-                        'travel planning',
-                        'translator mode',
-                        'transport guidance',
-                        'weather'
+                        '⚡ Hybrid Local Vision (ResNet/U-Net offline classifier & ROI segmenter)',
+                        '🛡️ Verified Live Intelligence (live search citations & strict SQL schema validation)',
+                        '🗣️ Native Indic Multilingual Voice (Tamil, Telugu, Kannada, Hindi & English)'
                     ],
-                    supportedLanguages: ['Tamil', 'Kannada', 'Telugu', 'Hindi']
+                    supportedLanguages: ['Tamil', 'Telugu', 'Kannada', 'Hindi', 'English']
                 }, {
                     historyKey: text,
-                    fallbackText: 'I can help with travel planning, translator mode, transport guidance, weather, and related everyday questions.'
+                    fallbackText: 'I am JARVIS — your hybrid, verified multilingual AI copilot.\n\n• ⚡ Hybrid Local Vision Engine: Instant local image classification & ROI document cropping (works offline & without API keys).\n• 🛡️ Verified Live Intelligence: Real-time search citations, 3-day weather forecasts, and schema-validated SQL query drafting.\n• 🗣️ Native Indic Multilingual Voice: Hands-free voice conversation & TTS in Tamil, Telugu, Kannada, Hindi, and English.'
                 });
                 return; 
             }
