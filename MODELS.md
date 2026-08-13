@@ -1,10 +1,34 @@
-# JARVIS - AI Models & Capabilities Architecture
+# JARVIS - AI Models & Value Proposition Architecture
 
-This document provides a comprehensive specification of all LLM and computer vision technologies integrated into the **Unify Assistant** platform, including cloud inference providers, local computer vision engines, structured output decoding, vision pipelines, and Indic speech support.
+> ### **Master Value Proposition**
+> **"Unify Assistant: The Privacy-First, Hybrid Multilingual AI Copilot — Live Web Intelligence & Local Vision in Your Language."**
 
 ---
 
-## 1. Primary Model Architecture (Groq API Integration)
+## 🏛️ The 3 Core Pillars of Unify Assistant
+
+```
+                                ┌────────────────────────────────────────┐
+                                │            UNIFY ASSISTANT             │
+                                └───────────────────┬────────────────────┘
+                                                    │
+          ┌─────────────────────────────────────────┼─────────────────────────────────────────┐
+          ▼                                         ▼                                         ▼
+┌───────────────────┐                     ┌───────────────────┐                     ┌───────────────────┐
+│     PILLAR 1      │                     │     PILLAR 2      │                     │     PILLAR 3      │
+│   Hybrid Local    │                     │   Verified Live   │                     │   Native Indic    │
+│   Vision Engine   │                     │   Intelligence    │                     │ Multilingual Voice│
+└─────────┬─────────┘                     └─────────┬─────────┘                     └─────────┬─────────┘
+          │                                         │                                         │
+          ├─ Local ResNet-style classifier          ├─ Live web verification                  ├─ Voice dictation & TTS
+          ├─ U-Net ROI document cropping            ├─ Source citation badges                 ├─ Tamil, Telugu, Kannada,
+          └─ Offline fallback (<30ms)               └─ Schema SQL (strict: true)              │  Hindi & English
+                                                                                            └─ Regional food & travel
+```
+
+---
+
+## 1. Primary Model Architecture (Groq LPU Hardware Acceleration)
 
 Inference is accelerated via **Groq LPU (Language Processing Unit)** hardware using the following specialized models:
 
@@ -27,7 +51,7 @@ Inference is accelerated via **Groq LPU (Language Processing Unit)** hardware us
 
 ---
 
-## 3. Local Vision Engine (ResNet-50 & U-Net Style Computer Vision)
+## 3. Pillar 1: Hybrid Local Vision Engine (ResNet-50 & U-Net Style Vision)
 
 To guarantee zero-dependency offline fallback, instantaneous local processing, and visual anti-hallucination:
 
@@ -47,7 +71,7 @@ To guarantee zero-dependency offline fallback, instantaneous local processing, a
 
 ---
 
-## 4. Structured JSON Output Constrained Decoding (`strict: true`)
+## 4. Pillar 2: Pillar 2: Verified Live Intelligence & Constrained Decoding (`strict: true`)
 
 Supported models (`openai/gpt-oss-120b`, `openai/gpt-oss-20b`, `openai/gpt-oss-safeguard-20b`) leverage Groq's constrained grammar decoding:
 
@@ -68,7 +92,7 @@ Supported models (`openai/gpt-oss-120b`, `openai/gpt-oss-20b`, `openai/gpt-oss-s
 
 ---
 
-## 5. Indic Multilingual & Speech Stack
+## 5. Pillar 3: Native Indic Multilingual & Speech Stack
 
 ### A. Text Language Support
 Native multilingual understanding and natural text generation across:
