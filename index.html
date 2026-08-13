@@ -17971,6 +17971,10 @@ function isWakeGreetingText(text) {
                 cleanText = cleanText.replace(regex, ''); 
             } 
 
+            const isSqlDataQuery = /\b(?:sql|database|postgres|mysql|sqlite|bigquery|snowflake)\b/i.test(cleanText) ||
+                (/\b(?:find|list|show|select|fetch|get|generate|write)\b.*\b(?:all|top|customers|orders|users|products|rows|items|sales|revenue|table|schema|records)\b/i.test(cleanText) &&
+                 /\b(?:where|over|greater|less|group by|order by|joined|total|sum|count|amount|days|date|status|showing|having)\b/i.test(cleanText));
+
             if (pendingScreenSuggestionRequest) {
                 const handledPendingScreen = await handlePendingScreenSuggestionReply(cleanText);
                 if (handledPendingScreen) return;
@@ -19237,9 +19241,6 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
             }
             
             // Hotel/Transport queries - skip for SQL/data queries
-            const isSqlDataQuery = /\b(?:sql|database|postgres|mysql|sqlite|bigquery|snowflake)\b/i.test(cleanText) ||
-                (/\b(?:find|list|show|select|fetch|get|generate|write)\b.*\b(?:all|top|customers|orders|users|products|rows|items|sales|revenue|table|schema|records)\b/i.test(cleanText) &&
-                 /\b(?:where|over|greater|less|group by|order by|joined|total|sum|count|amount|days|date|status|showing|having)\b/i.test(cleanText));
             const isHotelMatch = !isSqlDataQuery && cleanText.toLowerCase().match(/\b(hotel|hotels|stay|staying|accommodation|accommodations|lodge|resort|hostel|place to stay|places to stay|where can i stay|where should i stay)\b/i);
             const isTransportMatch = !isSqlDataQuery && cleanText.toLowerCase().match(/\b(transport|transportation|bus|train|taxi|uber|ola|auto|rickshaw|metro|subway|getting around|get around|how to reach|how do i get|travel to)\b/i);
 
