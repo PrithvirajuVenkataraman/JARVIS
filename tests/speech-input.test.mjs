@@ -89,10 +89,10 @@ assert.equal(controller.getState().submittedResultIds.length, 1);
 assert.equal(controller.toggleDictation(), false);
 assert.equal(controller.getState().mode, 'idle');
 
-assert.equal(controller.setLanguage('ta-IN'), 'en-US');
+assert.equal(controller.setLanguage('ta-IN'), 'ta-IN');
 assert.equal(controller.toggleConverse(), true);
 const converseRecognition = FakeRecognition.instances.at(-1);
-assert.equal(converseRecognition.lang, 'en-US');
+assert.equal(converseRecognition.lang, 'ta-IN');
 assert.equal(converseRecognition.continuous, true);
 assert.equal(controller.getState().converseEnabled, true);
 
@@ -158,7 +158,7 @@ assert.equal(converseController.getState().restartRequested, false);
 const activeRecognition = FakeRecognition.instances.at(-1);
 converseController.setLanguage('hi-IN');
 await Promise.resolve();
-assert.equal(FakeRecognition.instances.at(-1).lang, 'en-US');
+assert.equal(FakeRecognition.instances.at(-1).lang, 'hi-IN');
 assert.notEqual(FakeRecognition.instances.at(-1), activeRecognition);
 await activeRecognition.emitResult(SAMPLE.stale, true);
 await wait(12);
