@@ -1,5 +1,6 @@
 export const config = { maxDuration: 60 };
 import { applyApiSecurity } from './_lib/security.js';
+import { classifyImageLocally } from './_lib/local-vision-classifier.js';
 
 const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 const MAX_IMAGE_BASE64_CHARS = 8 * 1024 * 1024;
@@ -21,6 +22,7 @@ export default async function handler(req, res) {
             success: true,
             configured: !!(providers.groqApiKey || providers.geminiApiKey),
             disabled: process.env.DISABLE_VISION_PREPASS === 'true',
+            localFallbackAvailable: true,
             providers: {
                 groq: !!providers.groqApiKey,
                 gemini: !!providers.geminiApiKey
@@ -54,25 +56,10 @@ export default async function handler(req, res) {
     }
 
     try {
-
-        const { prompt = '', task = 'general_vision', mimeType = 'image/jpeg', imageBase64 = '' } = req.body || {};
-        if (String(prompt).length > 2000 || String(task).length > 120) {
-            return sendVisionError(res, 413, 'payload_too_large', 'Prompt or task is too long.');
-        }
-        if (!imageBase64 || typeof imageBase64 !== 'string') {
-            return sendVisionError(res, 400, 'invalid_request', 'imageBase64 is required.');
-        }
-        const normalizedMimeType = String(mimeType || '').trim().toLowerCase();
-        if (!ALLOWED_IMAGE_TYPES.has(normalizedMimeType)) {
-            return sendVisionError(res, 415, 'unsupported_media_type', 'Supported image types are JPEG, PNG, WebP, and GIF.');
-        }
-        if (imageBase64.length > MAX_IMAGE_BASE64_CHARS || !/^[A-Za-z0-9+/]+={0,2}$/.test(imageBase64)) {
-            return sendVisionError(res, 413, 'invalid_image', 'Image data is malformed or too large.');
-        }
-
         const providers = getVisionProviders();
         if (!providers.groqApiKey && !providers.geminiApiKey) {
-            return sendVisionError(res, 503, 'provider_unavailable', 'Vision provider is not configured.');
+            const localResult = classifyImageLocally({ imageBase64, mimeType: normalizedMimeType, prompt, task });
+            return res.status(200).json(localResult);
         }
 
         if (task === 'math_ocr_solve') { 
