@@ -13,8 +13,16 @@ const DEFAULT_CONVERSE_MAX_WAIT_MS = 2400;
 
 function normalizeVoiceInputLanguage(language = '') {
     const value = String(language || '').trim();
-    return value === 'en-IN' ? 'en-IN' : 'en-US';
+    const supported = ['ta-IN', 'te-IN', 'kn-IN', 'hi-IN', 'en-IN', 'en-US'];
+    if (supported.includes(value)) return value;
+    const lower = value.toLowerCase();
+    if (lower.startsWith('ta')) return 'ta-IN';
+    if (lower.startsWith('te')) return 'te-IN';
+    if (lower.startsWith('kn')) return 'kn-IN';
+    if (lower.startsWith('hi')) return 'hi-IN';
+    return 'en-US';
 }
+
 
 export function createSpeechInputController(options = {}) { 
     const Recognition = options.Recognition;
