@@ -106,7 +106,7 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
         const guard = applyApiSecurity(req, res, {
             methods: ['POST'],
             routeKey: 'chat-groq',
-            maxBodyBytes: 700 * 1024,
+            maxBodyBytes: 8 * 1024 * 1024,
             rateLimit: { max: 25, windowMs: 60 * 1000 }
         });
         if (guard.handled) return;
