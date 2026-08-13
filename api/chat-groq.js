@@ -1767,7 +1767,7 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
         if (!t.trim()) return false;
         if (/\b(with sources?|source links?)\b/.test(t)) return true;
         if (/\b(current|latest|today|now|as of)\b/.test(t)) return true;
-        return /\b(president|prime minister|chief minister|governor|mayor|ceo|chairman|chairperson|captain|coach|ranking|standings|winner|score|price|rate|market cap|election result)\b/.test(t);
+        return /\b(president|prime minister|chief minister|cm|governor|mayor|ceo|chairman|chairperson|captain|coach|ranking|standings|winner|score|price|rate|market cap|election result)\b/.test(t);
     }
 
     function isInternalSummarizerPrompt(message, clientSystemPrompt) {
@@ -2105,32 +2105,10 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
             /^(the provided|based on the provided|according to the provided|the search results)\b/.test(t);
     }
 
-    function getDirectKnowledgeFallback(message) {
-        const m = String(message || '').toLowerCase();
-        if (/\b(cm|chief minister)\b[\s\S]{0,30}\btamil\s*nadu\b/.test(m)) {
-            return 'M. K. Stalin is the Chief Minister of Tamil Nadu, having assumed office on May 7, 2021.';
-        }
-        if (/\b(cm|chief minister)\b[\s\S]{0,30}\bkarnataka\b/.test(m)) {
-            return 'Siddaramaiah is the Chief Minister of Karnataka.';
-        }
-        if (/\b(cm|chief minister)\b[\s\S]{0,30}\bmaharashtra\b/.test(m)) {
-            return 'Eknath Shinde is the Chief Minister of Maharashtra.';
-        }
-        if (/\b(cm|chief minister)\b[\s\S]{0,30}\bdelhi\b/.test(m)) {
-            return 'Atishi Marlena is the Chief Minister of Delhi.';
-        }
-        if (/\b(cm|chief minister)\b[\s\S]{0,30}\bkerala\b/.test(m)) {
-            return 'Pinarayi Vijayan is the Chief Minister of Kerala.';
-        }
-        if (/\b(cm|chief minister)\b[\s\S]{0,30}\bandhra\b/.test(m)) {
-            return 'N. Chandrababu Naidu is the Chief Minister of Andhra Pradesh.';
-        }
-        if (/\b(pm|prime minister)\b[\s\S]{0,30}\bindia\b/.test(m)) {
-            return 'Narendra Modi is the Prime Minister of India.';
-        }
-        if (/\b(president)\b[\s\S]{0,30}\bindia\b/.test(m)) {
-            return 'Droupadi Murmu is the President of India.';
-        }
+    // IMPORTANT: Political leadership, current officeholders, prices, scores, and
+    // other mutable facts must NEVER be hardcoded. They change with elections,
+    // appointments, and events. Always rely on live web search retrieval instead.
+    function getDirectKnowledgeFallback(_message) {
         return '';
     }
 
@@ -2428,6 +2406,15 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
         const hay = `${title} ${desc} ${domain}`.toLowerCase();
         if (!url.trim()) return false;
         if (isGoogleNewsRedirect(url)) return false;
+
+        const msg = String(message || '').toLowerCase();
+        const lowerTitle = title.toLowerCase();
+
+        // Filter out deputy lists unless deputy was requested
+        if (!/\bdeputy\b/.test(msg) && /\bdeputy\s+chief\s+minister\b/.test(lowerTitle)) {
+            return false;
+        }
+
         const queryTerms = tokenizeRelevanceTerms(message);
         if (!queryTerms.length) return true;
         if (queryTerms.some(term => hay.includes(term))) return true;
