@@ -89,6 +89,42 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
         return [...new Set([mappedGemini, configured, 'gemini-3.5-flash', 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'].filter(Boolean))];
     }
 
+    const SQL_QUERY_GENERATION_SCHEMA = {
+        type: 'json_schema',
+        json_schema: {
+            name: 'sql_query_generation',
+            strict: true,
+            schema: {
+                type: 'object',
+                properties: {
+                    query: { type: 'string' },
+                    query_type: { type: 'string' },
+                    tables_used: { type: 'array', items: { type: 'string' } },
+                    estimated_complexity: { type: 'string' },
+                    execution_notes: { type: 'array', items: { type: 'string' } },
+                    validation_status: {
+                        type: 'object',
+                        properties: {
+                            is_valid: { type: 'boolean' },
+                            syntax_errors: { type: 'array', items: { type: 'string' } }
+                        },
+                        required: ['is_valid', 'syntax_errors'],
+                        additionalProperties: false
+                    }
+                },
+                required: ['query', 'query_type', 'tables_used', 'estimated_complexity', 'execution_notes', 'validation_status'],
+                additionalProperties: false
+            }
+        }
+    };
+
+    function isSqlQueryGenerationRequest(text) {
+        const t = String(text || '').toLowerCase();
+        return /\b(?:sql|database|postgres|mysql|sqlite|bigquery|snowflake)\b/.test(t) &&
+            /\b(?:generate|write|find|create|show|select|fetch|join|query)\b/.test(t);
+    }
+
+
     function isEnvFlagEnabled(name, defaultValue = false) {
         const flag = String(process.env[name] ?? '').trim().toLowerCase();
         if (!flag) return defaultValue;
@@ -1028,6 +1064,7 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
                     model,
                     temperature: 0,
                     max_tokens: 300,
+                    response_format: { type: 'json_object' },
                     messages: [{ role: 'user', content: policyPrompt }]
                 })
             }, {
@@ -1095,18 +1132,25 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
                     }
                     messages = [{ role: 'user', content }];
                 }
+                const requestBody = {
+                    model,
+                    temperature: temp,
+                    max_tokens: maxTokens,
+                    messages
+                };
+                if (['openai/gpt-oss-120b', 'openai/gpt-oss-20b'].includes(model) && isSqlQueryGenerationRequest(finalPrompt)) {
+                    requestBody.response_format = SQL_QUERY_GENERATION_SCHEMA;
+                } else if (['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'openai/gpt-oss-safeguard-20b'].includes(model)) {
+                    requestBody.response_format = { type: 'json_object' };
+                }
+
                 const response = await fetchWithTimeoutRetry('https://api.groq.com/openai/v1/chat/completions', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                         Authorization: `Bearer ${groqApiKey}`
                     },
-                    body: JSON.stringify({
-                        model,
-                        temperature: temp,
-                        max_tokens: maxTokens,
-                        messages
-                    })
+                    body: JSON.stringify(requestBody)
                 }, {
                     timeoutMs: clampInt(lengthPolicy?.timeoutMs, MODEL_FETCH_TIMEOUT_MS, 1000, MODEL_FETCH_TIMEOUT_MS),
                     retries: Number.isFinite(Number(lengthPolicy?.retries)) ? Number(lengthPolicy.retries) : FETCH_RETRIES
@@ -1488,6 +1532,33 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
                     action: null
                 };
             }
+
+            if (parsed.query && (parsed.query_type || parsed.tables_used || parsed.validation_status)) {
+                const sqlCode = String(parsed.query || '').trim();
+                const queryType = String(parsed.query_type || 'SELECT').toUpperCase();
+                const tables = Array.isArray(parsed.tables_used) && parsed.tables_used.length ? parsed.tables_used.join(', ') : 'N/A';
+                const complexity = String(parsed.estimated_complexity || 'Normal');
+                const notes = Array.isArray(parsed.execution_notes) && parsed.execution_notes.length ? parsed.execution_notes.map(n => `- ${n}`).join('\n') : '';
+                const isValid = parsed.validation_status?.is_valid !== false;
+                const errors = Array.isArray(parsed.validation_status?.syntax_errors) ? parsed.validation_status.syntax_errors.filter(Boolean).join(', ') : '';
+
+                const formattedResponse = [
+                    `\`\`\`sql\n${sqlCode}\n\`\`\``,
+                    '',
+                    `**Query Type:** ${queryType}`,
+                    `**Tables Used:** ${tables}`,
+                    `**Estimated Complexity:** ${complexity}`,
+                    isValid ? '**Syntax Validation:** Passed' : `**Syntax Errors:** ${errors}`,
+                    notes ? `\n**Execution Notes:**\n${notes}` : ''
+                ].filter(Boolean).join('\n');
+
+                return {
+                    intent: 'sql_generation',
+                    response: formattedResponse,
+                    action: null
+                };
+            }
+
 
             const normalized = { ...parsed };
             normalized.intent = typeof normalized.intent === 'string' && normalized.intent.trim()
