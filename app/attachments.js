@@ -118,6 +118,8 @@ export async function ingestAllForMessage(attachments = [], userText = '') {
                 customInstruction: [
                     'The user has attached image(s)/document(s).',
                     'Describe and answer directly about what is depicted in the attached image.',
+                    'DEVICE & SCREEN DISPLAY IDENTIFICATION: If the attached image depicts an electronic device (such as an iPad, tablet, smartphone, laptop, or display) showing an application or screen content, identify the device (e.g. iPad/tablet) and the app/interface on screen FIRST.',
+                    'DO NOT misidentify wallpapers, app graphics, icons, or headers inside a screen display as real-world physical landscapes (such as real mountains or outdoor scenes).',
                     'Do not write meta-commentary about vision algorithms, CNNs, or machine learning.',
                     'Do not state that you cannot see the image. Directly describe the objects, text, scene, and content of the image.'
                 ].join(' ')
