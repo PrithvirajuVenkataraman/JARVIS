@@ -129,7 +129,22 @@ export default async function handler(req, res) {
     });
     if (guard.handled) return;
 
-    const originalQuery = normalizeSearchQuery(req.body?.query || req.body?.q || '');
+    if (req.body?.task === 'web_fetch' || req.body?.action === 'web_fetch') {
+        const fetchUrl = String(req.body?.url || req.body?.query || '').trim();
+        if (!fetchUrl) {
+            return res.status(400).json({ success: false, error: 'url is required for web_fetch.' });
+        }
+        const extracted = await extractWithCrawl4Ai(fetchUrl).catch(e => ({ success: false, error: String(e?.message || e) }));
+        return res.status(200).json({
+            success: true,
+            tool: 'web_fetch',
+            url: fetchUrl,
+            markdown: extracted?.content || extracted?.markdown || extracted?.text || '',
+            content: extracted?.content || extracted?.markdown || extracted?.text || ''
+        });
+    }
+
+    const originalQuery = normalizeSearchQuery(req.body?.query || req.body?.q || req.body?.url || '');
     const rewrite = buildSearchQueryRewrite(originalQuery);
     const query = rewrite.query;
     if (!query) {
@@ -141,6 +156,7 @@ export default async function handler(req, res) {
     }
 
     try {
+
         const limit = clampInt(req.body?.limit || req.body?.maxResults, 8, 1, 20);
         const mode = normalizeSearchMode(req.body?.mode || req.body?.searchMode || '');
         if (mode === 'rag') {
