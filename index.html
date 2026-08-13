@@ -7688,7 +7688,7 @@ let showRoutingDebugBadge = false;
             const shouldDelayAssistantRender = false;
             if (!isUser) hideThinkingIndicator();
             updateComposerPlaceholder();
-            const rawDisplayText = normalizeUiTokens(String(text ?? ''));
+            const rawDisplayText = normalizeUiTokens(String(text ?? '').replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/^<think>[\s\S]*$/gi, '').replace(/<\/?think>/gi, '').trim());
             const allowEmptyAssistant = !isUser && meta?.allowEmpty === true;
             const hasAttachments = Array.isArray(meta?.attachments) && meta.attachments.length > 0;
             if (isUser && !rawDisplayText.trim() && !hasAttachments) return;
@@ -19227,9 +19227,12 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
                 return; 
             }
             
-            // Hotel/Transport queries
-            const isHotelMatch = cleanText.toLowerCase().match(/\b(hotel|hotels|stay|staying|accommodation|accommodations|lodge|resort|hostel|place to stay|places to stay|where can i stay|where should i stay)\b/i);
-            const isTransportMatch = cleanText.toLowerCase().match(/\b(transport|transportation|bus|train|taxi|uber|ola|auto|rickshaw|metro|subway|getting around|get around|how to reach|how do i get|travel to)\b/i);
+            // Hotel/Transport queries - skip for SQL/data queries
+            const isSqlDataQuery = /\b(?:sql|database|postgres|mysql|sqlite|bigquery|snowflake)\b/i.test(cleanText) ||
+                (/\b(?:find|list|show|select|fetch|get|generate|write)\b.*\b(?:all|top|customers|orders|users|products|rows|items|sales|revenue|table|schema|records)\b/i.test(cleanText) &&
+                 /\b(?:where|over|greater|less|group by|order by|joined|total|sum|count|amount|days|date|status|showing|having)\b/i.test(cleanText));
+            const isHotelMatch = !isSqlDataQuery && cleanText.toLowerCase().match(/\b(hotel|hotels|stay|staying|accommodation|accommodations|lodge|resort|hostel|place to stay|places to stay|where can i stay|where should i stay)\b/i);
+            const isTransportMatch = !isSqlDataQuery && cleanText.toLowerCase().match(/\b(transport|transportation|bus|train|taxi|uber|ola|auto|rickshaw|metro|subway|getting around|get around|how to reach|how do i get|travel to)\b/i);
 
             if (isHotelMatch || isTransportMatch) { 
 
