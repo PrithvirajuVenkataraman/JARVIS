@@ -8022,7 +8022,7 @@ let showRoutingDebugBadge = false;
             return div.innerHTML;
         }
 
-function normalizeUiTokens(text) {
+        function normalizeUiTokens(text) {
             return String(text || '')
                 .replace(/\[Map\]/g, '\u{1F5FA}\uFE0F')
                 .replace(/\[Search\]/g, '\u{1F50E}')
@@ -8039,12 +8039,34 @@ function normalizeUiTokens(text) {
         }
 
         function sanitizeTextForConverseSpeech(text) {
-            return String(text || '')
+            let result = String(text || '')
                 .replace(/```[\s\S]*?```/g, ' code block omitted ')
                 .replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '$1')
                 .replace(/https?:\/\/\S+/gi, '')
                 .replace(/(?:^|\n)\s*Sources:\s*[\s\S]*$/i, '')
-                .replace(/[*_`#>~|]/g, ' ')
+                .replace(/[*_`#>~|]/g, ' ');
+
+            // Convert caret powers: x^2 -> x squared, x^3 -> x cubed, x^N -> x to the power of N
+            result = result.replace(/(\b[a-zA-Z0-9]+|\))\s*\^\s*2\b/g, '$1 squared');
+            result = result.replace(/(\b[a-zA-Z0-9]+|\))\s*\^\s*3\b/g, '$1 cubed');
+            result = result.replace(/(\b[a-zA-Z0-9]+|\))\s*\^\s*([0-9a-zA-Z]+)\b/g, '$1 to the power of $2');
+
+            // Convert Unicode superscripts: x² -> x squared, x³ -> x cubed
+            result = result.replace(/(\b[a-zA-Z0-9]+|\))²/g, '$1 squared');
+            result = result.replace(/(\b[a-zA-Z0-9]+|\))³/g, '$1 cubed');
+            result = result.replace(/²/g, ' squared');
+            result = result.replace(/³/g, ' cubed');
+            result = result.replace(/⁴/g, ' to the power of 4');
+            result = result.replace(/⁵/g, ' to the power of 5');
+            result = result.replace(/⁶/g, ' to the power of 6');
+            result = result.replace(/⁷/g, ' to the power of 7');
+            result = result.replace(/⁸/g, ' to the power of 8');
+            result = result.replace(/⁹/g, ' to the power of 9');
+
+            // Convert decimals: 11.2 -> 11 point 2, 3.14 -> 3 point 14
+            result = result.replace(/(\b\d+)\.(\d+\b)/g, '$1 point $2');
+
+            return result
                 .replace(/\s+/g, ' ')
                 .trim()
                 .slice(0, 900);
