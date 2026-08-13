@@ -10931,14 +10931,6 @@ async function buildTransportMessage(locationInfo) {
     });
 }
 
-async function askTransportSuggestionFor(cityName) {
-    const city = cityName || 'this place';
-    window.pendingTransportSuggestionCity = city;
-    await deliverApiReply('transport_suggestion_prompt', {
-        city
-    });
-}
-
 function isDebateIntent(text) {
     const t = String(text || '').toLowerCase();
     return /\b(debate|argue|argument|counterargument|counterpoint|rebut|prove|defend|criticize|disagree)\b/.test(t);
@@ -19360,7 +19352,6 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
                         
                         setLastResolvedTravelLocation(resolvedHotelLocation);
                         saveToHistory(text, `Hotel search for ${cityName}`);
-                        await askTransportSuggestionFor(cityName);
                         return;
                     }
                     
@@ -19380,10 +19371,11 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
                             });
                             return;
                         }
-                        const transportMsg = await buildTransportMessage(resolved);
+                        const transportMsg = await buildTransportMessage(resolved, rawCommandText || text || cleanText);
                         addChatMessage(transportMsg, false);
                         const transportSummary = await composeApiReply('transport_ready', {
-                            cityName: resolved?.cityName || cityName
+                            cityName: resolved?.cityName || cityName,
+                            userPrompt: rawCommandText || text || cleanText
                         }, {
                             fallbackText: `Here are the transport options for ${resolved?.cityName || cityName}.`
                         });
