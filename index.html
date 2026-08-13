@@ -19751,7 +19751,10 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
                 const match = cleanText.match(pattern);
                 if (match && match[1]) {
                     let location = cleanGenericQueryTarget(match[1].trim());
-                    location = location.replace(/^(?:the\s+)?(?:weather|forecast|temperature|climate)\s+(?:in|at|for|of)\s+/i, '').trim();
+                    location = location
+                        .replace(/\b(?:over|for|in|during|throughout)\s+(?:the\s+)?(?:next|past|following|coming|last)?\s*\d*\s*(?:days?|weeks?|months?|hours?|weekend)\b.*$/gi, '')
+                        .replace(/\b(?:over|for|in)\s+the\s+(?:next|past|following|coming|last)\b.*$/gi, '')
+                        .replace(/^(?:the\s+)?(?:weather|forecast|temperature|climate)\s+(?:in|at|for|of)\s+/i, '').trim();
                     location = location.replace(/\b(?:be|like|looking|feel|feels|seem|seems)\b/gi, ' ').replace(/\s+/g, ' ').trim();
                     location = location.replace(/[?.!,;]$/g, '').trim();
                     
@@ -19788,8 +19791,10 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
                 const match = raw.match(pattern);
                 if (!match?.[1]) continue;
                 let location = match[1]
+                    .replace(/\b(?:over|for|in|during|throughout)\s+(?:the\s+)?(?:next|past|following|coming|last)?\s*\d*\s*(?:days?|weeks?|months?|hours?|weekend)\b.*$/gi, '')
+                    .replace(/\b(?:over|for|in)\s+the\s+(?:next|past|following|coming|last)\b.*$/gi, '')
                     .replace(/\b(?:around|about|in|during|for|on)\s+(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|summer|winter|spring|autumn|fall|monsoon|rainy season|dry season)\b.*$/i, '')
-                    .replace(/\b(?:today|tomorrow|tonight|now|right now|currently|at the moment|this morning|this afternoon|this evening|next week|next month|next year)\b.*$/gi, '')
+                    .replace(/\b(?:today|tomorrow|tonight|now|right now|currently|at the moment|this morning|this afternoon|this evening|next week|next month|next year|this weekend|next weekend)\b.*$/gi, '')
                     .replace(/\b(?:be|like|looking)\b/gi, ' ')
                     .replace(/[?.!,;]$/g, '')
                     .replace(/\s+/g, ' ')
@@ -22422,14 +22427,14 @@ function showThinkingIndicator(message = 'Thinking') {
         row.innerHTML = `
             <div class="w-full max-w-3xl">
                 <div class="flex items-start gap-2">
-                    <div class="chat-bubble-assistant assistant-thinking-bubble assistant-thinking-minimal" role="status" aria-live="polite" aria-label="${escapeHtml(phaseLabel)}">
+                    <div class="chat-bubble-assistant assistant-thinking-bubble assistant-thinking-minimal flex items-center gap-2" role="status" aria-live="polite" aria-label="${escapeHtml(phaseLabel)}">
                         <span class="assistant-thinking-pulse ${visualModeClass}" aria-hidden="true">
                             <span class="assistant-thinking-dot"></span>
                             <span class="assistant-thinking-dot"></span>
                             <span class="assistant-thinking-dot"></span>
                             <span class="assistant-thinking-ring"></span>
                         </span>
-                        <span class="assistant-thinking-text" data-thinking-label hidden>${escapeHtml(phaseLabel)}</span>
+                        <span class="assistant-thinking-text font-semibold uppercase tracking-wider text-xs text-neutral-300 flex items-center gap-1" data-thinking-label>THINKING<span class="inline-block animate-pulse">...</span></span>
                     </div>
                 </div>
             </div>
@@ -22448,8 +22453,8 @@ function showThinkingIndicator(message = 'Thinking') {
         }
         const label = row.querySelector('[data-thinking-label]');
         if (label) {
-            label.textContent = phaseLabel;
-            label.hidden = true;
+            label.innerHTML = `THINKING<span class="inline-block animate-pulse">...</span>`;
+            label.hidden = false;
         }
     }
     maybeAutoScroll(chatContainer);
