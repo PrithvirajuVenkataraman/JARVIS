@@ -81,7 +81,7 @@
                 </svg>
                 <span>System Instructions</span>
             </button>
-            <div class="chat-sidebar-nav-item" style="padding: 8px 12px;">
+            <div class="chat-sidebar-model-block">
                 <div class="chat-sidebar-model-selector">
                     <label for="model-selector" class="chat-sidebar-model-label">Model</label>
                     <select id="model-selector" class="chat-sidebar-model-select" onchange="setSelectedModel(this.value)" aria-label="Select AI model">
@@ -5677,6 +5677,7 @@ let showRoutingDebugBadge = false;
         let assistantProcessingDepth = 0;
         let converseQueuedSubmissionSequence = 0;
         let activeConverseSpeechUtterance = null;
+        let activeConverseSpeechRun = null;
         let activeTypewriterTimeouts = new Set();
         let activeTypewriterRuns = new Set();
         let responseRecoveryTimer = null;
@@ -5732,12 +5733,15 @@ let showRoutingDebugBadge = false;
         }
 
         function isConverseSpeechActive() {
-            return Boolean(activeConverseSpeechUtterance) ||
+            return Boolean(activeConverseSpeechRun) ||
+                Boolean(activeConverseSpeechUtterance) ||
                 Boolean(window.speechSynthesis?.speaking) ||
                 Boolean(window.speechSynthesis?.pending);
         }
 
         function stopConverseSpeech() {
+            if (activeConverseSpeechRun) activeConverseSpeechRun.cancelled = true;
+            activeConverseSpeechRun = null;
             activeConverseSpeechUtterance = null;
             try {
                 window.speechSynthesis?.cancel?.();
@@ -8040,6 +8044,46 @@ function normalizeUiTokens(text) {
                 .slice(0, 900);
         }
 
+        function splitConverseSpeechSegments(text) {
+            const source = String(text || '').replace(/\s+/g, ' ').trim();
+            if (!source) return [];
+            const sentences = source.match(/[^.!?;:]+[.!?;:]?/g) || [source];
+            const segments = [];
+            for (const sentence of sentences) {
+                const clean = sentence.trim();
+                if (!clean) continue;
+                if (clean.length <= 170) {
+                    segments.push(clean);
+                    continue;
+                }
+                const clauses = clean.match(/[^,]+,?/g) || [clean];
+                let buffer = '';
+                for (const clause of clauses) {
+                    const next = [buffer, clause.trim()].filter(Boolean).join(' ');
+                    if (next.length > 170 && buffer) {
+                        segments.push(buffer.trim());
+                        buffer = clause.trim();
+                    } else {
+                        buffer = next;
+                    }
+                }
+                if (buffer.trim()) segments.push(buffer.trim());
+            }
+            return segments.slice(0, 12);
+        }
+
+        function createConverseUtterance(spokenText, index, total) {
+            const utterance = new SpeechSynthesisUtterance(spokenText);
+            const text = String(spokenText || '').trim();
+            const question = /\?$/.test(text);
+            const emphasis = /!$/.test(text) || /\b(important|key|remember|careful|exactly)\b/i.test(text);
+            const finalSegment = index >= total - 1;
+            utterance.rate = question ? 1.03 : (emphasis ? 0.96 : 0.99);
+            utterance.pitch = question ? 1.12 : (emphasis ? 1.06 : (finalSegment ? 0.94 : 1.01));
+            utterance.volume = 1;
+            return utterance;
+        }
+
         const converseStateTracker = globalThis.JarvisConverseState?.createConverseStateTracker
             ? globalThis.JarvisConverseState.createConverseStateTracker('listening')
             : null;
@@ -8116,27 +8160,45 @@ function normalizeUiTokens(text) {
             const spokenText = sanitizeTextForConverseSpeech(text);
             if (!spokenText) return;
             stopConverseSpeech();
-            const utterance = new SpeechSynthesisUtterance(spokenText);
-            utterance.rate = 1;
-            utterance.pitch = 1;
-            utterance.volume = 1;
-            utterance.onend = () => {
-                if (activeConverseSpeechUtterance === utterance) activeConverseSpeechUtterance = null;
-                setConverseUiState('listening', 'speech_finished');
-                logLatencyTrace('speech_end', { source: 'converse' });
+            const segments = splitConverseSpeechSegments(spokenText);
+            if (!segments.length) return;
+            const speechRun = { cancelled: false, index: 0, total: segments.length };
+            activeConverseSpeechRun = speechRun;
+            const finishSpeechRun = reason => {
+                if (activeConverseSpeechRun !== speechRun) return;
+                activeConverseSpeechRun = null;
+                activeConverseSpeechUtterance = null;
+                setConverseUiState('listening', reason || 'speech_finished');
+                logLatencyTrace('speech_end', { source: 'converse', segments: speechRun.total });
                 window.JarvisSpeechInput?.setProcessing?.(false);
             };
-            utterance.onerror = event => {
-                if (activeConverseSpeechUtterance === utterance) activeConverseSpeechUtterance = null;
-                setConverseUiState('recovering', `speech_blocked:${String(event?.error || 'unknown')}`);
-                logLatencyTrace('speech_blocked', { stage: 'synthesis', error: String(event?.error || 'unknown') });
-                window.JarvisSpeechInput?.setProcessing?.(false);
-                showConverseSpeechUnlockPrompt();
+            const speakNextSegment = () => {
+                if (speechRun.cancelled || activeConverseSpeechRun !== speechRun) return;
+                if (speechRun.index >= segments.length) {
+                    finishSpeechRun('speech_finished');
+                    return;
+                }
+                const utterance = createConverseUtterance(segments[speechRun.index], speechRun.index, speechRun.total);
+                speechRun.index += 1;
+                utterance.onend = () => {
+                    if (activeConverseSpeechUtterance === utterance) activeConverseSpeechUtterance = null;
+                    speakNextSegment();
+                };
+                utterance.onerror = event => {
+                    if (activeConverseSpeechUtterance === utterance) activeConverseSpeechUtterance = null;
+                    if (speechRun.cancelled) return;
+                    activeConverseSpeechRun = null;
+                    setConverseUiState('recovering', `speech_blocked:${String(event?.error || 'unknown')}`);
+                    logLatencyTrace('speech_blocked', { stage: 'synthesis', error: String(event?.error || 'unknown') });
+                    window.JarvisSpeechInput?.setProcessing?.(false);
+                    showConverseSpeechUnlockPrompt();
+                };
+                activeConverseSpeechUtterance = utterance;
+                window.speechSynthesis.speak(utterance);
             };
-            activeConverseSpeechUtterance = utterance;
             setConverseUiState('speaking', 'speech_start');
-            logLatencyTrace('speech_start', { source: 'converse', chars: spokenText.length });
-            window.speechSynthesis.speak(utterance);
+            logLatencyTrace('speech_start', { source: 'converse', chars: spokenText.length, segments: segments.length });
+            speakNextSegment();
         }
 
         function rememberMultimodalGrounding(payload = {}) {
@@ -9275,11 +9337,14 @@ async function sendTextInput(submission = {}) {
             const text = input.value.trim();
             const pendingAttachments = window.JarvisAttachments?.getPendingAttachments?.() || [];
             const inputSource = String(submission?.source || input.dataset.inputSource || 'text').trim() || 'text';
-            if (activeRequestController || isAssistantProcessing()) {
-                if (inputSource !== 'converse' || submission?.interrupt !== true || (!text && !pendingAttachments.length)) {
+            if (activeRequestController || isAssistantProcessing() || isConverseSpeechActive()) {
+                const canInterruptFromConverse = inputSource === 'converse' &&
+                    (submission?.interrupt === true || isConverseSpeechActive());
+                if (!canInterruptFromConverse || (!text && !pendingAttachments.length)) {
                     stopActiveGeneration();
                     return;
                 }
+                stopActiveGeneration('converse_interruption');
                 const queuedSubmissionId = ++converseQueuedSubmissionSequence;
                 await waitForAssistantIdle();
                 if (queuedSubmissionId !== converseQueuedSubmissionSequence) return;
