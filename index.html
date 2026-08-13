@@ -81,6 +81,18 @@
                 </svg>
                 <span>System Instructions</span>
             </button>
+            <div class="chat-sidebar-nav-item" style="padding: 8px 12px;">
+                <div class="chat-sidebar-model-selector">
+                    <label for="model-selector" class="chat-sidebar-model-label">Model</label>
+                    <select id="model-selector" class="chat-sidebar-model-select" onchange="setSelectedModel(this.value)" aria-label="Select AI model">
+                        <option value="auto">Auto (Recommended)</option>
+                        <option value="llama-3.1-8b-instant">Llama 3.1 8B Instant (Fast)</option>
+                        <option value="llama-3.3-70b-versatile">Llama 3.3 70B Versatile (Balanced)</option>
+                        <option value="openai/gpt-oss-20b">GPT-OSS 20B (Open)</option>
+                        <option value="openai/gpt-oss-120b">GPT-OSS 120B (High Quality)</option>
+                    </select>
+                </div>
+            </div>
             <div class="chat-sidebar-search-field">
                 <input id="chat-sidebar-search-input" type="search" placeholder="Type to search chats" aria-label="Search chats" oninput="renderChatSidebarList()">
             </div>
@@ -3745,7 +3757,7 @@ function normalizeEntityText(value) {
 function isAcknowledgementUtterance(text) {
     const t = String(text || '').toLowerCase().replace(/[.!?]+$/g, '').trim();
     if (!t) return false;
-    return /^(yes|yeah|yep|yup|no|nope|nah|ok|okay|sure|alright|fine|thanks|thank you|got it|gotcha|cool|hi|hello|hey|hmm|uh huh|i see|oh i see|ah i see|oh okay|oh ok|makes sense|understood|fair enough|right|ah okay|nice|great|perfect|awesome)$/i.test(t);
+    return /^(yes|yeah|yep|yup|no|nope|nah|ok|okay|sure|alright|fine|thanks|thank you|got it|gotcha|cool|hmm|uh huh|i see|oh i see|ah i see|oh okay|oh ok|makes sense|understood|fair enough|right|ah okay|nice|great|perfect|awesome)$/i.test(t);
 }
 
 function isGenericNonEntity(text) {
@@ -4686,15 +4698,17 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
                 : `${normalizedUserMessage}${relevantSavedMemoryContext}\n\nResponse length requested: ${responseMode}. ${responseHint}\nResponse format preference: ${formatMode}. ${formatHint}\nPrompt-requested explanation style: ${activeLearningMode}. ${learningHint}${languageReplyHint}\n${conciseFactHint}\n${directExplainerHint}\n${fastExplainerHint}${learnedStyleHint}${learnedPreferenceHint ? `\n${learnedPreferenceHint}` : ''}\n\nStyle requirements: Be specific, avoid repetition, and stay natural. Do not invent facts, dates, numbers, quotes, or sources.`); 
 
          
-        const requestPayload = { 
-                message: effectiveMessage, 
+        const selectedModel = getSelectedModel();
+            const requestPayload = {
+                message: effectiveMessage,
                 context: engineContext,
                 preferences: {
                     userName,
                     responseLength: responseMode,
                     responseFormat: formatMode,
                     responseStyle,
-                    customSystemPrompt
+                    customSystemPrompt,
+                    selectedModel: selectedModel !== 'auto' ? selectedModel : undefined
                 },
                 intent: requestOptions?.intent || (requestOptions?.fastExplainer === true ? 'fast_explainer' : 'chat'),
                 grounding: requestOptions?.grounding || null,
@@ -20551,9 +20565,6 @@ function isCasualConversationQuery(text) {
 
 function buildCasualConversationReply(text) {
     const t = normalizeCasualConversationText(text);
-    if (/^do you understand\s+[a-z][a-z\s-]{1,40}\??$/i.test(String(text || '').trim())) {
-        return 'Yes, I can understand Tamil in text. Voice transcription depends on the browser, but you can type or speak and I will do my best.';
-    }
     if (/^(?:thanks|thank you|thank u|appreciate it)\b/.test(t)) {
         return 'You are welcome.';
     }
@@ -20564,10 +20575,6 @@ function buildCasualConversationReply(text) {
         return 'Yes, I am here.';
     }
     return buildWakeGreeting();
-}
-
-function isLanguageCapabilityQuery(text) {
-    return /^do you understand\s+[a-z][a-z\s-]{1,40}\??$/i.test(String(text || '').trim());
 }
 
 function isSimpleStableQuestion(text) {
@@ -20641,10 +20648,8 @@ function decideFrontendRoute(text, context = {}) {
 async function handleFastSimpleQuery(text, options = {}) {
     const userText = String(text || '').trim();
     if (!userText) return { intent: 'fast_simple' };
-    if (isCasualConversationQuery(userText) || isLanguageCapabilityQuery(userText)) {
-        const reply = isLanguageCapabilityQuery(userText)
-            ? 'Yes, I can understand Tamil in text. Voice transcription depends on the browser, but you can type or speak and I will do my best.'
-            : buildCasualConversationReply(userText);
+    if (isCasualConversationQuery(userText)) {
+        const reply = buildCasualConversationReply(userText);
         const messageId = addModelAssistantMessage(reply, 'Model answer', {
             turnId: options?.turnId,
             sourceType: 'model',
@@ -22026,6 +22031,7 @@ function toggleChatSidebar() {
         return;
     }
     renderChatSidebarList();
+    initModelSelector();
     panel?.classList.add('is-open');
     panel?.setAttribute('aria-hidden', 'false');
     backdrop?.classList.remove('hidden');
@@ -22058,6 +22064,33 @@ function openSidebarQuickAction(action) {
     showHelpModal();
     if (action === 'system') {
         setTimeout(() => document.getElementById('custom-system-prompt-input')?.focus(), 0);
+    }
+}
+
+const MODEL_STORAGE_KEY = 'jarvis_selected_model';
+
+function getSelectedModel() {
+    try {
+        const stored = localStorage.getItem(MODEL_STORAGE_KEY);
+        return stored || 'auto';
+    } catch {
+        return 'auto';
+    }
+}
+
+function setSelectedModel(model) {
+    try {
+        localStorage.setItem(MODEL_STORAGE_KEY, model);
+    } catch (e) {}
+    // Update the selector UI
+    const selector = document.getElementById('model-selector');
+    if (selector) selector.value = model;
+}
+
+function initModelSelector() {
+    const selector = document.getElementById('model-selector');
+    if (selector) {
+        selector.value = getSelectedModel();
     }
 }
 
