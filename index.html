@@ -86,10 +86,14 @@
                     <label for="model-selector" class="chat-sidebar-model-label">Model</label>
                     <select id="model-selector" class="chat-sidebar-model-select" onchange="setSelectedModel(this.value)" aria-label="Select AI model">
                         <option value="auto">Auto (Recommended)</option>
-                        <option value="llama-3.1-8b-instant">Llama 3.1 8B Instant (Fast)</option>
-                        <option value="llama-3.3-70b-versatile">Llama 3.3 70B Versatile (Balanced)</option>
-                        <option value="openai/gpt-oss-20b">GPT-OSS 20B (Open)</option>
-                        <option value="openai/gpt-oss-120b">GPT-OSS 120B (High Quality)</option>
+                        <option value="openai/gpt-oss-120b">GPT OSS 120B (Groq)</option>
+                        <option value="openai/gpt-oss-20b">GPT OSS 20B (Groq)</option>
+                        <option value="llama-3.3-70b-versatile">Llama 3.3 70B (Groq)</option>
+                        <option value="llama-3.1-8b-instant">Llama 3.1 8B Instant (Groq)</option>
+                        <option value="deepseek-r1-distill-llama-70b">DeepSeek R1 Distill 70B (Groq)</option>
+                        <option value="qwen-2.5-coder-32b">Qwen 2.5 Coder 32B (Groq)</option>
+                        <option value="gpt-4o">GPT-4o (Official OpenAI)</option>
+                        <option value="gpt-4o-mini">GPT-4o Mini (Official OpenAI)</option>
                     </select>
                 </div>
             </div>
@@ -21752,6 +21756,10 @@ function scheduleChatTitleGeneration(session) {
         latest.updatedAt = new Date().toISOString();
         saveChatSessions();
         renderChatSidebarList();
+        if (typeof activeChatSessionId !== 'undefined' && activeChatSessionId === sessionId) {
+            const headerTitle = document.getElementById('chat-header-title');
+            if (headerTitle) headerTitle.textContent = title;
+        }
     }, 40);
 }
 
