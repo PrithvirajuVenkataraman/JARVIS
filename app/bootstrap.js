@@ -15,6 +15,7 @@ import * as JarvisContextCopilotUi from './context-copilot-ui.js';
 import * as JarvisMemoryQuality from './memory-quality.js';
 import * as JarvisAttachments from './attachments.js';
 import * as JarvisAgentWorkflows from './agent-workflows.js';
+import JarvisDataVerification from './data-tracking-verification.js';
 
 const engine = createConversationEngine({
     maxTurns: 12,
@@ -38,6 +39,7 @@ globalThis.JarvisContextCopilotUi = Object.freeze({ ...JarvisContextCopilotUi })
 globalThis.JarvisMemoryQuality = Object.freeze({ ...JarvisMemoryQuality });
 globalThis.JarvisAttachments = Object.freeze({ ...JarvisAttachments });
 globalThis.JarvisAgentWorkflows = Object.freeze({ ...JarvisAgentWorkflows });
+globalThis.JarvisDataVerification = Object.freeze({ ...JarvisDataVerification });
 
 function initializeSpeechInput() {
     if (globalThis.__jarvisSpeechInputInstalled) return;
