@@ -1,4 +1,4 @@
-# Unify Assistant - AI Models & Capabilities Architecture
+# JARVIS - AI Models & Capabilities Architecture
 
 This document provides a comprehensive specification of all AI models integrated into the **Unify Assistant** platform, including provider endpoints, vision processing pipelines, structured output schemas, and multilingual support.
 
