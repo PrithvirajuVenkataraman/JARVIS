@@ -13,38 +13,59 @@ const FETCH_TIMEOUT_MS = 4000;
  * @returns {{ slug: string, role: string, jurisdiction: string } | null}
  */
 export function resolveVerificationTarget(query) {
-    const q = String(query || '').toLowerCase().trim();
+    const q = String(query || '').trim();
     if (!q) return null;
 
-    if (/\b(?:cm|chief minister)\b/.test(q) && /\btamil\s*nadu\b/.test(q)) {
-        return { slug: 'Tamil_Nadu', role: 'Chief Minister', jurisdiction: 'Tamil Nadu' };
-    }
-    if (/\b(?:cm|chief minister)\b/.test(q) && /\bkarnataka\b/.test(q)) {
-        return { slug: 'Karnataka', role: 'Chief Minister', jurisdiction: 'Karnataka' };
-    }
-    if (/\b(?:cm|chief minister)\b/.test(q) && /\bmaharashtra\b/.test(q)) {
-        return { slug: 'Maharashtra', role: 'Chief Minister', jurisdiction: 'Maharashtra' };
-    }
-    if (/\b(?:cm|chief minister)\b/.test(q) && /\bdelhi\b/.test(q)) {
-        return { slug: 'Delhi', role: 'Chief Minister', jurisdiction: 'Delhi' };
-    }
-    if (/\b(?:pm|prime minister)\b/.test(q) && /\bindia\b/.test(q)) {
-        return { slug: 'Prime_Minister_of_India', role: 'Prime Minister', jurisdiction: 'India' };
-    }
-    if (/\b(?:president)\b/.test(q) && /\b(?:usa|united states|america)\b/.test(q)) {
-        return { slug: 'President_of_the_United_States', role: 'President', jurisdiction: 'United States' };
+    // Pattern 1: Role followed by jurisdiction ("role of region")
+    const matchAfter = q.match(/\b(?:who is|what is|tell me|who's)?\s*(?:the\s+)?(current\s+)?(chief minister|prime minister|president|governor|mayor|chancellor|premier|ceo)\s+(?:of|for|in)\s+([a-zA-Z\s]+?)(?:\?|\.|\!|$)/i);
+    if (matchAfter && matchAfter[2] && matchAfter[3]) {
+        const role = matchAfter[2].trim().replace(/\b\w/g, c => c.toUpperCase());
+        const rawPlace = matchAfter[3].trim().replace(/\b(?:now|today|currently)\b/gi, '').trim();
+        if (rawPlace.length >= 2) {
+            const jurisdiction = rawPlace.replace(/\b\w/g, c => c.toUpperCase());
+            const slug = formatWikiSlug(jurisdiction, role);
+            return { slug, role, jurisdiction };
+        }
     }
 
-    // Generic CM extraction
-    const cmMatch = q.match(/\b(?:cm|chief minister)\s+(?:of\s+)?([a-z\s]+?)(?:\?|\.|$)/i);
-    if (cmMatch && cmMatch[1]) {
-        const place = cmMatch[1].trim().replace(/\s+/g, '_');
-        if (place.length >= 3) {
-            return { slug: place, role: 'Chief Minister', jurisdiction: cmMatch[1].trim() };
+    // Pattern 2: Short role abbreviations ("cm/pm of region")
+    const matchAbbr = q.match(/\b(?:cm|pm)\s+(?:of|for|in)\s+([a-zA-Z\s]+?)(?:\?|\.|\!|$)/i);
+    if (matchAbbr && matchAbbr[1]) {
+        const isPm = /\bpm\b/i.test(q);
+        const role = isPm ? 'Prime Minister' : 'Chief Minister';
+        const rawPlace = matchAbbr[1].trim().replace(/\b(?:now|today|currently)\b/gi, '').trim();
+        if (rawPlace.length >= 2) {
+            const jurisdiction = rawPlace.replace(/\b\w/g, c => c.toUpperCase());
+            const slug = formatWikiSlug(jurisdiction, role);
+            return { slug, role, jurisdiction };
+        }
+    }
+
+    // Pattern 3: Jurisdiction followed by role ("region cm/pm/leader")
+    const matchBefore = q.match(/\b(?:who is|what is|tell me|who's)?\s*(?:the\s+)?([a-zA-Z\s]+?)\s+(cm|pm|chief minister|prime minister|president|governor|mayor)\b/i);
+    if (matchBefore && matchBefore[1] && matchBefore[2]) {
+        const rawRole = matchBefore[2].trim().toLowerCase();
+        const role = rawRole === 'cm' ? 'Chief Minister' : (rawRole === 'pm' ? 'Prime Minister' : rawRole.replace(/\b\w/g, c => c.toUpperCase()));
+        const rawPlace = matchBefore[1].replace(/\b(?:current|the|who is|what is|who's|tell me)\b/gi, '').trim();
+        if (rawPlace.length >= 2) {
+            const jurisdiction = rawPlace.replace(/\b\w/g, c => c.toUpperCase());
+            const slug = formatWikiSlug(jurisdiction, role);
+            return { slug, role, jurisdiction };
         }
     }
 
     return null;
+}
+
+function formatWikiSlug(jurisdiction, role) {
+    const p = String(jurisdiction || '').trim().replace(/\s+/g, '_');
+    if (role === 'Prime Minister') {
+        return `Prime_Minister_of_${p}`;
+    }
+    if (role === 'President') {
+        return `President_of_${p}`;
+    }
+    return p;
 }
 
 /**
@@ -62,11 +83,11 @@ export function extractIncumbentFromSummary(extract, role = '') {
     if (pA && pA[1]) return cleanEntityName(pA[1]);
 
     // Predicate incumbent pattern: match role declaration followed by entity name
-    const pB = text.match(/(?:(?:is the|serving as the|the) current (?:and \d+[a-z]{2} )?(?:Chief Minister|Prime Minister|President)(?: of [A-Za-z\s]+?)?\s+(?:is|was)|incumbent is)\s*[:,-]?\s*([A-Z][a-zA-Z.\s]+?)(?=\s+(?:who|since|having|\(|,|\.|\n|$))/i);
+    const pB = text.match(/(?:(?:is the|serving as the|the) (?:current|incumbent) (?:and \d+[a-z]{2} )?(?:Chief Minister|Prime Minister|President|Governor)(?:(?:\s+of|\s+for)\s+(?:the\s+)?[A-Za-z\s]+?)?\s+(?:is|was)|(?:the\s+)?incumbent is)\s*[:,-]?\s*([A-Z][a-zA-Z.\s]+?)(?=\s*(?:,|\.|\(|\n|$|\bwho\b|\bsince\b|\bhaving\b|\bassumed\b|\bin office\b))/i);
     if (pB && pB[1]) return cleanEntityName(pB[1]);
 
     // Key-value header pattern: match title followed by colon and entity
-    const pC = text.match(/(?:Chief Minister|Prime Minister|President)\s*[:]\s*([A-Z][a-zA-Z.\s]+?)(?=\s+(?:since|\(|,|\.|\n|$))/i);
+    const pC = text.match(/(?:Chief Minister|Prime Minister|President|Governor)\s*[:]\s*([A-Z][a-zA-Z.\s]+?)(?=\s*(?:,|\.|\(|\n|$|\bsince\b|\bin office\b))/i);
     if (pC && pC[1]) return cleanEntityName(pC[1]);
 
     return null;
