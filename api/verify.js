@@ -1,103 +1,96 @@
 export const config = { maxDuration: 30 };
 
 import { applyApiSecurity } from './_lib/security.js';
-import { extractHostname, isTrustedDomain } from './_lib/entity-verifier.js';
 
-const WIKIPEDIA_API_BASE = 'https://en.wikipedia.org/api/rest_v1/page/summary';
+const WIKIPEDIA_SEARCH_API = 'https://en.wikipedia.org/w/api.php';
+const WIKIPEDIA_SUMMARY_API = 'https://en.wikipedia.org/api/rest_v1/page/summary';
 const DEFAULT_USER_AGENT = 'AntigravityParser/1.0 (+https://github.com; zero-dependency-verifier)';
 const FETCH_TIMEOUT_MS = 4000;
 
 /**
- * Extracts target topic/article slug from user query.
- * @param {string} query 
- * @returns {{ slug: string, role: string, jurisdiction: string } | null}
+ * Dynamically fetches live ground truth summary for any query by routing to Wikipedia's search and summary APIs.
+ * @param {string} query
+ * @param {AbortSignal} [signal]
+ * @returns {Promise<{ title: string, extract: string, sourceUrl: string } | null>}
  */
-export function resolveVerificationTarget(query) {
-    const q = String(query || '').trim();
-    if (!q) return null;
+export async function fetchGroundTruth(query, signal) {
+    const rawQuery = String(query || '').trim();
+    if (!rawQuery) return null;
 
-    // Pattern 1: Role followed by jurisdiction ("role of region")
-    const matchAfter = q.match(/\b(?:who is|what is|tell me|who's)?\s*(?:the\s+)?(current\s+)?(chief minister|prime minister|president|governor|mayor|chancellor|premier|ceo)\s+(?:of|for|in)\s+([a-zA-Z\s]+?)(?:\?|\.|\!|$)/i);
-    if (matchAfter && matchAfter[2] && matchAfter[3]) {
-        const role = matchAfter[2].trim().replace(/\b\w/g, c => c.toUpperCase());
-        const rawPlace = matchAfter[3].trim().replace(/\b(?:now|today|currently)\b/gi, '').trim();
-        if (rawPlace.length >= 2) {
-            const jurisdiction = rawPlace.replace(/\b\w/g, c => c.toUpperCase());
-            const slug = formatWikiSlug(jurisdiction, role);
-            return { slug, role, jurisdiction };
+    const cleanQuery = rawQuery.replace(/^[?!.,\s]+|[?!.,\s]+$/g, '').trim();
+    if (!cleanQuery) return null;
+
+    // 1. Route to search API to discover canonical topic
+    const searchParams = new URLSearchParams({
+        action: 'query',
+        list: 'search',
+        srsearch: cleanQuery,
+        utf8: '1',
+        format: 'json',
+        srlimit: '1'
+    });
+
+    const searchRes = await fetch(`${WIKIPEDIA_SEARCH_API}?${searchParams.toString()}`, {
+        signal,
+        headers: {
+            'User-Agent': DEFAULT_USER_AGENT,
+            'Accept': 'application/json'
         }
-    }
+    });
 
-    // Pattern 2: Short role abbreviations ("cm/pm of region")
-    const matchAbbr = q.match(/\b(?:cm|pm)\s+(?:of|for|in)\s+([a-zA-Z\s]+?)(?:\?|\.|\!|$)/i);
-    if (matchAbbr && matchAbbr[1]) {
-        const isPm = /\bpm\b/i.test(q);
-        const role = isPm ? 'Prime Minister' : 'Chief Minister';
-        const rawPlace = matchAbbr[1].trim().replace(/\b(?:now|today|currently)\b/gi, '').trim();
-        if (rawPlace.length >= 2) {
-            const jurisdiction = rawPlace.replace(/\b\w/g, c => c.toUpperCase());
-            const slug = formatWikiSlug(jurisdiction, role);
-            return { slug, role, jurisdiction };
+    if (!searchRes.ok) return null;
+
+    const searchData = await searchRes.json();
+    const topResult = searchData.query?.search?.[0];
+    if (!topResult?.title) return null;
+
+    // 2. Route to summary REST endpoint for lightweight ground truth text
+    const summaryRes = await fetch(`${WIKIPEDIA_SUMMARY_API}/${encodeURIComponent(topResult.title.replace(/ /g, '_'))}`, {
+        signal,
+        headers: {
+            'User-Agent': DEFAULT_USER_AGENT,
+            'Accept': 'application/json'
         }
-    }
+    });
 
-    // Pattern 3: Jurisdiction followed by role ("region cm/pm/leader")
-    const matchBefore = q.match(/\b(?:who is|what is|tell me|who's)?\s*(?:the\s+)?([a-zA-Z\s]+?)\s+(cm|pm|chief minister|prime minister|president|governor|mayor)\b/i);
-    if (matchBefore && matchBefore[1] && matchBefore[2]) {
-        const rawRole = matchBefore[2].trim().toLowerCase();
-        const role = rawRole === 'cm' ? 'Chief Minister' : (rawRole === 'pm' ? 'Prime Minister' : rawRole.replace(/\b\w/g, c => c.toUpperCase()));
-        const rawPlace = matchBefore[1].replace(/\b(?:current|the|who is|what is|who's|tell me)\b/gi, '').trim();
-        if (rawPlace.length >= 2) {
-            const jurisdiction = rawPlace.replace(/\b\w/g, c => c.toUpperCase());
-            const slug = formatWikiSlug(jurisdiction, role);
-            return { slug, role, jurisdiction };
-        }
-    }
+    if (!summaryRes.ok) return null;
 
-    return null;
-}
-
-function formatWikiSlug(jurisdiction, role) {
-    const p = String(jurisdiction || '').trim().replace(/\s+/g, '_');
-    if (role === 'Prime Minister') {
-        return `Prime_Minister_of_${p}`;
-    }
-    if (role === 'President') {
-        return `President_of_${p}`;
-    }
-    return p;
+    const summaryData = await summaryRes.json();
+    return {
+        title: summaryData.title || topResult.title,
+        extract: String(summaryData.extract || summaryData.description || '').trim(),
+        sourceUrl: summaryData.content_urls?.desktop?.page || `https://en.wikipedia.org/wiki/${encodeURIComponent(topResult.title.replace(/ /g, '_'))}`
+    };
 }
 
 /**
- * Extracts the incumbent officeholder name from summary text using compiled regular expressions.
- * @param {string} extract 
- * @param {string} role 
- * @returns {string | null}
+ * Assesses alignment between live ground-truth reference and model response.
+ * @param {string} groundTruth
+ * @param {string} llmResponse
+ * @returns {{ isAccurate: boolean, extractedAnchor: string | null }}
  */
-export function extractIncumbentFromSummary(extract, role = '') {
-    const text = String(extract || '').trim();
-    if (!text) return null;
+export function assessAlignment(groundTruth, llmResponse) {
+    const truth = String(groundTruth || '').trim();
+    const resp = String(llmResponse || '').toLowerCase().trim();
+    if (!truth || !resp) return { isAccurate: true, extractedAnchor: null };
 
-    // Biographical lead pattern: match leading subject before title declaration
-    const pA = text.match(/^([A-Z][a-zA-Z.\s]+?)\s+is (?:an? [a-zA-Z\s]+?who (?:is|serves as) )?the (?:current )?(?:and \d+[a-z]{2} )?(?:Chief Minister|Prime Minister|President|Governor|Mayor|Chancellor|Premier)/i);
-    if (pA && pA[1]) return cleanEntityName(pA[1]);
+    // Extract key proper nouns / names from ground truth lead sentence
+    const leadSentence = truth.split(/[.\n]/)[0] || '';
+    const nameMatch = leadSentence.match(/\b([A-Z][a-zA-Z.\s]{2,30})\b/);
+    const candidateAnchor = nameMatch ? nameMatch[1].trim() : null;
 
-    // Predicate incumbent pattern: match role declaration followed by entity name
-    const pB = text.match(/(?:(?:is the|serving as the|the) (?:current|incumbent) (?:and \d+[a-z]{2} )?(?:Chief Minister|Prime Minister|President|Governor|Mayor|Chancellor|Premier)(?:(?:\s+of|\s+for)\s+(?:the\s+)?[A-Za-z\s]+?)?\s+(?:is|was)|(?:the\s+)?incumbent is)\s*[:,-]?\s*([A-Z][a-zA-Z.\s]+?)(?=\s*(?:,|\.|\(|\n|$|\bwho\b|\bsince\b|\bhaving\b|\bassumed\b|\bin office\b))/i);
-    if (pB && pB[1]) return cleanEntityName(pB[1]);
+    let isAccurate = true;
+    if (candidateAnchor) {
+        const anchorLower = candidateAnchor.toLowerCase();
+        const parts = anchorLower.split(' ').filter(p => p.length >= 3);
+        const matchesAnyPart = parts.some(p => resp.includes(p));
+        isAccurate = resp.includes(anchorLower) || matchesAnyPart;
+    }
 
-    // Key-value header pattern: match title followed by colon and entity
-    const pC = text.match(/(?:Chief Minister|Prime Minister|President|Governor|Mayor|Chancellor|Premier)\s*[:]\s*([A-Z][a-zA-Z.\s]+?)(?=\s*(?:,|\.|\(|\n|$|\bsince\b|\bin office\b))/i);
-    if (pC && pC[1]) return cleanEntityName(pC[1]);
-
-    return null;
-}
-
-function cleanEntityName(raw) {
-    return String(raw || '')
-        .replace(/^(?:the|honourable|thiru|mr\.|dr\.)\s+/i, '')
-        .replace(/[.,;]+$/, '')
-        .trim();
+    return {
+        isAccurate,
+        extractedAnchor: candidateAnchor
+    };
 }
 
 /**
@@ -126,9 +119,13 @@ export default async function handler(req, res) {
     }
 
     try {
-        const target = resolveVerificationTarget(query);
-        if (!target) {
-            // Not a recognized time-sensitive entity query — return verified neutral pass
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
+        const groundTruthData = await fetchGroundTruth(query, controller.signal);
+        clearTimeout(timer);
+
+        if (!groundTruthData) {
             return res.status(200).json({
                 success: true,
                 verified: true,
@@ -139,56 +136,19 @@ export default async function handler(req, res) {
             });
         }
 
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-
-        const wikiUrl = `${WIKIPEDIA_API_BASE}/${encodeURIComponent(target.slug)}`;
-        const response = await fetch(wikiUrl, {
-            signal: controller.signal,
-            headers: {
-                'User-Agent': DEFAULT_USER_AGENT,
-                'Accept': 'application/json'
-            }
-        });
-        clearTimeout(timer);
-
-        if (!response.ok) {
-            return res.status(200).json({
-                success: true,
-                verified: true,
-                extractedAnchor: null,
-                sourceUrl: `https://en.wikipedia.org/wiki/${target.slug}`,
-                latencyMs: Math.round(performance.now() - start),
-                timestamp: Date.now()
-            });
-        }
-
-        const data = await response.json();
-        const extract = String(data.extract || data.description || '');
-        const actualIncumbent = extractIncumbentFromSummary(extract, target.role);
-
-        let isAccurate = true;
-        if (actualIncumbent) {
-            const respLower = llmResponse.toLowerCase();
-            const incumbentLower = actualIncumbent.toLowerCase();
-            // Check if primary last name or full name is mentioned
-            const nameParts = incumbentLower.split(' ').filter(p => p.length >= 3);
-            isAccurate = respLower.includes(incumbentLower) || nameParts.some(p => respLower.includes(p));
-        }
+        const alignment = assessAlignment(groundTruthData.extract, llmResponse);
 
         return res.status(200).json({
             success: true,
-            verified: isAccurate,
-            extractedAnchor: actualIncumbent,
-            role: target.role,
-            jurisdiction: target.jurisdiction,
-            sourceUrl: data.content_urls?.desktop?.page || `https://en.wikipedia.org/wiki/${target.slug}`,
+            verified: alignment.isAccurate,
+            extractedAnchor: alignment.extractedAnchor,
+            topic: groundTruthData.title,
+            sourceUrl: groundTruthData.sourceUrl,
             latencyMs: Math.round(performance.now() - start),
             timestamp: Date.now()
         });
 
     } catch (error) {
-        // Fail-safe: verification failures never crash the app pipeline
         return res.status(200).json({
             success: true,
             verified: true,
