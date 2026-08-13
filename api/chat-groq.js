@@ -9,31 +9,78 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
     const INTERNAL_FETCH_TIMEOUT_MS = 8_000;
     const FETCH_RETRIES = 0;
     const CHAT_ROUTER_MODE = String(process.env.CHAT_ROUTER_MODE || 'strict_single_pass').trim().toLowerCase();
-    const USER_SELECTABLE_GROQ_MODELS = new Set([
+    const USER_SELECTABLE_MODELS = new Set([
+        'openai/gpt-oss-120b',
+        'openai/gpt-oss-20b',
+        'gpt-4o',
+        'gpt-4o-mini',
+        'o3-mini',
+        'gpt-4-turbo',
         'llama-3.1-8b-instant',
         'llama-3.3-70b-versatile',
-        'openai/gpt-oss-20b',
-        'openai/gpt-oss-120b'
+        'deepseek-r1-distill-llama-70b',
+        'qwen-2.5-coder-32b'
     ]);
+    const USER_SELECTABLE_GROQ_MODELS = USER_SELECTABLE_MODELS;
 
-    function getPreferredGroqCandidates(configuredModel = '', { preferSpeed = false } = {}) {
+    function getPreferredOpenAICandidates(configuredModel = '', userSelectedModel = null) {
         const configured = String(configuredModel || '').trim();
-        // Prefer fast models first to cut tail latency; larger models remain as fallbacks.
+        const userSelected = String(userSelectedModel || '').trim();
+        let mappedOpenAI = '';
+        if (['gpt-4o', 'gpt-4o-mini', 'o3-mini', 'gpt-4-turbo'].includes(userSelected)) {
+            mappedOpenAI = userSelected;
+        } else if (['openai/gpt-oss-120b', 'llama-3.3-70b-versatile', 'deepseek-r1-distill-llama-70b', 'qwen-2.5-coder-32b'].includes(userSelected)) {
+            mappedOpenAI = 'gpt-4o';
+        } else if (['openai/gpt-oss-20b', 'llama-3.1-8b-instant'].includes(userSelected)) {
+            mappedOpenAI = 'gpt-4o-mini';
+        }
+        return [...new Set([mappedOpenAI, configured, 'gpt-4o', 'gpt-4o-mini', 'o3-mini'].filter(Boolean))];
+    }
+
+    function getPreferredGroqCandidates(configuredModel = '', { preferSpeed = false, userSelectedModel = null } = {}) {
+        const configured = String(configuredModel || '').trim();
+        const userSelected = String(userSelectedModel || '').trim();
+        let mappedGroq = '';
+        if (['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'llama-3.1-8b-instant', 'llama-3.3-70b-versatile', 'deepseek-r1-distill-llama-70b', 'qwen-2.5-coder-32b'].includes(userSelected)) {
+            mappedGroq = userSelected;
+        } else if (userSelected === 'gpt-4o' || userSelected === 'o3-mini' || userSelected === 'gpt-4-turbo') {
+            mappedGroq = 'openai/gpt-oss-120b';
+        } else if (userSelected === 'gpt-4o-mini') {
+            mappedGroq = 'openai/gpt-oss-20b';
+        }
         const speedFirst = [
+            mappedGroq,
             configured,
-            'llama-3.1-8b-instant',
             'openai/gpt-oss-20b',
+            'llama-3.1-8b-instant',
+            'qwen-2.5-coder-32b',
             'llama-3.3-70b-versatile',
-            'openai/gpt-oss-120b'
+            'openai/gpt-oss-120b',
+            'deepseek-r1-distill-llama-70b'
         ];
         const qualityFirst = [
+            mappedGroq,
             configured,
-            'openai/gpt-oss-20b',
+            'openai/gpt-oss-120b',
             'llama-3.3-70b-versatile',
-            'llama-3.1-8b-instant',
-            'openai/gpt-oss-120b'
+            'deepseek-r1-distill-llama-70b',
+            'qwen-2.5-coder-32b',
+            'openai/gpt-oss-20b',
+            'llama-3.1-8b-instant'
         ];
         return [...new Set((preferSpeed ? speedFirst : qualityFirst).filter(Boolean))];
+    }
+
+    function getPreferredGeminiCandidates(configuredModel = '', userSelectedModel = null) {
+        const configured = String(configuredModel || '').trim();
+        const userSelected = String(userSelectedModel || '').trim();
+        let mappedGemini = '';
+        if (['openai/gpt-oss-120b', 'llama-3.3-70b-versatile', 'deepseek-r1-distill-llama-70b', 'qwen-2.5-coder-32b', 'gpt-4o', 'o3-mini', 'gpt-4-turbo'].includes(userSelected)) {
+            mappedGemini = 'gemini-2.5-pro';
+        } else if (['openai/gpt-oss-20b', 'llama-3.1-8b-instant', 'gpt-4o-mini'].includes(userSelected)) {
+            mappedGemini = 'gemini-2.5-flash-lite';
+        }
+        return [...new Set([mappedGemini, configured, 'gemini-3.5-flash', 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'].filter(Boolean))];
     }
 
     function isEnvFlagEnabled(name, defaultValue = false) {
@@ -1022,21 +1069,15 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
     async function runModelWithFallback(finalPrompt, lengthPolicy = {}, userSelectedModel = null) {
         const temp = Number.isFinite(Number(lengthPolicy?.temperature)) ? Number(lengthPolicy.temperature) : 0.7;
         const maxTokens = clampInt(lengthPolicy?.maxTokens, 8000, 256, 16000);
-        let groqFailureDetail = '';
-        let groqTriedModels = [];
-        const groqApiKey = process.env.GROQ_API_KEY || process.env.GROQ_KEY;
+        const userSelected = String(userSelectedModel || '').trim();
+        const isOpenAiPreferred = ['gpt-4o', 'gpt-4o-mini', 'o3-mini', 'gpt-4-turbo'].includes(userSelected);
 
-        if (groqApiKey) {
+        const tryRunGroq = async () => {
+            const groqApiKey = process.env.GROQ_API_KEY || process.env.GROQ_KEY;
+            if (!groqApiKey) return null;
             const groqConfiguredModel = userSelectedModel || String(process.env.GROQ_MODEL || '').trim();
-            const groqCandidates = getPreferredGroqCandidates(groqConfiguredModel, { preferSpeed: false });
-
-            let groqText = '';
-            let modelUsed = null;
-            let lastErrorDetail = '';
-            const triedModels = [];
-
+            const groqCandidates = getPreferredGroqCandidates(groqConfiguredModel, { preferSpeed: false, userSelectedModel });
             for (const model of groqCandidates) {
-                triedModels.push(model);
                 const response = await fetchWithTimeoutRetry('https://api.groq.com/openai/v1/chat/completions', {
                     method: 'POST',
                     headers: {
@@ -1047,132 +1088,137 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
                         model,
                         temperature: temp,
                         max_tokens: maxTokens,
-                        messages: [
-                            { role: 'user', content: finalPrompt }
-                        ]
+                        messages: [{ role: 'user', content: finalPrompt }]
                     })
                 }, {
                     timeoutMs: clampInt(lengthPolicy?.timeoutMs, MODEL_FETCH_TIMEOUT_MS, 1000, MODEL_FETCH_TIMEOUT_MS),
                     retries: Number.isFinite(Number(lengthPolicy?.retries)) ? Number(lengthPolicy.retries) : FETCH_RETRIES
                 });
-
                 if (response.ok) {
                     const data = await response.json();
-                    groqText = String(data?.choices?.[0]?.message?.content || '').trim();
-                    modelUsed = model;
-                    break;
+                    const text = String(data?.choices?.[0]?.message?.content || '').trim();
+                    if (text) {
+                        return { ok: true, parsedResponse: parseModelText(text), modelUsed: model, provider: 'groq' };
+                    }
                 }
-
-                const bodyText = await response.text().catch(() => '');
-                lastErrorDetail = `provider=groq, model=${model}, status=${response.status}, body=${bodyText.slice(0, 300)}`;
             }
+            return null;
+        };
 
-            if (groqText) {
-                return {
-                    ok: true,
-                    parsedResponse: parseModelText(groqText),
-                    modelUsed,
-                    provider: 'groq'
-                };
-            }
-
-            groqFailureDetail = lastErrorDetail || 'Groq did not return a successful response.';
-            groqTriedModels = triedModels;
-        }
-
-        const geminiApiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
-        if (!geminiApiKey) {
-            return {
-                ok: false,
-                payload: {
-                    intent: 'service_unconfigured',
-                    response: 'AI backend is not configured. Set GROQ_API_KEY or GEMINI_API_KEY in the server environment.',
-                    action: null,
-                    provider: 'none'
-                }
-            };
-        }
-
-        const geminiConfiguredModel = String(process.env.GEMINI_MODEL || '').trim();
-        const geminiCandidates = [
-            geminiConfiguredModel,
-            'gemini-3.5-flash',
-            'gemini-2.5-flash',
-            'gemini-2.5-flash-lite',
-            'gemini-2.0-flash'
-        ].filter(Boolean);
-
-        let geminiData = null;
-        let modelUsed = null;
-        let lastErrorDetail = '';
-        const triedModels = [];
-
-        for (const model of geminiCandidates) {
-            triedModels.push(model);
-            const response = await fetchWithTimeoutRetry(
-                `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`,
-                {
+        const tryRunOpenAI = async () => {
+            const openaiApiKey = process.env.OPENAI_API_KEY || process.env.OPENAI_KEY;
+            if (!openaiApiKey) return null;
+            const openaiCandidates = getPreferredOpenAICandidates(userSelectedModel, userSelectedModel);
+            for (const model of openaiCandidates) {
+                const response = await fetchWithTimeoutRetry('https://api.openai.com/v1/chat/completions', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
+                        Authorization: `Bearer ${openaiApiKey}`
                     },
                     body: JSON.stringify({
-                        contents: [{
-                            parts: [{ text: finalPrompt }]
-                        }],
-                        generationConfig: {
-                            temperature: temp,
-                            topK: 40,
-                            topP: 0.95,
-                            maxOutputTokens: maxTokens,
-                        }
+                        model,
+                        temperature: temp,
+                        max_tokens: maxTokens,
+                        messages: [{ role: 'user', content: finalPrompt }]
                     })
-                },
-                {
+                }, {
                     timeoutMs: clampInt(lengthPolicy?.timeoutMs, MODEL_FETCH_TIMEOUT_MS, 1000, MODEL_FETCH_TIMEOUT_MS),
                     retries: Number.isFinite(Number(lengthPolicy?.retries)) ? Number(lengthPolicy.retries) : FETCH_RETRIES
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    const text = String(data?.choices?.[0]?.message?.content || '').trim();
+                    if (text) {
+                        return { ok: true, parsedResponse: parseModelText(text), modelUsed: model, provider: 'openai' };
+                    }
                 }
-            );
-
-            if (response.ok) {
-                geminiData = await response.json();
-                modelUsed = model;
-                break;
             }
+            return null;
+        };
 
-            const bodyText = await response.text().catch(() => '');
-            lastErrorDetail = `provider=gemini, model=${model}, status=${response.status}, body=${bodyText.slice(0, 300)}`;
-        }
-
-        if (!geminiData) {
-            return {
-                ok: false,
-                payload: {
-                    intent: 'service_unavailable',
-                    response: 'The AI service is temporarily unavailable right now. Please try again shortly.',
-                    action: null,
-                    provider: 'gemini'
+        const tryRunGemini = async () => {
+            const geminiApiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+            if (!geminiApiKey) return null;
+            const geminiConfiguredModel = String(process.env.GEMINI_MODEL || '').trim();
+            const geminiCandidates = getPreferredGeminiCandidates(geminiConfiguredModel, userSelectedModel);
+            for (const model of geminiCandidates) {
+                const response = await fetchWithTimeoutRetry(
+                    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`,
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            contents: [{ parts: [{ text: finalPrompt }] }],
+                            generationConfig: { temperature: temp, topK: 40, topP: 0.95, maxOutputTokens: maxTokens }
+                        })
+                    },
+                    {
+                        timeoutMs: clampInt(lengthPolicy?.timeoutMs, MODEL_FETCH_TIMEOUT_MS, 1000, MODEL_FETCH_TIMEOUT_MS),
+                        retries: Number.isFinite(Number(lengthPolicy?.retries)) ? Number(lengthPolicy.retries) : FETCH_RETRIES
+                    }
+                );
+                if (response.ok) {
+                    const geminiData = await response.json();
+                    const text = String(geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
+                    if (text) {
+                        return { ok: true, parsedResponse: parseModelText(text), modelUsed: model, provider: 'gemini' };
+                    }
                 }
-            };
+            }
+            return null;
+        };
+
+        const providerFns = isOpenAiPreferred
+            ? [tryRunOpenAI, tryRunGroq, tryRunGemini]
+            : [tryRunGroq, tryRunOpenAI, tryRunGemini];
+
+        for (const fn of providerFns) {
+            const result = await fn();
+            if (result) return result;
         }
 
-        const aiText = String(geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
         return {
-            ok: true,
-            parsedResponse: parseModelText(aiText),
-            modelUsed,
-            provider: 'gemini'
+            ok: false,
+            payload: {
+                intent: 'service_unavailable',
+                response: 'The AI service is temporarily unavailable right now. Please try again shortly.',
+                action: null,
+                provider: 'none'
+            }
         };
     }
 
     async function streamModelWithFallback(finalPrompt, lengthPolicy = {}, onDelta = () => {}, userSelectedModel = null) {
         const temp = Number.isFinite(Number(lengthPolicy?.temperature)) ? Number(lengthPolicy.temperature) : 0.7;
         const maxTokens = clampInt(lengthPolicy?.maxTokens, 8000, 256, 16000);
-        const groqApiKey = process.env.GROQ_API_KEY || process.env.GROQ_KEY;
+        const userSelected = String(userSelectedModel || '').trim();
+        const isOpenAiPreferred = ['gpt-4o', 'gpt-4o-mini', 'o3-mini', 'gpt-4-turbo'].includes(userSelected);
 
-        if (groqApiKey) {
+        const tryStreamOpenAI = async () => {
+            const openaiApiKey = process.env.OPENAI_API_KEY || process.env.OPENAI_KEY;
+            if (!openaiApiKey) return null;
+            const openaiCandidates = getPreferredOpenAICandidates(userSelectedModel, userSelectedModel);
+            for (const model of openaiCandidates) {
+                const result = await streamOpenAIModel({
+                    apiKey: openaiApiKey,
+                    model,
+                    prompt: finalPrompt,
+                    temperature: temp,
+                    maxTokens,
+                    timeoutMs: clampInt(lengthPolicy?.timeoutMs, STREAM_MODEL_FETCH_TIMEOUT_MS, 1000, STREAM_MODEL_FETCH_TIMEOUT_MS),
+                    onDelta
+                });
+                if (result.ok) return result;
+            }
+            return null;
+        };
+
+        const tryStreamGroq = async () => {
+            const groqApiKey = process.env.GROQ_API_KEY || process.env.GROQ_KEY;
+            if (!groqApiKey) return null;
             const groqConfiguredModel = userSelectedModel || String(process.env.GROQ_MODEL || '').trim();
-            const groqCandidates = getPreferredGroqCandidates(groqConfiguredModel, { preferSpeed: true });
+            const groqCandidates = getPreferredGroqCandidates(groqConfiguredModel, { preferSpeed: true, userSelectedModel });
             for (const model of groqCandidates) {
                 const result = await streamGroqModel({
                     apiKey: groqApiKey,
@@ -1185,18 +1231,14 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
                 });
                 if (result.ok) return result;
             }
-        }
+            return null;
+        };
 
-        const geminiApiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
-        if (geminiApiKey) {
+        const tryStreamGemini = async () => {
+            const geminiApiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+            if (!geminiApiKey) return null;
             const geminiConfiguredModel = String(process.env.GEMINI_MODEL || '').trim();
-            const geminiCandidates = [
-                geminiConfiguredModel,
-                'gemini-3.5-flash',
-                'gemini-2.5-flash',
-                'gemini-2.5-flash-lite',
-                'gemini-2.0-flash'
-            ].filter(Boolean);
+            const geminiCandidates = getPreferredGeminiCandidates(geminiConfiguredModel, userSelectedModel);
             for (const model of geminiCandidates) {
                 const result = await streamGeminiModel({
                     apiKey: geminiApiKey,
@@ -1209,18 +1251,65 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
                 });
                 if (result.ok) return result;
             }
+            return null;
+        };
+
+        const streamFns = isOpenAiPreferred
+            ? [tryStreamOpenAI, tryStreamGroq, tryStreamGemini]
+            : [tryStreamGroq, tryStreamOpenAI, tryStreamGemini];
+
+        for (const fn of streamFns) {
+            const result = await fn();
+            if (result) return result;
         }
 
         return {
             ok: false,
             payload: {
-                intent: groqApiKey || geminiApiKey ? 'service_unavailable' : 'service_unconfigured',
-                response: groqApiKey || geminiApiKey
-                    ? 'The AI service is temporarily unavailable right now. Please try again shortly.'
-                    : 'AI backend is not configured. Set GROQ_API_KEY or GEMINI_API_KEY in the server environment.',
+                intent: 'service_unavailable',
+                response: 'The AI service is temporarily unavailable right now. Please try again shortly.',
                 action: null
             }
         };
+    }
+
+    async function streamOpenAIModel({ apiKey, model, prompt, temperature, maxTokens, timeoutMs, onDelta }) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            const response = await fetch('https://api.openai.com/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${apiKey}`
+                },
+                signal: controller.signal,
+                body: JSON.stringify({
+                    model,
+                    temperature,
+                    max_tokens: maxTokens,
+                    stream: true,
+                    messages: [
+                        { role: 'user', content: prompt }
+                    ]
+                })
+            });
+            if (!response.ok || !response.body) return { ok: false };
+            let text = '';
+            await readSseStream(response.body, payload => {
+                const delta = String(payload?.choices?.[0]?.delta?.content || '');
+                if (!delta) return;
+                text += delta;
+                onDelta(delta);
+            });
+            return text.trim()
+                ? { ok: true, provider: 'openai', modelUsed: model, text }
+                : { ok: false };
+        } catch (_) {
+            return { ok: false };
+        } finally {
+            clearTimeout(timeout);
+        }
     }
 
     async function streamGroqModel({ apiKey, model, prompt, temperature, maxTokens, timeoutMs, onDelta }) {
