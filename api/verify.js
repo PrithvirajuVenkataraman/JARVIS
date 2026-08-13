@@ -79,15 +79,15 @@ export function extractIncumbentFromSummary(extract, role = '') {
     if (!text) return null;
 
     // Biographical lead pattern: match leading subject before title declaration
-    const pA = text.match(/^([A-Z][a-zA-Z.\s]+?)\s+is (?:an? [a-zA-Z\s]+?who (?:is|serves as) )?the (?:current )?(?:and \d+[a-z]{2} )?(?:Chief Minister|Prime Minister|President)/i);
+    const pA = text.match(/^([A-Z][a-zA-Z.\s]+?)\s+is (?:an? [a-zA-Z\s]+?who (?:is|serves as) )?the (?:current )?(?:and \d+[a-z]{2} )?(?:Chief Minister|Prime Minister|President|Governor|Mayor|Chancellor|Premier)/i);
     if (pA && pA[1]) return cleanEntityName(pA[1]);
 
     // Predicate incumbent pattern: match role declaration followed by entity name
-    const pB = text.match(/(?:(?:is the|serving as the|the) (?:current|incumbent) (?:and \d+[a-z]{2} )?(?:Chief Minister|Prime Minister|President|Governor)(?:(?:\s+of|\s+for)\s+(?:the\s+)?[A-Za-z\s]+?)?\s+(?:is|was)|(?:the\s+)?incumbent is)\s*[:,-]?\s*([A-Z][a-zA-Z.\s]+?)(?=\s*(?:,|\.|\(|\n|$|\bwho\b|\bsince\b|\bhaving\b|\bassumed\b|\bin office\b))/i);
+    const pB = text.match(/(?:(?:is the|serving as the|the) (?:current|incumbent) (?:and \d+[a-z]{2} )?(?:Chief Minister|Prime Minister|President|Governor|Mayor|Chancellor|Premier)(?:(?:\s+of|\s+for)\s+(?:the\s+)?[A-Za-z\s]+?)?\s+(?:is|was)|(?:the\s+)?incumbent is)\s*[:,-]?\s*([A-Z][a-zA-Z.\s]+?)(?=\s*(?:,|\.|\(|\n|$|\bwho\b|\bsince\b|\bhaving\b|\bassumed\b|\bin office\b))/i);
     if (pB && pB[1]) return cleanEntityName(pB[1]);
 
     // Key-value header pattern: match title followed by colon and entity
-    const pC = text.match(/(?:Chief Minister|Prime Minister|President|Governor)\s*[:]\s*([A-Z][a-zA-Z.\s]+?)(?=\s*(?:,|\.|\(|\n|$|\bsince\b|\bin office\b))/i);
+    const pC = text.match(/(?:Chief Minister|Prime Minister|President|Governor|Mayor|Chancellor|Premier)\s*[:]\s*([A-Z][a-zA-Z.\s]+?)(?=\s*(?:,|\.|\(|\n|$|\bsince\b|\bin office\b))/i);
     if (pC && pC[1]) return cleanEntityName(pC[1]);
 
     return null;
