@@ -3251,6 +3251,10 @@ body.dark .response-action-btn {
     display: none !important;
 }
 
+.assistant-thinking-minimal .assistant-thinking-pulse {
+    display: none !important;
+}
+
 .assistant-thinking-minimal .assistant-thinking-phase-pill {
     display: inline-flex !important;
 }
