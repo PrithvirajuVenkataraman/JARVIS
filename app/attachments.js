@@ -78,7 +78,7 @@ export async function ingestAllForMessage(attachments = [], userText = '') {
                     base64
                 });
                 methods.push({ name: attachment.name, method: 'single_pass_native_image', provider: 'native', ok: true });
-                sections.push(`### ${attachment.name} (Attached Image)\n[Image attached for native vision processing]`);
+                sections.push(`[Attached Image: ${attachment.name}]`);
                 continue;
             }
         }
@@ -116,12 +116,14 @@ export async function ingestAllForMessage(attachments = [], userText = '') {
                 sourceAnswer: readableSections || combined,
                 originalRequest: prompt,
                 customInstruction: [
-                    'The content below is the attached document(s)/image(s).',
-                    'Answer the user request using this attachment content.',
-                    'Do not ask the user to upload, paste, share, or provide the same file again.'
+                    'The user has attached image(s)/document(s).',
+                    'Describe and answer directly about what is depicted in the attached image.',
+                    'Do not write meta-commentary about vision algorithms, CNNs, or machine learning.',
+                    'Do not state that you cannot see the image. Directly describe the objects, text, scene, and content of the image.'
                 ].join(' ')
             }
             : null,
+
         methods,
         combinedText: readableSections || combined,
         anyReadable
