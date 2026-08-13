@@ -1,10 +1,5 @@
 import { isCasualConversationQuery } from './frontend-routing.js';
 
-const CAPABILITY_REPLIES = Object.freeze({
-    tamil: 'Yes, I can understand Tamil in text. Voice transcription depends on your browser, but you can type or speak and I will do my best.',
-    default: 'Yes, I can help with that when it is within my supported features.'
-});
-
 export function getInstantReply(text) {
     const raw = String(text || '').trim();
     if (!raw) return null;
@@ -28,10 +23,6 @@ export function getInstantReply(text) {
 
     if (/^(i see|oh i see|ah i see|got it|gotcha|makes sense|understood|oh okay|oh ok)\.?$/i.test(lower)) {
         return 'Got it. What would you like to do next?';
-    }
-
-    if (/^do you understand tamil\??$/i.test(lower)) {
-        return CAPABILITY_REPLIES.tamil;
     }
 
     if (/^(are you there|you there)\??$/i.test(lower)) {
