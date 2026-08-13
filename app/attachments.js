@@ -1,3 +1,4 @@
+import { extractLocalImageTagFromAttachment } from './local-vision-engine.js';
 const MAX_ATTACHMENTS = 6;
 const MAX_FILE_BYTES = 12 * 1024 * 1024;
 const MAX_EXTRACT_CHARS = 120000;
@@ -72,13 +73,14 @@ export async function ingestAllForMessage(attachments = [], userText = '') {
             const base64 = await resolveAttachmentBase64(attachment).catch(() => '');
             if (base64) {
                 anyReadable = true;
+                const localTag = extractLocalImageTagFromAttachment(attachment);
                 imagePayloads.push({
                     name: attachment.name,
                     mimeType: normalizeImageMime(attachment.mimeType, attachment.name),
                     base64
                 });
                 methods.push({ name: attachment.name, method: 'single_pass_native_image', provider: 'native', ok: true });
-                sections.push(`[Attached Image: ${attachment.name}]`);
+                sections.push(`[Attached Image: ${attachment.name}] ${localTag}`);
                 continue;
             }
         }
