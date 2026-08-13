@@ -69,9 +69,16 @@ export function classifyFreeLiveIntent(message) {
     const text = normalizeMessage(message);
     if (!text) return strictRoute('clarify', 'clarify', 0.2, ['empty_message']);
 
+    if (/\b(?:sql|database|postgres|mysql|sqlite|bigquery|snowflake)\b/i.test(text) ||
+        (/\b(?:find|list|show|select|fetch|get|generate|write)\b.*\b(?:all|top|customers|orders|users|products|rows|items|sales|revenue|table|schema|records)\b/i.test(text) &&
+         /\b(?:where|over|greater|less|group by|order by|joined|total|sum|count|amount|days|date|status|showing|having)\b/i.test(text))) {
+        return strictRoute('llm', 'sql_generation', 0.99, ['sql_query_generation_request']);
+    }
+
     if (isExplicitSearchCommand(text)) {
         return strictRoute('live_required', 'web_search', 0.88, ['explicit_or_product_search_requires_web_sources']);
     }
+
 
     for (const pattern of UNSUPPORTED_FREE_LIVE_PATTERNS) {
         if (pattern.test(text)) {
