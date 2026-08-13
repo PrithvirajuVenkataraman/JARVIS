@@ -19,7 +19,9 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
         'llama-3.1-8b-instant',
         'llama-3.3-70b-versatile',
         'deepseek-r1-distill-llama-70b',
-        'qwen-2.5-coder-32b'
+        'qwen-2.5-coder-32b',
+        'qwen/qwen3.6-27b',
+        'qwen-3.6-27b'
     ]);
     const USER_SELECTABLE_GROQ_MODELS = USER_SELECTABLE_MODELS;
 
@@ -29,7 +31,7 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
         let mappedOpenAI = '';
         if (['gpt-4o', 'gpt-4o-mini', 'o3-mini', 'gpt-4-turbo'].includes(userSelected)) {
             mappedOpenAI = userSelected;
-        } else if (['openai/gpt-oss-120b', 'llama-3.3-70b-versatile', 'deepseek-r1-distill-llama-70b', 'qwen-2.5-coder-32b'].includes(userSelected)) {
+        } else if (['openai/gpt-oss-120b', 'llama-3.3-70b-versatile', 'deepseek-r1-distill-llama-70b', 'qwen-2.5-coder-32b', 'qwen/qwen3.6-27b', 'qwen-3.6-27b'].includes(userSelected)) {
             mappedOpenAI = 'gpt-4o';
         } else if (['openai/gpt-oss-20b', 'llama-3.1-8b-instant'].includes(userSelected)) {
             mappedOpenAI = 'gpt-4o-mini';
@@ -41,7 +43,7 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
         const configured = String(configuredModel || '').trim();
         const userSelected = String(userSelectedModel || '').trim();
         let mappedGroq = '';
-        if (['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'llama-3.1-8b-instant', 'llama-3.3-70b-versatile', 'deepseek-r1-distill-llama-70b', 'qwen-2.5-coder-32b'].includes(userSelected)) {
+        if (['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'llama-3.1-8b-instant', 'llama-3.3-70b-versatile', 'deepseek-r1-distill-llama-70b', 'qwen-2.5-coder-32b', 'qwen/qwen3.6-27b', 'qwen-3.6-27b'].includes(userSelected)) {
             mappedGroq = userSelected;
         } else if (userSelected === 'gpt-4o' || userSelected === 'o3-mini' || userSelected === 'gpt-4-turbo') {
             mappedGroq = 'openai/gpt-oss-120b';
@@ -51,6 +53,8 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
         const speedFirst = [
             mappedGroq,
             configured,
+            'qwen/qwen3.6-27b',
+            'qwen-3.6-27b',
             'openai/gpt-oss-20b',
             'llama-3.1-8b-instant',
             'qwen-2.5-coder-32b',
@@ -61,6 +65,8 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
         const qualityFirst = [
             mappedGroq,
             configured,
+            'qwen/qwen3.6-27b',
+            'qwen-3.6-27b',
             'openai/gpt-oss-120b',
             'llama-3.3-70b-versatile',
             'deepseek-r1-distill-llama-70b',
