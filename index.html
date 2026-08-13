@@ -19980,13 +19980,43 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
                 document.getElementById('weather-advice').textContent = advice;
 
                 const isCurrentLocationAsk = isCurrentLocationWeatherQuery(originalQuery);
+                const isForecastAsk = /\b(forecast|3\s*days?|next|upcoming|few\s*days|multi-day|multiday|week)\b/i.test(String(originalQuery || ''));
+
+                const dailyForecastList = [];
+                if (weather?.daily?.time && Array.isArray(weather.daily.time)) {
+                    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+                    for (let i = 0; i < Math.min(weather.daily.time.length, 5); i++) {
+                        const dateObj = new Date(weather.daily.time[i]);
+                        const dayName = days[dateObj.getUTCDay()] || weather.daily.time[i];
+                        const maxC = Math.round(weather.daily.temperature_2m_max[i]);
+                        const minC = Math.round(weather.daily.temperature_2m_min[i]);
+                        const code = weather.daily.weather_code[i];
+                        dailyForecastList.push({
+                            day: dayName,
+                            date: weather.daily.time[i],
+                            maxC,
+                            minC,
+                            weatherCode: code
+                        });
+                    }
+                }
+
                 const aqiLine = aqi && Number.isFinite(aqi.usAqi)
                     ? `Air Quality Index (US AQI): ${aqi.usAqi} (${aqi.label || 'Unknown'})`
                     : 'Air Quality Index (US AQI): unavailable right now';
+
+                let forecastSummaryText = '';
+                if (isForecastAsk && dailyForecastList.length > 0) {
+                    const next3 = dailyForecastList.slice(0, 3).map(d => `${d.day}: ${d.minC}°C - ${d.maxC}°C`).join(', ');
+                    forecastSummaryText = `3-Day Forecast: ${next3}`;
+                }
+
                 const weatherFallback = [
-                    `In ${displayLocation}, it's ${celsius}°C (${fahrenheit}°F) with ${advice}.`,
+                    `In ${displayLocation}, current weather is ${celsius}°C (${fahrenheit}°F) with ${advice}.`,
+                    forecastSummaryText,
                     isCurrentLocationAsk ? aqiLine : ''
                 ].filter(Boolean).join('\n');
+                
                 await deliverApiReply('weather_result', {
                     location: displayLocation,
                     fahrenheit,
@@ -19994,7 +20024,9 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
                     advice,
                     weatherCode: weather?.current?.weather_code,
                     aqiIndex: aqi?.usAqi ?? null,
-                    aqiLabel: aqi?.label ?? null
+                    aqiLabel: aqi?.label ?? null,
+                    dailyForecast: dailyForecastList.slice(0, 3),
+                    isForecastAsk
                 }, {
                     fallbackText: weatherFallback,
                     typewriter: true
