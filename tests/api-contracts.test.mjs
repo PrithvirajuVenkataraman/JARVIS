@@ -328,6 +328,8 @@ assert.equal(invalidChat.body.success, false);
 assert.equal(invalidChat.body.error.code, 'invalid_request');
 assert.equal(chatTest.normalizeSelectedModel('llama-3.1-8b-instant'), 'llama-3.1-8b-instant');
 assert.equal(chatTest.normalizeSelectedModel('openai/gpt-oss-120b'), 'openai/gpt-oss-120b');
+assert.equal(chatTest.normalizeSelectedModel('gpt-4o'), 'gpt-4o');
+assert.equal(chatTest.normalizeSelectedModel('deepseek-r1-distill-llama-70b'), 'deepseek-r1-distill-llama-70b');
 assert.equal(chatTest.normalizeSelectedModel('auto'), null);
 assert.equal(chatTest.normalizeSelectedModel('not/a-real-sidebar-model'), null);
 
