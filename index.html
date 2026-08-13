@@ -10132,13 +10132,33 @@ function processSuggestionFromElement(buttonEl) {
     if (!buttonEl) return;
     const encoded = buttonEl.dataset?.query || '';
     processSuggestion(decodeURIComponent(encoded));
-}
-
-function processSuggestion(text) {
+}function processSuggestion(text) {
     const input = document.getElementById('text-input');
     if (!input) return;
     input.value = String(text || '').trim();
     sendTextInput();
+}
+
+function sanitizeExtractedLocation(rawLocation) {
+    let loc = String(rawLocation || '').trim();
+    if (!loc) return '';
+
+    loc = loc
+        .replace(/\b(?:over|for|in|during|throughout)\s+(?:the\s+)?(?:next|past|following|coming|last)?\s*\d*\s*(?:days?|weeks?|months?|hours?|weekend|nights?)\b.*$/gi, '')
+        .replace(/\b(?:over|for|in)\s+(?:the\s+)?(?:next|past|following|coming|last)\b.*$/gi, '')
+        .replace(/\b(?:for|during)\s+(?:a\s+few|several|some)\s+(?:days?|weeks?|nights?|hours?)\b.*$/gi, '')
+        .replace(/\b(?:today|tomorrow|tonight|now|right now|currently|at the moment|this morning|this afternoon|this evening|next week|next month|next year|this weekend|next weekend)\b.*$/gi, '')
+        .replace(/\b(?:from|starting|on|between|before|after)\s+(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|\d{1,2}(?:st|nd|rd|th)?|\d{4})\b.*$/gi, '')
+        .replace(/\b(?:with|for)\s+(?:family|friends|kids|children|couple|solo|group|business|work|vacation|holiday|trip)\b.*$/gi, '')
+        .replace(/\b(?:by|via)\s+(?:train|bus|flight|plane|car|taxi|cab|road|air)\b.*$/gi, '')
+        .replace(/\b(?:open|available)\s+(?:now|today|24\/7|late)\b.*$/gi, '')
+        .replace(/\b(?:showing|showing\s+their|their\s+name|email|total|order|amount|order\s+amount)\b.*$/gi, '')
+        .replace(/\b(?:be|like|looking|feel|feels|seem|seems)\b/gi, ' ')
+        .replace(/[?.!,;]$/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    return cleanGenericQueryTarget(loc);
 }
 
 function detectPrimaryLocationFromText(text) {
@@ -10151,7 +10171,7 @@ function detectPrimaryLocationFromText(text) {
     for (const pattern of patterns) {
         const match = normalized.match(pattern);
         if (match && match[1]) {
-            return match[1].trim().replace(/[?.!,]$/, '');
+            return sanitizeExtractedLocation(match[1]);
         }
     }
     return '';
@@ -10167,10 +10187,13 @@ function isInvalidLocationCandidate(candidate) {
         'hotels', 'hotel', 'food', 'trip', 'travel', 'place', 'places',
         'database', 'table', 'schema', 'production', 'staging', 'server',
         'cluster', 'query', 'results', 'codebase', 'repository', 'evening',
-        'morning', 'afternoon', 'night', 'today', 'yesterday', 'tomorrow'
+        'morning', 'afternoon', 'night', 'today', 'yesterday', 'tomorrow',
+        'the last 30 days', 'last 30 days', 'showing their name', 'total order amount',
+        'order amount', 'email and total'
     ];
     if (blocked.includes(c)) return true;
-    if (/\b(last|past|next)\s+\d+\s+(days?|weeks?|months?|years?)\b/i.test(c)) return true;
+    if (/\b(last|past|next|coming|following)\s+\d*\s*(days?|weeks?|months?|years?|hours?)\b/i.test(c)) return true;
+    if (/\b(customer|customers|order|orders|amount|email|select|from|where|join|group by|order by|having|limit|insert|update|delete|table|schema|query|showing|their name)\b/i.test(c)) return true;
     if (/\b(about|good|best|restaurant|restaurants|hotel|hotels|food|trip|travel|database|table|schema|query)\b/i.test(c) && !/,/.test(c)) {
         return true;
     }
@@ -19257,23 +19280,25 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
                     // Extract full location including state/country
                     const fullLocationMatch = text.match(/\b(?:in|at|near|around|to)\s+([^?.!]+?)(?:\?|$|\.)/i);
                     if (fullLocationMatch) {
-                        fullLocation = fullLocationMatch[1].trim();
+                        const rawFullLoc = fullLocationMatch[1].trim();
+                        fullLocation = sanitizeExtractedLocation(rawFullLoc);
                         const parts = fullLocation.split(',').map(p => p.trim());
-                        cityName = parts[0];
-                        stateName = parts.slice(1).join(', ');
+                        cityName = sanitizeExtractedLocation(parts[0]);
+                        stateName = parts.slice(1).map(p => sanitizeExtractedLocation(p)).filter(Boolean).join(', ');
                     } else {
                         // Try to extract from current text
-                        cityName = text.match(/\bin\s+([^,?.!]+)/i)?.[1] ||
-                                   text.match(/\bat\s+([^,?.!]+)/i)?.[1] ||
-                                   text.match(/\bnear\s+([^,?.!]+)/i)?.[1] ||
-                                   text.match(/\bto\s+([^,?.!]+)/i)?.[1] || '';
+                        const rawCity = text.match(/\bin\s+([^,?.!]+)/i)?.[1] ||
+                                        text.match(/\bat\s+([^,?.!]+)/i)?.[1] ||
+                                        text.match(/\bnear\s+([^,?.!]+)/i)?.[1] ||
+                                        text.match(/\bto\s+([^,?.!]+)/i)?.[1] || '';
+                        cityName = sanitizeExtractedLocation(rawCity);
                         
                         // If no city in current text, check conversation context
-                        if (!cityName) {
+                        if (!cityName || isInvalidLocationCandidate(cityName)) {
                             const ctxLoc = getLocationFromRecentContext();
                             if (ctxLoc) {
-                                fullLocation = ctxLoc;
-                                cityName = ctxLoc.split(',')[0].trim();
+                                fullLocation = sanitizeExtractedLocation(ctxLoc);
+                                cityName = sanitizeExtractedLocation(ctxLoc.split(',')[0]);
                             } else {
                                 const contextText = (conversationContext || []) 
                                     .filter(m => m && m.role === 'user') 
@@ -19283,16 +19308,16 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
                                 const contextMatch = contextText.match(/(?:hotels?|trip|itinerary|visit)\s+(?:in|to|at|near)\s+([A-Za-z][a-z]+(?:[\s,]+[A-Za-z][a-z]+)*)/i) ||
                                                      contextText.match(/\b(?:in|at|near|to)\s+([A-Za-z][a-z]+(?:,\s*[A-Za-z][a-z]+)*)/i);
                                 if (contextMatch) {
-                                    cityName = contextMatch[1].split(',')[0].trim();
-                                    fullLocation = contextMatch[1].trim();
+                                    cityName = sanitizeExtractedLocation(contextMatch[1].split(',')[0]);
+                                    fullLocation = sanitizeExtractedLocation(contextMatch[1]);
                                 }
                             }
                         }
                         if (!fullLocation) fullLocation = cityName;
                     }
                     
-                    cityName = cityName.trim().replace(/[?.!,]$/, '');
-                    fullLocation = fullLocation.trim().replace(/[?.!]$/, '');
+                    cityName = sanitizeExtractedLocation(cityName);
+                    fullLocation = sanitizeExtractedLocation(fullLocation);
                     if (isInvalidLocationCandidate(cityName)) cityName = '';
                     if (isInvalidLocationCandidate(fullLocation)) fullLocation = '';
                     
