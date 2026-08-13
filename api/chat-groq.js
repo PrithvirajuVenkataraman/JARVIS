@@ -258,7 +258,8 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
                 intent
             );
             const modelStartedAt = Date.now();
-            const firstPass = await runModelWithFallback(firstPrompt, lengthPolicy, preferences?.selectedModel || null);
+            const images = Array.isArray(grounding?.images) ? grounding.images : undefined;
+            const firstPass = await runModelWithFallback(firstPrompt, lengthPolicy, preferences?.selectedModel || null, images);
             timing.modelMs += Date.now() - modelStartedAt;
             if (!firstPass.ok) {
                 return res.status(503).json({
@@ -1066,7 +1067,7 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
         }
     }
 
-    async function runModelWithFallback(finalPrompt, lengthPolicy = {}, userSelectedModel = null) {
+    async function runModelWithFallback(finalPrompt, lengthPolicy = {}, userSelectedModel = null, images = undefined) {
         const temp = Number.isFinite(Number(lengthPolicy?.temperature)) ? Number(lengthPolicy.temperature) : 0.7;
         const maxTokens = clampInt(lengthPolicy?.maxTokens, 8000, 256, 16000);
         const userSelected = String(userSelectedModel || '').trim();
@@ -1078,6 +1079,16 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
             const groqConfiguredModel = userSelectedModel || String(process.env.GROQ_MODEL || '').trim();
             const groqCandidates = getPreferredGroqCandidates(groqConfiguredModel, { preferSpeed: false, userSelectedModel });
             for (const model of groqCandidates) {
+                let messages = [{ role: 'user', content: finalPrompt }];
+                if (Array.isArray(images) && images.length) {
+                    const content = [{ type: 'text', text: finalPrompt }];
+                    for (const img of images) {
+                        if (img?.base64) {
+                            content.push({ type: 'image_url', image_url: { url: `data:${img.mimeType || 'image/jpeg'};base64,${img.base64}` } });
+                        }
+                    }
+                    messages = [{ role: 'user', content }];
+                }
                 const response = await fetchWithTimeoutRetry('https://api.groq.com/openai/v1/chat/completions', {
                     method: 'POST',
                     headers: {
@@ -1088,7 +1099,7 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
                         model,
                         temperature: temp,
                         max_tokens: maxTokens,
-                        messages: [{ role: 'user', content: finalPrompt }]
+                        messages
                     })
                 }, {
                     timeoutMs: clampInt(lengthPolicy?.timeoutMs, MODEL_FETCH_TIMEOUT_MS, 1000, MODEL_FETCH_TIMEOUT_MS),
@@ -1110,6 +1121,16 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
             if (!openaiApiKey) return null;
             const openaiCandidates = getPreferredOpenAICandidates(userSelectedModel, userSelectedModel);
             for (const model of openaiCandidates) {
+                let messages = [{ role: 'user', content: finalPrompt }];
+                if (Array.isArray(images) && images.length) {
+                    const content = [{ type: 'text', text: finalPrompt }];
+                    for (const img of images) {
+                        if (img?.base64) {
+                            content.push({ type: 'image_url', image_url: { url: `data:${img.mimeType || 'image/jpeg'};base64,${img.base64}` } });
+                        }
+                    }
+                    messages = [{ role: 'user', content }];
+                }
                 const response = await fetchWithTimeoutRetry('https://api.openai.com/v1/chat/completions', {
                     method: 'POST',
                     headers: {
@@ -1120,7 +1141,7 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
                         model,
                         temperature: temp,
                         max_tokens: maxTokens,
-                        messages: [{ role: 'user', content: finalPrompt }]
+                        messages
                     })
                 }, {
                     timeoutMs: clampInt(lengthPolicy?.timeoutMs, MODEL_FETCH_TIMEOUT_MS, 1000, MODEL_FETCH_TIMEOUT_MS),
@@ -1143,13 +1164,21 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
             const geminiConfiguredModel = String(process.env.GEMINI_MODEL || '').trim();
             const geminiCandidates = getPreferredGeminiCandidates(geminiConfiguredModel, userSelectedModel);
             for (const model of geminiCandidates) {
+                const parts = [{ text: finalPrompt }];
+                if (Array.isArray(images) && images.length) {
+                    for (const img of images) {
+                        if (img?.base64) {
+                            parts.push({ inline_data: { mime_type: img.mimeType || 'image/jpeg', data: img.base64 } });
+                        }
+                    }
+                }
                 const response = await fetchWithTimeoutRetry(
                     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`,
                     {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            contents: [{ parts: [{ text: finalPrompt }] }],
+                            contents: [{ parts }],
                             generationConfig: { temperature: temp, topK: 40, topP: 0.95, maxOutputTokens: maxTokens }
                         })
                     },
