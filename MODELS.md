@@ -1,70 +1,85 @@
 # JARVIS - AI Models & Capabilities Architecture
 
-This document provides a comprehensive specification of all AI models integrated into the **Unify Assistant** platform, including provider endpoints, vision processing pipelines, structured output schemas, and multilingual support.
+This document provides a comprehensive specification of all LLM and computer vision technologies integrated into the **Unify Assistant** platform, including cloud inference providers, local computer vision engines, structured output decoding, vision pipelines, and Indic speech support.
 
 ---
 
 ## 1. Primary Model Architecture (Groq API Integration)
 
-| Model Name | API Identifier | Role & Usage |
-| :--- | :--- | :--- |
-| **GPT OSS 120B** | `openai/gpt-oss-120b` | **Flagship Model**: High-capacity general reasoning, multi-turn chat, structured outputs (`strict: true`), and complex problem solving. |
-| **GPT OSS 20B** | `openai/gpt-oss-20b` | **Fast Conversational Model**: Low-latency chat responses, fast structured JSON outputs (`strict: true`), and lightweight tasks. |
-| **Qwen 3.6 27B** | `qwen/qwen3.6-27b` | **Image Recognition & Vision**: Primary multimodal vision model for object detection, photo understanding, and visual scene analysis. |
-| **Llama 3.3 70B** | `llama-3.3-70b-versatile` | **Versatile Reasoning**: Large-scale open weights model for complex problem solving, document analysis, and detailed writing. |
-| **Llama 3.1 8B Instant** | `llama-3.1-8b-instant` | **Instant Pre-Pass**: Low-latency model for instant replies, intent classification, and quality verification. |
-| **DeepSeek R1 Distill 70B**| `deepseek-r1-distill-llama-70b` | **Deep Reasoning & Math**: Specialized reasoning model for step-by-step logic, mathematics, and architectural analysis. |
-| **Qwen 2.5 Coder 32B** | `qwen-2.5-coder-32b` | **Code & Syntax**: Technical coding model for software engineering, refactoring, SQL query drafting, and debugging. |
+Inference is accelerated via **Groq LPU (Language Processing Unit)** hardware using the following specialized models:
+
+| Model Name | API Identifier | Architecture & Tech | Role & Usage |
+| :--- | :--- | :--- | :--- |
+| **GPT OSS 120B** | `openai/gpt-oss-120b` | Large Transformer LLM | **Flagship Model**: High-capacity general reasoning, multi-turn chat, structured outputs (`strict: true`), and complex problem solving. |
+| **GPT OSS 20B** | `openai/gpt-oss-20b` | Lightweight Transformer LLM | **Fast Conversational Model**: Low-latency chat responses, fast structured JSON outputs (`strict: true`), and instant tasks. |
+| **Llama 3.3 70B** | `llama-3.3-70b-versatile` | Open-Weights Meta Llama 3 | **Versatile Reasoning**: Large-scale open weights model for complex reasoning, document analysis, and detailed writing. |
+| **Llama 3.1 8B Instant** | `llama-3.1-8b-instant` | Compact Meta Llama 3 | **Instant Pre-Pass**: Low-latency model for instant replies, intent classification, and quality verification. |
+| **DeepSeek R1 Distill 70B** | `deepseek-r1-distill-llama-70b` | Reasoning-Distilled Transformer | **Deep Reasoning & Math**: Specialized reasoning model for step-by-step logic, mathematics, and architectural analysis. |
+| **Qwen 2.5 Coder 32B** | `qwen-2.5-coder-32b` | Code-Specialized Transformer | **Code & Syntax**: Technical coding model for software engineering, refactoring, SQL query drafting, and debugging. |
+| **Llama 3.2 11B/90B Vision** | `llama-3.2-11b-vision-preview` / `llama-3.2-90b-vision-preview` | Multimodal Vision Transformer | **Cloud Vision**: Multimodal image analysis, visual scene understanding, and OCR text extraction. |
 
 ---
 
-## 2. Multimodal Vision Pipeline (Single-Pass Native Vision)
+## 2. Google Gemini & Cloud Vision Integration
 
-Image uploads bypass legacy pre-passes and execute in **single pass** directly through vision-capable models:
-
-- **Primary Vision Model**: `qwen/qwen3.6-27b` (Groq API)
-- **Google Gemini Native Vision**: `gemini-2.5-pro` & `gemini-2.5-flash` (`inline_data` base64 payload)
-- **OpenAI Vision Fallback**: `gpt-4o` & `gpt-4o-mini` (`image_url` base64 payload)
-
-### Client Image Optimization
-- Client image attachments are automatically downscaled to a max dimension of **1280px** and compressed as JPEG.
-- **Payload reduction**: Reduces multi-megabyte image files by ~85% (to ~180 KB), preventing HTTP 413 errors and reducing response latency to **< 3–5 seconds**.
+- **Google Gemini API**: `gemini-2.5-flash`, `gemini-2.0-flash`, `gemini-2.5-pro` (`inlineData` base64 visual payload).
+- **RAG & Search Grounding**: Leverages Gemini multimodal vision and web retrieval for real-time live fact verification, weather forecasts, market prices, and news ingestion.
 
 ---
 
-## 3. Groq Structured Outputs (`strict: true` & `strict: false`)
+## 3. Local Vision Engine (ResNet-50 & U-Net Style Computer Vision)
 
-Supported models (`openai/gpt-oss-120b`, `openai/gpt-oss-20b`, `openai/gpt-oss-safeguard-20b`) leverage Groq's constrained decoding:
+To guarantee zero-dependency offline fallback, instantaneous local processing, and visual anti-hallucination:
+
+### A. Local Feature Classifier (ResNet-50 Style Architecture)
+- **Module**: [`api/_lib/local-vision-classifier.js`](file:///c:/Users/drkan/Desktop/AI%20Projects/unify-assistant/api/_lib/local-vision-classifier.js)
+- **Technology**: Feature vector extraction analyzing color moments, spatial edge-contrast density, UI grid patterns, text density, and aspect ratios.
+- **Function**: Classifies image subjects into `device`, `document`, `product`, `scene`, or `object` locally in Node.js when cloud APIs are unconfigured or offline.
+
+### B. Local ROI Bounding Box Segmenter (U-Net Style Architecture)
+- **Module**: [`app/local-vision-engine.js`](file:///c:/Users/drkan/Desktop/AI%20Projects/unify-assistant/app/local-vision-engine.js)
+- **Technology**: Spatial contour region-of-interest (ROI) segmentation using HTML5 Canvas pixel analysis.
+- **Function**: Auto-detects and crops bounding boxes `{ x, y, width, height }` for document text regions, paper worksheets, and electronic screens prior to OCR extraction.
+
+### C. Device & Display Anti-Hallucination Guardrails
+- Enforces visual priority rules for electronic hardware (iPads, tablets, smartphones, laptops).
+- Explicitly prevents wallpapers, app icons, stock headers, or screen graphics inside a display from being misclassified as outdoor physical landscapes (such as "mountains").
+
+---
+
+## 4. Structured JSON Output Constrained Decoding (`strict: true`)
+
+Supported models (`openai/gpt-oss-120b`, `openai/gpt-oss-20b`, `openai/gpt-oss-safeguard-20b`) leverage Groq's constrained grammar decoding:
 
 ### A. Safety Safeguard Classification
 - **Model**: `openai/gpt-oss-safeguard-20b`
 - **Format**: `response_format: { type: "json_object" }`
-- Evaluates safety policies while permitting benign education, fiction, and triage requests.
+- Evaluates safety policies while permitting benign educational, creative, and triage requests.
 
-### B. Structured SQL Query Generation
+### B. Schema-Validated SQL Query Generation
 - **Models**: `openai/gpt-oss-120b`, `openai/gpt-oss-20b`
 - **Format**: `response_format: { type: "json_schema", json_schema: { name: "sql_query_generation", strict: true, schema: ... } }`
-- Generates schema-validated SQL queries containing metadata:
+- Generates schema-validated SQL queries containing:
   - `query`: Syntactically valid SQL code.
-  - `query_type`: `SELECT`, `INSERT`, `UPDATE`, etc.
-  - `tables_used`: List of database tables.
-  - `estimated_complexity`: Query complexity estimate.
-  - `validation_status`: `is_valid` boolean and `syntax_errors`.
+  - `query_type`: `SELECT`, `INSERT`, `UPDATE`, `DELETE`, etc.
+  - `tables_used`: List of database tables involved.
+  - `estimated_complexity`: Query complexity rating.
+  - `validation_status`: Boolean `is_valid` flag and syntax error details.
 
 ---
 
-## 4. Indic Multilingual & Voice Capabilities
+## 5. Indic Multilingual & Speech Stack
 
 ### A. Text Language Support
-The AI engine natively reads, understands, and responds fluently in:
+Native multilingual understanding and natural text generation across:
 - **Tamil (தமிழ்)**
 - **Telugu (తెలుగు)**
 - **Kannada (ಕನ್ನಡ)**
 - **Hindi (हिन्दी)**
-- **English** and all major world languages.
+- **English** and major international languages.
 
-### B. Speech Input & Voice Synthesis (Web Speech API)
-Native voice dictation and conversation mode support:
+### B. Voice Input & Speech Synthesis
+Web Speech API integration supporting native speech recognition and Text-to-Speech (TTS):
 - Tamil: `ta-IN`
 - Telugu: `te-IN`
 - Kannada: `kn-IN`
