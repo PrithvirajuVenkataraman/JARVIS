@@ -7927,7 +7927,6 @@ let showRoutingDebugBadge = false;
             }
             return '';
         }
-
         function createStreamingAssistantMessage(meta = {}) {
             return addChatMessage('', false, false, {
                 ...meta,
@@ -7995,11 +7994,66 @@ let showRoutingDebugBadge = false;
             if (!messageId || !cleanText) return '';
             updateStreamingAssistantMessage(messageId, cleanText, { ...meta, streaming: false });
             const turnId = String(meta?.turnId || getAssistantMessageMeta(messageId)?.turnId || activeResponseRenderContext?.turnId || '').trim();
+            const turn = getConversationTurn(turnId);
+            const userPrompt = String(meta?.userMessage || turn?.rawPrompt || '').trim();
             chatHistory.push({ text: cleanText, isUser: false });
             recordActiveChatMessage('assistant', cleanText, turnId);
-            const turn = getConversationTurn(turnId);
             speakConverseReply(cleanText, turn);
+            if (userPrompt) {
+                scheduleBackgroundResponseVerification(messageId, userPrompt, cleanText);
+            }
             return messageId;
+        }
+
+        function scheduleBackgroundResponseVerification(messageId, userQuery, assistantText) {
+            if (!messageId || !userQuery || !assistantText) return;
+            const run = async () => {
+                try {
+                    const res = await fetch('/api/verify', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ query: userQuery, llmResponse: assistantText })
+                    });
+                    if (!res.ok) return;
+                    const telemetry = await res.json();
+                    if (globalThis.JarvisDataVerification?.track) {
+                        globalThis.JarvisDataVerification.track('verification_complete', telemetry);
+                    }
+                    if (telemetry?.verified === false && telemetry?.extractedAnchor) {
+                        renderVerificationNotice(messageId, {
+                            status: 'drift_detected',
+                            extractedAnchor: telemetry.extractedAnchor,
+                            role: telemetry.role || 'official',
+                            jurisdiction: telemetry.jurisdiction || '',
+                            sourceUrl: telemetry.sourceUrl || ''
+                        });
+                    }
+                } catch (err) {
+                    console.debug('[verification subsystem bypassed]', err);
+                }
+            };
+            if (typeof queueMicrotask === 'function') {
+                queueMicrotask(run);
+            } else {
+                setTimeout(run, 0);
+            }
+        }
+
+        function renderVerificationNotice(messageId, notice = {}) {
+            const row = findAssistantMessageRow(messageId);
+            if (!row) return;
+            const container = row.querySelector('.chat-bubble-assistant') || row;
+            if (!container || container.querySelector('.verification-notice-banner')) return;
+            const banner = document.createElement('div');
+            banner.className = 'verification-notice-banner mt-2 text-xs text-amber-300/90 border border-amber-500/30 rounded p-2 bg-amber-950/20 flex items-start gap-2';
+            banner.innerHTML = `
+                <span class="inline-block mt-0.5">\u26A0\uFE0F</span>
+                <div>
+                    <span class="font-semibold">Notice:</span> Live records indicate the incumbent ${escapeHtml(notice.role || '')} of ${escapeHtml(notice.jurisdiction || '')} is <strong>${escapeHtml(notice.extractedAnchor || '')}</strong>.
+                    ${notice.sourceUrl ? `<a href="${escapeHtml(notice.sourceUrl)}" target="_blank" rel="noopener noreferrer" class="underline ml-1 text-amber-200">Source</a>` : ''}
+                </div>
+            `;
+            container.appendChild(banner);
         }
 
         function discardStreamingAssistantMessage(messageId) {
