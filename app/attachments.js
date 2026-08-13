@@ -1,5 +1,5 @@
 const MAX_ATTACHMENTS = 6;
-const MAX_FILE_BYTES = 4 * 1024 * 1024;
+const MAX_FILE_BYTES = 8 * 1024 * 1024;
 const MAX_EXTRACT_CHARS = 120000;
 const PDF_VISUAL_PAGE_LIMIT = 4;
 const TEXT_EXTENSIONS = /\.(txt|md|markdown|json|jsonl|csv|tsv|xml|html|htm|css|js|mjs|cjs|ts|tsx|jsx|py|java|cpp|c|h|cs|go|rs|rb|php|sh|yaml|yml|toml|ini|log|sql|rtf)$/i;
@@ -64,8 +64,25 @@ export async function ingestAllForMessage(attachments = [], userText = '') {
 
     const sections = [];
     const methods = [];
+    const imagePayloads = [];
     let anyReadable = false;
+
     for (const attachment of items) {
+        if (isImageAttachment(attachment)) {
+            const base64 = await resolveAttachmentBase64(attachment).catch(() => '');
+            if (base64) {
+                anyReadable = true;
+                imagePayloads.push({
+                    name: attachment.name,
+                    mimeType: normalizeImageMime(attachment.mimeType, attachment.name),
+                    base64
+                });
+                methods.push({ name: attachment.name, method: 'single_pass_native_image', provider: 'native', ok: true });
+                sections.push(`### ${attachment.name} (Attached Image)\n[Image attached for native vision processing]`);
+                continue;
+            }
+        }
+
         const result = await ingestAttachmentWithFallback(attachment);
         methods.push({
             name: attachment.name,
@@ -95,14 +112,13 @@ export async function ingestAllForMessage(attachments = [], userText = '') {
             ? {
                 kind: 'attachment',
                 selectedText: readableSections || combined,
+                images: imagePayloads.length ? imagePayloads : undefined,
                 sourceAnswer: readableSections || combined,
                 originalRequest: prompt,
                 customInstruction: [
-                    'The content below is the attached document(s).',
+                    'The content below is the attached document(s)/image(s).',
                     'Answer the user request using this attachment content.',
-                    'Do not ask the user to upload, paste, share, or provide the same file again.',
-                    'If the user asked to analyze/review/summarize a resume or document, provide a useful analysis now.',
-                    'Do not invent content that is not present in the attachment text.'
+                    'Do not ask the user to upload, paste, share, or provide the same file again.'
                 ].join(' ')
             }
             : null,
@@ -175,26 +191,35 @@ export async function ingestAttachmentWithFallback(attachment) {
         return { ...server, ok: true, attempts };
     }
 
-    if (isImageAttachment(attachment) || isPdfFile(attachment?.file || attachment)) {
-        const vision = isPdfFile(attachment?.file || attachment)
-            ? await extractPdfViaVision(attachment).catch(error => ({
-                ok: false,
-                text: '',
-                method: 'pdf_vision_ocr',
-                provider: 'vision',
-                message: String(error?.message || error)
-            }))
-            : await ingestViaVision(attachment).catch(error => ({
-                ok: false,
-                text: '',
-                method: 'vision_ocr',
-                provider: 'vision',
-                message: String(error?.message || error)
-            }));
+    if (isImageAttachment(attachment)) {
+        const vision = await ingestViaVision(attachment).catch(error => ({
+            ok: false,
+            text: '',
+            method: 'vision_analysis',
+            provider: 'vision',
+            message: String(error?.message || error)
+        }));
+        const hasVisualText = Boolean(vision?.text && String(vision.text).trim().length >= 10);
         attempts.push({
-            stage: vision?.method || 'vision_ocr',
+            stage: 'vision_analysis',
+            ok: hasVisualText,
+            method: vision?.method || 'vision_analysis'
+        });
+        if (hasVisualText) {
+            return { ...vision, ok: true, attempts };
+        }
+    } else if (isPdfFile(attachment?.file || attachment)) {
+        const vision = await extractPdfViaVision(attachment).catch(error => ({
+            ok: false,
+            text: '',
+            method: 'pdf_vision_ocr',
+            provider: 'vision',
+            message: String(error?.message || error)
+        }));
+        attempts.push({
+            stage: vision?.method || 'pdf_vision_ocr',
             ok: hasUsefulExtractedText(vision?.text),
-            method: vision?.method || 'vision_ocr'
+            method: vision?.method || 'pdf_vision_ocr'
         });
         if (hasUsefulExtractedText(vision?.text)) {
             return { ...vision, ok: true, attempts };
@@ -341,13 +366,9 @@ async function ingestOnServer(attachment, localResult = {}) {
 async function ingestViaVision(attachment) {
     const base64 = await resolveAttachmentBase64(attachment);
     const mimeType = normalizeImageMime(attachment.mimeType, attachment.name);
-    // Detect if user wants object/scene detection vs pure text extraction
-    const isSceneTask = detectSceneTask(attachment);
     const data = await postJson('/api/vision', {
-        task: isSceneTask ? 'general_vision' : 'text_extract',
-        prompt: isSceneTask
-            ? `Analyze this image (${attachment.name}). Identify the main subject, objects, animals, people, and any visible text. Describe what you see.`
-            : `Extract all readable text from this attachment (${attachment.name}). Preserve line order and numbers.`,
+        task: 'general_vision',
+        prompt: `Analyze and describe this image (${attachment.name}) in complete detail. Describe the subject, scene, objects, people, background, colors, layout, text (if any), and key visual features.`,
         mimeType,
         imageBase64: base64
     }, { timeoutMs: 45000 });
@@ -358,9 +379,9 @@ async function ingestViaVision(attachment) {
         : '';
     const text = fullText || snippets || String(data?.response || '').trim();
     return {
-        ok: Boolean(text),
+        ok: Boolean(text && text.length >= 10),
         text: clipText(text),
-        method: 'vision_ocr',
+        method: 'vision_analysis',
         provider: 'vision'
     };
 }
