@@ -9,6 +9,12 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
     const INTERNAL_FETCH_TIMEOUT_MS = 8_000;
     const FETCH_RETRIES = 0;
     const CHAT_ROUTER_MODE = String(process.env.CHAT_ROUTER_MODE || 'strict_single_pass').trim().toLowerCase();
+    const USER_SELECTABLE_GROQ_MODELS = new Set([
+        'llama-3.1-8b-instant',
+        'llama-3.3-70b-versatile',
+        'openai/gpt-oss-20b',
+        'openai/gpt-oss-120b'
+    ]);
 
     function getPreferredGroqCandidates(configuredModel = '', { preferSpeed = false } = {}) {
         const configured = String(configuredModel || '').trim();
@@ -167,7 +173,8 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
                     effectiveMessage,
                     intent,
                     routeDecision,
-                    lengthPolicy
+                    lengthPolicy,
+                    selectedModel: preferences?.selectedModel || null
                 });
             }
 
@@ -204,7 +211,7 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
                 intent
             );
             const modelStartedAt = Date.now();
-            const firstPass = await runModelWithFallback(firstPrompt, lengthPolicy);
+            const firstPass = await runModelWithFallback(firstPrompt, lengthPolicy, preferences?.selectedModel || null);
             timing.modelMs += Date.now() - modelStartedAt;
             if (!firstPass.ok) {
                 return res.status(503).json({
@@ -255,7 +262,7 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
                         intent
                     );
                     const secondStartedAt = Date.now();
-                    const secondPass = await runModelWithFallback(secondPrompt, lengthPolicy);
+                    const secondPass = await runModelWithFallback(secondPrompt, lengthPolicy, preferences?.selectedModel || null);
                     timing.modelMs += Date.now() - secondStartedAt;
                     if (secondPass.ok) {
                         selectedPass = secondPass;
@@ -455,7 +462,8 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
             effectiveMessage,
             intent,
             routeDecision,
-            lengthPolicy
+            lengthPolicy,
+            selectedModel
         } = options;
         res.writeHead(200, {
             'Content-Type': 'text/event-stream; charset=utf-8',
@@ -473,7 +481,7 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
                 if (!delta) return;
                 streamedText += delta;
                 writeSse(res, 'delta', { text: delta });
-            });
+            }, selectedModel);
             timing.modelMs += Date.now() - modelStartedAt;
 
             if (!streamResult.ok) {
@@ -1011,7 +1019,7 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
         }
     }
 
-    async function runModelWithFallback(finalPrompt, lengthPolicy = {}) {
+    async function runModelWithFallback(finalPrompt, lengthPolicy = {}, userSelectedModel = null) {
         const temp = Number.isFinite(Number(lengthPolicy?.temperature)) ? Number(lengthPolicy.temperature) : 0.7;
         const maxTokens = clampInt(lengthPolicy?.maxTokens, 8000, 256, 16000);
         let groqFailureDetail = '';
@@ -1019,7 +1027,7 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
         const groqApiKey = process.env.GROQ_API_KEY || process.env.GROQ_KEY;
 
         if (groqApiKey) {
-            const groqConfiguredModel = String(process.env.GROQ_MODEL || '').trim();
+            const groqConfiguredModel = userSelectedModel || String(process.env.GROQ_MODEL || '').trim();
             const groqCandidates = getPreferredGroqCandidates(groqConfiguredModel, { preferSpeed: false });
 
             let groqText = '';
@@ -1157,13 +1165,13 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
         };
     }
 
-    async function streamModelWithFallback(finalPrompt, lengthPolicy = {}, onDelta = () => {}) {
+    async function streamModelWithFallback(finalPrompt, lengthPolicy = {}, onDelta = () => {}, userSelectedModel = null) {
         const temp = Number.isFinite(Number(lengthPolicy?.temperature)) ? Number(lengthPolicy.temperature) : 0.7;
         const maxTokens = clampInt(lengthPolicy?.maxTokens, 8000, 256, 16000);
         const groqApiKey = process.env.GROQ_API_KEY || process.env.GROQ_KEY;
 
         if (groqApiKey) {
-            const groqConfiguredModel = String(process.env.GROQ_MODEL || '').trim();
+            const groqConfiguredModel = userSelectedModel || String(process.env.GROQ_MODEL || '').trim();
             const groqCandidates = getPreferredGroqCandidates(groqConfiguredModel, { preferSpeed: true });
             for (const model of groqCandidates) {
                 const result = await streamGroqModel({
@@ -2620,7 +2628,8 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
                 responseLength: String(body.preferences.responseLength || 'normal'),
                 responseFormat: String(body.preferences.responseFormat || 'paragraph'),
                 responseStyle: normalizeResponseStyle(body.preferences.responseStyle || body.preferences.supportMode),
-                customSystemPrompt: normalizeCustomSystemPrompt(body.preferences.customSystemPrompt)
+                customSystemPrompt: normalizeCustomSystemPrompt(body.preferences.customSystemPrompt),
+                selectedModel: normalizeSelectedModel(body.preferences.selectedModel)
             }
             : {};
         const intent = normalizeIntent(body.intent);
@@ -2644,6 +2653,12 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
             .replace(/\s+/g, ' ')
             .trim()
             .slice(0, 1200);
+    }
+
+    function normalizeSelectedModel(value) {
+        const model = String(value || '').trim();
+        if (!model || model === 'auto') return null;
+        return USER_SELECTABLE_GROQ_MODELS.has(model) ? model : null;
     }
 
     function normalizeIntent(value) {
@@ -3019,6 +3034,7 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
         getUnknownGeneralKnowledgeEscalationDecision,
         normalizeChatRequest,
         normalizeCustomSystemPrompt,
+        normalizeSelectedModel,
         ensureVerificationSourcesSection,
         normalizeCompactVerificationReport,
         normalizeVerifyGrounding,
