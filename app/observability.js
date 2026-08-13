@@ -17,6 +17,11 @@ export function trackEvent(name, details = {}) {
     store.push(event);
     if (store.length > MAX_EVENTS) store.splice(0, store.length - MAX_EVENTS);
     try {
+        if (globalThis.JarvisDataVerification?.track) {
+            globalThis.JarvisDataVerification.track(event.name, event.details);
+        }
+    } catch (_) {}
+    try {
         console.debug('[JARVIS observability]', event.name, event.details);
     } catch (_) {}
     return event;
@@ -36,7 +41,7 @@ export function trackLatency(name, ms, extra = {}) {
         ms: Math.round(Number(ms) || 0),
         ...extra
     });
-} 
+}
 
 export function getRecentEvents(limit = 20) {
     return getStore().slice(-Math.max(1, Number(limit) || 20));
