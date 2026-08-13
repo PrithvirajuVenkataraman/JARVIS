@@ -120,9 +120,13 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
 
     function isSqlQueryGenerationRequest(text) {
         const t = String(text || '').toLowerCase();
-        return /\b(?:sql|database|postgres|mysql|sqlite|bigquery|snowflake)\b/.test(t) &&
-            /\b(?:generate|write|find|create|show|select|fetch|join|query)\b/.test(t);
+        if (/\b(?:sql|database|postgres|mysql|sqlite|bigquery|snowflake)\b/.test(t)) {
+            return true;
+        }
+        return /\b(?:find|list|show|select|fetch|get|generate|write)\b.*\b(?:all|top|customers|orders|users|products|rows|items|sales|revenue|table|schema|records)\b/i.test(t) &&
+            /\b(?:where|over|greater|less|group by|order by|joined|total|sum|count|amount|days|date|status|showing|having)\b/i.test(t);
     }
+
 
 
     function isEnvFlagEnabled(name, defaultValue = false) {
@@ -1514,8 +1518,16 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
         }
     }
 
+    function stripThinkingTags(text) {
+        return String(text || '')
+            .replace(/<think>[\s\S]*?<\/think>/gi, '')
+            .replace(/^<think>[\s\S]*$/gi, '')
+            .replace(/<\/?think>/gi, '')
+            .trim();
+    }
+
     function parseModelText(modelText) {
-        const text = String(modelText || '').trim();
+        let text = stripThinkingTags(modelText);
         if (!text) {
             return {
                 intent: 'service_unavailable',
@@ -1523,8 +1535,13 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
                 action: null
             };
         }
+        const jsonMatch = text.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/i);
+        if (jsonMatch && jsonMatch[1]) {
+            text = jsonMatch[1].trim();
+        }
         try {
             const parsed = JSON.parse(text);
+
             if (!parsed || typeof parsed !== 'object') {
                 return {
                     intent: 'casual_chat',
