@@ -17910,10 +17910,11 @@ function isWakeGreetingText(text) {
                     location: extractLocationFromSentence(compact) || ''
                 });
                 const location = extractLocationFromSentence(compact);
+                const fullWeatherPrompt = text || compact;
                 if (location) {
-                    await getWeatherByCity(location);
+                    await getWeatherByCity(location, fullWeatherPrompt);
                 } else {
-                    await handleCurrentLocationWeatherRequest(compact);
+                    await handleCurrentLocationWeatherRequest(fullWeatherPrompt);
                 }
                 return;
             }
@@ -18965,11 +18966,12 @@ Quick recap: ...
             
             else if (isWeatherIntentText(cleanText)) {
                 const location = extractLocationFromSentence(cleanText);
+                const fullPrompt = rawCommandText || text || cleanText;
 
                 if (location) {
-                    await getWeatherByCity(location);
+                    await getWeatherByCity(location, fullPrompt);
                 } else {
-                    await handleCurrentLocationWeatherRequest(cleanText);
+                    await handleCurrentLocationWeatherRequest(fullPrompt);
                 }
                 return;
             }
@@ -19848,7 +19850,7 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
             return !extractLocationFromSentence(raw);
         }
 
-        async function getWeatherByCity(cityName) {
+        async function getWeatherByCity(cityName, originalQuery = null) {
             hideThinkingIndicator(); 
             try {
                 const searchName = expandStateAbbreviation(cityName.trim());
@@ -19941,7 +19943,7 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
                 }
 
 
-                await fetchWeather(latitude, longitude, locationName, cityName.trim());
+                await fetchWeather(latitude, longitude, locationName, originalQuery || cityName.trim());
                 
             } catch (error) {
                 await deliverApiReply('weather_lookup_error', {
