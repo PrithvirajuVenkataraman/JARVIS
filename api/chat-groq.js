@@ -3,6 +3,7 @@ import { applyApiSecurity } from './_lib/security.js';
 import { runEvidenceFirstWebRag, runVerifiedWebSearch } from './search.js';
 import { extractWithCrawl4Ai } from './_lib/crawl4ai-client.js';
 import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-controls.js';
+import { validateEntityResponse } from './_lib/entity-verifier.js';
 
     const MODEL_FETCH_TIMEOUT_MS = 12_000;
     const STREAM_MODEL_FETCH_TIMEOUT_MS = 10_000;
@@ -2080,11 +2081,15 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
             return parsedResponse;
         }
 
+        const entityCheck = validateEntityResponse(message, answerText, sources);
+        const verifiedSourceData = entityCheck?.verifiedSourceData || null;
+
         return {
             ...parsedResponse,
             intent: 'live_update',
             response: buildLiveUpdateResponse(message, sources, answerText),
-            action: parsedResponse?.action ?? null
+            action: parsedResponse?.action ?? null,
+            ...(verifiedSourceData ? { verifiedSourceData } : {})
         };
     }
 
@@ -2101,8 +2106,20 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
     function isMetaTalkAnswer(text) {
         const t = String(text || '').toLowerCase();
         if (!t.trim()) return true;
-        return /\b(provided snippets?|supplied snippets?|provided text|retrieved context|search results|top live snippets)\b[\s\S]{0,80}\b(do not|does not|do not state|do not name|contain no|no information|do not specify|could not confirm)\b/.test(t) ||
-            /^(the provided|based on the provided|according to the provided|the search results)\b/.test(t);
+        // Catch LLM meta-commentary about search snippets/retrieved context
+        return /\b(provided snippets?|supplied snippets?|provided text|retrieved context|search results?|top live snippets?|available snippets?|given snippets?|above snippets?)\b[\s\S]{0,100}\b(do not|does not|don't|doesn't|do not state|do not name|do not mention|contain no|no information|do not specify|could not confirm|could not find|do not include|do not provide|only state|only mention)\b/.test(t) ||
+            /^(the provided|based on the provided|according to the provided|the search results?|from the provided|the available|the retrieved|the supplied)\b/.test(t) ||
+            /\b(snippets?|search results?) (do not|don't|only)\b/.test(t);
+    }
+
+    function stripMetaTalkPrefixes(text) {
+        let t = String(text || '').trim();
+        if (!t) return t;
+        // Remove leading meta-talk sentences that reference snippets/search results
+        t = t.replace(/^(?:The provided snippets?|Based on the provided snippets?|According to the provided snippets?|The search results?|Based on the search results?|From the (?:provided|available|retrieved) (?:snippets?|context|text))[\s\S]*?(?:\.|\n)\s*/i, '');
+        // Remove "However, ..." transitional prefixes after meta-talk removal
+        t = t.replace(/^(?:However|That said|Nevertheless|Nonetheless),?\s*/i, '');
+        return t.trim();
     }
 
     // IMPORTANT: Political leadership, current officeholders, prices, scores, and
@@ -2123,7 +2140,7 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
                 .slice(0, 3);
         }
 
-        let body = cleanExisting;
+        let body = stripMetaTalkPrefixes(cleanExisting);
         if (!body || isMetaTalkAnswer(body)) {
             const lead = top[0] || {};
             const title = normalizeLeadTitle(message, lead);
@@ -2134,6 +2151,8 @@ import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-control
                 if (fallback) body = fallback;
             }
         }
+        // Final cleanup: strip any remaining meta-talk prefixes
+        body = stripMetaTalkPrefixes(body);
 
         if (!/\bSources:\s*/i.test(body) && top.length > 0) {
             const lines = [body, '', 'Sources:'];
