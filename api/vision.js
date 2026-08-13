@@ -10,11 +10,51 @@ export default async function handler(req, res) {
         methods: ['POST'],
         routeKey: 'vision',
         maxBodyBytes: 8 * 1024 * 1024,
-        rateLimit: { max: 10, windowMs: 60 * 1000 }
+        rateLimit: { max: 10, windowMs: 60 * 1000 },
+        skipAbusiveCheck: true
     });
     if (guard.handled) return;
 
+    if (req.body?.task === 'health_check') {
+        const providers = getVisionProviders();
+        return res.status(200).json({
+            success: true,
+            configured: !!(providers.groqApiKey || providers.geminiApiKey),
+            disabled: process.env.DISABLE_VISION_PREPASS === 'true',
+            providers: {
+                groq: !!providers.groqApiKey,
+                gemini: !!providers.geminiApiKey
+            }
+        });
+    }
+
+    const { prompt = '', task = 'general_vision', mimeType = 'image/jpeg', imageBase64 = '' } = req.body || {};
+    if (String(prompt).length > 2000 || String(task).length > 120) {
+        return sendVisionError(res, 413, 'payload_too_large', 'Prompt or task is too long.');
+    }
+    if (!imageBase64 || typeof imageBase64 !== 'string') {
+        return sendVisionError(res, 400, 'invalid_request', 'imageBase64 is required.');
+    }
+    const normalizedMimeType = String(mimeType || '').trim().toLowerCase();
+    if (!ALLOWED_IMAGE_TYPES.has(normalizedMimeType)) {
+        return sendVisionError(res, 415, 'unsupported_media_type', 'Supported image types are JPEG, PNG, WebP, and GIF.');
+    }
+    if (imageBase64.length > MAX_IMAGE_BASE64_CHARS || !/^[A-Za-z0-9+/]+={0,2}$/.test(imageBase64)) {
+        return sendVisionError(res, 413, 'invalid_image', 'Image data is malformed or too large.');
+    }
+
+    if (process.env.DISABLE_VISION_PREPASS === 'true') {
+        return res.status(200).json({
+            success: true,
+            task,
+            disabled: true,
+            response: 'Vision pre-pass is bypassed. Single-pass native vision is active.',
+            details: { disabled: true }
+        });
+    }
+
     try {
+
         const { prompt = '', task = 'general_vision', mimeType = 'image/jpeg', imageBase64 = '' } = req.body || {};
         if (String(prompt).length > 2000 || String(task).length > 120) {
             return sendVisionError(res, 413, 'payload_too_large', 'Prompt or task is too long.');
@@ -158,8 +198,6 @@ const GROQ_VISION_MODEL_FALLBACKS = [
     'llama-3.2-90b-vision-preview'
 ];
 const GROQ_TEXT_MODEL_FALLBACKS = [
-    'openai/gpt-oss-120b',
-    'openai/gpt-oss-20b',
     'llama-3.3-70b-versatile',
     'llama-3.1-8b-instant'
 ];
