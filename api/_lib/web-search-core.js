@@ -88,7 +88,8 @@ export async function searchWeb(query, options = {}) {
     }
 
     const searxngUrl = getSearxngUrl(options.searxngUrl);
-    if (!searxngUrl) {
+    const exaApiKey = getExaApiKey();
+    if (!searxngUrl && !exaApiKey) {
         const error = new Error('SEARXNG_URL is not configured.');
         error.code = 'searxng_not_configured';
         error.status = 503;
@@ -115,6 +116,19 @@ export async function searchWeb(query, options = {}) {
             ...cached,
             cached: true
         };
+    }
+
+    if (!searxngUrl && exaApiKey) {
+        const exaResults = await queryExa(exaApiKey, normalizedQuery, { timeoutMs, maxResults });
+        const payload = {
+            query: normalizedQuery,
+            results: exaResults,
+            sourceCount: exaResults.length,
+            provider: 'exa',
+            cached: false
+        };
+        await cacheSet(cacheKey, payload, cacheTtlSeconds);
+        return payload;
     }
 
     const searchResults = await querySearxng(searxngUrl, normalizedQuery, {
@@ -616,11 +630,65 @@ function maskEndpoint(value) {
     return parsed ? parsed.origin : '';
 }
 
+function getExaApiKey() {
+    return String(process.env.EXA_API_KEY || process.env.EXA_KEY || process.env.AI_GATEWAY_TOKEN || process.env.VERCEL_AI_GATEWAY_TOKEN || process.env.GATEWAY_TOKEN || '').trim();
+}
+
+async function queryExa(apiKey, query, { timeoutMs = 8000, maxResults = 4 } = {}) {
+    const isAiGateway = Boolean(process.env.AI_GATEWAY_TOKEN || process.env.VERCEL_AI_GATEWAY_TOKEN);
+    const exaEndpoint = isAiGateway && process.env.AI_GATEWAY_EXA_URL
+        ? process.env.AI_GATEWAY_EXA_URL
+        : 'https://api.exa.ai/search';
+    const headers = {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey
+    };
+    if (isAiGateway) {
+        headers.Authorization = `Bearer ${apiKey}`;
+    }
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        const response = await fetch(exaEndpoint, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+                query,
+                type: 'auto',
+                numResults: Math.min(maxResults, 10),
+                contents: {
+                    text: { maxCharacters: 3000 },
+                    summary: true,
+                    highlights: { numSentences: 3, highlightsPerUrl: 3 }
+                }
+            }),
+            signal: controller.signal
+        });
+        if (!response.ok) return [];
+        const data = await response.json();
+        const results = Array.isArray(data?.results) ? data.results : [];
+        return results.map(item => ({
+            title: String(item?.title || item?.url || '').trim(),
+            url: String(item?.url || '').trim(),
+            snippet: String(item?.summary || item?.text || item?.highlights?.join(' ') || '').replace(/\s+/g, ' ').trim().slice(0, 300),
+            text: String(item?.text || item?.summary || '').replace(/\s+/g, ' ').trim().slice(0, 4000),
+            source: 'exa',
+            fetchedAt: new Date().toISOString()
+        })).filter(item => item.title && item.url);
+    } catch (_) {
+        return [];
+    } finally {
+        clearTimeout(timeout);
+    }
+}
+
 export const __test = {
     extractReadableText,
     normalizeSearchRequest,
     robotsAllows,
     rankSearxngResults,
     isFetchableHttpUrl,
-    isWebSearchEnabled
+    isWebSearchEnabled,
+    getExaApiKey,
+    queryExa
 };
