@@ -8,6 +8,7 @@ const GEMINI_MODEL_FALLBACKS = [
 ];
 const GROQ_VISION_MODEL_FALLBACKS = [
     'llama-3.2-11b-vision-preview',
+    'meta-llama/llama-3.2-11b-vision-instruct',
     'llama-3.2-90b-vision-preview'
 ];
 
