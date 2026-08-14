@@ -1,4 +1,3 @@
-import { extractLocalImageTagFromAttachment } from './local-vision-engine.js';
 const MAX_ATTACHMENTS = 6;
 const MAX_FILE_BYTES = 12 * 1024 * 1024;
 const MAX_EXTRACT_CHARS = 120000;
@@ -73,14 +72,13 @@ export async function ingestAllForMessage(attachments = [], userText = '') {
             const base64 = await resolveAttachmentBase64(attachment).catch(() => '');
             if (base64) {
                 anyReadable = true;
-                const localTag = extractLocalImageTagFromAttachment(attachment);
                 imagePayloads.push({
                     name: attachment.name,
                     mimeType: normalizeImageMime(attachment.mimeType, attachment.name),
                     base64
                 });
                 methods.push({ name: attachment.name, method: 'single_pass_native_image', provider: 'native', ok: true });
-                sections.push(`[Attached Image: ${attachment.name}] ${localTag}`);
+                sections.push(`[Attached Image: ${attachment.name}]`);
                 continue;
             }
         }
@@ -119,9 +117,7 @@ export async function ingestAllForMessage(attachments = [], userText = '') {
                 originalRequest: prompt,
                 customInstruction: [
                     'The user has attached image(s)/document(s).',
-                    'Describe and answer directly about what is depicted in the attached image.',
-                    'DEVICE & SCREEN DISPLAY IDENTIFICATION: If the attached image depicts an electronic device (such as an iPad, tablet, smartphone, laptop, or display) showing an application or screen content, identify the device (e.g. iPad/tablet) and the app/interface on screen FIRST.',
-                    'DO NOT misidentify wallpapers, app graphics, icons, or headers inside a screen display as real-world physical landscapes (such as real mountains or outdoor scenes).',
+                    'Describe and answer directly about what is depicted in the attached image, including people, objects, text, diagrams, or scenes shown.',
                     'Do not write meta-commentary about vision algorithms, CNNs, or machine learning.',
                     'Do not state that you cannot see the image. Directly describe the objects, text, scene, and content of the image.'
                 ].join(' ')
