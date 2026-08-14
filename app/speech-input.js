@@ -527,13 +527,13 @@ export function installSpeechInputUI(options = {}) {
         return controller.toggleDictation();
     };
 
-    globalThis.toggleConverseMode = () => {
+    globalThis.toggleConverseMode = async () => {
         const wasConverseEnabled = controller.getState().converseEnabled;
         committedText = '';
         input.value = '';
         delete input.dataset.inputSource;
         options.onComposerChanged?.();
-        const toggled = controller.toggleConverse();
+        const toggled = await controller.toggleConverse();
         if (wasConverseEnabled) {
             globalThis.stopActiveGeneration?.('converse_stop');
             if (globalThis.speechSynthesis?.speaking) {
