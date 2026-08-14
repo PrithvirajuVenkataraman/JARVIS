@@ -10,7 +10,7 @@ const FETCH_TIMEOUT_MS = 4000;
 /**
  * Dynamically fetches live ground truth summary for any query by routing to Wikipedia's search and summary APIs.
  * @param {string} query
- * @param {AbortSignal} [signal]
+ * @param {AbortSignal} [signal] 
  * @returns {Promise<{ title: string, extract: string, sourceUrl: string } | null>}
  */
 export async function fetchGroundTruth(query, signal) {
