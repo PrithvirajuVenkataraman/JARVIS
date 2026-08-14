@@ -995,6 +995,13 @@ function buildVisionPrompt(userPrompt, task) {
             : '- Ignore wall color/background/decor unless user explicitly asks for background.',
         '- VISIBLE EVIDENCE RULE: Describe only what is visibly supported by the image pixels. Accurately identify people, attire, gestures, objects, text, math, charts, and scenes that are clearly visible.',
         '- UNCERTAINTY & ZERO-HALLUCINATION RULE: If uncertain about any identity, object, model, brand, or visual detail, state uncertainty clearly rather than guessing. Never invent, assume, or fabricate unseen devices, screens, backgrounds, or contexts.',
+        '- PERSON & PORTRAIT RECOGNITION RULE: When a person or portrait appears in the image:',
+        '  1. First, attempt to recognize and name the person if they are a well-known public figure, celebrity, or historical personality with high confidence based on clear visible features.',
+        '  2. If the person cannot be recognized or is not a known public figure, DO NOT guess their name or invent an identity. Instead, provide a detailed description of:',
+        '     * How the person looks (apparent age range, expression, hair color/style, facial features).',
+        '     * What they are wearing (clothing type, colors, patterns, accessories like glasses, watch, hat, jewelry).',
+        '     * What they are doing (action, posture, pose, gestures, activity).',
+        '     * The setting/environment they are in (indoor/outdoor, background, lighting, objects around them).',
         '- If a clear product or object is prominent, name it in answer and summary using only visible evidence.',
         '- For phones, tablets, laptops, earbuds, watches, and other consumer electronics: only fill brand/model when a logo, printed text, or unmistakable hardware cue is visible.',
         '- If brand/model is not clearly supported by visible evidence, leave brand and model as empty strings and describe the object instead. Prefer "not visible" over guessing.',
@@ -1004,7 +1011,7 @@ function buildVisionPrompt(userPrompt, task) {
         'If text appears, preserve character accuracy, punctuation, and line order.',
         'Detect visible objects including products, people, animals, food, devices, vehicles, and common items.',
         'Put animals in animals[]. Put vehicles/cars/bikes/buses/trucks in objects[] with clear labels like "car", "motorcycle", "bus".',
-        'If user asks "what is this", "what animal", "what vehicle", or "what do you see", answer the main subject first in plain language.',
+        'If user asks "what is this", "what animal", "what vehicle", "who is this", or "what do you see", answer the main subject first in plain language.',
         'If text appears in image, include extracted snippets in textDetected and fullText, but do not let text override the main subject for scene tasks.',
         `Requested task: ${task}.`,
         `Task-specific requirement: ${taskRule}`,
@@ -1015,6 +1022,13 @@ function buildVisionPrompt(userPrompt, task) {
         '  "answer": "direct concise answer to user prompt",',
         '  "mainSubject": "most important visible subject, object, living thing, part, product, or scene item",',
         '  "subjectType": "animal|person|vehicle|device|product|plant|food|document|scene|object|unknown",',
+        '  "personDetails": {',
+        '    "recognizedName": "recognized public figure name, or empty string if not recognized",',
+        '    "appearance": "facial features, hair, expression, apparent age range",',
+        '    "attire": "clothing items, colors, style, accessories (glasses, watch, etc.)",',
+        '    "action": "what the person is doing, pose, posture, gestures",',
+        '    "setting": "environment, indoor/outdoor, background elements"',
+        '  },',
         '  "conditionOrState": "visible condition, posture, damage, growth stage, UI state, arrangement, or empty string",',
         '  "likelyReason": "visible-evidence explanation for why it looks like this, or empty string",',
         '  "careOrSafetyNote": "brief practical note only when useful for living things, damaged items, hazards, or empty string",',
@@ -1044,7 +1058,7 @@ function buildVisionPrompt(userPrompt, task) {
         '- Use empty arrays when a section does not apply.',
         '- Confidence values must be between 0 and 1.',
         '- Keep summary under 45 words.',
-        '- Keep answer under 140 words for product/object identification, otherwise under 80 words.',
+        '- Keep answer under 140 words for product/object/person identification, otherwise under 80 words.',
         '- For why/explanation questions, keep the final answer direct: identity first, visible condition second, likely reason third.',
         '- Do not fabricate unreadable text; only include likely readable snippets.',
         isTextTask
@@ -1063,6 +1077,9 @@ function getTaskRule(task) {
             return 'Focus on food and drink items visible in fridge shelves and door.';
         case 'people_count':
             return 'Focus on counting people/humans accurately and include count in summary.';
+        case 'person_analyze':
+        case 'portrait_describe':
+            return 'First attempt to recognize if it is a well-known public figure. If not recognized, describe in detail how they look, what they are wearing, what they are doing, and the setting.';
         case 'animal_detect':
             return 'Focus on animals and species/breed labels when visible. Include counts and confidence. Do not answer with OCR/text-only results.';
         case 'object_detect':
@@ -1074,7 +1091,7 @@ function getTaskRule(task) {
         case 'translate_to_english':
             return 'Extract visible text and translate it accurately to English.';
         default:
-            return 'Answer the user query about the scene. Prefer the prominent foreground subject (animal, vehicle, person, product, or object). For devices, infer brand/model only from visible evidence and qualify uncertainty. Do not let background text dominate.';
+            return 'Answer the user query about the scene. Prefer the prominent foreground subject (animal, vehicle, person, product, or object). If a person is present, try to recognize them if well-known, or describe their appearance, clothing, action, and setting. For devices, infer brand/model only from visible evidence and qualify uncertainty. Do not let background text dominate.';
     }
 }
 
