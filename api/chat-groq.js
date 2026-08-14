@@ -731,12 +731,16 @@ import { classifyImageLocally } from './_lib/local-vision-classifier.js';
                 warnings: [`verification_rag_failed:${String(error?.code || error?.message || 'unknown')}`]
             }));
             retrievalFallbackUsed = true;
-            if (fallback?.verified && Array.isArray(fallback.results) && fallback.results.length) {
-                const evidenceUrls = new Set((Array.isArray(fallback.evidenceUsed) ? fallback.evidenceUsed : [])
+            const candidateResults = Array.isArray(fallback?.results) && fallback.results.length
+                ? fallback.results
+                : (Array.isArray(fallback?.evidenceUsed) ? fallback.evidenceUsed : []);
+            if (candidateResults.length) {
+                const evidenceUrls = new Set((Array.isArray(fallback?.evidenceUsed) ? fallback.evidenceUsed : [])
                     .map(item => String(item?.url || '').trim())
                     .filter(Boolean));
-                sources = fallback.results
-                    .filter(item => !evidenceUrls.size || evidenceUrls.has(String(item?.url || '').trim()))
+                const filtered = candidateResults.filter(item => !evidenceUrls.size || evidenceUrls.has(String(item?.url || '').trim()));
+                const finalCandidates = filtered.length ? filtered : candidateResults;
+                sources = finalCandidates
                     .slice(0, 6)
                     .map(normalizeVerificationRagSource);
                 evidenceWarning = '';
@@ -824,13 +828,23 @@ import { classifyImageLocally } from './_lib/local-vision-classifier.js';
     }
 
     function buildVerificationRagQuery(originalRequest, answer) {
-        const original = String(originalRequest || '').replace(/\s+/g, ' ').trim();
-        const claim = String(answer || '').replace(/\s+/g, ' ').trim();
+        const cleanQuestion = String(originalRequest || '')
+            .replace(/^(?:please\s+)?(?:can you\s+)?(?:tell me\s+)?(?:what is|who is|where is|when is|how is|which is)\s+/i, '')
+            .replace(/[?!.,]+$/g, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+        const firstSentence = String(answer || '')
+            .split(/[.\n]/)[0]
+            .replace(/\s+/g, ' ')
+            .trim();
+        const properNouns = firstSentence.match(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b/g) || [];
+        const uniqueEntities = Array.from(new Set(properNouns)).slice(0, 3).join(' ');
         const pieces = [
-            original && !/^unknown$/i.test(original) ? original : '',
-            claim
+            cleanQuestion && !/^unknown$/i.test(cleanQuestion) ? cleanQuestion : '',
+            uniqueEntities || firstSentence.slice(0, 60)
         ].filter(Boolean);
-        return pieces.join(' ').slice(0, 420) || 'verify current factual claim';
+        const combined = pieces.join(' ').replace(/[^\w\s-]/g, ' ').replace(/\s+/g, ' ').trim();
+        return combined.slice(0, 100) || 'verify current factual claim';
     }
 
     function normalizeVerificationRagSource(source = {}) {
