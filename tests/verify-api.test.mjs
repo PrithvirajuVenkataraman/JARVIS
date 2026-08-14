@@ -60,7 +60,7 @@ assert.equal(getRes.statusCode, 405);
 
 const invalidReq = createMockReq('POST', {});
 const invalidRes = createMockRes();
-await handler(invalidReq, invalidRes);
+await handler(invalidReq, invalidRes); 
 assert.equal(invalidRes.statusCode, 400);
 assert.equal(invalidRes.data?.success, false);
 
