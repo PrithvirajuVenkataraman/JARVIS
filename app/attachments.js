@@ -432,16 +432,21 @@ function validateFile(file) {
 }
 
 async function createPendingAttachment(file) {
-    const isImage = (file.type || '').startsWith('image/') || IMAGE_EXTENSIONS.test(file.name);
+    const isImage = (file.type || '').startsWith('image/') || IMAGE_EXTENSIONS.test(file.name || '');
+    let fileName = String(file.name || '').trim();
+    if (!fileName || fileName === 'blob' || fileName === 'image.png') {
+        const ext = file.type ? (file.type.split('/')[1]?.replace('jpeg', 'jpg') || 'png') : 'png';
+        fileName = `pasted-media-${Date.now()}.${ext}`;
+    }
     const base64 = isImage
         ? await compressImageFileToBase64(file).catch(() => fileToBase64(file))
         : await fileToBase64(file);
     const previewUrl = isImage ? URL.createObjectURL(file) : '';
     return {
         id: `att_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-        name: file.name,
-        mimeType: isImage ? 'image/jpeg' : (file.type || guessMimeFromName(file.name)),
-        size: file.size,
+        name: fileName,
+        mimeType: isImage ? (file.type || 'image/jpeg') : (file.type || guessMimeFromName(fileName)),
+        size: file.size || 0,
         file,
         base64,
         previewUrl
