@@ -7391,20 +7391,40 @@ let showRoutingDebugBadge = false;
         }
 
         function buildVerificationSearchQuery(originalQuestion, answerText = '') {
-            const original = String(originalQuestion || '').replace(/\s+/g, ' ').trim();
-            const answer = String(answerText || '').replace(/\s+/g, ' ').trim();
-            return [original && original !== 'the previous question' ? original : '', answer]
-                .filter(Boolean)
-                .join(' ')
-                .slice(0, 420);
+            const cleanQuestion = String(originalQuestion || '')
+                .replace(/^(?:please\s+)?(?:can you\s+)?(?:tell me\s+)?(?:what is|who is|where is|when is|how is|which is)\s+/i, '')
+                .replace(/[?!.,]+$/g, '')
+                .replace(/\s+/g, ' ')
+                .trim();
+            const firstSentence = String(answerText || '')
+                .split(/[.\n]/)[0]
+                .replace(/\s+/g, ' ')
+                .trim();
+            const properNouns = firstSentence.match(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b/g) || [];
+            const uniqueEntities = Array.from(new Set(properNouns)).slice(0, 3).join(' ');
+            const pieces = [
+                cleanQuestion && cleanQuestion !== 'the previous question' && !/^unknown$/i.test(cleanQuestion) ? cleanQuestion : '',
+                uniqueEntities || firstSentence.slice(0, 60)
+            ].filter(Boolean);
+            const combined = pieces.join(' ').replace(/[^\w\s-]/g, ' ').replace(/\s+/g, ' ').trim();
+            return combined.slice(0, 100) || 'verify current factual claim';
         }
 
-        async function buildVerificationEvidenceBundle(originalQuestion, answerText = '') {
+        async function buildVerificationEvidenceBundle(originalQuestion, answerText = '', existingSources = []) {
             const query = buildVerificationSearchQuery(originalQuestion, answerText);
+            const normalizedExisting = (Array.isArray(existingSources) ? existingSources : [])
+                .filter(isUsableVerificationSource)
+                .map(item => normalizeVerificationSource(item, null))
+                .filter(item => item.url && item.title);
+
             if (!query || query === 'the previous question') {
+                if (normalizedExisting.length) {
+                    return { query: 'verified claim', sources: normalizedExisting.slice(0, 5), warning: '' };
+                }
                 return { query, sources: [], warning: 'No original user question was available for source lookup.' };
             }
-            let results = [];
+
+            let results = [...normalizedExisting];
             const searchController = new AbortController();
             const searchTimeout = setTimeout(() => searchController.abort(), 5500);
             try {
@@ -7418,31 +7438,41 @@ let showRoutingDebugBadge = false;
                     6000,
                     () => ({ results: [], timeout: true })
                 );
-                if (searchData?.timeout) {
-                    return { query, sources: [], warning: 'Source lookup timed out before usable results were returned.' };
+
+                const candidateResults = Array.isArray(searchData?.results) && searchData.results.length
+                    ? searchData.results
+                    : (Array.isArray(searchData?.evidenceUsed) ? searchData.evidenceUsed : []);
+
+                if (candidateResults.length) {
+                    const evidenceUrls = new Set((Array.isArray(searchData?.evidenceUsed) ? searchData.evidenceUsed : [])
+                        .map(item => String(item?.url || '').trim())
+                        .filter(Boolean));
+                    const freshFiltered = candidateResults
+                        .filter(item => !evidenceUrls.size || evidenceUrls.has(String(item?.url || '').trim()))
+                        .filter(isUsableVerificationSource);
+                    const freshUsable = freshFiltered.length ? freshFiltered : candidateResults.filter(isUsableVerificationSource);
+
+                    const seenUrls = new Set(results.map(r => String(r.url || '').trim()));
+                    for (const item of freshUsable) {
+                        const u = String(item.url || '').trim();
+                        if (u && !seenUrls.has(u)) {
+                            seenUrls.add(u);
+                            results.push(item);
+                        }
+                    }
                 }
-                if (searchData?.verified !== true) {
-                    return {
-                        query,
-                        sources: [],
-                        warning: searchData?.answer || 'Strict source lookup could not verify this claim from retrieved evidence.'
-                    };
-                }
-                const evidenceUrls = new Set((Array.isArray(searchData?.evidenceUsed) ? searchData.evidenceUsed : [])
-                    .map(item => String(item?.url || '').trim())
-                    .filter(Boolean));
-                results = (Array.isArray(searchData?.results) ? searchData.results : [])
-                    .filter(item => !evidenceUrls.size || evidenceUrls.has(String(item?.url || '').trim()))
-                    .filter(isUsableVerificationSource)
-                    .slice(0, 5);
             } catch (error) {
+                // If live search fails or times out, proceed with existing sources if present
+            } finally {
+                clearTimeout(searchTimeout);
+            }
+
+            if (!results.length) {
                 return {
                     query,
                     sources: [],
-                    warning: String(error?.message || 'Source lookup failed before usable results were returned.')
+                    warning: 'No answer-bearing public source was found for this verification.'
                 };
-            } finally {
-                clearTimeout(searchTimeout);
             }
 
             const extractionCandidates = results.slice(0, 3);
@@ -7528,7 +7558,8 @@ let showRoutingDebugBadge = false;
             const controller = beginAbortableRequest();
             try {
                 showThinkingIndicator('Checking sources...');
-                const evidenceBundle = await buildVerificationEvidenceBundle(originalQuestion, meta.text);
+                const existingSources = Array.isArray(meta.sources) ? meta.sources : [];
+                const evidenceBundle = await buildVerificationEvidenceBundle(originalQuestion, meta.text, existingSources);
                 const evidenceBlock = formatVerificationEvidenceForPrompt(evidenceBundle);
                 const verificationPrompt = [
                     hidden,
@@ -7563,9 +7594,11 @@ let showRoutingDebugBadge = false;
                 });
                 if (response?.aborted) return;
                 const finalText = String(response?.response || response?.text || '').trim() || 'I could not complete verification this time.';
+                const hasUnavailableSources = /No retrieved sources were available|verification could not be performed/i.test(finalText);
+                const hasValidEvidence = evidenceBundle.sources.length > 0 && !hasUnavailableSources;
                 addChatMessage(finalText, false, true, {
                     turnId: turn.id,
-                    sourceType: 'verified',
+                    sourceType: hasValidEvidence ? 'verified' : 'default',
                     userMessage: originalQuestion
                 });
                 saveToHistory(visible, finalText);
