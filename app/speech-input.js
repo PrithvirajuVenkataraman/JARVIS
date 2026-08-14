@@ -154,9 +154,9 @@ export function createWhisperRecorder(options = {}) {
                         // Voice activity threshold
                         if (average > 12) {
                             speechDetected = true;
-                            // Instant barge-in: cancel any active TTS speaking
-                            if (window.speechSynthesis?.speaking) {
-                                window.speechSynthesis.cancel();
+                            // Instant barge-in: cancel any active TTS speaking and capture interrupted state
+                            if (globalThis.speechSynthesis?.speaking || globalThis.isConverseSpeechActive?.()) {
+                                globalThis.stopConverseSpeech?.('barge_in');
                             }
                             if (silenceTimer) {
                                 clearTimeout(silenceTimer);
@@ -276,6 +276,9 @@ export function createSpeechInputController(options = {}) {
             r.lang = language;
 
             r.onresult = event => {
+                if (globalThis.speechSynthesis?.speaking || globalThis.isConverseSpeechActive?.()) {
+                    globalThis.stopConverseSpeech?.('barge_in');
+                }
                 let interim = '';
                 let final = '';
                 for (let i = event.resultIndex; i < event.results.length; i++) {
@@ -533,8 +536,8 @@ export function installSpeechInputUI(options = {}) {
         const toggled = controller.toggleConverse();
         if (wasConverseEnabled) {
             globalThis.stopActiveGeneration?.('converse_stop');
-            if (window.speechSynthesis?.speaking) {
-                window.speechSynthesis.cancel();
+            if (globalThis.speechSynthesis?.speaking) {
+                globalThis.speechSynthesis.cancel();
             }
         }
         return toggled;
