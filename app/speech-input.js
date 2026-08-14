@@ -1,19 +1,23 @@
-const ERROR_MESSAGES = { 
-    'not-allowed': 'Microphone permission was denied. Allow microphone access in your browser settings.', 
-    'service-not-allowed': 'Speech recognition is blocked by the browser or device policy. Language support depends on your browser and device; try English or another language.', 
-    'audio-capture': 'No working microphone was found.', 
-    network: 'Speech recognition could not reach the recognition service. Language support depends on your browser and device; try English or another language.', 
-    'no-speech': 'No speech was detected. If this repeats, try English or another browser-supported language.' 
-}; 
-const enqueueMicrotask = globalThis.queueMicrotask || (callback => Promise.resolve().then(callback)); 
-const TEXT_ONLY_LANGUAGE_NOTICE = 'Non-English languages are supported by text translation only. Voice input uses English transcription.';
-const CONVERSE_DUPLICATE_WINDOW_MS = 8000;
-const DEFAULT_CONVERSE_SILENCE_MS = 650;
-const DEFAULT_CONVERSE_MAX_WAIT_MS = 2400;
+/**
+ * Unified Speech Input & Hands-Free Converse Controller.
+ * Primary STT: Serverless Groq Whisper (whisper-large-v3-turbo) via MediaRecorder.
+ * Fallback STT: Native Browser Web Speech API (SpeechRecognition / webkitSpeechRecognition).
+ */
+
+const ERROR_MESSAGES = {
+    'not-allowed': 'Microphone permission was denied. Allow microphone access in your browser settings.',
+    'service-not-allowed': 'Speech recognition is blocked by browser policy. Language support depends on your browser and device; try English or another language.',
+    'audio-capture': 'No working microphone was found.',
+    network: 'Speech recognition could not reach the recognition service. Language support depends on your browser and device; try English or another language.',
+    'no-speech': 'No speech was detected. If this repeats, try English or another language.'
+};
+
+const DEFAULT_CONVERSE_SILENCE_MS = 800;
+const DEFAULT_CONVERSE_MAX_WAIT_MS = 3500;
 
 function normalizeVoiceInputLanguage(language = '') {
     const value = String(language || '').trim();
-    const supported = ['ta-IN', 'te-IN', 'kn-IN', 'hi-IN', 'en-IN', 'en-US'];
+    const supported = ['en-US', 'en-IN', 'ta-IN', 'te-IN', 'kn-IN', 'hi-IN'];
     if (supported.includes(value)) return value;
     const lower = value.toLowerCase();
     if (lower.startsWith('ta')) return 'ta-IN';
@@ -23,8 +27,206 @@ function normalizeVoiceInputLanguage(language = '') {
     return 'en-US';
 }
 
+/**
+ * Creates an audio recorder that posts audio to /api/stt with fallback support.
+ */
+export function createWhisperRecorder(options = {}) {
+    let mediaStream = null;
+    let mediaRecorder = null;
+    let audioChunks = [];
+    let isRecording = false;
+    let audioContext = null;
+    let analyser = null;
+    let silenceTimer = null;
+    let speechDetected = false;
 
-export function createSpeechInputController(options = {}) { 
+    const onTranscribed = options.onTranscribed || (() => {});
+    const onError = options.onError || (() => {});
+    const onState = options.onState || (() => {});
+    const silenceTimeoutMs = options.silenceTimeoutMs || DEFAULT_CONVERSE_SILENCE_MS;
+
+    async function start(language = 'en-US') {
+        if (isRecording) return true;
+        if (!navigator?.mediaDevices?.getUserMedia) {
+            return false;
+        }
+
+        try {
+            audioChunks = [];
+            speechDetected = false;
+            mediaStream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true
+                }
+            });
+
+            // Choose supported mimeType
+            const mimeTypes = [
+                'audio/webm;codecs=opus',
+                'audio/webm',
+                'audio/mp4',
+                'audio/ogg;codecs=opus',
+                'audio/wav'
+            ];
+            const chosenMime = mimeTypes.find(t => MediaRecorder.isTypeSupported?.(t)) || '';
+
+            mediaRecorder = chosenMime ? new MediaRecorder(mediaStream, { mimeType: chosenMime }) : new MediaRecorder(mediaStream);
+
+            mediaRecorder.ondataavailable = event => {
+                if (event.data && event.data.size > 0) {
+                    audioChunks.push(event.data);
+                }
+            };
+
+            mediaRecorder.onstop = async () => {
+                isRecording = false;
+                onState({ recording: false, processing: true });
+                if (audioChunks.length === 0) {
+                    onState({ recording: false, processing: false });
+                    return;
+                }
+
+                const mime = mediaRecorder.mimeType || 'audio/webm';
+                const audioBlob = new Blob(audioChunks, { type: mime });
+                audioChunks = [];
+
+                try {
+                    const reader = new FileReader();
+                    reader.onloadend = async () => {
+                        const base64Audio = reader.result?.split(',')[1];
+                        if (!base64Audio) {
+                            onState({ recording: false, processing: false });
+                            return;
+                        }
+
+                        const res = await fetch('/api/stt', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                audioBase64: base64Audio,
+                                mimeType: mime,
+                                language
+                            })
+                        });
+
+                        const data = await res.json();
+                        onState({ recording: false, processing: false });
+
+                        if (data?.success && data.text) {
+                            onTranscribed(data.text);
+                        } else if (data?.fallbackToBrowser) {
+                            onError({ code: 'fallback_to_browser', error: data.error });
+                        } else {
+                            onError({ code: 'transcription_empty' });
+                        }
+                    };
+                    reader.readAsDataURL(audioBlob);
+                } catch (err) {
+                    onState({ recording: false, processing: false });
+                    onError({ code: 'stt_network_error', error: err });
+                }
+            };
+
+            // Setup WebAudio VAD for silence detection in continuous mode
+            try {
+                const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                if (AudioCtx) {
+                    audioContext = new AudioCtx();
+                    const source = audioContext.createMediaStreamSource(mediaStream);
+                    analyser = audioContext.createAnalyser();
+                    analyser.fftSize = 512;
+                    source.connect(analyser);
+
+                    const bufferLength = analyser.frequencyBinCount;
+                    const dataArray = new Uint8Array(bufferLength);
+
+                    const checkVolume = () => {
+                        if (!isRecording) return;
+                        analyser.getByteFrequencyData(dataArray);
+                        let sum = 0;
+                        for (let i = 0; i < bufferLength; i++) {
+                            sum += dataArray[i];
+                        }
+                        const average = sum / bufferLength;
+
+                        // Voice activity threshold
+                        if (average > 12) {
+                            speechDetected = true;
+                            // Instant barge-in: cancel any active TTS speaking
+                            if (window.speechSynthesis?.speaking) {
+                                window.speechSynthesis.cancel();
+                            }
+                            if (silenceTimer) {
+                                clearTimeout(silenceTimer);
+                                silenceTimer = null;
+                            }
+                        } else if (speechDetected && !silenceTimer) {
+                            silenceTimer = setTimeout(() => {
+                                if (isRecording) {
+                                    stop();
+                                }
+                            }, silenceTimeoutMs);
+                        }
+
+                        requestAnimationFrame(checkVolume);
+                    };
+                    requestAnimationFrame(checkVolume);
+                }
+            } catch {}
+
+            mediaRecorder.start(250);
+            isRecording = true;
+            onState({ recording: true, processing: false });
+            return true;
+        } catch (err) {
+            isRecording = false;
+            onError({ code: 'mic_permission_error', error: err });
+            return false;
+        }
+    }
+
+    function stop() {
+        if (!isRecording && !mediaRecorder) return;
+        if (silenceTimer) {
+            clearTimeout(silenceTimer);
+            silenceTimer = null;
+        }
+        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+            try {
+                mediaRecorder.stop();
+            } catch {}
+        }
+        if (mediaStream) {
+            mediaStream.getTracks().forEach(t => t.stop());
+            mediaStream = null;
+        }
+        if (audioContext && audioContext.state !== 'closed') {
+            try {
+                audioContext.close();
+            } catch {}
+            audioContext = null;
+        }
+        isRecording = false;
+    }
+
+    function isSupported() {
+        return Boolean(navigator?.mediaDevices?.getUserMedia && typeof MediaRecorder !== 'undefined');
+    }
+
+    return {
+        start,
+        stop,
+        isSupported,
+        isRecording: () => isRecording
+    };
+}
+
+/**
+ * Creates the complete Speech & Converse Controller combining Whisper STT + Web Speech fallback.
+ */
+export function createSpeechInputController(options = {}) {
     const Recognition = options.Recognition;
     const callbacks = {
         onInterim: options.onInterim || (() => {}),
@@ -32,35 +234,112 @@ export function createSpeechInputController(options = {}) {
         onState: options.onState || (() => {}),
         onError: options.onError || (() => {})
     };
-    let recognition = null;
-    let activeSession = null;
-    let recognitionSessionId = 0;
-    let mode = 'idle';
+
+    let mode = 'idle'; // 'idle' | 'dictation' | 'converse'
     let converseEnabled = false;
     let processing = false;
-    let submissionsInFlight = 0;
-    let intentionalStop = false;
-    let restartRequested = false;
-    let restartQueued = false;
-    let currentInterim = '';
-    let language = normalizeVoiceInputLanguage(options.language || 'en-US'); 
-    const converseSilenceMs = Math.max(1, Number(options.converseSilenceMs) || DEFAULT_CONVERSE_SILENCE_MS);
-    const converseMaxWaitMs = Math.max(converseSilenceMs, Number(options.converseMaxWaitMs) || DEFAULT_CONVERSE_MAX_WAIT_MS);
-    let converseBuffer = null;
-    const submittedResultIds = new Set();
-    const recentConverseSubmissions = new Map();
+    let language = normalizeVoiceInputLanguage(options.language || 'en-US');
+    let browserRecognition = null;
+    let fallbackMode = false;
+
+    const whisperRecorder = createWhisperRecorder({
+        silenceTimeoutMs: options.converseSilenceMs || DEFAULT_CONVERSE_SILENCE_MS,
+        onTranscribed(text) {
+            const clean = String(text || '').trim();
+            if (!clean) return;
+            callbacks.onFinal(clean, {
+                autoSubmit: converseEnabled,
+                source: converseEnabled ? 'converse' : 'vtt',
+                transcriptFinal: true
+            });
+        },
+        onError(err) {
+            if (err.code === 'fallback_to_browser' || err.code === 'stt_network_error') {
+                fallbackMode = true;
+                startBrowserRecognition();
+            } else if (err.code === 'mic_permission_error') {
+                callbacks.onError(ERROR_MESSAGES['not-allowed']);
+                stop({ disableConverse: true });
+            }
+        },
+        onState(state) {
+            emitState();
+        }
+    });
+
+    function initBrowserRecognition() {
+        if (!Recognition) return null;
+        try {
+            const r = new Recognition();
+            r.continuous = converseEnabled;
+            r.interimResults = true;
+            r.lang = language;
+
+            r.onresult = event => {
+                let interim = '';
+                let final = '';
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    const res = event.results[i];
+                    if (res.isFinal) {
+                        final += res[0].transcript;
+                    } else {
+                        interim += res[0].transcript;
+                    }
+                }
+                if (interim) callbacks.onInterim(interim, getState());
+                if (final) {
+                    callbacks.onFinal(final.trim(), {
+                        autoSubmit: converseEnabled,
+                        source: converseEnabled ? 'converse' : 'vtt',
+                        transcriptFinal: true
+                    });
+                }
+            };
+
+            r.onerror = event => {
+                const msg = ERROR_MESSAGES[event.error] || `Recognition error: ${event.error}`;
+                callbacks.onError(msg);
+            };
+
+            r.onend = () => {
+                if (converseEnabled && !processing) {
+                    // Auto-resume continuous listening in converse mode
+                    setTimeout(() => {
+                        if (converseEnabled && !processing && browserRecognition) {
+                            try { r.start(); } catch {}
+                        }
+                    }, 300);
+                } else {
+                    emitState();
+                }
+            };
+
+            return r;
+        } catch {
+            return null;
+        }
+    }
+
+    function startBrowserRecognition() {
+        if (!browserRecognition) {
+            browserRecognition = initBrowserRecognition();
+        }
+        if (browserRecognition) {
+            try {
+                browserRecognition.start();
+            } catch {}
+        }
+    }
 
     function getState() {
         return {
-            supported: typeof Recognition === 'function',
+            supported: whisperRecorder.isSupported() || typeof Recognition === 'function',
             mode,
             converseEnabled,
-            listening: Boolean(recognition),
+            listening: whisperRecorder.isRecording() || Boolean(browserRecognition),
             processing,
             interruptible: converseEnabled && processing,
-            recognitionSessionId,
-            submittedResultIds: [...submittedResultIds],
-            restartRequested
+            language
         };
     }
 
@@ -72,292 +351,80 @@ export function createSpeechInputController(options = {}) {
         } catch {}
     }
 
-    function clearInterim() {
-        currentInterim = '';
-        callbacks.onInterim('', getState());
-    }
-
-    function clearConverseBuffer() {
-        if (converseBuffer?.silenceTimer) clearTimeout(converseBuffer.silenceTimer);
-        if (converseBuffer?.maxTimer) clearTimeout(converseBuffer.maxTimer);
-        converseBuffer = null;
-    }
-
-    function rememberSubmittedResult(resultId) {
-        submittedResultIds.add(resultId);
-        if (submittedResultIds.size <= 100) return;
-        const oldest = submittedResultIds.values().next().value;
-        submittedResultIds.delete(oldest);
-    }
-
-    function shouldSubmitConverseTranscript(text, transcriptId) {
-        const normalized = String(text || '').toLowerCase().replace(/\s+/g, ' ').trim();
-        if (!normalized) return false;
-        const now = Date.now();
-        for (const [key, createdAt] of recentConverseSubmissions) {
-            if (now - createdAt > CONVERSE_DUPLICATE_WINDOW_MS) recentConverseSubmissions.delete(key);
+    async function toggleDictation() {
+        if (mode === 'dictation') {
+            stop();
+            return false;
         }
-        const key = `${normalized}:${String(transcriptId || '')}`;
-        if (recentConverseSubmissions.has(key) || recentConverseSubmissions.has(normalized)) return false;
-        recentConverseSubmissions.set(key, now);
-        recentConverseSubmissions.set(normalized, now);
+        stop();
+        mode = 'dictation';
+        converseEnabled = false;
+
+        const started = await whisperRecorder.start(language);
+        if (!started && Recognition) {
+            fallbackMode = true;
+            startBrowserRecognition();
+        }
+        emitState();
         return true;
     }
 
-    async function submitConverseTranscript(buffer, completeReason = 'silence') {
-        const finalText = buffer.parts.join(' ').replace(/\s+/g, ' ').trim();
-        const transcriptId = buffer.resultIds.join('|');
-        if (!finalText || !shouldSubmitConverseTranscript(finalText, transcriptId)) return;
-        submissionsInFlight += 1;
-        try {
-            await callbacks.onFinal(finalText, {
-                autoSubmit: true,
-                interrupt: processing,
-                mode: 'converse',
-                source: 'converse',
-                transcriptFinal: true,
-                transcriptCompleteReason: completeReason,
-                sessionId: buffer.sessionId,
-                transcriptId
-            });
-        } finally {
-            submissionsInFlight = Math.max(0, submissionsInFlight - 1);
-            if (!recognition) requestConverseRestart();
-        }
-    }
-
-    function flushConverseBuffer(completeReason = 'silence') {
-        const buffer = converseBuffer;
-        if (!buffer) return;
-        clearConverseBuffer();
-        void submitConverseTranscript(buffer, completeReason);
-    }
-
-    function queueConverseTranscript(session, finalText, finalResultIds) {
-        if (!finalText || activeSession !== session || session.closed) return;
-        if (!converseBuffer || converseBuffer.sessionId !== session.id) {
-            clearConverseBuffer();
-            converseBuffer = {
-                sessionId: session.id,
-                parts: [],
-                resultIds: [],
-                startedAt: Date.now(),
-                silenceTimer: null,
-                maxTimer: null
-            };
-            converseBuffer.maxTimer = setTimeout(() => flushConverseBuffer('max_wait'), converseMaxWaitMs);
-        }
-        converseBuffer.parts.push(finalText);
-        converseBuffer.resultIds.push(...finalResultIds);
-        if (converseBuffer.silenceTimer) clearTimeout(converseBuffer.silenceTimer);
-        converseBuffer.silenceTimer = setTimeout(() => flushConverseBuffer('silence'), converseSilenceMs);
-    }
-
-    function stopRecognition(reason = 'manual') {
-        restartRequested = converseEnabled && reason !== 'disabled';
-        if (!recognition) return;
-        intentionalStop = true;
-        if (mode === 'converse') flushConverseBuffer('manual');
-        if (activeSession) activeSession.closed = true;
-        clearInterim();
-        try {
-            recognition.stop();
-        } catch {
-            try {
-                recognition.abort();
-            } catch {}
-        }
-    }
-
-    function requestConverseRestart() {
-        if (recognition) {
-            restartRequested = false;
-            return;
-        }
-        restartRequested = Boolean(converseEnabled);
-        if (!restartRequested || submissionsInFlight || recognition || restartQueued) return;
-        restartQueued = true;
-        enqueueMicrotask(() => {
-            restartQueued = false;
-            if (converseEnabled && !recognition) {
-                restartRequested = false;
-                startRecognition('converse');
-            }
-        });
-    }
-
-    function startRecognition(nextMode) {
-        if (typeof Recognition !== 'function') {
-            callbacks.onError('Speech recognition is not supported in this browser.');
-            emitState();
-            return false;
-        }
-        if (recognition || (processing && nextMode !== 'converse')) return false;
-
-        const instance = new Recognition();
-        const session = {
-            id: ++recognitionSessionId,
-            instance,
-            closed: false
-        };
-        recognition = instance;
-        activeSession = session;
-        mode = nextMode;
-        intentionalStop = false;
-        restartRequested = false;
-        instance.lang = language;
-        instance.interimResults = true;
-        instance.continuous = true;
-        instance.maxAlternatives = 1;
-
-        instance.onstart = emitState;
-        instance.onresult = async event => {
-            if (activeSession !== session || session.closed) return;
-            let interim = '';
-            const finalParts = [];
-            const finalResultIds = [];
-            for (let index = event.resultIndex || 0; index < event.results.length; index += 1) {
-                const result = event.results[index];
-                const transcript = String(result?.[0]?.transcript || '').trim();
-                if (!transcript) continue;
-                if (result.isFinal) {
-                    const resultId = `${session.id}:${index}:${transcript.toLowerCase().replace(/\s+/g, ' ')}`;
-                    if (submittedResultIds.has(resultId)) continue;
-                    rememberSubmittedResult(resultId);
-                    finalResultIds.push(resultId);
-                    finalParts.push(transcript);
-                } else {
-                    interim += `${transcript} `;
-                }
-            }
-            currentInterim = interim.trim();
-            const bufferedFinal = nextMode === 'converse' && converseBuffer?.sessionId === session.id
-                ? converseBuffer.parts.join(' ').trim()
-                : '';
-            const visibleInterim = [bufferedFinal, currentInterim].filter(Boolean).join(' ').trim();
-            callbacks.onInterim(visibleInterim, getState());
-            try {
-                globalThis.dispatchEvent?.(new CustomEvent('jarvis:speech-transcript', {
-                    detail: { text: currentInterim, final: false, mode: nextMode }
-                }));
-            } catch {}
-            const finalText = finalParts.join(' ').trim();
-            if (!finalText) return;
-            try {
-                globalThis.dispatchEvent?.(new CustomEvent('jarvis:speech-transcript', {
-                    detail: { text: finalText, final: true, mode: nextMode }
-                }));
-            } catch {}
-            const transcriptId = finalResultIds.join('|');
-
-            if (nextMode === 'converse') {
-                queueConverseTranscript(session, finalText, finalResultIds);
-                return;
-            }
-
-            callbacks.onFinal(finalText, {
-                autoSubmit: false,
-                mode: nextMode,
-                sessionId: session.id,
-                transcriptId
-            });
-        };
-        instance.onerror = event => {
-            if (activeSession !== session) return;
-            const code = String(event?.error || 'unknown');
-            if (code !== 'aborted' || !intentionalStop) {
-                clearInterim();
-                if (['not-allowed', 'service-not-allowed', 'audio-capture', 'network'].includes(code)) {
-                    converseEnabled = false;
-                    mode = 'idle';
-                    restartRequested = false;
-                    session.closed = true;
-                    stopRecognition('disabled');
-                }
-                callbacks.onError(ERROR_MESSAGES[code] || `Speech recognition failed (${code}).`);
-            }
-        };
-        instance.onend = () => {
-            if (activeSession !== session) return;
-            recognition = null;
-            activeSession = null;
-            session.closed = true;
-            intentionalStop = false;
-            clearInterim();
-            if (mode === 'converse') flushConverseBuffer('manual');
-            if (mode === 'dictation') mode = 'idle';
-            emitState();
-            requestConverseRestart();
-        };
-
-        try {
-            instance.start();
-            emitState();
-            return true;
-        } catch (error) {
-            recognition = null;
-            activeSession = null;
-            session.closed = true;
-            mode = 'idle';
-            clearInterim();
-            clearConverseBuffer();
-            callbacks.onError(String(error?.message || 'Could not start speech recognition.'));
-            emitState();
-            return false;
-        }
-    }
-
-    function toggleDictation() {
-        if (mode === 'dictation' && recognition) {
-            stopRecognition();
-            return false;
-        }
-        if (converseEnabled) stop({ disableConverse: true });
-        return startRecognition('dictation');
-    }
-
-    function toggleConverse() {
+    async function toggleConverse() {
         if (converseEnabled) {
             stop({ disableConverse: true });
             return false;
         }
-        converseEnabled = true;
+        stop();
         mode = 'converse';
+        converseEnabled = true;
+
+        const started = await whisperRecorder.start(language);
+        if (!started && Recognition) {
+            fallbackMode = true;
+            startBrowserRecognition();
+        }
         emitState();
-        if (!processing) startRecognition('converse');
         return true;
     }
 
-    function setProcessing(active) {
-        processing = Boolean(active);
-        if (processing && !converseEnabled) {
-            if (recognition) stopRecognition('processing');
-        } else if (!processing) {
-            requestConverseRestart();
+    function setProcessing(isProc) {
+        processing = Boolean(isProc);
+        if (processing) {
+            whisperRecorder.stop();
+            if (browserRecognition) {
+                try { browserRecognition.stop(); } catch {}
+            }
+        } else if (converseEnabled) {
+            // Re-open microphone after processing/speech finishes
+            setTimeout(() => {
+                if (converseEnabled && !processing) {
+                    if (!fallbackMode) {
+                        whisperRecorder.start(language);
+                    } else {
+                        startBrowserRecognition();
+                    }
+                }
+            }, 400);
         }
         emitState();
     }
 
-    function stop({ disableConverse = false } = {}) {
-        if (disableConverse) converseEnabled = false;
-        restartRequested = false;
-        if (mode === 'converse') flushConverseBuffer('manual');
-        stopRecognition(disableConverse ? 'disabled' : 'manual');
-        if (!converseEnabled) mode = 'idle';
-        clearInterim();
+    function stop(options = {}) {
+        whisperRecorder.stop();
+        if (browserRecognition) {
+            try { browserRecognition.stop(); } catch {}
+            browserRecognition = null;
+        }
+        if (options.disableConverse) {
+            converseEnabled = false;
+            mode = 'idle';
+        }
         emitState();
     }
 
-    function setLanguage(nextLanguage) { 
-        const normalized = normalizeVoiceInputLanguage(nextLanguage || ''); 
-        if (!normalized) return language; 
-        language = normalized; 
-        clearInterim();
-        if (recognition) {
-            stopRecognition('language_change');
-        } else {
-            requestConverseRestart();
-        }
+    function setLanguage(lang) {
+        language = normalizeVoiceInputLanguage(lang);
+        if (browserRecognition) browserRecognition.lang = language;
         return language;
     }
 
@@ -371,6 +438,9 @@ export function createSpeechInputController(options = {}) {
     };
 }
 
+/**
+ * Attaches the speech input controller to DOM UI elements.
+ */
 export function installSpeechInputUI(options = {}) {
     const input = document.getElementById('text-input');
     const vttButton = document.getElementById('voice-to-text-btn');
@@ -378,7 +448,6 @@ export function installSpeechInputUI(options = {}) {
     if (!input || !vttButton) return null;
 
     const Recognition = globalThis.SpeechRecognition || globalThis.webkitSpeechRecognition;
-    const secureContext = globalThis.isSecureContext === true;
     let committedText = '';
 
     function setStatusText(message = '') {
@@ -400,29 +469,21 @@ export function installSpeechInputUI(options = {}) {
         onInterim(text, state) {
             input.value = [committedText, text].filter(Boolean).join(' ').trim();
             if (state?.mode === 'dictation' && state.listening && status) {
-                if (text) {
-                    setStatusText('Listening');
-                } else {
-                    setListeningStatus();
-                }
+                if (text) setStatusText('Listening');
+                else setListeningStatus();
             }
             options.onComposerChanged?.();
         },
         async onFinal(text, event) {
             if (event.autoSubmit) {
-                const outgoing = text;
                 committedText = '';
-                input.value = outgoing;
+                input.value = text;
                 input.dataset.inputSource = 'converse';
                 options.onComposerChanged?.();
                 await options.onSubmit?.({
                     source: 'converse',
                     preserveTranscript: true,
-                    interrupt: event.interrupt === true,
-                    transcriptFinal: event.transcriptFinal === true,
-                    transcriptCompleteReason: event.transcriptCompleteReason || '',
-                    transcriptId: event.transcriptId,
-                    recognitionSessionId: event.sessionId
+                    interrupt: event.interrupt === true
                 });
             } else {
                 committedText = [committedText, text].filter(Boolean).join(' ').trim();
@@ -435,17 +496,14 @@ export function installSpeechInputUI(options = {}) {
         onState(state) {
             vttButton.classList.toggle('is-listening', state.mode === 'dictation' && state.listening);
             vttButton.setAttribute('aria-pressed', state.mode === 'dictation' && state.listening ? 'true' : 'false');
-            vttButton.disabled = !state.supported || !secureContext || state.processing || state.converseEnabled;
             input.placeholder = state.converseEnabled
-                ? (state.processing ? 'Thinking' : 'Listening...')
+                ? (state.processing ? 'Thinking...' : 'Listening (speak now)...')
                 : (state.mode === 'dictation' && state.listening ? 'Listening...' : 'Ask anything...');
             if (status) {
-                if (!secureContext) {
-                    setStatusText('Voice input needs HTTPS or localhost.');
-                } else if (!state.supported) {
-                    setStatusText('Voice input is unavailable in this browser.');
+                if (!state.supported) {
+                    setStatusText('Voice input unavailable in this browser.');
                 } else if (state.converseEnabled) {
-                    setStatusText(state.processing ? 'Thinking' : 'Listening...');
+                    setStatusText(state.processing ? 'Thinking...' : 'Listening...');
                 } else if (state.mode === 'dictation' && state.listening) {
                     setListeningStatus();
                 } else {
@@ -460,48 +518,33 @@ export function installSpeechInputUI(options = {}) {
             options.onError?.(message);
         }
     });
-    const toggleConverseController = controller.toggleConverse;
 
     globalThis.toggleVoiceToText = () => {
-        if (!secureContext) {
-            setStatusText('Voice input needs HTTPS or localhost.');
-            options.onError?.('Voice input needs HTTPS or localhost.');
-            return false;
-        }
         committedText = input.value.trim();
         return controller.toggleDictation();
     };
+
     globalThis.toggleConverseMode = () => {
-        if (!secureContext) {
-            setStatusText('Voice input needs HTTPS or localhost.');
-            options.onError?.('Voice input needs HTTPS or localhost.');
-            return false;
-        }
         const wasConverseEnabled = controller.getState().converseEnabled;
         committedText = '';
         input.value = '';
         delete input.dataset.inputSource;
         options.onComposerChanged?.();
-        const toggled = toggleConverseController();
+        const toggled = controller.toggleConverse();
         if (wasConverseEnabled) {
             globalThis.stopActiveGeneration?.('converse_stop');
+            if (window.speechSynthesis?.speaking) {
+                window.speechSynthesis.cancel();
+            }
         }
         return toggled;
     };
+
     globalThis.JarvisSpeechInput = controller;
     globalThis.JarvisSpeechInput.toggleConverse = globalThis.toggleConverseMode;
     globalThis.syncVttUiState = () => controller.getState();
-    globalThis.setVoiceInputLanguage = language => { 
-        const requested = String(language || '').trim();
-        const selected = controller.setLanguage(language); 
-        try { 
-            globalThis.localStorage?.setItem?.('jarvis_voice_input_language', selected); 
-        } catch {} 
-        if (requested && requested !== selected) {
-            setStatusText(TEXT_ONLY_LANGUAGE_NOTICE);
-        }
-        return selected; 
-    }; 
+    globalThis.setVoiceInputLanguage = language => controller.setLanguage(language);
+
     vttButton.addEventListener('click', globalThis.toggleVoiceToText);
     globalThis.addEventListener('jarvis:assistant-processing', event => {
         controller.setProcessing(Boolean(event.detail?.active));
@@ -511,6 +554,7 @@ export function installSpeechInputUI(options = {}) {
             controller.stop({ disableConverse: true });
         }
     });
+
     controller.setProcessing(false);
     return controller;
 }
