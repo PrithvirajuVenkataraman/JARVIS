@@ -5625,7 +5625,6 @@ let showRoutingDebugBadge = false;
             if (!btn) return;
             const state = window.JarvisSpeechInput?.getState?.() || {};
             const active = !!state.converseEnabled;
-            const secureContext = window.isSecureContext === true;
             btn.dataset.mode = 'converse';
             btn.onclick = togglePrimaryConverseMode;
             btn.innerHTML = getConverseIconSvg();
@@ -5633,7 +5632,7 @@ let showRoutingDebugBadge = false;
             btn.classList.add('is-converse-ready', 'composer-send-btn');
             btn.classList.toggle('is-converse-active', active);
             btn.classList.remove('composer-send-stop');
-            btn.disabled = state.supported === false || !secureContext;
+            btn.disabled = false;
             btn.setAttribute('aria-label', active ? 'Stop Converse mode' : 'Start Converse mode');
             btn.title = active ? 'Stop Converse mode' : 'Start Converse mode';
         }
@@ -5653,6 +5652,15 @@ let showRoutingDebugBadge = false;
 
         function resetPrimaryActionButtonWhenIdle() {
             if (activeRequestController || isAssistantProcessing()) return;
+            const state = window.JarvisSpeechInput?.getState?.() || {};
+            if (state.converseEnabled) {
+                if (isConverseSpeechActive()) {
+                    setPrimaryActionButtonToStop();
+                } else {
+                    setPrimaryActionButtonToConverse();
+                }
+                return;
+            }
             const input = document.getElementById('text-input');
             if (input && input.value.trim()) {
                 setPrimaryActionButtonToSend();
@@ -9398,14 +9406,35 @@ ${code}
 
         function toggleSendButton() {
             autoResizeComposerTextarea();
-            if (activeRequestController || isAssistantProcessing()) {
-                setPrimaryActionButtonToStop();
+            const state = window.JarvisSpeechInput?.getState?.() || {};
+            const converseActive = !!state.converseEnabled;
+
+            if (activeRequestController || isAssistantProcessing() || isConverseSpeechActive()) {
+                if (converseActive) {
+                    if (isConverseSpeechActive()) {
+                        setPrimaryActionButtonToStop();
+                    } else {
+                        setPrimaryActionButtonToConverse();
+                    }
+                } else {
+                    setPrimaryActionButtonToStop();
+                }
                 return;
             }
+
             const input = document.getElementById('text-input');
             const hasInput = !!(input && input.value.trim().length > 0);
             const hasAttachments = window.JarvisAttachments?.hasPendingAttachments?.() === true;
             const shouldSend = hasInput || hasAttachments;
+
+            if (converseActive) {
+                if (shouldSend && input?.dataset?.inputSource !== 'converse' && input?.dataset?.inputSource !== 'vtt') {
+                    setPrimaryActionButtonToSend();
+                } else {
+                    setPrimaryActionButtonToConverse();
+                }
+                return;
+            }
 
             if (shouldSend) {
                 setPrimaryActionButtonToSend();
@@ -9639,7 +9668,9 @@ async function sendTextInput(submission = {}) {
                             ? [
                                 attachmentRequest,
                                 '',
-                                'An image is attached to this request. Analyze what is shown in the image based strictly on visible pixels. If people are present, try to recognize them if well-known or describe their appearance, attire, activity, and setting. Answer the user prompt directly.',
+                                'An image is attached to this request. Analyze what is shown in the image based strictly on visible pixels.',
+                                'PEOPLE & PERSONS RULE: Do not attempt facial recognition or guess the names/identities of individuals or groups of people to avoid misidentification. State that you cannot recognize individual people, and provide a clear, respectful description of how the person or people look: visible facial features, hair, expression, attire/clothing, posture/actions, and the surrounding setting. Answer the user prompt directly.',
+                                '',
                                 String(attachmentContext.combinedText || '').slice(0, 28000)
                             ].join('\n')
                             : [
