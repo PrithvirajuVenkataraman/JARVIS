@@ -490,8 +490,10 @@ import { classifyImageLocally } from './_lib/local-vision-classifier.js';
         if (String(intent || '') === 'chat_title') {
             return [
                 'Chat title generation intent:',
-                '- Return only one concise conversation title.',
-                '- Use Title Case, 3 to 6 words, and preferably 40 characters or fewer.',
+                '- Return only one concise conversation title (3 to 6 words) summarizing the user\'s substantive topic or question.',
+                '- Use Title Case and preferably 40 characters or fewer.',
+                '- Base the title SOLELY on the user\'s inquiry, task, or question.',
+                '- NEVER output generic error messages, assistant fallback text, apologies, or failure phrases (e.g. "I Could Not Generate A Response", "Error", "Service Unavailable"). If the conversation contains an error, title it after what the user asked about.',
                 '- Do not use quotes, punctuation at the end, markdown, explanations, or prefixes such as Title:.',
                 '- Do not use generic titles like New Chat, Untitled, Conversation, Help, Question, or Chat.',
                 '- Prefer the most significant or final user goal over greetings or small talk.',
