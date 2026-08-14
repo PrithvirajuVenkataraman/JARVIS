@@ -5210,12 +5210,17 @@ let showRoutingDebugBadge = false;
                 viewportMeta.setAttribute('content', lockedViewportContent);
             }
 
-            // Prevent browser zoom gestures and Ctrl/Cmd + wheel zoom.
+            // Prevent browser zoom gestures, Ctrl/Cmd + wheel zoom, and keyboard zoom shortcuts.
             document.addEventListener('gesturestart', (event) => event.preventDefault(), { passive: false });
             document.addEventListener('gesturechange', (event) => event.preventDefault(), { passive: false });
             document.addEventListener('gestureend', (event) => event.preventDefault(), { passive: false });
             document.addEventListener('wheel', (event) => {
                 if (event.ctrlKey || event.metaKey) event.preventDefault();
+            }, { passive: false });
+            window.addEventListener('keydown', (event) => {
+                if ((event.ctrlKey || event.metaKey) && ['+', '-', '=', '_', '0'].includes(event.key)) {
+                    event.preventDefault();
+                }
             }, { passive: false });
 
             // Block multi-touch pinch start and movement.
@@ -5254,6 +5259,7 @@ let showRoutingDebugBadge = false;
                 }, true);
             }
         }
+        initZoomLock();
 
         function hasAnyRenderedChatMessages() {
             const chatContainer = document.getElementById('chat-container');
@@ -5770,21 +5776,20 @@ let showRoutingDebugBadge = false;
             }
         }
 
-        function togglePrimaryConverseMode() {
+        async function togglePrimaryConverseMode() {
             const input = document.getElementById('text-input');
             if (input?.value?.trim()) {
                 void sendTextInput();
                 return;
             }
-            if (window.isSecureContext !== true) {
-                showTemporaryMessage('Voice input needs HTTPS or localhost.');
-                return;
-            }
-            const toggled = window.JarvisSpeechInput?.toggleConverse?.();
-            if (toggled === false && !window.JarvisSpeechInput?.getState?.().supported) {
-                showTemporaryMessage('Voice input is unavailable in this browser.');
-            } else if (toggled === true) {
-                unlockConverseSpeechFromGesture();
+            unlockConverseSpeechFromGesture();
+            try {
+                const toggled = await window.JarvisSpeechInput?.toggleConverse?.();
+                if (toggled === false && !window.JarvisSpeechInput?.getState?.().supported) {
+                    showTemporaryMessage('Voice input is unavailable or microphone was denied.');
+                }
+            } catch (err) {
+                showTemporaryMessage('Could not start microphone. Check browser permissions.');
             }
             toggleSendButton();
         }
