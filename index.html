@@ -4718,6 +4718,9 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
                 },
                 intent: requestOptions?.intent || (requestOptions?.fastExplainer === true ? 'fast_explainer' : 'chat'),
                 grounding: requestOptions?.grounding || null,
+                images: Array.isArray(requestOptions?.images)
+                    ? requestOptions.images
+                    : (Array.isArray(requestOptions?.grounding?.images) ? requestOptions.grounding.images : undefined),
                 routingMessage: String(requestOptions?.routingMessage || requestOptions?.displayUserMessage || '').trim() || undefined,
                 displayUserMessage: String(requestOptions?.displayUserMessage || '').trim() || undefined
             };
@@ -9588,13 +9591,21 @@ async function sendTextInput(submission = {}) {
                             );
                             return;
                         }
-                        const attachmentPrompt = [
-                            attachmentRequest,
-                            '',
-                            'The attached document text is already provided below. Analyze it now. Do not ask me to share, paste, or upload it again.',
-                            '',
-                            String(attachmentContext.combinedText || '').slice(0, 28000)
-                        ].join('\n');
+                        const hasImageAttachments = Array.isArray(attachmentContext?.grounding?.images) && attachmentContext.grounding.images.length > 0;
+                        const attachmentPrompt = hasImageAttachments
+                            ? [
+                                attachmentRequest,
+                                '',
+                                'An image is attached to this request. Analyze what is shown in the image based strictly on visible pixels. If people are present, try to recognize them if well-known or describe their appearance, attire, activity, and setting. Answer the user prompt directly.',
+                                String(attachmentContext.combinedText || '').slice(0, 28000)
+                            ].join('\n')
+                            : [
+                                attachmentRequest,
+                                '',
+                                'The attached document text is already provided below. Analyze it now. Do not ask me to share, paste, or upload it again.',
+                                '',
+                                String(attachmentContext.combinedText || '').slice(0, 28000)
+                            ].join('\n');
                         let result = await askGeminiAI(attachmentPrompt, {
                             intent: 'selection_custom',
                             grounding: attachmentContext.grounding,
