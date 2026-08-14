@@ -637,21 +637,49 @@ export async function searchExa(query, options = {}) {
         ? options.plannedQueries.map(item => normalizeSearchQuery(item)).filter(Boolean)
         : [];
     const querySet = Array.from(new Set([normalizedQuery, ...plannedQueries])).slice(0, 4);
+
+    const isAiGateway = Boolean(process.env.AI_GATEWAY_TOKEN || process.env.VERCEL_AI_GATEWAY_TOKEN);
+    const exaEndpoint = isAiGateway && process.env.AI_GATEWAY_EXA_URL
+        ? process.env.AI_GATEWAY_EXA_URL
+        : EXA_SEARCH_URL;
+
+    const headers = {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey
+    };
+    if (isAiGateway) {
+        headers.Authorization = `Bearer ${apiKey}`;
+    }
+
+    const searchPayload = {
+        type: 'auto',
+        numResults: Math.min(limit, 10),
+        contents: {
+            text: { maxCharacters: 3000 },
+            summary: true,
+            highlights: { numSentences: 3, highlightsPerUrl: 3 }
+        }
+    };
+    if (Array.isArray(options.includeDomains) && options.includeDomains.length) {
+        searchPayload.includeDomains = options.includeDomains;
+    }
+    if (Array.isArray(options.excludeDomains) && options.excludeDomains.length) {
+        searchPayload.excludeDomains = options.excludeDomains;
+    }
+    if (options.startPublishedDate) {
+        searchPayload.startPublishedDate = options.startPublishedDate;
+    }
+    if (options.endPublishedDate) {
+        searchPayload.endPublishedDate = options.endPublishedDate;
+    }
+
     const settled = await Promise.allSettled(querySet.map(async (candidate, queryIndex) => {
-        const response = await fetchWithTimeout(EXA_SEARCH_URL, {
+        const response = await fetchWithTimeout(exaEndpoint, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'x-api-key': apiKey
-            },
+            headers,
             body: JSON.stringify({
-                query: candidate,
-                type: 'auto',
-                numResults: Math.min(limit, 10),
-                contents: {
-                    text: { maxCharacters: 3000 },
-                    summary: true
-                }
+                ...searchPayload,
+                query: candidate
             })
         }, SEARCH_TIMEOUT_MS);
         if (!response.ok) {
@@ -677,10 +705,18 @@ export async function runVerifiedWebSearch(query, options = {}) {
         queries: [],
         warning: `gemini_query_planning_failed:${String(error?.code || error?.message || 'unknown')}`
     }));
-    const publicResults = rankSources(query, dedupeSearchResults(await searchPublicSources(query, {
-        limit,
-        plannedQueries: planning.queries
-    })).filter(item => isValidCitationSource(item, query))).slice(0, limit);
+    const [publicSources, exaSources] = await Promise.all([
+        searchPublicSources(query, {
+            limit,
+            plannedQueries: planning.queries
+        }).catch(() => []),
+        searchExa(query, {
+            limit,
+            plannedQueries: planning.queries
+        }).catch(() => [])
+    ]);
+    const publicResults = rankSources(query, dedupeSearchResults([...exaSources, ...publicSources])
+        .filter(item => isValidCitationSource(item, query))).slice(0, limit);
     let warnings = buildSearchWarnings(publicResults, planning.warning ? [planning.warning] : []);
     const enhanced = await enhanceResultsWithGemini(query, publicResults, { limit }).catch(error => ({
         results: publicResults,
@@ -696,7 +732,7 @@ export async function runVerifiedWebSearch(query, options = {}) {
 
     return buildSearchSummary(enhancedResults, {
         query,
-        provider: 'public_sources',
+        provider: exaSources.length ? 'exa_and_public_sources' : 'public_sources',
         publicSourceCount: enhancedResults.length,
         geminiEnhanced: Boolean(enhanced.enhanced),
         warnings
@@ -2593,7 +2629,7 @@ function getSerperApiKey() {
 }
 
 function getExaApiKey() {
-    return String(process.env.EXA_API_KEY || process.env.EXA_KEY || '').trim();
+    return String(process.env.EXA_API_KEY || process.env.EXA_KEY || process.env.AI_GATEWAY_TOKEN || process.env.VERCEL_AI_GATEWAY_TOKEN || process.env.GATEWAY_TOKEN || '').trim();
 }
 
 function getGeminiApiKey() {
