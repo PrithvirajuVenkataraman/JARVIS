@@ -3236,16 +3236,36 @@ body.dark .response-action-btn {
 }
 
 .thinking-inline-text {
-    color: rgba(255, 255, 255, 0.65);
     font-size: 0.82rem;
     font-weight: 700;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.12em;
     text-transform: uppercase;
-    padding: 2px 0;
+    padding: 2px 4px;
+    display: inline-flex;
+    align-items: center;
+    background: linear-gradient(90deg, rgba(255, 255, 255, 0.45) 0%, rgba(255, 255, 255, 1) 50%, rgba(255, 255, 255, 0.45) 100%);
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: jarvis-word-shimmer 2s ease-in-out infinite;
 }
 
-.streaming-placeholder::after,
-.assistant-message-text.is-streaming::after {
+.thinking-inline-text.is-streaming::after {
+    display: none !important;
+}
+
+.streaming-placeholder::after {
+    content: '';
+    display: inline-block;
+    width: 7px;
+    height: 1.05em;
+    margin-left: 3px;
+    transform: translateY(2px);
+    border-right: 2px solid currentColor;
+    animation: jarvis-stream-caret 0.85s steps(2, start) infinite;
+}
+
+.assistant-message-text.is-streaming:not(.thinking-inline-text)::after {
     content: '';
     display: inline-block;
     width: 7px;
@@ -3272,6 +3292,20 @@ body.dark .response-action-btn {
     display: inline-flex !important;
     align-items: center;
     gap: 4px;
+}
+
+@keyframes jarvis-word-shimmer {
+    0% {
+        background-position: 100% 0;
+        filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.2));
+    }
+    50% {
+        filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.6));
+    }
+    100% {
+        background-position: -100% 0;
+        filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.2));
+    }
 }
 
 @keyframes jarvis-thinking-pulse {
