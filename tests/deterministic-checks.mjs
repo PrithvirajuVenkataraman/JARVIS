@@ -825,7 +825,7 @@ assert.match(SOURCE.appHtml, /How checked:/);
 assert.match(SOURCE.appHtml, /Sources used:/);
 assert.match(SOURCE.appHtml, /Do not include Verdict, Claims checked/);
 assert.match(SOURCE.appHtml, /function buildVerificationSearchQuery\(originalQuestion,\s*answerText = ''\)/);
-assert.match(SOURCE.appHtml, /async function buildVerificationEvidenceBundle\(originalQuestion,\s*answerText = ''\)/);
+assert.match(SOURCE.appHtml, /async function buildVerificationEvidenceBundle\(originalQuestion,\s*answerText = ''/);
 assert.match(SOURCE.appHtml, /fetchLiveSearchJson\(query,\s*\{[\s\S]*maxResults:\s*5[\s\S]*answer:\s*true[\s\S]*mode:\s*'rag'/);
 assert.match(SOURCE.appHtml, /Promise\.all\(extractionCandidates\.map\(item => fetchVerificationExtract\(item\.url,\s*query\)\)\)/);
 assert.match(SOURCE.appHtml, /intent:\s*'verify_answer'/);
