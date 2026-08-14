@@ -57,9 +57,8 @@ export default async function handler(req, res) {
 
     try {
         const providers = getVisionProviders();
-        if (!providers.groqApiKey && !providers.geminiApiKey) {
-            const localResult = classifyImageLocally({ imageBase64, mimeType: normalizedMimeType, prompt, task });
-            return res.status(200).json(localResult);
+        if (!providers.groqApiKey && !providers.geminiApiKey && !providers.openaiApiKey) {
+            return sendVisionError(res, 503, 'vision_provider_unavailable', 'Image recognition requires a Gemini (GEMINI_API_KEY), Groq Vision (GROQ_API_KEY), or OpenAI (OPENAI_API_KEY) API key configured in the environment.');
         }
 
         if (task === 'math_ocr_solve') { 
@@ -182,7 +181,12 @@ const GEMINI_MODEL_FALLBACKS = [
 ];
 const GROQ_VISION_MODEL_FALLBACKS = [
     'llama-3.2-11b-vision-preview',
+    'meta-llama/llama-3.2-11b-vision-instruct',
     'llama-3.2-90b-vision-preview'
+];
+const OPENAI_VISION_MODEL_FALLBACKS = [
+    'gpt-4o',
+    'gpt-4o-mini'
 ];
 const GROQ_TEXT_MODEL_FALLBACKS = [
     'llama-3.3-70b-versatile',
@@ -193,9 +197,11 @@ function getVisionProviders() {
     return {
         groqApiKey: process.env.GROQ_API_KEY || process.env.GROQ_KEY || '',
         geminiApiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '',
+        openaiApiKey: process.env.OPENAI_API_KEY || process.env.OPENAI_KEY || '',
         groqVisionModel: String(process.env.GROQ_VISION_MODEL || '').trim(),
         groqModel: String(process.env.GROQ_MODEL || '').trim(),
-        geminiModel: String(process.env.GEMINI_MODEL || '').trim()
+        geminiModel: String(process.env.GEMINI_MODEL || '').trim(),
+        openaiModel: String(process.env.OPENAI_MODEL || '').trim()
     };
 }
 
@@ -215,16 +221,70 @@ async function callVisionText({ providers, systemPrompt, mimeType, imageBase64 }
     }
 
     if (providers?.groqApiKey) {
-        const text = await callGroqVisionText({
-            apiKey: providers.groqApiKey,
-            configuredModel: providers.groqVisionModel,
-            systemPrompt,
-            mimeType,
-            imageBase64
-        });
-        if (text) return text;
+        try {
+            const text = await callGroqVisionText({
+                apiKey: providers.groqApiKey,
+                configuredModel: providers.groqVisionModel,
+                systemPrompt,
+                mimeType,
+                imageBase64
+            });
+            if (text) return text;
+        } catch (_) {}
     }
 
+    if (providers?.openaiApiKey) {
+        try {
+            const text = await callOpenAIVisionText({
+                apiKey: providers.openaiApiKey,
+                configuredModel: providers.openaiModel,
+                systemPrompt,
+                mimeType,
+                imageBase64
+            });
+            if (text) return text;
+        } catch (_) {}
+    }
+
+    return '';
+}
+
+async function callOpenAIVisionText({ apiKey, configuredModel, systemPrompt, mimeType, imageBase64 }) {
+    const candidates = [
+        String(configuredModel || '').trim(),
+        ...OPENAI_VISION_MODEL_FALLBACKS
+    ].filter(Boolean);
+    const dataUrl = `data:${mimeType || 'image/jpeg'};base64,${imageBase64}`;
+
+    for (const model of candidates) {
+        try {
+            const response = await fetchWithTimeout('https://api.openai.com/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${apiKey}`
+                },
+                body: JSON.stringify({
+                    model,
+                    temperature: 0.15,
+                    max_tokens: 3000,
+                    messages: [
+                        {
+                            role: 'user',
+                            content: [
+                                { type: 'text', text: systemPrompt },
+                                { type: 'image_url', image_url: { url: dataUrl } }
+                            ]
+                        }
+                    ]
+                })
+            });
+            if (!response.ok) continue;
+            const data = await response.json();
+            const text = String(data?.choices?.[0]?.message?.content || '').trim();
+            if (text) return text;
+        } catch (_) {}
+    }
     return '';
 }
 
@@ -933,8 +993,8 @@ function buildVisionPrompt(userPrompt, task) {
         isSceneTask
             ? '- Do NOT lead with background signs, wall posters, small labels, or unrelated printed text unless the user asked to read text.'
             : '- Ignore wall color/background/decor unless user explicitly asks for background.',
-        '- SCREEN & DEVICE DISPLAY RULE: If the image depicts an electronic device (such as an iPad, tablet, smartphone, laptop, or computer monitor) displaying an application, website, or UI interface, identify the physical device (e.g., "iPad", "tablet", "smartphone") and the screen application as the primary subject.',
-        '- DO NOT misidentify wallpapers, app icons, stock graphics, or UI artwork inside a screen display as real-world physical environments (such as real mountains, forests, or outdoor scenery).',
+        '- VISIBLE EVIDENCE RULE: Describe only what is visibly supported by the image pixels. Accurately identify people, attire, gestures, objects, text, math, charts, and scenes that are clearly visible.',
+        '- UNCERTAINTY & ZERO-HALLUCINATION RULE: If uncertain about any identity, object, model, brand, or visual detail, state uncertainty clearly rather than guessing. Never invent, assume, or fabricate unseen devices, screens, backgrounds, or contexts.',
         '- If a clear product or object is prominent, name it in answer and summary using only visible evidence.',
         '- For phones, tablets, laptops, earbuds, watches, and other consumer electronics: only fill brand/model when a logo, printed text, or unmistakable hardware cue is visible.',
         '- If brand/model is not clearly supported by visible evidence, leave brand and model as empty strings and describe the object instead. Prefer "not visible" over guessing.',
