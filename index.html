@@ -2669,9 +2669,94 @@ async function callAIWithTyping(message, loadingMessage = 'Assistant is thinking
     }
 }
 
+        function isConverseResumptionIntent(text) {
+            const raw = String(text || '').trim().toLowerCase().replace(/^[.,!?;:'"\s]+|[.,!?;:'"\s]+$/g, '');
+            if (!raw) return false;
+
+            const directPhrases = [
+                'continue',
+                'continue speaking',
+                'continue to speak',
+                'keep speaking',
+                'keep talking',
+                'keep going',
+                'go on',
+                'go ahead',
+                'carry on',
+                'proceed',
+                'resume',
+                'unpause',
+                'stay on that',
+                'keep explaining',
+                'tell me more',
+                'tell more',
+                'more',
+                'and then',
+                'what next',
+                'what else',
+                'what happened next',
+                'finish what you were saying',
+                'finish it',
+                'finish that',
+                'finish your thought',
+                'finish your sentence',
+                'tell me the rest',
+                'the rest',
+                'what were you saying',
+                'you were saying',
+                'speak on',
+                'say more',
+                'complete it',
+                'read the rest',
+                'sollu',
+                'solunga',
+                'solu',
+                'pesu',
+                'pesunga',
+                'thodaru',
+                'aage bolo',
+                'aage',
+                'bolte raho',
+                'aage batao',
+                'aur batao',
+                'fir kya',
+                'phir kya',
+                'haan bolo',
+                'haan continue',
+                'theek hai aage',
+                'boliye',
+                'bolo na'
+            ];
+
+            if (directPhrases.includes(raw)) return true;
+
+            const resumptionPattern = /\b(continue|go on|go ahead|keep going|keep talking|keep speaking|carry on|proceed|resume|unpause|stay on that|keep explaining|tell more|tell me more|what next|what else|what happened next|finish what you were saying|finish it|finish that|complete it|finish your thought|finish your sentence|tell me the rest|the rest|what were you saying|you were saying|speak on|say more|read the rest|sollu|solunga|solu|pesu|pesunga|aage bolo|bolte raho|aage batao|aur batao|fir kya|phir kya|haan bolo|haan continue|theek hai aage|boliye|bolo na)\b/i;
+
+            const prefixPattern = /^(?:yes|yeah|yep|ok|okay|sure|please|then|so)\s+(?:continue|go on|go ahead|keep going|keep talking|keep speaking|proceed|sollu|solunga|aage bolo|boliye|tell me)$/i;
+
+            return resumptionPattern.test(raw) || prefixPattern.test(raw);
+        }
+
 async function processUserQuery(text, options = {}) {
     const t = String(text || '').trim();
     if (!t) return;
+
+    const activeSource = String(options?.source || options?.turnSource || activeResponseRenderContext?.source || '').toLowerCase();
+    const isConverseMode = activeSource === 'converse' || window.JarvisSpeechInput?.getState?.().converseEnabled === true;
+
+    if (isConverseMode && isConverseResumptionIntent(t) && lastInterruptedConverseState?.remainingText) {
+        logRoutingDebug('processUserQuery -> converse_resumption', t, {
+            remainingLength: lastInterruptedConverseState.remainingText.length
+        });
+        const remaining = lastInterruptedConverseState.remainingText;
+        lastInterruptedConverseState = null;
+        addChatMessage(remaining, false, true, {
+            turnId: activeResponseRenderContext?.turnId || '',
+            turnSource: 'converse'
+        });
+        return { intent: 'converse_resumption', response: remaining };
+    }
+
     const frontendRoute = decideFrontendRoute(t, {
         turnSource: options?.source || options?.turnSource || activeResponseRenderContext?.source || ''
     });
@@ -4449,6 +4534,13 @@ async function streamChatCompletion(payload, options = {}) {
         });
         return assistantMessageId;
     };
+    const activeTurnId = String(activeResponseRenderContext?.turnId || '').trim();
+    const activeTurnSource = String(activeResponseRenderContext?.source || options?.turnSource || '').toLowerCase();
+    const isConverseStream = activeTurnSource === 'converse' || window.JarvisSpeechInput?.getState?.().converseEnabled === true;
+
+    if (isConverseStream) {
+        startStreamingConverseSpeech(activeTurnId);
+    }
     ensureStreamMessage();
     const handleEvent = event => {
         if (!event?.event) return;
@@ -4458,6 +4550,9 @@ async function streamChatCompletion(payload, options = {}) {
             accumulated += delta;
             // Strip <think> reasoning tags from streaming output
             const displayAccumulated = accumulated.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/^<think>[\s\S]*$/gi, '').replace(/<\/?think>/gi, '').trim();
+            if (isConverseStream) {
+                feedStreamingConverseDelta(delta, activeTurnId);
+            }
             if (!firstDeltaLogged && displayAccumulated) {
                 firstDeltaLogged = true;
                 hideThinkingIndicator();
@@ -4482,6 +4577,9 @@ async function streamChatCompletion(payload, options = {}) {
         if (event.event === 'done') {
             donePayload = event.data || {};
             accumulated = String(donePayload.response || accumulated || '').replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/^<think>[\s\S]*$/gi, '').replace(/<\/?think>/gi, '').trim();
+            if (isConverseStream && accumulated) {
+                finishStreamingConverseSpeech(accumulated, activeTurnId);
+            }
             if (accumulated) {
                 hideThinkingIndicator();
                 const id = ensureStreamMessage();
@@ -4498,6 +4596,9 @@ async function streamChatCompletion(payload, options = {}) {
         }
         if (event.event === 'error') {
             hideThinkingIndicator();
+            if (isConverseStream) {
+                stopConverseSpeech('stream_error');
+            }
             throw new Error(String(event.data?.message || 'Streaming response failed.'));
         }
     };
@@ -5698,6 +5799,17 @@ let showRoutingDebugBadge = false;
         let converseQueuedSubmissionSequence = 0;
         let activeConverseSpeechUtterance = null;
         let activeConverseSpeechRun = null;
+        let lastInterruptedConverseState = null;
+        let streamingConverseSpeech = {
+            active: false,
+            turnId: '',
+            rawBuffer: '',
+            enqueuedSegments: [],
+            spokenSegments: [],
+            queue: [],
+            isPlaying: false,
+            completed: false
+        };
         let activeTypewriterTimeouts = new Set();
         let activeTypewriterRuns = new Set();
         let responseRecoveryTimer = null;
@@ -5753,19 +5865,44 @@ let showRoutingDebugBadge = false;
         }
 
         function isConverseSpeechActive() {
-            return Boolean(activeConverseSpeechRun) ||
+            return Boolean(streamingConverseSpeech?.active) ||
+                Boolean(activeConverseSpeechRun) ||
                 Boolean(activeConverseSpeechUtterance) ||
                 Boolean(window.speechSynthesis?.speaking) ||
                 Boolean(window.speechSynthesis?.pending);
         }
 
-        function stopConverseSpeech() {
+        function stopConverseSpeech(reason = 'interrupted') {
+            if (streamingConverseSpeech?.active || activeConverseSpeechRun || isConverseSpeechActive()) {
+                const remainingSegments = [...(streamingConverseSpeech?.queue || [])];
+                if (streamingConverseSpeech?.rawBuffer?.trim()) {
+                    const sanitized = sanitizeTextForConverseSpeech(streamingConverseSpeech.rawBuffer.trim());
+                    if (sanitized) remainingSegments.push(sanitized);
+                }
+                const remainingText = remainingSegments.join(' ').trim();
+                if (remainingText) {
+                    lastInterruptedConverseState = {
+                        turnId: streamingConverseSpeech?.turnId || activeResponseRenderContext?.turnId || '',
+                        spoken: [...(streamingConverseSpeech?.spokenSegments || [])].join(' '),
+                        remainingText,
+                        interruptedAt: Date.now()
+                    };
+                }
+            }
+            if (streamingConverseSpeech) {
+                streamingConverseSpeech.active = false;
+                streamingConverseSpeech.queue = [];
+                streamingConverseSpeech.rawBuffer = '';
+                streamingConverseSpeech.isPlaying = false;
+                streamingConverseSpeech.completed = false;
+            }
             if (activeConverseSpeechRun) activeConverseSpeechRun.cancelled = true;
             activeConverseSpeechRun = null;
             activeConverseSpeechUtterance = null;
             try {
                 window.speechSynthesis?.cancel?.();
             } catch (e) {}
+            setConverseUiState('listening', reason);
         }
 
         function beginAbortableRequest() {
@@ -8052,7 +8189,13 @@ let showRoutingDebugBadge = false;
             const userPrompt = String(meta?.userMessage || turn?.rawPrompt || '').trim();
             chatHistory.push({ text: cleanText, isUser: false });
             recordActiveChatMessage('assistant', cleanText, turnId);
-            speakConverseReply(cleanText, turn);
+            const turnSource = String(turn?.source || meta?.turnSource || activeResponseRenderContext?.source || '').toLowerCase();
+            const isConverse = turnSource === 'converse' || window.JarvisSpeechInput?.getState?.().converseEnabled === true;
+            if (isConverse) {
+                finishStreamingConverseSpeech(cleanText, turnId);
+            } else {
+                speakConverseReply(cleanText, turn);
+            }
             if (userPrompt) {
                 scheduleBackgroundResponseVerification(messageId, userPrompt, cleanText);
             }
@@ -8277,6 +8420,128 @@ let showRoutingDebugBadge = false;
                 logLatencyTrace('speech_blocked', { stage: 'unlock', error: String(error?.message || error || '') });
                 showConverseSpeechUnlockPrompt();
                 return false;
+            }
+        }
+
+        function startStreamingConverseSpeech(turnId) {
+            stopConverseSpeech('new_stream');
+            streamingConverseSpeech = {
+                active: true,
+                turnId: String(turnId || ''),
+                rawBuffer: '',
+                enqueuedSegments: [],
+                spokenSegments: [],
+                queue: [],
+                isPlaying: false,
+                completed: false
+            };
+            setConverseUiState('speaking', 'stream_start');
+        }
+
+        function feedStreamingConverseDelta(deltaText, turnId) {
+            if (!streamingConverseSpeech || !streamingConverseSpeech.active) return;
+            if (turnId && streamingConverseSpeech.turnId && turnId !== streamingConverseSpeech.turnId) return;
+            const cleanDelta = String(deltaText || '').replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/^<think>[\s\S]*$/gi, '').replace(/<\/?think>/gi, '');
+            if (!cleanDelta) return;
+            streamingConverseSpeech.rawBuffer += cleanDelta;
+
+            let current = streamingConverseSpeech.rawBuffer;
+            let sentenceMatch;
+            const sentenceRegex = /^(.*?[.?!;\n]+(?:\s+|$))([\s\S]*)$/;
+            while ((sentenceMatch = current.match(sentenceRegex))) {
+                const sentence = sentenceMatch[1].trim();
+                current = sentenceMatch[2];
+                if (sentence) {
+                    const sanitized = sanitizeTextForConverseSpeech(sentence);
+                    if (sanitized) {
+                        const segments = splitConverseSpeechSegments(sanitized);
+                        for (const seg of segments) {
+                            streamingConverseSpeech.enqueuedSegments.push(seg);
+                            streamingConverseSpeech.queue.push(seg);
+                        }
+                    }
+                }
+            }
+            streamingConverseSpeech.rawBuffer = current;
+            processStreamingSpeechQueue();
+        }
+
+        function finishStreamingConverseSpeech(finalFullText, turnId) {
+            if (!streamingConverseSpeech || !streamingConverseSpeech.active) {
+                const turn = getConversationTurn(turnId);
+                speakConverseReply(finalFullText, turn);
+                return;
+            }
+            if (turnId && streamingConverseSpeech.turnId && turnId !== streamingConverseSpeech.turnId) return;
+            if (streamingConverseSpeech.rawBuffer.trim()) {
+                const sanitized = sanitizeTextForConverseSpeech(streamingConverseSpeech.rawBuffer.trim());
+                if (sanitized) {
+                    const segments = splitConverseSpeechSegments(sanitized);
+                    for (const seg of segments) {
+                        streamingConverseSpeech.enqueuedSegments.push(seg);
+                        streamingConverseSpeech.queue.push(seg);
+                    }
+                }
+                streamingConverseSpeech.rawBuffer = '';
+            }
+            streamingConverseSpeech.completed = true;
+            processStreamingSpeechQueue();
+        }
+
+        function processStreamingSpeechQueue() {
+            if (!streamingConverseSpeech || !streamingConverseSpeech.active) return;
+            if (streamingConverseSpeech.isPlaying) return;
+
+            if (streamingConverseSpeech.queue.length === 0) {
+                if (streamingConverseSpeech.completed) {
+                    streamingConverseSpeech.active = false;
+                    activeConverseSpeechRun = null;
+                    activeConverseSpeechUtterance = null;
+                    setConverseUiState('listening', 'speech_finished');
+                    window.JarvisSpeechInput?.setProcessing?.(false);
+                    toggleSendButton();
+                }
+                return;
+            }
+
+            const nextSegment = streamingConverseSpeech.queue.shift();
+            if (!nextSegment) {
+                processStreamingSpeechQueue();
+                return;
+            }
+
+            if (!('speechSynthesis' in window) || !('SpeechSynthesisUtterance' in window)) {
+                streamingConverseSpeech.active = false;
+                setConverseUiState('recovering', 'speech_unsupported');
+                return;
+            }
+
+            streamingConverseSpeech.isPlaying = true;
+            setConverseUiState('speaking', 'streaming_segment');
+
+            const utterance = createConverseUtterance(nextSegment, streamingConverseSpeech.spokenSegments.length, 10);
+            activeConverseSpeechUtterance = utterance;
+
+            utterance.onend = () => {
+                if (activeConverseSpeechUtterance === utterance) activeConverseSpeechUtterance = null;
+                streamingConverseSpeech.spokenSegments.push(nextSegment);
+                streamingConverseSpeech.isPlaying = false;
+                processStreamingSpeechQueue();
+            };
+
+            utterance.onerror = () => {
+                if (activeConverseSpeechUtterance === utterance) activeConverseSpeechUtterance = null;
+                streamingConverseSpeech.isPlaying = false;
+                if (streamingConverseSpeech.active) {
+                    processStreamingSpeechQueue();
+                }
+            };
+
+            try {
+                window.speechSynthesis.speak(utterance);
+            } catch (err) {
+                streamingConverseSpeech.isPlaying = false;
+                processStreamingSpeechQueue();
             }
         }
 
@@ -24206,6 +24471,8 @@ globalThis.stopActiveGeneration = stopActiveGeneration;
 globalThis.updateComposerPlaceholder = updateComposerPlaceholder;
 globalThis.allowJarvisLocationAccess = allowJarvisLocationAccess;
 globalThis.declineJarvisLocationAccess = declineJarvisLocationAccess;
+globalThis.isConverseSpeechActive = isConverseSpeechActive;
+globalThis.stopConverseSpeech = stopConverseSpeech;
 globalThis.dispatchEvent(new CustomEvent('jarvis:app-ready'));
 
 </script>
