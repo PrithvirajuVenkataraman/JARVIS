@@ -1876,10 +1876,16 @@ button[aria-label^="Back"],
 }
 
 .speech-input-btn.is-listening {
-    color: #ffffff !important;
-    background: #dc2626 !important;
-    border-color: #ef4444 !important;
+    color: #ef4444 !important;
+    background: rgba(239, 68, 68, 0.14) !important;
+    border-color: rgba(239, 68, 68, 0.38) !important;
+    box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.22), 0 0 16px rgba(239, 68, 68, 0.28) !important;
     animation: jarvis-input-pulse 1.35s ease-in-out infinite;
+}
+
+.speech-input-btn.is-listening svg {
+    stroke: #ef4444 !important;
+    filter: drop-shadow(0 0 5px rgba(239, 68, 68, 0.55));
 }
 
 #send-message-btn.is-converse-ready {
