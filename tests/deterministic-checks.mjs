@@ -157,8 +157,8 @@ const FEATURE_CONTRACTS = Object.freeze({
     },
     spinnerOnlyLoading: {
         required: [
-            /aria-label="\$\{escapeHtml\(phaseLabel\)\}"/,
-            /class="assistant-thinking-pulse/
+            /data-thinking-inline/,
+            /class="assistant-message-text is-streaming thinking-inline-text"/
         ],
         forbidden: [
             /id="chat-thinking-phase"/,
@@ -467,7 +467,7 @@ assert.match(SOURCE.styles, /\.selection-helper-popover\s*\{[\s\S]*display:\s*no
 assert.match(SOURCE.styles, /\.selection-helper-popover\.visible\s*\{[\s\S]*display:\s*flex !important[\s\S]*visibility:\s*visible !important/);
 assert.match(SOURCE.styles, /Selection helper readability after the global monochrome override/);
 assert.match(SOURCE.styles, /\.selection-helper-btn,\s*\.selection-helper-btn:hover,[\s\S]*background:\s*#000000 !important[\s\S]*color:\s*#ffffff !important/);
-assert.match(SOURCE.styles, /\.assistant-thinking-pulse\s*\{/);
+assert.match(SOURCE.styles, /\.thinking-inline-text\s*\{/);
 assert.match(SOURCE.styles, /@keyframes jarvis-thinking-pulse/);
 assert.doesNotMatch(SOURCE.styles, /assistant-thinking-spinner/);
 assert.match(SOURCE.styles, /\.assistant-message-text a\s*\{[\s\S]*color:\s*#ffffff !important/);
@@ -477,7 +477,7 @@ assert.doesNotMatch(SOURCE.appHtml, /chat-bubble-user text-white px-4 py-3/);
 assert.match(SOURCE.appHtml, /popover\.hidden = true/);
 assert.match(SOURCE.appHtml, /popover\.hidden = false/);
 assert.match(SOURCE.appHtml, /function isJarvisTechStackRequest/);
-assert.match(SOURCE.appHtml, /openai\/gpt-oss-120b/);
+assert.match(SOURCE.appHtml, /deepseek-r1-distill-llama-70b/);
 assert.match(SOURCE.appHtml, /gemini-2\.5-flash-lite/);
 assert.match(SOURCE.appHtml, /permanent-free public-source routing through Wikipedia, Wikidata, GDELT, RSS\/Atom, official-source discovery/);
 assert.match(SOURCE.appHtml, /Britannica lookup, Reddit discussion lookup, and archive\.today snapshot lookup/);
@@ -1200,20 +1200,32 @@ const titleSandbox = {};
 vm.createContext(titleSandbox);
 vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'splitReadableSentences'), titleSandbox);
 vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'compactChatTitleText'), titleSandbox);
+vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'toTitleCaseChatTitle'), titleSandbox);
 vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'capitalizeChatTitle'), titleSandbox);
-vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'normalizeChatTitleCandidate'), titleSandbox);
+vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'isAssistantErrorOrFallbackText'), titleSandbox);
+vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'isInvalidOrGenericChatTitle'), titleSandbox);
 vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'isGenericChatTitle'), titleSandbox);
+vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'normalizeChatTitleCandidate'), titleSandbox);
 vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'normalizeGeneratedChatTitle'), titleSandbox);
 vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'isChatTitleIgnorableMessage'), titleSandbox);
 vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'getChatTitleMessages'), titleSandbox);
 vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'buildChatTitlePrompt'), titleSandbox);
 vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'stripChatTitlePromptFiller'), titleSandbox);
+vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'deriveChatTitleFromAttachment'), titleSandbox);
 vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'deriveChatTitleFromText'), titleSandbox);
 vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'isVagueChatTitlePrompt'), titleSandbox);
 vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'isShortChatTitleFollowUp'), titleSandbox);
 vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'pickPreferredChatTitleUserMessage'), titleSandbox);
 vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'deriveChatTitleFromAssistantText'), titleSandbox);
 vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'deriveChatTitleFromMessages'), titleSandbox);
+assert.equal(titleSandbox.isInvalidOrGenericChatTitle('I Could Not Generate A Response'), true);
+assert.equal(titleSandbox.isInvalidOrGenericChatTitle('Unable To Generate Response'), true);
+assert.equal(titleSandbox.isInvalidOrGenericChatTitle('Service Error'), true);
+assert.equal(titleSandbox.isInvalidOrGenericChatTitle('The Model API Is Currently Overloaded'), true);
+assert.equal(titleSandbox.deriveChatTitleFromMessages([
+    { role: 'user', text: 'How do I center a div in CSS?' },
+    { role: 'assistant', text: 'I could not generate a response this time. Please try again.' }
+]), 'Center a div in CSS');
 assert.equal(titleSandbox.deriveChatTitleFromMessages([
     { role: 'user', text: 'what is this' },
     { role: 'assistant', text: 'Likely item: likely Lenovo IdeaPad (laptop). Visible details: keyboard; JARVIS page.' }
