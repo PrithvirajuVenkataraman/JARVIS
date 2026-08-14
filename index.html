@@ -21344,14 +21344,20 @@ function normalizeChatSession(raw) {
             .filter(item => item.text || (Array.isArray(item.attachments) && item.attachments.length))
             .slice(-CHAT_SESSION_MAX_MESSAGES)
         : [];
+    let title = String(raw.title || '').trim().slice(0, 80);
+    const titleIsInvalid = isInvalidOrGenericChatTitle(title);
+    if (titleIsInvalid || !title) {
+        const derived = deriveChatTitleFromMessages(messages);
+        title = (derived && !isInvalidOrGenericChatTitle(derived)) ? derived : 'New chat';
+    }
     return {
         id: String(raw.id || '').trim() || `chat_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-        title: String(raw.title || '').trim().slice(0, 80) || deriveChatTitleFromMessages(messages) || 'New chat',
+        title: title || 'New chat',
         messages,
         createdAt: String(raw.createdAt || raw.updatedAt || new Date().toISOString()),
         updatedAt: String(raw.updatedAt || raw.createdAt || new Date().toISOString()),
-        autoTitle: raw.autoTitle !== false && raw.titleEdited !== true,
-        titleEdited: raw.titleEdited === true,
+        autoTitle: titleIsInvalid ? true : (raw.autoTitle !== false && raw.titleEdited !== true),
+        titleEdited: titleIsInvalid ? false : (raw.titleEdited === true),
         pinned: raw.pinned === true,
         deleted: raw.deleted === true
     };
@@ -21415,14 +21421,21 @@ function rememberDeletedChatSession(session) {
 }
 
 function loadChatSessions() {
+    let repairedAny = false;
     try {
         const saved = localStorage.getItem(CHAT_SESSIONS_STORAGE_KEY);
         const parsed = saved ? JSON.parse(saved) : [];
         const rawCount = Array.isArray(parsed) ? parsed.length : 0;
         chatSessions = Array.isArray(parsed)
-            ? parsed.map(normalizeChatSession).filter(session => session && !isDeletedChatSession(session) && chatSessionHasUserMessage(session))
+            ? parsed.map(session => {
+                const normalized = normalizeChatSession(session);
+                if (normalized && session && (normalized.title !== session.title || normalized.titleEdited !== session.titleEdited)) {
+                    repairedAny = true;
+                }
+                return normalized;
+            }).filter(session => session && !isDeletedChatSession(session) && chatSessionHasUserMessage(session))
             : [];
-        if (rawCount !== chatSessions.length) saveChatSessions();
+        if (repairedAny || rawCount !== chatSessions.length) saveChatSessions();
     } catch (_) {
         chatSessions = [];
     }
@@ -21691,7 +21704,8 @@ function migrateLegacyHistoryToChatSession() {
             }
         }
         if (!clean.length) return;
-        const legacyTitle = deriveChatTitleFromText(clean[0]?.user || 'Previous chat');
+        const rawLegacyTitle = deriveChatTitleFromText(clean[0]?.user || '');
+        const legacyTitle = (rawLegacyTitle && !isInvalidOrGenericChatTitle(rawLegacyTitle)) ? rawLegacyTitle : 'Previous chat';
         if (getDeletedChatSessionTitles().has(normalizeDeletedChatTitle(legacyTitle))) return;
         const session = createChatSession(legacyTitle);
         session.id = 'legacy_default_chat';
@@ -21795,6 +21809,25 @@ function compactChatTitleText(text) {
         .trim();
 }
 
+function toTitleCaseChatTitle(text) {
+    const cleaned = compactChatTitleText(text);
+    if (!cleaned) return '';
+    const words = cleaned.split(/\s+/).filter(Boolean);
+    const lowercaseSet = new Set(['a', 'an', 'the', 'and', 'but', 'or', 'for', 'nor', 'on', 'at', 'to', 'from', 'by', 'of', 'in', 'with']);
+    return words
+        .map((word, index) => {
+            const lower = word.toLowerCase();
+            if (/^(?:AI|API|UI|UX|URL|SQL|CSS|HTML|JS|JSON|GPT|iOS|Q[1-4]|LLM|REST|SDK)$/i.test(word)) {
+                return word.toUpperCase();
+            }
+            if (index > 0 && index < words.length - 1 && lowercaseSet.has(lower)) {
+                return lower;
+            }
+            return word.charAt(0).toUpperCase() + word.slice(1);
+        })
+        .join(' ');
+}
+
 function capitalizeChatTitle(text) {
     const cleaned = compactChatTitleText(text);
     if (!cleaned) return '';
@@ -21806,18 +21839,80 @@ function normalizeChatTitleCandidate(text, options) {
     let cleaned = compactChatTitleText(text)
         .replace(/\b(?:please|kindly)\b/gi, ' ')
         .replace(/\b(?:my|your|our)\b/gi, ' ')
+        .replace(/\s+(?:to|for)\s+me$/i, ' ')
         .replace(/\s+/g, ' ')
         .replace(/^[?.!,;:\-\s]+|[?.!,;:\-\s]+$/g, '')
         .trim();
-    if (!cleaned) return 'New chat';
+    if (!cleaned || isInvalidOrGenericChatTitle(cleaned)) return 'New chat';
     const words = cleaned.split(/\s+/).filter(Boolean).slice(0, options.maxWords || 7);
     if (!words.length) return 'New chat';
-    return capitalizeChatTitle(words.join(' ')).slice(0, 60);
+    const result = capitalizeChatTitle(words.join(' ')).slice(0, 60);
+    return isInvalidOrGenericChatTitle(result) ? 'New chat' : result;
+}
+
+function isAssistantErrorOrFallbackText(text) {
+    const raw = String(text || '').trim();
+    if (!raw) return true;
+    const lower = raw.toLowerCase();
+
+    if (/\b(?:could not generate|cannot generate|unable to generate|failed to generate|could not produce|unable to produce|could not extract|failed to extract|could not answer|unable to answer|could not create|unable to create)\b/i.test(lower)) {
+        return true;
+    }
+    if (/\b(?:generate a response|produce a response|produce an answer|generate an answer|produce a reliable answer|generate reliable|produce a clean)\b/i.test(lower)) {
+        return true;
+    }
+    if (/\b(?:i apologize|sorry,? i (?:am|could|can|cannot|was)|i'm sorry|service hit an internal error|internal server error|provider error|service is unavailable|service_unavailable)\b/i.test(lower)) {
+        return true;
+    }
+    if (/\b(?:the model api is currently overloaded|rate limit exceeded|vision processing failed|empty provider response|request timed out|network error|failed to fetch)\b/i.test(lower)) {
+        return true;
+    }
+    if (/\b(?:no readable text could be extracted|could not extract readable text|frame was received, but i could not produce|contains no extractable text or visual data|attachment reference contains no|i could not produce a clean|i could not produce a reliable)\b/i.test(lower)) {
+        return true;
+    }
+    if (/^(?:error|service error|failed to fetch|network error|the ai service hit an internal error|the ai service is unavailable|something went wrong)\b/i.test(lower)) {
+        return true;
+    }
+    return false;
+}
+
+function isInvalidOrGenericChatTitle(title) {
+    const raw = String(title || '').trim();
+    if (!raw) return true;
+    const normalized = raw
+        .replace(/[^\w\s-]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+    if (!normalized) return true;
+
+    // 1. Generic placeholder titles
+    if (/^(?:new chat|untitled|untitled chat|conversation|conversation title|chat title|title|topic|help|question|chat|assistant|jarvis|previous chat|no substantive conversation|no substantive conversation yet|substantive conversation|chat session|saved chat)$/i.test(normalized)) {
+        return true;
+    }
+
+    // 2. Error / failure / refusal messages
+    if (/\b(?:could not generate|cannot generate|unable to generate|failed to generate|could not produce|unable to produce|could not extract|failed to extract|could not answer|unable to answer|could not create|unable to create)\b/i.test(normalized)) {
+        return true;
+    }
+    if (/\b(?:generate a response|produce a response|produce an answer|generate an answer|generate response|reliable answer|clean answer|clean summary)\b/i.test(normalized)) {
+        return true;
+    }
+    if (/\b(?:error occurred|service error|internal error|provider error|model error|rate limit|api overloaded|network error|request failed|service unavailable|server error|something went wrong)\b/i.test(normalized)) {
+        return true;
+    }
+    if (/^(?:i apologize|sorry i|i am unable to|i cannot see|the frame was received|attachment reference contains no|i could not|the model api|no readable text)\b/i.test(normalized)) {
+        return true;
+    }
+    if (/^(?:thinking|analyzing|searching|translating|reading attachments|re-reading the document)\b/i.test(normalized)) {
+        return true;
+    }
+
+    return false;
 }
 
 function isGenericChatTitle(title) {
-    const normalized = String(title || '').replace(/[^\w\s-]/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
-    return !normalized || /^(new chat|untitled|conversation|help|question|chat|assistant|jarvis)$/i.test(normalized);
+    return isInvalidOrGenericChatTitle(title);
 }
 
 function normalizeGeneratedChatTitle(title, fallback = '') {
@@ -21825,12 +21920,12 @@ function normalizeGeneratedChatTitle(title, fallback = '') {
         .replace(/\r?\n/g, ' ')
         .replace(/^```[\w-]*|```$/g, '')
         .replace(/^["'“”‘’`]+|["'“”‘’`]+$/g, '')
-        .replace(/^\s*(?:title|conversation|chat)\s*:\s*/i, '')
+        .replace(/^\s*(?:title|conversation title|chat title|topic)\s*:\s*/i, '')
         .replace(/^["'“”‘’`]+|["'“”‘’`]+$/g, '')
         .replace(/[.!?;:,\-–—\s]+$/g, '')
         .replace(/\s+/g, ' ')
         .trim();
-    if (!cleaned || isGenericChatTitle(cleaned)) return fallback || '';
+    if (!cleaned || isInvalidOrGenericChatTitle(cleaned)) return fallback || '';
     const words = cleaned.split(/\s+/).filter(Boolean);
     if (words.length > 8) cleaned = words.slice(0, 6).join(' ');
     cleaned = cleaned
@@ -21842,7 +21937,7 @@ function normalizeGeneratedChatTitle(title, fallback = '') {
         .slice(0, 60)
         .replace(/[.!?;:,\-–—\s]+$/g, '')
         .trim();
-    if (isGenericChatTitle(cleaned)) return fallback || '';
+    if (isInvalidOrGenericChatTitle(cleaned)) return fallback || '';
     return cleaned;
 }
 
@@ -21851,8 +21946,11 @@ function isChatTitleIgnorableMessage(message) {
     const role = message?.role === 'assistant' ? 'assistant' : 'user';
     const text = String(message?.text || '').replace(/\s+/g, ' ').trim();
     const lower = text.toLowerCase();
-    if (!text) return true;
-    if (role === 'assistant' && message?.systemGreeting === true) return true;
+    if (!text && !(Array.isArray(message?.attachments) && message.attachments.length)) return true;
+    if (role === 'assistant') {
+        if (message?.systemGreeting === true) return true;
+        if (isAssistantErrorOrFallbackText(text)) return true;
+    }
     if (/^(hi|hello|hey|yo|sup|hola|vanakkam|namaste|good morning|good afternoon|good evening|hey jarvis|hi jarvis|hello jarvis|jarvis)$/i.test(lower)) return true;
     if (/^(yes sir, how can i help|hi! how can i help|hello! how can i help|hey there! how can i help|vanakkam! how can i help|hola, amigo! how can i help)/i.test(lower)) return true;
     if (/^(thanks|thank you|you are welcome|i am doing well|yes, i am here)\b/i.test(lower)) return true;
@@ -21865,9 +21963,10 @@ function getChatTitleMessages(messages = []) {
         .filter(item => item && !isChatTitleIgnorableMessage(item))
         .map(item => ({
             role: item.role === 'assistant' ? 'assistant' : 'user',
-            text: String(item.text || '').replace(/\s+/g, ' ').trim().slice(0, 800)
+            text: String(item.text || '').replace(/\s+/g, ' ').trim().slice(0, 800),
+            attachments: Array.isArray(item.attachments) ? item.attachments : []
         }))
-        .filter(item => item.text)
+        .filter(item => item.text || item.attachments.length)
         .slice(-8);
 }
 
@@ -21878,11 +21977,13 @@ function buildChatTitlePrompt(messages = []) {
         .join('\n');
     return [
         'You are an expert AI assistant responsible for generating concise, meaningful conversation titles.',
-        'Generate one natural human-written title that summarizes the primary topic or intent.',
+        'Generate one natural human-written title that summarizes the primary topic or user inquiry.',
         'Rules:',
         '- Use Title Case.',
         '- Keep it between 3 and 6 words.',
         '- Keep it under 40 characters whenever possible.',
+        '- Base the title SOLELY on the user\'s substantive topic, inquiry, or goal.',
+        '- NEVER output generic error messages, assistant fallback text, apologies, or failures (e.g. "I Could Not Generate A Response", "Error", "Service Unavailable"). If an error occurred, title the conversation after the user\'s original request.',
         '- Prefer concrete nouns: place names, products, topics, or tasks.',
         '- For weather or travel about a place, include the place name (example: Weather In Ooty).',
         '- For coding or debugging, name the technology or bug area.',
@@ -21905,17 +22006,17 @@ function shouldGenerateModelChatTitle(session) {
     if (!session || session.titleEdited === true || session.autoTitle === false) return false;
     const messages = getChatTitleMessages(session.messages);
     const userCount = messages.filter(item => item.role === 'user').length;
-    const assistantCount = messages.filter(item => item.role === 'assistant').length;
-    if (!userCount || !assistantCount) return false;
-    if (isGenericChatTitle(session.title)) return true;
-    // Refine title after the first and second substantive exchanges.
-    if (userCount <= 3 && messages.length <= 12) return true;
+    const assistantCount = messages.filter(item => item.role === 'assistant' && !isAssistantErrorOrFallbackText(item.text)).length;
+    if (!userCount) return false;
+    if (isInvalidOrGenericChatTitle(session.title)) return true;
+    if (userCount <= 3 && assistantCount >= 1 && messages.length <= 12) return true;
     return false;
 }
 
 async function generateModelChatTitle(session, fallbackTitle = '') {
+    const titleMessages = getChatTitleMessages(session?.messages || []);
+    if (!titleMessages.length) return fallbackTitle || '';
     const prompt = buildChatTitlePrompt(session?.messages || []);
-    if (!getChatTitleMessages(session?.messages || []).length) return fallbackTitle || '';
     try {
         const result = await window.JarvisApi?.postJson?.('/api/chat-groq', {
             message: prompt,
@@ -21929,7 +22030,11 @@ async function generateModelChatTitle(session, fallbackTitle = '') {
         }, {
             timeoutMs: 14000
         });
-        return normalizeGeneratedChatTitle(result?.response || result?.text || '', fallbackTitle);
+        const rawResponse = String(result?.response || result?.text || '').trim();
+        if (!rawResponse || isAssistantErrorOrFallbackText(rawResponse) || isInvalidOrGenericChatTitle(rawResponse)) {
+            return fallbackTitle || '';
+        }
+        return normalizeGeneratedChatTitle(rawResponse, fallbackTitle);
     } catch (_) {
         return fallbackTitle || '';
     }
@@ -21939,13 +22044,16 @@ function scheduleChatTitleGeneration(session) {
     if (!shouldGenerateModelChatTitle(session)) return;
     const sequence = ++chatTitleGenerationSequence;
     const sessionId = String(session.id || '');
-    const fallbackTitle = normalizeGeneratedChatTitle(deriveChatTitleFromMessages(getChatTitleMessages(session.messages)), session.title || '');
+    const derivedFallback = deriveChatTitleFromMessages(getChatTitleMessages(session.messages));
+    const fallbackTitle = (derivedFallback && !isInvalidOrGenericChatTitle(derivedFallback))
+        ? derivedFallback
+        : (session.title && !isInvalidOrGenericChatTitle(session.title) ? session.title : 'New chat');
     setTimeout(async () => {
         const latest = chatSessions.find(item => item.id === sessionId && !item.deleted);
         if (!latest || latest.titleEdited === true || latest.autoTitle === false) return;
         if (sequence < chatTitleGenerationSequence - 4) return;
         const title = await generateModelChatTitle(latest, fallbackTitle);
-        if (!title || latest.titleEdited === true || latest.autoTitle === false) return;
+        if (!title || isInvalidOrGenericChatTitle(title) || latest.titleEdited === true || latest.autoTitle === false) return;
         latest.title = title;
         latest.updatedAt = new Date().toISOString();
         saveChatSessions();
@@ -21962,25 +22070,42 @@ function stripChatTitlePromptFiller(text) {
         .replace(/^(?:please|kindly|hey|hi|hello|jarvis)[,\s]+/i, '')
         .trim();
     const fillerPatterns = [
-        /^(?:can|could|would|will)\s+you\s+(?:please\s+)?/i,
-        /^(?:can|could|would)\s+i\s+/i,
-        /^help\s+me\s+(?:to\s+)?/i,
-        /^tell\s+me\s+(?:about\s+)?/i,
-        /^explain\s+(?:to\s+me\s+)?/i,
-        /^give\s+me\s+(?:a\s+|an\s+|the\s+)?/i,
-        /^show\s+me\s+(?:a\s+|an\s+|the\s+)?/i,
+        /^(?:can|could|would|will)\s+you\s+(?:please\s+)?(?:tell\s+me\s+|explain\s+|show\s+|help\s+me\s+with\s+|help\s+me\s+to\s+|give\s+me\s+)?/i,
+        /^(?:can|could|would)\s+i\s+(?:please\s+)?/i,
+        /^help\s+me\s+(?:to\s+|with\s+)?/i,
+        /^tell\s+me\s+(?:about\s+|more\s+about\s+)?/i,
+        /^explain\s+(?:to\s+me\s+)?(?:how\s+|what\s+|why\s+)?/i,
+        /^give\s+me\s+(?:a\s+|an\s+|the\s+|some\s+)?/i,
+        /^show\s+me\s+(?:a\s+|an\s+|the\s+|some\s+)?/i,
         /^what\s+is\s+(?:a\s+|an\s+|the\s+)?/i,
         /^what's\s+(?:a\s+|an\s+|the\s+)?/i,
         /^who\s+is\s+(?:a\s+|an\s+|the\s+)?/i,
+        /^where\s+is\s+(?:a\s+|an\s+|the\s+)?/i,
+        /^why\s+is\s+(?:a\s+|an\s+|the\s+)?/i,
         /^how\s+do\s+i\s+/i,
-        /^how\s+to\s+/i
+        /^how\s+can\s+i\s+/i,
+        /^how\s+to\s+/i,
+        /^how\s+does\s+/i,
+        /^i\s+want\s+to\s+(?:know\s+|learn\s+|understand\s+)?/i,
+        /^i\s+need\s+(?:help\s+with\s+|a\s+|to\s+)?/i,
+        /^write\s+(?:me\s+)?(?:a\s+|an\s+)?/i,
+        /^generate\s+(?:a\s+|an\s+)?/i,
+        /^create\s+(?:a\s+|an\s+)?/i,
+        /^suggest\s+(?:some\s+|a\s+few\s+)?/i,
+        /^find\s+(?:me\s+)?(?:some\s+|a\s+)?/i,
+        /^search\s+(?:for\s+)?/i,
+        /^look\s+up\s+/i,
+        /^analyze\s+(?:the\s+attached\s+(?:file|document|image|photo)s?\s*(?:\([^)]*\))?|this|the\s+)?/i,
+        /^review\s+(?:the\s+attached\s+(?:file|document|image|photo)s?\s*(?:\([^)]*\))?|this|the\s+)?/i,
+        /^attached\s+\d+\s+files?\b/i,
+        /^about\s+/i
     ];
     let changed = true;
     while (changed) {
         changed = false;
         for (const pattern of fillerPatterns) {
             const next = cleaned.replace(pattern, '').trim();
-            if (next !== cleaned) {
+            if (next !== cleaned && next.length >= 2) {
                 cleaned = next;
                 changed = true;
             }
@@ -21989,11 +22114,42 @@ function stripChatTitlePromptFiller(text) {
     return cleaned;
 }
 
-function deriveChatTitleFromText(text) {
-    const cleaned = compactChatTitleText(text)
+function deriveChatTitleFromAttachment(attachment, userText = '') {
+    const name = String(attachment?.name || attachment?.filename || '').trim();
+    const cleanUser = String(userText || '').trim();
+    if (cleanUser && !isVagueChatTitlePrompt(cleanUser) && !/^(?:analyze|review|check)\s+(?:the\s+attached|this)/i.test(cleanUser)) {
+        const fromText = deriveChatTitleFromText(cleanUser);
+        if (fromText && !isInvalidOrGenericChatTitle(fromText)) return fromText;
+    }
+    if (!name) return 'File Analysis';
+    if (/^pasted-media-\d+/i.test(name) || /^image\.(?:png|jpe?g|webp)$/i.test(name) || /^blob$/i.test(name)) {
+        if (cleanUser && !isVagueChatTitlePrompt(cleanUser)) {
+            const fromText = deriveChatTitleFromText(cleanUser);
+            if (fromText && !isInvalidOrGenericChatTitle(fromText)) return fromText;
+        }
+        return 'Image Analysis';
+    }
+    const baseName = name.replace(/\.[a-zA-Z0-9]+$/, '');
+    const readable = baseName
+        .replace(/[-_.]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    if (!readable) return 'Document Analysis';
+    return normalizeChatTitleCandidate(readable, { maxWords: 6 });
+}
+
+function deriveChatTitleFromText(text, attachments = []) {
+    const rawText = String(text || '').trim();
+    if (Array.isArray(attachments) && attachments.length > 0) {
+        const titleFromAtt = deriveChatTitleFromAttachment(attachments[0], rawText);
+        if (titleFromAtt && !isInvalidOrGenericChatTitle(titleFromAtt)) {
+            return titleFromAtt;
+        }
+    }
+    const cleaned = compactChatTitleText(rawText)
         .replace(/^(please|hey|hi|hello|jarvis)[,\s]+/i, '')
         .trim();
-    if (!cleaned) return 'New chat';
+    if (!cleaned || isInvalidOrGenericChatTitle(cleaned)) return 'New chat';
 
     if (/\bwhere\s+am\s+i\b|\bwhat(?:'?s|\s+is)\s+my\s+(?:exact\s+)?location\b|\bmy\s+current\s+location\b/i.test(cleaned)) {
         return 'Where Am I';
@@ -22024,7 +22180,10 @@ function deriveChatTitleFromText(text) {
     }
     const withoutFiller = stripChatTitlePromptFiller(cleaned);
     const withoutQuestion = withoutFiller.replace(/[?.!,;:]+$/g, '').trim();
-    return normalizeChatTitleCandidate(withoutQuestion);
+    if (withoutQuestion && !isInvalidOrGenericChatTitle(withoutQuestion)) {
+        return normalizeChatTitleCandidate(withoutQuestion);
+    }
+    return normalizeChatTitleCandidate(cleaned);
 }
 
 function isShortChatTitleFollowUp(text) {
@@ -22044,25 +22203,30 @@ function isVagueChatTitlePrompt(text) {
 }
 
 function deriveChatTitleFromAssistantText(text) {
+    if (isAssistantErrorOrFallbackText(text)) return '';
     let cleaned = compactChatTitleText(text)
         .replace(/^(Likely item|Visible item|Detected text|Readable text)\s*:\s*/i, '')
         .replace(/^I can see\s+/i, '')
         .replace(/^I see\s+/i, '')
         .replace(/^It (?:looks like|appears to be|is)\s+/i, '')
         .trim();
-    if (!cleaned) return 'New chat';
-    const firstSentence = splitReadableSentences(cleaned)[0] || cleaned.split(/[.!?]/)[0] || cleaned;
+    if (!cleaned || isAssistantErrorOrFallbackText(cleaned)) return '';
+    const firstSentence = (typeof splitReadableSentences === 'function' ? splitReadableSentences(cleaned)[0] : null) ||
+        cleaned.split(/[.!?\n]/)[0] ||
+        cleaned;
+    if (isAssistantErrorOrFallbackText(firstSentence)) return '';
     cleaned = firstSentence
         .replace(/\([^)]*\)/g, ' ')
         .replace(/\b(likely|probably|visible|showing|shown|there is|there are|a|an|the)\b/gi, ' ')
         .replace(/[?.!,;:]+$/g, '')
         .replace(/\s+/g, ' ')
         .trim();
+    if (!cleaned || isInvalidOrGenericChatTitle(cleaned)) return '';
     return normalizeChatTitleCandidate(cleaned);
 }
 
 function pickPreferredChatTitleUserMessage(userMessages = []) {
-    const list = Array.isArray(userMessages) ? userMessages.filter(item => item?.text) : [];
+    const list = Array.isArray(userMessages) ? userMessages.filter(item => item?.text || (Array.isArray(item?.attachments) && item.attachments.length)) : [];
     if (!list.length) return null;
     if (list.length === 1) return list[0];
     for (let i = list.length - 1; i >= 0; i -= 1) {
@@ -22071,21 +22235,42 @@ function pickPreferredChatTitleUserMessage(userMessages = []) {
             return candidate;
         }
     }
-    return list[list.length - 1];
+    return list[0];
 }
 
 function deriveChatTitleFromMessages(messages = []) {
-    const titleMessages = getChatTitleMessages(messages);
-    const userMessages = titleMessages.filter(item => item.role === 'user' && item.text);
+    const validMessages = (Array.isArray(messages) ? messages : []).filter(item => item && !isChatTitleIgnorableMessage(item));
+    const userMessages = validMessages.filter(item => item.role === 'user' && (item.text || (Array.isArray(item.attachments) && item.attachments.length)));
     const preferredUser = pickPreferredChatTitleUserMessage(userMessages);
-    const firstAssistant = titleMessages.find(item => item.role === 'assistant' && item.text);
-    const userTitle = preferredUser ? deriveChatTitleFromText(preferredUser.text) : 'New chat';
-    if (preferredUser && isVagueChatTitlePrompt(preferredUser.text) && firstAssistant) {
-        const assistantTitle = deriveChatTitleFromAssistantText(firstAssistant.text);
-        if (assistantTitle && assistantTitle !== 'New chat') return assistantTitle;
+    const firstAssistant = validMessages.find(item => item.role === 'assistant' && item.text && !isAssistantErrorOrFallbackText(item.text));
+
+    if (preferredUser) {
+        const userTitle = deriveChatTitleFromText(preferredUser.text, preferredUser.attachments);
+        if (userTitle && !isInvalidOrGenericChatTitle(userTitle)) {
+            if (isVagueChatTitlePrompt(preferredUser.text) && firstAssistant) {
+                const assistantTitle = deriveChatTitleFromAssistantText(firstAssistant.text);
+                if (assistantTitle && !isInvalidOrGenericChatTitle(assistantTitle)) {
+                    return assistantTitle;
+                }
+            }
+            return userTitle;
+        }
     }
-    if (userTitle && userTitle !== 'New chat') return userTitle;
-    return firstAssistant ? deriveChatTitleFromAssistantText(firstAssistant.text) : 'New chat';
+
+    if (firstAssistant) {
+        const assistantTitle = deriveChatTitleFromAssistantText(firstAssistant.text);
+        if (assistantTitle && !isInvalidOrGenericChatTitle(assistantTitle)) {
+            return assistantTitle;
+        }
+    }
+
+    const anyUser = (Array.isArray(messages) ? messages : []).find(item => item?.role === 'user' && (item.text || item.attachments?.length));
+    if (anyUser) {
+        const fallback = deriveChatTitleFromText(anyUser.text, anyUser.attachments);
+        if (fallback && !isInvalidOrGenericChatTitle(fallback)) return fallback;
+    }
+
+    return 'New chat';
 }
 
 function recordActiveChatMessage(role, text, turnId = '', extra = {}) {
@@ -22114,13 +22299,20 @@ function recordActiveChatMessage(role, text, turnId = '', extra = {}) {
     session.messages = session.messages.slice(-CHAT_SESSION_MAX_MESSAGES);
     session.updatedAt = now;
     if (session.titleEdited !== true && session.autoTitle !== false) {
-        session.title = normalizeGeneratedChatTitle(deriveChatTitleFromMessages(session.messages), session.title || 'New chat') || 'New chat';
+        const derived = deriveChatTitleFromMessages(session.messages);
+        if (derived && !isInvalidOrGenericChatTitle(derived)) {
+            session.title = normalizeGeneratedChatTitle(derived, session.title || 'New chat') || derived;
+        } else if (isInvalidOrGenericChatTitle(session.title)) {
+            session.title = derived || 'New chat';
+        }
     }
     forgetActiveEmptyChatDraft();
     saveChatSessions();
     persistActiveSessionSnapshot(turnId);
     renderChatSidebarList();
-    if (normalizedRole === 'assistant') scheduleChatTitleGeneration(session);
+    if (normalizedRole === 'assistant' && !isAssistantErrorOrFallbackText(cleanText)) {
+        scheduleChatTitleGeneration(session);
+    }
 }
 
 function buildHistoryFromChatSession(session) {
