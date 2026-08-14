@@ -60,7 +60,10 @@ body {
     overflow: hidden;
     position: fixed;
     inset: 0;
-    overscroll-behavior-y: none;
+    overscroll-behavior: none;
+    touch-action: pan-x pan-y;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
 }
 
 body,
