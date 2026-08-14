@@ -16,6 +16,7 @@ import * as JarvisMemoryQuality from './memory-quality.js';
 import * as JarvisAttachments from './attachments.js';
 import * as JarvisAgentWorkflows from './agent-workflows.js';
 import JarvisDataVerification from './data-tracking-verification.js';
+import * as JarvisToolDispatcher from './tool-dispatcher.js';
 
 const engine = createConversationEngine({
     maxTurns: 12,
@@ -40,6 +41,7 @@ globalThis.JarvisMemoryQuality = Object.freeze({ ...JarvisMemoryQuality });
 globalThis.JarvisAttachments = Object.freeze({ ...JarvisAttachments });
 globalThis.JarvisAgentWorkflows = Object.freeze({ ...JarvisAgentWorkflows });
 globalThis.JarvisDataVerification = Object.freeze({ ...JarvisDataVerification });
+globalThis.JarvisToolDispatcher = Object.freeze({ ...JarvisToolDispatcher });
 
 function initializeSpeechInput() {
     if (globalThis.__jarvisSpeechInputInstalled) return;
