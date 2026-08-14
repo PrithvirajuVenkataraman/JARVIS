@@ -995,10 +995,8 @@ function buildVisionPrompt(userPrompt, task) {
             : '- Ignore wall color/background/decor unless user explicitly asks for background.',
         '- VISIBLE EVIDENCE RULE: Describe only what is visibly supported by the image pixels. Accurately identify people, attire, gestures, objects, text, math, charts, and scenes that are clearly visible.',
         '- UNCERTAINTY & ZERO-HALLUCINATION RULE: If uncertain about any identity, object, model, brand, or visual detail, state uncertainty clearly rather than guessing. Never invent, assume, or fabricate unseen devices, screens, backgrounds, or contexts.',
-        '- PERSON & PORTRAIT RECOGNITION RULE: When a person or portrait appears in the image:',
-        '  1. First, attempt to recognize and name the person if they are a well-known public figure, celebrity, or historical personality with high confidence based on clear visible features.',
-        '  2. If the person cannot be recognized or is not a known public figure, DO NOT guess their name or invent an identity. Instead, provide a detailed description of:',
-        '     * How the person looks (apparent age range, expression, hair color/style, facial features).',
+        '- PERSONS & PORTRAIT RULE: When a person, portrait, or group of people appears in the image, DO NOT attempt facial recognition or guess personal identities/names to prevent hallucinating identities. State that you cannot recognize individual people, and provide a clear, respectful description of:',
+        '     * How the person or people look (apparent age range, expression, hair color/style, facial features).',
         '     * What they are wearing (clothing type, colors, patterns, accessories like glasses, watch, hat, jewelry).',
         '     * What they are doing (action, posture, pose, gestures, activity).',
         '     * The setting/environment they are in (indoor/outdoor, background, lighting, objects around them).',
@@ -1079,7 +1077,7 @@ function getTaskRule(task) {
             return 'Focus on counting people/humans accurately and include count in summary.';
         case 'person_analyze':
         case 'portrait_describe':
-            return 'First attempt to recognize if it is a well-known public figure. If not recognized, describe in detail how they look, what they are wearing, what they are doing, and the setting.';
+            return 'State that you cannot recognize individual people, and describe in detail how they look, what they are wearing, what they are doing, and the setting.';
         case 'animal_detect':
             return 'Focus on animals and species/breed labels when visible. Include counts and confidence. Do not answer with OCR/text-only results.';
         case 'object_detect':
@@ -1091,7 +1089,7 @@ function getTaskRule(task) {
         case 'translate_to_english':
             return 'Extract visible text and translate it accurately to English.';
         default:
-            return 'Answer the user query about the scene. Prefer the prominent foreground subject (animal, vehicle, person, product, or object). If a person is present, try to recognize them if well-known, or describe their appearance, clothing, action, and setting. For devices, infer brand/model only from visible evidence and qualify uncertainty. Do not let background text dominate.';
+            return 'Answer the user query about the scene. Prefer the prominent foreground subject (animal, vehicle, person, product, or object). If a person is present, state that you cannot recognize individual people and describe their appearance, clothing, action, and setting. For devices, infer brand/model only from visible evidence and qualify uncertainty. Do not let background text dominate.';
     }
 }
 
