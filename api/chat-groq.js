@@ -79,6 +79,17 @@ import { classifyImageLocally } from './_lib/local-vision-classifier.js';
         return [...new Set((preferSpeed ? speedFirst : qualityFirst).filter(Boolean))];
     }
 
+    function getPreferredGroqVisionCandidates(configuredModel = '', userSelectedModel = null) {
+        const configured = String(configuredModel || '').trim();
+        const userSelected = String(userSelectedModel || '').trim();
+        const visionModels = [
+            'llama-3.2-11b-vision-preview',
+            'meta-llama/llama-3.2-11b-vision-instruct',
+            'llama-3.2-90b-vision-preview'
+        ];
+        return [...new Set([userSelected, configured, ...visionModels].filter(Boolean))];
+    }
+
     function getPreferredGeminiCandidates(configuredModel = '', userSelectedModel = null) {
         const configured = String(configuredModel || '').trim();
         const userSelected = String(userSelectedModel || '').trim();
@@ -89,6 +100,18 @@ import { classifyImageLocally } from './_lib/local-vision-classifier.js';
             mappedGemini = 'gemini-2.5-flash-lite';
         }
         return [...new Set([mappedGemini, configured, 'gemini-3.5-flash', 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'].filter(Boolean))];
+    }
+
+    function getPreferredGeminiVisionCandidates(configuredModel = '', userSelectedModel = null) {
+        const configured = String(configuredModel || '').trim();
+        const userSelected = String(userSelectedModel || '').trim();
+        const visionModels = [
+            'gemini-2.5-flash',
+            'gemini-2.0-flash',
+            'gemini-1.5-flash',
+            'gemini-2.5-flash-lite'
+        ];
+        return [...new Set([userSelected, configured, ...visionModels].filter(Boolean))];
     }
 
     const SQL_QUERY_GENERATION_SCHEMA = {
@@ -178,7 +201,7 @@ import { classifyImageLocally } from './_lib/local-vision-classifier.js';
                     }
                 });
             }
-            const { message, context, preferences, intent, grounding } = request.value;
+            const { message, context, preferences, intent, grounding, images } = request.value;
             const systemPrompt = buildServerSystemPrompt(preferences);
             const contextBlock = Array.isArray(context)
                 ? context
@@ -267,6 +290,8 @@ import { classifyImageLocally } from './_lib/local-vision-classifier.js';
                     contextBlock,
                     effectiveMessage,
                     intent,
+                    grounding,
+                    images,
                     routeDecision,
                     lengthPolicy,
                     selectedModel: preferences?.selectedModel || null
@@ -306,8 +331,10 @@ import { classifyImageLocally } from './_lib/local-vision-classifier.js';
                 intent
             );
             const modelStartedAt = Date.now();
-            const images = Array.isArray(grounding?.images) ? grounding.images : undefined;
-            const firstPass = await runModelWithFallback(firstPrompt, lengthPolicy, preferences?.selectedModel || null, images);
+            const imagesToPass = Array.isArray(images)
+                ? images
+                : (Array.isArray(grounding?.images) ? grounding.images : undefined);
+            const firstPass = await runModelWithFallback(firstPrompt, lengthPolicy, preferences?.selectedModel || null, imagesToPass);
             timing.modelMs += Date.now() - modelStartedAt;
             if (!firstPass.ok) {
                 return res.status(503).json({
@@ -557,6 +584,8 @@ import { classifyImageLocally } from './_lib/local-vision-classifier.js';
             contextBlock,
             effectiveMessage,
             intent,
+            grounding,
+            images,
             routeDecision,
             lengthPolicy,
             selectedModel
@@ -573,11 +602,14 @@ import { classifyImageLocally } from './_lib/local-vision-classifier.js';
         try {
             const prompt = composeStreamingPrompt(systemPrompt, contextBlock, effectiveMessage, lengthPolicy?.instruction || '', intent);
             const modelStartedAt = Date.now();
+            const streamImages = Array.isArray(images)
+                ? images
+                : (Array.isArray(grounding?.images) ? grounding.images : undefined);
             const streamResult = await streamModelWithFallback(prompt, lengthPolicy, delta => {
                 if (!delta) return;
                 streamedText += delta;
                 writeSse(res, 'delta', { text: delta });
-            }, selectedModel);
+            }, selectedModel, streamImages);
             timing.modelMs += Date.now() - modelStartedAt;
 
             if (!streamResult.ok) {
@@ -1121,29 +1153,27 @@ import { classifyImageLocally } from './_lib/local-vision-classifier.js';
         const maxTokens = clampInt(lengthPolicy?.maxTokens, 8000, 256, 16000);
         const userSelected = String(userSelectedModel || '').trim();
         const isOpenAiPreferred = ['gpt-4o', 'gpt-4o-mini', 'o3-mini', 'gpt-4-turbo'].includes(userSelected);
-
         const hasImages = Array.isArray(images) && images.length > 0;
 
         const tryRunGroq = async () => {
             const groqApiKey = process.env.GROQ_API_KEY || process.env.GROQ_KEY;
             if (!groqApiKey) return null;
             const groqConfiguredModel = userSelectedModel || String(process.env.GROQ_MODEL || '').trim();
-            const groqCandidates = getPreferredGroqCandidates(groqConfiguredModel, { preferSpeed: false, userSelectedModel });
-            
-            // Format visual context for Groq text models without sending crashing image_url payload
-            let groqTextPrompt = finalPrompt;
-            if (hasImages) {
-                const imageContexts = images.map((img, idx) => {
-                    const label = img.name ? `Image ${idx + 1} (${img.name})` : `Image ${idx + 1}`;
-                    const localExtraction = classifyImageLocally({ imageBase64: img.base64, mimeType: img.mimeType || 'image/jpeg', prompt: finalPrompt });
-                    const visualNotes = localExtraction?.response || localExtraction?.summary || 'Visual content attached.';
-                    return `[${label} Visual Analysis & Extracted Content]\n${visualNotes}`;
-                }).join('\n\n');
-                groqTextPrompt = `${finalPrompt}\n\n${imageContexts}`;
-            }
+            const groqCandidates = hasImages
+                ? getPreferredGroqVisionCandidates(groqConfiguredModel, userSelectedModel)
+                : getPreferredGroqCandidates(groqConfiguredModel, { preferSpeed: false, userSelectedModel });
 
             for (const model of groqCandidates) {
-                const messages = [{ role: 'user', content: groqTextPrompt }];
+                let messages = [{ role: 'user', content: finalPrompt }];
+                if (hasImages) {
+                    const content = [{ type: 'text', text: finalPrompt }];
+                    for (const img of images) {
+                        if (img?.base64) {
+                            content.push({ type: 'image_url', image_url: { url: `data:${img.mimeType || 'image/jpeg'};base64,${img.base64}` } });
+                        }
+                    }
+                    messages = [{ role: 'user', content }];
+                }
                 const requestBody = {
                     model,
                     temperature: temp,
@@ -1224,7 +1254,9 @@ import { classifyImageLocally } from './_lib/local-vision-classifier.js';
             const geminiApiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
             if (!geminiApiKey) return null;
             const geminiConfiguredModel = String(process.env.GEMINI_MODEL || '').trim();
-            const geminiCandidates = getPreferredGeminiCandidates(geminiConfiguredModel, userSelectedModel);
+            const geminiCandidates = hasImages
+                ? getPreferredGeminiVisionCandidates(geminiConfiguredModel, userSelectedModel)
+                : getPreferredGeminiCandidates(geminiConfiguredModel, userSelectedModel);
             for (const model of geminiCandidates) {
                 const parts = [{ text: finalPrompt }];
                 if (hasImages) {
@@ -1261,12 +1293,25 @@ import { classifyImageLocally } from './_lib/local-vision-classifier.js';
         };
 
         const providerFns = hasImages
-            ? [tryRunGemini, tryRunOpenAI, tryRunGroq]
+            ? [tryRunGemini, tryRunGroq, tryRunOpenAI]
             : (isOpenAiPreferred ? [tryRunOpenAI, tryRunGroq, tryRunGemini] : [tryRunGroq, tryRunOpenAI, tryRunGemini]);
 
         for (const fn of providerFns) {
             const result = await fn();
             if (result) return result;
+        }
+
+        if (hasImages) {
+            return {
+                ok: true,
+                parsedResponse: {
+                    intent: 'general_chat',
+                    response: 'Image recognition requires a Gemini (`GEMINI_API_KEY`) or Groq Vision (`GROQ_API_KEY`) API key configured in the environment. Please configure your API key to enable visual analysis.',
+                    action: null
+                },
+                modelUsed: 'none',
+                provider: 'notice'
+            };
         }
 
         return {
@@ -1280,7 +1325,7 @@ import { classifyImageLocally } from './_lib/local-vision-classifier.js';
         };
     }
 
-    async function streamModelWithFallback(finalPrompt, lengthPolicy = {}, onDelta = () => {}, userSelectedModel = null) {
+    async function streamModelWithFallback(finalPrompt, lengthPolicy = {}, onDelta = () => {}, userSelectedModel = null, images = undefined) {
         const temp = Number.isFinite(Number(lengthPolicy?.temperature)) ? Number(lengthPolicy.temperature) : 0.7;
         const maxTokens = clampInt(lengthPolicy?.maxTokens, 8000, 256, 16000);
         const userSelected = String(userSelectedModel || '').trim();
@@ -1310,24 +1355,16 @@ import { classifyImageLocally } from './_lib/local-vision-classifier.js';
             const groqApiKey = process.env.GROQ_API_KEY || process.env.GROQ_KEY;
             if (!groqApiKey) return null;
             const groqConfiguredModel = userSelectedModel || String(process.env.GROQ_MODEL || '').trim();
-            const groqCandidates = getPreferredGroqCandidates(groqConfiguredModel, { preferSpeed: true, userSelectedModel });
-            
-            let groqTextPrompt = finalPrompt;
-            if (hasImages) {
-                const imageContexts = images.map((img, idx) => {
-                    const label = img.name ? `Image ${idx + 1} (${img.name})` : `Image ${idx + 1}`;
-                    const localExtraction = classifyImageLocally({ imageBase64: img.base64, mimeType: img.mimeType || 'image/jpeg', prompt: finalPrompt });
-                    const visualNotes = localExtraction?.response || localExtraction?.summary || 'Visual content attached.';
-                    return `[${label} Visual Analysis & Extracted Content]\n${visualNotes}`;
-                }).join('\n\n');
-                groqTextPrompt = `${finalPrompt}\n\n${imageContexts}`;
-            }
+            const groqCandidates = hasImages
+                ? getPreferredGroqVisionCandidates(groqConfiguredModel, userSelectedModel)
+                : getPreferredGroqCandidates(groqConfiguredModel, { preferSpeed: true, userSelectedModel });
 
             for (const model of groqCandidates) {
                 const result = await streamGroqModel({
                     apiKey: groqApiKey,
                     model,
-                    prompt: groqTextPrompt,
+                    prompt: finalPrompt,
+                    images,
                     temperature: temp,
                     maxTokens,
                     timeoutMs: clampInt(lengthPolicy?.timeoutMs, STREAM_MODEL_FETCH_TIMEOUT_MS, 1000, STREAM_MODEL_FETCH_TIMEOUT_MS),
@@ -1342,7 +1379,9 @@ import { classifyImageLocally } from './_lib/local-vision-classifier.js';
             const geminiApiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
             if (!geminiApiKey) return null;
             const geminiConfiguredModel = String(process.env.GEMINI_MODEL || '').trim();
-            const geminiCandidates = getPreferredGeminiCandidates(geminiConfiguredModel, userSelectedModel);
+            const geminiCandidates = hasImages
+                ? getPreferredGeminiVisionCandidates(geminiConfiguredModel, userSelectedModel)
+                : getPreferredGeminiCandidates(geminiConfiguredModel, userSelectedModel);
             for (const model of geminiCandidates) {
                 const result = await streamGeminiModel({
                     apiKey: geminiApiKey,
@@ -1360,12 +1399,23 @@ import { classifyImageLocally } from './_lib/local-vision-classifier.js';
         };
 
         const streamFns = hasImages
-            ? [tryStreamGemini, tryStreamOpenAI, tryStreamGroq]
+            ? [tryStreamGemini, tryStreamGroq, tryStreamOpenAI]
             : (isOpenAiPreferred ? [tryStreamOpenAI, tryStreamGroq, tryStreamGemini] : [tryStreamGroq, tryStreamOpenAI, tryStreamGemini]);
 
         for (const fn of streamFns) {
             const result = await fn();
             if (result) return result;
+        }
+
+        if (hasImages) {
+            const notice = 'Image recognition requires a Gemini (`GEMINI_API_KEY`) or Groq Vision (`GROQ_API_KEY`) API key configured in the environment. Please configure your API key to enable visual analysis.';
+            onDelta(notice);
+            return {
+                ok: true,
+                provider: 'notice',
+                modelUsed: 'none',
+                text: notice
+            };
         }
 
         return {
@@ -1425,10 +1475,20 @@ import { classifyImageLocally } from './_lib/local-vision-classifier.js';
         }
     }
 
-    async function streamGroqModel({ apiKey, model, prompt, temperature, maxTokens, timeoutMs, onDelta }) {
+    async function streamGroqModel({ apiKey, model, prompt, images = [], temperature, maxTokens, timeoutMs, onDelta }) {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), timeoutMs);
         try {
+            let messages = [{ role: 'user', content: prompt }];
+            if (Array.isArray(images) && images.length) {
+                const content = [{ type: 'text', text: prompt }];
+                for (const img of images) {
+                    if (img?.base64) {
+                        content.push({ type: 'image_url', image_url: { url: `data:${img.mimeType || 'image/jpeg'};base64,${img.base64}` } });
+                    }
+                }
+                messages = [{ role: 'user', content }];
+            }
             const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
                 method: 'POST',
                 headers: {
@@ -1441,9 +1501,7 @@ import { classifyImageLocally } from './_lib/local-vision-classifier.js';
                     temperature,
                     max_tokens: maxTokens,
                     stream: true,
-                    messages: [
-                        { role: 'user', content: prompt }
-                    ]
+                    messages
                 })
             });
             if (!response.ok || !response.body) return { ok: false };
@@ -2935,12 +2993,14 @@ import { classifyImageLocally } from './_lib/local-vision-classifier.js';
             : {};
         const intent = normalizeIntent(body.intent);
         const grounding = normalizeGrounding(body.grounding, intent);
+        const rawImages = Array.isArray(body.images) ? body.images : (Array.isArray(body.grounding?.images) ? body.grounding.images : undefined);
+        const images = Array.isArray(rawImages) ? rawImages.filter(img => img && (img.base64 || img.url)) : undefined;
         if ((intent.startsWith('selection_') || intent === 'verify_answer') && !grounding) {
             return { ok: false, error: 'Grounded requests require valid grounding data.' };
         }
         return {
             ok: true,
-            value: { message, context, preferences, intent, grounding }
+            value: { message, context, preferences, intent, grounding, images }
         };
     }
 
@@ -2978,14 +3038,16 @@ import { classifyImageLocally } from './_lib/local-vision-classifier.js';
         const sourceLimit = isAttachment ? 60000 : 10000;
         const selectedText = String(value.selectedText || value.sourceAnswer || '').trim().slice(0, textLimit);
         const sourceAnswer = String(value.sourceAnswer || value.selectedText || '').trim().slice(0, sourceLimit);
+        const rawImages = Array.isArray(value.images) ? value.images : undefined;
         const grounding = {
             kind: isAttachment ? 'attachment' : (kind || 'selection'),
             selectedText,
             sourceAnswer,
+            images: rawImages,
             originalRequest: String(value.originalRequest || '').trim().slice(0, 4000),
             customInstruction: String(value.customInstruction || '').trim().slice(0, 4000)
         };
-        return (grounding.selectedText || grounding.sourceAnswer) ? grounding : null;
+        return (grounding.selectedText || grounding.sourceAnswer || (grounding.images && grounding.images.length)) ? grounding : null;
     }
 
     function normalizeVerifyGrounding(value) {
