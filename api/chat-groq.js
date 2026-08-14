@@ -1,9 +1,10 @@
-    export const config = { maxDuration: 60 };
+export const config = { maxDuration: 60 };
 import { applyApiSecurity } from './_lib/security.js';
 import { runEvidenceFirstWebRag, runVerifiedWebSearch } from './search.js';
 import { extractWithCrawl4Ai } from './_lib/crawl4ai-client.js';
 import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-controls.js';
 import { validateEntityResponse } from './_lib/entity-verifier.js';
+import { classifyImageLocally } from './_lib/local-vision-classifier.js';
 
     const MODEL_FETCH_TIMEOUT_MS = 12_000;
     const STREAM_MODEL_FETCH_TIMEOUT_MS = 10_000;
@@ -1121,22 +1122,28 @@ import { validateEntityResponse } from './_lib/entity-verifier.js';
         const userSelected = String(userSelectedModel || '').trim();
         const isOpenAiPreferred = ['gpt-4o', 'gpt-4o-mini', 'o3-mini', 'gpt-4-turbo'].includes(userSelected);
 
+        const hasImages = Array.isArray(images) && images.length > 0;
+
         const tryRunGroq = async () => {
             const groqApiKey = process.env.GROQ_API_KEY || process.env.GROQ_KEY;
             if (!groqApiKey) return null;
             const groqConfiguredModel = userSelectedModel || String(process.env.GROQ_MODEL || '').trim();
             const groqCandidates = getPreferredGroqCandidates(groqConfiguredModel, { preferSpeed: false, userSelectedModel });
+            
+            // Format visual context for Groq text models without sending crashing image_url payload
+            let groqTextPrompt = finalPrompt;
+            if (hasImages) {
+                const imageContexts = images.map((img, idx) => {
+                    const label = img.name ? `Image ${idx + 1} (${img.name})` : `Image ${idx + 1}`;
+                    const localExtraction = classifyImageLocally({ imageBase64: img.base64, mimeType: img.mimeType || 'image/jpeg', prompt: finalPrompt });
+                    const visualNotes = localExtraction?.response || localExtraction?.summary || 'Visual content attached.';
+                    return `[${label} Visual Analysis & Extracted Content]\n${visualNotes}`;
+                }).join('\n\n');
+                groqTextPrompt = `${finalPrompt}\n\n${imageContexts}`;
+            }
+
             for (const model of groqCandidates) {
-                let messages = [{ role: 'user', content: finalPrompt }];
-                if (Array.isArray(images) && images.length) {
-                    const content = [{ type: 'text', text: finalPrompt }];
-                    for (const img of images) {
-                        if (img?.base64) {
-                            content.push({ type: 'image_url', image_url: { url: `data:${img.mimeType || 'image/jpeg'};base64,${img.base64}` } });
-                        }
-                    }
-                    messages = [{ role: 'user', content }];
-                }
+                const messages = [{ role: 'user', content: groqTextPrompt }];
                 const requestBody = {
                     model,
                     temperature: temp,
@@ -1177,7 +1184,7 @@ import { validateEntityResponse } from './_lib/entity-verifier.js';
             const openaiCandidates = getPreferredOpenAICandidates(userSelectedModel, userSelectedModel);
             for (const model of openaiCandidates) {
                 let messages = [{ role: 'user', content: finalPrompt }];
-                if (Array.isArray(images) && images.length) {
+                if (hasImages) {
                     const content = [{ type: 'text', text: finalPrompt }];
                     for (const img of images) {
                         if (img?.base64) {
@@ -1220,7 +1227,7 @@ import { validateEntityResponse } from './_lib/entity-verifier.js';
             const geminiCandidates = getPreferredGeminiCandidates(geminiConfiguredModel, userSelectedModel);
             for (const model of geminiCandidates) {
                 const parts = [{ text: finalPrompt }];
-                if (Array.isArray(images) && images.length) {
+                if (hasImages) {
                     for (const img of images) {
                         if (img?.base64) {
                             parts.push({ inline_data: { mime_type: img.mimeType || 'image/jpeg', data: img.base64 } });
@@ -1253,9 +1260,9 @@ import { validateEntityResponse } from './_lib/entity-verifier.js';
             return null;
         };
 
-        const providerFns = isOpenAiPreferred
-            ? [tryRunOpenAI, tryRunGroq, tryRunGemini]
-            : [tryRunGroq, tryRunOpenAI, tryRunGemini];
+        const providerFns = hasImages
+            ? [tryRunGemini, tryRunOpenAI, tryRunGroq]
+            : (isOpenAiPreferred ? [tryRunOpenAI, tryRunGroq, tryRunGemini] : [tryRunGroq, tryRunOpenAI, tryRunGemini]);
 
         for (const fn of providerFns) {
             const result = await fn();
@@ -1277,7 +1284,7 @@ import { validateEntityResponse } from './_lib/entity-verifier.js';
         const temp = Number.isFinite(Number(lengthPolicy?.temperature)) ? Number(lengthPolicy.temperature) : 0.7;
         const maxTokens = clampInt(lengthPolicy?.maxTokens, 8000, 256, 16000);
         const userSelected = String(userSelectedModel || '').trim();
-        const isOpenAiPreferred = ['gpt-4o', 'gpt-4o-mini', 'o3-mini', 'gpt-4-turbo'].includes(userSelected);
+        const hasImages = Array.isArray(images) && images.length > 0;
 
         const tryStreamOpenAI = async () => {
             const openaiApiKey = process.env.OPENAI_API_KEY || process.env.OPENAI_KEY;
@@ -1288,6 +1295,7 @@ import { validateEntityResponse } from './_lib/entity-verifier.js';
                     apiKey: openaiApiKey,
                     model,
                     prompt: finalPrompt,
+                    images,
                     temperature: temp,
                     maxTokens,
                     timeoutMs: clampInt(lengthPolicy?.timeoutMs, STREAM_MODEL_FETCH_TIMEOUT_MS, 1000, STREAM_MODEL_FETCH_TIMEOUT_MS),
@@ -1303,11 +1311,23 @@ import { validateEntityResponse } from './_lib/entity-verifier.js';
             if (!groqApiKey) return null;
             const groqConfiguredModel = userSelectedModel || String(process.env.GROQ_MODEL || '').trim();
             const groqCandidates = getPreferredGroqCandidates(groqConfiguredModel, { preferSpeed: true, userSelectedModel });
+            
+            let groqTextPrompt = finalPrompt;
+            if (hasImages) {
+                const imageContexts = images.map((img, idx) => {
+                    const label = img.name ? `Image ${idx + 1} (${img.name})` : `Image ${idx + 1}`;
+                    const localExtraction = classifyImageLocally({ imageBase64: img.base64, mimeType: img.mimeType || 'image/jpeg', prompt: finalPrompt });
+                    const visualNotes = localExtraction?.response || localExtraction?.summary || 'Visual content attached.';
+                    return `[${label} Visual Analysis & Extracted Content]\n${visualNotes}`;
+                }).join('\n\n');
+                groqTextPrompt = `${finalPrompt}\n\n${imageContexts}`;
+            }
+
             for (const model of groqCandidates) {
                 const result = await streamGroqModel({
                     apiKey: groqApiKey,
                     model,
-                    prompt: finalPrompt,
+                    prompt: groqTextPrompt,
                     temperature: temp,
                     maxTokens,
                     timeoutMs: clampInt(lengthPolicy?.timeoutMs, STREAM_MODEL_FETCH_TIMEOUT_MS, 1000, STREAM_MODEL_FETCH_TIMEOUT_MS),
@@ -1328,6 +1348,7 @@ import { validateEntityResponse } from './_lib/entity-verifier.js';
                     apiKey: geminiApiKey,
                     model,
                     prompt: finalPrompt,
+                    images,
                     temperature: temp,
                     maxTokens,
                     timeoutMs: clampInt(lengthPolicy?.timeoutMs, MODEL_FETCH_TIMEOUT_MS, 1000, MODEL_FETCH_TIMEOUT_MS),
@@ -1338,9 +1359,9 @@ import { validateEntityResponse } from './_lib/entity-verifier.js';
             return null;
         };
 
-        const streamFns = isOpenAiPreferred
-            ? [tryStreamOpenAI, tryStreamGroq, tryStreamGemini]
-            : [tryStreamGroq, tryStreamOpenAI, tryStreamGemini];
+        const streamFns = hasImages
+            ? [tryStreamGemini, tryStreamOpenAI, tryStreamGroq]
+            : (isOpenAiPreferred ? [tryStreamOpenAI, tryStreamGroq, tryStreamGemini] : [tryStreamGroq, tryStreamOpenAI, tryStreamGemini]);
 
         for (const fn of streamFns) {
             const result = await fn();
@@ -1357,10 +1378,20 @@ import { validateEntityResponse } from './_lib/entity-verifier.js';
         };
     }
 
-    async function streamOpenAIModel({ apiKey, model, prompt, temperature, maxTokens, timeoutMs, onDelta }) {
+    async function streamOpenAIModel({ apiKey, model, prompt, images = [], temperature, maxTokens, timeoutMs, onDelta }) {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), timeoutMs);
         try {
+            let messages = [{ role: 'user', content: prompt }];
+            if (Array.isArray(images) && images.length) {
+                const content = [{ type: 'text', text: prompt }];
+                for (const img of images) {
+                    if (img?.base64) {
+                        content.push({ type: 'image_url', image_url: { url: `data:${img.mimeType || 'image/jpeg'};base64,${img.base64}` } });
+                    }
+                }
+                messages = [{ role: 'user', content }];
+            }
             const response = await fetch('https://api.openai.com/v1/chat/completions', {
                 method: 'POST',
                 headers: {
@@ -1373,9 +1404,7 @@ import { validateEntityResponse } from './_lib/entity-verifier.js';
                     temperature,
                     max_tokens: maxTokens,
                     stream: true,
-                    messages: [
-                        { role: 'user', content: prompt }
-                    ]
+                    messages
                 })
             });
             if (!response.ok || !response.body) return { ok: false };
@@ -1435,10 +1464,18 @@ import { validateEntityResponse } from './_lib/entity-verifier.js';
         }
     }
 
-    async function streamGeminiModel({ apiKey, model, prompt, temperature, maxTokens, timeoutMs, onDelta }) {
+    async function streamGeminiModel({ apiKey, model, prompt, images = [], temperature, maxTokens, timeoutMs, onDelta }) {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), timeoutMs);
         try {
+            const parts = [{ text: prompt }];
+            if (Array.isArray(images) && images.length) {
+                for (const img of images) {
+                    if (img?.base64) {
+                        parts.push({ inline_data: { mime_type: img.mimeType || 'image/jpeg', data: img.base64 } });
+                    }
+                }
+            }
             const response = await fetch(
                 `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${apiKey}`,
                 {
@@ -1446,9 +1483,7 @@ import { validateEntityResponse } from './_lib/entity-verifier.js';
                     headers: { 'Content-Type': 'application/json' },
                     signal: controller.signal,
                     body: JSON.stringify({
-                        contents: [{
-                            parts: [{ text: prompt }]
-                        }],
+                        contents: [{ parts }],
                         generationConfig: {
                             temperature,
                             topK: 40,
