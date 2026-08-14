@@ -8911,6 +8911,20 @@ let showRoutingDebugBadge = false;
                 closeComposerActionsMenu();
             });
 
+            document.addEventListener('paste', (event) => {
+                const target = event.target;
+                if (target?.id === 'text-input') return;
+                const isFormInput = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
+                if (isFormInput) return;
+                const clipboardData = event?.clipboardData;
+                if (!clipboardData) return;
+                const hasFiles = (clipboardData.files && clipboardData.files.length > 0) ||
+                    (clipboardData.items && Array.from(clipboardData.items).some(item => item.kind === 'file'));
+                if (hasFiles) {
+                    void handleComposerPaste(event);
+                }
+            });
+
             window.toggleComposerActionsMenu = toggleComposerActionsMenu;
             window.handleComposerAction = handleComposerAction;
         }
@@ -9287,9 +9301,35 @@ ${code}
                 .trim();
         }
 
-        function handleComposerPaste(event) {
+        async function handleComposerPaste(event) {
+            const clipboardData = event?.clipboardData;
+            if (!clipboardData) return;
+
+            // 1. Intercept pasted media / files (screenshots, image copies, dropped files)
+            const pastedFiles = [];
+            if (clipboardData.files && clipboardData.files.length > 0) {
+                for (let i = 0; i < clipboardData.files.length; i++) {
+                    pastedFiles.push(clipboardData.files[i]);
+                }
+            } else if (clipboardData.items && clipboardData.items.length > 0) {
+                for (let i = 0; i < clipboardData.items.length; i++) {
+                    const item = clipboardData.items[i];
+                    if (item.kind === 'file') {
+                        const file = item.getAsFile?.();
+                        if (file) pastedFiles.push(file);
+                    }
+                }
+            }
+
+            if (pastedFiles.length > 0) {
+                event.preventDefault();
+                await handleComposerAttachmentSelection(pastedFiles);
+                return;
+            }
+
+            // 2. Text paste handling & prompt normalization
             const input = document.getElementById('text-input');
-            const raw = event?.clipboardData?.getData?.('text');
+            const raw = clipboardData.getData?.('text');
             if (!input || typeof raw !== 'string') return;
             const cleaned = normalizePastedPromptText(raw);
             if (cleaned === raw) return;
