@@ -3250,10 +3250,6 @@ body.dark .response-action-btn {
     animation: jarvis-word-shimmer 2s ease-in-out infinite;
 }
 
-.thinking-inline-text.is-streaming::after {
-    display: none !important;
-}
-
 .streaming-placeholder::after {
     content: '';
     display: inline-block;
@@ -3265,7 +3261,7 @@ body.dark .response-action-btn {
     animation: jarvis-stream-caret 0.85s steps(2, start) infinite;
 }
 
-.assistant-message-text.is-streaming:not(.thinking-inline-text)::after {
+.assistant-message-text.is-streaming::after {
     content: '';
     display: inline-block;
     width: 7px;
@@ -3274,6 +3270,10 @@ body.dark .response-action-btn {
     transform: translateY(2px);
     border-right: 2px solid currentColor;
     animation: jarvis-stream-caret 0.85s steps(2, start) infinite;
+}
+
+.thinking-inline-text.is-streaming::after {
+    display: none !important;
 }
 
 .professional-thinking-dots {
