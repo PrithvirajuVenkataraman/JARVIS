@@ -9,7 +9,7 @@ export function classifyImageLocally({ imageBase64 = '', mimeType = 'image/jpeg'
     const kb = Math.round(byteLength / 1024);
     const summary = rawData
         ? `Image attached (${mimeType || 'image/jpeg'}, ${kb} KB).`
-        : 'Image data is empty.';
+        : 'Image data is empty.'; 
 
     return {
         success: true,
