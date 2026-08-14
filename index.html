@@ -4483,6 +4483,7 @@ async function streamChatCompletion(payload, options = {}) {
             donePayload = event.data || {};
             accumulated = String(donePayload.response || accumulated || '').replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/^<think>[\s\S]*$/gi, '').replace(/<\/?think>/gi, '').trim();
             if (accumulated) {
+                hideThinkingIndicator();
                 const id = ensureStreamMessage();
                 updateStreamingAssistantMessage(id, accumulated, {
                     userMessage,
@@ -4496,6 +4497,7 @@ async function streamChatCompletion(payload, options = {}) {
             return;
         }
         if (event.event === 'error') {
+            hideThinkingIndicator();
             throw new Error(String(event.data?.message || 'Streaming response failed.'));
         }
     };
@@ -4517,6 +4519,7 @@ async function streamChatCompletion(payload, options = {}) {
             handleEvent(parseSseClientEvent(buffer));
         }
     } catch (error) {
+        hideThinkingIndicator();
         if (isAbortError(error) && assistantMessageId) {
             discardStreamingAssistantMessage(assistantMessageId);
             throw error;
@@ -7692,10 +7695,10 @@ let showRoutingDebugBadge = false;
             const chatContainer = document.getElementById('chat-container');
             if (!chatContainer) return;
             const shouldDelayAssistantRender = false;
-            if (!isUser) hideThinkingIndicator();
+            const allowEmptyAssistant = !isUser && meta?.allowEmpty === true;
+            if (!isUser && !allowEmptyAssistant) hideThinkingIndicator();
             updateComposerPlaceholder();
             const rawDisplayText = normalizeUiTokens(String(text ?? '').replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/^<think>[\s\S]*$/gi, '').replace(/<\/?think>/gi, '').trim());
-            const allowEmptyAssistant = !isUser && meta?.allowEmpty === true;
             const hasAttachments = Array.isArray(meta?.attachments) && meta.attachments.length > 0;
             if (isUser && !rawDisplayText.trim() && !hasAttachments) return;
             if (!isUser && !rawDisplayText.trim() && !allowEmptyAssistant) return '';
@@ -7708,6 +7711,9 @@ let showRoutingDebugBadge = false;
             const messageDiv = document.createElement('div');
             messageDiv.className = `chat-row flex ${isUser ? 'justify-end' : 'justify-start'} items-start gap-3`;
             messageDiv.dataset.role = isUser ? 'user' : 'assistant';
+            if (allowEmptyAssistant) {
+                messageDiv.style.display = 'none';
+            }
             const messageTurnId = meta?.detached
                 ? ''
                 : String(
@@ -7965,6 +7971,9 @@ let showRoutingDebugBadge = false;
         function updateStreamingAssistantMessage(messageId, text, meta = {}) {
             const row = findAssistantMessageRow(messageId);
             if (!row) return;
+            if (row.style.display === 'none') {
+                row.style.display = '';
+            }
             const textElement = row.querySelector('.assistant-message-text');
             renderAssistantTextIntoElement(textElement, text, { streaming: meta?.streaming === true, meta });
             const cleanText = String(text || '').trim();
@@ -7995,6 +8004,7 @@ let showRoutingDebugBadge = false;
         function finalizeStreamingAssistantMessage(messageId, text, meta = {}) {
             const cleanText = String(text || '').trim();
             if (!messageId || !cleanText) return '';
+            hideThinkingIndicator();
             updateStreamingAssistantMessage(messageId, cleanText, { ...meta, streaming: false });
             const turnId = String(meta?.turnId || getAssistantMessageMeta(messageId)?.turnId || activeResponseRenderContext?.turnId || '').trim();
             const turn = getConversationTurn(turnId);
