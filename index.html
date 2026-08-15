@@ -5408,6 +5408,13 @@ let showRoutingDebugBadge = false;
                             const bMic = document.getElementById('perm-badge-mic');
                             if (bMic) { bMic.textContent = 'Enabled'; bMic.className = 'permissions-item-badge is-granted'; }
                         } catch (_) {}
+                        try {
+                            const videoStream = await navigator.mediaDevices.getUserMedia({ video: true });
+                            window.__jarvisCameraGranted = true;
+                            videoStream.getTracks().forEach(t => t.stop());
+                            const bCam = document.getElementById('perm-badge-cam');
+                            if (bCam) { bCam.textContent = 'Enabled'; bCam.className = 'permissions-item-badge is-granted'; }
+                        } catch (_) {}
                     }
                 }
                 if (navigator?.geolocation?.getCurrentPosition) {
