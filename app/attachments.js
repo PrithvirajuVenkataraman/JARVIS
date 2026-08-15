@@ -3,7 +3,7 @@ const MAX_FILE_BYTES = 12 * 1024 * 1024;
 const MAX_EXTRACT_CHARS = 120000;
 const PDF_VISUAL_PAGE_LIMIT = 4;
 const TEXT_EXTENSIONS = /\.(txt|md|markdown|json|jsonl|csv|tsv|xml|html|htm|css|js|mjs|cjs|ts|tsx|jsx|py|java|cpp|c|h|cs|go|rs|rb|php|sh|yaml|yml|toml|ini|log|sql|rtf)$/i;
-const IMAGE_EXTENSIONS = /\.(jpe?g|png|gif|webp|bmp|tiff?)$/i;
+const IMAGE_EXTENSIONS = /\.(jpe?g|png|gif|webp|bmp|tiff?|heic|heif|avif)$/i;
 
 const pendingAttachments = [];
 
@@ -449,17 +449,53 @@ async function createPendingAttachment(file) {
     };
 }
 
-async function compressImageFileToBase64(file, maxDimension = 1280, quality = 0.82) {
+async function compressImageFileToBase64(file, maxDimension = 1536, quality = 0.82) {
+    if (typeof document === 'undefined') {
+        return fileToBase64(file);
+    }
+
+    // Modern memory-efficient decoding via createImageBitmap (supported in modern mobile browsers)
+    if (typeof createImageBitmap === 'function') {
+        try {
+            const bitmap = await createImageBitmap(file);
+            let width = bitmap.width;
+            let height = bitmap.height;
+            if (width > maxDimension || height > maxDimension) {
+                if (width > height) {
+                    height = Math.round((height * maxDimension) / width);
+                    width = maxDimension;
+                } else {
+                    width = Math.round((width * maxDimension) / height);
+                    height = maxDimension;
+                }
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(bitmap, 0, 0, width, height);
+            bitmap.close?.();
+            const dataUrl = canvas.toDataURL('image/jpeg', quality);
+            const comma = dataUrl.indexOf(',');
+            const base64 = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
+            if (base64 && base64.length > 50) return base64;
+        } catch (_) {}
+    }
+
+    // Fallback using URL.createObjectURL (avoids multi-MB FileReader base64 string in JS memory)
     return new Promise((resolve, reject) => {
-        if (typeof document === 'undefined' || typeof Image === 'undefined') {
-            return resolve(fileToBase64(file));
+        let objectUrl = '';
+        try {
+            objectUrl = URL.createObjectURL(file);
+        } catch (_) {
+            return fileToBase64(file).then(resolve).catch(reject);
         }
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            const img = new Image();
-            img.onload = () => {
-                let width = img.width;
-                let height = img.height;
+
+        const img = new Image();
+        img.onload = () => {
+            try {
+                let width = img.naturalWidth || img.width;
+                let height = img.naturalHeight || img.height;
                 if (width > maxDimension || height > maxDimension) {
                     if (width > height) {
                         height = Math.round((height * maxDimension) / width);
@@ -476,15 +512,19 @@ async function compressImageFileToBase64(file, maxDimension = 1280, quality = 0.
                 ctx.drawImage(img, 0, 0, width, height);
                 const dataUrl = canvas.toDataURL('image/jpeg', quality);
                 const comma = dataUrl.indexOf(',');
-                resolve(comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl);
-            };
-            img.onerror = () => {
+                const base64 = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
+                URL.revokeObjectURL(objectUrl);
+                resolve(base64);
+            } catch (err) {
+                URL.revokeObjectURL(objectUrl);
                 fileToBase64(file).then(resolve).catch(reject);
-            };
-            img.src = e.target.result;
+            }
         };
-        reader.onerror = () => fileToBase64(file).then(resolve).catch(reject);
-        reader.readAsDataURL(file);
+        img.onerror = () => {
+            URL.revokeObjectURL(objectUrl);
+            fileToBase64(file).then(resolve).catch(reject);
+        };
+        img.src = objectUrl;
     });
 }
 
@@ -568,9 +608,10 @@ export function buildChatAttachmentMeta(attachments = []) {
     });
 }
 
-function normalizeImageMime(mimeType, filename) {
-    if (/^image\//i.test(mimeType)) return mimeType;
-    if (/\.jpe?g$/i.test(filename)) return 'image/jpeg';
+function normalizeImageMime(mimeType, filename = '') {
+    const cleanMime = String(mimeType || '').trim().toLowerCase();
+    if (['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(cleanMime)) return cleanMime;
+    if (/\.(jpe?g)$/i.test(filename)) return 'image/jpeg';
     if (/\.png$/i.test(filename)) return 'image/png';
     if (/\.webp$/i.test(filename)) return 'image/webp';
     if (/\.gif$/i.test(filename)) return 'image/gif';
@@ -586,6 +627,8 @@ function guessMimeFromName(filename) {
     if (lower.endsWith('.png')) return 'image/png';
     if (lower.endsWith('.webp')) return 'image/webp';
     if (lower.endsWith('.gif')) return 'image/gif';
+    if (lower.endsWith('.heic') || lower.endsWith('.heif')) return 'image/heic';
+    if (lower.endsWith('.avif')) return 'image/avif';
     return 'application/octet-stream';
 }
 
