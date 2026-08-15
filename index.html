@@ -5831,6 +5831,14 @@ let showRoutingDebugBadge = false;
                 void sendTextInput();
                 return;
             }
+
+            if (isConverseSpeechActive() || activeRequestController || isAssistantProcessing()) {
+                stopActiveGeneration('manual');
+                stopConverseSpeech('manual');
+            }
+
+            unlockConverseSpeechFromGesture();
+
             const btn = document.getElementById('send-message-btn');
             const currentState = window.JarvisSpeechInput?.getState?.() || {};
             const willEnable = !currentState.converseEnabled;
@@ -5839,22 +5847,16 @@ let showRoutingDebugBadge = false;
                 btn.classList.remove('composer-send-stop', 'is-send-ready');
                 btn.classList.add('is-converse-ready');
             }
-            unlockConverseSpeechFromGesture();
-
-            let retries = 0;
-            while (!window.JarvisSpeechInput?.toggleConverse && retries < 15) {
-                await new Promise(r => setTimeout(r, 40));
-                retries++;
-            }
 
             try {
-                if (window.JarvisSpeechInput?.toggleConverse) {
-                    const toggled = await window.JarvisSpeechInput.toggleConverse();
-                    if (toggled === false && !window.JarvisSpeechInput.getState().supported) {
+                const toggleFn = window.JarvisSpeechInput?.toggleConverse || window.toggleConverseMode;
+                if (typeof toggleFn === 'function') {
+                    const toggled = await toggleFn();
+                    if (toggled === false && window.JarvisSpeechInput && !window.JarvisSpeechInput.getState().supported) {
                         showTemporaryMessage('Voice input is unavailable or microphone was denied.');
                     }
                 } else {
-                    showTemporaryMessage('Initializing speech recognition. Please try again.');
+                    showTemporaryMessage('Initializing speech recognition...');
                 }
             } catch (err) {
                 showTemporaryMessage('Could not start microphone. Check browser permissions.');
