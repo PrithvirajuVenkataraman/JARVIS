@@ -47,20 +47,27 @@ export function createWhisperRecorder(options = {}) {
 
     async function start(language = 'en-US') {
         if (isRecording) return true;
-        if (!navigator?.mediaDevices?.getUserMedia) {
-            return false;
-        }
 
         try {
             audioChunks = [];
             speechDetected = false;
-            mediaStream = await navigator.mediaDevices.getUserMedia({
-                audio: {
-                    echoCancellation: true,
-                    noiseSuppression: true,
-                    autoGainControl: true
+
+            // Reuse persistent mediaStream if active and has live audio tracks
+            const hasLiveTracks = mediaStream && mediaStream.active && mediaStream.getAudioTracks().some(t => t.readyState === 'live');
+            if (hasLiveTracks) {
+                mediaStream.getAudioTracks().forEach(t => { t.enabled = true; });
+            } else {
+                if (!navigator?.mediaDevices?.getUserMedia) {
+                    return false;
                 }
-            });
+                mediaStream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true
+                    }
+                });
+            }
 
             // Choose supported mimeType
             const mimeTypes = [
@@ -133,7 +140,11 @@ export function createWhisperRecorder(options = {}) {
             try {
                 const AudioCtx = window.AudioContext || window.webkitAudioContext;
                 if (AudioCtx) {
-                    audioContext = new AudioCtx();
+                    if (!audioContext || audioContext.state === 'closed') {
+                        audioContext = new AudioCtx();
+                    } else if (audioContext.state === 'suspended') {
+                        audioContext.resume();
+                    }
                     const source = audioContext.createMediaStreamSource(mediaStream);
                     analyser = audioContext.createAnalyser();
                     analyser.fftSize = 512;
@@ -165,7 +176,7 @@ export function createWhisperRecorder(options = {}) {
                         } else if (speechDetected && !silenceTimer) {
                             silenceTimer = setTimeout(() => {
                                 if (isRecording) {
-                                    stop();
+                                    stop({ keepStream: true });
                                 }
                             }, silenceTimeoutMs);
                         }
@@ -187,8 +198,8 @@ export function createWhisperRecorder(options = {}) {
         }
     }
 
-    function stop() {
-        if (!isRecording && !mediaRecorder) return;
+    function stop(options = {}) {
+        const keepStream = options.keepStream === true;
         if (silenceTimer) {
             clearTimeout(silenceTimer);
             silenceTimer = null;
@@ -199,10 +210,15 @@ export function createWhisperRecorder(options = {}) {
             } catch {}
         }
         if (mediaStream) {
-            mediaStream.getTracks().forEach(t => t.stop());
-            mediaStream = null;
+            if (keepStream) {
+                // Mute tracks during processing / TTS without destroying the authorization
+                mediaStream.getAudioTracks().forEach(t => { t.enabled = false; });
+            } else {
+                mediaStream.getTracks().forEach(t => t.stop());
+                mediaStream = null;
+            }
         }
-        if (audioContext && audioContext.state !== 'closed') {
+        if (!keepStream && audioContext && audioContext.state !== 'closed') {
             try {
                 audioContext.close();
             } catch {}
@@ -254,12 +270,19 @@ export function createSpeechInputController(options = {}) {
             });
         },
         onError(err) {
-            if (err.code === 'fallback_to_browser' || err.code === 'stt_network_error') {
-                fallbackMode = true;
-                startBrowserRecognition();
+            if (err.code === 'fallback_to_browser' || err.code === 'stt_network_error' || err.code === 'transcription_empty') {
+                if (converseEnabled && Recognition) {
+                    fallbackMode = true;
+                    startBrowserRecognition();
+                }
             } else if (err.code === 'mic_permission_error') {
-                callbacks.onError(ERROR_MESSAGES['not-allowed']);
-                stop({ disableConverse: true });
+                if (Recognition && !fallbackMode) {
+                    fallbackMode = true;
+                    startBrowserRecognition();
+                } else {
+                    callbacks.onError(ERROR_MESSAGES['not-allowed']);
+                    stop({ disableConverse: true });
+                }
             }
         },
         onState(state) {
@@ -393,7 +416,7 @@ export function createSpeechInputController(options = {}) {
     function setProcessing(isProc) {
         processing = Boolean(isProc);
         if (processing) {
-            whisperRecorder.stop();
+            whisperRecorder.stop({ keepStream: true });
             if (browserRecognition) {
                 try { browserRecognition.stop(); } catch {}
             }
@@ -407,13 +430,14 @@ export function createSpeechInputController(options = {}) {
                         startBrowserRecognition();
                     }
                 }
-            }, 400);
+            }, 300);
         }
         emitState();
     }
 
     function stop(options = {}) {
-        whisperRecorder.stop();
+        const keepStream = options.keepStream === true && !options.disableConverse;
+        whisperRecorder.stop({ keepStream });
         if (browserRecognition) {
             try { browserRecognition.stop(); } catch {}
             browserRecognition = null;
