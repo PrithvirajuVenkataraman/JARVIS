@@ -64,11 +64,8 @@ function initializeSpeechInput() {
     }
 }
 
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initializeSpeechInput, { once: true });
-} else {
-    initializeSpeechInput();
-}
+// Only initialize after the inline script has exposed global functions (jarvis:app-ready)
+// Fallback to window load event for safety
 globalThis.addEventListener('jarvis:app-ready', initializeSpeechInput, { once: true });
 window.addEventListener('load', initializeSpeechInput, { once: true });
 
