@@ -5943,17 +5943,34 @@ let showRoutingDebugBadge = false;
         function toggleSendButton() {
             const btn = document.getElementById('send-message-btn');
             if (!btn) return;
-            if (activeRequestController || isAssistantProcessing() || isConverseSpeechActive()) {
-                setPrimaryActionButtonToStop();
-                return;
-            }
+            autoResizeComposerTextarea?.();
             const state = window.JarvisSpeechInput?.getState?.() || {};
-            if (state.converseEnabled) {
-                setPrimaryActionButtonToConverse();
+            const converseActive = !!state.converseEnabled;
+
+            if (activeRequestController || isAssistantProcessing() || isConverseSpeechActive()) {
+                if (converseActive && !isConverseSpeechActive()) {
+                    setPrimaryActionButtonToConverse();
+                } else {
+                    setPrimaryActionButtonToStop();
+                }
                 return;
             }
+
             const input = document.getElementById('text-input');
-            if (input && input.value.trim()) {
+            const hasInput = !!(input && input.value.trim().length > 0);
+            const hasAttachments = window.JarvisAttachments?.hasPendingAttachments?.() === true;
+            const shouldSend = hasInput || hasAttachments;
+
+            if (converseActive) {
+                if (shouldSend && input?.dataset?.inputSource !== 'converse' && input?.dataset?.inputSource !== 'vtt') {
+                    setPrimaryActionButtonToSend();
+                } else {
+                    setPrimaryActionButtonToConverse();
+                }
+                return;
+            }
+
+            if (shouldSend) {
                 setPrimaryActionButtonToSend();
             } else {
                 setPrimaryActionButtonToConverse();
@@ -9896,45 +9913,6 @@ ${code}
             if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault();
                 sendTextInput();
-            }
-        }
-
-        function toggleSendButton() {
-            autoResizeComposerTextarea();
-            const state = window.JarvisSpeechInput?.getState?.() || {};
-            const converseActive = !!state.converseEnabled;
-
-            if (activeRequestController || isAssistantProcessing() || isConverseSpeechActive()) {
-                if (converseActive) {
-                    if (isConverseSpeechActive()) {
-                        setPrimaryActionButtonToStop();
-                    } else {
-                        setPrimaryActionButtonToConverse();
-                    }
-                } else {
-                    setPrimaryActionButtonToStop();
-                }
-                return;
-            }
-
-            const input = document.getElementById('text-input');
-            const hasInput = !!(input && input.value.trim().length > 0);
-            const hasAttachments = window.JarvisAttachments?.hasPendingAttachments?.() === true;
-            const shouldSend = hasInput || hasAttachments;
-
-            if (converseActive) {
-                if (shouldSend && input?.dataset?.inputSource !== 'converse' && input?.dataset?.inputSource !== 'vtt') {
-                    setPrimaryActionButtonToSend();
-                } else {
-                    setPrimaryActionButtonToConverse();
-                }
-                return;
-            }
-
-            if (shouldSend) {
-                setPrimaryActionButtonToSend();
-            } else {
-                setPrimaryActionButtonToConverse();
             }
         }
 
