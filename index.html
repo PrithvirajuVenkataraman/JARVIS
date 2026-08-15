@@ -271,7 +271,6 @@
                         id="voice-to-text-btn"
                         type="button"
                         class="composer-icon-btn speech-input-btn"
-                        onclick="globalThis.toggleVoiceToText ? globalThis.toggleVoiceToText() : (globalThis.JarvisSpeechInput && globalThis.JarvisSpeechInput.toggleDictation())"
                         title="Transcribe one message"
                         aria-label="Transcribe one message"
                         aria-pressed="false">
@@ -6115,9 +6114,7 @@ let showRoutingDebugBadge = false;
         function isConverseSpeechActive() {
             return Boolean(streamingConverseSpeech?.active) ||
                 Boolean(activeConverseSpeechRun) ||
-                Boolean(activeConverseSpeechUtterance) ||
-                Boolean(window.speechSynthesis?.speaking) ||
-                Boolean(window.speechSynthesis?.pending);
+                Boolean(activeConverseSpeechUtterance);
         }
 
         function stopConverseSpeech(reason = 'interrupted') {
@@ -8655,18 +8652,13 @@ let showRoutingDebugBadge = false;
         }
 
         function unlockConverseSpeechFromGesture() {
-            if (!('speechSynthesis' in window) || !('SpeechSynthesisUtterance' in window)) return false;
+            if (!('speechSynthesis' in window)) return false;
             try {
-                const utterance = new SpeechSynthesisUtterance(' ');
-                utterance.volume = 0.01;
-                utterance.rate = 1;
-                window.speechSynthesis.speak(utterance);
-                window.speechSynthesis.cancel();
-                logLatencyTrace('speech_unlock_attempt', { source: 'converse_toggle' });
+                if (window.speechSynthesis.paused) {
+                    window.speechSynthesis.resume();
+                }
                 return true;
             } catch (error) {
-                logLatencyTrace('speech_blocked', { stage: 'unlock', error: String(error?.message || error || '') });
-                showConverseSpeechUnlockPrompt();
                 return false;
             }
         }
