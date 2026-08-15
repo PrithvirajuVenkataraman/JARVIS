@@ -4263,6 +4263,34 @@ body:not(.dark) .permissions-modal-panel {
     gap: 0.75rem;
 }
 
+.permissions-modal-close {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    color: #94a3b8 !important;
+    padding: 2px !important;
+    cursor: pointer !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    transition: color 0.15s ease, opacity 0.15s ease !important;
+    border-radius: 0 !important;
+    line-height: 1 !important;
+}
+
+.permissions-modal-close:hover {
+    color: #ffffff !important;
+    opacity: 0.9 !important;
+}
+
+body:not(.dark) .permissions-modal-close {
+    color: #64748b !important;
+}
+
+body:not(.dark) .permissions-modal-close:hover {
+    color: #0f172a !important;
+}
+
 .permissions-modal-title {
     font-size: 1.2rem;
     font-weight: 700;
