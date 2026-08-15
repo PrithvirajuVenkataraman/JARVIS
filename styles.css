@@ -4219,3 +4219,187 @@ button:hover {
         width: min(92vw, 360px);
     }
 }
+
+/* ============ STARTUP PERMISSIONS MODAL ============ */
+.permissions-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    background: rgba(0, 0, 0, 0.65);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    animation: fadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.permissions-modal-panel {
+    background: #111827;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 20px;
+    max-width: 480px;
+    width: 100%;
+    padding: 1.5rem;
+    color: #f8fafc;
+    box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.6);
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+}
+
+body:not(.dark) .permissions-modal-panel {
+    background: #ffffff;
+    border-color: #e2e8f0;
+    color: #0f172a;
+    box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.18);
+}
+
+.permissions-modal-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+.permissions-modal-title {
+    font-size: 1.2rem;
+    font-weight: 700;
+    margin: 0 0 0.25rem 0;
+    letter-spacing: -0.02em;
+}
+
+.permissions-modal-desc {
+    font-size: 0.88rem;
+    line-height: 1.45;
+    color: #94a3b8;
+    margin: 0;
+}
+
+body:not(.dark) .permissions-modal-desc {
+    color: #64748b;
+}
+
+.permissions-items-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.permissions-item-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 0.9rem;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    gap: 0.75rem;
+}
+
+body:not(.dark) .permissions-item-card {
+    background: #f8fafc;
+    border-color: #e2e8f0;
+}
+
+.permissions-item-left {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.permissions-item-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    background: rgba(59, 130, 246, 0.15);
+    color: #60a5fa;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.permissions-item-info strong {
+    display: block;
+    font-size: 0.92rem;
+    font-weight: 600;
+}
+
+.permissions-item-info span {
+    display: block;
+    font-size: 0.78rem;
+    color: #94a3b8;
+}
+
+body:not(.dark) .permissions-item-info span {
+    color: #64748b;
+}
+
+.permissions-item-badge {
+    font-size: 0.78rem;
+    padding: 0.25rem 0.6rem;
+    border-radius: 999px;
+    font-weight: 600;
+}
+
+.permissions-item-badge.is-granted {
+    background: rgba(34, 197, 94, 0.15);
+    color: #4ade80;
+    border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.permissions-item-badge.is-prompt {
+    background: rgba(234, 179, 8, 0.15);
+    color: #facc15;
+    border: 1px solid rgba(234, 179, 8, 0.3);
+}
+
+.permissions-modal-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+}
+
+.permissions-btn-primary {
+    background: #2563eb;
+    color: #ffffff;
+    border: none;
+    padding: 0.75rem 1.25rem;
+    border-radius: 12px;
+    font-weight: 600;
+    font-size: 0.95rem;
+    cursor: pointer;
+    transition: background 0.15s, transform 0.1s;
+    text-align: center;
+}
+
+.permissions-btn-primary:hover {
+    background: #1d4ed8;
+}
+
+.permissions-btn-primary:active {
+    transform: scale(0.98);
+}
+
+.permissions-btn-secondary {
+    background: transparent;
+    color: #94a3b8;
+    border: none;
+    padding: 0.5rem 1rem;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    text-align: center;
+    transition: color 0.15s;
+}
+
+.permissions-btn-secondary:hover {
+    color: #f8fafc;
+}
+
+body:not(.dark) .permissions-btn-secondary:hover {
+    color: #0f172a;
+}
+
