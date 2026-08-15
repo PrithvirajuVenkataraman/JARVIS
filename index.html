@@ -2424,10 +2424,8 @@ async function translateTextToEnglish(sourceText) {
             })
         });
         const data = await response.json();
-        hideThinkingIndicator();
         return String(data.response || '').trim();
     } catch (_) {
-        hideThinkingIndicator();
         return '';
     }
 }
@@ -4994,9 +4992,6 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
     } finally {
         requestSettled = true;
         clearTimeout(autoIndicatorTimer);
-        if (autoIndicatorShown && !hadExistingThinkingIndicator) {
-            hideThinkingIndicator();
-        }
         clearActiveRequest(controller);
     }
 } 
@@ -5262,34 +5257,185 @@ let showRoutingDebugBadge = false;
         }
         initZoomLock();
 
-        async function initStartupPermissions() {
-            try {
-                if (navigator.permissions?.query) {
-                    try {
-                        const geoStatus = await navigator.permissions.query({ name: 'geolocation' });
-                        if (geoStatus.state === 'granted') {
-                            window.__jarvisLocationGranted = true;
-                            getCurrentPositionAsync({ enableHighAccuracy: false, timeout: 6000, maximumAge: 300000 }).catch(() => {});
-                        }
-                        geoStatus.onchange = () => {
-                            window.__jarvisLocationGranted = geoStatus.state === 'granted';
-                            if (geoStatus.state === 'granted') {
-                                getCurrentPositionAsync({ enableHighAccuracy: false, timeout: 6000, maximumAge: 300000 }).catch(() => {});
-                            }
-                        };
-                    } catch (_) {}
+        async function checkAppPermissionsState() {
+            const states = {
+                geolocation: 'prompt',
+                microphone: 'prompt',
+                camera: 'prompt'
+            };
+            if (typeof navigator !== 'undefined' && navigator.permissions?.query) {
+                try {
+                    const geo = await navigator.permissions.query({ name: 'geolocation' }).catch(() => null);
+                    if (geo?.state) states.geolocation = geo.state;
+                } catch (_) {}
+                try {
+                    const mic = await navigator.permissions.query({ name: 'microphone' }).catch(() => null);
+                    if (mic?.state) states.microphone = mic.state;
+                } catch (_) {}
+                try {
+                    const cam = await navigator.permissions.query({ name: 'camera' }).catch(() => null);
+                    if (cam?.state) states.camera = cam.state;
+                } catch (_) {}
+            }
+            if (states.geolocation === 'granted') window.__jarvisLocationGranted = true;
+            if (states.microphone === 'granted') window.__jarvisMicGranted = true;
+            if (states.camera === 'granted') window.__jarvisCameraGranted = true;
+            return states;
+        }
 
-                    try {
-                        const micStatus = await navigator.permissions.query({ name: 'microphone' });
-                        if (micStatus.state === 'granted') {
-                            window.__jarvisMicPreGranted = true;
-                        }
-                        micStatus.onchange = () => {
-                            window.__jarvisMicPreGranted = micStatus.state === 'granted';
-                        };
-                    } catch (_) {}
+        async function initStartupPermissions(forceModal = false) {
+            try {
+                const states = await checkAppPermissionsState();
+                if (states.geolocation === 'granted') {
+                    getCurrentPositionAsync({ enableHighAccuracy: false, timeout: 6000, maximumAge: 300000 }).catch(() => {});
+                }
+                const allGranted = states.geolocation === 'granted' && states.microphone === 'granted';
+                const dismissed = sessionStorage.getItem('jarvis_permissions_dismissed');
+                if (forceModal || (!allGranted && !dismissed)) {
+                    setTimeout(() => {
+                        showStartupPermissionsModal(states);
+                    }, 650);
                 }
             } catch (_) {}
+        }
+
+        function closeStartupPermissionsModal() {
+            sessionStorage.setItem('jarvis_permissions_dismissed', 'true');
+            const modal = document.getElementById('startup-permissions-modal');
+            if (modal) {
+                modal.classList.add('fade-out');
+                setTimeout(() => modal.remove(), 200);
+            }
+        }
+
+        function showStartupPermissionsModal(initialStates = null) {
+            const existing = document.getElementById('startup-permissions-modal');
+            if (existing) existing.remove();
+
+            const micGranted = window.__jarvisMicGranted || initialStates?.microphone === 'granted';
+            const camGranted = window.__jarvisCameraGranted || initialStates?.camera === 'granted';
+            const locGranted = window.__jarvisLocationGranted || initialStates?.geolocation === 'granted';
+
+            const modal = document.createElement('div');
+            modal.id = 'startup-permissions-modal';
+            modal.className = 'permissions-modal-backdrop';
+            modal.setAttribute('role', 'dialog');
+            modal.setAttribute('aria-modal', 'true');
+            modal.setAttribute('aria-labelledby', 'permissions-modal-heading');
+            modal.innerHTML = `
+                <div class="permissions-modal-panel">
+                    <div class="permissions-modal-header">
+                        <div>
+                            <h2 id="permissions-modal-heading" class="permissions-modal-title">Enable Jarvis Features</h2>
+                            <p class="permissions-modal-desc">Enable permissions to unlock 1-click voice conversation, live camera recognition, and accurate local weather.</p>
+                        </div>
+                        <button type="button" class="memory-manager-close" onclick="closeStartupPermissionsModal()" aria-label="Close permissions dialog">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+                                <line x1="18" y1="6" x2="6" y2="18"></line>
+                                <line x1="6" y1="6" x2="18" y2="18"></line>
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="permissions-items-list">
+                        <div class="permissions-item-card">
+                            <div class="permissions-item-left">
+                                <div class="permissions-item-icon" aria-hidden="true">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
+                                </div>
+                                <div class="permissions-item-info">
+                                    <strong>Microphone</strong>
+                                    <span>Voice Converse & instant speech commands</span>
+                                </div>
+                            </div>
+                            <span id="perm-badge-mic" class="permissions-item-badge ${micGranted ? 'is-granted' : 'is-prompt'}">${micGranted ? 'Enabled' : 'Required'}</span>
+                        </div>
+                        <div class="permissions-item-card">
+                            <div class="permissions-item-left">
+                                <div class="permissions-item-icon" aria-hidden="true">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>
+                                </div>
+                                <div class="permissions-item-info">
+                                    <strong>Camera & Media</strong>
+                                    <span>Live object, scene & document recognition</span>
+                                </div>
+                            </div>
+                            <span id="perm-badge-cam" class="permissions-item-badge ${camGranted ? 'is-granted' : 'is-prompt'}">${camGranted ? 'Enabled' : 'Optional'}</span>
+                        </div>
+                        <div class="permissions-item-card">
+                            <div class="permissions-item-left">
+                                <div class="permissions-item-icon" aria-hidden="true">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+                                </div>
+                                <div class="permissions-item-info">
+                                    <strong>Location</strong>
+                                    <span>Live local weather, travel & "Where am I"</span>
+                                </div>
+                            </div>
+                            <span id="perm-badge-loc" class="permissions-item-badge ${locGranted ? 'is-granted' : 'is-prompt'}">${locGranted ? 'Enabled' : 'Optional'}</span>
+                        </div>
+                    </div>
+                    <div class="permissions-modal-actions">
+                        <button id="permissions-grant-all-btn" type="button" class="permissions-btn-primary" onclick="requestAllStartupPermissions()">Enable All (1-Click)</button>
+                        <button type="button" class="permissions-btn-secondary" onclick="closeStartupPermissionsModal()">Continue with defaults</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+        }
+
+        async function requestAllStartupPermissions() {
+            const btn = document.getElementById('permissions-grant-all-btn');
+            if (btn) {
+                btn.textContent = 'Requesting...';
+                btn.disabled = true;
+            }
+            try {
+                if (navigator?.mediaDevices?.getUserMedia) {
+                    try {
+                        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+                        window.__jarvisMicGranted = true;
+                        window.__jarvisCameraGranted = true;
+                        stream.getTracks().forEach(t => t.stop());
+                        const bMic = document.getElementById('perm-badge-mic');
+                        if (bMic) { bMic.textContent = 'Enabled'; bMic.className = 'permissions-item-badge is-granted'; }
+                        const bCam = document.getElementById('perm-badge-cam');
+                        if (bCam) { bCam.textContent = 'Enabled'; bCam.className = 'permissions-item-badge is-granted'; }
+                    } catch (mediaErr) {
+                        try {
+                            const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                            window.__jarvisMicGranted = true;
+                            audioStream.getTracks().forEach(t => t.stop());
+                            const bMic = document.getElementById('perm-badge-mic');
+                            if (bMic) { bMic.textContent = 'Enabled'; bMic.className = 'permissions-item-badge is-granted'; }
+                        } catch (_) {}
+                    }
+                }
+                if (navigator?.geolocation?.getCurrentPosition) {
+                    try {
+                        await new Promise(resolve => {
+                            navigator.geolocation.getCurrentPosition(
+                                pos => {
+                                    window.__jarvisLocationGranted = true;
+                                    const bLoc = document.getElementById('perm-badge-loc');
+                                    if (bLoc) { bLoc.textContent = 'Enabled'; bLoc.className = 'permissions-item-badge is-granted'; }
+                                    resolve(pos);
+                                },
+                                () => resolve(null),
+                                { enableHighAccuracy: false, timeout: 5000, maximumAge: 300000 }
+                            );
+                        });
+                    } catch (_) {}
+                }
+                if (btn) {
+                    btn.textContent = 'Permissions Ready ✓';
+                }
+                showTemporaryMessage('Permissions enabled! Voice converse, vision, and location are ready.');
+                setTimeout(() => {
+                    closeStartupPermissionsModal();
+                }, 400);
+            } catch (err) {
+                closeStartupPermissionsModal();
+            }
         }
         void initStartupPermissions();
 
@@ -5854,13 +6000,14 @@ let showRoutingDebugBadge = false;
                 if (typeof toggleFn === 'function') {
                     const toggled = await toggleFn();
                     if (toggled === false && window.JarvisSpeechInput && !window.JarvisSpeechInput.getState().supported) {
-                        showTemporaryMessage('Voice input is unavailable or microphone was denied.');
+                        showTemporaryMessage('Voice input is unavailable on this device.');
                     }
-                } else {
-                    showTemporaryMessage('Initializing speech recognition...');
                 }
             } catch (err) {
-                showTemporaryMessage('Could not start microphone. Check browser permissions.');
+                const errStr = String(err?.message || err || '').toLowerCase();
+                if (errStr.includes('denied') || errStr.includes('not-allowed')) {
+                    showTemporaryMessage('Microphone access was denied. Please allow microphone in your browser settings.');
+                }
             }
             toggleSendButton();
         }
@@ -17415,7 +17562,6 @@ async function handleUniversalEntityFactQuery(userText, liveIntent = null) {
     } finally { 
         clearTimeout(budgetTimer);
         clearActiveRequest(controller);
-        hideThinkingIndicator();
     }
 }
 
@@ -20379,7 +20525,7 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
         }
 
         async function getWeatherByCity(cityName, originalQuery = null) {
-            hideThinkingIndicator(); 
+            showThinkingIndicator('Checking weather...');
             try {
                 const searchName = expandStateAbbreviation(cityName.trim());
                 
@@ -20482,7 +20628,6 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
         }
 
         async function fetchWeather(lat, lon, resolvedLocation, originalQuery = null) {
-            hideThinkingIndicator(); 
             showThinkingIndicator('Checking weather...');
             try {
                 const weatherResponse = await fetch(
@@ -23227,6 +23372,7 @@ function showThinkingIndicator(message = 'Thinking') {
             </div>
         `;
         chatContainer.appendChild(row);
+        startThinkingPhaseTimeline(phase.key);
     } else {
         const textEl = row.querySelector('[data-thinking-inline]');
         if (textEl) {
@@ -23239,11 +23385,36 @@ function showThinkingIndicator(message = 'Thinking') {
     maybeAutoScroll(chatContainer);
 }
 
-function startThinkingPhaseTimeline() {
+function startThinkingPhaseTimeline(initialKey = 'thinking') {
     if (thinkingPhaseTimer) {
         clearInterval(thinkingPhaseTimer);
         thinkingPhaseTimer = null;
     }
+    const phaseMap = {
+        searching: ['SEARCHING', 'ANALYZING SOURCES', 'GENERATING ANSWER'],
+        reading: ['ANALYZING', 'EXTRACTING CONTENT', 'GENERATING ANSWER'],
+        translating: ['TRANSLATING', 'ANALYZING', 'GENERATING ANSWER'],
+        thinking: ['THINKING', 'ANALYZING', 'GENERATING ANSWER']
+    };
+    const sequence = phaseMap[initialKey] || phaseMap.thinking;
+    let index = 0;
+    thinkingPhaseTimer = setInterval(() => {
+        const row = document.getElementById('chat-thinking-indicator');
+        if (!row) {
+            clearInterval(thinkingPhaseTimer);
+            thinkingPhaseTimer = null;
+            return;
+        }
+        index = (index + 1) % sequence.length;
+        const nextLabel = sequence[index];
+        const textEl = row.querySelector('[data-thinking-inline]');
+        if (textEl) {
+            textEl.textContent = nextLabel;
+            textEl.classList.add('is-streaming');
+        }
+        const bubble = row.querySelector('.chat-bubble-assistant');
+        if (bubble) bubble.setAttribute('aria-label', nextLabel);
+    }, 2800);
 }
 
 function resolveThinkingPhase(message = '') {
@@ -23262,11 +23433,11 @@ function resolveThinkingPhase(message = '') {
 
 function hideThinkingIndicator() {
     const row = document.getElementById('chat-thinking-indicator');
-    if (!row) return;
     if (thinkingPhaseTimer) {
         clearInterval(thinkingPhaseTimer);
         thinkingPhaseTimer = null;
     }
+    if (!row) return;
     row.classList.add('fade-out');
     setTimeout(() => {
         if (row.parentNode) row.parentNode.removeChild(row);
