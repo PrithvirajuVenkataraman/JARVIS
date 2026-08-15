@@ -64,9 +64,12 @@ function initializeSpeechInput() {
     }
 }
 
-// Only initialize after the inline script has exposed global functions (jarvis:app-ready)
-// Fallback to window load event for safety
-globalThis.addEventListener('jarvis:app-ready', initializeSpeechInput, { once: true });
+if (globalThis.__jarvisAppReady || document.readyState !== 'loading') {
+    initializeSpeechInput();
+} else {
+    globalThis.addEventListener('jarvis:app-ready', initializeSpeechInput, { once: true });
+    document.addEventListener('DOMContentLoaded', initializeSpeechInput, { once: true });
+}
 window.addEventListener('load', initializeSpeechInput, { once: true });
 
 globalThis.dispatchEvent(new CustomEvent('jarvis:modules-ready'));
