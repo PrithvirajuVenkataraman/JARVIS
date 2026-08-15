@@ -439,9 +439,9 @@ export function createSpeechInputController(options = {}) {
                 try { browserRecognition.stop(); } catch {}
             }
         } else if (converseEnabled) {
-            // Re-open microphone after processing/speech finishes
+            // Re-open microphone after processing AND assistant speech playback finish
             setTimeout(() => {
-                if (converseEnabled && !processing) {
+                if (converseEnabled && !processing && !globalThis.isConverseSpeechActive?.()) {
                     if (fallbackMode && Recognition) {
                         startBrowserRecognition();
                     } else {
