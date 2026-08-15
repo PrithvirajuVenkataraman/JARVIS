@@ -5751,7 +5751,6 @@ let showRoutingDebugBadge = false;
             const btn = document.getElementById('send-message-btn');
             if (!btn) return;
             btn.dataset.mode = 'send';
-            btn.onclick = sendTextInput;
             btn.innerHTML = getSendIconSvg();
             btn.classList.add('is-send-ready', 'composer-send-btn');
             btn.classList.remove('is-converse-ready', 'is-converse-active', 'composer-send-stop');
@@ -5766,7 +5765,6 @@ let showRoutingDebugBadge = false;
             const state = window.JarvisSpeechInput?.getState?.() || {};
             const active = !!state.converseEnabled;
             btn.dataset.mode = 'converse';
-            btn.onclick = togglePrimaryConverseMode;
             btn.innerHTML = getConverseIconSvg();
             btn.classList.remove('is-send-ready');
             btn.classList.add('is-converse-ready', 'composer-send-btn');
@@ -5781,7 +5779,6 @@ let showRoutingDebugBadge = false;
             const btn = document.getElementById('send-message-btn');
             if (!btn) return;
             btn.dataset.mode = 'stop';
-            btn.onclick = stopActiveGeneration;
             btn.innerHTML = getStopIconSvg();
             btn.classList.add('is-send-ready', 'composer-send-btn', 'composer-send-stop');
             btn.classList.remove('is-converse-ready', 'is-converse-active');
@@ -5790,15 +5787,16 @@ let showRoutingDebugBadge = false;
             btn.title = 'Stop generating';
         }
 
-        function resetPrimaryActionButtonWhenIdle() {
-            if (activeRequestController || isAssistantProcessing()) return;
+        function toggleSendButton() {
+            const btn = document.getElementById('send-message-btn');
+            if (!btn) return;
+            if (activeRequestController || isAssistantProcessing() || isConverseSpeechActive()) {
+                setPrimaryActionButtonToStop();
+                return;
+            }
             const state = window.JarvisSpeechInput?.getState?.() || {};
             if (state.converseEnabled) {
-                if (isConverseSpeechActive()) {
-                    setPrimaryActionButtonToStop();
-                } else {
-                    setPrimaryActionButtonToConverse();
-                }
+                setPrimaryActionButtonToConverse();
                 return;
             }
             const input = document.getElementById('text-input');
@@ -5808,18 +5806,21 @@ let showRoutingDebugBadge = false;
                 setPrimaryActionButtonToConverse();
             }
         }
+        const resetPrimaryActionButtonWhenIdle = toggleSendButton;
 
         function handlePrimaryActionButtonClick() {
             const btn = document.getElementById('send-message-btn');
             const input = document.getElementById('text-input');
             const hasInput = !!(input && input.value.trim().length > 0);
             const hasAttachments = window.JarvisAttachments?.hasPendingAttachments?.() === true;
+
             if (hasInput || hasAttachments) {
                 void sendTextInput();
                 return;
             }
-            if (btn?.classList.contains('composer-send-stop')) {
+            if (btn?.classList.contains('composer-send-stop') || isConverseSpeechActive() || activeRequestController || isAssistantProcessing()) {
                 stopActiveGeneration('manual');
+                stopConverseSpeech('manual');
                 return;
             }
             void togglePrimaryConverseMode();
