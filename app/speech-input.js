@@ -297,6 +297,7 @@ export function createSpeechInputController(options = {}) {
             r.continuous = converseEnabled;
             r.interimResults = true;
             r.lang = language;
+            r.maxAlternatives = 1;
 
             r.onresult = event => {
                 if (globalThis.speechSynthesis?.speaking || globalThis.isConverseSpeechActive?.()) {
@@ -313,7 +314,7 @@ export function createSpeechInputController(options = {}) {
                     }
                 }
                 if (interim) callbacks.onInterim(interim, getState());
-                if (final) {
+                if (final && final.trim()) {
                     callbacks.onFinal(final.trim(), {
                         autoSubmit: converseEnabled,
                         source: converseEnabled ? 'converse' : 'vtt',
@@ -323,6 +324,9 @@ export function createSpeechInputController(options = {}) {
             };
 
             r.onerror = event => {
+                if (event.error === 'no-speech') {
+                    return;
+                }
                 const msg = ERROR_MESSAGES[event.error] || `Recognition error: ${event.error}`;
                 callbacks.onError(msg);
             };
@@ -332,9 +336,9 @@ export function createSpeechInputController(options = {}) {
                     // Auto-resume continuous listening in converse mode
                     setTimeout(() => {
                         if (converseEnabled && !processing && browserRecognition) {
-                            try { r.start(); } catch {}
+                            try { browserRecognition.start(); } catch {}
                         }
-                    }, 300);
+                    }, 200);
                 } else {
                     emitState();
                 }
@@ -386,10 +390,15 @@ export function createSpeechInputController(options = {}) {
         mode = 'dictation';
         converseEnabled = false;
 
-        const started = await whisperRecorder.start(language);
-        if (!started && Recognition) {
+        if (Recognition) {
             fallbackMode = true;
             startBrowserRecognition();
+        } else {
+            const started = await whisperRecorder.start(language);
+            if (!started && Recognition) {
+                fallbackMode = true;
+                startBrowserRecognition();
+            }
         }
         emitState();
         return true;
@@ -404,10 +413,15 @@ export function createSpeechInputController(options = {}) {
         mode = 'converse';
         converseEnabled = true;
 
-        const started = await whisperRecorder.start(language);
-        if (!started && Recognition) {
+        if (Recognition) {
             fallbackMode = true;
             startBrowserRecognition();
+        } else {
+            const started = await whisperRecorder.start(language);
+            if (!started && Recognition) {
+                fallbackMode = true;
+                startBrowserRecognition();
+            }
         }
         emitState();
         return true;
@@ -424,13 +438,13 @@ export function createSpeechInputController(options = {}) {
             // Re-open microphone after processing/speech finishes
             setTimeout(() => {
                 if (converseEnabled && !processing) {
-                    if (!fallbackMode) {
-                        whisperRecorder.start(language);
-                    } else {
+                    if (Recognition) {
                         startBrowserRecognition();
+                    } else {
+                        whisperRecorder.start(language);
                     }
                 }
-            }, 300);
+            }, 250);
         }
         emitState();
     }
@@ -440,10 +454,14 @@ export function createSpeechInputController(options = {}) {
         whisperRecorder.stop({ keepStream });
         if (browserRecognition) {
             try { browserRecognition.stop(); } catch {}
-            browserRecognition = null;
+            if (options.disableConverse || mode === 'dictation') {
+                browserRecognition = null;
+            }
         }
         if (options.disableConverse) {
             converseEnabled = false;
+            mode = 'idle';
+        } else if (mode === 'dictation') {
             mode = 'idle';
         }
         emitState();
