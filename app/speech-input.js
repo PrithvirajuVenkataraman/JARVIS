@@ -351,13 +351,20 @@ export function createSpeechInputController(options = {}) {
     }
 
     function startBrowserRecognition() {
-        if (!browserRecognition) {
-            browserRecognition = initBrowserRecognition();
-        }
         if (browserRecognition) {
             try {
                 browserRecognition.start();
-            } catch {}
+                return;
+            } catch (err) {
+                try { browserRecognition.abort?.(); } catch (_) {}
+                browserRecognition = null;
+            }
+        }
+        browserRecognition = initBrowserRecognition();
+        if (browserRecognition) {
+            try {
+                browserRecognition.start();
+            } catch (_) {}
         }
     }
 
