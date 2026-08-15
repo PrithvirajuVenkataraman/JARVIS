@@ -67,4 +67,18 @@ if (originalKey) {
     process.env.GROQ_API_KEY = originalKey;
 }
 
+// 4. Test api/index.js routes /api/stt
+import rootApiHandler from '../api/index.js';
+const rootReq = {
+    method: 'POST',
+    url: '/api/stt',
+    headers: { 'content-type': 'application/json' },
+    body: {}
+};
+const rootRes = createMockRes();
+await rootApiHandler(rootReq, rootRes);
+// Expect 400 (missing_audio) which proves it reached sttHandler rather than 404
+assert.equal(rootRes.statusCode, 400);
+assert.equal(rootRes.data?.error?.code, 'missing_audio');
+
 console.log('stt-api-tests-ok');
