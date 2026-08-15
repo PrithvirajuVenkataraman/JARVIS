@@ -92,7 +92,26 @@ assert.equal(controller.getState().processing, false);
 controller.stop({ disableConverse: true });
 assert.equal(controller.getState().converseEnabled, false);
 
-// 7. Test Language Switcher
+// 7. Test Error Recovery & Bi-directional Fallback
+const failController = createSpeechInputController({
+    Recognition: FakeRecognition,
+    language: 'en-US',
+    onError: error => errors.push(error)
+});
+await failController.toggleConverse();
+assert.equal(failController.getState().converseEnabled, true);
+
+const failingRec = FakeRecognition.instances.at(-1);
+if (failingRec) {
+    // Simulating browser speech service block
+    failingRec.emitError('network');
+}
+// Should maintain converseEnabled without crashing
+assert.equal(failController.getState().converseEnabled, true);
+failController.stop({ disableConverse: true });
+assert.equal(failController.getState().converseEnabled, false);
+
+// 8. Test Language Switcher
 const switchedLang = controller.setLanguage('ta-IN');
 assert.equal(switchedLang, 'ta-IN');
 assert.equal(controller.getState().language, 'ta-IN');
