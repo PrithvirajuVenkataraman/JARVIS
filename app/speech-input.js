@@ -271,7 +271,7 @@ export function createSpeechInputController(options = {}) {
         },
         onError(err) {
             if (err.code === 'fallback_to_browser' || err.code === 'stt_network_error' || err.code === 'transcription_empty') {
-                if (converseEnabled && Recognition) {
+                if ((converseEnabled || mode === 'dictation') && Recognition) {
                     fallbackMode = true;
                     startBrowserRecognition();
                 }
@@ -325,6 +325,13 @@ export function createSpeechInputController(options = {}) {
 
             r.onerror = event => {
                 if (event.error === 'no-speech') {
+                    return;
+                }
+                if ((converseEnabled || mode === 'dictation') && !fallbackMode && whisperRecorder.isSupported()) {
+                    fallbackMode = false;
+                    try { r.abort?.(); } catch (_) {}
+                    browserRecognition = null;
+                    whisperRecorder.start(language);
                     return;
                 }
                 const msg = ERROR_MESSAGES[event.error] || `Recognition error: ${event.error}`;
@@ -397,15 +404,10 @@ export function createSpeechInputController(options = {}) {
         mode = 'dictation';
         converseEnabled = false;
 
-        if (Recognition) {
+        const started = await whisperRecorder.start(language);
+        if (!started && Recognition) {
             fallbackMode = true;
             startBrowserRecognition();
-        } else {
-            const started = await whisperRecorder.start(language);
-            if (!started && Recognition) {
-                fallbackMode = true;
-                startBrowserRecognition();
-            }
         }
         emitState();
         return true;
@@ -420,15 +422,10 @@ export function createSpeechInputController(options = {}) {
         mode = 'converse';
         converseEnabled = true;
 
-        if (Recognition) {
+        const started = await whisperRecorder.start(language);
+        if (!started && Recognition) {
             fallbackMode = true;
             startBrowserRecognition();
-        } else {
-            const started = await whisperRecorder.start(language);
-            if (!started && Recognition) {
-                fallbackMode = true;
-                startBrowserRecognition();
-            }
         }
         emitState();
         return true;
@@ -445,7 +442,7 @@ export function createSpeechInputController(options = {}) {
             // Re-open microphone after processing/speech finishes
             setTimeout(() => {
                 if (converseEnabled && !processing) {
-                    if (Recognition) {
+                    if (fallbackMode && Recognition) {
                         startBrowserRecognition();
                     } else {
                         whisperRecorder.start(language);
