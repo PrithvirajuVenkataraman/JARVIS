@@ -271,6 +271,7 @@
                         id="voice-to-text-btn"
                         type="button"
                         class="composer-icon-btn speech-input-btn"
+                        onclick="globalThis.toggleVoiceToText ? globalThis.toggleVoiceToText() : (globalThis.JarvisSpeechInput && globalThis.JarvisSpeechInput.toggleDictation())"
                         title="Transcribe one message"
                         aria-label="Transcribe one message"
                         aria-pressed="false">
@@ -24718,6 +24719,7 @@ globalThis.isConverseSpeechActive = isConverseSpeechActive;
 globalThis.stopConverseSpeech = stopConverseSpeech;
 globalThis.handlePrimaryActionButtonClick = handlePrimaryActionButtonClick;
 globalThis.togglePrimaryConverseMode = togglePrimaryConverseMode;
+globalThis.__jarvisAppReady = true;
 globalThis.dispatchEvent(new CustomEvent('jarvis:app-ready'));
 
 </script>
