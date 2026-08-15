@@ -5262,6 +5262,37 @@ let showRoutingDebugBadge = false;
         }
         initZoomLock();
 
+        async function initStartupPermissions() {
+            try {
+                if (navigator.permissions?.query) {
+                    try {
+                        const geoStatus = await navigator.permissions.query({ name: 'geolocation' });
+                        if (geoStatus.state === 'granted') {
+                            window.__jarvisLocationGranted = true;
+                            getCurrentPositionAsync({ enableHighAccuracy: false, timeout: 6000, maximumAge: 300000 }).catch(() => {});
+                        }
+                        geoStatus.onchange = () => {
+                            window.__jarvisLocationGranted = geoStatus.state === 'granted';
+                            if (geoStatus.state === 'granted') {
+                                getCurrentPositionAsync({ enableHighAccuracy: false, timeout: 6000, maximumAge: 300000 }).catch(() => {});
+                            }
+                        };
+                    } catch (_) {}
+
+                    try {
+                        const micStatus = await navigator.permissions.query({ name: 'microphone' });
+                        if (micStatus.state === 'granted') {
+                            window.__jarvisMicPreGranted = true;
+                        }
+                        micStatus.onchange = () => {
+                            window.__jarvisMicPreGranted = micStatus.state === 'granted';
+                        };
+                    } catch (_) {}
+                }
+            } catch (_) {}
+        }
+        void initStartupPermissions();
+
         function hasAnyRenderedChatMessages() {
             const chatContainer = document.getElementById('chat-container');
             return !!chatContainer?.querySelector('[data-role]');
@@ -5283,6 +5314,7 @@ let showRoutingDebugBadge = false;
 
         window.onload = async () => { 
             initZoomLock();  
+            void initStartupPermissions();
             loadMemoryPersistencePreference();  
             loadUserData();  
             loadAssistantModes(); 
@@ -20104,27 +20136,29 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
             const pending = action || window.__jarvisPendingLocationAction;
             window.__jarvisPendingLocationAction = null;
             const code = Number(error?.code || 0);
+            const permState = await getGeolocationPermissionState();
             let askMsg;
-            if (code === 1 || /denied/i.test(String(error?.message || ''))) {
+
+            if (code === 1 && permState === 'denied') {
                 askMsg = pending?.type === 'whereami'
-                    ? 'Location permission was denied. Enable it in your browser settings, then ask "where am I" again.'
-                    : 'Location permission was denied. Tell me your city, or enable location access in browser settings.';
-            } else if (code === 2) {
-                askMsg = pending?.type === 'whereami'
-                    ? 'I could not determine your location. Check GPS/network and try again, or tell me your city for weather.'
-                    : 'I could not determine your location. Where are you? Just say your city.';
+                    ? 'Location permission was denied in browser settings. Enable it in browser settings, then ask "where am I" again.'
+                    : 'Location permission was denied in browser settings. Tell me your city, or enable location access in browser settings.';
             } else if (code === 3) {
                 askMsg = pending?.type === 'whereami'
-                    ? 'Location detection timed out. Try again, or enable precise location and ask once more.'
-                    : 'Location detection is taking too long. Where are you located?';
+                    ? 'GPS location detection timed out. Please try again or check device GPS.'
+                    : 'Location detection timed out. Which city are you in?';
+            } else if (code === 2) {
+                askMsg = pending?.type === 'whereami'
+                    ? 'GPS position is currently unavailable on this network/device. Please try again or tell me your city.'
+                    : 'GPS location is currently unavailable. Tell me your city and I will check the weather there.';
             } else if (/not supported|unsupported/i.test(String(error?.message || ''))) {
                 askMsg = pending?.type === 'whereami'
                     ? 'This device does not support location detection.'
                     : 'This device does not support location detection. Please tell me your city.';
             } else {
                 askMsg = pending?.type === 'whereami'
-                    ? 'I could not access your current location. Please enable location permission and try again.'
-                    : 'I could not detect your location. Where are you?';
+                    ? 'Could not determine GPS coordinates right now. Please try again or tell me your city.'
+                    : 'Could not detect your location. Which city are you in?';
             }
 
             if (pending?.type === 'weather' || !pending) {
@@ -20161,27 +20195,20 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
                 return;
             }
 
-            if (state === 'granted') {
-                showThinkingIndicator(action?.type === 'weather' ? 'Getting your local weather...' : 'Checking your current location...');
-                try {
-                    const position = await getCurrentPositionAsync({
-                        enableHighAccuracy: action?.type === 'whereami',
-                        timeout: 15000,
-                        maximumAge: action?.type === 'whereami' ? 60000 : 300000
-                    });
-                    hideThinkingIndicator();
-                    window.__jarvisPendingLocationAction = action;
-                    await continuePendingLocationAction(position);
-                } catch (error) {
-                    hideThinkingIndicator();
-                    await handleGeolocationFailure(error, action);
-                }
-                return;
+            showThinkingIndicator(action?.type === 'weather' ? 'Getting your local weather...' : 'Checking your current location...');
+            try {
+                const position = await getCurrentPositionAsync({
+                    enableHighAccuracy: action?.type === 'whereami',
+                    timeout: 15000,
+                    maximumAge: action?.type === 'whereami' ? 60000 : 300000
+                });
+                hideThinkingIndicator();
+                window.__jarvisPendingLocationAction = action;
+                await continuePendingLocationAction(position);
+            } catch (error) {
+                hideThinkingIndicator();
+                await handleGeolocationFailure(error, action);
             }
-
-            // Permission not decided yet: ask explicitly, then wait for Allow / city.
-            setPendingLocationPermissionAction(action);
-            addChatMessage(buildLocationPermissionCardHtml(featureLabel), false, false);
         }
 
         async function completeCurrentLocationWeatherRequest(position, originalQuery = '') {
@@ -20760,19 +20787,34 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
             }
             return location;
         }
-        function getCurrentPositionAsync(options = {}) {
-            return new Promise((resolve, reject) => {
-                if (!navigator.geolocation) {
-                    reject(new Error('Geolocation is not supported in this browser.'));
-                    return;
-                }
-                navigator.geolocation.getCurrentPosition(resolve, reject, {
-                    enableHighAccuracy: true,
-                    timeout: 12000,
-                    maximumAge: 120000,
-                    ...options
+        async function getCurrentPositionAsync(options = {}) {
+            if (!navigator.geolocation) {
+                throw new Error('Geolocation is not supported in this browser.');
+            }
+            try {
+                return await new Promise((resolve, reject) => {
+                    navigator.geolocation.getCurrentPosition(resolve, reject, {
+                        enableHighAccuracy: options.enableHighAccuracy !== false,
+                        timeout: options.timeout || 10000,
+                        maximumAge: options.maximumAge || 60000,
+                        ...options
+                    });
                 });
-            });
+            } catch (err) {
+                // If high-accuracy GPS timed out or failed, auto-fallback to network-based position
+                if (options.enableHighAccuracy !== false && err?.code === 3) {
+                    try {
+                        return await new Promise((resolve, reject) => {
+                            navigator.geolocation.getCurrentPosition(resolve, reject, {
+                                enableHighAccuracy: false,
+                                timeout: 8000,
+                                maximumAge: 300000
+                            });
+                        });
+                    } catch (_) {}
+                }
+                throw err;
+            }
         }
 
         async function completeCurrentLocationRequest(position, originalText = '') {
