@@ -116,4 +116,10 @@ const switchedLang = controller.setLanguage('ta-IN');
 assert.equal(switchedLang, 'ta-IN');
 assert.equal(controller.getState().language, 'ta-IN');
 
+// 9. Test Speech Filler Cleaner
+import { cleanSpeechFillers } from '../app/speech-input.js';
+assert.equal(cleanSpeechFillers('um hello uh world err'), 'hello world');
+assert.equal(cleanSpeechFillers('ah explain more details please'), 'explain more details please');
+assert.equal(cleanSpeechFillers('yes sure'), 'yes sure');
+
 console.log('speech-input-tests-ok');
