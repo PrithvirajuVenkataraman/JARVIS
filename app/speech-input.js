@@ -334,6 +334,13 @@ export function createSpeechInputController(options = {}) {
 
             r.onerror = event => {
                 if (event.error === 'no-speech') {
+                    if (converseEnabled && !processing && !globalThis.isConverseSpeechActive?.()) {
+                        setTimeout(() => {
+                            if (converseEnabled && !processing && !globalThis.isConverseSpeechActive?.()) {
+                                startBrowserRecognition();
+                            }
+                        }, 250);
+                    }
                     return;
                 }
                 if ((converseEnabled || mode === 'dictation') && !fallbackMode && whisperRecorder.isSupported()) {
@@ -348,11 +355,11 @@ export function createSpeechInputController(options = {}) {
             };
 
             r.onend = () => {
-                if (converseEnabled && !processing) {
+                if (converseEnabled && !processing && !globalThis.isConverseSpeechActive?.()) {
                     // Auto-resume continuous listening in converse mode
                     setTimeout(() => {
-                        if (converseEnabled && !processing && browserRecognition) {
-                            try { browserRecognition.start(); } catch {}
+                        if (converseEnabled && !processing && !globalThis.isConverseSpeechActive?.()) {
+                            startBrowserRecognition();
                         }
                     }, 200);
                 } else {
@@ -461,7 +468,7 @@ export function createSpeechInputController(options = {}) {
             // Re-open microphone after processing AND assistant speech playback finish
             setTimeout(() => {
                 if (converseEnabled && !processing && !globalThis.isConverseSpeechActive?.()) {
-                    if (fallbackMode && Recognition) {
+                    if (Recognition && !fallbackMode) {
                         startBrowserRecognition();
                     } else {
                         whisperRecorder.start(language);
