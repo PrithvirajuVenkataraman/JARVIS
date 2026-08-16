@@ -3999,14 +3999,7 @@ async function buildSearchFallbackAnswer(userMessage) {
         }
     } catch (error) {
     }
-
-    try {
-        const summary = await fetchWikipediaSummaryFallback(subject || resolvedMessage);
-        if (!summary?.extract) return null;
-        return `${summary.extract}\n\nSource:\n1. [${summary.title}](${summary.sourceUrl})`;
-    } catch (fallbackError) {
-        return null;
-    }
+    return null;
 }
 
 async function buildStrictApiKnowledgeFallback(userMessage) {
@@ -4139,18 +4132,6 @@ function sanitizeWeakModelAnswer(answerText, userMessage) {
     const asksForUserProvidedSources =
         /\b(?:provide|share|give)\b[\s\S]{0,40}\b(?:source|sources|link|links)\b/.test(rawLower) ||
         /\b(?:send|paste)\b[\s\S]{0,40}\b(?:url|source|link)\b/.test(rawLower);
-    const looksLikeWeakExplainerTemplate =
-        /follow these steps|quick recap|next thing to learn|to understand (its|the|this) meaning/i.test(raw) ||
-        (/(\n|^)\s*1[\).:-]\s+/.test(raw) && /(\n|^)\s*2[\).:-]\s+/.test(raw));
-    if (directQuery && looksLikeResearchSteps) {
-        return '';
-    }
-    if (directQuery && looksLikeWeakExplainerTemplate) {
-        return '';
-    }
-    if (freshnessQuery && looksLikeResearchSteps) {
-        return '';
-    }
     if (liveOrEntityFactQuery && staleCutoffAnswer) {
         return '';
     }
@@ -4158,10 +4139,6 @@ function sanitizeWeakModelAnswer(answerText, userMessage) {
         return '';
     }
     if (liveOrEntityFactQuery && asksForUserProvidedSources) {
-        return '';
-    }
-    if (isLowSignalModelAnswer(raw) &&
-        directQuery) {
         return '';
     }
     return raw;
@@ -4214,13 +4191,9 @@ function asksUserToProvideSources(text) {
 }
 
 async function resolveFinalAssistantAnswer(userMessage, answerText) {
-    if (asksUserToProvideSources(answerText)) {
-        if (!isFactSearchEnabled()) {
-            const cleanAnswer = sanitizeWeakModelAnswer(answerText, userMessage);
-            if (cleanAnswer) return cleanAnswer;
-            return String(answerText || '').trim();
-        }
-    }
+    const raw = String(answerText || '').trim();
+    if (raw && !asksUserToProvideSources(raw)) return raw;
+
     const safeAnswer = sanitizeWeakModelAnswer(answerText, userMessage);
     if (safeAnswer) return safeAnswer;
 
@@ -4232,7 +4205,7 @@ async function resolveFinalAssistantAnswer(userMessage, answerText) {
     const strictApiFallback = await buildStrictApiKnowledgeFallback(userMessage);
     if (strictApiFallback) return strictApiFallback;
 
-    return await buildUniversalSoftFallback(userMessage);
+    return raw || (await buildUniversalSoftFallback(userMessage));
 }
 
 async function publishResolvedModelMessage(userMessage, answerText, options = {}) {
