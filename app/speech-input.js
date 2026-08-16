@@ -1,7 +1,8 @@
 /**
  * Unified Speech Input & Hands-Free Converse Controller.
- * Primary STT: Serverless Groq Whisper (whisper-large-v3-turbo) via MediaRecorder.
- * Fallback STT: Native Browser Web Speech API (SpeechRecognition / webkitSpeechRecognition).
+ * Primary STT: Native Browser Web Speech API (SpeechRecognition / webkitSpeechRecognition).
+ * Fallback STT: Serverless MediaRecorder -> /api/stt (Whisper Large).
+ * Designed for zero main-thread blocking, continuous converse, and instant streaming.
  */
 
 const ERROR_MESSAGES = {
@@ -12,10 +13,14 @@ const ERROR_MESSAGES = {
     'no-speech': 'No speech was detected. If this repeats, try English or another language.'
 };
 
-const DEFAULT_CONVERSE_SILENCE_MS = 800;
-const DEFAULT_CONVERSE_MAX_WAIT_MS = 3500;
+export function cleanSpeechFillers(text = '') {
+    return String(text || '')
+        .replace(/\b(um+|uh+|err+|ahh?|erm+)\b/gi, '')
+        .replace(/\s{2,}/g, ' ')
+        .trim();
+}
 
-function normalizeVoiceInputLanguage(language = '') {
+export function normalizeVoiceInputLanguage(language = '') {
     const value = String(language || '').trim();
     const supported = ['en-US', 'en-IN', 'ta-IN', 'te-IN', 'kn-IN', 'hi-IN'];
     if (supported.includes(value)) return value;
@@ -28,59 +33,42 @@ function normalizeVoiceInputLanguage(language = '') {
 }
 
 /**
- * Creates an audio recorder that posts audio to /api/stt with fallback support.
+ * Creates a clean MediaRecorder audio recorder that sends audio chunks to /api/stt.
  */
 export function createWhisperRecorder(options = {}) {
     let mediaStream = null;
     let mediaRecorder = null;
     let audioChunks = [];
     let isRecording = false;
-    let audioContext = null;
-    let analyser = null;
-    let silenceTimer = null;
-    let speechDetected = false;
 
     const onTranscribed = options.onTranscribed || (() => {});
     const onError = options.onError || (() => {});
     const onState = options.onState || (() => {});
-    const silenceTimeoutMs = options.silenceTimeoutMs || DEFAULT_CONVERSE_SILENCE_MS;
+
+    function isSupported() {
+        return Boolean(typeof navigator !== 'undefined' && navigator?.mediaDevices?.getUserMedia && typeof MediaRecorder !== 'undefined');
+    }
 
     async function start(language = 'en-US') {
         if (isRecording) return true;
+        if (!isSupported()) {
+            onError({ code: 'unsupported' });
+            return false;
+        }
 
         try {
             audioChunks = [];
-            speechDetected = false;
-
-            // Reuse persistent mediaStream if active and has live audio tracks
             const hasLiveTracks = mediaStream && mediaStream.active && mediaStream.getAudioTracks().some(t => t.readyState === 'live');
             if (hasLiveTracks) {
                 mediaStream.getAudioTracks().forEach(t => { t.enabled = true; });
             } else {
-                if (!navigator?.mediaDevices?.getUserMedia) {
-                    return false;
-                }
-                mediaStream = await navigator.mediaDevices.getUserMedia({
-                    audio: {
-                        echoCancellation: true,
-                        noiseSuppression: true,
-                        autoGainControl: true
-                    }
-                });
+                mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
             }
 
-            // Choose supported mimeType
-            const mimeTypes = [
-                'audio/webm;codecs=opus',
-                'audio/webm',
-                'audio/mp4',
-                'audio/ogg;codecs=opus',
-                'audio/wav'
-            ];
-            const chosenMime = mimeTypes.find(t => MediaRecorder.isTypeSupported?.(t)) || '';
+            const mimeTypes = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus', 'audio/wav'];
+            const chosenMime = mimeTypes.find(t => typeof MediaRecorder.isTypeSupported === 'function' && MediaRecorder.isTypeSupported(t)) || '';
 
             mediaRecorder = chosenMime ? new MediaRecorder(mediaStream, { mimeType: chosenMime }) : new MediaRecorder(mediaStream);
-
             mediaRecorder.ondataavailable = event => {
                 if (event.data && event.data.size > 0) {
                     audioChunks.push(event.data);
@@ -107,20 +95,13 @@ export function createWhisperRecorder(options = {}) {
                             onState({ recording: false, processing: false });
                             return;
                         }
-
                         const res = await fetch('/api/stt', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                audioBase64: base64Audio,
-                                mimeType: mime,
-                                language
-                            })
+                            body: JSON.stringify({ audioBase64: base64Audio, mimeType: mime, language })
                         });
-
                         const data = await res.json();
                         onState({ recording: false, processing: false });
-
                         if (data?.success && data.text) {
                             onTranscribed(data.text);
                         } else if (data?.fallbackToBrowser) {
@@ -136,58 +117,7 @@ export function createWhisperRecorder(options = {}) {
                 }
             };
 
-            // Setup WebAudio VAD for silence detection in continuous mode
-            try {
-                const AudioCtx = window.AudioContext || window.webkitAudioContext;
-                if (AudioCtx) {
-                    if (!audioContext || audioContext.state === 'closed') {
-                        audioContext = new AudioCtx();
-                    } else if (audioContext.state === 'suspended') {
-                        audioContext.resume();
-                    }
-                    const source = audioContext.createMediaStreamSource(mediaStream);
-                    analyser = audioContext.createAnalyser();
-                    analyser.fftSize = 512;
-                    source.connect(analyser);
-
-                    const bufferLength = analyser.frequencyBinCount;
-                    const dataArray = new Uint8Array(bufferLength);
-
-                    const checkVolume = () => {
-                        if (!isRecording) return;
-                        analyser.getByteFrequencyData(dataArray);
-                        let sum = 0;
-                        for (let i = 0; i < bufferLength; i++) {
-                            sum += dataArray[i];
-                        }
-                        const average = sum / bufferLength;
-
-                        // Voice activity threshold
-                        if (average > 12) {
-                            speechDetected = true;
-                            // Instant barge-in: cancel any active TTS speaking and capture interrupted state
-                            if (globalThis.speechSynthesis?.speaking || globalThis.isConverseSpeechActive?.()) {
-                                globalThis.stopConverseSpeech?.('barge_in');
-                            }
-                            if (silenceTimer) {
-                                clearTimeout(silenceTimer);
-                                silenceTimer = null;
-                            }
-                        } else if (speechDetected && !silenceTimer) {
-                            silenceTimer = setTimeout(() => {
-                                if (isRecording) {
-                                    stop({ keepStream: true });
-                                }
-                            }, silenceTimeoutMs);
-                        }
-
-                        requestAnimationFrame(checkVolume);
-                    };
-                    requestAnimationFrame(checkVolume);
-                }
-            } catch {}
-
-            mediaRecorder.start(250);
+            mediaRecorder.start();
             isRecording = true;
             onState({ recording: true, processing: false });
             return true;
@@ -200,35 +130,18 @@ export function createWhisperRecorder(options = {}) {
 
     function stop(options = {}) {
         const keepStream = options.keepStream === true;
-        if (silenceTimer) {
-            clearTimeout(silenceTimer);
-            silenceTimer = null;
-        }
         if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-            try {
-                mediaRecorder.stop();
-            } catch {}
+            try { mediaRecorder.stop(); } catch {}
         }
         if (mediaStream) {
             if (keepStream) {
-                // Mute tracks during processing / TTS without destroying the authorization
                 mediaStream.getAudioTracks().forEach(t => { t.enabled = false; });
             } else {
                 mediaStream.getTracks().forEach(t => t.stop());
                 mediaStream = null;
             }
         }
-        if (!keepStream && audioContext && audioContext.state !== 'closed') {
-            try {
-                audioContext.close();
-            } catch {}
-            audioContext = null;
-        }
         isRecording = false;
-    }
-
-    function isSupported() {
-        return Boolean(navigator?.mediaDevices?.getUserMedia && typeof MediaRecorder !== 'undefined');
     }
 
     return {
@@ -239,18 +152,11 @@ export function createWhisperRecorder(options = {}) {
     };
 }
 
-export function cleanSpeechFillers(text = '') {
-    return String(text || '')
-        .replace(/\b(um+|uh+|err+|ahh?|erm+)\b/gi, '')
-        .replace(/\s{2,}/g, ' ')
-        .trim();
-}
-
 /**
- * Creates the complete Speech & Converse Controller combining Whisper STT + Web Speech fallback.
+ * Creates the complete Speech & Converse Controller combining native SpeechRecognition + Whisper STT.
  */
 export function createSpeechInputController(options = {}) {
-    const Recognition = options.Recognition;
+    const Recognition = options.Recognition || (typeof window !== 'undefined' ? (window.SpeechRecognition || window.webkitSpeechRecognition) : null);
     const callbacks = {
         onInterim: options.onInterim || (() => {}),
         onFinal: options.onFinal || (() => {}),
@@ -266,7 +172,6 @@ export function createSpeechInputController(options = {}) {
     let fallbackMode = false;
 
     const whisperRecorder = createWhisperRecorder({
-        silenceTimeoutMs: options.converseSilenceMs || DEFAULT_CONVERSE_SILENCE_MS,
         onTranscribed(text) {
             const clean = cleanSpeechFillers(text);
             if (!clean) return;
@@ -292,7 +197,7 @@ export function createSpeechInputController(options = {}) {
                 }
             }
         },
-        onState(state) {
+        onState() {
             emitState();
         }
     });
@@ -339,7 +244,7 @@ export function createSpeechInputController(options = {}) {
                             if (converseEnabled && !processing && !globalThis.isConverseSpeechActive?.()) {
                                 startBrowserRecognition();
                             }
-                        }, 250);
+                        }, 200);
                     }
                     return;
                 }
@@ -356,7 +261,6 @@ export function createSpeechInputController(options = {}) {
 
             r.onend = () => {
                 if (converseEnabled && !processing && !globalThis.isConverseSpeechActive?.()) {
-                    // Auto-resume continuous listening in converse mode
                     setTimeout(() => {
                         if (converseEnabled && !processing && !globalThis.isConverseSpeechActive?.()) {
                             startBrowserRecognition();
@@ -393,7 +297,7 @@ export function createSpeechInputController(options = {}) {
 
     function getState() {
         return {
-            supported: whisperRecorder.isSupported() || typeof Recognition === 'function',
+            supported: whisperRecorder.isSupported() || Boolean(Recognition),
             mode,
             converseEnabled,
             listening: whisperRecorder.isRecording() || Boolean(browserRecognition),
@@ -465,7 +369,6 @@ export function createSpeechInputController(options = {}) {
                 try { browserRecognition.stop(); } catch {}
             }
         } else if (converseEnabled) {
-            // Re-open microphone after processing AND assistant speech playback finish
             setTimeout(() => {
                 if (converseEnabled && !processing && !globalThis.isConverseSpeechActive?.()) {
                     if (Recognition && !fallbackMode) {
@@ -601,7 +504,6 @@ export function installSpeechInputUI(options = {}) {
         }
     });
 
-    let lastVttClickTime = 0;
     globalThis.toggleVoiceToText = () => {
         committedText = input.value.trim();
         return controller.toggleDictation();
@@ -638,6 +540,5 @@ export function installSpeechInputUI(options = {}) {
         }
     });
 
-    controller.setProcessing(false);
     return controller;
 }
