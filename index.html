@@ -18438,12 +18438,6 @@ function isWakeGreetingText(text) {
                 });
                 return;
             }
-            if (contextResolution?.decisionReason === 'acknowledgement_keep_context' || isAcknowledgementUtterance(text)) {
-                const reply = buildAcknowledgementReply(text);
-                addChatMessage(reply, false);
-                saveToHistory(text, reply, { recordContext: true });
-                return;
-            }
             const instantReply = window.JarvisInstantReplies?.getInstantReply?.(text);
             if (instantReply) {
                 const messageId = addModelAssistantMessage(instantReply, 'Instant reply', {
