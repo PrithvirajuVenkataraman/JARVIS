@@ -6023,7 +6023,7 @@ let showRoutingDebugBadge = false;
                 void sendTextInput();
                 return;
             }
-            if (btn?.classList.contains('composer-send-stop') || isConverseSpeechActive() || activeRequestController || isAssistantProcessing()) {
+            if (btn?.classList.contains('composer-send-stop')) {
                 stopActiveGeneration('manual');
                 stopConverseSpeech('manual');
                 return;
@@ -6038,8 +6038,10 @@ let showRoutingDebugBadge = false;
                 return;
             }
 
-            if (isConverseSpeechActive() || activeRequestController || isAssistantProcessing()) {
+            if (activeRequestController || isAssistantProcessing()) {
                 stopActiveGeneration('manual');
+            }
+            if (isConverseSpeechActive()) {
                 stopConverseSpeech('manual');
             }
 
