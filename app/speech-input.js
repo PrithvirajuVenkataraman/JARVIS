@@ -541,6 +541,9 @@ export function installSpeechInputUI(options = {}) {
                 if (cleaned) setStatusText('Listening');
                 else setListeningStatus();
             }
+            if (state?.converseEnabled) {
+                globalThis.updateLiveConverseOverlay?.(state.processing ? 'thinking' : 'listening', cleaned, true);
+            }
             options.onComposerChanged?.();
         },
         async onFinal(text, event) {
@@ -549,6 +552,7 @@ export function installSpeechInputUI(options = {}) {
                 committedText = '';
                 input.value = cleaned;
                 input.dataset.inputSource = 'converse';
+                globalThis.updateLiveConverseOverlay?.('thinking', cleaned, false);
                 options.onComposerChanged?.();
                 await options.onSubmit?.({
                     source: 'converse',
@@ -580,6 +584,7 @@ export function installSpeechInputUI(options = {}) {
                     setStatusText('');
                 }
             }
+            globalThis.updateLiveConverseOverlay?.(state.processing ? 'thinking' : (state.listening ? 'listening' : 'idle'));
             options.onStateChanged?.(state);
             globalThis.updateComposerPlaceholder?.();
         },
