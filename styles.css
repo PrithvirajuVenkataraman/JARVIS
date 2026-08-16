@@ -4431,3 +4431,383 @@ body:not(.dark) .permissions-btn-secondary:hover {
     color: #0f172a;
 }
 
+/* ==========================================================================
+   Gemini-Style Live Converse Overlay
+   ========================================================================== */
+.converse-live-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1.5rem 1.25rem 2.5rem;
+    background: radial-gradient(circle at 50% 35%, #1e293b 0%, #0f172a 75%, #020617 100%);
+    backdrop-filter: blur(28px);
+    -webkit-backdrop-filter: blur(28px);
+    color: #f8fafc;
+    box-sizing: border-box;
+    user-select: none;
+    animation: converseFadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.converse-live-overlay.hidden {
+    display: none !important;
+}
+
+@keyframes converseFadeIn {
+    from { opacity: 0; transform: scale(0.98); }
+    to { opacity: 1; transform: scale(1); }
+}
+
+.converse-live-content {
+    width: 100%;
+    max-width: 600px;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    align-items: center;
+    position: relative;
+    z-index: 2;
+}
+
+/* Header */
+.converse-live-header {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.5rem 0;
+}
+
+.converse-live-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.35rem 0.85rem;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: #38bdf8;
+    text-transform: uppercase;
+}
+
+.converse-live-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #38bdf8;
+    box-shadow: 0 0 10px #38bdf8;
+    animation: converseLivePulse 1.6s ease-in-out infinite;
+}
+
+@keyframes converseLivePulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(0.85); }
+}
+
+.converse-live-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.converse-live-lang-select {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    color: #f8fafc;
+    font-size: 0.8rem;
+    font-weight: 500;
+    padding: 0.35rem 0.75rem;
+    border-radius: 9999px;
+    cursor: pointer;
+    outline: none;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.converse-live-lang-select:hover,
+.converse-live-lang-select:focus {
+    background: rgba(255, 255, 255, 0.14);
+    border-color: rgba(255, 255, 255, 0.25);
+}
+
+.converse-live-lang-select option {
+    background: #0f172a;
+    color: #f8fafc;
+}
+
+.converse-live-close-btn {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    color: #94a3b8;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.converse-live-close-btn:hover {
+    background: rgba(255, 255, 255, 0.16);
+    color: #ffffff;
+    transform: scale(1.05);
+}
+
+/* Center Visualizer & Pulse Orb */
+.converse-live-visualizer-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1.75rem;
+    margin: auto 0;
+    width: 100%;
+}
+
+.converse-live-orb {
+    position: relative;
+    width: 160px;
+    height: 160px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.converse-orb-ring {
+    position: absolute;
+    border-radius: 50%;
+    pointer-events: none;
+}
+
+.converse-orb-ring.ring-1 {
+    inset: -20px;
+    border: 2px solid rgba(56, 189, 248, 0.2);
+    box-shadow: 0 0 40px rgba(56, 189, 248, 0.15);
+    animation: orbRingPulse 2.4s ease-in-out infinite;
+}
+
+.converse-orb-ring.ring-2 {
+    inset: -40px;
+    border: 1px dashed rgba(56, 189, 248, 0.1);
+    animation: orbRingRotate 14s linear infinite;
+}
+
+@keyframes orbRingPulse {
+    0%, 100% { transform: scale(1); opacity: 0.6; }
+    50% { transform: scale(1.12); opacity: 0.2; }
+}
+
+@keyframes orbRingRotate {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+.converse-orb-core {
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 40% 35%, #38bdf8 0%, #2563eb 60%, #1e1b4b 100%);
+    box-shadow: 0 0 50px rgba(56, 189, 248, 0.5), inset 0 0 20px rgba(255, 255, 255, 0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* State changes for Orb */
+.converse-live-orb.is-thinking .converse-orb-core {
+    background: radial-gradient(circle at 40% 35%, #fbbf24 0%, #f59e0b 60%, #78350f 100%);
+    box-shadow: 0 0 50px rgba(245, 158, 11, 0.6), inset 0 0 20px rgba(255, 255, 255, 0.4);
+    animation: orbThinkingShimmer 1.4s ease-in-out infinite;
+}
+
+.converse-live-orb.is-thinking .converse-orb-ring.ring-1 {
+    border-color: rgba(245, 158, 11, 0.3);
+    box-shadow: 0 0 40px rgba(245, 158, 11, 0.2);
+}
+
+.converse-live-orb.is-speaking .converse-orb-core {
+    background: radial-gradient(circle at 40% 35%, #34d399 0%, #059669 60%, #064e3b 100%);
+    box-shadow: 0 0 60px rgba(16, 185, 129, 0.7), inset 0 0 20px rgba(255, 255, 255, 0.4);
+    animation: orbSpeakingBounce 0.8s ease-in-out infinite alternate;
+}
+
+.converse-live-orb.is-speaking .converse-orb-ring.ring-1 {
+    border-color: rgba(16, 185, 129, 0.4);
+    box-shadow: 0 0 50px rgba(16, 185, 129, 0.3);
+}
+
+@keyframes orbThinkingShimmer {
+    0%, 100% { transform: scale(1) rotate(0deg); }
+    50% { transform: scale(1.06) rotate(180deg); }
+}
+
+@keyframes orbSpeakingBounce {
+    0% { transform: scale(0.96); }
+    100% { transform: scale(1.08); }
+}
+
+/* Audio wave bars */
+.converse-wave-bars {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    height: 40px;
+}
+
+.converse-wave-bars .bar {
+    width: 4px;
+    height: 12px;
+    background: #ffffff;
+    border-radius: 4px;
+    transition: height 0.1s ease;
+}
+
+.converse-live-orb.is-listening .bar {
+    animation: barWave 1.2s ease-in-out infinite;
+}
+
+.converse-live-orb.is-listening .bar-1 { animation-delay: 0.0s; }
+.converse-live-orb.is-listening .bar-2 { animation-delay: 0.15s; }
+.converse-live-orb.is-listening .bar-3 { animation-delay: 0.3s; }
+.converse-live-orb.is-listening .bar-4 { animation-delay: 0.45s; }
+.converse-live-orb.is-listening .bar-5 { animation-delay: 0.6s; }
+
+@keyframes barWave {
+    0%, 100% { height: 10px; }
+    50% { height: 32px; }
+}
+
+.converse-live-orb.is-speaking .bar {
+    animation: barSpeakingWave 0.6s ease-in-out infinite;
+}
+
+.converse-live-orb.is-speaking .bar-1 { animation-delay: 0.0s; }
+.converse-live-orb.is-speaking .bar-2 { animation-delay: 0.12s; }
+.converse-live-orb.is-speaking .bar-3 { animation-delay: 0.24s; }
+.converse-live-orb.is-speaking .bar-4 { animation-delay: 0.36s; }
+.converse-live-orb.is-speaking .bar-5 { animation-delay: 0.48s; }
+
+@keyframes barSpeakingWave {
+    0%, 100% { height: 8px; }
+    50% { height: 38px; }
+}
+
+.converse-live-orb.is-thinking .bar {
+    height: 6px;
+    opacity: 0.6;
+}
+
+.converse-live-status {
+    font-size: 1.15rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: #e2e8f0;
+    text-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+}
+
+/* Transcript Box */
+.converse-live-transcript-box {
+    width: 100%;
+    min-height: 90px;
+    max-height: 160px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 1rem 1.25rem;
+    background: rgba(15, 23, 42, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 16px;
+    overflow-y: auto;
+    box-sizing: border-box;
+}
+
+.converse-live-transcript {
+    font-size: 1.05rem;
+    line-height: 1.5;
+    color: #f1f5f9;
+    font-weight: 400;
+    transition: color 0.15s ease;
+}
+
+.converse-live-transcript.is-interim {
+    color: #94a3b8;
+    font-style: italic;
+}
+
+/* Footer Controls */
+.converse-live-footer {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1.5rem;
+    padding-top: 1rem;
+}
+
+.converse-live-action-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.35rem;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    color: #f8fafc;
+    padding: 0.75rem 1.25rem;
+    border-radius: 9999px;
+    cursor: pointer;
+    font-size: 0.75rem;
+    font-weight: 600;
+    transition: all 0.15s;
+    min-width: 80px;
+}
+
+.converse-live-action-btn:hover {
+    background: rgba(255, 255, 255, 0.16);
+    transform: translateY(-2px);
+}
+
+.converse-live-action-btn.is-muted {
+    background: rgba(239, 68, 68, 0.2);
+    border-color: rgba(239, 68, 68, 0.4);
+    color: #fca5a5;
+}
+
+.converse-live-end-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.35rem;
+    background: #ef4444;
+    border: none;
+    color: #ffffff;
+    padding: 0.75rem 1.5rem;
+    border-radius: 9999px;
+    cursor: pointer;
+    font-size: 0.75rem;
+    font-weight: 700;
+    transition: all 0.15s;
+    min-width: 90px;
+    box-shadow: 0 4px 20px rgba(239, 68, 68, 0.4);
+}
+
+.converse-live-end-btn:hover {
+    background: #dc2626;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 24px rgba(239, 68, 68, 0.6);
+}
+
+.converse-live-end-btn:active {
+    transform: scale(0.96);
+}
+
