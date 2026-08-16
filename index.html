@@ -335,6 +335,77 @@
     </div>
     <canvas id="continuous-vision-canvas" class="hidden"></canvas>
 
+    <!-- Gemini-Style Live Converse Overlay -->
+    <div id="converse-live-overlay" class="converse-live-overlay hidden" aria-modal="true" role="dialog" aria-label="Jarvis Live Voice Conversation">
+        <div class="converse-live-content">
+            <!-- Header -->
+            <div class="converse-live-header">
+                <div class="converse-live-pill">
+                    <span class="converse-live-dot"></span>
+                    <span>JARVIS LIVE</span>
+                </div>
+                <div class="converse-live-header-actions">
+                    <select id="converse-live-language" class="converse-live-lang-select" onchange="window.setVoiceInputLanguage?.(this.value)" aria-label="Voice conversation language">
+                        <option value="en-US">English</option>
+                        <option value="ta-IN">Tamil (தமிழ்)</option>
+                        <option value="te-IN">Telugu (తెలుగు)</option>
+                        <option value="kn-IN">Kannada (ಕನ್ನಡ)</option>
+                        <option value="hi-IN">Hindi (हिन्दी)</option>
+                    </select>
+                    <button type="button" class="converse-live-close-btn" onclick="togglePrimaryConverseMode()" aria-label="Exit Live Conversation" title="Exit Live Conversation">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                            <line x1="6" y1="6" x2="18" y2="18"></line>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Center Visualizer & Pulse Orb -->
+            <div class="converse-live-visualizer-container">
+                <div id="converse-live-orb" class="converse-live-orb is-listening">
+                    <div class="converse-orb-ring ring-1"></div>
+                    <div class="converse-orb-ring ring-2"></div>
+                    <div class="converse-orb-core">
+                        <div class="converse-wave-bars">
+                            <span class="bar bar-1"></span>
+                            <span class="bar bar-2"></span>
+                            <span class="bar bar-3"></span>
+                            <span class="bar bar-4"></span>
+                            <span class="bar bar-5"></span>
+                        </div>
+                    </div>
+                </div>
+                <div id="converse-live-status-text" class="converse-live-status">Listening...</div>
+            </div>
+
+            <!-- Live Speech Transcript / Conversation Stream -->
+            <div class="converse-live-transcript-box">
+                <div id="converse-live-transcript" class="converse-live-transcript">Speak freely...</div>
+            </div>
+
+            <!-- Footer Controls -->
+            <div class="converse-live-footer">
+                <button type="button" id="converse-live-mic-btn" class="converse-live-action-btn" onclick="toggleConverseMic()" aria-label="Mute microphone" title="Mute microphone">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="9" y="2" width="6" height="12" rx="3"></rect>
+                        <path d="M5 10a7 7 0 0 0 14 0"></path>
+                        <path d="M12 17v5"></path>
+                        <path d="M8 22h8"></path>
+                    </svg>
+                    <span id="converse-live-mic-label">Mute</span>
+                </button>
+                <button type="button" class="converse-live-end-btn" onclick="togglePrimaryConverseMode()" aria-label="End conversation" title="End conversation">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path>
+                        <line x1="12" y1="2" x2="12" y2="12"></line>
+                    </svg>
+                    <span>End</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
 <!-- Inline app logic lives below -->
 <script>
 (function () {
@@ -8612,6 +8683,64 @@ let showRoutingDebugBadge = false;
             ? globalThis.JarvisConverseState.createConverseStateTracker('listening')
             : null;
 
+        function updateLiveConverseOverlay(state, transcriptText = '', isInterim = false) {
+            const overlay = document.getElementById('converse-live-overlay');
+            const orb = document.getElementById('converse-live-orb');
+            const statusText = document.getElementById('converse-live-status-text');
+            const transcriptEl = document.getElementById('converse-live-transcript');
+            const langSelect = document.getElementById('converse-live-language');
+            if (!overlay) return;
+
+            const speechState = window.JarvisSpeechInput?.getState?.() || {};
+            const isConverseActive = Boolean(speechState.converseEnabled);
+
+            overlay.classList.toggle('hidden', !isConverseActive);
+
+            if (langSelect && speechState.language) {
+                langSelect.value = speechState.language;
+            }
+
+            if (orb) {
+                orb.classList.remove('is-listening', 'is-thinking', 'is-speaking');
+                if (state === 'speaking') {
+                    orb.classList.add('is-speaking');
+                    if (statusText) statusText.textContent = 'Speaking...';
+                } else if (state === 'thinking' || state === 'submitting' || state === 'responding' || speechState.processing) {
+                    orb.classList.add('is-thinking');
+                    if (statusText) statusText.textContent = 'Thinking...';
+                } else {
+                    orb.classList.add('is-listening');
+                    if (statusText) statusText.textContent = 'Listening (speak now)...';
+                }
+            }
+
+            if (transcriptEl && transcriptText) {
+                transcriptEl.textContent = transcriptText;
+                transcriptEl.classList.toggle('is-interim', isInterim);
+            }
+        }
+
+        globalThis.updateLiveConverseOverlay = updateLiveConverseOverlay;
+
+        function toggleConverseMic() {
+            const micBtn = document.getElementById('converse-live-mic-btn');
+            const micLabel = document.getElementById('converse-live-mic-label');
+            const speechInput = window.JarvisSpeechInput;
+            if (!speechInput) return;
+            const state = speechInput.getState();
+            if (state.listening) {
+                speechInput.stop();
+                if (micBtn) micBtn.classList.add('is-muted');
+                if (micLabel) micLabel.textContent = 'Unmute';
+            } else {
+                speechInput.start?.();
+                if (micBtn) micBtn.classList.remove('is-muted');
+                if (micLabel) micLabel.textContent = 'Mute';
+            }
+        }
+
+        globalThis.toggleConverseMic = toggleConverseMic;
+
         function setConverseUiState(state, reason = '') {
             const snapshot = converseStateTracker?.setState
                 ? converseStateTracker.setState(state, reason)
@@ -8623,6 +8752,7 @@ let showRoutingDebugBadge = false;
                 if (snapshot.state === 'recovering') status.textContent = 'Tap to enable voice replies';
                 if (snapshot.state === 'listening') status.textContent = window.JarvisSpeechInput?.getState?.().converseEnabled ? 'Listening...' : '';
             }
+            updateLiveConverseOverlay(snapshot.state);
             logLatencyTrace('converse_state', { state: snapshot.state, reason: snapshot.reason });
             return snapshot;
         }
