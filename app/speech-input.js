@@ -239,6 +239,13 @@ export function createWhisperRecorder(options = {}) {
     };
 }
 
+export function cleanSpeechFillers(text = '') {
+    return String(text || '')
+        .replace(/\b(um+|uh+|err+|ahh?|erm+)\b/gi, '')
+        .replace(/\s{2,}/g, ' ')
+        .trim();
+}
+
 /**
  * Creates the complete Speech & Converse Controller combining Whisper STT + Web Speech fallback.
  */
@@ -261,7 +268,7 @@ export function createSpeechInputController(options = {}) {
     const whisperRecorder = createWhisperRecorder({
         silenceTimeoutMs: options.converseSilenceMs || DEFAULT_CONVERSE_SILENCE_MS,
         onTranscribed(text) {
-            const clean = String(text || '').trim();
+            const clean = cleanSpeechFillers(text);
             if (!clean) return;
             callbacks.onFinal(clean, {
                 autoSubmit: converseEnabled,
@@ -313,9 +320,11 @@ export function createSpeechInputController(options = {}) {
                         interim += res[0].transcript;
                     }
                 }
-                if (interim) callbacks.onInterim(interim, getState());
-                if (final && final.trim()) {
-                    callbacks.onFinal(final.trim(), {
+                const cleanedInterim = cleanSpeechFillers(interim);
+                const cleanedFinal = cleanSpeechFillers(final);
+                if (cleanedInterim) callbacks.onInterim(cleanedInterim, getState());
+                if (cleanedFinal) {
+                    callbacks.onFinal(cleanedFinal, {
                         autoSubmit: converseEnabled,
                         source: converseEnabled ? 'converse' : 'vtt',
                         transcriptFinal: true
@@ -328,7 +337,7 @@ export function createSpeechInputController(options = {}) {
                     return;
                 }
                 if ((converseEnabled || mode === 'dictation') && !fallbackMode && whisperRecorder.isSupported()) {
-                    fallbackMode = false;
+                    fallbackMode = true;
                     try { r.abort?.(); } catch (_) {}
                     browserRecognition = null;
                     whisperRecorder.start(language);
@@ -404,10 +413,15 @@ export function createSpeechInputController(options = {}) {
         mode = 'dictation';
         converseEnabled = false;
 
-        const started = await whisperRecorder.start(language);
-        if (!started && Recognition) {
-            fallbackMode = true;
+        if (Recognition) {
+            fallbackMode = false;
             startBrowserRecognition();
+        } else {
+            const started = await whisperRecorder.start(language);
+            if (!started && Recognition) {
+                fallbackMode = true;
+                startBrowserRecognition();
+            }
         }
         emitState();
         return true;
@@ -422,10 +436,15 @@ export function createSpeechInputController(options = {}) {
         mode = 'converse';
         converseEnabled = true;
 
-        const started = await whisperRecorder.start(language);
-        if (!started && Recognition) {
-            fallbackMode = true;
+        if (Recognition) {
+            fallbackMode = false;
             startBrowserRecognition();
+        } else {
+            const started = await whisperRecorder.start(language);
+            if (!started && Recognition) {
+                fallbackMode = true;
+                startBrowserRecognition();
+            }
         }
         emitState();
         return true;
@@ -516,17 +535,19 @@ export function installSpeechInputUI(options = {}) {
         Recognition,
         language: savedLanguage || navigator.language || 'en-US',
         onInterim(text, state) {
-            input.value = [committedText, text].filter(Boolean).join(' ').trim();
+            const cleaned = cleanSpeechFillers(text);
+            input.value = [committedText, cleaned].filter(Boolean).join(' ').trim();
             if (state?.mode === 'dictation' && state.listening && status) {
-                if (text) setStatusText('Listening');
+                if (cleaned) setStatusText('Listening');
                 else setListeningStatus();
             }
             options.onComposerChanged?.();
         },
         async onFinal(text, event) {
+            const cleaned = cleanSpeechFillers(text);
             if (event.autoSubmit) {
                 committedText = '';
-                input.value = text;
+                input.value = cleaned;
                 input.dataset.inputSource = 'converse';
                 options.onComposerChanged?.();
                 await options.onSubmit?.({
@@ -535,7 +556,7 @@ export function installSpeechInputUI(options = {}) {
                     interrupt: event.interrupt === true
                 });
             } else {
-                committedText = [committedText, text].filter(Boolean).join(' ').trim();
+                committedText = [committedText, cleaned].filter(Boolean).join(' ').trim();
                 input.value = committedText;
                 input.dataset.inputSource = 'vtt';
                 options.onComposerChanged?.();
