@@ -1491,16 +1491,7 @@ async function handleConversationRecallRequest(originalText = '') {
 }
 
 function buildReactionFallbackByName(text) {
-    const t = String(text || '').toLowerCase();
-    if (!/\b(cannizzaro|cannizarro)\b/.test(t)) return '';
-    return [
-        'Ah, classic high-school organic chemistry.',
-        'Cannizzaro reaction is the disproportionation of an aldehyde with no alpha-hydrogen in concentrated base.',
-        'Reaction:',
-        '2 R-CHO + OH- -> R-COO- + R-CH2OH',
-        'Example:',
-        '2 C6H5CHO + KOH -> C6H5COOK + C6H5CH2OH'
-    ].join('\n');
+    return '';
 }
 
 async function handleUniversalExplainerQuery(userText, historyKey = '') {
