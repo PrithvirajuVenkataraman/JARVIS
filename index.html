@@ -18532,17 +18532,6 @@ function isWakeGreetingText(text) {
                 });
                 return;
             }
-            const instantReply = window.JarvisInstantReplies?.getInstantReply?.(text);
-            if (instantReply) {
-                const messageId = addModelAssistantMessage(instantReply, 'Instant reply', {
-                    turnId: activeResponseRenderContext?.turnId || '',
-                    route: 'fast_simple',
-                    routeReason: 'instant_local_reply'
-                });
-                saveToHistory(text, instantReply);
-                addFeedbackButtons(text, instantReply, messageId);
-                return;
-            }
             if (await handleMultimodalFollowup(text)) {
                 return;
             }
