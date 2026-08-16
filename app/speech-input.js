@@ -602,20 +602,12 @@ export function installSpeechInputUI(options = {}) {
     });
 
     let lastVttClickTime = 0;
-    let lastConverseClickTime = 0;
-
     globalThis.toggleVoiceToText = () => {
-        const now = Date.now();
-        if (now - lastVttClickTime < 350) return false;
-        lastVttClickTime = now;
         committedText = input.value.trim();
         return controller.toggleDictation();
     };
 
     globalThis.toggleConverseMode = async () => {
-        const now = Date.now();
-        if (now - lastConverseClickTime < 350) return false;
-        lastConverseClickTime = now;
         const wasConverseEnabled = controller.getState().converseEnabled;
         committedText = '';
         input.value = '';
