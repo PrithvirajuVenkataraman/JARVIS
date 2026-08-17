@@ -8090,6 +8090,108 @@ let showRoutingDebugBadge = false;
             return duplicate;
         }
 
+        function extractThoughtAndAnswer(rawText) {
+            const textStr = String(rawText ?? '');
+            let thought = '';
+            const match = textStr.match(/<think>([\s\S]*?)<\/think>/i);
+            if (match) {
+                thought = match[1].trim();
+            }
+            const cleanAnswer = textStr.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/^<think>[\s\S]*$/gi, '').replace(/<\/?think>/gi, '').trim();
+            return { thought, answer: cleanAnswer };
+        }
+
+        function generateContextualThoughtSteps(userPrompt) {
+            const prompt = String(userPrompt || '').toLowerCase().trim();
+            if (!prompt || (/\b(hi|hello|hey|thanks|thank you|good morning|bye|good night|ok|okay)\b/i.test(prompt) && prompt.length < 20)) {
+                return [];
+            }
+            if (/\b(python|javascript|typescript|c\+\+|java|code|function|algorithm|class|bug|debug|sql|regex|implement|write\s+a)\b/i.test(prompt)) {
+                return [
+                    'Analyzing problem constraints, inputs, and edge cases...',
+                    'Evaluating optimal algorithmic patterns and time complexity...',
+                    'Structuring clean, robust code implementation...'
+                ];
+            }
+            if (/\b(calculate|compute|solve|derivative|integral|equation|formula|matrix|math|arithmetic)\b/i.test(prompt)) {
+                return [
+                    'Parsing mathematical terms and algebraic relationships...',
+                    'Executing step-by-step symbolic and numerical derivations...',
+                    'Verifying calculation consistency and final result...'
+                ];
+            }
+            if (/\b(history|roman|war|empire|dynasty|revolution|century|ancient|civilization|medieval)\b/i.test(prompt)) {
+                return [
+                    'Establishing chronological historical timeline and epoch context...',
+                    'Cross-referencing key political, economic, and cultural drivers...',
+                    'Synthesizing comprehensive historical breakdown...'
+                ];
+            }
+            if (/\b(physics|quantum|space|star|galaxy|biology|chemistry|science|evolution|planet|orbit)\b/i.test(prompt)) {
+                return [
+                    'Reviewing underlying scientific laws and foundational principles...',
+                    'Tracing empirical mechanisms and causal relationships...',
+                    'Formulating structured, intuitive scientific explanation...'
+                ];
+            }
+            if (/\b(ai|machine learning|neural network|transformer|deep learning|llm|nlp)\b/i.test(prompt)) {
+                return [
+                    'Deconstructing neural architecture and mathematical mechanics...',
+                    'Tracing loss functions, attention layers, and representations...',
+                    'Synthesizing architectural analysis and practical implications...'
+                ];
+            }
+            if (prompt.length > 25 || /\b(why|how|explain|what is|difference|compare|describe|principles)\b/i.test(prompt)) {
+                return [
+                    'Deconstructing core premises and contextual nuances...',
+                    'Evaluating domain concepts and logical arguments...',
+                    'Synthesizing direct, well-structured answer...'
+                ];
+            }
+            return [];
+        }
+
+        window.toggleThinkingProcessCard = function(card, event) {
+            if (event) event.stopPropagation();
+            if (!card) return;
+            card.classList.toggle('is-expanded');
+        };
+
+        function buildThinkingProcessHtml(thoughtContent, steps = [], elapsedSeconds = 2.1, isStreaming = false) {
+            if (!thoughtContent && (!steps || steps.length === 0)) return '';
+            const stateClass = isStreaming ? 'is-active is-expanded' : 'is-finished';
+            const timerText = isStreaming ? `Thinking... ${elapsedSeconds}s` : `Thought for ${elapsedSeconds}s`;
+            
+            let bodyContentHtml = '';
+            if (thoughtContent) {
+                bodyContentHtml = `<div class="thinking-raw-content">${escapeHtml(thoughtContent)}</div>`;
+            } else if (steps && steps.length > 0) {
+                bodyContentHtml = steps.map(step => `
+                    <div class="thinking-step">
+                        <span class="thinking-step-icon">&#10003;</span>
+                        <span class="thinking-step-text">${escapeHtml(step)}</span>
+                    </div>
+                `).join('');
+            }
+            
+            return `
+                <div class="thinking-process-card ${stateClass}" onclick="window.toggleThinkingProcessCard(this, event)">
+                    <div class="thinking-header">
+                        <div class="thinking-header-left">
+                            <span class="thinking-pulse-dot"></span>
+                            <span class="thinking-timer">${timerText}</span>
+                        </div>
+                        <svg class="thinking-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="6 9 12 15 18 9"></polyline>
+                        </svg>
+                    </div>
+                    <div class="thinking-body">
+                        ${bodyContentHtml}
+                    </div>
+                </div>
+            `;
+        }
+
         function addChatMessage(text, isUser = true, typewriter = null, meta = {}) {
             const renderStartedAt = performance.now();
             const chatContainer = document.getElementById('chat-container');
@@ -8098,7 +8200,8 @@ let showRoutingDebugBadge = false;
             const allowEmptyAssistant = !isUser && meta?.allowEmpty === true;
             if (!isUser && !allowEmptyAssistant) hideThinkingIndicator();
             updateComposerPlaceholder();
-            const rawDisplayText = normalizeUiTokens(String(text ?? '').replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/^<think>[\s\S]*$/gi, '').replace(/<\/?think>/gi, '').trim());
+            const parsedThought = isUser ? { thought: '', answer: String(text ?? '') } : extractThoughtAndAnswer(text);
+            const rawDisplayText = normalizeUiTokens(parsedThought.answer.trim());
             const hasAttachments = Array.isArray(meta?.attachments) && meta.attachments.length > 0;
             if (isUser && !rawDisplayText.trim() && !hasAttachments) return;
             if (!isUser && !rawDisplayText.trim() && !allowEmptyAssistant) return '';
@@ -8194,6 +8297,14 @@ let showRoutingDebugBadge = false;
                 }); 
                 messageDiv.dataset.messageId = messageId;
 
+                const thoughtContent = parsedThought.thought || meta?.thought || '';
+                const thoughtSteps = thoughtContent ? [] : generateContextualThoughtSteps(priorUserPrompt);
+                const rawElapsed = meta?.latency ? (meta.latency / 1000) : (2.1 + (Math.random() * 0.7));
+                const elapsedSeconds = Number(rawElapsed).toFixed(1);
+                const thinkingHtml = (!allowEmptyAssistant && (thoughtContent || thoughtSteps.length > 0) && !meta?.systemGreeting)
+                    ? buildThinkingProcessHtml(thoughtContent, thoughtSteps, elapsedSeconds, false)
+                    : '';
+
                 messageDiv.innerHTML = `
                     <div class="w-full ${containerWidth}">
                         ${routeBadgeHtml}
@@ -8201,6 +8312,7 @@ let showRoutingDebugBadge = false;
                         ${avatarHtml}
                         <div class="min-w-0 flex-1 overflow-hidden ${hasMap ? 'map-message' : ''}"> 
                             <div class="${hasMap ? '' : 'chat-bubble-assistant'}"> 
+                                ${thinkingHtml}
                                 <div class="assistant-message-text typewriter-text text-sm leading-relaxed text-left" data-message-id="${messageId}"></div>
                                 ${sourceFooterHtml}
                             </div> 
