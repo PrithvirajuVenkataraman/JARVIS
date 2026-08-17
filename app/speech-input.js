@@ -32,6 +32,27 @@ export function normalizeVoiceInputLanguage(language = '') {
     return 'en-US';
 }
 
+export function detectSpokenLanguage(text = '') {
+    const s = String(text || '').trim();
+    if (!s) return null;
+    if (/[\u0B80-\u0BFF]/.test(s)) return 'ta-IN';
+    if (/[\u0C00-\u0C7F]/.test(s)) return 'te-IN';
+    if (/[\u0C80-\u0CFF]/.test(s)) return 'kn-IN';
+    if (/[\u0900-\u097F]/.test(s)) return 'hi-IN';
+    return null;
+}
+
+export function detectLanguageSwitchCommand(text = '') {
+    const s = String(text || '').toLowerCase().trim();
+    if (!s) return null;
+    if (/\b(?:switch|change|set|speak|talk)\s+(?:in|to|(?:the\s+)?language\s+to)\s+tamil\b/i.test(s) || /தமிழில்\s+பேசு|தமிழுக்கு\s+மாற்று/i.test(s)) return 'ta-IN';
+    if (/\b(?:switch|change|set|speak|talk)\s+(?:in|to|(?:the\s+)?language\s+to)\s+telugu\b/i.test(s) || /தெலுங்கில்\s+பேசு|తెలుగులో\s+మాట్లాడు/i.test(s)) return 'te-IN';
+    if (/\b(?:switch|change|set|speak|talk)\s+(?:in|to|(?:the\s+)?language\s+to)\s+kannada\b/i.test(s) || /கன்னடத்தில்\s+பேசு|ಕನ್ನಡದಲ್ಲಿ\s+ಮಾತನಾಡು/i.test(s)) return 'kn-IN';
+    if (/\b(?:switch|change|set|speak|talk)\s+(?:in|to|(?:the\s+)?language\s+to)\s+hindi\b/i.test(s) || /இந்தியில்\s+பேசு|हिंदी\s+में\s+बोलो/i.test(s)) return 'hi-IN';
+    if (/\b(?:switch|change|set|speak|talk)\s+(?:in|to|(?:the\s+)?language\s+to)\s+english\b/i.test(s) || /ஆங்கிலத்தில்\s+பேசு|ஆங்கிலத்திற்கு\s+மாற்று/i.test(s)) return 'en-US';
+    return null;
+}
+
 /**
  * Creates a clean MediaRecorder audio recorder that sends audio chunks to /api/stt.
  */
@@ -261,12 +282,25 @@ export function createSpeechInputController(options = {}) {
                 }
                 const cleanedInterim = cleanSpeechFillers(interim);
                 const cleanedFinal = cleanSpeechFillers(final);
+
+                const detectedCommandLang = detectLanguageSwitchCommand(cleanedFinal || cleanedInterim);
+                const detectedScriptLang = detectSpokenLanguage(cleanedFinal || cleanedInterim);
+                const targetNewLang = detectedCommandLang || detectedScriptLang;
+                if (targetNewLang && targetNewLang !== language) {
+                    setLanguage(targetNewLang);
+                    globalThis.localStorage?.setItem?.('jarvis_voice_input_language', targetNewLang);
+                    try {
+                        globalThis.dispatchEvent?.(new CustomEvent('jarvis:voice-language-changed', { detail: { language: targetNewLang } }));
+                    } catch (_) {}
+                }
+
                 if (cleanedInterim) callbacks.onInterim(cleanedInterim, getState());
                 if (cleanedFinal) {
                     callbacks.onFinal(cleanedFinal, {
                         autoSubmit: converseEnabled,
                         source: converseEnabled ? 'converse' : 'vtt',
-                        transcriptFinal: true
+                        transcriptFinal: true,
+                        language
                     });
                 }
             };
