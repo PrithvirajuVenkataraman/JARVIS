@@ -8106,6 +8106,21 @@ let showRoutingDebugBadge = false;
             if (!prompt || (/\b(hi|hello|hey|thanks|thank you|good morning|bye|good night|ok|okay)\b/i.test(prompt) && prompt.length < 20)) {
                 return [];
             }
+            if (/\b(palindrome|palindromic|substring)\b/i.test(prompt)) {
+                return [
+                    'Hmm, let me unpack this problem and edge cases...',
+                    'Evaluating O(1) extra space constraints & center expansion...',
+                    'Tracing pointer logic for even vs odd palindromes...',
+                    'Crafting clean, optimal Python implementation...'
+                ];
+            }
+            if (/\b(black hole|event horizon|dilation|relativity|gravity|spacetime)\b/i.test(prompt)) {
+                return [
+                    'Examining Einstein general relativity and metric spacetime...',
+                    'Connecting gravitational potential to local observer time flow...',
+                    'Formulating intuitive conceptual and mathematical breakdown...'
+                ];
+            }
             if (/\b(python|javascript|typescript|c\+\+|java|code|function|algorithm|class|bug|debug|sql|regex|implement|write\s+a)\b/i.test(prompt)) {
                 return [
                     'Analyzing problem constraints, inputs, and edge cases...',
@@ -8115,15 +8130,15 @@ let showRoutingDebugBadge = false;
             }
             if (/\b(calculate|compute|solve|derivative|integral|equation|formula|matrix|math|arithmetic)\b/i.test(prompt)) {
                 return [
-                    'Parsing mathematical terms and algebraic relationships...',
-                    'Executing step-by-step symbolic and numerical derivations...',
-                    'Verifying calculation consistency and final result...'
+                    'Parsing mathematical expressions and variable constraints...',
+                    'Executing step-by-step symbolic derivation...',
+                    'Verifying calculations and finalizing numerical solution...'
                 ];
             }
             if (/\b(history|roman|war|empire|dynasty|revolution|century|ancient|civilization|medieval)\b/i.test(prompt)) {
                 return [
-                    'Establishing chronological historical timeline and epoch context...',
-                    'Cross-referencing key political, economic, and cultural drivers...',
+                    'Retrieving chronological timeline and historical context...',
+                    'Examining key socioeconomic and political catalysts...',
                     'Synthesizing comprehensive historical breakdown...'
                 ];
             }
@@ -8157,8 +8172,8 @@ let showRoutingDebugBadge = false;
             card.classList.toggle('is-expanded');
         };
 
-        function buildThinkingProcessHtml(thoughtContent, steps = [], elapsedSeconds = 2.1, isStreaming = false) {
-            if (!thoughtContent && (!steps || steps.length === 0)) return '';
+        function buildThinkingProcessHtml(thoughtContent, steps = [], elapsedSeconds = 2.1, isStreaming = false, selfHealing = null) {
+            if (!thoughtContent && (!steps || steps.length === 0) && !selfHealing) return '';
             const stateClass = isStreaming ? 'is-active is-expanded' : 'is-finished';
             const timerText = isStreaming ? `Thinking... ${elapsedSeconds}s` : `Thought for ${elapsedSeconds}s`;
             
@@ -8172,6 +8187,15 @@ let showRoutingDebugBadge = false;
                         <span class="thinking-step-text">${escapeHtml(step)}</span>
                     </div>
                 `).join('');
+            }
+
+            if (selfHealing && selfHealing.thought) {
+                bodyContentHtml += `
+                    <div class="thinking-step is-self-healing">
+                        <span class="thinking-step-icon">&#9889;</span>
+                        <span class="thinking-step-text">${escapeHtml(selfHealing.thought)}</span>
+                    </div>
+                `;
             }
             
             return `
@@ -8299,10 +8323,11 @@ let showRoutingDebugBadge = false;
 
                 const thoughtContent = parsedThought.thought || meta?.thought || '';
                 const thoughtSteps = thoughtContent ? [] : generateContextualThoughtSteps(priorUserPrompt);
+                const selfHealing = meta?.selfHealing || meta?.routing?.selfHealing || null;
                 const rawElapsed = meta?.latency ? (meta.latency / 1000) : (2.1 + (Math.random() * 0.7));
                 const elapsedSeconds = Number(rawElapsed).toFixed(1);
-                const thinkingHtml = (!allowEmptyAssistant && (thoughtContent || thoughtSteps.length > 0) && !meta?.systemGreeting)
-                    ? buildThinkingProcessHtml(thoughtContent, thoughtSteps, elapsedSeconds, false)
+                const thinkingHtml = (!allowEmptyAssistant && (thoughtContent || thoughtSteps.length > 0 || selfHealing) && !meta?.systemGreeting)
+                    ? buildThinkingProcessHtml(thoughtContent, thoughtSteps, elapsedSeconds, false, selfHealing)
                     : '';
 
                 messageDiv.innerHTML = `
@@ -23537,8 +23562,11 @@ function showThinkingIndicator(message = 'Thinking') {
     const chatContainer = document.getElementById('chat-container');
     if (!chatContainer) return;
 
-    const phase = resolveThinkingPhase(message);
-    const displayLabel = phase.label;
+    const userPrompt = String(window.__lastUserMessage || '').trim();
+    const thoughtSteps = generateContextualThoughtSteps(userPrompt);
+    const initialText = (thoughtSteps && thoughtSteps.length > 0)
+        ? thoughtSteps[0]
+        : (message && message !== 'Thinking' ? message : 'Hmm, let me analyze this...');
 
     let row = document.getElementById('chat-thinking-indicator');
     if (!row) {
@@ -23549,39 +23577,43 @@ function showThinkingIndicator(message = 'Thinking') {
         row.innerHTML = `
             <div class="w-full max-w-3xl">
                 <div class="flex items-start gap-2">
-                    <div class="chat-bubble-assistant assistant-thinking-bubble assistant-thinking-minimal" role="status" aria-live="polite" aria-label="${escapeHtml(displayLabel)}">
-                        <div class="assistant-message-text is-streaming thinking-inline-text" data-thinking-inline>${escapeHtml(displayLabel)}</div>
+                    <div class="chat-bubble-assistant assistant-thinking-bubble assistant-thinking-minimal" role="status" aria-live="polite">
+                        <div class="assistant-message-text is-streaming thinking-inline-text" data-thinking-inline>
+                            <span class="thinking-pulse-dot"></span>
+                            <span class="thinking-timer" data-thinking-timer>Thinking...</span>
+                            <span class="thinking-live-action" data-thinking-action>${escapeHtml(initialText)}</span>
+                        </div>
                     </div>
                 </div>
             </div>
         `;
         chatContainer.appendChild(row);
-        startThinkingPhaseTimeline(phase.key);
+        startThinkingPhaseTimeline(thoughtSteps);
     } else {
-        const textEl = row.querySelector('[data-thinking-inline]');
+        const textEl = row.querySelector('[data-thinking-action]');
         if (textEl) {
-            textEl.textContent = displayLabel;
-            textEl.classList.add('is-streaming');
+            textEl.textContent = initialText;
         }
-        const bubble = row.querySelector('.chat-bubble-assistant');
-        if (bubble) bubble.setAttribute('aria-label', displayLabel);
     }
     maybeAutoScroll(chatContainer);
 }
 
-function startThinkingPhaseTimeline(initialKey = 'thinking') {
+function startThinkingPhaseTimeline(customSteps = []) {
     if (thinkingPhaseTimer) {
         clearInterval(thinkingPhaseTimer);
         thinkingPhaseTimer = null;
     }
-    const phaseMap = {
-        searching: ['SEARCHING', 'ANALYZING SOURCES', 'GENERATING ANSWER'],
-        reading: ['ANALYZING', 'EXTRACTING CONTENT', 'GENERATING ANSWER'],
-        translating: ['TRANSLATING', 'ANALYZING', 'GENERATING ANSWER'],
-        thinking: ['THINKING', 'ANALYZING', 'GENERATING ANSWER']
-    };
-    const sequence = phaseMap[initialKey] || phaseMap.thinking;
+    const defaultSteps = [
+        'Hmm, let me unpack this problem...',
+        'Connecting domain concepts and core constraints...',
+        'Formulating clean, well-reasoned response...'
+    ];
+    const sequence = (Array.isArray(customSteps) && customSteps.length > 0)
+        ? customSteps
+        : defaultSteps;
     let index = 0;
+    const startedAt = Date.now();
+
     thinkingPhaseTimer = setInterval(() => {
         const row = document.getElementById('chat-thinking-indicator');
         if (!row) {
@@ -23591,28 +23623,33 @@ function startThinkingPhaseTimeline(initialKey = 'thinking') {
         }
         index = (index + 1) % sequence.length;
         const nextLabel = sequence[index];
-        const textEl = row.querySelector('[data-thinking-inline]');
+        const textEl = row.querySelector('[data-thinking-action]');
         if (textEl) {
             textEl.textContent = nextLabel;
-            textEl.classList.add('is-streaming');
+            textEl.style.animation = 'none';
+            void textEl.offsetHeight; // trigger reflow
+            textEl.style.animation = 'thoughtMorphFade 0.35s ease-in-out';
         }
-        const bubble = row.querySelector('.chat-bubble-assistant');
-        if (bubble) bubble.setAttribute('aria-label', nextLabel);
-    }, 2800);
+        const timerEl = row.querySelector('[data-thinking-timer]');
+        if (timerEl) {
+            const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
+            timerEl.textContent = `Thinking... ${elapsed}s`;
+        }
+    }, 750);
 }
 
 function resolveThinkingPhase(message = '') {
     const lower = String(message || '').toLowerCase();
     if (/\b(web search|search|sources?|retriev|fetch|look(?:ing)?\s+up|checking verified|checking reliable|checking current|finding|lookup)\b/.test(lower)) {
-        return { key: 'searching', label: 'SEARCHING' };
+        return { key: 'searching', label: 'Searching live sources...' };
     }
     if (/\b(attachment|reading|image|document|pdf|file|view)\b/.test(lower)) {
-        return { key: 'reading', label: 'ANALYZING' };
+        return { key: 'reading', label: 'Analyzing attached document...' };
     }
     if (/\b(translat|language)\b/.test(lower)) {
-        return { key: 'translating', label: 'TRANSLATING' };
+        return { key: 'translating', label: 'Translating text...' };
     }
-    return { key: 'thinking', label: 'THINKING' };
+    return { key: 'thinking', label: 'Thinking...' };
 }
 
 function hideThinkingIndicator() {
