@@ -8644,8 +8644,26 @@ let showRoutingDebugBadge = false;
             return segments.slice(0, 12);
         }
 
+        function getBestVoiceForLanguage(lang = 'en-US') {
+            if (!('speechSynthesis' in window)) return null;
+            const voices = window.speechSynthesis.getVoices() || [];
+            if (!voices.length) return null;
+            const normalized = String(lang || 'en-US').toLowerCase();
+            const prefix = normalized.split('-')[0];
+            return voices.find(v => v.lang && v.lang.toLowerCase() === normalized) ||
+                   voices.find(v => v.lang && v.lang.toLowerCase().replace('_', '-').startsWith(prefix)) ||
+                   voices.find(v => v.default) ||
+                   voices[0] || null;
+        }
+
         function createConverseUtterance(spokenText, index, total) {
             const utterance = new SpeechSynthesisUtterance(spokenText);
+            const currentLang = window.JarvisSpeechInput?.getState?.().language || 'en-US';
+            utterance.lang = currentLang;
+            const voice = getBestVoiceForLanguage(currentLang);
+            if (voice) {
+                utterance.voice = voice;
+            }
             const text = String(spokenText || '').trim();
             const question = /\?$/.test(text);
             const emphasis = /!$/.test(text) || /\b(important|key|remember|careful|exactly)\b/i.test(text);
@@ -8659,6 +8677,14 @@ let showRoutingDebugBadge = false;
         const converseStateTracker = globalThis.JarvisConverseState?.createConverseStateTracker
             ? globalThis.JarvisConverseState.createConverseStateTracker('listening')
             : null;
+
+        window.addEventListener('jarvis:voice-language-changed', event => {
+            const lang = event.detail?.language;
+            const langSelect = document.getElementById('converse-live-language');
+            if (langSelect && lang) {
+                langSelect.value = lang;
+            }
+        });
 
         function updateLiveConverseOverlay(state, transcriptText = '', isInterim = false) {
             const overlay = document.getElementById('converse-live-overlay');
@@ -8906,7 +8932,8 @@ let showRoutingDebugBadge = false;
         function speakConverseReply(text, turn) {
             const fallbackTurn = turn || getConversationTurn(activeResponseRenderContext?.turnId);
             const activeSource = String(fallbackTurn?.source || activeResponseRenderContext?.source || '').toLowerCase();
-            if (activeSource !== 'converse') {
+            const isConverseActive = window.JarvisSpeechInput?.getState?.().converseEnabled === true || activeSource === 'converse';
+            if (!isConverseActive) {
                 logLatencyTrace('speech_skipped_no_converse_turn', { source: activeSource || 'unknown' });
                 return;
             }
@@ -18648,6 +18675,9 @@ function isWakeGreetingText(text) {
                 const greet = buildWakeGreeting();
                 addChatMessage(greet, false);
                 saveToHistory(text, greet);
+                if (window.JarvisSpeechInput?.getState?.().converseEnabled === true) {
+                    speakConverseReply(greet);
+                }
                 return;
             }
 
