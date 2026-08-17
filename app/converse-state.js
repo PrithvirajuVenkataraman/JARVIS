@@ -13,6 +13,7 @@ export function normalizeConverseState(state) {
 }
 
 export function createConverseStateTracker(initialState = CONVERSE_STATES.listening) {
+    const listeners = new Set();
     let snapshot = {
         state: normalizeConverseState(initialState),
         reason: 'initial',
@@ -22,12 +23,28 @@ export function createConverseStateTracker(initialState = CONVERSE_STATES.listen
         getSnapshot() {
             return { ...snapshot };
         },
+        getState() {
+            return snapshot.state;
+        },
+        subscribe(listener) {
+            if (typeof listener === 'function') {
+                listeners.add(listener);
+                return () => listeners.delete(listener);
+            }
+            return () => {};
+        },
         setState(state, reason = '') {
+            const prevState = snapshot.state;
             snapshot = {
                 state: normalizeConverseState(state),
                 reason: String(reason || '').trim(),
                 updatedAt: Date.now()
             };
+            for (const listener of listeners) {
+                try {
+                    listener({ ...snapshot }, prevState);
+                } catch (_) {}
+            }
             return { ...snapshot };
         }
     };
