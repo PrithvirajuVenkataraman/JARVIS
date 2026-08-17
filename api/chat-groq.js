@@ -1879,11 +1879,13 @@ import { resolveInstantFact } from './_lib/instant-fact-layer.js';
         if (strategy === 'live_first') {
             return { escalate: false, reason: 'live_preloaded_first_pass' };
         }
-        if (strictMode) {
-            if (strategy === 'direct' && reason === 'stable_factual_query') {
+        if (strategy === 'direct') {
+            if (reason.startsWith('static_') || reason === 'stable_factual_query' || reason === 'casual_or_non_factual') {
                 return getUnknownGeneralKnowledgeEscalationDecision(firstAnswer);
             }
-            return { escalate: false, reason: 'strict_single_pass_no_second_pass' };
+            if (strictMode) {
+                return { escalate: false, reason: 'strict_single_pass_no_second_pass' };
+            }
         }
         if (strategy === 'direct_then_live_if_needed') {
             return getWebEscalationDecision(message, firstAnswer);
@@ -1904,12 +1906,12 @@ import { resolveInstantFact } from './_lib/instant-fact-layer.js';
             return { escalate: true, reason: 'unknown_general_knowledge_answer', trigger: 'generic_advice_answer' };
         }
 
-        const uncertain = /\b(i\s+(?:don'?t|do not)\s+know|i\s+(?:don'?t|do not)\s+have\s+(?:enough\s+)?(?:information|context|live|real[- ]?time)|not sure|cannot verify|can't verify|cannot confirm|can't confirm|might be outdated|may be outdated|i(?:'m| am)\s+unable\s+to\s+verify|i(?:'m| am)\s+not\s+certain)\b/i.test(answer);
+        const uncertain = /\b(i\s+(?:don'?t|do not)\s+know|i\s+(?:don'?t|do not)\s+have\s+(?:enough\s+)?(?:information|context|live|real[- ]?time)|not sure|cannot verify|can't verify|cannot confirm|can't confirm|might be outdated|may be outdated|i(?:'m| am)\s+unable\s+to\s+verify|i(?:'m| am)\s+not\s+certain|knowledge\s+cutoff|as\s+of\s+my\s+last\s+update|no\s+direct\s+information|unable\s+to\s+find\s+information)\b/i.test(answer);
         if (uncertain) {
             return { escalate: true, reason: 'unknown_general_knowledge_answer', trigger: 'uncertain_or_evasive_answer' };
         }
 
-        return { escalate: false, reason: 'strict_single_pass_no_second_pass' };
+        return { escalate: false, reason: 'pre_trained_answer_accepted' };
     }
 
     function isMutableEntityFactQuery(text) {
