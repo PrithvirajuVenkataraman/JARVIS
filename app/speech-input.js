@@ -15,7 +15,7 @@ const ERROR_MESSAGES = {
 
 export function cleanSpeechFillers(text = '') {
     return String(text || '')
-        .replace(/\b(um+|uh+|err+|ahh?|erm+)\b/gi, '')
+        .replace(/\b(um+|uh+|er+|ah+|erm+)\b/gi, '')
         .replace(/\s{2,}/g, ' ')
         .trim();
 }
@@ -44,6 +44,15 @@ export function createWhisperRecorder(options = {}) {
     const onTranscribed = options.onTranscribed || (() => {});
     const onError = options.onError || (() => {});
     const onState = options.onState || (() => {});
+
+    function releaseStreamTracks() {
+        if (mediaStream) {
+            try {
+                mediaStream.getTracks().forEach(t => t.stop());
+            } catch (_) {}
+            mediaStream = null;
+        }
+    }
 
     function isSupported() {
         return Boolean(typeof navigator !== 'undefined' && navigator?.mediaDevices?.getUserMedia && typeof MediaRecorder !== 'undefined');
@@ -90,24 +99,29 @@ export function createWhisperRecorder(options = {}) {
                 try {
                     const reader = new FileReader();
                     reader.onloadend = async () => {
-                        const base64Audio = reader.result?.split(',')[1];
-                        if (!base64Audio) {
+                        try {
+                            const base64Audio = reader.result?.split(',')[1];
+                            if (!base64Audio) {
+                                onState({ recording: false, processing: false });
+                                return;
+                            }
+                            const res = await fetch('/api/stt', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ audioBase64: base64Audio, mimeType: mime, language })
+                            });
+                            const data = await res.json();
                             onState({ recording: false, processing: false });
-                            return;
-                        }
-                        const res = await fetch('/api/stt', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ audioBase64: base64Audio, mimeType: mime, language })
-                        });
-                        const data = await res.json();
-                        onState({ recording: false, processing: false });
-                        if (data?.success && data.text) {
-                            onTranscribed(data.text);
-                        } else if (data?.fallbackToBrowser) {
-                            onError({ code: 'fallback_to_browser', error: data.error });
-                        } else {
-                            onError({ code: 'transcription_empty' });
+                            if (data?.success && data.text) {
+                                onTranscribed(data.text);
+                            } else if (data?.fallbackToBrowser) {
+                                onError({ code: 'fallback_to_browser', error: data.error });
+                            } else {
+                                onError({ code: 'transcription_empty' });
+                            }
+                        } catch (err) {
+                            onState({ recording: false, processing: false });
+                            onError({ code: 'stt_network_error', error: err });
                         }
                     };
                     reader.readAsDataURL(audioBlob);
@@ -123,6 +137,7 @@ export function createWhisperRecorder(options = {}) {
             return true;
         } catch (err) {
             isRecording = false;
+            releaseStreamTracks();
             onError({ code: 'mic_permission_error', error: err });
             return false;
         }
@@ -135,18 +150,30 @@ export function createWhisperRecorder(options = {}) {
         }
         if (mediaStream) {
             if (keepStream) {
-                mediaStream.getAudioTracks().forEach(t => { t.enabled = false; });
+                try {
+                    mediaStream.getAudioTracks().forEach(t => { t.enabled = false; });
+                } catch (_) {}
             } else {
-                mediaStream.getTracks().forEach(t => t.stop());
-                mediaStream = null;
+                releaseStreamTracks();
             }
         }
         isRecording = false;
     }
 
+    function cancel() {
+        audioChunks = [];
+        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+            try { mediaRecorder.stop(); } catch {}
+        }
+        releaseStreamTracks();
+        isRecording = false;
+        onState({ recording: false, processing: false });
+    }
+
     return {
         start,
         stop,
+        cancel,
         isSupported,
         isRecording: () => isRecording
     };
@@ -170,6 +197,9 @@ export function createSpeechInputController(options = {}) {
     let language = normalizeVoiceInputLanguage(options.language || 'en-US');
     let browserRecognition = null;
     let fallbackMode = false;
+    let processingTimer = null;
+    let restartTimer = null;
+    let explicitlyStopped = false;
 
     const whisperRecorder = createWhisperRecorder({
         onTranscribed(text) {
@@ -211,7 +241,11 @@ export function createSpeechInputController(options = {}) {
             r.lang = language;
             r.maxAlternatives = 1;
 
+            let resultReceived = false;
+            let sessionStartTime = Date.now();
+
             r.onresult = event => {
+                resultReceived = true;
                 if (globalThis.speechSynthesis?.speaking || globalThis.isConverseSpeechActive?.()) {
                     globalThis.stopConverseSpeech?.('barge_in');
                 }
@@ -238,10 +272,12 @@ export function createSpeechInputController(options = {}) {
             };
 
             r.onerror = event => {
+                if (explicitlyStopped || (!converseEnabled && mode !== 'dictation')) return;
                 if (event.error === 'no-speech') {
                     if (converseEnabled && !processing && !globalThis.isConverseSpeechActive?.()) {
-                        setTimeout(() => {
-                            if (converseEnabled && !processing && !globalThis.isConverseSpeechActive?.()) {
+                        if (restartTimer) clearTimeout(restartTimer);
+                        restartTimer = setTimeout(() => {
+                            if (!explicitlyStopped && converseEnabled && !processing && !globalThis.isConverseSpeechActive?.()) {
                                 startBrowserRecognition();
                             }
                         }, 200);
@@ -260,13 +296,32 @@ export function createSpeechInputController(options = {}) {
             };
 
             r.onend = () => {
+                if (explicitlyStopped || (!converseEnabled && mode !== 'dictation')) {
+                    browserRecognition = null;
+                    emitState();
+                    return;
+                }
+
+                const duration = Date.now() - sessionStartTime;
+                if (!resultReceived && duration < 600 && (converseEnabled || mode === 'dictation') && !fallbackMode && whisperRecorder.isSupported()) {
+                    fallbackMode = true;
+                    browserRecognition = null;
+                    whisperRecorder.start(language);
+                    return;
+                }
+
                 if (converseEnabled && !processing && !globalThis.isConverseSpeechActive?.()) {
-                    setTimeout(() => {
-                        if (converseEnabled && !processing && !globalThis.isConverseSpeechActive?.()) {
+                    if (restartTimer) clearTimeout(restartTimer);
+                    restartTimer = setTimeout(() => {
+                        if (!explicitlyStopped && converseEnabled && !processing && !globalThis.isConverseSpeechActive?.()) {
                             startBrowserRecognition();
                         }
                     }, 200);
                 } else {
+                    if (mode === 'dictation') {
+                        mode = 'idle';
+                        browserRecognition = null;
+                    }
                     emitState();
                 }
             };
@@ -278,6 +333,7 @@ export function createSpeechInputController(options = {}) {
     }
 
     function startBrowserRecognition() {
+        if (explicitlyStopped && !converseEnabled && mode !== 'dictation') return;
         if (browserRecognition) {
             try {
                 browserRecognition.start();
@@ -321,6 +377,7 @@ export function createSpeechInputController(options = {}) {
             return false;
         }
         stop();
+        explicitlyStopped = false;
         mode = 'dictation';
         converseEnabled = false;
 
@@ -344,6 +401,7 @@ export function createSpeechInputController(options = {}) {
             return false;
         }
         stop();
+        explicitlyStopped = false;
         mode = 'converse';
         converseEnabled = true;
 
@@ -362,14 +420,29 @@ export function createSpeechInputController(options = {}) {
     }
 
     function setProcessing(isProc) {
+        if (processingTimer) {
+            clearTimeout(processingTimer);
+            processingTimer = null;
+        }
+        if (restartTimer) {
+            clearTimeout(restartTimer);
+            restartTimer = null;
+        }
         processing = Boolean(isProc);
         if (processing) {
+            // Auto-release processing lock after 20s safety threshold to prevent permanent DOM locking
+            processingTimer = setTimeout(() => {
+                setProcessing(false);
+            }, 20000);
             whisperRecorder.stop({ keepStream: true });
             if (browserRecognition) {
-                try { browserRecognition.stop(); } catch {}
+                const rec = browserRecognition;
+                browserRecognition = null;
+                try { rec.stop(); } catch {}
             }
-        } else if (converseEnabled) {
-            setTimeout(() => {
+        } else if (converseEnabled && !explicitlyStopped) {
+            if (restartTimer) clearTimeout(restartTimer);
+            restartTimer = setTimeout(() => {
                 if (converseEnabled && !processing && !globalThis.isConverseSpeechActive?.()) {
                     if (Recognition && !fallbackMode) {
                         startBrowserRecognition();
@@ -379,23 +452,42 @@ export function createSpeechInputController(options = {}) {
                 }
             }, 250);
         }
+        if (typeof document !== 'undefined' && document.body) {
+            document.body.classList.toggle('is-processing', processing);
+        }
         emitState();
     }
 
     function stop(options = {}) {
-        const keepStream = options.keepStream === true && !options.disableConverse;
-        whisperRecorder.stop({ keepStream });
-        if (browserRecognition) {
-            try { browserRecognition.stop(); } catch {}
-            if (options.disableConverse || mode === 'dictation') {
-                browserRecognition = null;
-            }
+        explicitlyStopped = true;
+        if (processingTimer) {
+            clearTimeout(processingTimer);
+            processingTimer = null;
+        }
+        if (restartTimer) {
+            clearTimeout(restartTimer);
+            restartTimer = null;
         }
         if (options.disableConverse) {
             converseEnabled = false;
             mode = 'idle';
+            if (processing) {
+                processing = false;
+                if (typeof document !== 'undefined' && document.body) {
+                    document.body.classList.toggle('is-processing', false);
+                }
+            }
         } else if (mode === 'dictation') {
             mode = 'idle';
+        }
+
+        const keepStream = options.keepStream === true && !options.disableConverse;
+        whisperRecorder.stop({ keepStream });
+
+        if (browserRecognition) {
+            const rec = browserRecognition;
+            browserRecognition = null;
+            try { rec.stop(); } catch {}
         }
         emitState();
     }
@@ -427,6 +519,23 @@ export function installSpeechInputUI(options = {}) {
 
     const Recognition = globalThis.SpeechRecognition || globalThis.webkitSpeechRecognition;
     let committedText = '';
+    let lastInterimText = '';
+
+    input.addEventListener('input', () => {
+        delete input.dataset.inputSource;
+        const currentVal = input.value;
+        if (lastInterimText && currentVal.endsWith(lastInterimText)) {
+            committedText = currentVal.slice(0, currentVal.length - lastInterimText.length).trim();
+        } else {
+            committedText = currentVal.trim();
+            lastInterimText = '';
+        }
+    });
+
+    globalThis.resetSpeechInputCommittedText = () => {
+        committedText = '';
+        lastInterimText = '';
+    };
 
     function setStatusText(message = '') {
         if (!status) return;
@@ -446,6 +555,7 @@ export function installSpeechInputUI(options = {}) {
         language: savedLanguage || navigator.language || 'en-US',
         onInterim(text, state) {
             const cleaned = cleanSpeechFillers(text);
+            lastInterimText = cleaned;
             input.value = [committedText, cleaned].filter(Boolean).join(' ').trim();
             if (state?.mode === 'dictation' && state.listening && status) {
                 if (cleaned) setStatusText('Listening');
@@ -457,6 +567,7 @@ export function installSpeechInputUI(options = {}) {
             options.onComposerChanged?.();
         },
         async onFinal(text, event) {
+            lastInterimText = '';
             const cleaned = cleanSpeechFillers(text);
             if (event.autoSubmit) {
                 committedText = '';
@@ -478,6 +589,9 @@ export function installSpeechInputUI(options = {}) {
             }
         },
         onState(state) {
+            if (!state.listening) {
+                lastInterimText = '';
+            }
             vttButton.classList.toggle('is-listening', state.mode === 'dictation' && state.listening);
             vttButton.setAttribute('aria-pressed', state.mode === 'dictation' && state.listening ? 'true' : 'false');
             input.placeholder = state.converseEnabled
@@ -499,6 +613,7 @@ export function installSpeechInputUI(options = {}) {
             globalThis.updateComposerPlaceholder?.();
         },
         onError(message) {
+            lastInterimText = '';
             setStatusText(message);
             options.onError?.(message);
         }
@@ -506,16 +621,19 @@ export function installSpeechInputUI(options = {}) {
 
     globalThis.toggleVoiceToText = () => {
         committedText = input.value.trim();
+        lastInterimText = '';
         return controller.toggleDictation();
     };
 
+    const rawToggleConverse = typeof controller?.toggleConverse === 'function' ? controller.toggleConverse.bind(controller) : async () => false;
     globalThis.toggleConverseMode = async () => {
         const wasConverseEnabled = controller.getState().converseEnabled;
         committedText = '';
+        lastInterimText = '';
         input.value = '';
         delete input.dataset.inputSource;
         options.onComposerChanged?.();
-        const toggled = await controller.toggleConverse();
+        const toggled = await rawToggleConverse();
         if (wasConverseEnabled) {
             globalThis.stopActiveGeneration?.('converse_stop');
             if (globalThis.speechSynthesis?.speaking) {
@@ -527,6 +645,7 @@ export function installSpeechInputUI(options = {}) {
 
     globalThis.JarvisSpeechInput = controller;
     globalThis.JarvisSpeechInput.toggleConverse = globalThis.toggleConverseMode;
+    globalThis.JarvisSpeechInput.resetCommittedText = globalThis.resetSpeechInputCommittedText;
     globalThis.syncVttUiState = () => controller.getState();
     globalThis.setVoiceInputLanguage = language => controller.setLanguage(language);
 
