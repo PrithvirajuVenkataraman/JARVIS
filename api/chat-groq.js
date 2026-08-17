@@ -1314,9 +1314,21 @@ import { resolveInstantFact } from './_lib/instant-fact-layer.js';
             ? [tryRunGemini, tryRunGroq, tryRunOpenAI]
             : (isOpenAiPreferred ? [tryRunOpenAI, tryRunGroq, tryRunGemini] : [tryRunGroq, tryRunOpenAI, tryRunGemini]);
 
+        let attemptIndex = 0;
         for (const fn of providerFns) {
             const result = await fn();
-            if (result) return result;
+            if (result && result.ok && result.parsedResponse?.response && result.parsedResponse.response !== 'I could not generate a response this time. Please try again.') {
+                if (attemptIndex > 0) {
+                    result.selfHealing = {
+                        recovered: true,
+                        attemptIndex,
+                        provider: result.provider,
+                        thought: '⚡ Primary model stalled — seamlessly recovered via secondary engine.'
+                    };
+                }
+                return result;
+            }
+            attemptIndex++;
         }
 
         if (hasImages) {
@@ -1631,11 +1643,12 @@ import { resolveInstantFact } from './_lib/instant-fact-layer.js';
     }
 
     function stripThinkingTags(text) {
-        return String(text || '')
-            .replace(/<think>[\s\S]*?<\/think>/gi, '')
-            .replace(/^<think>[\s\S]*$/gi, '')
-            .replace(/<\/?think>/gi, '')
-            .trim();
+        const raw = String(text || '').trim();
+        if (/<think>[\s\S]*?<\/think>/i.test(raw)) {
+            const stripped = raw.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+            if (stripped) return stripped;
+        }
+        return raw.replace(/^<think>\s*/i, '').replace(/<\/think>\s*$/i, '').trim();
     }
 
     function parseModelText(modelText) {
