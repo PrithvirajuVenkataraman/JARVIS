@@ -66,6 +66,40 @@ body {
     text-size-adjust: 100%;
 }
 
+/* ==========================================================================
+   Aesthetic Floating Glassmorphism Scrollbar
+   ========================================================================== */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(148, 163, 184, 0.28) transparent;
+}
+
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.28);
+    border-radius: 9999px;
+    border: 1px solid transparent;
+    background-clip: padding-box;
+    transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(56, 189, 248, 0.65);
+    box-shadow: 0 0 8px rgba(56, 189, 248, 0.5);
+}
+
+::-webkit-scrollbar-corner {
+    background: transparent;
+}
+
 body,
 body.light,
 body.dark {
@@ -4608,9 +4642,37 @@ body:not(.dark) .thinking-body {
     opacity: 0.88;
 }
 
-@keyframes fadeInThought {
-    from { opacity: 0; transform: translateY(3px); }
-    to { opacity: 1; transform: translateY(0); }
+.thinking-live-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.8rem;
+    color: #38bdf8;
+    font-style: italic;
+    animation: thoughtMorphFade 0.35s ease-in-out;
+}
+
+body:not(.dark) .thinking-live-action {
+    color: #0284c7;
+}
+
+@keyframes thoughtMorphFade {
+    0% { opacity: 0; transform: translateY(4px); }
+    100% { opacity: 1; transform: translateY(0); }
+}
+
+.thinking-step.is-self-healing {
+    color: #f59e0b;
+    background: rgba(245, 158, 11, 0.12);
+    border: 1px solid rgba(245, 158, 11, 0.25);
+    border-radius: 6px;
+    padding: 0.3rem 0.5rem;
+    margin-top: 0.35rem;
+}
+
+.thinking-step.is-self-healing .thinking-step-icon {
+    color: #f59e0b;
+    font-weight: bold;
 }
 
 
