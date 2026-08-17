@@ -4462,4 +4462,155 @@ body:not(.dark) .permissions-btn-secondary:hover {
     display: none !important;
 }
 
+/* ==========================================================================
+   Human-Like Thinking & Reasoning Process UI Styles
+   ========================================================================== */
+.thinking-process-card {
+    margin-bottom: 0.75rem;
+    border-radius: 10px;
+    border: 1px solid rgba(148, 163, 184, 0.15);
+    background: rgba(15, 23, 42, 0.35);
+    backdrop-filter: blur(8px);
+    overflow: hidden;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    font-size: 0.85rem;
+}
+
+body:not(.dark) .thinking-process-card {
+    border-color: rgba(203, 213, 225, 0.6);
+    background: rgba(241, 245, 249, 0.6);
+}
+
+.thinking-process-card.is-active {
+    border-color: rgba(56, 189, 248, 0.35);
+    box-shadow: 0 0 14px rgba(56, 189, 248, 0.08);
+}
+
+.thinking-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.45rem 0.75rem;
+    cursor: pointer;
+    user-select: none;
+    background: rgba(30, 41, 59, 0.3);
+    color: #94a3b8;
+    font-size: 0.8rem;
+    font-weight: 500;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+body:not(.dark) .thinking-header {
+    background: rgba(226, 232, 240, 0.4);
+    color: #64748b;
+}
+
+.thinking-header:hover {
+    background: rgba(51, 65, 85, 0.4);
+    color: #e2e8f0;
+}
+
+body:not(.dark) .thinking-header:hover {
+    background: rgba(203, 213, 225, 0.6);
+    color: #1e293b;
+}
+
+.thinking-header-left {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.thinking-pulse-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #38bdf8;
+    box-shadow: 0 0 8px #38bdf8;
+    animation: thinkingDotGlow 1.4s ease-in-out infinite;
+}
+
+.thinking-process-card.is-finished .thinking-pulse-dot {
+    background: #94a3b8;
+    box-shadow: none;
+    animation: none;
+}
+
+@keyframes thinkingDotGlow {
+    0%, 100% { transform: scale(0.9); opacity: 0.5; }
+    50% { transform: scale(1.3); opacity: 1; }
+}
+
+.thinking-timer {
+    font-variant-numeric: tabular-nums;
+    font-size: 0.78rem;
+    opacity: 0.85;
+}
+
+.thinking-chevron {
+    width: 14px;
+    height: 14px;
+    transition: transform 0.2s ease;
+    opacity: 0.7;
+}
+
+.thinking-process-card.is-expanded .thinking-chevron {
+    transform: rotate(180deg);
+}
+
+.thinking-body {
+    display: none;
+    padding: 0.6rem 0.85rem;
+    border-top: 1px solid rgba(148, 163, 184, 0.1);
+    color: #cbd5e1;
+    line-height: 1.45;
+    font-size: 0.82rem;
+    max-height: 280px;
+    overflow-y: auto;
+}
+
+body:not(.dark) .thinking-body {
+    border-top-color: rgba(203, 213, 225, 0.4);
+    color: #475569;
+}
+
+.thinking-process-card.is-expanded .thinking-body,
+.thinking-process-card.is-active .thinking-body {
+    display: block;
+}
+
+.thinking-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.45rem;
+    margin-bottom: 0.35rem;
+    animation: fadeInThought 0.25s ease-out;
+}
+
+.thinking-step:last-child {
+    margin-bottom: 0;
+}
+
+.thinking-step-icon {
+    font-size: 0.75rem;
+    color: #38bdf8;
+    line-height: 1.4;
+}
+
+.thinking-step-text {
+    flex: 1;
+}
+
+.thinking-raw-content {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.78rem;
+    white-space: pre-wrap;
+    opacity: 0.88;
+}
+
+@keyframes fadeInThought {
+    from { opacity: 0; transform: translateY(3px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
 
