@@ -5,6 +5,8 @@ import { extractWithCrawl4Ai } from './_lib/crawl4ai-client.js';
 import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-controls.js';
 import { validateEntityResponse } from './_lib/entity-verifier.js';
 import { classifyImageLocally } from './_lib/local-vision-classifier.js';
+import { classifyQueryIntent } from './_lib/intent-separator.js';
+import { resolveInstantFact } from './_lib/instant-fact-layer.js';
 
     const MODEL_FETCH_TIMEOUT_MS = 12_000;
     const STREAM_MODEL_FETCH_TIMEOUT_MS = 10_000;
@@ -1761,6 +1763,44 @@ import { classifyImageLocally } from './_lib/local-vision-classifier.js';
                 webEligible: false
             };
         }
+        if (String(options?.intent || '') === 'pop_culture_reference') {
+            if (/\b(latest|current|news|today|now|with sources?|source links?)\b/i.test(query)) {
+                return {
+                    strategy: 'live_first',
+                    reason: 'time_sensitive_query',
+                    webEligible: true
+                };
+            }
+            return {
+                strategy: 'direct',
+                reason: 'pop_culture_reference_stable',
+                webEligible: false
+            };
+        }
+
+        const intentClassification = classifyQueryIntent(query);
+        if (intentClassification.type === 'temporal_fact') {
+            if (!isFactSearchConfigured()) {
+                return {
+                    strategy: 'direct',
+                    reason: 'live_retrieval_disabled',
+                    webEligible: false
+                };
+            }
+            return {
+                strategy: 'live_first',
+                reason: 'temporal_fact_separator',
+                webEligible: true,
+                intentClassification
+            };
+        }
+        if (intentClassification.type === 'static_reasoning' && intentClassification.category !== 'general_reasoning') {
+            return {
+                strategy: 'direct',
+                reason: `static_${intentClassification.category}`,
+                webEligible: false
+            };
+        }
 
         if (!isFactSearchConfigured()) {
             return {
@@ -1921,8 +1961,33 @@ import { classifyImageLocally } from './_lib/local-vision-classifier.js';
     }
 
     async function buildLiveRagContext(message, req, contextTurns = []) {
-        if (!isFactSearchConfigured()) return { ragText: '', sources: [] };
         const query = resolveContextualLiveQuery(message, contextTurns);
+        const intentClassification = classifyQueryIntent(query);
+        if (intentClassification.type === 'temporal_fact') {
+            try {
+                const instantFact = await resolveInstantFact(query, intentClassification);
+                if (instantFact.grounded && instantFact.ragText) {
+                    const sources = instantFact.facts.map((f, i) => ({
+                        title: f.title,
+                        description: f.summary,
+                        url: f.url,
+                        domain: 'wikipedia.org',
+                        sourceType: 'instant_fact_authority',
+                        sourceLabel: f.source,
+                        date: '',
+                        freshness: 'authoritative_live_fact',
+                        evidenceLevel: 'official_current_holder',
+                        qualitySignals: ['instant_fact_authority', 'zero_scrape'],
+                        trusted: true,
+                        query
+                    }));
+                    return { ragText: instantFact.ragText, sources, directAnswerDirective: instantFact.directAnswerDirective };
+                }
+            } catch (_) {
+                // Fallback to standard flow
+            }
+        }
+        if (!isFactSearchConfigured()) return { ragText: '', sources: [] };
         const queries = buildChatLiveSearchQueries(query, contextTurns);
         const allResults = [];
         const seenUrls = new Set();
