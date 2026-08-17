@@ -285,6 +285,7 @@
                         id="send-message-btn"
                         type="button"
                         class="composer-send-btn footer-action-btn is-converse-ready"
+                        data-mode="converse"
                         onclick="handlePrimaryActionButtonClick()"
                         title="Start Converse mode"
                         aria-label="Start Converse mode">
@@ -6083,6 +6084,8 @@ let showRoutingDebugBadge = false;
         let converseQueuedSubmissionSequence = 0;
         let activeConverseSpeechUtterance = null;
         let activeConverseSpeechRun = null;
+        const activeConverseUtterances = new Set();
+        globalThis.__activeConverseUtterances = activeConverseUtterances;
         let lastInterruptedConverseState = null;
         let streamingConverseSpeech = {
             active: false,
@@ -6151,7 +6154,8 @@ let showRoutingDebugBadge = false;
         function isConverseSpeechActive() {
             return Boolean(streamingConverseSpeech?.active) ||
                 Boolean(activeConverseSpeechRun) ||
-                Boolean(activeConverseSpeechUtterance);
+                Boolean(activeConverseSpeechUtterance) ||
+                (activeConverseUtterances && activeConverseUtterances.size > 0);
         }
 
         function stopConverseSpeech(reason = 'interrupted') {
@@ -6181,11 +6185,18 @@ let showRoutingDebugBadge = false;
             if (activeConverseSpeechRun) activeConverseSpeechRun.cancelled = true;
             activeConverseSpeechRun = null;
             activeConverseSpeechUtterance = null;
+            activeConverseUtterances.clear();
             try {
                 window.speechSynthesis?.cancel?.();
             } catch (e) {}
             setConverseUiState('listening', reason);
         }
+
+        globalThis.isConverseSpeechActive = isConverseSpeechActive;
+        globalThis.stopConverseSpeech = stopConverseSpeech;
+        globalThis.togglePrimaryConverseMode = togglePrimaryConverseMode;
+        globalThis.handlePrimaryActionButtonClick = handlePrimaryActionButtonClick;
+        globalThis.toggleSendButton = toggleSendButton;
 
         function beginAbortableRequest() {
             const controller = new AbortController();
@@ -8734,6 +8745,9 @@ let showRoutingDebugBadge = false;
                 prompt.addEventListener('click', () => {
                     try {
                         const utterance = new SpeechSynthesisUtterance('Voice replies enabled.');
+                        activeConverseUtterances.add(utterance);
+                        utterance.onend = () => activeConverseUtterances.delete(utterance);
+                        utterance.onerror = () => activeConverseUtterances.delete(utterance);
                         utterance.volume = 0.75;
                         window.speechSynthesis?.speak?.(utterance);
                         prompt.remove();
@@ -8833,9 +8847,13 @@ let showRoutingDebugBadge = false;
                     streamingConverseSpeech.active = false;
                     activeConverseSpeechRun = null;
                     activeConverseSpeechUtterance = null;
+                    activeConverseUtterances.clear();
                     setConverseUiState('listening', 'speech_finished');
-                    window.JarvisSpeechInput?.setProcessing?.(false);
-                    toggleSendButton();
+                    // 150ms acoustic echo debounce before auto-rearming recognition
+                    setTimeout(() => {
+                        window.JarvisSpeechInput?.setProcessing?.(false);
+                        toggleSendButton();
+                    }, 150);
                 }
                 return;
             }
@@ -8857,8 +8875,10 @@ let showRoutingDebugBadge = false;
 
             const utterance = createConverseUtterance(nextSegment, streamingConverseSpeech.spokenSegments.length, 10);
             activeConverseSpeechUtterance = utterance;
+            activeConverseUtterances.add(utterance);
 
             utterance.onend = () => {
+                activeConverseUtterances.delete(utterance);
                 if (activeConverseSpeechUtterance === utterance) activeConverseSpeechUtterance = null;
                 streamingConverseSpeech.spokenSegments.push(nextSegment);
                 streamingConverseSpeech.isPlaying = false;
@@ -8866,6 +8886,7 @@ let showRoutingDebugBadge = false;
             };
 
             utterance.onerror = () => {
+                activeConverseUtterances.delete(utterance);
                 if (activeConverseSpeechUtterance === utterance) activeConverseSpeechUtterance = null;
                 streamingConverseSpeech.isPlaying = false;
                 if (streamingConverseSpeech.active) {
@@ -8876,6 +8897,7 @@ let showRoutingDebugBadge = false;
             try {
                 window.speechSynthesis.speak(utterance);
             } catch (err) {
+                activeConverseUtterances.delete(utterance);
                 streamingConverseSpeech.isPlaying = false;
                 processStreamingSpeechQueue();
             }
@@ -8905,9 +8927,13 @@ let showRoutingDebugBadge = false;
                 if (activeConverseSpeechRun !== speechRun) return;
                 activeConverseSpeechRun = null;
                 activeConverseSpeechUtterance = null;
+                activeConverseUtterances.clear();
                 setConverseUiState('listening', reason || 'speech_finished');
                 logLatencyTrace('speech_end', { source: 'converse', segments: speechRun.total });
-                window.JarvisSpeechInput?.setProcessing?.(false);
+                setTimeout(() => {
+                    window.JarvisSpeechInput?.setProcessing?.(false);
+                    toggleSendButton();
+                }, 150);
             };
             const speakNextSegment = () => {
                 if (speechRun.cancelled || activeConverseSpeechRun !== speechRun) return;
@@ -8917,11 +8943,15 @@ let showRoutingDebugBadge = false;
                 }
                 const utterance = createConverseUtterance(segments[speechRun.index], speechRun.index, speechRun.total);
                 speechRun.index += 1;
+                activeConverseSpeechUtterance = utterance;
+                activeConverseUtterances.add(utterance);
                 utterance.onend = () => {
+                    activeConverseUtterances.delete(utterance);
                     if (activeConverseSpeechUtterance === utterance) activeConverseSpeechUtterance = null;
                     speakNextSegment();
                 };
                 utterance.onerror = event => {
+                    activeConverseUtterances.delete(utterance);
                     if (activeConverseSpeechUtterance === utterance) activeConverseSpeechUtterance = null;
                     if (speechRun.cancelled) return;
                     activeConverseSpeechRun = null;
@@ -8930,13 +8960,24 @@ let showRoutingDebugBadge = false;
                     window.JarvisSpeechInput?.setProcessing?.(false);
                     showConverseSpeechUnlockPrompt();
                 };
-                activeConverseSpeechUtterance = utterance;
                 window.speechSynthesis.speak(utterance);
             };
             setConverseUiState('speaking', 'speech_start');
             logLatencyTrace('speech_start', { source: 'converse', chars: spokenText.length, segments: segments.length });
             speakNextSegment();
         }
+
+        globalThis.unlockConverseSpeechFromGesture = unlockConverseSpeechFromGesture;
+        globalThis.setConverseUiState = setConverseUiState;
+        globalThis.updateLiveConverseOverlay = updateLiveConverseOverlay;
+        globalThis.toggleConverseMic = toggleConverseMic;
+        globalThis.speakConverseReply = speakConverseReply;
+        globalThis.startStreamingConverseSpeech = startStreamingConverseSpeech;
+        globalThis.feedStreamingConverseDelta = feedStreamingConverseDelta;
+        globalThis.finishStreamingConverseSpeech = finishStreamingConverseSpeech;
+        globalThis.sanitizeTextForConverseSpeech = sanitizeTextForConverseSpeech;
+        globalThis.splitConverseSpeechSegments = splitConverseSpeechSegments;
+        globalThis.createConverseUtterance = createConverseUtterance;
 
         function rememberMultimodalGrounding(payload = {}) {
             const kind = String(payload.kind || 'multimodal');
@@ -10016,6 +10057,7 @@ ${code}
                 input.value = '';
                 delete input.dataset.inputSource;
                 window.JarvisSessionRecovery?.clearComposerDraft?.();
+                globalThis.resetSpeechInputCommittedText?.();
                 input.placeholder = window.JarvisSpeechInput?.getState?.().converseEnabled
                     ? 'Converse mode is listening...'
                     : 'Ask anything...';
@@ -10112,6 +10154,7 @@ async function sendTextInput(submission = {}) {
                 if (handleLocalVoiceCommand(text, inputSource)) {
                     input.value = '';
                     delete input.dataset.inputSource;
+                    globalThis.resetSpeechInputCommittedText?.();
                     toggleSendButton();
                     return;
                 }
@@ -10133,6 +10176,7 @@ async function sendTextInput(submission = {}) {
                     // Ignore rapid duplicate submit (double Enter/click).
                     input.value = '';
                     delete input.dataset.inputSource;
+                    globalThis.resetSpeechInputCommittedText?.();
                     toggleSendButton();
                     return;
                 }
@@ -10176,6 +10220,7 @@ async function sendTextInput(submission = {}) {
                 const previousRenderContext = beginResponseRenderContext(turn);
                 input.value = '';
                 delete input.dataset.inputSource;
+                globalThis.resetSpeechInputCommittedText?.();
                 input.placeholder = window.JarvisSpeechInput?.getState?.().converseEnabled
                     ? 'Converse mode is listening...'
                     : 'Ask anything...';
