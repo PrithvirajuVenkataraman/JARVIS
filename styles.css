@@ -4621,8 +4621,12 @@ body:not(.dark) .thinking-body {
 }
 
 .thinking-process-card.is-expanded .thinking-body,
-.thinking-process-card.is-active .thinking-body {
+.thinking-process-card.is-active.is-expanded .thinking-body {
     display: block;
+}
+
+.thinking-process-card.is-finished:not(.is-expanded) .thinking-body {
+    display: none !important;
 }
 
 .thinking-chain-of-thought {
