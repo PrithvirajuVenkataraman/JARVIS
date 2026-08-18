@@ -1536,12 +1536,34 @@ import { resolveInstantFact } from './_lib/instant-fact-layer.js';
             });
             if (!response.ok || !response.body) return { ok: false };
             let text = '';
+            let inReasoning = false;
             await readSseStream(response.body, payload => {
-                const delta = String(payload?.choices?.[0]?.delta?.content || '');
-                if (!delta) return;
-                text += delta;
-                onDelta(delta);
+                const deltaObj = payload?.choices?.[0]?.delta;
+                const reasoning = String(deltaObj?.reasoning || '');
+                const content = String(deltaObj?.content || '');
+                
+                if (reasoning) {
+                    if (!inReasoning) {
+                        inReasoning = true;
+                        text += '<think>\n';
+                        onDelta('<think>\n');
+                    }
+                    text += reasoning;
+                    onDelta(reasoning);
+                } else if (content) {
+                    if (inReasoning) {
+                        inReasoning = false;
+                        text += '\n</think>\n';
+                        onDelta('\n</think>\n');
+                    }
+                    text += content;
+                    onDelta(content);
+                }
             });
+            if (inReasoning) {
+                text += '\n</think>\n';
+                onDelta('\n</think>\n');
+            }
             return text.trim()
                 ? { ok: true, provider: 'groq', modelUsed: model, text }
                 : { ok: false };
