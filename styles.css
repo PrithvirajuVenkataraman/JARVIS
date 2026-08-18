@@ -4625,6 +4625,52 @@ body:not(.dark) .thinking-body {
     display: block;
 }
 
+.thinking-chain-of-thought {
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+    padding: 0.2rem 0;
+}
+
+.thinking-cot-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.65rem;
+    font-size: 0.81rem;
+    line-height: 1.5;
+    color: #cbd5e1;
+    animation: fadeInThought 0.25s ease-out;
+}
+
+body:not(.dark) .thinking-cot-step {
+    color: #334155;
+}
+
+.thinking-cot-number {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 19px;
+    height: 19px;
+    border-radius: 9999px;
+    background: rgba(56, 189, 248, 0.15);
+    color: #38bdf8;
+    font-size: 0.72rem;
+    font-weight: 600;
+    flex-shrink: 0;
+    margin-top: 1px;
+}
+
+body:not(.dark) .thinking-cot-number {
+    background: rgba(2, 132, 199, 0.15);
+    color: #0284c7;
+}
+
+.thinking-cot-text {
+    flex: 1;
+    opacity: 0.94;
+}
+
 .thinking-step {
     display: flex;
     align-items: flex-start;
