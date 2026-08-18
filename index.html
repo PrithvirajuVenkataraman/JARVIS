@@ -4155,17 +4155,23 @@ async function publishResolvedModelMessage(userMessage, answerText, options = {}
     if (Object.prototype.hasOwnProperty.call(options || {}, 'turnId')) {
         messageMeta.turnId = options.turnId;
     }
-    const assistantMessageId = streamedMessageId
-        ? streamedMessageId
+    const activeTurnId = String(activeResponseRenderContext?.turnId || options?.turnId || '').trim();
+    const existingTurnRow = activeTurnId
+        ? Array.from(document.querySelectorAll('.chat-row[data-turn-id]')).find(row => row.dataset.turnId === activeTurnId && row.dataset.role === 'assistant')
+        : null;
+    const existingRowId = streamedMessageId || existingTurnRow?.dataset?.messageId || '';
+
+    const assistantMessageId = existingRowId
+        ? existingRowId
         : addModelAssistantMessage(safeText, label, messageMeta);
-    if (assistantMessageId && streamedMessageId) {
+    if (assistantMessageId) {
         finalizeStreamingAssistantMessage(assistantMessageId, safeText, {
             ...messageMeta,
             userMessage
         });
         logLatencyTrace('assistant_final_render', {
             messageId: assistantMessageId,
-            streamed: true,
+            streamed: Boolean(existingRowId),
             chars: safeText.length
         });
     }
@@ -8113,98 +8119,98 @@ let showRoutingDebugBadge = false;
             }
             if (/\b(song|songs|music|track|tracks|album|artist|singer|band|discography|hits)\b/i.test(prompt)) {
                 const subject = raw.replace(/\b(name|list|give me|suggest|tell me|what are|a few|some|best|top|popular|latest|recent|famous|songs?|of|by|from|tracks?|music|albums?)\b/gi, '').replace(/[?.!]+/g, '').trim();
-                const target = subject || 'the artist';
+                const target = subject || 'the requested artist';
                 return [
-                    `Scanning discography and notable tracks for ${target}...`,
-                    `Curating chart-topping releases and popular hits...`,
-                    `Compiling formatted recommendations...`
+                    `Identifying musical discography and signature releases for ${target}.`,
+                    `Evaluating chart-topping singles, breakthrough hits, and critical favorites across eras.`,
+                    `Compiling formatted tracklist with album context and prominent musical collaborations.`
                 ];
             }
             if (/\b(movie|movies|film|films|cinema|actor|actress|director|series|show|shows|sitcom|anime|watchlist)\b/i.test(prompt)) {
                 const subject = raw.replace(/\b(name|list|give me|suggest|tell me|what are|a few|some|best|top|popular|latest|recent|famous|movies?|films?|shows?|series|of|by|from)\b/gi, '').replace(/[?.!]+/g, '').trim();
                 const target = subject || 'the requested title';
                 return [
-                    `Searching filmography and critical reception for ${target}...`,
-                    `Evaluating genre highlights and key plot themes...`,
-                    `Structuring comprehensive recommendations...`
+                    `Analyzing cinema catalog, director filmography, and thematic genres for ${target}.`,
+                    `Assessing audience reception, critical ratings, and standout storytelling elements.`,
+                    `Structuring a well-balanced recommendation list with genre context and plot summaries.`
                 ];
             }
             if (/\b(recipe|cook|cooking|bake|ingredient|ingredients|dish|dishes|meal|food|cuisine)\b/i.test(prompt)) {
                 const subject = raw.replace(/\b(how to make|how to cook|recipe for|give me a recipe|ingredients for|how do i make)\b/gi, '').replace(/[?.!]+/g, '').trim();
                 const target = subject || 'the dish';
                 return [
-                    `Reviewing culinary techniques and ingredients for ${target}...`,
-                    `Balancing preparation steps and flavor profiles...`,
-                    `Drafting clear step-by-step cooking guide...`
+                    `Deconstructing authentic flavor profiles and standard culinary methods for ${target}.`,
+                    `Determining essential ingredients, pantry substitutions, and precise cooking times.`,
+                    `Formulating clear, sequential kitchen instructions with chef tips for optimal texture and taste.`
                 ];
             }
             if (/\b(palindrome|palindromic|substring)\b/i.test(prompt)) {
                 return [
-                    'Analyzing string symmetry and subproblem constraints...',
-                    'Evaluating O(1) extra space constraints & center expansion...',
-                    'Tracing pointer logic for even vs odd palindromes...',
-                    'Crafting clean, optimal Python implementation...'
+                    'Deconstructing string palindromic properties: a palindrome is symmetric around its midpoint.',
+                    'Evaluating algorithmic approaches: dynamic programming takes O(N²) space, whereas expanding around center operates in O(1) auxiliary space.',
+                    'Tracing pointer boundaries for both odd-length (single character center) and even-length (two-character center) palindromes.',
+                    'Constructing optimal Python implementation with boundary checks and clean asymptotic efficiency.'
                 ];
             }
             if (/\b(python|javascript|typescript|c\+\+|java|rust|go|golang|code|function|algorithm|class|bug|debug|sql|regex|implement|write\s+a|refactor)\b/i.test(prompt)) {
                 const langMatch = raw.match(/\b(python|javascript|typescript|c\+\+|java|rust|go|golang|sql|regex)\b/i);
                 const lang = langMatch ? langMatch[0] : 'code';
                 return [
-                    `Analyzing inputs, data structures, and edge cases for ${lang}...`,
-                    `Evaluating optimal algorithmic patterns and time complexity...`,
-                    `Structuring clean, robust implementation...`
+                    `Analyzing requirements, expected data types, constraints, and edge conditions for ${lang}.`,
+                    `Selecting optimal algorithmic patterns to minimize time complexity and maintain memory efficiency.`,
+                    `Drafting clean, idiomatic code with clear error handling and type-safe architecture.`
                 ];
             }
             if (/\b(black hole|event horizon|dilation|relativity|gravity|spacetime|gravitational)\b/i.test(prompt)) {
                 return [
-                    'Examining Einstein general relativity and metric spacetime...',
-                    'Connecting gravitational potential to local observer time flow...',
-                    'Formulating intuitive conceptual and mathematical breakdown...'
+                    'Grounding problem in Einstein\'s theory of General Relativity and the Schwarzschild spacetime metric.',
+                    'Connecting gravitational field strength (potential depth) to the deceleration of coordinate time for distant observers.',
+                    'Bridging theoretical physics with intuitive conceptual breakdown of the event horizon and tidal forces.'
                 ];
             }
             if (/\b(physics|quantum|space|star|galaxy|biology|chemistry|science|evolution|planet|orbit)\b/i.test(prompt)) {
                 return [
-                    'Reviewing underlying scientific laws and foundational principles...',
-                    'Tracing empirical mechanisms and causal relationships...',
-                    'Formulating structured, intuitive scientific explanation...'
+                    'Reviewing underlying scientific laws, foundational axioms, and empirical models.',
+                    'Tracing cause-and-effect relationships across physical, chemical, or biological mechanisms.',
+                    'Structuring a comprehensive, grounded explanation connecting first principles to observable outcomes.'
                 ];
             }
             if (/\b(calculate|compute|solve|derivative|integral|equation|formula|matrix|math|arithmetic)\b/i.test(prompt)) {
                 return [
-                    'Parsing mathematical expressions and variable constraints...',
-                    'Executing step-by-step symbolic derivation...',
-                    'Verifying calculations and finalizing numerical solution...'
+                    'Parsing mathematical symbols, algebraic definitions, and constraint domains.',
+                    'Applying step-by-step mathematical rules (e.g. product/chain rules, matrix operations, or substitutions).',
+                    'Verifying intermediate algebraic arithmetic and finalizing the exact simplified solution.'
                 ];
             }
             if (/\b(history|roman|war|empire|dynasty|revolution|century|ancient|civilization|medieval|president|prime minister|country|capital)\b/i.test(prompt)) {
                 return [
-                    'Retrieving chronological timeline and historical context...',
-                    'Examining key socioeconomic and geopolitical catalysts...',
-                    'Synthesizing comprehensive historical breakdown...'
+                    'Retrieving historical timeline, geopolitical landscape, and societal structures of the era.',
+                    'Analyzing primary socioeconomic catalysts, governance failures, and institutional decay.',
+                    'Synthesizing structural causes and external pressures into a cohesive, multi-perspective historical breakdown.'
                 ];
             }
             if (/\b(ai|machine learning|neural network|transformer|deep learning|llm|nlp)\b/i.test(prompt)) {
                 return [
-                    'Deconstructing neural architecture and mathematical mechanics...',
-                    'Tracing loss functions, attention layers, and representations...',
-                    'Synthesizing architectural analysis and practical implications...'
+                    'Deconstructing neural model architecture, mathematical loss formulations, and attention mechanisms.',
+                    'Examining training dynamics, representation spaces, and inference behavior.',
+                    'Synthesizing technical mechanics with practical architectural trade-offs.'
                 ];
             }
             if (/\b(place|places|travel|trip|itinerary|visit|city|tour|hotel|attraction)\b/i.test(prompt)) {
                 const subject = raw.replace(/\b(places to visit in|trip to|travel to|best places in|things to do in)\b/gi, '').replace(/[?.!]+/g, '').trim();
                 const target = subject || 'the destination';
                 return [
-                    `Mapping top attractions, culture, and transit for ${target}...`,
-                    `Optimizing schedule and localized travel tips...`,
-                    `Synthesizing comprehensive travel guide...`
+                    `Mapping geography, cultural landmarks, historical highlights, and transit hubs for ${target}.`,
+                    `Optimizing daily pacing, geographic proximity of attractions, and local traveler considerations.`,
+                    `Assembling an actionable, rich itinerary complete with timing suggestions and practical tips.`
                 ];
             }
             const cleanSubject = raw.replace(/^(who is|who was|what is|what was|why is|why does|how does|how is|explain|tell me about|describe|compare)\s+/i, '').replace(/[?.!]+/g, '').trim();
             const subjectSnippet = cleanSubject.length > 40 ? cleanSubject.slice(0, 38) + '...' : cleanSubject;
             return [
-                `Deconstructing core premises and context for ${subjectSnippet || 'the query'}...`,
-                `Cross-referencing domain concepts and logical arguments...`,
-                `Synthesizing clear, well-reasoned answer...`
+                `Deconstructing the core inquiry and contextual nuances regarding ${subjectSnippet || 'the topic'}.`,
+                `Evaluating relevant domain knowledge, core principles, and contrasting perspectives.`,
+                `Synthesizing a thorough, well-reasoned, and human-like response.`
             ];
         }
 
@@ -8223,12 +8229,16 @@ let showRoutingDebugBadge = false;
             if (thoughtContent) {
                 bodyContentHtml = `<div class="thinking-raw-content">${escapeHtml(thoughtContent)}</div>`;
             } else if (steps && steps.length > 0) {
-                bodyContentHtml = steps.map(step => `
-                    <div class="thinking-step">
-                        <span class="thinking-step-icon">&#10003;</span>
-                        <span class="thinking-step-text">${escapeHtml(step)}</span>
+                bodyContentHtml = `
+                    <div class="thinking-chain-of-thought">
+                        ${steps.map((step, idx) => `
+                            <div class="thinking-cot-step">
+                                <span class="thinking-cot-number">${idx + 1}</span>
+                                <span class="thinking-cot-text">${escapeHtml(step)}</span>
+                            </div>
+                        `).join('')}
                     </div>
-                `).join('');
+                `;
             }
 
             if (selfHealing && selfHealing.thought) {
