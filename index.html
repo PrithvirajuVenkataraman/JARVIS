@@ -8585,6 +8585,13 @@ let showRoutingDebugBadge = false;
                 } else if (thinkingCard) {
                     if (isFinished) {
                         thinkingCard.className = 'thinking-process-card is-finished';
+                        const timerEl = thinkingCard.querySelector('.thinking-timer');
+                        if (timerEl && !timerEl.textContent.startsWith('Thought for')) {
+                            const elapsed = meta?.latency ? (meta.latency / 1000).toFixed(1) : '1.8';
+                            timerEl.textContent = `Thought for ${elapsed}s`;
+                        }
+                    } else {
+                        thinkingCard.className = 'thinking-process-card is-active is-expanded';
                     }
                     if (thoughtText) {
                         const rawContent = thinkingCard.querySelector('.thinking-raw-content');
