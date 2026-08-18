@@ -4512,12 +4512,10 @@ async function streamChatCompletion(payload, options = {}) {
             const delta = String(event.data?.text || '');
             if (!delta) return;
             accumulated += delta;
-            // Strip <think> reasoning tags from streaming output
-            const displayAccumulated = accumulated.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/^<think>[\s\S]*$/gi, '').replace(/<\/?think>/gi, '').trim();
             if (isConverseStream) {
                 feedStreamingConverseDelta(delta, activeTurnId);
             }
-            if (!firstDeltaLogged && displayAccumulated) {
+            if (!firstDeltaLogged && accumulated) {
                 firstDeltaLogged = true;
                 hideThinkingIndicator();
                 latencyTrace.firstDeltaAt = performance.now();
@@ -4527,35 +4525,33 @@ async function streamChatCompletion(payload, options = {}) {
                     totalMs: Math.round(latencyTrace.firstDeltaAt - (latencyTrace.submittedAt || latencyTrace.firstDeltaAt))
                 });
             }
-            if (!displayAccumulated) return;
             const id = ensureStreamMessage();
-            updateStreamingAssistantMessage(id, displayAccumulated, { userMessage, streaming: true });
+            updateStreamingAssistantMessage(id, accumulated, { userMessage, streaming: true });
             return;
         }
         if (event.event === 'correction') {
-            accumulated = String(event.data?.text || accumulated || '').replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/^<think>[\s\S]*$/gi, '').replace(/<\/?think>/gi, '').trim();
+            accumulated = String(event.data?.text || accumulated || '');
             const id = ensureStreamMessage();
             updateStreamingAssistantMessage(id, accumulated, { userMessage, streaming: true });
             return;
         }
         if (event.event === 'done') {
             donePayload = event.data || {};
-            accumulated = String(donePayload.response || accumulated || '').replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/^<think>[\s\S]*$/gi, '').replace(/<\/?think>/gi, '').trim();
-            if (isConverseStream && accumulated) {
-                finishStreamingConverseSpeech(accumulated, activeTurnId);
+            const doneResponse = String(donePayload.response || accumulated || '').trim();
+            if (isConverseStream && doneResponse) {
+                finishStreamingConverseSpeech(doneResponse, activeTurnId);
             }
-            if (accumulated) {
-                hideThinkingIndicator();
-                const id = ensureStreamMessage();
-                updateStreamingAssistantMessage(id, accumulated, {
-                    userMessage,
-                    routing: donePayload.routing || null,
-                    route: options?.routeDecision?.route || '',
-                    routeReason: options?.routeDecision?.reason || '',
-                    turnSource: activeResponseRenderContext?.source || '',
-                    sourcePolicy: options?.routeDecision?.sourcePolicy || ''
-                });
-            }
+            hideThinkingIndicator();
+            const id = ensureStreamMessage();
+            updateStreamingAssistantMessage(id, doneResponse, {
+                userMessage,
+                streaming: false,
+                routing: donePayload.routing || null,
+                route: options?.routeDecision?.route || '',
+                routeReason: options?.routeDecision?.reason || '',
+                turnSource: activeResponseRenderContext?.source || '',
+                sourcePolicy: options?.routeDecision?.sourcePolicy || ''
+            });
             return;
         }
         if (event.event === 'error') {
@@ -4563,7 +4559,10 @@ async function streamChatCompletion(payload, options = {}) {
             if (isConverseStream) {
                 stopConverseSpeech('stream_error');
             }
-            throw new Error(String(event.data?.message || 'Streaming response failed.'));
+            const errMsg = String(event.data?.message || 'The AI service is temporarily unavailable. Please try again.');
+            const id = ensureStreamMessage();
+            updateStreamingAssistantMessage(id, errMsg, { userMessage, streaming: false });
+            return;
         }
     };
 
