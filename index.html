@@ -8182,7 +8182,22 @@ let showRoutingDebugBadge = false;
                     'Verifying intermediate algebraic arithmetic and finalizing the exact simplified solution.'
                 ];
             }
-            if (/\b(history|roman|war|empire|dynasty|revolution|century|ancient|civilization|medieval|president|prime minister|country|capital)\b/i.test(prompt)) {
+            if (/\b(capital|capitals|country|countries|continent|geography|geographic|territory|provinces?)\b/i.test(prompt)) {
+                let target = 'the requested region';
+                const countryMatch = raw.match(/\b(?:capital of|country of|in|for)\s+([A-Z][A-Za-z\s]+?)(?:,|\?|\.|\band\b|$)/i);
+                if (countryMatch && countryMatch[1]) {
+                    target = countryMatch[1].trim();
+                } else {
+                    const fallbackMatch = raw.match(/\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b/);
+                    if (fallbackMatch && fallbackMatch[1]) target = fallbackMatch[1].trim();
+                }
+                return [
+                    `Identifying designated capital, administrative jurisdiction, and geographic territory for ${target}.`,
+                    `Examining geopolitical compromises, historical regional rivalries, and constitutional selection criteria.`,
+                    `Synthesizing historical compromise details with geography and administrative context.`
+                ];
+            }
+            if (/\b(history|roman|war|wars|battle|empire|empires|dynasty|revolution|century|ancient|civilization|medieval|collapse|feudal)\b/i.test(prompt)) {
                 return [
                     'Retrieving historical timeline, geopolitical landscape, and societal structures of the era.',
                     'Analyzing primary socioeconomic catalysts, governance failures, and institutional decay.',
@@ -14746,10 +14761,24 @@ function isPureHowToOrCodingConcept(text) {
     return false;
 }
 
+function isStableGeographyOrGeneralFactQuery(text) {
+    const raw = String(text || '').trim();
+    const lower = raw.toLowerCase();
+    if (!raw) return false;
+    if (/\b(current|currently|latest|recent|today|now|right now|live|breaking|news|price|weather|forecast|score|match|election|stock)\b/i.test(lower)) {
+        return false;
+    }
+    if (/\b(capital of|capital city|why was .+ chosen|located in|continent|origin of|history of|definition of|meaning of|principles of|why did|what caused|catalysts that led)\b/i.test(lower)) {
+        return true;
+    }
+    return false;
+}
+
 function isBroadFactualWebQuery(text, entityIntent = null, liveIntent = null) {
     const raw = String(text || '').trim();
     if (!raw) return false;
     if (isPureHowToOrCodingConcept(raw)) return false;
+    if (isStableGeographyOrGeneralFactQuery(raw)) return false;
 
     const lower = raw.toLowerCase();
     if (isInappropriateContent(raw)) return false;
@@ -16085,6 +16114,11 @@ function buildStructuredEntityRecord(text, liveIntent = null) {
 } 
 
 function classifyUniversalEntityIntent(text, liveIntent = null) {
+    if (isStableGeographyOrGeneralFactQuery(text)) {
+        const record = buildStructuredEntityRecord(text, liveIntent || extractLiveQueryIntent(text));
+        record.isEntityFact = false;
+        return record;
+    }
     const record = buildStructuredEntityRecord(text, liveIntent || extractLiveQueryIntent(text));
     const lower = normalizeEntitySearchText(text);
     const domainPack = UNIVERSAL_ENTITY_DOMAIN_PACKS[record.domain];
@@ -17768,6 +17802,9 @@ async function handleUniversalEntityFactQuery(userText, liveIntent = null) {
                 entityIntent: pipeline.entityIntent,
                 riskLevel
             });
+            if (isStableGeographyOrGeneralFactQuery(userText) || riskLevel === 'low_risk') {
+                return false;
+            }
             return publishStrictVerificationClarification(pipeline, {
                 sources: [],
                 summaryText: 'I could not verify this from independent trusted sources.',
@@ -17790,6 +17827,9 @@ async function handleUniversalEntityFactQuery(userText, liveIntent = null) {
                 summaryText: 'I could not fully verify this, so here is the best-supported answer from available sources.'
             });
             if (bestEffortPublished) return true;
+            if (isStableGeographyOrGeneralFactQuery(userText) || riskLevel === 'low_risk') {
+                return false;
+            }
             return publishStrictVerificationClarification(pipeline, {
                 sources: deduped,
                 summaryText: isSportsRoleQuery
