@@ -8096,50 +8096,71 @@ let showRoutingDebugBadge = false;
             const match = textStr.match(/<think>([\s\S]*?)<\/think>/i);
             if (match) {
                 thought = match[1].trim();
+            } else {
+                const openMatch = textStr.match(/<think>([\s\S]*)$/i);
+                if (openMatch) {
+                    thought = openMatch[1].trim();
+                }
             }
             const cleanAnswer = textStr.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/^<think>[\s\S]*$/gi, '').replace(/<\/?think>/gi, '').trim();
             return { thought, answer: cleanAnswer };
         }
 
         function generateContextualThoughtSteps(userPrompt) {
-            const prompt = String(userPrompt || '').toLowerCase().trim();
-            if (!prompt || (/\b(hi|hello|hey|thanks|thank you|good morning|bye|good night|ok|okay)\b/i.test(prompt) && prompt.length < 20)) {
+            const raw = String(userPrompt || '').trim();
+            const prompt = raw.toLowerCase();
+            if (!raw || (/\b(hi|hello|hey|thanks|thank you|good morning|bye|good night|ok|okay)\b/i.test(prompt) && prompt.length < 15)) {
                 return [];
+            }
+            if (/\b(song|songs|music|track|tracks|album|artist|singer|band|discography|hits)\b/i.test(prompt)) {
+                const subject = raw.replace(/\b(name|list|give me|suggest|tell me|what are|a few|some|best|top|popular|latest|recent|famous|songs?|of|by|from|tracks?|music|albums?)\b/gi, '').replace(/[?.!]+/g, '').trim();
+                const target = subject || 'the artist';
+                return [
+                    `Scanning discography and notable tracks for ${target}...`,
+                    `Curating chart-topping releases and popular hits...`,
+                    `Compiling formatted recommendations...`
+                ];
+            }
+            if (/\b(movie|movies|film|films|cinema|actor|actress|director|series|show|shows|sitcom|anime|watchlist)\b/i.test(prompt)) {
+                const subject = raw.replace(/\b(name|list|give me|suggest|tell me|what are|a few|some|best|top|popular|latest|recent|famous|movies?|films?|shows?|series|of|by|from)\b/gi, '').replace(/[?.!]+/g, '').trim();
+                const target = subject || 'the requested title';
+                return [
+                    `Searching filmography and critical reception for ${target}...`,
+                    `Evaluating genre highlights and key plot themes...`,
+                    `Structuring comprehensive recommendations...`
+                ];
+            }
+            if (/\b(recipe|cook|cooking|bake|ingredient|ingredients|dish|dishes|meal|food|cuisine)\b/i.test(prompt)) {
+                const subject = raw.replace(/\b(how to make|how to cook|recipe for|give me a recipe|ingredients for|how do i make)\b/gi, '').replace(/[?.!]+/g, '').trim();
+                const target = subject || 'the dish';
+                return [
+                    `Reviewing culinary techniques and ingredients for ${target}...`,
+                    `Balancing preparation steps and flavor profiles...`,
+                    `Drafting clear step-by-step cooking guide...`
+                ];
             }
             if (/\b(palindrome|palindromic|substring)\b/i.test(prompt)) {
                 return [
-                    'Hmm, let me unpack this problem and edge cases...',
+                    'Analyzing string symmetry and subproblem constraints...',
                     'Evaluating O(1) extra space constraints & center expansion...',
                     'Tracing pointer logic for even vs odd palindromes...',
                     'Crafting clean, optimal Python implementation...'
                 ];
             }
-            if (/\b(black hole|event horizon|dilation|relativity|gravity|spacetime)\b/i.test(prompt)) {
+            if (/\b(python|javascript|typescript|c\+\+|java|rust|go|golang|code|function|algorithm|class|bug|debug|sql|regex|implement|write\s+a|refactor)\b/i.test(prompt)) {
+                const langMatch = raw.match(/\b(python|javascript|typescript|c\+\+|java|rust|go|golang|sql|regex)\b/i);
+                const lang = langMatch ? langMatch[0] : 'code';
+                return [
+                    `Analyzing inputs, data structures, and edge cases for ${lang}...`,
+                    `Evaluating optimal algorithmic patterns and time complexity...`,
+                    `Structuring clean, robust implementation...`
+                ];
+            }
+            if (/\b(black hole|event horizon|dilation|relativity|gravity|spacetime|gravitational)\b/i.test(prompt)) {
                 return [
                     'Examining Einstein general relativity and metric spacetime...',
                     'Connecting gravitational potential to local observer time flow...',
                     'Formulating intuitive conceptual and mathematical breakdown...'
-                ];
-            }
-            if (/\b(python|javascript|typescript|c\+\+|java|code|function|algorithm|class|bug|debug|sql|regex|implement|write\s+a)\b/i.test(prompt)) {
-                return [
-                    'Analyzing problem constraints, inputs, and edge cases...',
-                    'Evaluating optimal algorithmic patterns and time complexity...',
-                    'Structuring clean, robust code implementation...'
-                ];
-            }
-            if (/\b(calculate|compute|solve|derivative|integral|equation|formula|matrix|math|arithmetic)\b/i.test(prompt)) {
-                return [
-                    'Parsing mathematical expressions and variable constraints...',
-                    'Executing step-by-step symbolic derivation...',
-                    'Verifying calculations and finalizing numerical solution...'
-                ];
-            }
-            if (/\b(history|roman|war|empire|dynasty|revolution|century|ancient|civilization|medieval)\b/i.test(prompt)) {
-                return [
-                    'Retrieving chronological timeline and historical context...',
-                    'Examining key socioeconomic and political catalysts...',
-                    'Synthesizing comprehensive historical breakdown...'
                 ];
             }
             if (/\b(physics|quantum|space|star|galaxy|biology|chemistry|science|evolution|planet|orbit)\b/i.test(prompt)) {
@@ -8149,6 +8170,20 @@ let showRoutingDebugBadge = false;
                     'Formulating structured, intuitive scientific explanation...'
                 ];
             }
+            if (/\b(calculate|compute|solve|derivative|integral|equation|formula|matrix|math|arithmetic)\b/i.test(prompt)) {
+                return [
+                    'Parsing mathematical expressions and variable constraints...',
+                    'Executing step-by-step symbolic derivation...',
+                    'Verifying calculations and finalizing numerical solution...'
+                ];
+            }
+            if (/\b(history|roman|war|empire|dynasty|revolution|century|ancient|civilization|medieval|president|prime minister|country|capital)\b/i.test(prompt)) {
+                return [
+                    'Retrieving chronological timeline and historical context...',
+                    'Examining key socioeconomic and geopolitical catalysts...',
+                    'Synthesizing comprehensive historical breakdown...'
+                ];
+            }
             if (/\b(ai|machine learning|neural network|transformer|deep learning|llm|nlp)\b/i.test(prompt)) {
                 return [
                     'Deconstructing neural architecture and mathematical mechanics...',
@@ -8156,14 +8191,22 @@ let showRoutingDebugBadge = false;
                     'Synthesizing architectural analysis and practical implications...'
                 ];
             }
-            if (prompt.length > 25 || /\b(why|how|explain|what is|difference|compare|describe|principles)\b/i.test(prompt)) {
+            if (/\b(place|places|travel|trip|itinerary|visit|city|tour|hotel|attraction)\b/i.test(prompt)) {
+                const subject = raw.replace(/\b(places to visit in|trip to|travel to|best places in|things to do in)\b/gi, '').replace(/[?.!]+/g, '').trim();
+                const target = subject || 'the destination';
                 return [
-                    'Deconstructing core premises and contextual nuances...',
-                    'Evaluating domain concepts and logical arguments...',
-                    'Synthesizing direct, well-structured answer...'
+                    `Mapping top attractions, culture, and transit for ${target}...`,
+                    `Optimizing schedule and localized travel tips...`,
+                    `Synthesizing comprehensive travel guide...`
                 ];
             }
-            return [];
+            const cleanSubject = raw.replace(/^(who is|who was|what is|what was|why is|why does|how does|how is|explain|tell me about|describe|compare)\s+/i, '').replace(/[?.!]+/g, '').trim();
+            const subjectSnippet = cleanSubject.length > 40 ? cleanSubject.slice(0, 38) + '...' : cleanSubject;
+            return [
+                `Deconstructing core premises and context for ${subjectSnippet || 'the query'}...`,
+                `Cross-referencing domain concepts and logical arguments...`,
+                `Synthesizing clear, well-reasoned answer...`
+            ];
         }
 
         window.toggleThinkingProcessCard = function(card, event) {
@@ -8511,18 +8554,54 @@ let showRoutingDebugBadge = false;
             if (row.style.display === 'none') {
                 row.style.display = '';
             }
+            const parsed = extractThoughtAndAnswer(text);
+            const cleanAnswer = parsed.answer;
+            const thoughtText = parsed.thought;
+            
+            const bubble = row.querySelector('.chat-bubble-assistant');
+            let thinkingCard = row.querySelector('.thinking-process-card');
+            const priorUserPrompt = String(meta?.userMessage || getAssistantMessageMeta(messageId)?.priorUserPrompt || '').trim();
+            const thoughtSteps = thoughtText ? [] : generateContextualThoughtSteps(priorUserPrompt);
+            
+            if (thoughtText || (thoughtSteps.length > 0 && !meta?.systemGreeting)) {
+                const isFinished = !meta?.streaming || !!cleanAnswer;
+                if (!thinkingCard && bubble) {
+                    const elapsed = meta?.latency ? (meta.latency / 1000).toFixed(1) : '1.8';
+                    const tempDiv = document.createElement('div');
+                    tempDiv.innerHTML = buildThinkingProcessHtml(thoughtText, thoughtSteps, elapsed, !isFinished, meta?.selfHealing);
+                    if (tempDiv.firstElementChild) {
+                        bubble.insertBefore(tempDiv.firstElementChild, bubble.firstChild);
+                        thinkingCard = row.querySelector('.thinking-process-card');
+                    }
+                } else if (thinkingCard) {
+                    if (isFinished) {
+                        thinkingCard.className = 'thinking-process-card is-finished';
+                    }
+                    if (thoughtText) {
+                        const rawContent = thinkingCard.querySelector('.thinking-raw-content');
+                        if (rawContent) {
+                            rawContent.textContent = thoughtText;
+                        } else {
+                            const body = thinkingCard.querySelector('.thinking-body');
+                            if (body) body.innerHTML = `<div class="thinking-raw-content">${escapeHtml(thoughtText)}</div>`;
+                        }
+                    }
+                }
+            }
+
             const textElement = row.querySelector('.assistant-message-text');
-            renderAssistantTextIntoElement(textElement, text, { streaming: meta?.streaming === true, meta });
-            const cleanText = String(text || '').trim();
+            const textToRender = cleanAnswer || (thoughtText ? '' : text);
+            renderAssistantTextIntoElement(textElement, textToRender, { streaming: meta?.streaming === true, meta });
+            const cleanText = String(cleanAnswer || text || '').trim();
             const existing = getAssistantMessageMeta(messageId) || {};
             const turnId = String(existing.turnId || meta?.turnId || activeResponseRenderContext?.turnId || '').trim();
-            const priorUserPrompt = String(meta?.userMessage || existing.priorUserPrompt || '').trim();
             const presentation = prepareAssistantSourcePresentation(cleanText, { ...existing, ...meta });
             registerAssistantMessageMeta(messageId, {
                 ...existing,
                 text: cleanText,
                 priorUserPrompt,
                 turnId,
+                thought: thoughtText,
                 sourceType: meta?.sourceType || existing.sourceType || 'model',
                 sourceLabel: meta?.sourceLabel || existing.sourceLabel || 'Model answer',
                 sources: presentation.sources || existing.sources || [],
@@ -23603,14 +23682,18 @@ function startThinkingPhaseTimeline(customSteps = []) {
         clearInterval(thinkingPhaseTimer);
         thinkingPhaseTimer = null;
     }
-    const defaultSteps = [
-        'Hmm, let me unpack this problem...',
-        'Connecting domain concepts and core constraints...',
-        'Formulating clean, well-reasoned response...'
+    const userPrompt = String(window.__lastUserMessage || '').trim();
+    const cleanSubject = userPrompt.replace(/^(who is|who was|what is|what was|why is|why does|how does|how is|explain|tell me about|describe|compare|name|list|give me|suggest)\s+/i, '').replace(/[?.!]+/g, '').trim();
+    const target = cleanSubject ? (cleanSubject.length > 35 ? cleanSubject.slice(0, 32) + '...' : cleanSubject) : 'the query';
+    
+    const fallbackDynamicSteps = [
+        `Analyzing context and key premises for ${target}...`,
+        `Cross-referencing domain knowledge and facts...`,
+        `Synthesizing clear, well-structured response...`
     ];
     const sequence = (Array.isArray(customSteps) && customSteps.length > 0)
         ? customSteps
-        : defaultSteps;
+        : fallbackDynamicSteps;
     let index = 0;
     const startedAt = Date.now();
 
