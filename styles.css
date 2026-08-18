@@ -3188,18 +3188,27 @@ body.dark .response-action-btn {
     display: none !important;
 }
 
-/* Professional in-chat thinking pulse */
+/* Professional in-chat thinking Unified Inline Pill */
 .assistant-thinking-bubble {
     display: inline-flex;
     align-items: center;
-    justify-content: center;
+    justify-content: flex-start;
     gap: 8px;
-    min-width: 58px;
-    height: 28px;
-    padding: 0 !important;
-    border-radius: 0 !important;
-    border: none !important;
-    background: transparent !important;
+    min-width: auto;
+    max-width: 100%;
+    height: auto;
+    padding: 6px 14px !important;
+    border-radius: 9999px !important;
+    border: 1px solid rgba(56, 189, 248, 0.25) !important;
+    background: rgba(15, 23, 42, 0.85) !important;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    margin: 4px 0;
+}
+
+body:not(.dark) .assistant-thinking-bubble {
+    background: rgba(241, 245, 249, 0.95) !important;
+    border-color: rgba(2, 132, 199, 0.25) !important;
 }
 
 .assistant-thinking-avatar {
@@ -3280,17 +3289,20 @@ body.dark .response-action-btn {
 
 .thinking-inline-text {
     font-size: 0.82rem;
-    font-weight: 700;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    padding: 2px 4px;
+    font-weight: 500;
+    letter-spacing: normal;
+    text-transform: none;
+    padding: 0;
     display: inline-flex;
     align-items: center;
-    background: linear-gradient(90deg, rgba(255, 255, 255, 0.45) 0%, rgba(255, 255, 255, 1) 50%, rgba(255, 255, 255, 0.45) 100%);
-    background-size: 200% 100%;
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    animation: jarvis-word-shimmer 2s ease-in-out infinite;
+    gap: 8px;
+    color: #e2e8f0;
+    max-width: 100%;
+    overflow: hidden;
+}
+
+body:not(.dark) .thinking-inline-text {
+    color: #1e293b;
 }
 
 .streaming-placeholder::after {
@@ -4643,13 +4655,17 @@ body:not(.dark) .thinking-body {
 }
 
 .thinking-live-action {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-    font-size: 0.8rem;
+    display: inline-block;
+    font-size: 0.82rem;
+    font-weight: 400;
     color: #38bdf8;
-    font-style: italic;
+    font-style: normal;
     animation: thoughtMorphFade 0.35s ease-in-out;
+    max-width: min(72vw, 420px);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    overflow: hidden;
+    vertical-align: middle;
 }
 
 body:not(.dark) .thinking-live-action {
