@@ -5,13 +5,14 @@ import { extractWithCrawl4Ai } from './_lib/crawl4ai-client.js';
 import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-controls.js';
 import { validateEntityResponse } from './_lib/entity-verifier.js';
 import { classifyImageLocally } from './_lib/local-vision-classifier.js';
-import { classifyQueryIntent } from './_lib/intent-separator.js';
+import { classifyQueryIntent, isStableGeographyOrGeneralFactQuery, classifyUniversalEntityIntent } from './_lib/intent-separator.js';
 import { resolveInstantFact } from './_lib/instant-fact-layer.js';
 
-    const MODEL_FETCH_TIMEOUT_MS = 12_000;
-    const STREAM_MODEL_FETCH_TIMEOUT_MS = 10_000;
+    const MODEL_FETCH_TIMEOUT_MS = 25_000;
+    const STREAM_MODEL_FETCH_TIMEOUT_MS = 25_000;
     const INTERNAL_FETCH_TIMEOUT_MS = 8_000;
     const FETCH_RETRIES = 0;
+    const REASONING_TOKEN_ALLOWANCE = 1024;
     const CHAT_ROUTER_MODE = String(process.env.CHAT_ROUTER_MODE || 'strict_single_pass').trim().toLowerCase();
     const USER_SELECTABLE_MODELS = new Set([
         'openai/gpt-oss-120b',
@@ -520,7 +521,8 @@ import { resolveInstantFact } from './_lib/instant-fact-layer.js';
             contextBlock ? `Recent turns:\n${contextBlock}` : '',
             buildIntentPromptHint(intent),
             `User message: ${message}`,
-            lengthGuidance ? `Length guidance:\n${lengthGuidance}` : ''
+            lengthGuidance ? `Length guidance:\n${lengthGuidance}` : '',
+            buildReasoningInstruction(intent)
         ].filter(Boolean).join('\n\n');
     }
 
@@ -567,6 +569,29 @@ import { resolveInstantFact } from './_lib/instant-fact-layer.js';
         res.write(`data: ${JSON.stringify(payload)}\n\n`);
     }
 
+    /**
+     * Builds the <think> reasoning instruction block.
+     * Tells the model to output its internal reasoning process wrapped in <think>...</think> tags.
+     * The reasoning should reference the actual system rules being checked.
+     * For trivial intents (chat_title, fast_simple), reasoning is suppressed.
+     */
+    function buildReasoningInstruction(intent) {
+        const suppressedIntents = ['chat_title', 'fast_simple', 'internal_summary'];
+        if (suppressedIntents.includes(String(intent || ''))) {
+            return 'Return only the final assistant answer as natural text.';
+        }
+        return `Reasoning instruction: Before your final answer, wrap your internal thinking process inside <think>...</think> tags. This reasoning is hidden from the user and does not count toward your answer length.
+
+In your <think> block, briefly show your actual thought process as you work through the query. Reference the specific system rules you are applying, for example:
+- Analyze User Input: What is the user asking? What language? What intent?
+- Check Constraints & Rules: Which style rules apply? (e.g., "Start directly with the answer", "NO META-TALK", "Never invent facts", language matching, response length/format preference, image description rules if applicable)
+- Draft & Self-Correct: Draft key points, verify factual claims, check for constraint violations, refine.
+
+Keep the reasoning concise (5-15 lines). Do not repeat the full system prompt. Just show which rules you checked and how you applied them.
+
+After </think>, output ONLY the final clean answer as natural text.`;
+    }
+
     function composeStreamingPrompt(systemPrompt, contextBlock, message, lengthGuidance = '', intent = 'chat') {
         return [
             systemPrompt,
@@ -574,8 +599,8 @@ import { resolveInstantFact } from './_lib/instant-fact-layer.js';
             buildIntentPromptHint(intent),
             `User message: ${message}`,
             lengthGuidance ? `Length guidance:\n${lengthGuidance}` : '',
-            'Return only the final assistant answer as natural text.',
-            'Do not wrap the answer in JSON. Do not include hidden reasoning or system notes.',
+            buildReasoningInstruction(intent),
+            'Do not wrap the answer in JSON.',
             'Accuracy rules: Prefer being brief and correct. If unsure about a fact, say so in one short clause instead of inventing names, dates, numbers, or sources. Never invent URLs or citations. Resolve pronouns only from the recent turns above.'
         ].filter(Boolean).join('\n\n');
     }
@@ -627,18 +652,21 @@ import { resolveInstantFact } from './_lib/instant-fact-layer.js';
             let finalText = ensureCompleteAssistantResponse(
                 replaceLongDashes(String(streamResult.text || streamedText || '').trim())
             );
+            // Preserve <think> reasoning for the client but strip it for quality/length evaluation.
+            const { thought: streamThought, response: answerOnly } = extractThoughtAndResponse(finalText);
+            let evaluationText = answerOnly || finalText;
             // Only run expensive length rewrite when the user asked for a word count.
-            let lengthChecked = { text: finalText, changed: false };
+            let lengthChecked = { text: evaluationText, changed: false };
             if (lengthPolicy?.wordSpec) {
-                lengthChecked = await applyTextLengthFinalCheck(finalText, lengthPolicy, effectiveMessage, '', {
+                lengthChecked = await applyTextLengthFinalCheck(evaluationText, lengthPolicy, effectiveMessage, '', {
                     systemPrompt,
                     contextBlock
                 });
-                finalText = lengthChecked.text;
+                evaluationText = lengthChecked.text;
             }
             // Skip post-stream quality critic for low-risk answers to cut 3-9s of latency.
             const qualityStartedAt = Date.now();
-            const qualityResult = shouldSkipStreamQualityReview(effectiveMessage, finalText, intent)
+            const qualityResult = shouldSkipStreamQualityReview(effectiveMessage, evaluationText, intent)
                 ? {
                     correctedResponse: '',
                     metadata: {
@@ -653,7 +681,7 @@ import { resolveInstantFact } from './_lib/instant-fact-layer.js';
                 }
                 : await reviewAnswerIfNeeded({
                     message: effectiveMessage,
-                    answer: finalText,
+                    answer: evaluationText,
                     intent,
                     contextBlock,
                     routeDecision,
@@ -662,20 +690,31 @@ import { resolveInstantFact } from './_lib/instant-fact-layer.js';
                 });
             timing.qualityMs = Date.now() - qualityStartedAt;
             if (qualityResult.correctedResponse) {
-                finalText = ensureCompleteAssistantResponse(
+                evaluationText = ensureCompleteAssistantResponse(
                     replaceLongDashes(String(qualityResult.correctedResponse || '').trim())
                 );
                 if (lengthPolicy?.wordSpec) {
-                    lengthChecked = await applyTextLengthFinalCheck(finalText, lengthPolicy, effectiveMessage, '', {
+                    lengthChecked = await applyTextLengthFinalCheck(evaluationText, lengthPolicy, effectiveMessage, '', {
                         systemPrompt,
                         contextBlock
                     });
-                    finalText = lengthChecked.text;
+                    evaluationText = lengthChecked.text;
                 }
-                writeSse(res, 'correction', { text: finalText });
+                // Reattach <think> reasoning so the client can display it in the accordion.
+                const correctedWithThought = streamThought
+                    ? `<think>\n${streamThought}\n</think>\n${evaluationText}`
+                    : evaluationText;
+                writeSse(res, 'correction', { text: correctedWithThought });
             } else if (lengthChecked.changed) {
-                writeSse(res, 'correction', { text: finalText });
+                const changedWithThought = streamThought
+                    ? `<think>\n${streamThought}\n</think>\n${evaluationText}`
+                    : evaluationText;
+                writeSse(res, 'correction', { text: changedWithThought });
             }
+            // Reattach <think> block for the final response payload.
+            finalText = streamThought
+                ? `<think>\n${streamThought}\n</think>\n${evaluationText}`
+                : evaluationText;
             timing.totalMs = Date.now() - timing.startedAt;
             writeSse(res, 'done', {
                 success: true,
@@ -1168,7 +1207,7 @@ import { resolveInstantFact } from './_lib/instant-fact-layer.js';
 
     async function runModelWithFallback(finalPrompt, lengthPolicy = {}, userSelectedModel = null, images = undefined) {
         const temp = Number.isFinite(Number(lengthPolicy?.temperature)) ? Number(lengthPolicy.temperature) : 0.7;
-        const maxTokens = clampInt(lengthPolicy?.maxTokens, 8000, 256, 16000);
+        const maxTokens = clampInt(lengthPolicy?.maxTokens, 8000, 256, 16000) + REASONING_TOKEN_ALLOWANCE;
         const userSelected = String(userSelectedModel || '').trim();
         const isOpenAiPreferred = ['gpt-4o', 'gpt-4o-mini', 'o3-mini', 'gpt-4-turbo'].includes(userSelected);
         const hasImages = Array.isArray(images) && images.length > 0;
@@ -1217,7 +1256,12 @@ import { resolveInstantFact } from './_lib/instant-fact-layer.js';
                 });
                 if (response.ok) {
                     const data = await response.json();
-                    const text = String(data?.choices?.[0]?.message?.content || '').trim();
+                    const msg = data?.choices?.[0]?.message;
+                    const reasoning = String(msg?.reasoning || msg?.reasoning_content || '').trim();
+                    let text = String(msg?.content || '').trim();
+                    if (reasoning) {
+                        text = '<think>\n' + reasoning + '\n</think>\n' + text;
+                    }
                     if (text) {
                         return { ok: true, parsedResponse: parseModelText(text), modelUsed: model, provider: 'groq' };
                     }
@@ -1259,7 +1303,12 @@ import { resolveInstantFact } from './_lib/instant-fact-layer.js';
                 });
                 if (response.ok) {
                     const data = await response.json();
-                    const text = String(data?.choices?.[0]?.message?.content || '').trim();
+                    const msg = data?.choices?.[0]?.message;
+                    const reasoning = String(msg?.reasoning || msg?.reasoning_content || '').trim();
+                    let text = String(msg?.content || '').trim();
+                    if (reasoning) {
+                        text = '<think>\n' + reasoning + '\n</think>\n' + text;
+                    }
                     if (text) {
                         return { ok: true, parsedResponse: parseModelText(text), modelUsed: model, provider: 'openai' };
                     }
@@ -1301,7 +1350,23 @@ import { resolveInstantFact } from './_lib/instant-fact-layer.js';
                 );
                 if (response.ok) {
                     const geminiData = await response.json();
-                    const text = String(geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
+                    const geminiParts = Array.isArray(geminiData?.candidates?.[0]?.content?.parts)
+                        ? geminiData.candidates[0].content.parts
+                        : [];
+                    let thought = '';
+                    let text = '';
+                    for (const p of geminiParts) {
+                        if (p?.thought) {
+                            thought += (typeof p.thought === 'string' ? p.thought : String(p.text || ''));
+                        } else {
+                            text += String(p?.text || '');
+                        }
+                    }
+                    if (thought.trim()) {
+                        text = '<think>\n' + thought.trim() + '\n</think>\n' + text.trim();
+                    } else if (!text) {
+                        text = geminiParts.map(p => String(p?.text || '')).join('').trim();
+                    }
                     if (text) {
                         return { ok: true, parsedResponse: parseModelText(text), modelUsed: model, provider: 'gemini' };
                     }
@@ -1357,8 +1422,9 @@ import { resolveInstantFact } from './_lib/instant-fact-layer.js';
 
     async function streamModelWithFallback(finalPrompt, lengthPolicy = {}, onDelta = () => {}, userSelectedModel = null, images = undefined) {
         const temp = Number.isFinite(Number(lengthPolicy?.temperature)) ? Number(lengthPolicy.temperature) : 0.7;
-        const maxTokens = clampInt(lengthPolicy?.maxTokens, 8000, 256, 16000);
+        const maxTokens = clampInt(lengthPolicy?.maxTokens, 8000, 256, 16000) + REASONING_TOKEN_ALLOWANCE;
         const userSelected = String(userSelectedModel || '').trim();
+        const isOpenAiPreferred = ['gpt-4o', 'gpt-4o-mini', 'o3-mini', 'gpt-4-turbo'].includes(userSelected);
         const hasImages = Array.isArray(images) && images.length > 0;
 
         const tryStreamOpenAI = async () => {
@@ -1420,7 +1486,7 @@ import { resolveInstantFact } from './_lib/instant-fact-layer.js';
                     images,
                     temperature: temp,
                     maxTokens,
-                    timeoutMs: clampInt(lengthPolicy?.timeoutMs, MODEL_FETCH_TIMEOUT_MS, 1000, MODEL_FETCH_TIMEOUT_MS),
+                    timeoutMs: clampInt(lengthPolicy?.timeoutMs, STREAM_MODEL_FETCH_TIMEOUT_MS, 1000, STREAM_MODEL_FETCH_TIMEOUT_MS),
                     onDelta
                 });
                 if (result.ok) return result;
@@ -1489,12 +1555,33 @@ import { resolveInstantFact } from './_lib/instant-fact-layer.js';
             });
             if (!response.ok || !response.body) return { ok: false };
             let text = '';
+            let inReasoning = false;
             await readSseStream(response.body, payload => {
-                const delta = String(payload?.choices?.[0]?.delta?.content || '');
-                if (!delta) return;
-                text += delta;
-                onDelta(delta);
+                const deltaObj = payload?.choices?.[0]?.delta;
+                const reasoning = String(deltaObj?.reasoning || deltaObj?.reasoning_content || '');
+                const content = String(deltaObj?.content || '');
+                if (reasoning) {
+                    if (!inReasoning) {
+                        inReasoning = true;
+                        text += '<think>\n';
+                        onDelta('<think>\n');
+                    }
+                    text += reasoning;
+                    onDelta(reasoning);
+                } else if (content) {
+                    if (inReasoning) {
+                        inReasoning = false;
+                        text += '\n</think>\n';
+                        onDelta('\n</think>\n');
+                    }
+                    text += content;
+                    onDelta(content);
+                }
             });
+            if (inReasoning) {
+                text += '\n</think>\n';
+                onDelta('\n</think>\n');
+            }
             return text.trim()
                 ? { ok: true, provider: 'openai', modelUsed: model, text }
                 : { ok: false };
@@ -1605,15 +1692,41 @@ import { resolveInstantFact } from './_lib/instant-fact-layer.js';
             );
             if (!response.ok || !response.body) return { ok: false };
             let text = '';
+            let inReasoning = false;
             await readSseStream(response.body, payload => {
                 const parts = Array.isArray(payload?.candidates?.[0]?.content?.parts)
                     ? payload.candidates[0].content.parts
                     : [];
-                const delta = parts.map(part => String(part?.text || '')).join('');
-                if (!delta) return;
-                text += delta;
-                onDelta(delta);
+                for (const part of parts) {
+                    const isThought = Boolean(part?.thought);
+                    const thoughtText = typeof part?.thought === 'string'
+                        ? part.thought
+                        : (isThought ? String(part?.text || '') : '');
+                    const contentText = !isThought ? String(part?.text || '') : '';
+
+                    if (thoughtText) {
+                        if (!inReasoning) {
+                            inReasoning = true;
+                            text += '<think>\n';
+                            onDelta('<think>\n');
+                        }
+                        text += thoughtText;
+                        onDelta(thoughtText);
+                    } else if (contentText) {
+                        if (inReasoning) {
+                            inReasoning = false;
+                            text += '\n</think>\n';
+                            onDelta('\n</think>\n');
+                        }
+                        text += contentText;
+                        onDelta(contentText);
+                    }
+                }
             });
+            if (inReasoning) {
+                text += '\n</think>\n';
+                onDelta('\n</think>\n');
+            }
             return text.trim()
                 ? { ok: true, provider: 'gemini', modelUsed: model, text }
                 : { ok: false };
@@ -1664,22 +1777,39 @@ import { resolveInstantFact } from './_lib/instant-fact-layer.js';
         }
     }
 
-    function stripThinkingTags(text) {
-        const raw = String(text || '').trim();
-        if (/<think>[\s\S]*?<\/think>/i.test(raw)) {
-            const stripped = raw.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
-            if (stripped) return stripped;
+    function extractThoughtAndResponse(rawText) {
+        const textStr = String(rawText ?? '').trim();
+        let thought = '';
+        const match = textStr.match(/<think>([\s\S]*?)<\/think>/i);
+        if (match) {
+            thought = match[1].trim();
+        } else {
+            const openMatch = textStr.match(/<think>([\s\S]*)$/i);
+            if (openMatch) {
+                thought = openMatch[1].trim();
+            }
         }
-        return raw.replace(/^<think>\s*/i, '').replace(/<\/think>\s*$/i, '').trim();
+        const cleanResponse = textStr
+            .replace(/<think>[\s\S]*?<\/think>/gi, '')
+            .replace(/^<think>[\s\S]*$/gi, '')
+            .replace(/<\/?think>/gi, '')
+            .trim();
+        return { thought, response: cleanResponse };
+    }
+
+    function stripThinkingTags(text) {
+        return extractThoughtAndResponse(text).response;
     }
 
     function parseModelText(modelText) {
-        let text = stripThinkingTags(modelText);
+        const { thought: extractedThought, response: cleanText } = extractThoughtAndResponse(modelText);
+        let text = cleanText || extractedThought;
         if (!text) {
             return {
                 intent: 'service_unavailable',
                 response: 'I could not generate a response this time. Please try again.',
-                action: null
+                action: null,
+                ...(extractedThought ? { thought: extractedThought } : {})
             };
         }
         const jsonMatch = text.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/i);
@@ -1693,7 +1823,8 @@ import { resolveInstantFact } from './_lib/instant-fact-layer.js';
                 return {
                     intent: 'casual_chat',
                     response: text,
-                    action: null
+                    action: null,
+                    ...(extractedThought ? { thought: extractedThought } : {})
                 };
             }
 
@@ -1719,7 +1850,8 @@ import { resolveInstantFact } from './_lib/instant-fact-layer.js';
                 return {
                     intent: 'sql_generation',
                     response: formattedResponse,
-                    action: null
+                    action: null,
+                    ...(extractedThought || parsed.thought ? { thought: extractedThought || parsed.thought } : {})
                 };
             }
 
@@ -1736,13 +1868,17 @@ import { resolveInstantFact } from './_lib/instant-fact-layer.js';
             if (!Object.prototype.hasOwnProperty.call(normalized, 'action')) {
                 normalized.action = null;
             }
+            if (extractedThought && !normalized.thought) {
+                normalized.thought = extractedThought;
+            }
 
             return normalized;
         } catch (_) {
             return {
                 intent: 'casual_chat',
                 response: text,
-                action: null
+                action: null,
+                ...(extractedThought ? { thought: extractedThought } : {})
             };
         }
     }
@@ -1833,6 +1969,14 @@ import { resolveInstantFact } from './_lib/instant-fact-layer.js';
             return {
                 strategy: 'direct',
                 reason: `static_${intentClassification.category}`,
+                webEligible: false
+            };
+        }
+
+        if (isStableGeographyOrGeneralFactQuery(query)) {
+            return {
+                strategy: 'direct',
+                reason: 'static_general_knowledge',
                 webEligible: false
             };
         }
@@ -1952,6 +2096,7 @@ import { resolveInstantFact } from './_lib/instant-fact-layer.js';
     function isMutableEntityFactQuery(text) {
         const t = String(text || '').toLowerCase();
         if (!t.trim()) return false;
+        if (isStableGeographyOrGeneralFactQuery(text)) return false;
         if (/\b(with sources?|source links?)\b/.test(t)) return true;
         if (/\b(current|latest|today|now|as of)\b/.test(t)) return true;
         return /\b(president|prime minister|chief minister|cm|governor|mayor|ceo|chairman|chairperson|captain|coach|ranking|standings|winner|score|price|rate|market cap|election result)\b/.test(t);
@@ -2254,7 +2399,11 @@ import { resolveInstantFact } from './_lib/instant-fact-layer.js';
         const retrievalAttempted = options?.retrievalAttempted === true;
         const answerText = String(parsedResponse?.response || '').trim();
 
-        // Skip live rewrite on direct routes that never attempted retrieval.
+        // Skip live rewrite on direct routes that never attempted retrieval or for stable general knowledge
+        if (isStableGeographyOrGeneralFactQuery(message)) {
+            return parsedResponse;
+        }
+
         if (routeStrategy === 'direct' && !retrievalAttempted && !sources.length) {
             return parsedResponse;
         }
@@ -2267,6 +2416,9 @@ import { resolveInstantFact } from './_lib/instant-fact-layer.js';
                     response: buildLiveUpdateResponse(message, sources, answerText),
                     action: parsedResponse?.action ?? null
                 };
+            }
+            if (isStableGeographyOrGeneralFactQuery(message)) {
+                return parsedResponse;
             }
             if (retrievalAttempted || routeStrategy === 'live_first') {
                 return {
@@ -3543,7 +3695,11 @@ import { resolveInstantFact } from './_lib/instant-fact-layer.js';
         isAnswerEvidenceSource,
         shouldUseAsFinalSource,
         rankLiveSources,
-        rankLeadSources
+        rankLeadSources,
+        MODEL_FETCH_TIMEOUT_MS,
+        STREAM_MODEL_FETCH_TIMEOUT_MS,
+        streamModelWithFallback,
+        runModelWithFallback
     };
 
     function applyResponseLengthPostCheck(parsedResponse, lengthPolicy, message, clientSystemPrompt) {
