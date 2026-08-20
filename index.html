@@ -9076,7 +9076,7 @@ let showRoutingDebugBadge = false;
 
             let current = streamingConverseSpeech.rawBuffer;
             let sentenceMatch;
-            const sentenceRegex = /^(.*?[.?!;\n]+(?:\s+|$))([\s\S]*)$/;
+            const sentenceRegex = /^([\s\S]*?[.?!;\n]+(?:\s+|$))([\s\S]*)$/;
             while (current && (sentenceMatch = current.match(sentenceRegex))) {
                 const sentence = sentenceMatch[1].trim();
                 current = sentenceMatch[2];
