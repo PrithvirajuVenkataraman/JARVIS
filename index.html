@@ -2782,8 +2782,8 @@ async function processUserQuery(text, options = {}) {
             entityIntent,
             riskLevel
         });
-        await handleLiveRetrievalQuery(normalizeExplicitWebSearchQuery(t));
-        return { intent: 'live_retrieval' };
+        const handled = await handleLiveRetrievalQuery(normalizeExplicitWebSearchQuery(t));
+        if (handled) return { intent: 'live_retrieval' };
     }
     if (isFactSearchEnabled() && isStrictLatestQuery(t)) {
         logRoutingDebug('processUserQuery -> strict_latest', t, {
@@ -2792,8 +2792,8 @@ async function processUserQuery(text, options = {}) {
             entityIntent,
             riskLevel
         });
-        await handleStrictLatestQuery(t);
-        return { intent: 'strict_latest' };
+        const handled = await handleStrictLatestQuery(t);
+        if (handled) return { intent: 'strict_latest' };
     }
 
     if (isPopCultureReferenceQuery(t)) {
@@ -2837,19 +2837,20 @@ async function processUserQuery(text, options = {}) {
                 entityIntent,
                 riskLevel
             });
-            await handleUniversalEntityFactQuery(t, liveIntent);
-            return { intent: 'entity_fact' };
+            const handled = await handleUniversalEntityFactQuery(t, liveIntent);
+            if (handled) return { intent: 'entity_fact' };
+        } else {
+            logRoutingDebug('processUserQuery -> live_retrieval broad_factual', t, {
+                selectedHandler: 'handleLiveRetrievalQuery',
+                liveIntent,
+                entityIntent,
+                riskLevel
+            });
+            const handled = await handleLiveRetrievalQuery(t, {
+                broadFactualWeb: true
+            });
+            if (handled) return { intent: 'live_retrieval' };
         }
-        logRoutingDebug('processUserQuery -> live_retrieval broad_factual', t, {
-            selectedHandler: 'handleLiveRetrievalQuery',
-            liveIntent,
-            entityIntent,
-            riskLevel
-        });
-        await handleLiveRetrievalQuery(t, {
-            broadFactualWeb: true
-        });
-        return { intent: 'live_retrieval' };
     }
 
     if (
@@ -2863,8 +2864,8 @@ async function processUserQuery(text, options = {}) {
             entityIntent,
             riskLevel
         });
-        await handleLiveRetrievalQuery(t);
-        return { intent: 'live_retrieval' };
+        const handled = await handleLiveRetrievalQuery(t);
+        if (handled) return { intent: 'live_retrieval' };
     }
 
     if (isUniversalExplainerRequest(t)) {
@@ -8097,6 +8098,9 @@ let showRoutingDebugBadge = false;
 
         function extractThoughtAndAnswer(rawText) {
             const textStr = String(rawText ?? '');
+            if (textStr.startsWith('<') && !textStr.includes('>') && '<think>'.startsWith(textStr.toLowerCase())) {
+                return { thought: '', answer: '' };
+            }
             let thought = '';
             const match = textStr.match(/<think>([\s\S]*?)<\/think>/i);
             if (match) {
@@ -8113,126 +8117,133 @@ let showRoutingDebugBadge = false;
 
         function generateContextualThoughtSteps(userPrompt) {
             const raw = String(userPrompt || '').trim();
+            if (!raw) return [];
             const prompt = raw.toLowerCase();
-            if (!raw || (/\b(hi|hello|hey|thanks|thank you|good morning|bye|good night|ok|okay)\b/i.test(prompt) && prompt.length < 15)) {
+
+            // Ignore brief pleasantries and ultra-short non-inquiries (< 15 chars)
+            if (/^(hi|hello|hey|thanks|thank you|good morning|good evening|good afternoon|bye|good night|ok|okay|cool|sure|yep|nope)[!.?]*$/i.test(prompt) && raw.length < 15) {
                 return [];
             }
-            if (/\b(song|songs|music|track|tracks|album|artist|singer|band|discography|hits)\b/i.test(prompt)) {
-                const subject = raw.replace(/\b(name|list|give me|suggest|tell me|what are|a few|some|best|top|popular|latest|recent|famous|songs?|of|by|from|tracks?|music|albums?)\b/gi, '').replace(/[?.!]+/g, '').trim();
-                const target = subject || 'the requested artist';
-                return [
-                    `Identifying musical discography and signature releases for ${target}.`,
-                    `Evaluating chart-topping singles, breakthrough hits, and critical favorites across eras.`,
-                    `Compiling formatted tracklist with album context and prominent musical collaborations.`
-                ];
+
+            // Extract the core subject / question entity
+            let subject = raw.replace(/^[¿¡"'\s]+|[?"'\s]+$/g, '');
+            subject = subject.replace(/^(?:can you|could you|please|kindly|i want to|i need to|help me|tell me|show me|explain to me|give me|write|create|implement|solve|calculate|compute|compare|analyze|describe|discuss|summarize|what is|what was|what are|what were|who is|who was|who are|who were|why is|why was|why does|why did|why do|how to|how do i|how does|how is|how can|where is|when was|when did)\s+/i, '');
+            subject = subject.replace(/\b(?:step by step|in detail|briefly|simply|with code|with examples?|for beginners?|please)\b/gi, '').trim();
+            subject = subject.replace(/[?.!:]+$/g, '').trim();
+            const subjectSnippet = subject ? (subject.length > 55 ? subject.slice(0, 52) + '...' : subject) : 'the inquiry';
+
+            // Detect programming language & code constructs
+            const langMatch = raw.match(/\b(python|javascript|typescript|c\+\+|cpp|c#|rust|golang|go|java|kotlin|swift|ruby|php|sql|scala|haskell|bash|powershell|html|css)\b/i);
+            const lang = langMatch ? (langMatch[0].toLowerCase() === 'cpp' ? 'C++' : langMatch[0]) : null;
+
+            // Detect comparisons
+            const compMatch = raw.match(/(?:difference between|compare|versus|\bvs\.?\b)\s+([A-Za-z0-9_+#.\s-]+?)\s+(?:and|versus|\bvs\.?\b)\s+([A-Za-z0-9_+#.\s-]+)/i);
+            const isComparison = Boolean(compMatch) || /\b(versus|\bvs\b|compare|contrast|trade-?offs?|pros and cons|which is better)\b/i.test(prompt);
+            const entityA = compMatch ? compMatch[1].trim() : null;
+            const entityB = compMatch ? compMatch[2].trim() : null;
+
+            // Domain categorizations
+            const isCode = Boolean(lang) || /\b(code|algorithm|function|class|method|struct|pointer|interface|refactor|debug|bug|async|await|promise|regex|stack|queue|tree|graph|dp|recursion|api|database|query|table|schema|endpoint|implementation|quicksort|binary search|palindrome)\b/i.test(prompt);
+            const isMath = /\b(calculate|compute|solve|derivative|integral|equation|formula|matrix|matrices|eigen|probability|statistics|algebra|geometry|theorem|proof|arithmetic|polynomial|linear equation)\b/i.test(prompt);
+            const isScience = /\b(physics|quantum|relativity|gravity|spacetime|black hole|event horizon|thermodynamics|chemistry|molecule|reaction|atom|orbital|biology|cell|dna|rna|gene|crispr|protein|enzyme|evolution|planet|orbit|galaxy|star|supernova|photosynthesis)\b/i.test(prompt);
+            const isHistory = /\b(history|historical|war|battle|empire|dynasty|revolution|century|treaty|monarch|king|queen|ancient|medieval|republic|colony|colonial|independence|civilization|collapse|roman empire|french revolution)\b/i.test(prompt);
+            const isGeography = /\b(capital|capitals|country|countries|continent|geography|geographic|border|borders|territory|provinces?|state|states|city|cities|mountains?|ocean|river|latitude|longitude)\b/i.test(prompt);
+            const isEconOrSocial = /\b(economy|economics|gdp|inflation|monetary|fiscal|interest rate|market|supply and demand|philosophy|ethics|moral|utilitarianism|deontology|epistemology|sociology)\b/i.test(prompt);
+            const isProceduralOrCulinary = /\b(recipe|cook|cooking|bake|baking|ingredient|ingredients|dish|food|cuisine|itinerary|travel to|places to visit|things to do in|steps to|how to make)\b/i.test(prompt);
+            const isCreativeOrMedia = /\b(song|songs|music|track|tracks|album|artist|singer|band|discography|movie|movies|film|films|cinema|actor|actress|director|series|show|shows|sitcom|anime|watchlist|novel|author)\b/i.test(prompt);
+
+            // Construct 3-Stage Dynamic Narratives:
+
+            // --- STAGE 1: CONTEXTUALIZATION ---
+            let stage1 = '';
+            if (isComparison && (entityA || entityB)) {
+                const left = entityA || 'first entity';
+                const right = entityB || 'second entity';
+                stage1 = `Deconstructing comparative dimensions between ${left} and ${right}: scoping functional boundaries, use cases, and core criteria.`;
+            } else if (isCode) {
+                stage1 = `Deconstructing problem requirements and boundary constraints for ${subjectSnippet}${lang ? ' in ' + lang : ''}: analyzing input/output specifications and edge conditions.`;
+            } else if (isMath) {
+                stage1 = `Parsing mathematical definitions and operational scope for ${subjectSnippet}: identifying variable domains, boundary conditions, and formal constraints.`;
+            } else if (isScience) {
+                stage1 = `Framing theoretical premises and empirical context for ${subjectSnippet}: isolating governing physical principles and observable parameters.`;
+            } else if (isHistory) {
+                stage1 = `Contextualizing historical timeline and geopolitical landscape for ${subjectSnippet}: identifying primary catalysts and societal frameworks.`;
+            } else if (isGeography) {
+                stage1 = `Scoping geographic territory and administrative jurisdiction for ${subjectSnippet}: mapping regional boundaries and designation criteria.`;
+            } else if (isEconOrSocial) {
+                stage1 = `Framing theoretical axioms and structural dynamics regarding ${subjectSnippet}: scoping behavioral mechanisms and systemic factors.`;
+            } else if (isProceduralOrCulinary) {
+                stage1 = `Analyzing procedural prerequisites and compositional requirements for ${subjectSnippet}: establishing essential workflow dependencies.`;
+            } else if (isCreativeOrMedia) {
+                stage1 = `Analyzing creative catalog, thematic elements, and contextual background for ${subjectSnippet}: scoping prominent milestones and stylistic traits.`;
+            } else {
+                stage1 = `Deconstructing core inquiry parameters and contextual nuances for ${subjectSnippet}: isolating key premises and intent.`;
             }
-            if (/\b(movie|movies|film|films|cinema|actor|actress|director|series|show|shows|sitcom|anime|watchlist)\b/i.test(prompt)) {
-                const subject = raw.replace(/\b(name|list|give me|suggest|tell me|what are|a few|some|best|top|popular|latest|recent|famous|movies?|films?|shows?|series|of|by|from)\b/gi, '').replace(/[?.!]+/g, '').trim();
-                const target = subject || 'the requested title';
-                return [
-                    `Analyzing cinema catalog, director filmography, and thematic genres for ${target}.`,
-                    `Assessing audience reception, critical ratings, and standout storytelling elements.`,
-                    `Structuring a well-balanced recommendation list with genre context and plot summaries.`
-                ];
+
+            // --- STAGE 2: MECHANISTIC EVALUATION ---
+            let stage2 = '';
+            if (isComparison && (entityA || entityB)) {
+                const left = entityA || 'primary option';
+                const right = entityB || 'alternative option';
+                stage2 = `Evaluating structural trade-offs, performance characteristics, and architectural trade-offs between ${left} and ${right}.`;
+            } else if (isCode) {
+                stage2 = `Evaluating algorithmic patterns, invariant logic, and time/space complexity trade-offs to ensure robust asymptotic efficiency.`;
+            } else if (isMath) {
+                stage2 = `Applying step-by-step mathematical transformations, symbolic simplification, and formal deductive rules.`;
+            } else if (isScience) {
+                stage2 = `Tracing causal mechanisms and domain-specific governing dynamics connecting microscopic/macroscopic scientific laws to observed behavior.`;
+            } else if (isHistory) {
+                stage2 = `Analyzing causal trajectories, institutional dynamics, and socioeconomic forces driving historical outcomes.`;
+            } else if (isGeography) {
+                stage2 = `Evaluating geopolitical compromises, spatial distribution factors, and jurisdictional governance structures.`;
+            } else if (isEconOrSocial) {
+                stage2 = `Examining causal interactions, trade-off matrices, and equilibrium effects across interacting systemic variables.`;
+            } else if (isProceduralOrCulinary) {
+                stage2 = `Evaluating technique execution, timing precision, component interactions, and critical quality factors.`;
+            } else if (isCreativeOrMedia) {
+                stage2 = `Evaluating critical reception, structural narrative design, and distinctive aesthetic or thematic contributions.`;
+            } else {
+                stage2 = `Evaluating relevant domain knowledge, causal mechanisms, and contrasting perspectives surrounding the topic.`;
             }
-            if (/\b(recipe|cook|cooking|bake|ingredient|ingredients|dish|dishes|meal|food|cuisine)\b/i.test(prompt)) {
-                const subject = raw.replace(/\b(how to make|how to cook|recipe for|give me a recipe|ingredients for|how do i make)\b/gi, '').replace(/[?.!]+/g, '').trim();
-                const target = subject || 'the dish';
-                return [
-                    `Deconstructing authentic flavor profiles and standard culinary methods for ${target}.`,
-                    `Determining essential ingredients, pantry substitutions, and precise cooking times.`,
-                    `Formulating clear, sequential kitchen instructions with chef tips for optimal texture and taste.`
-                ];
+
+            // --- STAGE 3: SYNTHESIS & STRUCTURED OUTPUT ---
+            let stage3 = '';
+            if (isComparison && (entityA || entityB)) {
+                const left = entityA || 'the options';
+                const right = entityB || '';
+                stage3 = `Synthesizing balanced, multi-perspective comparative breakdown with clear situational recommendations for ${left}${right ? ' and ' + right : ''}.`;
+            } else if (isCode) {
+                stage3 = `Constructing clean, idiomatic ${lang || 'code'} implementation with boundary validation, error handling, and structured documentation.`;
+            } else if (isMath) {
+                stage3 = `Verifying intermediate algebraic arithmetic and finalizing the exact, step-by-step simplified derivation.`;
+            } else if (isScience) {
+                stage3 = `Synthesizing a grounded, first-principles explanation connecting theoretical mechanics to observable conclusions.`;
+            } else if (isHistory) {
+                stage3 = `Synthesizing evidence-based historical narrative connecting underlying catalysts, major inflection points, and lasting significance.`;
+            } else if (isGeography) {
+                stage3 = `Synthesizing administrative details, geographic context, and historical rationale into a structured summary.`;
+            } else if (isEconOrSocial) {
+                stage3 = `Formulating a coherent, multi-dimensional synthesis integrating theoretical foundations with practical implications.`;
+            } else if (isProceduralOrCulinary) {
+                stage3 = `Formulating structured, sequential instructions with practical tips for optimal results and error avoidance.`;
+            } else if (isCreativeOrMedia) {
+                stage3 = `Structuring a comprehensive, curated overview formatted with contextual details and standout recommendations.`;
+            } else {
+                stage3 = `Synthesizing a thorough, cohesive, and human-like response organized for maximum clarity.`;
             }
-            if (/\b(palindrome|palindromic|substring)\b/i.test(prompt)) {
-                return [
-                    'Deconstructing string palindromic properties: a palindrome is symmetric around its midpoint.',
-                    'Evaluating algorithmic approaches: dynamic programming takes O(N²) space, whereas expanding around center operates in O(1) auxiliary space.',
-                    'Tracing pointer boundaries for both odd-length (single character center) and even-length (two-character center) palindromes.',
-                    'Constructing optimal Python implementation with boundary checks and clean asymptotic efficiency.'
-                ];
-            }
-            if (/\b(python|javascript|typescript|c\+\+|java|rust|go|golang|code|function|algorithm|class|bug|debug|sql|regex|implement|write\s+a|refactor)\b/i.test(prompt)) {
-                const langMatch = raw.match(/\b(python|javascript|typescript|c\+\+|java|rust|go|golang|sql|regex)\b/i);
-                const lang = langMatch ? langMatch[0] : 'code';
-                return [
-                    `Analyzing requirements, expected data types, constraints, and edge conditions for ${lang}.`,
-                    `Selecting optimal algorithmic patterns to minimize time complexity and maintain memory efficiency.`,
-                    `Drafting clean, idiomatic code with clear error handling and type-safe architecture.`
-                ];
-            }
-            if (/\b(black hole|event horizon|dilation|relativity|gravity|spacetime|gravitational)\b/i.test(prompt)) {
-                return [
-                    'Grounding problem in Einstein\'s theory of General Relativity and the Schwarzschild spacetime metric.',
-                    'Connecting gravitational field strength (potential depth) to the deceleration of coordinate time for distant observers.',
-                    'Bridging theoretical physics with intuitive conceptual breakdown of the event horizon and tidal forces.'
-                ];
-            }
-            if (/\b(physics|quantum|space|star|galaxy|biology|chemistry|science|evolution|planet|orbit)\b/i.test(prompt)) {
-                return [
-                    'Reviewing underlying scientific laws, foundational axioms, and empirical models.',
-                    'Tracing cause-and-effect relationships across physical, chemical, or biological mechanisms.',
-                    'Structuring a comprehensive, grounded explanation connecting first principles to observable outcomes.'
-                ];
-            }
-            if (/\b(calculate|compute|solve|derivative|integral|equation|formula|matrix|math|arithmetic)\b/i.test(prompt)) {
-                return [
-                    'Parsing mathematical symbols, algebraic definitions, and constraint domains.',
-                    'Applying step-by-step mathematical rules (e.g. product/chain rules, matrix operations, or substitutions).',
-                    'Verifying intermediate algebraic arithmetic and finalizing the exact simplified solution.'
-                ];
-            }
-            if (/\b(capital|capitals|country|countries|continent|geography|geographic|territory|provinces?)\b/i.test(prompt)) {
-                let target = 'the requested region';
-                const countryMatch = raw.match(/\b(?:capital of|country of|in|for)\s+([A-Z][A-Za-z\s]+?)(?:,|\?|\.|\band\b|$)/i);
-                if (countryMatch && countryMatch[1]) {
-                    target = countryMatch[1].trim();
-                } else {
-                    const fallbackMatch = raw.match(/\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b/);
-                    if (fallbackMatch && fallbackMatch[1]) target = fallbackMatch[1].trim();
-                }
-                return [
-                    `Identifying designated capital, administrative jurisdiction, and geographic territory for ${target}.`,
-                    `Examining geopolitical compromises, historical regional rivalries, and constitutional selection criteria.`,
-                    `Synthesizing historical compromise details with geography and administrative context.`
-                ];
-            }
-            if (/\b(history|roman|war|wars|battle|empire|empires|dynasty|revolution|century|ancient|civilization|medieval|collapse|feudal)\b/i.test(prompt)) {
-                return [
-                    'Retrieving historical timeline, geopolitical landscape, and societal structures of the era.',
-                    'Analyzing primary socioeconomic catalysts, governance failures, and institutional decay.',
-                    'Synthesizing structural causes and external pressures into a cohesive, multi-perspective historical breakdown.'
-                ];
-            }
-            if (/\b(ai|machine learning|neural network|transformer|deep learning|llm|nlp)\b/i.test(prompt)) {
-                return [
-                    'Deconstructing neural model architecture, mathematical loss formulations, and attention mechanisms.',
-                    'Examining training dynamics, representation spaces, and inference behavior.',
-                    'Synthesizing technical mechanics with practical architectural trade-offs.'
-                ];
-            }
-            if (/\b(place|places|travel|trip|itinerary|visit|city|tour|hotel|attraction)\b/i.test(prompt)) {
-                const subject = raw.replace(/\b(places to visit in|trip to|travel to|best places in|things to do in)\b/gi, '').replace(/[?.!]+/g, '').trim();
-                const target = subject || 'the destination';
-                return [
-                    `Mapping geography, cultural landmarks, historical highlights, and transit hubs for ${target}.`,
-                    `Optimizing daily pacing, geographic proximity of attractions, and local traveler considerations.`,
-                    `Assembling an actionable, rich itinerary complete with timing suggestions and practical tips.`
-                ];
-            }
-            const cleanSubject = raw.replace(/^(who is|who was|what is|what was|why is|why does|how does|how is|explain|tell me about|describe|compare)\s+/i, '').replace(/[?.!]+/g, '').trim();
-            const subjectSnippet = cleanSubject.length > 40 ? cleanSubject.slice(0, 38) + '...' : cleanSubject;
-            return [
-                `Deconstructing the core inquiry and contextual nuances regarding ${subjectSnippet || 'the topic'}.`,
-                `Evaluating relevant domain knowledge, core principles, and contrasting perspectives.`,
-                `Synthesizing a thorough, well-reasoned, and human-like response.`
-            ];
+
+            return [stage1, stage2, stage3];
         }
 
         window.toggleThinkingProcessCard = function(card, event) {
             if (event) event.stopPropagation();
             if (!card) return;
-            card.classList.toggle('is-expanded');
+            const parent = (typeof card.closest === 'function') ? (card.closest('.thinking-process-card') || card) : card;
+            const isExpanded = parent.classList.toggle('is-expanded');
+            const header = (typeof parent.querySelector === 'function') ? parent.querySelector('.thinking-header') : null;
+            if (header && typeof header.setAttribute === 'function') {
+                header.setAttribute('aria-expanded', isExpanded ? 'true' : 'false');
+            }
         };
 
         function buildThinkingProcessHtml(thoughtContent, steps = [], elapsedSeconds = 2.1, isStreaming = false, selfHealing = null) {
@@ -8267,7 +8278,7 @@ let showRoutingDebugBadge = false;
             
             return `
                 <div class="thinking-process-card ${stateClass}" onclick="window.toggleThinkingProcessCard(this, event)">
-                    <div class="thinking-header">
+                    <div class="thinking-header" role="button" tabindex="0" aria-expanded="${isStreaming ? 'true' : 'false'}" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();window.toggleThinkingProcessCard(this.closest('.thinking-process-card')||this, event);}">
                         <div class="thinking-header-left">
                             <span class="thinking-pulse-dot"></span>
                             <span class="thinking-timer">${timerText}</span>
@@ -8578,6 +8589,9 @@ let showRoutingDebugBadge = false;
             if (row.style.display === 'none') {
                 row.style.display = '';
             }
+            if (!row.__thinkingStartedAt) {
+                row.__thinkingStartedAt = performance.now();
+            }
             const parsed = extractThoughtAndAnswer(text);
             const cleanAnswer = parsed.answer;
             const thoughtText = parsed.thought;
@@ -8589,8 +8603,10 @@ let showRoutingDebugBadge = false;
             
             if (thoughtText || (thoughtSteps.length > 0 && !meta?.systemGreeting)) {
                 const isFinished = !meta?.streaming || !!cleanAnswer;
+                const elapsed = meta?.latency 
+                    ? (meta.latency / 1000).toFixed(1) 
+                    : (row.__thinkingStartedAt ? ((performance.now() - row.__thinkingStartedAt) / 1000).toFixed(1) : '1.8');
                 if (!thinkingCard && bubble) {
-                    const elapsed = meta?.latency ? (meta.latency / 1000).toFixed(1) : '1.8';
                     const tempDiv = document.createElement('div');
                     tempDiv.innerHTML = buildThinkingProcessHtml(thoughtText, thoughtSteps, elapsed, !isFinished, meta?.selfHealing);
                     if (tempDiv.firstElementChild) {
@@ -8602,11 +8618,22 @@ let showRoutingDebugBadge = false;
                         thinkingCard.className = 'thinking-process-card is-finished';
                         const timerEl = thinkingCard.querySelector('.thinking-timer');
                         if (timerEl && !timerEl.textContent.startsWith('Thought for')) {
-                            const elapsed = meta?.latency ? (meta.latency / 1000).toFixed(1) : '1.8';
                             timerEl.textContent = `Thought for ${elapsed}s`;
+                        }
+                        const header = thinkingCard.querySelector('.thinking-header');
+                        if (header && typeof header.setAttribute === 'function') {
+                            header.setAttribute('aria-expanded', 'false');
                         }
                     } else {
                         thinkingCard.className = 'thinking-process-card is-active is-expanded';
+                        const timerEl = thinkingCard.querySelector('.thinking-timer');
+                        if (timerEl) {
+                            timerEl.textContent = `Thinking... ${elapsed}s`;
+                        }
+                        const header = thinkingCard.querySelector('.thinking-header');
+                        if (header && typeof header.setAttribute === 'function') {
+                            header.setAttribute('aria-expanded', 'true');
+                        }
                     }
                     if (thoughtText) {
                         const rawContent = thinkingCard.querySelector('.thinking-raw-content');
@@ -8996,7 +9023,9 @@ let showRoutingDebugBadge = false;
                 spokenSegments: [],
                 queue: [],
                 isPlaying: false,
-                completed: false
+                completed: false,
+                inThinking: false,
+                tagBuffer: ''
             };
             setConverseUiState('speaking', 'stream_start');
         }
@@ -9004,14 +9033,51 @@ let showRoutingDebugBadge = false;
         function feedStreamingConverseDelta(deltaText, turnId) {
             if (!streamingConverseSpeech || !streamingConverseSpeech.active) return;
             if (turnId && streamingConverseSpeech.turnId && turnId !== streamingConverseSpeech.turnId) return;
-            const cleanDelta = String(deltaText || '').replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/^<think>[\s\S]*$/gi, '').replace(/<\/?think>/gi, '');
+
+            let chunk = (streamingConverseSpeech.tagBuffer || '') + String(deltaText || '');
+            streamingConverseSpeech.tagBuffer = '';
+            let cleanDelta = '';
+
+            while (chunk.length > 0) {
+                if (streamingConverseSpeech.inThinking) {
+                    const closeIndex = chunk.toLowerCase().indexOf('</think>');
+                    if (closeIndex !== -1) {
+                        chunk = chunk.slice(closeIndex + 8);
+                        streamingConverseSpeech.inThinking = false;
+                    } else {
+                        const partialMatch = chunk.match(/<\/?[a-z]*$/i);
+                        if (partialMatch && ('<think>'.startsWith(partialMatch[0].toLowerCase()) || '</think>'.startsWith(partialMatch[0].toLowerCase()))) {
+                            streamingConverseSpeech.tagBuffer = chunk.slice(partialMatch.index);
+                        }
+                        chunk = '';
+                    }
+                } else {
+                    const openIndex = chunk.toLowerCase().indexOf('<think>');
+                    if (openIndex !== -1) {
+                        cleanDelta += chunk.slice(0, openIndex);
+                        chunk = chunk.slice(openIndex + 7);
+                        streamingConverseSpeech.inThinking = true;
+                    } else {
+                        const partialMatch = chunk.match(/<\/?[a-z]*$/i);
+                        if (partialMatch && ('<think>'.startsWith(partialMatch[0].toLowerCase()) || '</think>'.startsWith(partialMatch[0].toLowerCase()))) {
+                            cleanDelta += chunk.slice(0, partialMatch.index);
+                            streamingConverseSpeech.tagBuffer = chunk.slice(partialMatch.index);
+                            chunk = '';
+                        } else {
+                            cleanDelta += chunk;
+                            chunk = '';
+                        }
+                    }
+                }
+            }
+
             if (!cleanDelta) return;
             streamingConverseSpeech.rawBuffer += cleanDelta;
 
             let current = streamingConverseSpeech.rawBuffer;
             let sentenceMatch;
             const sentenceRegex = /^(.*?[.?!;\n]+(?:\s+|$))([\s\S]*)$/;
-            while ((sentenceMatch = current.match(sentenceRegex))) {
+            while (current && (sentenceMatch = current.match(sentenceRegex))) {
                 const sentence = sentenceMatch[1].trim();
                 current = sentenceMatch[2];
                 if (sentence) {
@@ -9036,6 +9102,10 @@ let showRoutingDebugBadge = false;
                 return;
             }
             if (turnId && streamingConverseSpeech.turnId && turnId !== streamingConverseSpeech.turnId) return;
+            if (!streamingConverseSpeech.inThinking && streamingConverseSpeech.tagBuffer) {
+                streamingConverseSpeech.rawBuffer += streamingConverseSpeech.tagBuffer;
+                streamingConverseSpeech.tagBuffer = '';
+            }
             if (streamingConverseSpeech.rawBuffer.trim()) {
                 const sanitized = sanitizeTextForConverseSpeech(streamingConverseSpeech.rawBuffer.trim());
                 if (sanitized) {
@@ -14762,16 +14832,24 @@ function isPureHowToOrCodingConcept(text) {
 }
 
 function isStableGeographyOrGeneralFactQuery(text) {
+    if (globalThis.JarvisFrontendRouting?.isStableGeographyOrGeneralFactQuery) {
+        return globalThis.JarvisFrontendRouting.isStableGeographyOrGeneralFactQuery(text);
+    }
     const raw = String(text || '').trim();
     const lower = raw.toLowerCase();
     if (!raw) return false;
-    if (/\b(current|currently|latest|recent|today|now|right now|live|breaking|news|price|weather|forecast|score|match|election|stock)\b/i.test(lower)) {
-        return false;
-    }
-    if (/\b(capital of|capital city|why was .+ chosen|located in|continent|origin of|history of|definition of|meaning of|principles of|why did|what caused|catalysts that led)\b/i.test(lower)) {
+    const liveSignals = /\b(?:who\s+is\s+(?:the\s+)?(?:current|present|latest)\s+(?:chief\s+minister|prime\s+minister|president|governor|mayor|chancellor|ceo|chairman|leader|head\s+of\s+state)|who\s+is\s+(?:the\s+)?(?:cm|pm)\s+of|weather\s+in|forecast\s+for|temperature\s+in|stock\s+price|price\s+of\s+(?:bitcoin|btc|eth|solana|crypto|gold|silver|crude|shares?)|market\s+cap\s+of|live\s+score|ipl\s+(?:score|schedule|match|table)|breaking\s+news|today'?s\s+news|earthquake\s+today|election\s+results?\s+today|as\s+of\s+today|right\s+now|open\s+now|near\s+me|nearby|near\s+[a-z]+|with\s+sources?|source\s+links?|what'?s\s+new|new\s+(?:update|updates|release|version|announcement|news|development|features?)|directions\s+to|route\s+to|how\s+to\s+(?:reach|get\s+to)|hotels?\s+(?:near|around|in)|restaurants?\s+(?:near|around|in)|ticket\s+price|tickets?\s+for|entry\s+fee|visiting\s+hours|timings?\s+of|places\s+to\s+visit|things\s+to\s+do\s+in|sightseeing\s+in)\b/i;
+    if (liveSignals.test(lower)) return false;
+
+    if (/\b(?:what\s+(?:is|was)|which\s+city\s+is|name)\s+(?:the\s+)?capital\s+(?:city\s+)?of\s+[a-z\s.'-]+/i.test(lower) ||
+        /\b(?:capital\s+(?:city\s+)?of\s+[a-z\s.'-]+)/i.test(lower) ||
+        /\b[a-z\s.'-]+\s+capital\b/i.test(lower)) {
         return true;
     }
-    return false;
+
+    const stableSignals = /\b(?:continent|continents|ocean|oceans|sea|seas|river|rivers|mountain|mountains|plateau|desert|island|islands|valley|gulf|bay|peninsula|equator|latitude|longitude|currency\s+of|official\s+language\s+of|population\s+of|area\s+of|architecture\s+of|geological\s+formation|why\s+was\s+.+\s+(?:constructed|built|created|founded)|who\s+(?:built|constructed|designed|founded|created)\s+|when\s+was\s+.+\s+(?:built|constructed|founded)|history\s+of|origin\s+of|significance\s+of|ancient\s+wonder|world\s+heritage|brihadeeswarar\s+temple|sun\s+temple|taj\s+mahal|eiffel\s+tower|colosseum|pyramids?\s+of\s+giza|angkor\s+wat|machu\s+picchu|stonehenge|parthenon|great\s+wall|statue\s+of\s+liberty|yosemite|grand\s+canyon|niagara\s+falls|mount\s+everest|marianas?\s+trench|louvre|central\s+park|history|ancient|medieval|century|empire|dynasty|civilization|battle\s+of|treaty\s+of|revolution|renaissance|archaeology|historical|cold\s+war|french\s+revolution|world\s+war|bronze\s+age|iron\s+age|mesopotamia|byzantine|ottoman|roman\s+empire|indus\s+valley|new\s+deal|new\s+kingdom|fdr|first\s+president\s+of|former\s+president|physics|chemistry|biology|astronomy|cosmology|quantum|gravity|relativity|thermodynamics|optics|evolution|photosynthesis|mitosis|meiosis|dna|rna|gene|protein|cell|atom|molecule|neutron\s+star|black\s+hole|supernova|galaxy|planet|orbit|solar\s+system|exoplanet|speed\s+of\s+light|periodic\s+table|atomic\s+number|penicillin|who\s+discovered|who\s+invented|calculate|compute|solve|integrate|integral|derivative|differentiate|equation|formula|pythagorean|factorial|matrix|matrices|determinant|eigenvalue|function|class|algorithm|data\s+structure|binary\s+search|sorting|quicksort|new\s+(?:keyword|operator|array|object|instance|class)|javascript|python|typescript|java|c\+\+|rust|golang|definition\s+of|meaning\s+of|what\s+is\s+the\s+definition\s+of|what\s+is\s+the\s+meaning\s+of|define\s+|explain\s+(?:the\s+concept\s+of|what|how|why)|difference\s+between|philosophy|ethics|epistemology|metaphysics|stoicism|utilitarianism|existentialism|economics|macroeconomics|microeconomics|inflation|gdp)\b/i;
+
+    return stableSignals.test(lower);
 }
 
 function isBroadFactualWebQuery(text, entityIntent = null, liveIntent = null) {
@@ -17802,7 +17880,7 @@ async function handleUniversalEntityFactQuery(userText, liveIntent = null) {
                 entityIntent: pipeline.entityIntent,
                 riskLevel
             });
-            if (isStableGeographyOrGeneralFactQuery(userText) || riskLevel === 'low_risk') {
+            if (isStableGeographyOrGeneralFactQuery(userText) || riskLevel === 'low_risk' || !requiresStrictLiveVerification(pipeline.userText, pipeline.intent, pipeline.entityIntent)) {
                 return false;
             }
             return publishStrictVerificationClarification(pipeline, {
@@ -17827,7 +17905,7 @@ async function handleUniversalEntityFactQuery(userText, liveIntent = null) {
                 summaryText: 'I could not fully verify this, so here is the best-supported answer from available sources.'
             });
             if (bestEffortPublished) return true;
-            if (isStableGeographyOrGeneralFactQuery(userText) || riskLevel === 'low_risk') {
+            if (isStableGeographyOrGeneralFactQuery(userText) || riskLevel === 'low_risk' || !requiresStrictLiveVerification(pipeline.userText, pipeline.intent, pipeline.entityIntent)) {
                 return false;
             }
             return publishStrictVerificationClarification(pipeline, {
@@ -17911,6 +17989,7 @@ async function handleUniversalEntityFactQuery(userText, liveIntent = null) {
                 });
                 return true;
             }
+            return false;
         }
         return publishStrictVerificationClarification(pipeline, {
             sources: [],
@@ -18143,6 +18222,16 @@ async function handleLiveRetrievalQuery(userText, options = {}) {
         });
 
         if (!deduped.length) {
+            if (!failClosed && !requiresStrictLiveVerification(query, intent, entityIntent)) {
+                logRoutingDebug('handler exit: live_retrieval empty_sources -> fallback to model', query, {
+                    liveIntent: intent,
+                    entityIntent,
+                    riskLevel: liveRiskLevel
+                });
+                const fallbackPublished = await publishUniversalModelFallback({ userText: query, intent, entityIntent }, 'Model answer');
+                if (fallbackPublished) return true;
+                return false;
+            }
             logRoutingDebug('handler exit: live_retrieval no_sources', query, {
                 selectedHandler: 'publishStrictVerificationClarification',
                 liveIntent: intent,
@@ -18355,11 +18444,22 @@ ${snippets}`
         saveToHistory(userText, finalWithCoverageNote);
         return true;
     } catch (error) {
+        const queryStr = String(userText || '').trim();
+        const fallbackIntent = extractLiveQueryIntent(queryStr);
+        const fallbackEntityIntent = extractUniversalEntityIntent(queryStr, fallbackIntent);
+        if (!isAbortError(error) && !failClosed && !requiresStrictLiveVerification(queryStr, fallbackIntent, fallbackEntityIntent)) {
+            logRoutingDebug('handler exit: live_retrieval error -> fallback to model', queryStr, {
+                error: String(error?.message || error || '')
+            });
+            const fallbackPublished = await publishUniversalModelFallback({ userText: queryStr, intent: fallbackIntent, entityIntent: fallbackEntityIntent }, 'Model answer');
+            if (fallbackPublished) return true;
+            return false;
+        }
         if (isAbortError(error)) {
             return publishStrictVerificationClarification({
-                userText: String(userText || '').trim(),
-                intent: extractLiveQueryIntent(String(userText || '').trim()),
-                entityIntent: extractUniversalEntityIntent(String(userText || '').trim(), extractLiveQueryIntent(String(userText || '').trim()))
+                userText: queryStr,
+                intent: fallbackIntent,
+                entityIntent: fallbackEntityIntent
             }, {
                 sources: [],
                 summaryText: 'Verification timed out before confidence threshold. Please narrow the query and I will retry.',
@@ -18367,9 +18467,9 @@ ${snippets}`
             });
         }
         return publishStrictVerificationClarification({
-            userText: String(userText || '').trim(),
-            intent: extractLiveQueryIntent(String(userText || '').trim()),
-            entityIntent: extractUniversalEntityIntent(String(userText || '').trim(), extractLiveQueryIntent(String(userText || '').trim()))
+            userText: queryStr,
+            intent: fallbackIntent,
+            entityIntent: fallbackEntityIntent
         }, {
             sources: [],
             summaryText: 'I hit a verification issue. Please narrow the query and I will retry.',
@@ -23739,17 +23839,14 @@ function startThinkingPhaseTimeline(customSteps = []) {
         thinkingPhaseTimer = null;
     }
     const userPrompt = String(window.__lastUserMessage || '').trim();
-    const cleanSubject = userPrompt.replace(/^(who is|who was|what is|what was|why is|why does|how does|how is|explain|tell me about|describe|compare|name|list|give me|suggest)\s+/i, '').replace(/[?.!]+/g, '').trim();
-    const target = cleanSubject ? (cleanSubject.length > 35 ? cleanSubject.slice(0, 32) + '...' : cleanSubject) : 'the query';
-    
-    const fallbackDynamicSteps = [
-        `Analyzing context and key premises for ${target}...`,
-        `Cross-referencing domain knowledge and facts...`,
-        `Synthesizing clear, well-structured response...`
-    ];
+    const dynamicSteps = generateContextualThoughtSteps(userPrompt);
     const sequence = (Array.isArray(customSteps) && customSteps.length > 0)
         ? customSteps
-        : fallbackDynamicSteps;
+        : (dynamicSteps.length > 0 ? dynamicSteps : [
+            `Deconstructing problem premises and contextual boundaries...`,
+            `Evaluating domain principles and structural logic...`,
+            `Synthesizing coherent, verified response...`
+        ]);
     let index = 0;
     const startedAt = Date.now();
 
