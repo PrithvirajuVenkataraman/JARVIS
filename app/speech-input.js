@@ -429,15 +429,14 @@ export function createSpeechInputController(options = {}) {
         return true;
     }
 
-    async function toggleConverse() {
-        if (converseEnabled) {
-            stop({ disableConverse: true });
-            return false;
-        }
-        stop();
+    async function start(options = {}) {
         explicitlyStopped = false;
-        mode = 'converse';
-        converseEnabled = true;
+        if (converseEnabled || options.converse) {
+            mode = 'converse';
+            converseEnabled = true;
+        } else if (mode === 'idle') {
+            mode = 'dictation';
+        }
 
         if (Recognition) {
             fallbackMode = false;
@@ -451,6 +450,14 @@ export function createSpeechInputController(options = {}) {
         }
         emitState();
         return true;
+    }
+
+    async function toggleConverse() {
+        if (converseEnabled) {
+            stop({ disableConverse: true });
+            return false;
+        }
+        return await start({ converse: true });
     }
 
     function setProcessing(isProc) {
@@ -535,6 +542,7 @@ export function createSpeechInputController(options = {}) {
     return {
         getState,
         setLanguage,
+        start,
         toggleDictation,
         toggleConverse,
         setProcessing,
