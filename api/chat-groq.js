@@ -10,6 +10,7 @@ import { resolveInstantFact } from './_lib/instant-fact-layer.js';
 
     const MODEL_FETCH_TIMEOUT_MS = 25_000;
     const STREAM_MODEL_FETCH_TIMEOUT_MS = 25_000;
+    const FAST_FAILOVER_TIMEOUT_MS = 3_500;
     const INTERNAL_FETCH_TIMEOUT_MS = 8_000;
     const FETCH_RETRIES = 0;
     const REASONING_TOKEN_ALLOWANCE = 1024;
@@ -17,10 +18,6 @@ import { resolveInstantFact } from './_lib/instant-fact-layer.js';
     const USER_SELECTABLE_MODELS = new Set([
         'openai/gpt-oss-120b',
         'openai/gpt-oss-20b',
-        'gpt-4o',
-        'gpt-4o-mini',
-        'o3-mini',
-        'gpt-4-turbo',
         'llama-3.1-8b-instant',
         'llama-3.3-70b-versatile',
         'deepseek-r1-distill-llama-70b',
@@ -30,56 +27,28 @@ import { resolveInstantFact } from './_lib/instant-fact-layer.js';
     ]);
     const USER_SELECTABLE_GROQ_MODELS = USER_SELECTABLE_MODELS;
 
-    function getPreferredOpenAICandidates(configuredModel = '', userSelectedModel = null) {
-        const configured = String(configuredModel || '').trim();
-        const userSelected = String(userSelectedModel || '').trim();
-        let mappedOpenAI = '';
-        if (['gpt-4o', 'gpt-4o-mini', 'o3-mini', 'gpt-4-turbo'].includes(userSelected)) {
-            mappedOpenAI = userSelected;
-        } else if (['openai/gpt-oss-120b', 'llama-3.3-70b-versatile', 'deepseek-r1-distill-llama-70b', 'qwen-2.5-coder-32b', 'qwen/qwen3.6-27b', 'qwen-3.6-27b'].includes(userSelected)) {
-            mappedOpenAI = 'gpt-4o';
-        } else if (['openai/gpt-oss-20b', 'llama-3.1-8b-instant'].includes(userSelected)) {
-            mappedOpenAI = 'gpt-4o-mini';
-        }
-        return [...new Set([mappedOpenAI, configured, 'gpt-4o', 'gpt-4o-mini', 'o3-mini'].filter(Boolean))];
-    }
-
     function getPreferredGroqCandidates(configuredModel = '', { preferSpeed = false, userSelectedModel = null } = {}) {
         const configured = String(configuredModel || '').trim();
         const userSelected = String(userSelectedModel || '').trim();
         let mappedGroq = '';
-        if (['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'llama-3.1-8b-instant', 'llama-3.3-70b-versatile', 'deepseek-r1-distill-llama-70b', 'qwen-2.5-coder-32b', 'qwen/qwen3.6-27b', 'qwen-3.6-27b'].includes(userSelected)) {
+        if (USER_SELECTABLE_MODELS.has(userSelected)) {
             mappedGroq = userSelected;
-        } else if (userSelected === 'gpt-4o' || userSelected === 'o3-mini' || userSelected === 'gpt-4-turbo') {
-            mappedGroq = 'openai/gpt-oss-120b';
-        } else if (userSelected === 'gpt-4o-mini') {
-            mappedGroq = 'openai/gpt-oss-20b';
         }
-        const speedFirst = [
+
+        // Hierarchy in Auto mode: GPT-OSS models FIRST -> Groq Llama/Qwen -> DeepSeek
+        const autoCandidates = [
             mappedGroq,
             configured,
+            'openai/gpt-oss-120b',
+            'openai/gpt-oss-20b',
+            'llama-3.3-70b-versatile',
             'qwen/qwen3.6-27b',
             'qwen-3.6-27b',
-            'openai/gpt-oss-20b',
             'llama-3.1-8b-instant',
             'qwen-2.5-coder-32b',
-            'llama-3.3-70b-versatile',
-            'openai/gpt-oss-120b',
             'deepseek-r1-distill-llama-70b'
         ];
-        const qualityFirst = [
-            mappedGroq,
-            configured,
-            'qwen/qwen3.6-27b',
-            'qwen-3.6-27b',
-            'openai/gpt-oss-120b',
-            'llama-3.3-70b-versatile',
-            'deepseek-r1-distill-llama-70b',
-            'qwen-2.5-coder-32b',
-            'openai/gpt-oss-20b',
-            'llama-3.1-8b-instant'
-        ];
-        return [...new Set((preferSpeed ? speedFirst : qualityFirst).filter(Boolean))];
+        return [...new Set(autoCandidates.filter(Boolean))];
     }
 
     function getPreferredGroqVisionCandidates(configuredModel = '', userSelectedModel = null) {
@@ -97,9 +66,9 @@ import { resolveInstantFact } from './_lib/instant-fact-layer.js';
         const configured = String(configuredModel || '').trim();
         const userSelected = String(userSelectedModel || '').trim();
         let mappedGemini = '';
-        if (['openai/gpt-oss-120b', 'llama-3.3-70b-versatile', 'deepseek-r1-distill-llama-70b', 'qwen-2.5-coder-32b', 'gpt-4o', 'o3-mini', 'gpt-4-turbo'].includes(userSelected)) {
+        if (['openai/gpt-oss-120b', 'llama-3.3-70b-versatile', 'deepseek-r1-distill-llama-70b', 'qwen-2.5-coder-32b'].includes(userSelected)) {
             mappedGemini = 'gemini-2.5-pro';
-        } else if (['openai/gpt-oss-20b', 'llama-3.1-8b-instant', 'gpt-4o-mini'].includes(userSelected)) {
+        } else if (['openai/gpt-oss-20b', 'llama-3.1-8b-instant'].includes(userSelected)) {
             mappedGemini = 'gemini-2.5-flash-lite';
         }
         return [...new Set([mappedGemini, configured, 'gemini-3.5-flash', 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'].filter(Boolean))];
@@ -582,12 +551,14 @@ import { resolveInstantFact } from './_lib/instant-fact-layer.js';
         }
         return `Reasoning instruction: Before your final answer, wrap your internal thinking process inside <think>...</think> tags. This reasoning is hidden from the user and does not count toward your answer length.
 
-In your <think> block, briefly show your actual thought process as you work through the query. Reference the specific system rules you are applying, for example:
-- Analyze User Input: What is the user asking? What language? What intent?
-- Check Constraints & Rules: Which style rules apply? (e.g., "Start directly with the answer", "NO META-TALK", "Never invent facts", language matching, response length/format preference, image description rules if applicable)
-- Draft & Self-Correct: Draft key points, verify factual claims, check for constraint violations, refine.
+In your <think> block, briefly show your actual thought process (capped at max 10 seconds of deliberation, 5-10 lines). Reference the specific system rules you are applying, for example:
+- Analyze User Input: What is the user asking? Language? Intent?
+- Check Constraints & Rules: (e.g., "Start directly with the answer", "NO META-TALK", "Never invent facts", language matching, response length/format preference).
+- Standalone Entity/Object Rule: If the user query is a standalone name, object, person, place, or concept alone (e.g. "Photosynthesis", "Tesla", "Alan Turing", "PostgreSQL", "Taj Mahal"): directly provide a crisp, informative 2-4 sentence factual overview immediately.
+- Ambiguity & Clarification Rule: If the user query is genuinely ambiguous, fragmented, or underspecified (e.g. "that thing", "it", "start") and context is insufficient: conclude thinking and ask a single polite, targeted clarification question instead of guessing.
+- Draft & Self-Correct: Verify factual accuracy and format constraints.
 
-Keep the reasoning concise (5-15 lines). Do not repeat the full system prompt. Just show which rules you checked and how you applied them.
+Keep the reasoning concise (5-10 lines, max 10 seconds). Do not repeat the full system prompt.
 
 After </think>, output ONLY the final clean answer as natural text.`;
     }
@@ -1208,8 +1179,6 @@ After </think>, output ONLY the final clean answer as natural text.`;
     async function runModelWithFallback(finalPrompt, lengthPolicy = {}, userSelectedModel = null, images = undefined) {
         const temp = Number.isFinite(Number(lengthPolicy?.temperature)) ? Number(lengthPolicy.temperature) : 0.7;
         const maxTokens = clampInt(lengthPolicy?.maxTokens, 8000, 256, 16000) + REASONING_TOKEN_ALLOWANCE;
-        const userSelected = String(userSelectedModel || '').trim();
-        const isOpenAiPreferred = ['gpt-4o', 'gpt-4o-mini', 'o3-mini', 'gpt-4-turbo'].includes(userSelected);
         const hasImages = Array.isArray(images) && images.length > 0;
 
         const tryRunGroq = async () => {
@@ -1251,7 +1220,7 @@ After </think>, output ONLY the final clean answer as natural text.`;
                     },
                     body: JSON.stringify(requestBody)
                 }, {
-                    timeoutMs: clampInt(lengthPolicy?.timeoutMs, MODEL_FETCH_TIMEOUT_MS, 1000, MODEL_FETCH_TIMEOUT_MS),
+                    timeoutMs: clampInt(lengthPolicy?.timeoutMs, FAST_FAILOVER_TIMEOUT_MS, 1000, MODEL_FETCH_TIMEOUT_MS),
                     retries: Number.isFinite(Number(lengthPolicy?.retries)) ? Number(lengthPolicy.retries) : FETCH_RETRIES
                 });
                 if (response.ok) {
@@ -1264,53 +1233,6 @@ After </think>, output ONLY the final clean answer as natural text.`;
                     }
                     if (text) {
                         return { ok: true, parsedResponse: parseModelText(text), modelUsed: model, provider: 'groq' };
-                    }
-                }
-            }
-            return null;
-        };
-
-        const tryRunOpenAI = async () => {
-            const openaiApiKey = process.env.OPENAI_API_KEY || process.env.OPENAI_KEY;
-            if (!openaiApiKey) return null;
-            const openaiCandidates = getPreferredOpenAICandidates(userSelectedModel, userSelectedModel);
-            for (const model of openaiCandidates) {
-                let messages = [{ role: 'user', content: finalPrompt }];
-                if (hasImages) {
-                    const content = [{ type: 'text', text: finalPrompt }];
-                    for (const img of images) {
-                        if (img?.base64) {
-                            content.push({ type: 'image_url', image_url: { url: `data:${img.mimeType || 'image/jpeg'};base64,${img.base64}` } });
-                        }
-                    }
-                    messages = [{ role: 'user', content }];
-                }
-                const response = await fetchWithTimeoutRetry('https://api.openai.com/v1/chat/completions', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        Authorization: `Bearer ${openaiApiKey}`
-                    },
-                    body: JSON.stringify({
-                        model,
-                        temperature: temp,
-                        max_tokens: maxTokens,
-                        messages
-                    })
-                }, {
-                    timeoutMs: clampInt(lengthPolicy?.timeoutMs, MODEL_FETCH_TIMEOUT_MS, 1000, MODEL_FETCH_TIMEOUT_MS),
-                    retries: Number.isFinite(Number(lengthPolicy?.retries)) ? Number(lengthPolicy.retries) : FETCH_RETRIES
-                });
-                if (response.ok) {
-                    const data = await response.json();
-                    const msg = data?.choices?.[0]?.message;
-                    const reasoning = String(msg?.reasoning || msg?.reasoning_content || '').trim();
-                    let text = String(msg?.content || '').trim();
-                    if (reasoning) {
-                        text = '<think>\n' + reasoning + '\n</think>\n' + text;
-                    }
-                    if (text) {
-                        return { ok: true, parsedResponse: parseModelText(text), modelUsed: model, provider: 'openai' };
                     }
                 }
             }
@@ -1375,9 +1297,7 @@ After </think>, output ONLY the final clean answer as natural text.`;
             return null;
         };
 
-        const providerFns = hasImages
-            ? [tryRunGemini, tryRunGroq, tryRunOpenAI]
-            : (isOpenAiPreferred ? [tryRunOpenAI, tryRunGroq, tryRunGemini] : [tryRunGroq, tryRunOpenAI, tryRunGemini]);
+        const providerFns = [tryRunGroq, tryRunGemini];
 
         let attemptIndex = 0;
         for (const fn of providerFns) {
@@ -1423,29 +1343,7 @@ After </think>, output ONLY the final clean answer as natural text.`;
     async function streamModelWithFallback(finalPrompt, lengthPolicy = {}, onDelta = () => {}, userSelectedModel = null, images = undefined) {
         const temp = Number.isFinite(Number(lengthPolicy?.temperature)) ? Number(lengthPolicy.temperature) : 0.7;
         const maxTokens = clampInt(lengthPolicy?.maxTokens, 8000, 256, 16000) + REASONING_TOKEN_ALLOWANCE;
-        const userSelected = String(userSelectedModel || '').trim();
-        const isOpenAiPreferred = ['gpt-4o', 'gpt-4o-mini', 'o3-mini', 'gpt-4-turbo'].includes(userSelected);
         const hasImages = Array.isArray(images) && images.length > 0;
-
-        const tryStreamOpenAI = async () => {
-            const openaiApiKey = process.env.OPENAI_API_KEY || process.env.OPENAI_KEY;
-            if (!openaiApiKey) return null;
-            const openaiCandidates = getPreferredOpenAICandidates(userSelectedModel, userSelectedModel);
-            for (const model of openaiCandidates) {
-                const result = await streamOpenAIModel({
-                    apiKey: openaiApiKey,
-                    model,
-                    prompt: finalPrompt,
-                    images,
-                    temperature: temp,
-                    maxTokens,
-                    timeoutMs: clampInt(lengthPolicy?.timeoutMs, STREAM_MODEL_FETCH_TIMEOUT_MS, 1000, STREAM_MODEL_FETCH_TIMEOUT_MS),
-                    onDelta
-                });
-                if (result.ok) return result;
-            }
-            return null;
-        };
 
         const tryStreamGroq = async () => {
             const groqApiKey = process.env.GROQ_API_KEY || process.env.GROQ_KEY;
@@ -1463,7 +1361,7 @@ After </think>, output ONLY the final clean answer as natural text.`;
                     images,
                     temperature: temp,
                     maxTokens,
-                    timeoutMs: clampInt(lengthPolicy?.timeoutMs, STREAM_MODEL_FETCH_TIMEOUT_MS, 1000, STREAM_MODEL_FETCH_TIMEOUT_MS),
+                    timeoutMs: clampInt(lengthPolicy?.timeoutMs, FAST_FAILOVER_TIMEOUT_MS, 1000, STREAM_MODEL_FETCH_TIMEOUT_MS),
                     onDelta
                 });
                 if (result.ok) return result;
@@ -1494,9 +1392,7 @@ After </think>, output ONLY the final clean answer as natural text.`;
             return null;
         };
 
-        const streamFns = hasImages
-            ? [tryStreamGemini, tryStreamGroq, tryStreamOpenAI]
-            : (isOpenAiPreferred ? [tryStreamOpenAI, tryStreamGroq, tryStreamGemini] : [tryStreamGroq, tryStreamOpenAI, tryStreamGemini]);
+        const streamFns = [tryStreamGroq, tryStreamGemini];
 
         for (const fn of streamFns) {
             const result = await fn();
@@ -1522,74 +1418,6 @@ After </think>, output ONLY the final clean answer as natural text.`;
                 action: null
             }
         };
-    }
-
-    async function streamOpenAIModel({ apiKey, model, prompt, images = [], temperature, maxTokens, timeoutMs, onDelta }) {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), timeoutMs);
-        try {
-            let messages = [{ role: 'user', content: prompt }];
-            if (Array.isArray(images) && images.length) {
-                const content = [{ type: 'text', text: prompt }];
-                for (const img of images) {
-                    if (img?.base64) {
-                        content.push({ type: 'image_url', image_url: { url: `data:${img.mimeType || 'image/jpeg'};base64,${img.base64}` } });
-                    }
-                }
-                messages = [{ role: 'user', content }];
-            }
-            const response = await fetch('https://api.openai.com/v1/chat/completions', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    Authorization: `Bearer ${apiKey}`
-                },
-                signal: controller.signal,
-                body: JSON.stringify({
-                    model,
-                    temperature,
-                    max_tokens: maxTokens,
-                    stream: true,
-                    messages
-                })
-            });
-            if (!response.ok || !response.body) return { ok: false };
-            let text = '';
-            let inReasoning = false;
-            await readSseStream(response.body, payload => {
-                const deltaObj = payload?.choices?.[0]?.delta;
-                const reasoning = String(deltaObj?.reasoning || deltaObj?.reasoning_content || '');
-                const content = String(deltaObj?.content || '');
-                if (reasoning) {
-                    if (!inReasoning) {
-                        inReasoning = true;
-                        text += '<think>\n';
-                        onDelta('<think>\n');
-                    }
-                    text += reasoning;
-                    onDelta(reasoning);
-                } else if (content) {
-                    if (inReasoning) {
-                        inReasoning = false;
-                        text += '\n</think>\n';
-                        onDelta('\n</think>\n');
-                    }
-                    text += content;
-                    onDelta(content);
-                }
-            });
-            if (inReasoning) {
-                text += '\n</think>\n';
-                onDelta('\n</think>\n');
-            }
-            return text.trim()
-                ? { ok: true, provider: 'openai', modelUsed: model, text }
-                : { ok: false };
-        } catch (_) {
-            return { ok: false };
-        } finally {
-            clearTimeout(timeout);
-        }
     }
 
     async function streamGroqModel({ apiKey, model, prompt, images = [], temperature, maxTokens, timeoutMs, onDelta }) {
@@ -3196,6 +3024,8 @@ After </think>, output ONLY the final clean answer as natural text.`;
     - For direct fact questions across any domain, answer with the fact immediately and stay concise by default.
     - Always end with a complete sentence, complete list item, or closed code block. Never stop mid-sentence or leave the answer hanging.
     - For person/celebrity queries ("Who is X?"), give a concise factual bio first, then notable works.
+    - Standalone Entity Queries: For standalone names, objects, concepts, or terms alone (e.g. "Alan Turing", "Photosynthesis", "React", "Mount Everest", "Quantum Computing", "Taj Mahal"): immediately provide a direct, informative 2-4 sentence factual overview of what it is, its core significance, and key details without asking for clarification.
+    - Ambiguous or Underspecified Queries: If the user's request is genuinely ambiguous, fragmented, or lacks context (e.g. "it", "why did that happen", "start", "that thing"), DO NOT guess or hallucinate. Ask one brief, polite clarification question.
     - For "Who is X?" or "Tell me about X" requests, never reply with research steps like "search online/check databases". Give the direct factual answer.
     - Never ask the user to provide, share, paste, or send sources or links. When retrieved source text is supplied, use it and cite the supplied source URLs. When no retrieved source text is supplied, do not claim live verification.
     - If the user asks a "do/can/could/would" question, do not answer with only yes or no unless they explicitly asked for yes/no only; explain the answer.
