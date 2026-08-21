@@ -1212,6 +1212,14 @@ After </think>, output ONLY the final clean answer as natural text.`;
         }
     }
 
+    function logUpstreamModelFailure(provider, model, error) {
+        console.warn('[chat-groq] upstream model attempt failed', {
+            provider,
+            model,
+            reason: String(error?.message || error || 'unknown_error')
+        });
+    }
+
     async function runModelWithFallback(finalPrompt, lengthPolicy = {}, userSelectedModel = null, images = undefined) {
         const temp = Number.isFinite(Number(lengthPolicy?.temperature)) ? Number(lengthPolicy.temperature) : 0.7;
         const maxTokens = clampInt(lengthPolicy?.maxTokens, 8000, 256, 16000) + REASONING_TOKEN_ALLOWANCE;
@@ -1248,28 +1256,32 @@ After </think>, output ONLY the final clean answer as natural text.`;
                     requestBody.response_format = { type: 'json_object' };
                 }
 
-                const response = await fetchWithTimeoutRetry('https://api.groq.com/openai/v1/chat/completions', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        Authorization: `Bearer ${groqApiKey}`
-                    },
-                    body: JSON.stringify(requestBody)
-                }, {
-                    timeoutMs: clampInt(lengthPolicy?.timeoutMs, FAST_FAILOVER_TIMEOUT_MS, 1000, MODEL_FETCH_TIMEOUT_MS),
-                    retries: Number.isFinite(Number(lengthPolicy?.retries)) ? Number(lengthPolicy.retries) : FETCH_RETRIES
-                });
-                if (response.ok) {
-                    const data = await response.json();
-                    const msg = data?.choices?.[0]?.message;
-                    const reasoning = String(msg?.reasoning || msg?.reasoning_content || '').trim();
-                    let text = String(msg?.content || '').trim();
-                    if (reasoning) {
-                        text = '<think>\n' + reasoning + '\n</think>\n' + text;
+                try {
+                    const response = await fetchWithTimeoutRetry('https://api.groq.com/openai/v1/chat/completions', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            Authorization: `Bearer ${groqApiKey}`
+                        },
+                        body: JSON.stringify(requestBody)
+                    }, {
+                        timeoutMs: clampInt(lengthPolicy?.timeoutMs, FAST_FAILOVER_TIMEOUT_MS, 1000, MODEL_FETCH_TIMEOUT_MS),
+                        retries: Number.isFinite(Number(lengthPolicy?.retries)) ? Number(lengthPolicy.retries) : FETCH_RETRIES
+                    });
+                    if (response.ok) {
+                        const data = await response.json();
+                        const msg = data?.choices?.[0]?.message;
+                        const reasoning = String(msg?.reasoning || msg?.reasoning_content || '').trim();
+                        let text = String(msg?.content || '').trim();
+                        if (reasoning) {
+                            text = '<think>\n' + reasoning + '\n</think>\n' + text;
+                        }
+                        if (text) {
+                            return { ok: true, parsedResponse: parseModelText(text), modelUsed: model, provider: 'groq' };
+                        }
                     }
-                    if (text) {
-                        return { ok: true, parsedResponse: parseModelText(text), modelUsed: model, provider: 'groq' };
-                    }
+                } catch (error) {
+                    logUpstreamModelFailure('groq', model, error);
                 }
             }
             return null;
@@ -1291,43 +1303,47 @@ After </think>, output ONLY the final clean answer as natural text.`;
                         }
                     }
                 }
-                const response = await fetchWithTimeoutRetry(
-                    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`,
-                    {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            contents: [{ parts }],
-                            generationConfig: { temperature: temp, topK: 40, topP: 0.95, maxOutputTokens: maxTokens }
-                        })
-                    },
-                    {
-                        timeoutMs: clampInt(lengthPolicy?.timeoutMs, MODEL_FETCH_TIMEOUT_MS, 1000, MODEL_FETCH_TIMEOUT_MS),
-                        retries: Number.isFinite(Number(lengthPolicy?.retries)) ? Number(lengthPolicy.retries) : FETCH_RETRIES
-                    }
-                );
-                if (response.ok) {
-                    const geminiData = await response.json();
-                    const geminiParts = Array.isArray(geminiData?.candidates?.[0]?.content?.parts)
-                        ? geminiData.candidates[0].content.parts
-                        : [];
-                    let thought = '';
-                    let text = '';
-                    for (const p of geminiParts) {
-                        if (p?.thought) {
-                            thought += (typeof p.thought === 'string' ? p.thought : String(p.text || ''));
-                        } else {
-                            text += String(p?.text || '');
+                try {
+                    const response = await fetchWithTimeoutRetry(
+                        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`,
+                        {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                contents: [{ parts }],
+                                generationConfig: { temperature: temp, topK: 40, topP: 0.95, maxOutputTokens: maxTokens }
+                            })
+                        },
+                        {
+                            timeoutMs: clampInt(lengthPolicy?.timeoutMs, MODEL_FETCH_TIMEOUT_MS, 1000, MODEL_FETCH_TIMEOUT_MS),
+                            retries: Number.isFinite(Number(lengthPolicy?.retries)) ? Number(lengthPolicy.retries) : FETCH_RETRIES
+                        }
+                    );
+                    if (response.ok) {
+                        const geminiData = await response.json();
+                        const geminiParts = Array.isArray(geminiData?.candidates?.[0]?.content?.parts)
+                            ? geminiData.candidates[0].content.parts
+                            : [];
+                        let thought = '';
+                        let text = '';
+                        for (const p of geminiParts) {
+                            if (p?.thought) {
+                                thought += (typeof p.thought === 'string' ? p.thought : String(p.text || ''));
+                            } else {
+                                text += String(p?.text || '');
+                            }
+                        }
+                        if (thought.trim()) {
+                            text = '<think>\n' + thought.trim() + '\n</think>\n' + text.trim();
+                        } else if (!text) {
+                            text = geminiParts.map(p => String(p?.text || '')).join('').trim();
+                        }
+                        if (text) {
+                            return { ok: true, parsedResponse: parseModelText(text), modelUsed: model, provider: 'gemini' };
                         }
                     }
-                    if (thought.trim()) {
-                        text = '<think>\n' + thought.trim() + '\n</think>\n' + text.trim();
-                    } else if (!text) {
-                        text = geminiParts.map(p => String(p?.text || '')).join('').trim();
-                    }
-                    if (text) {
-                        return { ok: true, parsedResponse: parseModelText(text), modelUsed: model, provider: 'gemini' };
-                    }
+                } catch (error) {
+                    logUpstreamModelFailure('gemini', model, error);
                 }
             }
             return null;
