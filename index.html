@@ -4988,6 +4988,7 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
     } finally {
         requestSettled = true;
         clearTimeout(autoIndicatorTimer);
+        hideThinkingIndicator();
         clearActiveRequest(controller);
     }
 } 
