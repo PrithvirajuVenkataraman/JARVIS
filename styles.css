@@ -3194,21 +3194,24 @@ body.dark .response-action-btn {
     align-items: center;
     justify-content: flex-start;
     gap: 8px;
-    min-width: auto;
+    width: fit-content;
     max-width: 100%;
     height: auto;
-    padding: 6px 14px !important;
+    padding: 7px 14px !important;
     border-radius: 9999px !important;
-    border: 1px solid rgba(56, 189, 248, 0.25) !important;
-    background: rgba(15, 23, 42, 0.85) !important;
+    border: 1px solid rgba(56, 189, 248, 0.28) !important;
+    background: rgba(15, 23, 42, 0.88) !important;
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
-    margin: 4px 0;
+    margin: 2px 0 8px 0;
+    box-sizing: border-box;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
 body:not(.dark) .assistant-thinking-bubble {
     background: rgba(241, 245, 249, 0.95) !important;
     border-color: rgba(2, 132, 199, 0.25) !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 }
 
 .assistant-thinking-avatar {
@@ -4752,7 +4755,7 @@ body:not(.dark) .thinking-cot-number {
     color: #38bdf8;
     font-style: normal;
     animation: thoughtMorphFade 0.35s ease-in-out;
-    max-width: min(72vw, 420px);
+    max-width: 360px;
     text-overflow: ellipsis;
     white-space: nowrap;
     overflow: hidden;
@@ -4795,6 +4798,11 @@ body:not(.dark) .thinking-live-action {
 
 /* Mobile & Reduced Motion Responsiveness */
 @media (max-width: 640px) {
+    .assistant-thinking-bubble {
+        max-width: calc(100vw - 2.5rem);
+        padding: 6px 12px !important;
+    }
+
     .thinking-header {
         min-height: 40px;
         padding: 0.5rem 0.75rem;
@@ -4808,6 +4816,11 @@ body:not(.dark) .thinking-live-action {
 
     .thinking-live-action {
         max-width: 62vw;
+        font-size: 0.78rem;
+    }
+
+    .thinking-timer {
+        font-size: 0.75rem;
     }
 }
 
