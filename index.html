@@ -546,11 +546,14 @@ function isRecipeRequest(text) {
 function isMathCalculationRequest(text) {
     const t = String(text || '').toLowerCase().trim();
     if (!t) return false;
-    if (/\b(weather|forecast|news|headline|translate|joke|hotel|restaurant)\b/.test(t)) return false;
+    if (/\b(weather|forecast|news|headline|translate|joke|hotel|restaurant|code|algorithm|complexity|function|class|architecture|plan|migration|protocol|dijkstra|byzantine)\b/.test(t)) return false;
     if (isAlgebraEquationRequest(t)) return false;
-    if (/\b(calculate|calc|compute|evaluate|solve|scientific calculation|scientific calculator)\b/.test(t)) return true;
+    // Pure arithmetic expressions like "25 * 4 + 10" or "what is 50 / 2"
     if (/^[\d\s()+\-*/^%.=,]+$/.test(t) && /[+\-*/^%]/.test(t)) return true;
-    if (/^(what is|what's)\s+[-+*/^%().,\d\s]+=?$/.test(t)) return true;
+    if (/^(what is|what's|calculate|calc|compute|evaluate|solve)\s+[-+*/^%().,\d\s]+=?$/.test(t)) return true;
+    // Scientific function calls with numbers like "sqrt(144)" or "sin(30)" or "log(100)"
+    if (/\b(?:sqrt|sin|cos|tan|log|ln|pow|exp|abs|floor|ceil)\s*\(\s*[-+*/^%().,\d\s]+\s*\)/i.test(t)) return true;
+    if (/\b(?:scientific calculation|scientific calculator)\b/i.test(t)) return true;
     return false;
 }
 
@@ -829,10 +832,8 @@ function formatExactMathResult(expression, value, preferSymbolic = false) {
 async function handleMathCalculationRequest(text) {
     const out = evaluateScientificExpression(text);
     if (!out.ok) {
-        const msg = `I could not calculate that yet. ${out.error} Try: "calculate (25*3.2)+sqrt(49)-log(100)".`;
-        addChatMessage(msg, false);
-        saveToHistory(text, msg);
-        return true;
+        // Fall through to LLM for non-trivial / symbolic / multi-clause queries
+        return false;
     }
 
     const symbolic = wantsSymbolicMathOutput(text);
@@ -849,10 +850,8 @@ async function handleMathCalculationRequest(text) {
 async function handleMathStepByStepRequest(text) {
     const out = evaluateScientificExpression(text);
     if (!out.ok) {
-        const msg = `I could not solve that step-by-step yet. ${out.error} Try: "solve step by step (25*3.2)+sqrt(49)-log(100)".`;
-        addChatMessage(msg, false);
-        saveToHistory(text, msg);
-        return true;
+        // Fall through to LLM for non-trivial / symbolic / multi-clause queries
+        return false;
     }
 
     const symbolic = wantsSymbolicMathOutput(text);
@@ -8194,84 +8193,80 @@ let showRoutingDebugBadge = false;
             const isProceduralOrCulinary = /\b(recipe|cook|cooking|bake|baking|ingredient|ingredients|dish|food|cuisine|itinerary|travel to|places to visit|things to do in|steps to|how to make)\b/i.test(prompt);
             const isCreativeOrMedia = /\b(song|songs|music|track|tracks|album|artist|singer|band|discography|movie|movies|film|films|cinema|actor|actress|director|series|show|shows|sitcom|anime|watchlist|novel|author)\b/i.test(prompt);
 
-            // Construct 3-Stage Dynamic Narratives:
+            // Construct 3-Stage Dynamic Narratives (Compact 3-6 word micro-steps):
 
             // --- STAGE 1: CONTEXTUALIZATION ---
             let stage1 = '';
             if (isComparison && (entityA || entityB)) {
-                const left = entityA || 'first entity';
-                const right = entityB || 'second entity';
-                stage1 = `Deconstructing comparative dimensions between ${left} and ${right}: scoping functional boundaries, use cases, and core criteria.`;
+                const left = entityA || 'options';
+                const right = entityB || '';
+                stage1 = `Scoping criteria for ${left}${right ? ' vs ' + right : ''}`;
             } else if (isCode) {
-                stage1 = `Deconstructing problem requirements and boundary constraints for ${subjectSnippet}${lang ? ' in ' + lang : ''}: analyzing input/output specifications and edge conditions.`;
+                stage1 = `Analyzing requirements for ${subjectSnippet}${lang ? ' in ' + lang : ''}`;
             } else if (isMath) {
-                stage1 = `Parsing mathematical definitions and operational scope for ${subjectSnippet}: identifying variable domains, boundary conditions, and formal constraints.`;
+                stage1 = `Parsing variables and equations for ${subjectSnippet}`;
             } else if (isScience) {
-                stage1 = `Framing theoretical premises and empirical context for ${subjectSnippet}: isolating governing physical principles and observable parameters.`;
+                stage1 = `Isolating governing principles for ${subjectSnippet}`;
             } else if (isHistory) {
-                stage1 = `Contextualizing historical timeline and geopolitical landscape for ${subjectSnippet}: identifying primary catalysts and societal frameworks.`;
+                stage1 = `Contextualizing historical timeline for ${subjectSnippet}`;
             } else if (isGeography) {
-                stage1 = `Scoping geographic territory and administrative jurisdiction for ${subjectSnippet}: mapping regional boundaries and designation criteria.`;
+                stage1 = `Mapping regional boundaries for ${subjectSnippet}`;
             } else if (isEconOrSocial) {
-                stage1 = `Framing theoretical axioms and structural dynamics regarding ${subjectSnippet}: scoping behavioral mechanisms and systemic factors.`;
+                stage1 = `Framing structural dynamics for ${subjectSnippet}`;
             } else if (isProceduralOrCulinary) {
-                stage1 = `Analyzing procedural prerequisites and compositional requirements for ${subjectSnippet}: establishing essential workflow dependencies.`;
+                stage1 = `Analyzing prerequisites for ${subjectSnippet}`;
             } else if (isCreativeOrMedia) {
-                stage1 = `Analyzing creative catalog, thematic elements, and contextual background for ${subjectSnippet}: scoping prominent milestones and stylistic traits.`;
+                stage1 = `Analyzing thematic elements for ${subjectSnippet}`;
             } else {
-                stage1 = `Deconstructing core inquiry parameters and contextual nuances for ${subjectSnippet}: isolating key premises and intent.`;
+                stage1 = `Analyzing inquiry premises for ${subjectSnippet}`;
             }
 
             // --- STAGE 2: MECHANISTIC EVALUATION ---
             let stage2 = '';
             if (isComparison && (entityA || entityB)) {
-                const left = entityA || 'primary option';
-                const right = entityB || 'alternative option';
-                stage2 = `Evaluating structural trade-offs, performance characteristics, and architectural trade-offs between ${left} and ${right}.`;
+                stage2 = `Evaluating performance & architectural trade-offs`;
             } else if (isCode) {
-                stage2 = `Evaluating algorithmic patterns, invariant logic, and time/space complexity trade-offs to ensure robust asymptotic efficiency.`;
+                stage2 = `Evaluating algorithmic design & boundary conditions`;
             } else if (isMath) {
-                stage2 = `Applying step-by-step mathematical transformations, symbolic simplification, and formal deductive rules.`;
+                stage2 = `Applying step-by-step mathematical transformations`;
             } else if (isScience) {
-                stage2 = `Tracing causal mechanisms and domain-specific governing dynamics connecting microscopic/macroscopic scientific laws to observed behavior.`;
+                stage2 = `Tracing causal mechanisms & observable dynamics`;
             } else if (isHistory) {
-                stage2 = `Analyzing causal trajectories, institutional dynamics, and socioeconomic forces driving historical outcomes.`;
+                stage2 = `Analyzing institutional forces & historical outcomes`;
             } else if (isGeography) {
-                stage2 = `Evaluating geopolitical compromises, spatial distribution factors, and jurisdictional governance structures.`;
+                stage2 = `Evaluating spatial distribution & territorial factors`;
             } else if (isEconOrSocial) {
-                stage2 = `Examining causal interactions, trade-off matrices, and equilibrium effects across interacting systemic variables.`;
+                stage2 = `Examining systemic interactions & market effects`;
             } else if (isProceduralOrCulinary) {
-                stage2 = `Evaluating technique execution, timing precision, component interactions, and critical quality factors.`;
+                stage2 = `Evaluating timing precision & execution details`;
             } else if (isCreativeOrMedia) {
-                stage2 = `Evaluating critical reception, structural narrative design, and distinctive aesthetic or thematic contributions.`;
+                stage2 = `Evaluating structural design & stylistic traits`;
             } else {
-                stage2 = `Evaluating relevant domain knowledge, causal mechanisms, and contrasting perspectives surrounding the topic.`;
+                stage2 = `Evaluating domain principles & logical mechanisms`;
             }
 
             // --- STAGE 3: SYNTHESIS & STRUCTURED OUTPUT ---
             let stage3 = '';
             if (isComparison && (entityA || entityB)) {
-                const left = entityA || 'the options';
-                const right = entityB || '';
-                stage3 = `Synthesizing balanced, multi-perspective comparative breakdown with clear situational recommendations for ${left}${right ? ' and ' + right : ''}.`;
+                stage3 = `Structuring balanced recommendation`;
             } else if (isCode) {
-                stage3 = `Constructing clean, idiomatic ${lang || 'code'} implementation with boundary validation, error handling, and structured documentation.`;
+                stage3 = `Structuring clean ${lang || 'code'} implementation`;
             } else if (isMath) {
-                stage3 = `Verifying intermediate algebraic arithmetic and finalizing the exact, step-by-step simplified derivation.`;
+                stage3 = `Verifying step-by-step derivation & values`;
             } else if (isScience) {
-                stage3 = `Synthesizing a grounded, first-principles explanation connecting theoretical mechanics to observable conclusions.`;
+                stage3 = `Synthesizing first-principles explanation`;
             } else if (isHistory) {
-                stage3 = `Synthesizing evidence-based historical narrative connecting underlying catalysts, major inflection points, and lasting significance.`;
+                stage3 = `Synthesizing grounded historical narrative`;
             } else if (isGeography) {
-                stage3 = `Synthesizing administrative details, geographic context, and historical rationale into a structured summary.`;
+                stage3 = `Structuring comprehensive geographic overview`;
             } else if (isEconOrSocial) {
-                stage3 = `Formulating a coherent, multi-dimensional synthesis integrating theoretical foundations with practical implications.`;
+                stage3 = `Synthesizing theoretical and practical implications`;
             } else if (isProceduralOrCulinary) {
-                stage3 = `Formulating structured, sequential instructions with practical tips for optimal results and error avoidance.`;
+                stage3 = `Formulating structured, actionable instructions`;
             } else if (isCreativeOrMedia) {
-                stage3 = `Structuring a comprehensive, curated overview formatted with contextual details and standout recommendations.`;
+                stage3 = `Structuring curated overview with highlights`;
             } else {
-                stage3 = `Synthesizing a thorough, cohesive, and human-like response organized for maximum clarity.`;
+                stage3 = `Structuring clear, verified response`;
             }
 
             return [stage1, stage2, stage3];
@@ -10207,7 +10202,14 @@ let showRoutingDebugBadge = false;
         function isSplitwiseExpenseIntent(text) {
             const t = String(text || '').toLowerCase();
             if (!t.trim()) return false;
-            return /\b(splitwise|split|settle|settlement|owe|owes|owed|share equally|divide equally|who paid|paid by|contributed|spent|brought)\b/.test(t);
+            // Exclude technical, architecture, coding, and engineering queries that contain 'split' (e.g. split-brain, train-test split, string split, split across shards)
+            if (/\b(split[- ]brain|split[- ]test|string split|split string|database|consensus|paxos|raft|distributed|region|partition|shard|sharding|dataset|array|table|query|code|function|migration|protocol|cluster|failover)\b/i.test(t)) {
+                return false;
+            }
+            // Must have clear financial or bill splitting phrase
+            const hasBillContext = /\b(bill|check|receipt|dinner|lunch|trip|rent|groceries|expense|expenses|cost|money|rupees|rs\.?|inr|\$|usd|eur|pounds|owe|owes|owed|settle|settlement|splitwise)\b/i.test(t);
+            const hasSplitAction = /\b(split\s+(?:the\s+)?(?:bill|check|expense|cost|rent|amount|total)|split\s+(?:between|among|across|with)\s+\d+|splitwise|who\s+owes\s+whom|settle\s+up|share\s+equally|divide\s+equally)\b/i.test(t);
+            return (hasSplitAction || (hasBillContext && /\b(split|paid\s+by|who\s+paid)\b/i.test(t))) && /\b(?:paid|spent|contributed|owe|owes|owed|share|splitwise|between|among)\b/i.test(t);
         }
 
         function normalizeExpensePersonName(name) {
@@ -10395,7 +10397,9 @@ let showRoutingDebugBadge = false;
             const raw = String(text || '').trim();
             if (!raw) return false;
             if (isLikelyCodeInput(raw)) return true;
-            return /\b(analyze|review|explain|debug|check|inspect)\b[\s\S]*\b(code|snippet|script|program|function)\b/i.test(raw);
+            const hasFencedCode = /```[\s\S]*?```/.test(raw);
+            const hasExplicitCodePrompt = /\b(?:analyze|review|debug|check|inspect)\s+(?:this\s+)?(?:code|snippet|script)\s*[:\n]/i.test(raw);
+            return hasFencedCode || hasExplicitCodePrompt;
         }
 
         function extractCodeFromRequest(text) {
@@ -10408,16 +10412,15 @@ let showRoutingDebugBadge = false;
             const promptThenCode = raw.match(/\b(?:code|snippet|script)\b[\s:,-]*\n([\s\S]+)/i);
             if (promptThenCode && promptThenCode[1]) return promptThenCode[1].trim();
 
-            return raw;
+            if (isLikelyCodeInput(raw)) return raw;
+            return '';
         }
 
         async function handleCodeAnalyzerRequest(text) {
             const code = extractCodeFromRequest(text);
             if (!code || code.length < 8) {
-                const msg = 'Please paste the code snippet you want analyzed.';
-                addChatMessage(msg, false);
-                saveToHistory(text, msg);
-                return;
+                // If no actual code body is found, fall through to normal LLM chat
+                return false;
             }
 
             const controller = beginAbortableRequest();
@@ -18707,9 +18710,14 @@ ${snippets}`
 }
 
 function isWordMeaningRequest(text) {
-    const t = String(text || '').trim().toLowerCase();
-    if (!t) return false;
-    return /\b(meaning of|define|definition of|what does .* mean|what is the meaning of)\b/.test(t);
+    const raw = String(text || '').trim();
+    if (!raw) return false;
+    // Word count check: dictionary lookup is strictly for short single-word/phrase queries (<= 6 words)
+    const wordCount = raw.split(/\s+/).length;
+    if (wordCount > 6) return false;
+    const t = raw.toLowerCase();
+    return /^(?:meaning of|define|definition of|what is the meaning of)\s+["']?[a-zA-Z-]{2,40}["']?[?.!]?$/i.test(t) ||
+           /^what does\s+["']?[a-zA-Z-]{2,40}["']?\s+mean[?.!]?$/i.test(t);
 }
 
 function extractWordForMeaning(text) {
@@ -24067,9 +24075,9 @@ function startThinkingPhaseTimeline(customSteps = []) {
     const sequence = (Array.isArray(customSteps) && customSteps.length > 0)
         ? customSteps
         : (dynamicSteps.length > 0 ? dynamicSteps : [
-            `Deconstructing problem premises and contextual boundaries...`,
-            `Evaluating domain principles and structural logic...`,
-            `Synthesizing coherent, verified response...`
+            'Analyzing inquiry premises & context',
+            'Evaluating domain principles & mechanisms',
+            'Structuring clear, verified response'
         ]);
     let index = 0;
     const startedAt = Date.now();
@@ -24081,8 +24089,10 @@ function startThinkingPhaseTimeline(customSteps = []) {
             thinkingPhaseTimer = null;
             return;
         }
+        const elapsedNum = (Date.now() - startedAt) / 1000;
+        const elapsed = Math.min(10.0, elapsedNum).toFixed(1);
         index = (index + 1) % sequence.length;
-        const nextLabel = sequence[index];
+        const nextLabel = elapsedNum >= 10 ? 'Finalizing response...' : sequence[index];
         const textEl = row.querySelector('[data-thinking-action]');
         if (textEl) {
             textEl.textContent = nextLabel;
@@ -24092,7 +24102,6 @@ function startThinkingPhaseTimeline(customSteps = []) {
         }
         const timerEl = row.querySelector('[data-thinking-timer]');
         if (timerEl) {
-            const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
             timerEl.textContent = `Thinking... ${elapsed}s`;
         }
     }, 750);
