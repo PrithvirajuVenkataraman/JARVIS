@@ -3635,7 +3635,7 @@ After </think>, output ONLY the final clean answer as natural text.`;
         }
         if (mode === 'range') {
             if (maxWords > 0 && count > maxWords) return trimToWordCount(out, maxWords);
-            return out;
+            return out; 
         }
         if (mode === 'target') {
             if (maxWords > 0 && count > maxWords) return trimToWordCount(out, maxWords);
