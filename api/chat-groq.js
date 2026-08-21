@@ -4,7 +4,6 @@ import { runEvidenceFirstWebRag, runVerifiedWebSearch } from './search.js';
 import { extractWithCrawl4Ai } from './_lib/crawl4ai-client.js';
 import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-controls.js';
 import { validateEntityResponse } from './_lib/entity-verifier.js';
-import { classifyImageLocally } from './_lib/local-vision-classifier.js';
 import { classifyQueryIntent, isStableGeographyOrGeneralFactQuery } from './_lib/intent-separator.js';
 import { resolveInstantFact } from './_lib/instant-fact-layer.js';
 
@@ -3635,7 +3634,7 @@ After </think>, output ONLY the final clean answer as natural text.`;
         }
         if (mode === 'range') {
             if (maxWords > 0 && count > maxWords) return trimToWordCount(out, maxWords);
-            return out; 
+            return out;
         }
         if (mode === 'target') {
             if (maxWords > 0 && count > maxWords) return trimToWordCount(out, maxWords);
