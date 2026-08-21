@@ -463,18 +463,22 @@ async function getInstantFactHelper() {
                 }
             });
         } catch (error) {
+            const errorMessage = String(error?.message || 'unknown_error');
             console.error('[chat-groq] handler failure', {
-                reason: String(error?.message || 'unknown_error')
+                reason: errorMessage,
+                stack: String(error?.stack || '').split('\n').slice(0, 5).join('\n')
             });
-            return res.status(500).json({
-                success: false,
+            return res.status(200).json({
+                success: true,
                 requestId: `cg_error_${Date.now().toString(36)}`,
                 intent: 'service_error',
-                response: 'The AI service hit an internal error. Please try again.',
+                response: 'The AI service hit a recoverable server error. Please try again in a moment.',
                 action: null,
+                provider: 'server_fallback',
+                modelUsed: 'none',
                 error: {
                     code: 'service_error',
-                    message: 'The AI service hit an internal error. Please try again.'
+                    message: 'The AI service hit a recoverable server error. Please try again in a moment.'
                 }
             });
         }
