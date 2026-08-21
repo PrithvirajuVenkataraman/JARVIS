@@ -534,8 +534,13 @@ import { resolveInstantFact } from './_lib/instant-fact-layer.js';
     }
 
     function writeSse(res, eventName, payload = {}) {
-        res.write(`event: ${eventName}\n`);
-        res.write(`data: ${JSON.stringify(payload)}\n\n`);
+        if (typeof res?.write === 'function') {
+            res.write(`event: ${eventName}\n`);
+            res.write(`data: ${JSON.stringify(payload)}\n\n`);
+        }
+        if (typeof res?.flush === 'function') {
+            try { res.flush(); } catch (_) {}
+        }
     }
 
     /**
