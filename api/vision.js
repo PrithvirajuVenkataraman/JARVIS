@@ -57,8 +57,8 @@ export default async function handler(req, res) {
 
     try {
         const providers = getVisionProviders();
-        if (!providers.groqApiKey && !providers.geminiApiKey && !providers.openaiApiKey) {
-            return sendVisionError(res, 503, 'vision_provider_unavailable', 'Image recognition requires a Gemini (GEMINI_API_KEY), Groq Vision (GROQ_API_KEY), or OpenAI (OPENAI_API_KEY) API key configured in the environment.');
+        if (!providers.groqApiKey && !providers.geminiApiKey) {
+            return sendVisionError(res, 503, 'vision_provider_unavailable', 'Image recognition requires a Gemini (GEMINI_API_KEY) or Groq Vision (GROQ_API_KEY) API key configured in the environment.');
         }
 
         if (task === 'math_ocr_solve') { 
@@ -184,10 +184,6 @@ const GROQ_VISION_MODEL_FALLBACKS = [
     'meta-llama/llama-3.2-11b-vision-instruct',
     'llama-3.2-90b-vision-preview'
 ];
-const OPENAI_VISION_MODEL_FALLBACKS = [
-    'gpt-4o',
-    'gpt-4o-mini'
-];
 const GROQ_TEXT_MODEL_FALLBACKS = [
     'llama-3.3-70b-versatile',
     'llama-3.1-8b-instant'
@@ -197,29 +193,13 @@ function getVisionProviders() {
     return {
         groqApiKey: process.env.GROQ_API_KEY || process.env.GROQ_KEY || '',
         geminiApiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '',
-        openaiApiKey: process.env.OPENAI_API_KEY || process.env.OPENAI_KEY || '',
         groqVisionModel: String(process.env.GROQ_VISION_MODEL || '').trim(),
         groqModel: String(process.env.GROQ_MODEL || '').trim(),
-        geminiModel: String(process.env.GEMINI_MODEL || '').trim(),
-        openaiModel: String(process.env.OPENAI_MODEL || '').trim()
+        geminiModel: String(process.env.GEMINI_MODEL || '').trim()
     };
 }
 
 async function callVisionText({ providers, systemPrompt, mimeType, imageBase64 }) {
-    if (providers?.geminiApiKey) {
-        try {
-            const payload = await callGeminiVision({
-                apiKey: providers.geminiApiKey,
-                configuredModel: providers.geminiModel,
-                systemPrompt,
-                mimeType,
-                imageBase64
-            });
-            const text = extractGeminiText(payload);
-            if (text) return text;
-        } catch (_) {}
-    }
-
     if (providers?.groqApiKey) {
         try {
             const text = await callGroqVisionText({
@@ -233,55 +213,16 @@ async function callVisionText({ providers, systemPrompt, mimeType, imageBase64 }
         } catch (_) {}
     }
 
-    if (providers?.openaiApiKey) {
+    if (providers?.geminiApiKey) {
         try {
-            const text = await callOpenAIVisionText({
-                apiKey: providers.openaiApiKey,
-                configuredModel: providers.openaiModel,
+            const payload = await callGeminiVision({
+                apiKey: providers.geminiApiKey,
+                configuredModel: providers.geminiModel,
                 systemPrompt,
                 mimeType,
                 imageBase64
             });
-            if (text) return text;
-        } catch (_) {}
-    }
-
-    return '';
-}
-
-async function callOpenAIVisionText({ apiKey, configuredModel, systemPrompt, mimeType, imageBase64 }) {
-    const candidates = [
-        String(configuredModel || '').trim(),
-        ...OPENAI_VISION_MODEL_FALLBACKS
-    ].filter(Boolean);
-    const dataUrl = `data:${mimeType || 'image/jpeg'};base64,${imageBase64}`;
-
-    for (const model of candidates) {
-        try {
-            const response = await fetchWithTimeout('https://api.openai.com/v1/chat/completions', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    Authorization: `Bearer ${apiKey}`
-                },
-                body: JSON.stringify({
-                    model,
-                    temperature: 0.15,
-                    max_tokens: 3000,
-                    messages: [
-                        {
-                            role: 'user',
-                            content: [
-                                { type: 'text', text: systemPrompt },
-                                { type: 'image_url', image_url: { url: dataUrl } }
-                            ]
-                        }
-                    ]
-                })
-            });
-            if (!response.ok) continue;
-            const data = await response.json();
-            const text = String(data?.choices?.[0]?.message?.content || '').trim();
+            const text = extractGeminiText(payload);
             if (text) return text;
         } catch (_) {}
     }
