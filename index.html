@@ -14026,6 +14026,14 @@ function extractComparisonEntities(text) {
     const normalized = String(text || '').replace(/\s+/g, ' ').trim();
     if (!normalized) return null;
 
+    // Strictly do not hijack complex design, system architecture, programming, or planning queries
+    if (/\b(design|plan|architecture|database|migration|step by step|protocol|split-brain|failover|algorithm|implement|benchmark|workflow|system|explain|how to|create)\b/i.test(normalized)) {
+        return null;
+    }
+    if (normalized.split(/\s+/).length > 15) {
+        return null;
+    }
+
     const vsMatches = [...normalized.matchAll(/([A-Za-z][A-Za-z0-9.&'\- ]{1,60})\s+(?:vs|versus|or)\s+([A-Za-z][A-Za-z0-9.&'\- ]{1,60})/gi)];
     if (!vsMatches.length) return null;
 
@@ -14053,41 +14061,17 @@ function isComparisonQuery(text) {
     const t = String(text || '').toLowerCase();
     const hasStrongComparisonSignal = /\b(best|better|vs|versus|compare|comparison)\b/.test(t);
     const hasOr = /\bor\b/.test(t);
-    if (!hasStrongComparisonSignal && !hasOr) return false;
-    if (hasOr && !hasStrongComparisonSignal && !/\b(which|who|what)\b/.test(t)) return false;
-    return !!extractComparisonEntities(text);
+    return (hasStrongComparisonSignal || hasOr) && !!extractComparisonEntities(text);
 }
 
 function getComparisonDomainHint(text) {
     const t = String(text || '').toLowerCase();
-    if (/\b(movie|film|cinema|actor|actress|director)\b/.test(t)) return 'cinema';
-    if (/\b(music|song|singer|composer|album|soundtrack)\b/.test(t)) return 'music';
-    if (/\b(sport|sports|player|team|cricket|football|soccer|tennis|basketball|match)\b/.test(t)) return 'sports';
-    return 'general';
-}
-
-async function answerYesNoOnly(questionText) {
-    showThinkingIndicator('Answering...');
-    try {
-        const response = await fetch('/api/chat-groq', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                message: `Question: "${questionText}"`
-            })
-        });
-        const data = await response.json();
-        const raw = String(data?.response || data?.text || '').trim().toLowerCase();
-        const answer = /\bno\b/.test(raw) && !/\byes\b/.test(raw) ? 'No' : 'Yes';
-        addChatMessage(answer, false);
-        saveToHistory(questionText, answer);
-    } catch (error) {
-        const fallback = 'Yes';
-        addChatMessage(fallback, false);
-        saveToHistory(questionText, fallback);
-    } finally {
-        hideThinkingIndicator();
-    }
+    if (/\b(actor|actress|director|movie|film|cinema|box office|star)\b/.test(t)) return 'movies cinema';
+    if (/\b(player|cricketer|footballer|batsman|bowler|athlete|sport|goal|run|match)\b/.test(t)) return 'sports statistics';
+    if (/\b(phone|laptop|gpu|cpu|camera|car|bike|gadget|processor)\b/.test(t)) return 'specs reviews benchmarks';
+    if (/\b(college|university|iit|nit|iim|institute|course)\b/.test(t)) return 'ranking placement academics';
+    if (/\b(stock|crypto|coin|share|market cap|roi)\b/.test(t)) return 'financial metrics market data';
+    return 'reviews performance facts';
 }
 
 async function handleComparisonWithReliableSources(userText) {
@@ -14136,11 +14120,7 @@ async function handleComparisonWithReliableSources(userText) {
         }
 
         if (!deduped.length) {
-            await deliverApiReply('comparison_fetch_error', {
-                left,
-                right
-            }, { historyKey: userText });
-            return true;
+            return false;
         }
 
         const snippets = deduped
@@ -14173,25 +14153,22 @@ ${snippets}`
             })
         });
 
+        if (!compareResponse.ok) {
+            return false;
+        }
+
         const compareData = await compareResponse.json();
         const analysis = String(compareData?.response || compareData?.text || '').trim();
+        if (!analysis) return false;
+
         const sourceLines = deduped.slice(0, 6).map((r, i) => `${i + 1}. [${r.title}](${r.url})`).join('\n');
         const finalMsg = `${analysis}\n\nSources:\n${sourceLines}`;
 
         addChatMessage(finalMsg, false);
-        const compareSummary = await composeApiReply('comparison_ready', {
-            left,
-            right
-        }, {
-            fallbackText: `I compared ${left} and ${right} using reliable web sources.`
-        });
         saveToHistory(userText, finalMsg);
         return true;
     } catch (error) {
-        const fallback = `I could not complete a reliable comparison right now for ${left} and ${right}.`;
-        addChatMessage(fallback, false);
-        saveToHistory(userText, fallback);
-        return true;
+        return false;
     } finally {
         hideThinkingIndicator();
     }
