@@ -590,12 +590,22 @@ After </think>, output ONLY the final clean answer as natural text.`;
             lengthPolicy,
             selectedModel
         } = options;
-        res.writeHead(200, {
-            'Content-Type': 'text/event-stream; charset=utf-8',
-            'Cache-Control': 'no-cache, no-transform',
-            Connection: 'keep-alive',
-            'X-Accel-Buffering': 'no'
-        });
+        if (typeof res.writeHead === 'function') {
+            res.writeHead(200, {
+                'Content-Type': 'text/event-stream; charset=utf-8',
+                'Cache-Control': 'no-cache, no-transform',
+                Connection: 'keep-alive',
+                'X-Accel-Buffering': 'no'
+            });
+        } else {
+            if (typeof res.status === 'function') res.status(200);
+            if (typeof res.setHeader === 'function') {
+                res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+                res.setHeader('Cache-Control', 'no-cache, no-transform');
+                res.setHeader('Connection', 'keep-alive');
+                res.setHeader('X-Accel-Buffering', 'no');
+            }
+        }
         writeSse(res, 'meta', { requestId });
 
         let streamedText = '';
