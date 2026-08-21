@@ -24039,17 +24039,15 @@ function showThinkingIndicator(message = 'Thinking') {
     if (!row) {
         row = document.createElement('div');
         row.id = 'chat-thinking-indicator';
-        row.className = 'chat-row flex justify-start fade-in';
+        row.className = 'chat-row flex justify-start items-start gap-3 fade-in';
         row.dataset.role = 'assistant';
         row.innerHTML = `
-            <div class="w-full max-w-3xl">
-                <div class="flex items-start gap-2">
-                    <div class="chat-bubble-assistant assistant-thinking-bubble assistant-thinking-minimal" role="status" aria-live="polite">
-                        <div class="assistant-message-text is-streaming thinking-inline-text" data-thinking-inline>
-                            <span class="thinking-pulse-dot"></span>
-                            <span class="thinking-timer" data-thinking-timer>Thinking...</span>
-                            <span class="thinking-live-action" data-thinking-action>${escapeHtml(initialText)}</span>
-                        </div>
+            <div class="w-full max-w-3xl flex flex-col items-start">
+                <div class="assistant-thinking-bubble assistant-thinking-minimal" role="status" aria-live="polite">
+                    <div class="assistant-message-text is-streaming thinking-inline-text" data-thinking-inline>
+                        <span class="thinking-pulse-dot"></span>
+                        <span class="thinking-timer" data-thinking-timer>Thinking...</span>
+                        <span class="thinking-live-action" data-thinking-action>${escapeHtml(initialText)}</span>
                     </div>
                 </div>
             </div>
