@@ -24031,9 +24031,6 @@ function showThinkingIndicator(message = 'Thinking') {
 
     const userPrompt = String(window.__lastUserMessage || '').trim();
     const thoughtSteps = generateContextualThoughtSteps(userPrompt);
-    const initialText = (thoughtSteps && thoughtSteps.length > 0)
-        ? thoughtSteps[0]
-        : (message && message !== 'Thinking' ? message : 'Hmm, let me analyze this...');
 
     let row = document.getElementById('chat-thinking-indicator');
     if (!row) {
@@ -24041,24 +24038,17 @@ function showThinkingIndicator(message = 'Thinking') {
         row.id = 'chat-thinking-indicator';
         row.className = 'chat-row flex justify-start items-start gap-3 fade-in';
         row.dataset.role = 'assistant';
+        const cardHtml = buildThinkingProcessHtml('', thoughtSteps, '0.1', true);
         row.innerHTML = `
             <div class="w-full max-w-3xl flex flex-col items-start">
-                <div class="assistant-thinking-bubble assistant-thinking-minimal" role="status" aria-live="polite">
-                    <div class="assistant-message-text is-streaming thinking-inline-text" data-thinking-inline>
-                        <span class="thinking-pulse-dot"></span>
-                        <span class="thinking-timer" data-thinking-timer>Thinking...</span>
-                        <span class="thinking-live-action" data-thinking-action>${escapeHtml(initialText)}</span>
-                    </div>
+                <div class="chat-bubble-assistant assistant-thinking-minimal w-full">
+                    ${cardHtml}
+                    <div class="assistant-message-text is-streaming thinking-inline-text" data-thinking-inline style="display:none"></div>
                 </div>
             </div>
         `;
         chatContainer.appendChild(row);
         startThinkingPhaseTimeline(thoughtSteps);
-    } else {
-        const textEl = row.querySelector('[data-thinking-action]');
-        if (textEl) {
-            textEl.textContent = initialText;
-        }
     }
     maybeAutoScroll(chatContainer);
 }
@@ -24068,16 +24058,6 @@ function startThinkingPhaseTimeline(customSteps = []) {
         clearInterval(thinkingPhaseTimer);
         thinkingPhaseTimer = null;
     }
-    const userPrompt = String(window.__lastUserMessage || '').trim();
-    const dynamicSteps = generateContextualThoughtSteps(userPrompt);
-    const sequence = (Array.isArray(customSteps) && customSteps.length > 0)
-        ? customSteps
-        : (dynamicSteps.length > 0 ? dynamicSteps : [
-            'Analyzing inquiry premises & context',
-            'Evaluating domain principles & mechanisms',
-            'Structuring clear, verified response'
-        ]);
-    let index = 0;
     const startedAt = Date.now();
 
     thinkingPhaseTimer = setInterval(() => {
@@ -24089,20 +24069,11 @@ function startThinkingPhaseTimeline(customSteps = []) {
         }
         const elapsedNum = (Date.now() - startedAt) / 1000;
         const elapsed = Math.min(10.0, elapsedNum).toFixed(1);
-        index = (index + 1) % sequence.length;
-        const nextLabel = elapsedNum >= 10 ? 'Finalizing response...' : sequence[index];
-        const textEl = row.querySelector('[data-thinking-action]');
-        if (textEl) {
-            textEl.textContent = nextLabel;
-            textEl.style.animation = 'none';
-            void textEl.offsetHeight; // trigger reflow
-            textEl.style.animation = 'thoughtMorphFade 0.35s ease-in-out';
-        }
-        const timerEl = row.querySelector('[data-thinking-timer]');
+        const timerEl = row.querySelector('.thinking-timer');
         if (timerEl) {
-            timerEl.textContent = `Thinking... ${elapsed}s`;
+            timerEl.textContent = elapsedNum >= 10 ? 'Finalizing response...' : `Thinking... ${elapsed}s`;
         }
-    }, 750);
+    }, 250);
 }
 
 function resolveThinkingPhase(message = '') {
