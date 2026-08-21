@@ -1,11 +1,35 @@
 export const config = { maxDuration: 60 };
 import { applyApiSecurity } from './_lib/security.js';
-import { runEvidenceFirstWebRag, runVerifiedWebSearch } from './search.js';
-import { extractWithCrawl4Ai } from './_lib/crawl4ai-client.js';
 import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-controls.js';
 import { validateEntityResponse } from './_lib/entity-verifier.js';
 import { classifyQueryIntent, isStableGeographyOrGeneralFactQuery } from './_lib/intent-separator.js';
-import { resolveInstantFact } from './_lib/instant-fact-layer.js';
+
+async function getSearchHelpers() {
+    try {
+        return await import('./search.js');
+    } catch (_) {
+        return {
+            runEvidenceFirstWebRag: async () => ({ verified: false, results: [], warnings: [] }),
+            runVerifiedWebSearch: async () => ({ ok: false, results: [], sources: [] })
+        };
+    }
+}
+
+async function getCrawl4AiHelper() {
+    try {
+        return await import('./_lib/crawl4ai-client.js');
+    } catch (_) {
+        return { extractWithCrawl4Ai: async () => ({ ok: false, content: '' }) };
+    }
+}
+
+async function getInstantFactHelper() {
+    try {
+        return await import('./_lib/instant-fact-layer.js');
+    } catch (_) {
+        return { resolveInstantFact: async () => null };
+    }
+}
 
     const MODEL_FETCH_TIMEOUT_MS = 25_000;
     const STREAM_MODEL_FETCH_TIMEOUT_MS = 25_000;
@@ -751,6 +775,7 @@ After </think>, output ONLY the final clean answer as natural text.`;
         let retrievalFallbackUsed = false;
         if (!sources.length) {
             const fallbackQuery = buildVerificationRagQuery(originalRequest, answer);
+            const { runEvidenceFirstWebRag } = await getSearchHelpers();
             const fallback = await runEvidenceFirstWebRag(fallbackQuery, { limit: 6 }).catch(error => ({
                 verified: false,
                 results: [],
@@ -1989,8 +2014,9 @@ After </think>, output ONLY the final clean answer as natural text.`;
         const intentClassification = classifyQueryIntent(query);
         if (intentClassification.type === 'temporal_fact') {
             try {
+                const { resolveInstantFact } = await getInstantFactHelper();
                 const instantFact = await resolveInstantFact(query, intentClassification);
-                if (instantFact.grounded && instantFact.ragText) {
+                if (instantFact?.grounded && instantFact?.ragText) {
                     const sources = instantFact.facts.map((f, i) => ({
                         title: f.title,
                         description: f.summary,
@@ -2016,6 +2042,7 @@ After </think>, output ONLY the final clean answer as natural text.`;
         const allResults = [];
         const seenUrls = new Set();
 
+        const { runVerifiedWebSearch } = await getSearchHelpers();
         for (const candidateQuery of queries) {
             try {
                 const search = await runVerifiedWebSearch(candidateQuery, { limit: 6 });
@@ -2072,6 +2099,7 @@ After </think>, output ONLY the final clean answer as natural text.`;
         const query = resolveContextualLiveQuery(message, contextTurns);
         let discovered = [];
         try {
+            const { runVerifiedWebSearch } = await getSearchHelpers();
             const search = await runVerifiedWebSearch(query, { limit: 6 });
             discovered = Array.isArray(search?.results) ? search.results : [];
         } catch (_) {
@@ -2085,6 +2113,7 @@ After </think>, output ONLY the final clean answer as natural text.`;
         if (!candidates.length) return { ragText: '', sources: [], extractor: 'crawl4ai' };
 
         const extracted = [];
+        const { extractWithCrawl4Ai } = await getCrawl4AiHelper();
         for (const item of candidates) {
             try {
                 const result = await extractWithCrawl4Ai({
