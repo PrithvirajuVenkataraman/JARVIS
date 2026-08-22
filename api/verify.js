@@ -10,7 +10,7 @@ const FETCH_TIMEOUT_MS = 4000;
 /**
  * Dynamically fetches live ground truth summary for any query by routing to Wikipedia's search and summary APIs.
  * @param {string} query
- * @param {AbortSignal} [signal] 
+ * @param {AbortSignal} [signal]
  * @returns {Promise<{ title: string, extract: string, sourceUrl: string } | null>}
  */
 export async function fetchGroundTruth(query, signal) {
@@ -74,10 +74,16 @@ export function assessAlignment(groundTruth, llmResponse) {
     const resp = String(llmResponse || '').toLowerCase().trim();
     if (!truth || !resp) return { isAccurate: true, extractedAnchor: null };
 
-    // Extract key proper nouns / names from ground truth lead sentence
+    // Extract key proper nouns / names from ground truth lead sentence, ignoring common sentence prefixes
     const leadSentence = truth.split(/[.\n]/)[0] || '';
-    const nameMatch = leadSentence.match(/\b([A-Z][a-zA-Z.\s]{2,30})\b/);
-    const candidateAnchor = nameMatch ? nameMatch[1].trim() : null;
+    const cleanLead = leadSentence.replace(/^(?:in\s+[a-z]+|according\s+to\s+[a-z]+|for\s+[a-z]+|as\s+of\s+[a-z]+|the\s+[a-z]+)[,:]?\s*/i, '');
+    const nameMatch = cleanLead.match(/\b([A-Z][a-zA-Z.'’\-]+(?:\s+[A-Z][a-zA-Z.'’\-]+){0,4})\b/);
+    const rawAnchor = nameMatch ? nameMatch[1].trim() : null;
+    
+    // Ignore non-proper nouns or general words
+    const candidateAnchor = (rawAnchor && !/^(In|On|At|For|By|With|From|As|The|This|That|These|Those|According|However|Although|While|When|Where|Why|How|What|Which|Who|Whom|Whose|If|Unless|Since|Because|Although)$/i.test(rawAnchor))
+        ? rawAnchor
+        : null;
 
     let isAccurate = true;
     if (candidateAnchor) {
@@ -115,6 +121,18 @@ export default async function handler(req, res) {
             success: false,
             verified: false,
             error: { code: 'missing_parameters', message: 'Both query and llmResponse are required.' }
+        });
+    }
+
+    // Abstract reasoning, math proofs, coding, and opinion queries do not have a single mutable real-world entity anchor
+    if (/```|\b(prove|proof|irrational|algorithm|function|javascript|python|calculate|integral|derivative|equation|viewpoint|perspective|opinion|philosophy)\b/i.test(query)) {
+        return res.status(200).json({
+            success: true,
+            verified: true,
+            extractedAnchor: null,
+            sourceUrl: null,
+            latencyMs: Math.round(performance.now() - start),
+            timestamp: Date.now()
         });
     }
 
