@@ -1,8 +1,207 @@
 export const config = { maxDuration: 60 };
 import { applyApiSecurity } from './_lib/security.js';
-import { applyCostCapToLengthPolicy, getCostControls } from './_lib/cost-controls.js';
-import { validateEntityResponse } from './_lib/entity-verifier.js';
-import { classifyQueryIntent, isStableGeographyOrGeneralFactQuery } from './_lib/intent-separator.js';
+
+/* ── Cost Controls (Inlined for 0-dep cold boot) ────────── */
+function readCostBool(name, fallback = false) {
+    const raw = String(process.env[name] || '').trim().toLowerCase();
+    if (!raw) return fallback;
+    return ['1', 'true', 'yes', 'on'].includes(raw);
+}
+
+function clampCostInt(value, fallback, min, max) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return fallback;
+    return Math.min(max, Math.max(min, Math.round(number)));
+}
+
+function getCostControls() {
+    return {
+        qualityCriticEnabled: readCostBool('JARVIS_QUALITY_CRITIC_ENABLED', true),
+        streamQualityReviewEnabled: readCostBool('JARVIS_STREAM_QUALITY_REVIEW', false),
+        defaultMaxTokens: clampCostInt(process.env.JARVIS_DEFAULT_MAX_TOKENS, 10000, 256, 16000),
+        fastMaxTokens: clampCostInt(process.env.JARVIS_FAST_MAX_TOKENS, 2500, 256, 8000),
+        streamMaxTokens: clampCostInt(process.env.JARVIS_STREAM_MAX_TOKENS, 10000, 256, 16000)
+    };
+}
+
+function applyCostCapToLengthPolicy(lengthPolicy = {}, options = {}) {
+    const controls = getCostControls();
+    const intent = String(options.intent || '');
+    const isFast = ['fast_simple', 'fast_explainer', 'casual_chat', 'chat_title'].includes(intent);
+    const cap = isFast ? controls.fastMaxTokens : (options.stream ? controls.streamMaxTokens : controls.defaultMaxTokens);
+    const maxTokens = clampCostInt(lengthPolicy?.maxTokens, cap, 256, 16000);
+    return {
+        ...lengthPolicy,
+        maxTokens: Math.min(maxTokens, cap)
+    };
+}
+
+/* ── Entity Verifier Helpers (Inlined for 0-dep cold boot) ── */
+const TRUSTED_ENTITY_DOMAINS = new Set([
+    'wikipedia.org', 'en.wikipedia.org', 'reuters.com', 'apnews.com', 'bbc.com', 'bbc.co.uk',
+    'thehindu.com', 'indianexpress.com', 'ndtv.com', 'timesofindia.indiatimes.com',
+    'gov.in', 'nic.in', 'tn.gov.in', 'india.gov.in', 'whitehouse.gov', 'gov.uk', 'nih.gov', 'cdc.gov', 'who.int'
+]);
+
+function extractEntityHostname(rawUrl) {
+    if (!rawUrl || typeof rawUrl !== 'string') return '';
+    try {
+        const parsed = new URL(rawUrl.startsWith('http') ? rawUrl : `https://${rawUrl}`);
+        return parsed.hostname.replace(/^www\./i, '').toLowerCase();
+    } catch (_) {
+        return '';
+    }
+}
+
+function isTrustedEntityDomain(domain) {
+    const d = String(domain || '').toLowerCase().trim();
+    if (!d) return false;
+    if (TRUSTED_ENTITY_DOMAINS.has(d)) return true;
+    return d.endsWith('.gov') || d.endsWith('.gov.in') || d.endsWith('.nic.in') || d.endsWith('.edu') || d.endsWith('.org');
+}
+
+function extractEntityTarget(text) {
+    const t = String(text || '').toLowerCase();
+    if (!t) return null;
+    const roleMatches = [
+        { regex: /\b(?:cm|chief minister)\s+(?:of\s+)?([a-z\s]+?)(?:\?|\.|\n|$|,)/i, role: 'Chief Minister' },
+        { regex: /\b(?:pm|prime minister)\s+(?:of\s+)?([a-z\s]+?)(?:\?|\.|\n|$|,)/i, role: 'Prime Minister' },
+        { regex: /\b(?:president)\s+(?:of\s+)?([a-z\s]+?)(?:\?|\.|\n|$|,)/i, role: 'President' },
+        { regex: /\b(?:governor)\s+(?:of\s+)?([a-z\s]+?)(?:\?|\.|\n|$|,)/i, role: 'Governor' },
+        { regex: /\b(?:mayor)\s+(?:of\s+)?([a-z\s]+?)(?:\?|\.|\n|$|,)/i, role: 'Mayor' },
+        { regex: /\b(?:ceo|chief executive officer)\s+(?:of\s+)?([a-z\s]+?)(?:\?|\.|\n|$|,)/i, role: 'CEO' },
+        { regex: /\b(?:chairman|chairperson)\s+(?:of\s+)?([a-z\s]+?)(?:\?|\.|\n|$|,)/i, role: 'Chairperson' }
+    ];
+    for (const item of roleMatches) {
+        const match = t.match(item.regex);
+        if (match && match[1]) {
+            const rawJurisdiction = match[1].trim().replace(/\b(the|current|latest|now|today|is|who)\b/g, '').trim();
+            if (rawJurisdiction.length >= 2 && rawJurisdiction.length <= 40) {
+                return { role: item.role, jurisdiction: rawJurisdiction.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ') };
+            }
+        }
+    }
+    return null;
+}
+
+function validateEntityResponse(message, answerText, sources = []) {
+    const target = extractEntityTarget(message);
+    if (!target) return { valid: true, issues: [] };
+    const trustedSources = (Array.isArray(sources) ? sources : []).filter(s => {
+        const domain = extractEntityHostname(s?.url || s?.domain || '');
+        return isTrustedEntityDomain(domain) || Boolean(s?.trusted);
+    });
+    return { valid: true, issues: [], target, trustedSourceCount: trustedSources.length };
+}
+
+/* ── Intent Separator Helpers (Inlined for 0-dep cold boot) ── */
+const INTENT_CODING_PATTERNS = [
+    /\b(?:function|def|class|const|let|var|import|export|return|async|await|console\.log|print\(|public\s+static|void\s+main)\b/,
+    /\b(?:javascript|python|typescript|java|c\+\+|c#|golang|rust|php|ruby|swift|kotlin|html|css|sql|dockerfile|yaml|json|regex)\b/i,
+    /\b(?:write|create|debug|fix|refactor|optimize|implement|explain)\s+(?:a\s+)?(?:code|function|script|algorithm|regex|query|component|loop|array|regex|endpoint)\b/i,
+    /\b(?:how\s+to\s+sort|binary\s+search|linked\s+list|dynamic\s+programming|tree\s+traversal|recursion|memoization|merge\s+sort|quick\s+sort)\b/i,
+    /\b(?:new\s+(?:keyword|operator|array|object|instance|class|promise|map|set|vector)|delete\s+operator|malloc|free|garbage\s+collection|memory\s+management)\b/i
+];
+
+function isStableGeographyOrGeneralFactQuery(rawQuery = '') {
+    const query = String(rawQuery || '').trim();
+    if (!query) return false;
+    const lower = query.toLowerCase().replace(/[?!.,;:]+$/g, '').trim();
+
+    const liveOfficeholderSignals = /\b(?:who\s+is\s+(?:the\s+)?(?:current|present|latest)\s+(?:chief\s+minister|prime\s+minister|president|governor|mayor|chancellor|ceo|chairman|leader|head\s+of\s+state))\b/i;
+    const liveCmPmSignals = /\b(?:who\s+is\s+(?:the\s+)?(?:cm|pm)\s+of)\b/i;
+    const liveDomainSignals = /\b(?:weather\s+in|forecast\s+for|temperature\s+in|stock\s+price|price\s+of\s+(?:bitcoin|btc|eth|solana|crypto|gold|silver|crude|shares?)|market\s+cap\s+of|live\s+score|ipl\s+(?:score|schedule|match|table)|breaking\s+news|today'?s\s+news|earthquake\s+today|election\s+results?\s+today)\b/i;
+    const explicitFreshnessSignals = /\b(?:as\s+of\s+today|right\s+now|open\s+now|near\s+me|with\s+sources?|source\s+links?)\b/i;
+    const explicitFreshnessUpdate = /\b(?:what'?s\s+new|new\s+(?:update|updates|release|version|announcement|news|development|features?))\b/i;
+    const actionableTravelSignals = /\b(?:directions\s+to|route\s+to|how\s+to\s+(?:reach|get\s+to)|hotels?\s+(?:near|around|in)|restaurants?\s+(?:near|around|in)|ticket\s+price|tickets?\s+for|entry\s+fee|visiting\s+hours|timings?\s+of|places\s+to\s+visit|things\s+to\s+do\s+in|sightseeing\s+in|near\s+me|nearby|near\s+[a-z]+)\b/i;
+
+    if (
+        liveOfficeholderSignals.test(lower) ||
+        liveCmPmSignals.test(lower) ||
+        liveDomainSignals.test(lower) ||
+        explicitFreshnessSignals.test(lower) ||
+        explicitFreshnessUpdate.test(lower) ||
+        actionableTravelSignals.test(lower)
+    ) {
+        return false;
+    }
+
+    if (/\b(?:what\s+(?:is|was)|which\s+city\s+is|name)\s+(?:the\s+)?capital\s+(?:city\s+)?of\s+[a-z\s.'-]+/i.test(lower) ||
+        /\b(?:capital\s+(?:city\s+)?of\s+[a-z\s.'-]+)/i.test(lower) ||
+        /\b[a-z\s.'-]+\s+capital\b/i.test(lower)) {
+        return true;
+    }
+
+    const geographySignals = /\b(?:continent|continents|ocean|oceans|sea|seas|river|rivers|mountain|mountains|mountain\s+range|plateau|desert|island|islands|valley|gulf|bay|strait|peninsula|archipelago|hemisphere|equator|latitude|longitude|tropic\s+of\s+(?:cancer|capricorn)|longest\s+river|highest\s+mountain|deepest\s+ocean|largest\s+desert|largest\s+country|smallest\s+country|currency\s+of|official\s+language\s+of|national\s+animal|national\s+bird|national\s+flower|national\s+anthem|population\s+of|area\s+of|located\s+in|location\s+of|where\s+is\s+.+\s+located|where\s+are\s+.+\s+located)\b/i;
+    if (geographySignals.test(lower)) return true;
+
+    const landmarkKnowledge = /\b(?:brihadeeswarar\s+temple|sun\s+temple|taj\s+mahal|eiffel\s+tower|colosseum|pyramids?\s+of\s+giza|angkor\s+wat|machu\s+picchu|stonehenge|parthenon|great\s+wall\s+of\s+china|statue\s+of\s+liberty|yosemite|grand\s+canyon|niagara\s+falls|mount\s+everest|marianas?\s+trench|louvre|central\s+park\s+design)\b/i;
+    if (landmarkKnowledge.test(lower)) return true;
+
+    const historySignals = /\b(?:history|ancient|medieval|century|empire|dynasty|civilization|battle\s+of|treaty\s+of|revolution|renaissance|archaeology|historical|cold\s+war|french\s+revolution|world\s+war|bronze\s+age|iron\s+age|mesopotamia|byzantine|ottoman|roman\s+empire|indus\s+valley|new\s+deal|new\s+kingdom|fdr|first\s+president\s+of|former\s+president|magna\s+carta|declaration\s+of\s+independence|constitution)\b/i;
+    if (historySignals.test(lower)) return true;
+
+    const scienceMathSignals = /\b(?:physics|chemistry|biology|astronomy|cosmology|quantum|gravity|relativity|thermodynamics|optics|evolution|photosynthesis|mitosis|meiosis|dna|rna|gene|protein|cell|atom|molecule|neutron\s+star|black\s+hole|supernova|galaxy|planet|orbit|solar\s+system|exoplanet|speed\s+of\s+light|periodic\s+table|atomic\s+number|penicillin|who\s+discovered|who\s+invented|calculate|compute|solve|integrate|integral|derivative|differentiate|equation|formula|pythagorean|factorial|matrix|matrices|determinant|eigenvalue)\b/i;
+    if (scienceMathSignals.test(lower) || /^\s*[\d\s+\-*/^().=xXyYzZ]+\s*$/.test(query)) return true;
+
+    for (const pattern of INTENT_CODING_PATTERNS) {
+        if (pattern.test(query)) return true;
+    }
+
+    const definitionalSignals = /\b(?:definition\s+of|meaning\s+of|what\s+is\s+the\s+definition\s+of|what\s+is\s+the\s+meaning\s+of|define\s+|explain\s+(?:the\s+concept\s+of|what|how|why)|difference\s+between|philosophy|ethics|epistemology|metaphysics|stoicism|utilitarianism|existentialism|economics|macroeconomics|microeconomics|inflation|gdp)\b/i;
+    if (definitionalSignals.test(lower)) return true;
+
+    if (/^(?:where\s+is|where\s+was|where\s+are|what\s+is|what\s+was|what\s+are|what'?s|who\s+was|how\s+does|how\s+do|explain|define|tell\s+me\s+about)\s+[\w\s.'-]{2,80}\??$/i.test(query)) {
+        return true;
+    }
+
+    return false;
+}
+
+function classifyQueryIntent(rawQuery = '') {
+    const query = String(rawQuery || '').trim();
+    if (!query) {
+        return { type: 'static_reasoning', category: 'empty_query', requiresLiveGrounding: false };
+    }
+
+    const lower = query.toLowerCase();
+
+    if (/\b(?:search\s+(?:for|the\s+web\s+for|google\s+for)|find\s+(?:articles|news|web\s+pages)\s+about|look\s+up\s+online)\b/i.test(lower)) {
+        return { type: 'explicit_search', category: 'explicit_search', requiresLiveGrounding: true };
+    }
+
+    if (/\b(?:weather|forecast|temperature|humidity|rain|rainfall|precipitation|sunny|cloudy|wind\s+speed)\b/i.test(lower)) {
+        return { type: 'domain_specific', category: 'weather', requiresLiveGrounding: true };
+    }
+
+    if (/\b(?:price\s+of\s+(?:bitcoin|btc|ethereum|eth|solana|crypto|gold|silver|crude\s+oil)|stock\s+price\s+of|market\s+cap\s+of)\b/i.test(lower)) {
+        return { type: 'domain_specific', category: 'finance_crypto', requiresLiveGrounding: true };
+    }
+
+    const isHistorical = /\b(?:first|former|past|in\s+\d{4}|during\s+\d{4}|who\s+was\s+the|history\s+of)\b/i.test(lower);
+    const entityTarget = extractEntityTarget(query);
+    if (entityTarget && !isHistorical) {
+        return { type: 'temporal_fact', category: 'political_leadership', requiresLiveGrounding: true, entityTarget };
+    }
+
+    if (!isHistorical && (
+        /\b(?:current|latest|present|today|now)\s+(?:governor|pm|cm|president|chancellor|minister|mayor|ceo|chairman|leader|head\s+of\s+state)\b/i.test(lower) ||
+        /\b(?:who\s+is\s+(?:the\s+)?(?:current|present|latest)?\s*(?:chief\s+minister|prime\s+minister|president|governor|mayor|chancellor|ceo|chairman))\b/i.test(lower) ||
+        /\b(?:who\s+is\s+(?:the\s+)?(?:cm|pm)\s+of)\b/i.test(lower)
+    )) {
+        return { type: 'temporal_fact', category: 'political_leadership', requiresLiveGrounding: true, entityTarget: entityTarget || extractEntityTarget(query) };
+    }
+
+    if (isStableGeographyOrGeneralFactQuery(query)) {
+        return { type: 'static_reasoning', category: 'stable_general_knowledge', requiresLiveGrounding: false };
+    }
+
+    for (const pattern of INTENT_CODING_PATTERNS) {
+        if (pattern.test(query)) return { type: 'static_reasoning', category: 'coding_cs', requiresLiveGrounding: false };
+    }
+
+    return { type: 'static_reasoning', category: 'general_reasoning', requiresLiveGrounding: false };
+}
 
 async function getSearchHelpers() {
     try {
