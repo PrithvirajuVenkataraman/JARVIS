@@ -4997,6 +4997,28 @@ body:not(.dark) .thinking-model-tag.is-failover {
     color: #b45309;
 }
 
+.thinking-telemetry-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+    font-size: 0.68rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 9999px;
+    background: rgba(56, 189, 248, 0.1);
+    border: 1px solid rgba(56, 189, 248, 0.25);
+    color: #38bdf8;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    margin-left: 0.3rem;
+    cursor: default;
+}
+
+body:not(.dark) .thinking-telemetry-tag {
+    background: rgba(2, 132, 199, 0.08);
+    border-color: rgba(2, 132, 199, 0.2);
+    color: #0284c7;
+}
+
 .thinking-chevron,
 .thinking-indicator-icon {
     width: 14px;
