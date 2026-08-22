@@ -20,6 +20,115 @@ const CRYPTO_IDS = Object.freeze({
     doge: 'dogecoin'
 });
 
+export async function searchDuckDuckGoHtml(query, options = {}) {
+    const limit = options.limit || 5;
+    try {
+        const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+        const response = await fetchWithTimeout(url, {
+            method: 'POST',
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+                'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            body: `q=${encodeURIComponent(query)}`
+        }, 3500);
+
+        if (!response.ok) return [];
+        const html = await response.text();
+        const results = [];
+        
+        const snippetBlocks = html.split(/class="result__body"/i);
+        for (let i = 1; i < snippetBlocks.length && results.length < limit; i++) {
+            const block = snippetBlocks[i];
+            
+            const titleMatch = /class="result__a"[^>]*>([\s\S]*?)<\/a>/i.exec(block);
+            const title = titleMatch ? titleMatch[1].replace(/<[^>]+>/g, '').trim() : '';
+            
+            const urlMatch = /href="([^"]+)"/i.exec(titleMatch ? titleMatch[0] : block);
+            let rawUrl = urlMatch ? urlMatch[1] : '';
+            if (rawUrl.includes('uddg=')) {
+                try {
+                    const match = /uddg=([^&]+)/.exec(rawUrl);
+                    if (match) rawUrl = decodeURIComponent(match[1]);
+                } catch (_) {}
+            }
+            
+            const snippetMatch = /class="result__snippet"[^>]*>([\s\S]*?)<\/a>/i.exec(block);
+            const snippet = snippetMatch ? snippetMatch[1].replace(/<[^>]+>/g, '').trim() : '';
+            
+            if (title && snippet && rawUrl.startsWith('http')) {
+                results.push({
+                    title,
+                    description: snippet,
+                    snippet,
+                    url: rawUrl,
+                    source: 'DuckDuckGo Web',
+                    sourceType: 'live_web',
+                    trusted: true,
+                    freshness: 'live_web_index',
+                    qualitySignals: ['live_search_index', 'ddg_html'],
+                    query
+                });
+            }
+        }
+        return results;
+    } catch (_) {
+        return [];
+    }
+}
+
+export async function searchWikipediaApi(query, options = {}) {
+    const limit = options.limit || 3;
+    try {
+        const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&utf8=&format=json&srlimit=${limit}`;
+        const res = await fetchWithTimeout(searchUrl, { headers: { 'User-Agent': 'JarvisAI/1.0 (free live search)' } }, 2500);
+        if (!res.ok) return [];
+        const data = await res.json();
+        const list = data?.query?.search || [];
+        return list.map(item => ({
+            title: item.title,
+            description: item.snippet ? item.snippet.replace(/<[^>]+>/g, '').trim() : `Wikipedia overview of ${item.title}`,
+            snippet: item.snippet ? item.snippet.replace(/<[^>]+>/g, '').trim() : `Wikipedia overview of ${item.title}`,
+            url: `https://en.wikipedia.org/wiki/${encodeURIComponent(item.title.replace(/ /g, '_'))}`,
+            source: 'Wikipedia',
+            sourceType: 'reference_lookup',
+            trusted: true,
+            freshness: 'current_encyclopedia',
+            qualitySignals: ['open_knowledge_graph', 'wikipedia_api'],
+            query
+        }));
+    } catch (_) {
+        return [];
+    }
+}
+
+export async function searchGdeltNews(query, options = {}) {
+    const limit = options.limit || 3;
+    try {
+        const url = `https://api.gdeltproject.org/api/v2/doc/doc?query=${encodeURIComponent(query)}&mode=artlist&maxrecords=${limit}&format=json&timespan=14d`;
+        const res = await fetchWithTimeout(url, { headers: { Accept: 'application/json' } }, 2500);
+        if (!res.ok) return [];
+        const data = await res.json();
+        const articles = data?.articles || [];
+        return articles.map(art => ({
+            title: art.title || 'Breaking Global News',
+            description: art.seendate ? `Published: ${art.seendate} | Source: ${art.domain}` : `News report from ${art.domain || 'global media'}`,
+            snippet: art.title,
+            url: art.url,
+            source: art.domain || 'GDELT Global News',
+            sourceType: 'news',
+            trusted: true,
+            freshness: 'recent_news',
+            qualitySignals: ['live_news_stream', 'gdelt_project'],
+            query
+        }));
+    } catch (_) {
+        return [];
+    }
+}
+
 export async function runFreeLiveSearch(query, route = {}, options = {}) {
     const category = String(route?.category || '').trim() || inferCategory(query);
     const limit = clampInt(options.limit, 8, 1, 20);
@@ -28,12 +137,39 @@ export async function runFreeLiveSearch(query, route = {}, options = {}) {
     if (category === 'disasters') return searchDisasters(query, { limit });
     if (category === 'sports') return searchSports(query, { limit });
     if (category === 'tourism_food_places') return searchTourismFoodPlaces(query, { limit });
-    if (category === 'unsupported_free_live') return unsupportedFreeLive(query, category);
+
+    // Universal Zero-Key Multi-Engine Parallel Fast-Race
+    const [ddgResults, wikiResults, gdeltResults] = await Promise.allSettled([
+        searchDuckDuckGoHtml(query, { limit }),
+        searchWikipediaApi(query, { limit: 3 }),
+        searchGdeltNews(query, { limit: 3 })
+    ]);
+
+    const results = [];
+    if (ddgResults.status === 'fulfilled' && Array.isArray(ddgResults.value)) {
+        results.push(...ddgResults.value);
+    }
+    if (wikiResults.status === 'fulfilled' && Array.isArray(wikiResults.value)) {
+        results.push(...wikiResults.value);
+    }
+    if (gdeltResults.status === 'fulfilled' && Array.isArray(gdeltResults.value)) {
+        results.push(...gdeltResults.value);
+    }
+
+    if (results.length > 0) {
+        return {
+            results: results.slice(0, limit),
+            provider: 'free_multi_engine_race',
+            publicSourceCount: results.length,
+            category: category || 'general_live_web'
+        };
+    }
+
     return {
         results: [],
         provider: 'free_public_sources',
         publicSourceCount: 0,
-        warnings: [`No dedicated permanent-free provider is configured for ${category || 'this request'}.`],
+        warnings: [`No live results found for "${query}".`],
         unsupported: true,
         category: category || 'unsupported_free_live'
     };
