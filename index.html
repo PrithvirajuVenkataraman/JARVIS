@@ -344,6 +344,21 @@
                 </div>
                 <div class="composer-trailing">
                     <button
+                        id="web-search-toggle-btn"
+                        type="button"
+                        class="composer-icon-btn web-search-toggle-btn"
+                        onclick="cycleWebSearchMode()"
+                        data-web-mode="auto"
+                        title="Web Search: Auto (Alt+W to toggle)"
+                        aria-label="Web Search: Auto">
+                        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <line x1="2" y1="12" x2="22" y2="12"></line>
+                            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1 4-10z"></path>
+                        </svg>
+                        <span class="web-search-mode-label">Auto</span>
+                    </button>
+                    <button
                         id="voice-to-text-btn"
                         type="button"
                         class="composer-icon-btn speech-input-btn"
@@ -4593,6 +4608,7 @@ async function streamChatCompletion(payload, options = {}) {
         signal,
         body: JSON.stringify({
             ...payload,
+            webMode: typeof getWebSearchMode === 'function' ? getWebSearchMode() : 'auto',
             stream: true
         })
     });
@@ -10921,8 +10937,66 @@ ${code}
             handleComposerInput();
         }
 
+        /* ==========================================================================
+           3-State Smart Web Search Controller (Auto / ON / OFF)
+           ========================================================================== */
+        let _composerWebMode = 'auto'; // 'auto' | 'force' | 'off'
+
+        function getWebSearchMode() {
+            return _composerWebMode || 'auto';
+        }
+
+        function setWebSearchMode(mode = 'auto') {
+            const valid = ['auto', 'force', 'off'].includes(mode) ? mode : 'auto';
+            _composerWebMode = valid;
+            updateWebSearchToggleUi();
+        }
+
+        function cycleWebSearchMode() {
+            triggerJarvisHaptic(12);
+            if (_composerWebMode === 'auto') {
+                setWebSearchMode('force');
+                showTemporaryMessage('Web Search: FORCED (Live sources enabled for next prompt)');
+            } else if (_composerWebMode === 'force') {
+                setWebSearchMode('off');
+                showTemporaryMessage('Web Search: OFF (Strict offline knowledge)');
+            } else {
+                setWebSearchMode('auto');
+                showTemporaryMessage('Web Search: AUTO (AI classifies need)');
+            }
+        }
+
+        function updateWebSearchToggleUi() {
+            const btn = document.getElementById('web-search-toggle-btn');
+            if (!btn) return;
+            const label = btn.querySelector('.web-search-mode-label');
+            btn.dataset.webMode = _composerWebMode;
+            btn.classList.remove('is-web-forced', 'is-web-disabled');
+
+            if (_composerWebMode === 'force') {
+                btn.classList.add('is-web-forced');
+                if (label) label.textContent = 'ON';
+                btn.title = 'Web Search: FORCED (Live web search enabled, Alt+W to toggle)';
+                btn.setAttribute('aria-label', 'Web Search: FORCED');
+            } else if (_composerWebMode === 'off') {
+                btn.classList.add('is-web-disabled');
+                if (label) label.textContent = 'OFF';
+                btn.title = 'Web Search: OFF (Strict offline knowledge, Alt+W to toggle)';
+                btn.setAttribute('aria-label', 'Web Search: OFF');
+            } else {
+                if (label) label.textContent = 'Auto';
+                btn.title = 'Web Search: Auto (AI classifies need, Alt+W to toggle)';
+                btn.setAttribute('aria-label', 'Web Search: Auto');
+            }
+        }
+
         function handleComposerKeydown(event) {
             if (!event) return;
+            if (event.altKey && (event.key === 'w' || event.key === 'W')) {
+                event.preventDefault();
+                cycleWebSearchMode();
+                return;
+            }
             if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault();
                 sendTextInput();
@@ -11278,6 +11352,9 @@ async function sendTextInput(submission = {}) {
                     clearSubmittedPromptBox(outgoingText, normalizedOutgoingText);
                     window.JarvisSessionRecovery?.clearComposerDraft?.();
                     restoreResponseRenderContext(previousRenderContext);
+                    if (typeof setWebSearchMode === 'function') {
+                        setWebSearchMode('auto');
+                    }
                     endAssistantProcessing();
                     resetPrimaryActionButtonWhenIdle();
                 }
@@ -24696,6 +24773,11 @@ if (typeof window !== 'undefined') {
                 closeCommandPalette();
             } else {
                 openCommandPalette();
+            }
+        } else if (e.altKey && e.key && e.key.toLowerCase() === 'w') {
+            e.preventDefault();
+            if (typeof cycleWebSearchMode === 'function') {
+                cycleWebSearchMode();
             }
         }
     });
