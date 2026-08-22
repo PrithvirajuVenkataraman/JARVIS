@@ -3673,7 +3673,7 @@ After </think>, output ONLY the final clean answer as natural text.`;
             return out;
         }
         if (mode === 'max' && maxWords > 0 && count > maxWords) {
-            return trimToWordCount(out, maxWords); 
+            return trimToWordCount(out, maxWords);
         }
         if (mode === 'min' && minWords > 0 && count < minWords) {
             return out;
