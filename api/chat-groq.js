@@ -245,7 +245,11 @@ async function getInstantFactHelper() {
         'deepseek-r1-distill-llama-70b',
         'qwen-2.5-coder-32b',
         'qwen/qwen3.6-27b',
-        'qwen-3.6-27b'
+        'qwen-3.6-27b',
+        'gemini-2.5-flash',
+        'gemini-2.5-pro',
+        'llama-3.2-11b-vision-preview',
+        'meta-llama/llama-3.2-11b-vision-instruct'
     ]);
     const USER_SELECTABLE_GROQ_MODELS = USER_SELECTABLE_MODELS;
     let __groqKeyRotationIdx = 0;
@@ -293,9 +297,19 @@ async function getInstantFactHelper() {
         return [...new Set(autoCandidates.filter(Boolean))];
     }
 
+    const KNOWN_GROQ_VISION_MODELS = new Set([
+        'llama-3.2-11b-vision-preview',
+        'meta-llama/llama-3.2-11b-vision-instruct',
+        'llama-3.2-90b-vision-preview'
+    ]);
+
     function getPreferredGroqVisionCandidates(configuredModel = '', userSelectedModel = null) {
-        const configured = String(configuredModel || '').trim();
-        const userSelected = String(userSelectedModel || '').trim();
+        const configured = KNOWN_GROQ_VISION_MODELS.has(String(configuredModel || '').trim())
+            ? String(configuredModel || '').trim()
+            : '';
+        const userSelected = KNOWN_GROQ_VISION_MODELS.has(String(userSelectedModel || '').trim())
+            ? String(userSelectedModel || '').trim()
+            : '';
         const visionModels = [
             'llama-3.2-11b-vision-preview',
             'meta-llama/llama-3.2-11b-vision-instruct',
@@ -308,7 +322,9 @@ async function getInstantFactHelper() {
         const configured = String(configuredModel || '').trim();
         const userSelected = String(userSelectedModel || '').trim();
         let mappedGemini = '';
-        if (['openai/gpt-oss-120b', 'llama-3.3-70b-versatile', 'deepseek-r1-distill-llama-70b', 'qwen-2.5-coder-32b'].includes(userSelected)) {
+        if (userSelected.startsWith('gemini-')) {
+            mappedGemini = userSelected;
+        } else if (['openai/gpt-oss-120b', 'llama-3.3-70b-versatile', 'deepseek-r1-distill-llama-70b', 'qwen-2.5-coder-32b'].includes(userSelected)) {
             mappedGemini = 'gemini-2.5-pro';
         } else if (['openai/gpt-oss-20b', 'llama-3.1-8b-instant'].includes(userSelected)) {
             mappedGemini = 'gemini-2.5-flash-lite';
@@ -316,14 +332,27 @@ async function getInstantFactHelper() {
         return [...new Set([mappedGemini, configured, 'gemini-3.5-flash', 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'].filter(Boolean))];
     }
 
+    const KNOWN_GEMINI_VISION_MODELS = new Set([
+        'gemini-2.5-flash',
+        'gemini-2.0-flash',
+        'gemini-1.5-flash',
+        'gemini-2.5-flash-lite',
+        'gemini-2.5-pro'
+    ]);
+
     function getPreferredGeminiVisionCandidates(configuredModel = '', userSelectedModel = null) {
-        const configured = String(configuredModel || '').trim();
-        const userSelected = String(userSelectedModel || '').trim();
+        const configured = KNOWN_GEMINI_VISION_MODELS.has(String(configuredModel || '').trim())
+            ? String(configuredModel || '').trim()
+            : '';
+        const userSelected = KNOWN_GEMINI_VISION_MODELS.has(String(userSelectedModel || '').trim())
+            ? String(userSelectedModel || '').trim()
+            : '';
         const visionModels = [
             'gemini-2.5-flash',
             'gemini-2.0-flash',
             'gemini-1.5-flash',
-            'gemini-2.5-flash-lite'
+            'gemini-2.5-flash-lite',
+            'gemini-2.5-pro'
         ];
         return [...new Set([userSelected, configured, ...visionModels].filter(Boolean))];
     }
