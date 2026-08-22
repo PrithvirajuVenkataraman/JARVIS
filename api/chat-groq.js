@@ -640,6 +640,17 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                     isInternalSummary,
                     isAttachmentGrounding
                 });
+            if (req.body?.webMode === 'force') {
+                routeDecision.webEligible = true;
+                routeDecision.strategy = 'search';
+                routeDecision.reason = 'forced_by_user';
+            } else if (req.body?.webMode === 'off') {
+                routeDecision.webEligible = false;
+                if (routeDecision.strategy === 'search') {
+                    routeDecision.strategy = 'direct';
+                    routeDecision.reason = 'offline_forced_by_user';
+                }
+            }
             const lengthPolicy = applyCostCapToLengthPolicy(
                 buildLengthPolicy(routingMessage, '', {
                     isInternalSummary,
