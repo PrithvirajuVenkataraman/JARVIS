@@ -8183,7 +8183,25 @@ let showRoutingDebugBadge = false;
                     thought = openMatch[1].trim();
                 }
             }
-            const cleanAnswer = textStr.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/^<think>[\s\S]*$/gi, '').replace(/<\/?think>/gi, '').trim();
+            let cleanAnswer = textStr.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/^<think>[\s\S]*$/gi, '').replace(/<\/?think>/gi, '').trim();
+
+            // Also detect and tuck raw unclosed model scratchpad/planning blocks (e.g. Plan: ... Review against constraints: ... Looks good. Proceeding to output.)
+            if (!thought) {
+                const planPattern = /^(?:1\s*\n[^\n]+\s*\n2\s*\n[^\n]+\s*\n3\s*\n[^\n]+\s*\.\s*\n+)?(?:Plan:|Drafting:|Thinking Process:|Reasoning:)\s*[\s\S]*?(?:Proceeding to output\.?|Final Answer:?|Output:?)\s*/i;
+                const planMatch = cleanAnswer.match(planPattern);
+                if (planMatch) {
+                    thought = planMatch[0].trim();
+                    cleanAnswer = cleanAnswer.slice(planMatch[0].length).trim();
+                } else {
+                    const reviewPattern = /^(?:Plan:[\s\S]*?)?(?:Review against constraints:[\s\S]*?Proceeding to output\.?\s*)/i;
+                    const reviewMatch = cleanAnswer.match(reviewPattern);
+                    if (reviewMatch) {
+                        thought = reviewMatch[0].trim();
+                        cleanAnswer = cleanAnswer.slice(reviewMatch[0].length).trim();
+                    }
+                }
+            }
+
             return { thought, answer: cleanAnswer };
         }
 
@@ -8829,6 +8847,11 @@ let showRoutingDebugBadge = false;
 
         function scheduleBackgroundResponseVerification(messageId, userQuery, assistantText) {
             if (!messageId || !userQuery || !assistantText) return;
+            // Only perform background verification for queries that actually ask for real-world mutable entities, leaders, or facts
+            const isEntityOrFact = /\b(who is|who was|current|incumbent|president|prime minister|ceo|governor|mayor|leader|capital|population|founded|born|located|headquarters)\b/i.test(userQuery);
+            const isAbstractOrCode = /```|\b(prove|proof|irrational|calculate|equation|integral|derivative|algorithm|function|javascript|python|css|html|regex|write|explain|what is an alternative viewpoint|opinion|perspective)\b/i.test(userQuery);
+            if (!isEntityOrFact || isAbstractOrCode) return;
+
             const run = async () => {
                 try {
                     const res = await fetch('/api/verify', {
@@ -8845,7 +8868,7 @@ let showRoutingDebugBadge = false;
                         renderVerificationNotice(messageId, {
                             status: 'drift_detected',
                             extractedAnchor: telemetry.extractedAnchor,
-                            role: telemetry.role || 'official',
+                            role: telemetry.role || '',
                             jurisdiction: telemetry.jurisdiction || '',
                             sourceUrl: telemetry.sourceUrl || ''
                         });
@@ -8866,12 +8889,27 @@ let showRoutingDebugBadge = false;
             if (!row) return;
             const container = row.querySelector('.chat-bubble-assistant') || row;
             if (!container || container.querySelector('.verification-notice-banner')) return;
+            const anchor = String(notice.extractedAnchor || '').trim();
+            if (!anchor) return;
+
+            const role = String(notice.role || '').trim();
+            const jurisdiction = String(notice.jurisdiction || '').trim();
+
+            let noticeText = '';
+            if (role && jurisdiction) {
+                noticeText = `Live records indicate the current ${escapeHtml(role)} of ${escapeHtml(jurisdiction)} is <strong>${escapeHtml(anchor)}</strong>.`;
+            } else if (role) {
+                noticeText = `Live records indicate the current ${escapeHtml(role)} is <strong>${escapeHtml(anchor)}</strong>.`;
+            } else {
+                noticeText = `Live reference note: Records identify <strong>${escapeHtml(anchor)}</strong>.`;
+            }
+
             const banner = document.createElement('div');
             banner.className = 'verification-notice-banner mt-2 text-xs text-amber-300/90 border border-amber-500/30 rounded p-2 bg-amber-950/20 flex items-start gap-2';
             banner.innerHTML = `
                 <span class="inline-block mt-0.5">\u26A0\uFE0F</span>
                 <div>
-                    <span class="font-semibold">Notice:</span> Live records indicate the incumbent ${escapeHtml(notice.role || '')} of ${escapeHtml(notice.jurisdiction || '')} is <strong>${escapeHtml(notice.extractedAnchor || '')}</strong>.
+                    <span class="font-semibold">Notice:</span> ${noticeText}
                     ${notice.sourceUrl ? `<a href="${escapeHtml(notice.sourceUrl)}" target="_blank" rel="noopener noreferrer" class="underline ml-1 text-amber-200">Source</a>` : ''}
                 </div>
             `;
