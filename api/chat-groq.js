@@ -248,6 +248,26 @@ async function getInstantFactHelper() {
         'qwen-3.6-27b'
     ]);
     const USER_SELECTABLE_GROQ_MODELS = USER_SELECTABLE_MODELS;
+    let __groqKeyRotationIdx = 0;
+    function getGroqApiKeys() {
+        const raw = String(process.env.GROQ_API_KEYS || process.env.GROQ_API_KEY || process.env.GROQ_KEY || '').trim();
+        if (!raw) return [];
+        return raw.split(/[\s,]+/).map(k => k.trim()).filter(Boolean);
+    }
+
+    function getAllGroqApiKeys() {
+        const keys = getGroqApiKeys();
+        if (!keys.length) return [];
+        const start = __groqKeyRotationIdx % keys.length;
+        return [...keys.slice(start), ...keys.slice(0, start)];
+    }
+
+    function advanceGroqKeyRotation() {
+        const keys = getGroqApiKeys();
+        if (keys.length > 1) {
+            __groqKeyRotationIdx = (__groqKeyRotationIdx + 1) % keys.length;
+        }
+    }
 
     function getPreferredGroqCandidates(configuredModel = '', { preferSpeed = false, userSelectedModel = null } = {}) {
         const configured = String(configuredModel || '').trim();
@@ -1428,62 +1448,65 @@ CRITICAL: Never output bare "Plan:", "Drafting:", or "Review against constraints
         const hasImages = Array.isArray(images) && images.length > 0;
 
         const tryRunGroq = async () => {
-            const groqApiKey = process.env.GROQ_API_KEY || process.env.GROQ_KEY;
-            if (!groqApiKey) return null;
+            const keys = getAllGroqApiKeys();
+            if (!keys.length) return null;
             const groqConfiguredModel = userSelectedModel || String(process.env.GROQ_MODEL || '').trim();
             const groqCandidates = hasImages
                 ? getPreferredGroqVisionCandidates(groqConfiguredModel, userSelectedModel)
                 : getPreferredGroqCandidates(groqConfiguredModel, { preferSpeed: false, userSelectedModel });
 
-            for (const model of groqCandidates) {
-                let messages = [{ role: 'user', content: finalPrompt }];
-                if (hasImages) {
-                    const content = [{ type: 'text', text: finalPrompt }];
-                    for (const img of images) {
-                        if (img?.base64) {
-                            content.push({ type: 'image_url', image_url: { url: `data:${img.mimeType || 'image/jpeg'};base64,${img.base64}` } });
+            for (const key of keys) {
+                for (const model of groqCandidates) {
+                    let messages = [{ role: 'user', content: finalPrompt }];
+                    if (hasImages) {
+                        const content = [{ type: 'text', text: finalPrompt }];
+                        for (const img of images) {
+                            if (img?.base64) {
+                                content.push({ type: 'image_url', image_url: { url: `data:${img.mimeType || 'image/jpeg'};base64,${img.base64}` } });
+                            }
                         }
+                        messages = [{ role: 'user', content }];
                     }
-                    messages = [{ role: 'user', content }];
-                }
-                const requestBody = {
-                    model,
-                    temperature: temp,
-                    max_tokens: maxTokens,
-                    messages
-                };
-                if (['openai/gpt-oss-120b', 'openai/gpt-oss-20b'].includes(model) && isSqlQueryGenerationRequest(finalPrompt)) {
-                    requestBody.response_format = SQL_QUERY_GENERATION_SCHEMA;
-                } else if (['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'openai/gpt-oss-safeguard-20b'].includes(model)) {
-                    requestBody.response_format = { type: 'json_object' };
-                }
+                    const requestBody = {
+                        model,
+                        temperature: temp,
+                        max_tokens: maxTokens,
+                        messages
+                    };
+                    if (['openai/gpt-oss-120b', 'openai/gpt-oss-20b'].includes(model) && isSqlQueryGenerationRequest(finalPrompt)) {
+                        requestBody.response_format = SQL_QUERY_GENERATION_SCHEMA;
+                    } else if (['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'openai/gpt-oss-safeguard-20b'].includes(model)) {
+                        requestBody.response_format = { type: 'json_object' };
+                    }
 
-                try {
-                    const response = await fetchWithTimeoutRetry('https://api.groq.com/openai/v1/chat/completions', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            Authorization: `Bearer ${groqApiKey}`
-                        },
-                        body: JSON.stringify(requestBody)
-                    }, {
-                        timeoutMs: clampInt(lengthPolicy?.timeoutMs, FAST_FAILOVER_TIMEOUT_MS, 1000, MODEL_FETCH_TIMEOUT_MS),
-                        retries: Number.isFinite(Number(lengthPolicy?.retries)) ? Number(lengthPolicy.retries) : FETCH_RETRIES
-                    });
-                    if (response.ok) {
-                        const data = await response.json();
-                        const msg = data?.choices?.[0]?.message;
-                        const reasoning = String(msg?.reasoning || msg?.reasoning_content || '').trim();
-                        let text = String(msg?.content || '').trim();
-                        if (reasoning) {
-                            text = '<think>\n' + reasoning + '\n</think>\n' + text;
+                    try {
+                        const response = await fetchWithTimeoutRetry('https://api.groq.com/openai/v1/chat/completions', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                Authorization: `Bearer ${key}`
+                            },
+                            body: JSON.stringify(requestBody)
+                        }, {
+                            timeoutMs: clampInt(lengthPolicy?.timeoutMs, FAST_FAILOVER_TIMEOUT_MS, 1000, MODEL_FETCH_TIMEOUT_MS),
+                            retries: Number.isFinite(Number(lengthPolicy?.retries)) ? Number(lengthPolicy.retries) : FETCH_RETRIES
+                        });
+                        if (response.ok) {
+                            const data = await response.json();
+                            const msg = data?.choices?.[0]?.message;
+                            const reasoning = String(msg?.reasoning || msg?.reasoning_content || '').trim();
+                            let text = String(msg?.content || '').trim();
+                            if (reasoning) {
+                                text = '<think>\n' + reasoning + '\n</think>\n' + text;
+                            }
+                            if (text) {
+                                advanceGroqKeyRotation();
+                                return { ok: true, parsedResponse: parseModelText(text), modelUsed: model, provider: 'groq' };
+                            }
                         }
-                        if (text) {
-                            return { ok: true, parsedResponse: parseModelText(text), modelUsed: model, provider: 'groq' };
-                        }
+                    } catch (error) {
+                        logUpstreamModelFailure('groq', model, error);
                     }
-                } catch (error) {
-                    logUpstreamModelFailure('groq', model, error);
                 }
             }
             return null;
@@ -1600,25 +1623,30 @@ CRITICAL: Never output bare "Plan:", "Drafting:", or "Review against constraints
         const hasImages = Array.isArray(images) && images.length > 0;
 
         const tryStreamGroq = async () => {
-            const groqApiKey = process.env.GROQ_API_KEY || process.env.GROQ_KEY;
-            if (!groqApiKey) return null;
+            const keys = getAllGroqApiKeys();
+            if (!keys.length) return null;
             const groqConfiguredModel = userSelectedModel || String(process.env.GROQ_MODEL || '').trim();
             const groqCandidates = hasImages
                 ? getPreferredGroqVisionCandidates(groqConfiguredModel, userSelectedModel)
                 : getPreferredGroqCandidates(groqConfiguredModel, { preferSpeed: true, userSelectedModel });
 
-            for (const model of groqCandidates) {
-                const result = await streamGroqModel({
-                    apiKey: groqApiKey,
-                    model,
-                    prompt: finalPrompt,
-                    images,
-                    temperature: temp,
-                    maxTokens,
-                    timeoutMs: clampInt(lengthPolicy?.timeoutMs, FAST_FAILOVER_TIMEOUT_MS, 1000, STREAM_MODEL_FETCH_TIMEOUT_MS),
-                    onDelta
-                });
-                if (result.ok) return result;
+            for (const key of keys) {
+                for (const model of groqCandidates) {
+                    const result = await streamGroqModel({
+                        apiKey: key,
+                        model,
+                        prompt: finalPrompt,
+                        images,
+                        temperature: temp,
+                        maxTokens,
+                        timeoutMs: clampInt(lengthPolicy?.timeoutMs, FAST_FAILOVER_TIMEOUT_MS, 1000, STREAM_MODEL_FETCH_TIMEOUT_MS),
+                        onDelta
+                    });
+                    if (result.ok) {
+                        advanceGroqKeyRotation();
+                        return result;
+                    }
+                }
             }
             return null;
         };
