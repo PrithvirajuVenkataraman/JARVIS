@@ -24262,6 +24262,43 @@ function triggerJarvisHaptic(pattern = 15) {
     } catch (_) {}
 }
 
+function initNetworkResilienceWatchdog() {
+    try {
+        function updateOnlineStatus() {
+            const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+            let banner = document.getElementById('jarvis-offline-banner');
+            if (isOffline) {
+                if (!banner) {
+                    banner = document.createElement('div');
+                    banner.id = 'jarvis-offline-banner';
+                    banner.style.cssText = 'position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:rgba(24,24,27,0.92);color:#f4f4f5;border:1px solid rgba(239,68,68,0.4);backdrop-filter:blur(12px);padding:8px 16px;border-radius:9999px;font-size:13px;font-weight:500;display:flex;align-items:center;gap:8px;z-index:9999;box-shadow:0 8px 30px rgba(0,0,0,0.3);';
+                    banner.innerHTML = '<span style="width:8px;height:8px;border-radius:50%;background:#ef4444;display:inline-block;"></span> Offline Mode — Viewing saved chats';
+                    document.body.appendChild(banner);
+                }
+                banner.style.display = 'flex';
+            } else if (banner) {
+                banner.style.display = 'none';
+            }
+        }
+
+        window.addEventListener('online', () => {
+            updateOnlineStatus();
+            showTemporaryMessage?.('Connected back online');
+        });
+        window.addEventListener('offline', updateOnlineStatus);
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+            updateOnlineStatus();
+        }
+    } catch (_) {}
+}
+if (typeof window !== 'undefined') {
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initNetworkResilienceWatchdog);
+    } else {
+        initNetworkResilienceWatchdog();
+    }
+}
+
 function getHistoryStorageKey() {
     const safeUserName = (userName || 'default_user').replace(/[^a-zA-Z0-9]/g, '_');
     return `unify_history_${safeUserName}`;
