@@ -168,7 +168,23 @@ To prevent browser `localStorage` 5MB quota exhaustion with multi-turn conversat
 
 ---
 
-## 10. Verification & Test Suite Matrix
+## 10. Edge Semantic Caching & Predictive Pre-warming
+
+To maximize throughput, minimize API quota burn, and eliminate latency on repeated queries:
+
+* **Edge Semantic LRU Cache (`api/chat-groq.js`):**
+  - High-performance in-memory LRU cache storing 500 entries with a 15-minute TTL.
+  - Automatically replays identical and normalized queries/code snippets in `<10ms` with zero upstream model calls.
+  - Automatic bypass for live temporal queries (`now`, `today`, `live`, `weather`, `price`) and media attachments.
+* **Predictive Connection Pre-warming (`index.html`):**
+  - Debounced pre-flight ping (`HEAD /api/chat-groq`) when the user starts typing in the composer, pre-warming TCP/TLS handshakes to save 80–150ms on Time-to-First-Token (TTFT).
+* **Live Token Telemetry & Profiler (`index.html`, `styles.css`):**
+  - Computes real-time streaming velocity (Tokens/Sec) and TTFT duration.
+  - Displays sleek, discrete telemetry badges on message headers (e.g. `⚡ 132 tok/s · TTFT 120ms` or `⚡ Cached`).
+
+---
+
+## 11. Verification & Test Suite Matrix
 
 JARVIS maintains **100% automated test coverage across 81 test suites**:
 
