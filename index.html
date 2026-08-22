@@ -22581,6 +22581,93 @@ async function deleteMemoryManagerItem(key) {
     refreshPrivacyDataSummary();
 }
 
+const JarvisIndexedDbStorage = {
+    dbName: 'jarvis_database_v1',
+    dbVersion: 1,
+    _db: null,
+
+    async getDb() {
+        if (this._db) return this._db;
+        if (typeof indexedDB === 'undefined') return null;
+        return new Promise((resolve) => {
+            try {
+                const req = indexedDB.open(this.dbName, this.dbVersion);
+                req.onupgradeneeded = (e) => {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains('kv_store')) {
+                        db.createObjectStore('kv_store', { keyPath: 'key' });
+                    }
+                    if (!db.objectStoreNames.contains('sessions')) {
+                        db.createObjectStore('sessions', { keyPath: 'id' });
+                    }
+                };
+                req.onsuccess = (e) => {
+                    this._db = e.target.result;
+                    resolve(this._db);
+                };
+                req.onerror = () => resolve(null);
+            } catch (_) {
+                resolve(null);
+            }
+        });
+    },
+
+    async setItem(key, value) {
+        try {
+            localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value));
+        } catch (_) {}
+        try {
+            const db = await this.getDb();
+            if (!db) return;
+            const tx = db.transaction('kv_store', 'readwrite');
+            const store = tx.objectStore('kv_store');
+            store.put({ key, value: typeof value === 'string' ? value : JSON.stringify(value), updatedAt: Date.now() });
+        } catch (_) {}
+    },
+
+    async getItem(key) {
+        try {
+            const db = await this.getDb();
+            if (db) {
+                const tx = db.transaction('kv_store', 'readonly');
+                const store = tx.objectStore('kv_store');
+                const req = store.get(key);
+                const result = await new Promise((resolve) => {
+                    req.onsuccess = () => resolve(req.result?.value || null);
+                    req.onerror = () => resolve(null);
+                });
+                if (result) return result;
+            }
+        } catch (_) {}
+        try {
+            return localStorage.getItem(key);
+        } catch (_) {
+            return null;
+        }
+    },
+
+    async autoMigrate() {
+        try {
+            if (typeof localStorage === 'undefined') return;
+            const db = await this.getDb();
+            if (!db) return;
+            for (let i = 0; i < localStorage.length; i++) {
+                const k = localStorage.key(i);
+                if (k && (k.startsWith('unify_') || k.startsWith('jarvis_'))) {
+                    const v = localStorage.getItem(k);
+                    if (v) {
+                        const tx = db.transaction('kv_store', 'readwrite');
+                        tx.objectStore('kv_store').put({ key: k, value: v, updatedAt: Date.now() });
+                    }
+                }
+            }
+        } catch (_) {}
+    }
+};
+if (typeof window !== 'undefined') {
+    setTimeout(() => JarvisIndexedDbStorage.autoMigrate(), 800);
+}
+
         function saveUserData() {
             if (!persistMemoryToDevice) return;
             try {
@@ -22591,7 +22678,7 @@ async function deleteMemoryManagerItem(key) {
                     memoryStore: memoryStore
                 };
                 const storageKey = getUserStorageKey();
-                localStorage.setItem(storageKey, JSON.stringify(data));
+                JarvisIndexedDbStorage.setItem(storageKey, JSON.stringify(data));
             } catch (e) { console.error('Failed to save user data:', e); }
         }
 
@@ -22614,7 +22701,7 @@ async function deleteMemoryManagerItem(key) {
                     AppState.user.preferredAddress = preferredAddress;
                     memoryStore = data.memoryStore || {};
                     normalizeMemoryStoreRecords();
-                    localStorage.setItem(storageKey, JSON.stringify({ userName, preferredAddress, memoryStore }));
+                    JarvisIndexedDbStorage.setItem(storageKey, JSON.stringify({ userName, preferredAddress, memoryStore }));
                 }
             } catch (e) { console.error('Failed to load user data:', e); }
         }
@@ -24308,7 +24395,7 @@ function saveConversationHistory() {
     if (!persistMemoryToDevice) return;
     try {
         const historyKey = getHistoryStorageKey();
-        localStorage.setItem(historyKey, JSON.stringify(conversationHistory));
+        JarvisIndexedDbStorage.setItem(historyKey, JSON.stringify(conversationHistory));
     } catch (_) {}
 }
 
