@@ -138,6 +138,12 @@ JARVIS includes a continuous, hands-free voice conversation engine:
 
 ## 8. UX Enhancements & Offline Resilience
 
+* **3-State Smart Web Search Composer Toggle (Auto / ON / OFF):**
+  - Interactive pill button (`#web-search-toggle-btn`) and `Alt+W` shortcut in the composer bar.
+  - `Auto`: Model classifies intent dynamically.
+  - `🌐 ON`: Explicitly forces live web retrieval and citations.
+  - `🌐 OFF`: Strict offline knowledge reasoning.
+  - Ephemeral safety: Automatically resets back to `Auto` after message submission.
 * **Spotlight Command Palette (`Ctrl+K` / `⌘K`):**
   - Instant keyboard launcher for searching sessions, starting new chats, toggling voice mode, and exporting data.
 * **In-Chat Code Execution Sandbox ("▶ Run"):**
