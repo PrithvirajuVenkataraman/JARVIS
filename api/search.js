@@ -5,7 +5,7 @@ import { applyApiSecurity } from './_lib/security.js';
 import { classifyFreeLiveIntent, routeMessage } from './_lib/latest/router.js';
 import { searchItems } from './_lib/latest/latest-cache.js';
 import { ingestLatestSources } from './_lib/latest/latest-ingest.js';
-import { runFreeLiveSearch } from './_lib/free-live/providers.js';
+import { runFreeLiveSearch, searchDuckDuckGoHtml } from './_lib/free-live/providers.js';
 import { extractWithCrawl4Ai } from './_lib/crawl4ai-client.js';
 import { rankTextsByEmbedding, chunkTextForEmbedding, hasNvidiaEmbeddingKey, rerankTexts, getNvidiaRerankModel } from './_lib/embeddings.js';
 import { cleanQueryTarget, extractQueryTargetMetadata } from './_lib/query-target-cleanup.js';
@@ -419,6 +419,7 @@ export async function searchPublicSources(query, options = {}) {
         ...plannedQueries.map(item => normalizeSearchQuery(item)).filter(Boolean)
     ])).slice(0, 7);
     const settled = await Promise.allSettled(querySet.flatMap(candidate => [
+        searchDuckDuckGoHtml(candidate, { limit: Math.min(5, limit) }),
         searchWikipedia(candidate, { limit: Math.min(4, limit) }),
         searchWikidata(candidate, { limit: Math.min(3, limit) }),
         searchReddit(candidate, { limit: Math.min(3, limit) }),
