@@ -6879,6 +6879,9 @@ let showRoutingDebugBadge = false;
         function hideSelectionHelperPopover() {
             const popover = selectionHelperState.popoverEl;
             if (!popover) return;
+            if (popover.contains(document.activeElement) && typeof document.activeElement.blur === 'function') {
+                document.activeElement.blur();
+            }
             popover.classList.remove('visible');
             popover.hidden = true;
             popover.setAttribute('aria-hidden', 'true');
@@ -23941,8 +23944,12 @@ function toggleChatSidebar() {
 }
 
 function closeChatSidebar() {
-    document.getElementById('chat-sidebar-panel')?.classList.remove('is-open');
-    document.getElementById('chat-sidebar-panel')?.setAttribute('aria-hidden', 'true');
+    const panel = document.getElementById('chat-sidebar-panel');
+    if (panel?.contains(document.activeElement) && typeof document.activeElement.blur === 'function') {
+        document.activeElement.blur();
+    }
+    panel?.classList.remove('is-open');
+    panel?.setAttribute('aria-hidden', 'true');
     document.getElementById('chat-sidebar-backdrop')?.classList.add('hidden');
     document.getElementById('chat-sidebar-toggle')?.setAttribute('aria-expanded', 'false');
     closeChatSessionMenu();
