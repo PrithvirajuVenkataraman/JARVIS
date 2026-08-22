@@ -4841,7 +4841,6 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
     }, minimalThinking ? 0 : 80);
     try { 
         const engineContext = requestOptions?.grounding
-            || minimalThinking
             ? []
             : (window.JarvisConversation?.buildContext({
                 maxTurns: 12,
