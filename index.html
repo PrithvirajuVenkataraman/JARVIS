@@ -349,8 +349,8 @@
                         class="composer-icon-btn web-search-toggle-btn"
                         onclick="cycleWebSearchMode()"
                         data-web-mode="auto"
-                        title="Web Search: Auto (Alt+W to toggle)"
-                        aria-label="Web Search: Auto">
+                        title="Web search (Auto)"
+                        aria-label="Web search (Auto)">
                         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                             <circle cx="12" cy="12" r="10"></circle>
                             <line x1="2" y1="12" x2="22" y2="12"></line>
@@ -2209,26 +2209,23 @@ function loadSavedEmail() {
 
 function showTemporaryMessage(message) {
     const chatContainer = document.getElementById('chat-container');
+    if (!chatContainer) return;
     const msgDiv = document.createElement('div');
     msgDiv.className = 'flex justify-center my-2 fade-in';
 
-    const bgClass = darkMode ? 'bg-green-900' : 'bg-green-50';
-    const textClass = darkMode ? 'text-green-200' : 'text-green-900';
-
     msgDiv.innerHTML = `
-        <div class="${bgClass} border-2 ${darkMode ? 'border-green-600' : 'border-green-300'} rounded-lg px-4 py-2">
-            <span class="text-sm font-medium ${textClass}">${message}</span>
+        <div class="bg-zinc-800/90 text-zinc-200 border border-zinc-700/60 rounded-full px-3.5 py-1.5 shadow-lg backdrop-blur-md flex items-center gap-1.5">
+            <span class="text-xs font-medium">${message}</span>
         </div>
     `;
 
     chatContainer.appendChild(msgDiv);
     maybeAutoScroll(chatContainer);
 
-
     setTimeout(() => {
         msgDiv.classList.add('fade-out');
         setTimeout(() => msgDiv.remove(), 300);
-    }, 3000);
+    }, 2400);
 }
 
 // ============ FEEDBACK & LEARNING SYSTEM ============
@@ -10999,13 +10996,10 @@ ${code}
             triggerJarvisHaptic(12);
             if (_composerWebMode === 'auto') {
                 setWebSearchMode('force');
-                showTemporaryMessage('Web Search: FORCED (Live sources enabled for next prompt)');
             } else if (_composerWebMode === 'force') {
                 setWebSearchMode('off');
-                showTemporaryMessage('Web Search: OFF (Strict offline knowledge)');
             } else {
                 setWebSearchMode('auto');
-                showTemporaryMessage('Web Search: AUTO (AI classifies need)');
             }
         }
 
@@ -11019,17 +11013,17 @@ ${code}
             if (_composerWebMode === 'force') {
                 btn.classList.add('is-web-forced');
                 if (label) label.textContent = 'ON';
-                btn.title = 'Web Search: FORCED (Live web search enabled, Alt+W to toggle)';
-                btn.setAttribute('aria-label', 'Web Search: FORCED');
+                btn.title = 'Web search (ON)';
+                btn.setAttribute('aria-label', 'Web search (ON)');
             } else if (_composerWebMode === 'off') {
                 btn.classList.add('is-web-disabled');
                 if (label) label.textContent = 'OFF';
-                btn.title = 'Web Search: OFF (Strict offline knowledge, Alt+W to toggle)';
-                btn.setAttribute('aria-label', 'Web Search: OFF');
+                btn.title = 'Web search (OFF)';
+                btn.setAttribute('aria-label', 'Web search (OFF)');
             } else {
                 if (label) label.textContent = 'Auto';
-                btn.title = 'Web Search: Auto (AI classifies need, Alt+W to toggle)';
-                btn.setAttribute('aria-label', 'Web Search: Auto');
+                btn.title = 'Web search (Auto)';
+                btn.setAttribute('aria-label', 'Web search (Auto)');
             }
         }
 
