@@ -190,7 +190,22 @@ To maximize throughput, minimize API quota burn, and eliminate latency on repeat
 
 ---
 
-## 11. Verification & Test Suite Matrix
+## 11. 100% Free-For-Life Live Web Search Engine
+
+To ensure real-time web search and citation generation work reliably forever without relying on expensive, paid search APIs (such as Serper or Bing):
+
+* **Zero-Key Multi-Engine Parallel Fast-Race (`api/_lib/free-live/providers.js`, `api/search.js`):**
+  - Concurrently queries multiple free, open public search indexers in parallel:
+    - **DuckDuckGo HTML Parser:** Live web search index scraper extracting title, snippet, and clean destination URLs without API keys.
+    - **Wikipedia & Wikidata REST APIs:** Real-time encyclopedia and entity knowledge graphs.
+    - **GDELT Global News Document API:** Live breaking news, international headlines, and publisher feeds.
+  - Races all providers with a sub-2.5s timeout, deduplicating and ranking the top verified source cards.
+* **Zero-Key URL Web Fetcher (`web_fetch`):**
+  - Directly scrapes and cleans readable markdown/text from any public URL without proxy credits.
+
+---
+
+## 12. Verification & Test Suite Matrix
 
 JARVIS maintains **100% automated test coverage across 81 test suites**:
 
