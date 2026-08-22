@@ -816,6 +816,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             return res.status(200).json({
                 success: true,
                 ...finalParsed,
+                sources: Array.isArray(liveRag.sources) && liveRag.sources.length > 0 ? liveRag.sources : undefined,
                 requestId,
                 modelUsed: selectedPass.modelUsed,
                 provider: selectedPass.provider,
@@ -1051,9 +1052,23 @@ CRITICAL: Never output bare "Plan:", "Drafting:", or "Review against constraints
             return res.end();
         }
 
+        let liveRag = { ragText: '', sources: [] };
+        if ((routeDecision.strategy === 'search' || routeDecision.strategy === 'live_first' || routeDecision.webEligible) && !isAttachmentGroundingPayload(grounding, intent)) {
+            writeSse(res, 'delta', { text: '<think>\n🔍 Searching live web sources...\n' });
+            liveRag = await buildLiveRagContext(effectiveMessage, null, []);
+            if (liveRag.sources && liveRag.sources.length > 0) {
+                writeSse(res, 'delta', { text: `📖 Reading ${liveRag.sources.slice(0, 2).map(s => s.domain || 'web source').join(', ')}...\n✨ Synthesizing ${liveRag.sources.length} sources...\n</think>\n` });
+                writeSse(res, 'sources', { sources: liveRag.sources });
+            } else {
+                writeSse(res, 'delta', { text: '✨ Synthesizing response...\n</think>\n' });
+            }
+        }
+
         let streamedText = '';
         try {
-            const prompt = composeStreamingPrompt(systemPrompt, contextBlock, effectiveMessage, lengthPolicy?.instruction || '', intent);
+            const prompt = liveRag.ragText
+                ? composeFinalPrompt(systemPrompt, liveRag.ragText, contextBlock, effectiveMessage, lengthPolicy?.instruction || '', intent)
+                : composeStreamingPrompt(systemPrompt, contextBlock, effectiveMessage, lengthPolicy?.instruction || '', intent);
             const modelStartedAt = Date.now();
             const streamImages = Array.isArray(images)
                 ? images
@@ -1145,6 +1160,7 @@ CRITICAL: Never output bare "Plan:", "Drafting:", or "Review against constraints
                 requestId,
                 intent: 'casual_chat',
                 response: finalText,
+                sources: Array.isArray(liveRag.sources) && liveRag.sources.length > 0 ? liveRag.sources : undefined,
                 action: null,
                 provider: streamResult.provider,
                 modelUsed: streamResult.modelUsed,
@@ -2482,6 +2498,36 @@ CRITICAL: Never output bare "Plan:", "Drafting:", or "Review against constraints
         return { escalate: false, reason: 'model_answer_accepted' };
     }
 
+    async function extractReadableArticleText(url, timeoutMs = 2200) {
+        if (!url || !url.startsWith('http')) return '';
+        try {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), timeoutMs);
+            const res = await fetch(url, {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8'
+                },
+                signal: controller.signal
+            });
+            clearTimeout(timeout);
+            if (!res.ok) return '';
+            const html = await res.text();
+            const cleaned = html
+                .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+                .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+                .replace(/<nav[\s\S]*?<\/nav>/gi, ' ')
+                .replace(/<header[\s\S]*?<\/header>/gi, ' ')
+                .replace(/<footer[\s\S]*?<\/footer>/gi, ' ')
+                .replace(/<[^>]*>/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim();
+            return cleaned.slice(0, 3000);
+        } catch (_) {
+            return '';
+        }
+    }
+
     async function buildLiveRagContext(message, req, contextTurns = []) {
         const query = resolveContextualLiveQuery(message, contextTurns);
         const intentClassification = classifyQueryIntent(query);
@@ -2495,6 +2541,8 @@ CRITICAL: Never output bare "Plan:", "Drafting:", or "Review against constraints
                         description: f.summary,
                         url: f.url,
                         domain: 'wikipedia.org',
+                        favicon: 'https://www.google.com/s2/favicons?domain=wikipedia.org&sz=64',
+                        sourceNumber: i + 1,
                         sourceType: 'instant_fact_authority',
                         sourceLabel: f.source,
                         date: '',
@@ -2549,17 +2597,36 @@ CRITICAL: Never output bare "Plan:", "Drafting:", or "Review against constraints
         const sources = rankLiveSources(message, allResults).filter(isAnswerEvidenceSource).slice(0, 8);
         if (!sources.length) return { ragText: '', sources: [] };
 
-        const ragText = sources
-            .map((item, index) => [
-                `[${index + 1}] ${item.title}`,
-                item.description ? `Summary: ${item.description}` : '',
-                item.sourceLabel ? `Source label: ${item.sourceLabel}` : '',
-                item.sourceType ? `Source type: ${item.sourceType}` : '',
-                item.freshness ? `Freshness: ${item.freshness}` : '',
-                item.date ? `Date: ${item.date}` : '',
-                `Source: ${item.url}`
-            ].filter(Boolean).join('\n'))
-            .join('\n\n');
+        // Deep Scrape Top 2-3 unique URLs concurrently for full paragraph synthesis
+        const deepScrapePromises = sources.slice(0, 3).map(async (src) => {
+            const articleText = await extractReadableArticleText(src.url, 2200);
+            if (articleText && articleText.length > 80) {
+                src.extract = articleText;
+                src.pageFetched = true;
+            }
+        });
+        await Promise.allSettled(deepScrapePromises);
+
+        sources.forEach((item, index) => {
+            item.sourceNumber = index + 1;
+            item.domain = item.domain || getHost(item.url);
+            item.favicon = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(item.domain)}&sz=64`;
+        });
+
+        const ragText = [
+            '=== VERIFIED REAL-TIME WEB SOURCES ===',
+            ...sources.map((item, index) => [
+                `[${index + 1}] Title: ${item.title}`,
+                `URL: ${item.url}`,
+                `Domain: ${item.domain}`,
+                item.extract ? `Full Extract: ${item.extract}` : (item.description ? `Summary: ${item.description}` : ''),
+                item.date ? `Date: ${item.date}` : ''
+            ].filter(Boolean).join('\n')),
+            '',
+            '=== CITATION DIRECTIVE ===',
+            'Synthesize a comprehensive, fact-grounded answer based strictly on the verified sources above.',
+            'When citing a fact, statistic, or quote from a source, append a clickable markdown link like [1](URL) or [2](URL) immediately after the claim.'
+        ].join('\n\n');
 
         return { ragText, sources };
     }
