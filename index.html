@@ -81,6 +81,14 @@
                 </svg>
                 <span>System Instructions</span>
             </button>
+            <button type="button" class="chat-sidebar-nav-item" onclick="exportCurrentChat('markdown'); closeChatSidebar();">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" aria-hidden="true">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="7 10 12 15 17 10"></polyline>
+                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+                <span>Export Chat</span>
+            </button>
             <div class="chat-sidebar-model-block">
                 <div class="chat-sidebar-model-selector">
                     <label for="model-selector" class="chat-sidebar-model-label">Model</label>
@@ -6099,6 +6107,10 @@ let showRoutingDebugBadge = false;
             const btn = document.getElementById('send-message-btn');
             const currentState = window.JarvisSpeechInput?.getState?.() || {};
             const willEnable = !currentState.converseEnabled;
+            if (willEnable) {
+                triggerJarvisHaptic(18);
+                playJarvisChime('activate');
+            }
             if (btn) {
                 btn.classList.toggle('is-converse-active', willEnable);
                 btn.classList.remove('composer-send-stop', 'is-send-ready');
@@ -24141,6 +24153,110 @@ function handleChatSessionMenuAction(action) {
     saveChatSessions();
     renderChatSidebarList();
     closeChatSessionMenu();
+}
+
+function exportCurrentChat(format = 'markdown') {
+    const session = (typeof getActiveChatSession === 'function' ? getActiveChatSession() : null) || {
+        title: 'JARVIS Conversation',
+        messages: []
+    };
+    const title = String(session.title || 'JARVIS Conversation').trim();
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const messages = (Array.isArray(session.messages) && session.messages.length > 0)
+        ? session.messages
+        : (Array.isArray(conversationHistory) ? conversationHistory.map(h => [
+            { role: 'user', text: h.user },
+            { role: 'assistant', text: h.assistant }
+        ]).flat().filter(m => m.text) : []);
+
+    if (!messages.length) {
+        showTemporaryMessage('No conversation messages to export.');
+        return;
+    }
+
+    let fileContent = '';
+    let mimeType = 'text/markdown;charset=utf-8';
+    let fileExtension = 'md';
+
+    if (format === 'json') {
+        mimeType = 'application/json;charset=utf-8';
+        fileExtension = 'json';
+        fileContent = JSON.stringify({
+            title,
+            exportedAt: new Date().toISOString(),
+            messages
+        }, null, 2);
+    } else {
+        const mdLines = [
+            `# ${title}`,
+            `*Exported from JARVIS on ${new Date().toLocaleString()}*`,
+            '',
+            '---',
+            ''
+        ];
+        for (const msg of messages) {
+            const speaker = msg.role === 'user' ? '### 👤 You' : '### 🤖 JARVIS';
+            mdLines.push(speaker);
+            mdLines.push('');
+            mdLines.push(String(msg.text || '').trim());
+            mdLines.push('');
+            mdLines.push('---');
+            mdLines.push('');
+        }
+        fileContent = mdLines.join('\n').trim();
+    }
+
+    const safeTitle = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40) || 'chat';
+    const filename = `jarvis-${safeTitle}-${dateStr}.${fileExtension}`;
+    const blob = new Blob([fileContent], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showTemporaryMessage(`Conversation exported as ${fileExtension.toUpperCase()}`);
+}
+
+function playJarvisChime(type = 'activate') {
+    try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return;
+        const ctx = new AudioCtx();
+        const now = ctx.currentTime;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        if (type === 'activate') {
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(440, now);
+            osc.frequency.exponentialRampToValueAtTime(880, now + 0.12);
+            gain.gain.setValueAtTime(0.04, now);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+            osc.start(now);
+            osc.stop(now + 0.2);
+        } else if (type === 'done') {
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(660, now);
+            osc.frequency.exponentialRampToValueAtTime(990, now + 0.08);
+            gain.gain.setValueAtTime(0.03, now);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
+            osc.start(now);
+            osc.stop(now + 0.16);
+        }
+    } catch (_) {}
+}
+
+function triggerJarvisHaptic(pattern = 15) {
+    try {
+        if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+            navigator.vibrate(pattern);
+        }
+    } catch (_) {}
 }
 
 function getHistoryStorageKey() {
