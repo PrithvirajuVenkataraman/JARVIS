@@ -9014,6 +9014,17 @@ let showRoutingDebugBadge = false;
             return segments.slice(0, 12);
         }
 
+        function detectScriptLanguage(text) {
+            const str = String(text || '');
+            if (!str) return 'en-US';
+            if (/[\u0C80-\u0CFF]/.test(str)) return 'kn-IN'; // Kannada
+            if (/[\u0B80-\u0BFF]/.test(str)) return 'ta-IN'; // Tamil
+            if (/[\u0C00-\u0C7F]/.test(str)) return 'te-IN'; // Telugu
+            if (/[\u0D00-\u0D7F]/.test(str)) return 'ml-IN'; // Malayalam
+            if (/[\u0900-\u097F]/.test(str)) return 'hi-IN'; // Hindi
+            return 'en-US';
+        }
+
         function getBestVoiceForLanguage(lang = 'en-US') {
             if (!('speechSynthesis' in window)) return null;
             const voices = window.speechSynthesis.getVoices() || [];
@@ -9028,7 +9039,9 @@ let showRoutingDebugBadge = false;
 
         function createConverseUtterance(spokenText, index, total) {
             const utterance = new SpeechSynthesisUtterance(spokenText);
-            const currentLang = window.JarvisSpeechInput?.getState?.().language || 'en-US';
+            const userLang = window.JarvisSpeechInput?.getState?.().language;
+            const scriptLang = detectScriptLanguage(spokenText);
+            const currentLang = (scriptLang !== 'en-US') ? scriptLang : (userLang || 'en-US');
             utterance.lang = currentLang;
             const voice = getBestVoiceForLanguage(currentLang);
             if (voice) {
@@ -9986,6 +9999,10 @@ let showRoutingDebugBadge = false;
                 : String(rawText || '').trim();
             if (!clean) return;
             const utterance = new SpeechSynthesisUtterance(clean);
+            const lang = typeof detectScriptLanguage === 'function' ? detectScriptLanguage(clean) : 'en-US';
+            utterance.lang = lang;
+            const voice = typeof getBestVoiceForLanguage === 'function' ? getBestVoiceForLanguage(lang) : null;
+            if (voice) utterance.voice = voice;
             utterance.onend = () => {
                 if (button) {
                     button.classList.remove('is-speaking');
