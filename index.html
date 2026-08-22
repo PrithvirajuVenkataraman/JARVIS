@@ -164,6 +164,36 @@
             <div id="command-palette-list" class="command-palette-list" role="listbox"></div>
         </div>
     </div>
+    <!-- Side-by-Side Artifact Canvas Drawer -->
+    <div id="jarvis-canvas-drawer" class="jarvis-canvas-drawer" role="complementary" aria-label="Artifact Canvas">
+        <div class="canvas-drawer-header">
+            <div class="canvas-drawer-title">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2" aria-hidden="true">
+                    <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                    <polyline points="2 17 12 22 22 17"></polyline>
+                    <polyline points="2 12 12 17 22 12"></polyline>
+                </svg>
+                <span id="canvas-title-text">Artifact Preview</span>
+            </div>
+            <div class="canvas-tab-bar">
+                <button id="canvas-tab-code" class="canvas-tab-btn is-active" onclick="setCanvasTab('code')">Code</button>
+                <button id="canvas-tab-preview" class="canvas-tab-btn" onclick="setCanvasTab('preview')">Live Preview</button>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <button class="code-header-btn" onclick="downloadCanvasCode()" title="Download file">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                    <span>Download</span>
+                </button>
+                <button class="code-header-btn" onclick="closeJarvisCanvas()" title="Close Canvas" style="padding: 4px 6px;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+            </div>
+        </div>
+        <div class="canvas-body">
+            <div id="canvas-code-pane" class="canvas-code-view"></div>
+            <iframe id="canvas-preview-frame" class="canvas-preview-frame" style="display: none;" sandbox="allow-scripts allow-modals"></iframe>
+        </div>
+    </div>
     <div class="page-shell">
         <div class="app-shell max-w-5xl mx-auto relative z-10 p-6">
             <!-- Header - Enhanced -->
@@ -7165,8 +7195,43 @@ let showRoutingDebugBadge = false;
             html = html.replace(/__CODE_BLOCK_(\d+)__/g, (_, idx) => {
                 const block = codeBlocks[Number(idx)];
                 if (!block) return '';
-                const lang = block.lang ? `<span class="assistant-md-code-lang">${escapeHtml(block.lang)}</span>` : '';
-                return `<pre class="assistant-md-code-block">${lang}<code>${escapeHtml(block.code)}</code></pre>`;
+                const blockId = `code_block_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+                window._jarvisCodeBlocks = window._jarvisCodeBlocks || {};
+                window._jarvisCodeBlocks[blockId] = {
+                    lang: block.lang || 'code',
+                    code: block.code || ''
+                };
+                const langLabel = block.lang ? escapeHtml(block.lang) : 'CODE';
+                const isExecutable = /^(javascript|js|html|htm|json)$/i.test(block.lang);
+                const runBtnHtml = isExecutable
+                    ? `<button type="button" class="code-header-btn run-btn" onclick="runJarvisCodeSandbox('${blockId}')" title="Run code">
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                        <span>Run</span>
+                       </button>`
+                    : '';
+                const canvasBtnHtml = `<button type="button" class="code-header-btn canvas-btn" onclick="openInCanvas('${blockId}')" title="Open in Artifact Canvas">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
+                    <span>Canvas</span>
+                </button>`;
+                const copyBtnHtml = `<button type="button" class="code-header-btn" onclick="copyCodeBlock(this, '${blockId}')" title="Copy code">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                    <span>Copy</span>
+                </button>`;
+
+                return `
+                    <div class="assistant-md-code-container" id="container_${blockId}">
+                        <div class="assistant-md-code-header">
+                            <span class="assistant-md-code-lang">${langLabel}</span>
+                            <div class="assistant-md-code-actions">
+                                ${runBtnHtml}
+                                ${canvasBtnHtml}
+                                ${copyBtnHtml}
+                            </div>
+                        </div>
+                        <pre class="assistant-md-code-block"><code>${escapeHtml(block.code)}</code></pre>
+                        <div id="output_${blockId}" class="code-output-drawer" style="display: none;"></div>
+                    </div>
+                `;
             });
 
             if (window.JarvisScienceFormat?.enhanceHtml) {
@@ -24613,6 +24678,152 @@ if (typeof window !== 'undefined') {
     } else {
         initScrollToBottomWatchdog();
     }
+}
+
+/* ==========================================================================
+   Code Sandbox Runner & Canvas Controller
+   ========================================================================== */
+function copyCodeBlock(btn, blockId) {
+    const data = window._jarvisCodeBlocks?.[blockId];
+    if (!data || !data.code) return;
+    try {
+        navigator.clipboard.writeText(data.code).then(() => {
+            const span = btn.querySelector('span');
+            if (span) {
+                const prev = span.innerText;
+                span.innerText = 'Copied!';
+                setTimeout(() => { span.innerText = prev; }, 1600);
+            }
+            triggerJarvisHaptic(10);
+        });
+    } catch (_) {}
+}
+
+function runJarvisCodeSandbox(blockId) {
+    const data = window._jarvisCodeBlocks?.[blockId];
+    const outEl = document.getElementById(`output_${blockId}`);
+    if (!data || !outEl) return;
+    outEl.style.display = 'block';
+    outEl.innerHTML = '<div class="code-output-header"><span>Sandbox Output</span><button class="code-header-btn" onclick="document.getElementById(\'output_' + blockId + '\').style.display=\'none\'">Close</button></div><div class="code-output-terminal" id="terminal_' + blockId + '"><div class="code-output-line system">Running sandbox...</div></div>';
+    const term = document.getElementById(`terminal_${blockId}`);
+
+    const lang = String(data.lang || '').toLowerCase();
+    if (lang === 'json') {
+        try {
+            const parsed = JSON.parse(data.code);
+            term.innerHTML = `<div class="code-output-line system">✓ Valid JSON (${Object.keys(parsed).length} top-level keys)</div><pre style="color:#a7f3d0;font-size:11.5px;margin:4px 0;">${escapeHtml(JSON.stringify(parsed, null, 2))}</pre>`;
+        } catch (err) {
+            term.innerHTML = `<div class="code-output-line error">✗ JSON Parse Error: ${escapeHtml(err.message)}</div>`;
+        }
+        return;
+    }
+
+    if (lang === 'html' || lang === 'htm') {
+        const frame = document.createElement('iframe');
+        frame.sandbox = 'allow-scripts';
+        frame.style.cssText = 'width:100%;min-height:160px;background:#ffffff;border-radius:6px;border:1px solid rgba(255,255,255,0.2);margin-top:6px;';
+        term.innerHTML = '<div class="code-output-line system">✓ Rendered HTML Preview:</div>';
+        term.appendChild(frame);
+        setTimeout(() => {
+            try {
+                frame.contentDocument.open();
+                frame.contentDocument.write(data.code);
+                frame.contentDocument.close();
+            } catch (err) {
+                term.innerHTML += `<div class="code-output-line error">Render error: ${escapeHtml(err.message)}</div>`;
+            }
+        }, 10);
+        return;
+    }
+
+    try {
+        const logs = [];
+        const sandboxConsole = {
+            log: (...args) => logs.push({ type: 'log', text: args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ') }),
+            error: (...args) => logs.push({ type: 'error', text: args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ') }),
+            warn: (...args) => logs.push({ type: 'log', text: '⚠️ ' + args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ') }),
+            info: (...args) => logs.push({ type: 'system', text: args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ') })
+        };
+        const runFn = new Function('console', `"use strict";\n${data.code}`);
+        const start = performance.now();
+        runFn(sandboxConsole);
+        const duration = (performance.now() - start).toFixed(1);
+
+        if (!logs.length) {
+            term.innerHTML = `<div class="code-output-line system">✓ Executed in ${duration}ms (no console output)</div>`;
+        } else {
+            term.innerHTML = `<div class="code-output-line system">✓ Executed in ${duration}ms:</div>` + logs.map(l => `<div class="code-output-line ${l.type}">${escapeHtml(l.text)}</div>`).join('');
+        }
+    } catch (err) {
+        term.innerHTML = `<div class="code-output-line error">✗ Runtime Error: ${escapeHtml(err.message)}</div>`;
+    }
+}
+
+let activeCanvasBlockId = null;
+function openInCanvas(blockId) {
+    const data = window._jarvisCodeBlocks?.[blockId];
+    const drawer = document.getElementById('jarvis-canvas-drawer');
+    const titleEl = document.getElementById('canvas-title-text');
+    const codePane = document.getElementById('canvas-code-pane');
+    if (!data || !drawer) return;
+
+    activeCanvasBlockId = blockId;
+    titleEl.innerText = `${(data.lang || 'code').toUpperCase()} Artifact`;
+    codePane.innerText = data.code;
+    drawer.classList.add('is-open');
+
+    const isPreviewable = /^(html|htm|svg)$/i.test(data.lang);
+    const prevTabBtn = document.getElementById('canvas-tab-preview');
+    if (prevTabBtn) prevTabBtn.style.display = isPreviewable ? 'block' : 'none';
+    setCanvasTab(isPreviewable ? 'preview' : 'code');
+}
+
+function closeJarvisCanvas() {
+    const drawer = document.getElementById('jarvis-canvas-drawer');
+    if (drawer) drawer.classList.remove('is-open');
+}
+
+function setCanvasTab(tab) {
+    const codePane = document.getElementById('canvas-code-pane');
+    const frame = document.getElementById('canvas-preview-frame');
+    const tabCode = document.getElementById('canvas-tab-code');
+    const tabPrev = document.getElementById('canvas-tab-preview');
+    const data = window._jarvisCodeBlocks?.[activeCanvasBlockId];
+
+    if (tab === 'preview' && data) {
+        if (tabPrev) tabPrev.classList.add('is-active');
+        if (tabCode) tabCode.classList.remove('is-active');
+        if (codePane) codePane.style.display = 'none';
+        if (frame) {
+            frame.style.display = 'block';
+            frame.contentDocument.open();
+            frame.contentDocument.write(data.code);
+            frame.contentDocument.close();
+        }
+    } else {
+        if (tabCode) tabCode.classList.add('is-active');
+        if (tabPrev) tabPrev.classList.remove('is-active');
+        if (frame) frame.style.display = 'none';
+        if (codePane) {
+            codePane.style.display = 'block';
+            if (data) codePane.innerText = data.code;
+        }
+    }
+}
+
+function downloadCanvasCode() {
+    const data = window._jarvisCodeBlocks?.[activeCanvasBlockId];
+    if (!data) return;
+    const ext = data.lang === 'javascript' || data.lang === 'js' ? 'js' : (data.lang === 'html' ? 'html' : (data.lang === 'json' ? 'json' : (data.lang === 'python' || data.lang === 'py' ? 'py' : 'txt')));
+    const blob = new Blob([data.code], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `artifact_${Date.now()}.${ext}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
 }
 
 function getHistoryStorageKey() {
