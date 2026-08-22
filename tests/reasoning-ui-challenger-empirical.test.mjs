@@ -236,6 +236,9 @@ vm.createContext(domSandbox);
 vm.runInContext(extractFunctionSource(indexHtml, 'escapeHtml'), domSandbox);
 vm.runInContext(extractFunctionSource(indexHtml, 'extractThoughtAndAnswer'), domSandbox);
 vm.runInContext(extractFunctionSource(indexHtml, 'generateContextualThoughtSteps'), domSandbox);
+if (indexHtml.includes('function formatModelDisplayName(')) {
+    vm.runInContext(extractFunctionSource(indexHtml, 'formatModelDisplayName'), domSandbox);
+}
 vm.runInContext(extractFunctionSource(indexHtml, 'buildThinkingProcessHtml'), domSandbox);
 
 const toggleMatch = indexHtml.match(/window\.toggleThinkingProcessCard\s*=\s*function\s*\(([^)]*)\)\s*\{([\s\S]*?)\};/);
