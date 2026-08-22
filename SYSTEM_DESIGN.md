@@ -10,28 +10,30 @@ This document provides a comprehensive technical overview of the system design, 
 graph TD
     Client["Client Web UI (Vanilla JS, Web Audio, Responsive CSS)"]
     
-    subgraph Frontend Subsystems
+    subgraph Frontend["Frontend Subsystems"]
         ChatComposer["Chat Composer & Attachment Ingestion"]
         ConverseController["Converse Mode Engine (VTT & TTS)"]
         OfflineWatchdog["Network Resilience Watchdog"]
         AudioHaptics["Web Audio Chimes & Haptics Engine"]
     end
 
-    subgraph Backend Edge Server (Vercel Serverless / Node.js)
+    subgraph Backend["Backend Edge Server (Vercel Serverless / Node.js)"]
         SecurityShield["Security Shield (Origin/Referer & Delimiter Guard)"]
         ContextCompactor["Context Window Token Compactor"]
         IntentRouter["Autonomous Model Router & Fallback Cascade"]
         CircuitBreaker["API Circuit Breaker State Machine"]
     end
 
-    subgraph Model & Provider Pool
+    subgraph Models["Model & Provider Pool"]
         GroqPool["Groq LPU Pool (Multi-Key Round-Robin)"]
         GeminiPool["Google Gemini 2.5 Flash / 2.0 / Pro (Vision & Multimodal)"]
         DeterministicFacts["Deterministic Instant Fact Layer"]
     end
 
-    Client --> FrontendSubsystems
-    FrontendSubsystems --> SecurityShield
+    Client --> ChatComposer
+    Client --> ConverseController
+    ChatComposer --> SecurityShield
+    ConverseController --> SecurityShield
     SecurityShield --> ContextCompactor
     ContextCompactor --> IntentRouter
     IntentRouter --> CircuitBreaker
@@ -94,7 +96,7 @@ For long conversations (50+ turns), JARVIS maintains full conversational coheren
 flowchart LR
     A["Raw Chat History (Turns 1 to N)"] --> B{"Turn Count > 10?"}
     B -- No --> C["Verbatim Context (All Turns)"]
-    B -- Yes --> D["Older Turns (1 to N-10) -> Condensed [Conversation Digest]"]
+    B -- Yes --> D["Older Turns (1 to N-10) -> Condensed (Conversation Digest)"]
     B -- Yes --> E["Recent Turns (N-9 to N) -> Verbatim Stream Block"]
     D --> F["Compacted Context Payload"]
     E --> F
