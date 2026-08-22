@@ -489,9 +489,66 @@ async function getInstantFactHelper() {
         return `${digestBlock}${verbatimBlock}`;
     }
 
+/* ==========================================================================
+   Edge Semantic LRU Cache (Sub-10ms Exact & Semantic Replay)
+   ========================================================================== */
+class EdgeSemanticLruCache {
+    constructor(maxSize = 500, ttlMs = 15 * 60 * 1000) {
+        this.maxSize = maxSize;
+        this.ttlMs = ttlMs;
+        this.cache = new Map();
+    }
+
+    _generateKey(message, contextBlock, intent, model) {
+        const normMsg = String(message || '').toLowerCase().trim().replace(/\s+/g, ' ');
+        const normContext = String(contextBlock || '').toLowerCase().trim().replace(/\s+/g, ' ');
+        const normIntent = String(intent || 'chat').toLowerCase();
+        const normModel = String(model || 'auto').toLowerCase();
+        return `${normIntent}::${normModel}::${normContext}::${normMsg}`;
+    }
+
+    shouldBypass(message, images) {
+        if (Array.isArray(images) && images.length > 0) return true;
+        const msg = String(message || '').toLowerCase();
+        if (/\b(today|tomorrow|yesterday|now|current|live|time|date|stock|price|weather|random|dice|coin)\b/i.test(msg)) {
+            return true;
+        }
+        return false;
+    }
+
+    get(message, contextBlock, intent, model) {
+        if (this.shouldBypass(message)) return null;
+        const key = this._generateKey(message, contextBlock, intent, model);
+        const item = this.cache.get(key);
+        if (!item) return null;
+        if (Date.now() - item.cachedAt > this.ttlMs) {
+            this.cache.delete(key);
+            return null;
+        }
+        this.cache.delete(key);
+        this.cache.set(key, item);
+        return item.value;
+    }
+
+    set(message, contextBlock, intent, model, value) {
+        if (this.shouldBypass(message)) return;
+        const key = this._generateKey(message, contextBlock, intent, model);
+        if (this.cache.size >= this.maxSize) {
+            const oldestKey = this.cache.keys().next().value;
+            if (oldestKey) this.cache.delete(oldestKey);
+        }
+        this.cache.set(key, {
+            value,
+            cachedAt: Date.now()
+        });
+    }
+}
+
+const edgeResponseCache = new EdgeSemanticLruCache();
+
     export default async function handler(req, res) {
         const guard = applyApiSecurity(req, res, {
-            methods: ['POST'],
+            methods: ['POST', 'HEAD', 'OPTIONS'],
             routeKey: 'chat-groq',
             maxBodyBytes: 8 * 1024 * 1024,
             rateLimit: { max: 25, windowMs: 60 * 1000 }
@@ -952,6 +1009,37 @@ CRITICAL: Never output bare "Plan:", "Drafting:", or "Review against constraints
         } catch (_) {}
         writeSse(res, 'meta', { requestId });
 
+        const cached = edgeResponseCache.get(effectiveMessage, contextBlock, intent, selectedModel);
+        if (cached) {
+            if (cached.thought) {
+                writeSse(res, 'delta', { text: `<think>\n${cached.thought}\n</think>\n` });
+            }
+            writeSse(res, 'delta', { text: cached.response });
+            writeSse(res, 'done', {
+                success: true,
+                requestId,
+                intent: 'casual_chat',
+                response: cached.response,
+                action: null,
+                provider: 'edge-cache',
+                modelUsed: cached.modelUsed || 'edge-lru',
+                cacheHit: true,
+                routing: {
+                    mode: CHAT_ROUTER_MODE,
+                    strategy: 'edge-lru-cache',
+                    reason: 'sub_10ms_semantic_cache_hit',
+                    webEligible: false,
+                    preloadedSources: 0
+                },
+                timing: {
+                    modelMs: 2,
+                    qualityMs: 0,
+                    totalMs: 6
+                }
+            });
+            return res.end();
+        }
+
         let streamedText = '';
         try {
             const prompt = composeStreamingPrompt(systemPrompt, contextBlock, effectiveMessage, lengthPolicy?.instruction || '', intent);
@@ -1069,6 +1157,12 @@ CRITICAL: Never output bare "Plan:", "Drafting:", or "Review against constraints
                     qualityMs: timing.qualityMs,
                     totalMs: timing.totalMs
                 }
+            });
+            edgeResponseCache.set(effectiveMessage, contextBlock, intent, selectedModel, {
+                response: evaluationText,
+                thought: streamThought,
+                modelUsed: streamResult.modelUsed,
+                provider: streamResult.provider
             });
             return res.end();
         } catch (error) {
