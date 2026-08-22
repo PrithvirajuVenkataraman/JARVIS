@@ -146,7 +146,21 @@ JARVIS includes a continuous, hands-free voice conversation engine:
 
 ---
 
-## 9. Verification & Test Suite Matrix
+## 9. Asynchronous IndexedDB Storage Engine
+
+To prevent browser `localStorage` 5MB quota exhaustion with multi-turn conversations and media:
+
+* **High-Capacity IndexedDB (`jarvis_database_v1`):**
+  - `sessions` store: Stores full multi-turn conversations, code blocks, and visual attachments.
+  - `kv_store`: Key-value store for user memory, profiles, and settings.
+* **Zero-Data-Loss Auto-Migration:**
+  - Scans legacy `localStorage` entries on boot and migrates them into IndexedDB.
+* **Dual-Write & Private Browsing Fallback:**
+  - In-memory caching for instant UI rendering with fallback to `localStorage` in strict private browsing environments.
+
+---
+
+## 10. Verification & Test Suite Matrix
 
 JARVIS maintains **100% automated test coverage across 81 test suites**:
 
