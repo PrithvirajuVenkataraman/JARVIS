@@ -99,7 +99,16 @@ function isSameOriginRequest(origin, host) {
     if (!origin || !host) return false;
     try {
         const parsed = new URL(origin);
-        return parsed.host.toLowerCase() === host;
+        const originHost = parsed.host.toLowerCase();
+        const cleanHost = host.toLowerCase();
+        if (originHost === cleanHost) return true;
+        if (cleanHost.includes('localhost') || cleanHost.includes('127.0.0.1')) {
+            return originHost.includes('localhost') || originHost.includes('127.0.0.1');
+        }
+        if (originHost === 'jarvisjr.vercel.app' || (cleanHost.endsWith('.vercel.app') && originHost.endsWith('.vercel.app'))) {
+            return true;
+        }
+        return false;
     } catch (_) {
         return false;
     }
@@ -175,7 +184,8 @@ export function applyApiSecurity(req, res, options = {}) {
         return { handled: true };
     }
 
-    if (looksLikeAbusivePayload(req?.body)) {
+    const skipAbusiveCheck = Boolean(options.skipAbusiveCheck);
+    if (!skipAbusiveCheck && looksLikeAbusivePayload(req?.body)) {
         sendSecurityError(res, 400, 'abusive_payload', 'Request payload was rejected.');
         return { handled: true };
     }
