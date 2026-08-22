@@ -138,6 +138,12 @@ JARVIS includes a continuous, hands-free voice conversation engine:
 
 ## 8. UX Enhancements & Offline Resilience
 
+* **Spotlight Command Palette (`Ctrl+K` / `⌘K`):**
+  - Instant keyboard launcher for searching sessions, starting new chats, toggling voice mode, and exporting data.
+* **In-Chat Code Execution Sandbox ("▶ Run"):**
+  - Sandboxed execution of JavaScript, HTML, and JSON directly beneath code blocks with live console logs.
+* **Artifact Canvas Side Panel (Split View):**
+  - Slide-over workspace for reviewing large code files, live previewing HTML/SVG components, and one-click file downloads.
 * **One-Click Chat Export:**
   - Export active conversations to formatted Markdown (`.md`) or structured JSON (`.json`).
 * **Real-Time Sidebar Search:**
