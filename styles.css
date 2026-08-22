@@ -4505,10 +4505,367 @@ body:not(.dark) .permissions-btn-secondary:hover {
 }
 
 /* ==========================================================================
-   Zero-Overlay In-Composer Converse Mode Styles
+   VTT Prompt Waveform Visualizer (In-Composer)
+   ========================================================================== */
+.vtt-waveform-container {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.25rem 0.6rem;
+    margin-top: 0.25rem;
+    border-radius: 999px;
+    background: rgba(245, 158, 11, 0.08);
+    border: 1px solid rgba(245, 158, 11, 0.25);
+    width: fit-content;
+    animation: vttFadeIn 0.25s ease-out;
+}
+
+body:not(.dark) .vtt-waveform-container {
+    background: rgba(217, 119, 6, 0.08);
+    border-color: rgba(217, 119, 6, 0.3);
+}
+
+.vtt-waveform-container.hidden {
+    display: none !important;
+}
+
+.vtt-waveform-bars {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    height: 16px;
+}
+
+.vtt-waveform-bar {
+    display: inline-block;
+    width: 3px;
+    height: 6px;
+    border-radius: 3px;
+    background: linear-gradient(180deg, #f59e0b, #fbbf24);
+    animation: vttBarPulse 1s ease-in-out infinite alternate;
+    animation-delay: calc(var(--i, 1) * 0.12s);
+    transform-origin: center bottom;
+}
+
+body:not(.dark) .vtt-waveform-bar {
+    background: linear-gradient(180deg, #d97706, #f59e0b);
+}
+
+.vtt-waveform-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #f59e0b;
+    letter-spacing: 0.02em;
+}
+
+body:not(.dark) .vtt-waveform-label {
+    color: #b45309;
+}
+
+@keyframes vttBarPulse {
+    0% { height: 4px; opacity: 0.4; }
+    100% { height: 16px; opacity: 1; transform: scaleY(1.1); }
+}
+
+@keyframes vttFadeIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* ==========================================================================
+   Converse Live Overlay & Voice Orb Styles
    ========================================================================== */
 .converse-live-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(10, 15, 29, 0.82);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    opacity: 1;
+    visibility: visible;
+    transition: opacity 0.28s ease, visibility 0.28s ease;
+}
+
+.converse-live-overlay.hidden {
     display: none !important;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+}
+
+.converse-live-backdrop {
+    position: absolute;
+    inset: 0;
+    cursor: pointer;
+}
+
+.converse-live-modal {
+    position: relative;
+    z-index: 10;
+    width: 90%;
+    max-width: 480px;
+    min-height: 420px;
+    background: rgba(17, 24, 39, 0.95);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 24px;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6), 0 0 40px rgba(56, 189, 248, 0.15);
+    display: flex;
+    flex-direction: column;
+    padding: 1.5rem;
+    overflow: hidden;
+}
+
+body:not(.dark) .converse-live-modal {
+    background: rgba(255, 255, 255, 0.96);
+    border-color: rgba(203, 213, 225, 0.8);
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.15), 0 0 35px rgba(14, 165, 233, 0.12);
+}
+
+.converse-live-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+}
+
+.converse-live-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.35rem 0.85rem;
+    border-radius: 999px;
+    background: rgba(56, 189, 248, 0.12);
+    border: 1px solid rgba(56, 189, 248, 0.3);
+    color: #38bdf8;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+body:not(.dark) .converse-live-pill {
+    background: rgba(2, 132, 199, 0.1);
+    border-color: rgba(2, 132, 199, 0.25);
+    color: #0284c7;
+}
+
+.converse-live-pulse-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #38bdf8;
+    box-shadow: 0 0 8px #38bdf8;
+    animation: converseDotPulse 1.2s ease-in-out infinite;
+}
+
+body:not(.dark) .converse-live-pulse-dot {
+    background: #0284c7;
+    box-shadow: 0 0 8px #0284c7;
+}
+
+@keyframes converseDotPulse {
+    0%, 100% { transform: scale(0.85); opacity: 0.6; }
+    50% { transform: scale(1.25); opacity: 1; }
+}
+
+.converse-live-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.converse-live-lang-select {
+    background: rgba(31, 41, 55, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: #e5e7eb;
+    font-size: 0.78rem;
+    padding: 0.3rem 0.6rem;
+    border-radius: 8px;
+    outline: none;
+    cursor: pointer;
+}
+
+body:not(.dark) .converse-live-lang-select {
+    background: #f1f5f9;
+    border-color: #cbd5e1;
+    color: #1e293b;
+}
+
+.converse-live-close-btn {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.08);
+    border: none;
+    color: #9ca3af;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.converse-live-close-btn:hover {
+    background: rgba(239, 68, 68, 0.2);
+    color: #ef4444;
+}
+
+.converse-live-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem 0;
+    gap: 1.75rem;
+}
+
+.converse-live-orb {
+    position: relative;
+    width: 120px;
+    height: 120px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.converse-orb-ring {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border: 2px solid transparent;
+    transition: all 0.4s ease;
+}
+
+.converse-orb-ring.ring-1 {
+    inset: -6px;
+    border-color: rgba(56, 189, 248, 0.4);
+    animation: orbSpin 8s linear infinite;
+}
+
+.converse-orb-ring.ring-2 {
+    inset: -14px;
+    border-color: rgba(129, 140, 248, 0.25);
+    animation: orbSpinReverse 12s linear infinite;
+}
+
+.converse-orb-ring.ring-3 {
+    inset: -22px;
+    border-color: rgba(56, 189, 248, 0.15);
+    animation: orbPulse 3s ease-in-out infinite;
+}
+
+.converse-orb-core {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #0284c7, #38bdf8);
+    box-shadow: 0 0 35px rgba(56, 189, 248, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s ease;
+}
+
+.converse-live-orb.is-thinking .converse-orb-core {
+    background: linear-gradient(135deg, #7c3aed, #a855f7);
+    box-shadow: 0 0 40px rgba(168, 85, 247, 0.6);
+    animation: orbThink 1.8s ease-in-out infinite;
+}
+
+.converse-live-orb.is-speaking .converse-orb-core {
+    background: linear-gradient(135deg, #059669, #10b981);
+    box-shadow: 0 0 45px rgba(16, 185, 129, 0.65);
+    animation: orbSpeak 1s ease-in-out infinite alternate;
+}
+
+@keyframes orbSpin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+@keyframes orbSpinReverse {
+    from { transform: rotate(360deg); }
+    to { transform: rotate(0deg); }
+}
+
+@keyframes orbPulse {
+    0%, 100% { transform: scale(1); opacity: 0.4; }
+    50% { transform: scale(1.1); opacity: 0.8; }
+}
+
+@keyframes orbThink {
+    0%, 100% { transform: scale(0.95); }
+    50% { transform: scale(1.08); }
+}
+
+@keyframes orbSpeak {
+    0% { transform: scale(0.96); }
+    100% { transform: scale(1.12); }
+}
+
+.converse-live-transcript {
+    width: 100%;
+    min-height: 52px;
+    text-align: center;
+    font-size: 1.05rem;
+    font-weight: 500;
+    color: #f3f4f6;
+    line-height: 1.5;
+    padding: 0 1rem;
+    word-break: break-word;
+    transition: opacity 0.2s ease;
+}
+
+body:not(.dark) .converse-live-transcript {
+    color: #1f2937;
+}
+
+.converse-live-transcript.is-interim {
+    opacity: 0.75;
+    font-style: italic;
+}
+
+.converse-live-footer {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    width: 100%;
+}
+
+.converse-live-action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1.2rem;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: #f3f4f6;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+body:not(.dark) .converse-live-action-btn {
+    background: #f1f5f9;
+    border-color: #cbd5e1;
+    color: #334155;
+}
+
+.converse-live-action-btn:hover {
+    background: rgba(255, 255, 255, 0.18);
+    transform: translateY(-1px);
+}
+
+.converse-live-action-btn.is-muted {
+    background: rgba(239, 68, 68, 0.18);
+    border-color: rgba(239, 68, 68, 0.4);
+    color: #fca5a5;
 }
 
 /* ==========================================================================
