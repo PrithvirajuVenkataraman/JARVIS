@@ -780,7 +780,7 @@ async function getInstantFactHelper() {
         if (suppressedIntents.includes(String(intent || ''))) {
             return 'Return only the final assistant answer as natural text.';
         }
-        return `Reasoning instruction: Before your final answer, wrap your internal thinking process inside <think>...</think> tags. This reasoning is hidden from the user and does not count toward your answer length.
+        return `Reasoning instruction: Before your final answer, wrap your entire internal thinking process strictly inside <think>...</think> tags. This reasoning is hidden from the user and does not count toward your answer length.
 
 In your <think> block, briefly show your actual thought process (capped at max 10 seconds of deliberation, 5-10 lines). Reference the specific system rules you are applying, for example:
 - Analyze User Input: What is the user asking? Language? Intent?
@@ -790,8 +790,7 @@ In your <think> block, briefly show your actual thought process (capped at max 1
 - Draft & Self-Correct: Verify factual accuracy and format constraints.
 
 Keep the reasoning concise (5-10 lines, max 10 seconds). Do not repeat the full system prompt.
-
-After </think>, output ONLY the final clean answer as natural text.`;
+CRITICAL: Never output bare "Plan:", "Drafting:", or "Review against constraints:" outside of <think> tags. Everything after </think> must be ONLY the final, polished answer for the user with zero meta-commentary.`;
     }
 
     function composeStreamingPrompt(systemPrompt, contextBlock, message, lengthGuidance = '', intent = 'chat') {
@@ -1872,11 +1871,29 @@ After </think>, output ONLY the final clean answer as natural text.`;
                 thought = openMatch[1].trim();
             }
         }
-        const cleanResponse = textStr
+        let cleanResponse = textStr
             .replace(/<think>[\s\S]*?<\/think>/gi, '')
             .replace(/^<think>[\s\S]*$/gi, '')
             .replace(/<\/?think>/gi, '')
             .trim();
+
+        // Capture unclosed model scratchpad/planning blocks (e.g. Plan: ... Review against constraints: ... Looks good. Proceeding to output.)
+        if (!thought) {
+            const planPattern = /^(?:1\s*\n[^\n]+\s*\n2\s*\n[^\n]+\s*\n3\s*\n[^\n]+\s*\.\s*\n+)?(?:Plan:|Drafting:|Thinking Process:|Reasoning:)\s*[\s\S]*?(?:Proceeding to output\.?|Final Answer:?|Output:?)\s*/i;
+            const planMatch = cleanResponse.match(planPattern);
+            if (planMatch) {
+                thought = planMatch[0].trim();
+                cleanResponse = cleanResponse.slice(planMatch[0].length).trim();
+            } else {
+                const reviewPattern = /^(?:Plan:[\s\S]*?)?(?:Review against constraints:[\s\S]*?Proceeding to output\.?\s*)/i;
+                const reviewMatch = cleanResponse.match(reviewPattern);
+                if (reviewMatch) {
+                    thought = reviewMatch[0].trim();
+                    cleanResponse = cleanResponse.slice(reviewMatch[0].length).trim();
+                }
+            }
+        }
+
         return { thought, response: cleanResponse };
     }
 
