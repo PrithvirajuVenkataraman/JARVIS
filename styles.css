@@ -5378,3 +5378,263 @@ body:not(.dark) .assistant-followup-chip:hover {
         transform: translateY(0);
     }
 }
+
+/* ==========================================================================
+   Command Palette (Ctrl+K / ⌘K)
+   ========================================================================== */
+.command-palette-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.65);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    z-index: 10000;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding-top: 12vh;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.command-palette-backdrop.is-open {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.command-palette-container {
+    width: 100%;
+    max-width: 620px;
+    background: rgba(24, 24, 27, 0.95);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 16px;
+    box-shadow: 0 24px 60px -12px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.06);
+    overflow: hidden;
+    transform: scale(0.96) translateY(-8px);
+    transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.command-palette-backdrop.is-open .command-palette-container {
+    transform: scale(1) translateY(0);
+}
+
+.command-palette-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 18px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.command-palette-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: #f4f4f5;
+    font-size: 15px;
+    font-weight: 500;
+    font-family: inherit;
+}
+
+.command-palette-input::placeholder {
+    color: #71717a;
+}
+
+.command-palette-kbd {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 6px;
+    padding: 2px 6px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #a1a1aa;
+    line-height: 1;
+}
+
+.command-palette-list {
+    max-height: 380px;
+    overflow-y: auto;
+    padding: 8px;
+}
+
+.command-palette-section-title {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #71717a;
+    padding: 6px 10px 4px;
+}
+
+.command-palette-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    color: #e4e4e7;
+    font-size: 13.5px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.1s ease, color 0.1s ease;
+    outline: none;
+}
+
+.command-palette-item:hover,
+.command-palette-item.is-selected {
+    background: rgba(255, 255, 255, 0.08);
+    color: #ffffff;
+}
+
+.command-palette-item svg {
+    color: #a1a1aa;
+    flex-shrink: 0;
+}
+
+.command-palette-item.is-selected svg {
+    color: #38bdf8;
+}
+
+.command-palette-item-shortcut {
+    margin-left: auto;
+    font-size: 11px;
+    color: #71717a;
+}
+
+/* ==========================================================================
+   User Message Inline Edit & Actions
+   ========================================================================== */
+.user-message-row {
+    position: relative;
+    group: relative;
+}
+
+.user-message-actions {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.14s ease;
+    display: flex;
+    gap: 4px;
+}
+
+.user-message-row:hover .user-message-actions {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.user-msg-edit-btn {
+    background: rgba(0, 0, 0, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 6px;
+    color: #d4d4d8;
+    padding: 4px 6px;
+    cursor: pointer;
+    font-size: 11px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.user-msg-edit-btn:hover {
+    background: rgba(255, 255, 255, 0.15);
+    color: #ffffff;
+}
+
+.inline-msg-editor {
+    width: 100%;
+    margin-top: 6px;
+}
+
+.inline-msg-textarea {
+    width: 100%;
+    min-height: 70px;
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    border-radius: 8px;
+    color: #ffffff;
+    padding: 8px 10px;
+    font-size: 14px;
+    font-family: inherit;
+    resize: vertical;
+    outline: none;
+}
+
+.inline-msg-textarea:focus {
+    border-color: #38bdf8;
+}
+
+.inline-msg-btn-row {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 6px;
+}
+
+.inline-msg-cancel-btn {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #a1a1aa;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.inline-msg-submit-btn {
+    background: #38bdf8;
+    border: none;
+    color: #0f172a;
+    padding: 4px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.inline-msg-submit-btn:hover {
+    background: #7dd3fc;
+}
+
+/* ==========================================================================
+   Scroll-To-Bottom Floating Pill
+   ========================================================================== */
+.scroll-to-bottom-pill {
+    position: absolute;
+    bottom: 84px;
+    left: 50%;
+    transform: translateX(-50%) translateY(12px);
+    background: rgba(24, 24, 27, 0.92);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-radius: 9999px;
+    padding: 6px 14px;
+    color: #f4f4f5;
+    font-size: 12.5px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.4);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.18s ease, transform 0.18s ease;
+    z-index: 40;
+}
+
+.scroll-to-bottom-pill.is-visible {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateX(-50%) translateY(0);
+}
+
+.scroll-to-bottom-pill:hover {
+    background: rgba(39, 39, 42, 0.96);
+    border-color: rgba(56, 189, 248, 0.4);
+}
