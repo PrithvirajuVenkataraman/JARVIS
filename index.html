@@ -4665,9 +4665,7 @@ async function streamChatCompletion(payload, options = {}) {
                 stopConverseSpeech('stream_error');
             }
             const errMsg = String(event.data?.message || 'The AI service is temporarily unavailable. Please try again.');
-            const id = ensureStreamMessage();
-            updateStreamingAssistantMessage(id, errMsg, { userMessage, streaming: false });
-            return;
+            throw new Error(errMsg);
         }
     };
 
