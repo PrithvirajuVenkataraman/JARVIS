@@ -4632,6 +4632,8 @@ async function streamChatCompletion(payload, options = {}) {
     const isConverseStream = activeTurnSource === 'converse' || window.JarvisSpeechInput?.getState?.().converseEnabled === true;
 
     const streamStartedAt = performance.now();
+    let firstTokenAt = 0;
+    let tokenChunkCount = 0;
     let thinkingCapped = false;
     let streamMeta = {};
     if (isConverseStream) {
@@ -4658,6 +4660,10 @@ async function streamChatCompletion(payload, options = {}) {
             const delta = String(event.data?.text || '');
             if (!delta) return;
             accumulated += delta;
+            if (!firstTokenAt) {
+                firstTokenAt = performance.now();
+            }
+            tokenChunkCount += Math.max(1, Math.round(delta.length / 4));
             // 10-second thinking ceiling: if the model is still outputting thoughts after 10s, auto-close thinking
             if (!thinkingCapped && (performance.now() - streamStartedAt) >= 10000) {
                 if (accumulated.includes('<think>') && !accumulated.includes('</think>')) {
@@ -4708,6 +4714,16 @@ async function streamChatCompletion(payload, options = {}) {
             }
             hideThinkingIndicator();
             const id = ensureStreamMessage();
+            const totalStreamDuration = (performance.now() - (firstTokenAt || streamStartedAt)) / 1000;
+            const tps = totalStreamDuration > 0 && tokenChunkCount > 0
+                ? Math.round(tokenChunkCount / totalStreamDuration)
+                : 0;
+            const ttftMs = firstTokenAt ? Math.round(firstTokenAt - streamStartedAt) : Math.round(performance.now() - streamStartedAt);
+            const telemetry = {
+                ttftMs,
+                tps,
+                cacheHit: !!donePayload.cacheHit
+            };
             updateStreamingAssistantMessage(id, doneResponse, {
                 userMessage,
                 streaming: false,
@@ -4718,7 +4734,8 @@ async function streamChatCompletion(payload, options = {}) {
                 route: options?.routeDecision?.route || '',
                 routeReason: options?.routeDecision?.reason || '',
                 turnSource: activeResponseRenderContext?.source || '',
-                sourcePolicy: options?.routeDecision?.sourcePolicy || ''
+                sourcePolicy: options?.routeDecision?.sourcePolicy || '',
+                telemetry
             });
             return;
         }
@@ -8527,12 +8544,15 @@ let showRoutingDebugBadge = false;
             };
         }
 
-        function buildThinkingProcessHtml(thoughtContent, steps = [], elapsedSeconds = 2.1, isStreaming = false, selfHealing = null, modelInfo = null) {
+        function buildThinkingProcessHtml(thoughtContent, steps = [], elapsedSeconds = 2.1, isStreaming = false, selfHealing = null, modelInfo = null, telemetry = null) {
             if (!thoughtContent && (!steps || steps.length === 0) && !selfHealing) return '';
             const stateClass = isStreaming ? 'is-active is-expanded' : 'is-finished';
             const timerText = isStreaming ? `Thinking... ${elapsedSeconds}s` : `Thought for ${elapsedSeconds}s`;
             const modelTagHtml = modelInfo && modelInfo.label
                 ? `<span class="thinking-model-tag ${modelInfo.isFailover ? 'is-failover' : ''}">${escapeHtml(modelInfo.label)}</span>`
+                : '';
+            const telemetryTagHtml = telemetry && (telemetry.tps || telemetry.ttftMs || telemetry.cacheHit)
+                ? `<span class="thinking-telemetry-tag" title="${telemetry.cacheHit ? 'Sub-10ms Edge Cache Replay' : `TTFT: ${telemetry.ttftMs}ms · Speed: ${telemetry.tps} tok/s`}">${telemetry.cacheHit ? '⚡ Cached' : `⚡ ${telemetry.tps > 0 ? `${telemetry.tps} tok/s` : `${telemetry.ttftMs}ms`}`}</span>`
                 : '';
             
             let bodyContentHtml = '';
@@ -8567,6 +8587,7 @@ let showRoutingDebugBadge = false;
                             <span class="thinking-pulse-dot"></span>
                             <span class="thinking-timer">${timerText}</span>
                             ${modelTagHtml}
+                            ${telemetryTagHtml}
                         </div>
                         <svg class="thinking-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <polyline points="6 9 12 15 18 9"></polyline>
@@ -8903,7 +8924,7 @@ let showRoutingDebugBadge = false;
                 const modelInfo = typeof formatModelDisplayName === 'function' ? formatModelDisplayName(rawModel, rawProvider, rawFailover) : null;
                 if (!thinkingCard && bubble) {
                     const tempDiv = document.createElement('div');
-                    tempDiv.innerHTML = buildThinkingProcessHtml(thoughtText, thoughtSteps, elapsed, !isFinished, meta?.selfHealing, modelInfo);
+                    tempDiv.innerHTML = buildThinkingProcessHtml(thoughtText, thoughtSteps, elapsed, !isFinished, meta?.selfHealing, modelInfo, meta?.telemetry);
                     if (tempDiv.firstElementChild) {
                         bubble.insertBefore(tempDiv.firstElementChild, bubble.firstChild);
                         thinkingCard = row.querySelector('.thinking-process-card');
@@ -8918,6 +8939,18 @@ let showRoutingDebugBadge = false;
                         }
                         tagEl.className = `thinking-model-tag ${modelInfo.isFailover ? 'is-failover' : ''}`;
                         tagEl.textContent = modelInfo.label;
+                    }
+                    if (meta?.telemetry) {
+                        let teleEl = thinkingCard.querySelector('.thinking-telemetry-tag');
+                        if (!teleEl) {
+                            teleEl = document.createElement('span');
+                            const leftHeader = thinkingCard.querySelector('.thinking-header-left');
+                            if (leftHeader) leftHeader.appendChild(teleEl);
+                        }
+                        const t = meta.telemetry;
+                        teleEl.className = 'thinking-telemetry-tag';
+                        teleEl.title = t.cacheHit ? 'Sub-10ms Edge Cache Replay' : `TTFT: ${t.ttftMs}ms · Speed: ${t.tps} tok/s`;
+                        teleEl.textContent = t.cacheHit ? '⚡ Cached' : `⚡ ${t.tps > 0 ? `${t.tps} tok/s` : `${t.ttftMs}ms`}`;
                     }
                     if (isFinished) {
                         thinkingCard.className = 'thinking-process-card is-finished';
@@ -10808,9 +10841,24 @@ ${code}
             input.style.overflowY = input.scrollHeight > maxHeight ? 'auto' : 'hidden';
         }
 
+        let _prewarmDebounceTimer = null;
+        let _lastPrewarmTimestamp = 0;
+        function triggerPredictiveSocketPrewarm() {
+            const now = Date.now();
+            if (now - _lastPrewarmTimestamp < 25000) return;
+            clearTimeout(_prewarmDebounceTimer);
+            _prewarmDebounceTimer = setTimeout(() => {
+                _lastPrewarmTimestamp = Date.now();
+                fetch('/api/chat-groq', { method: 'HEAD' }).catch(() => {});
+            }, 350);
+        }
+
         function handleComposerInput() {
             const input = document.getElementById('text-input');
             if (input) window.JarvisSessionRecovery?.saveComposerDraft?.(input.value);
+            if (input && input.value.trim().length > 2) {
+                triggerPredictiveSocketPrewarm();
+            }
             if (input && input.value.trim() !== '/') {
                 closeSlashCommandPicker();
             }
