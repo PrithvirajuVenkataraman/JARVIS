@@ -5019,6 +5019,71 @@ body:not(.dark) .thinking-telemetry-tag {
     color: #0284c7;
 }
 
+.web-search-toggle-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    border-radius: 9999px;
+    font-size: 11px;
+    font-weight: 500;
+    color: #94a3b8;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    cursor: pointer;
+    line-height: 1;
+}
+
+.web-search-toggle-btn:hover {
+    color: #f1f5f9;
+    background: rgba(255, 255, 255, 0.09);
+    border-color: rgba(255, 255, 255, 0.16);
+}
+
+.web-search-toggle-btn.is-web-forced {
+    color: #38bdf8;
+    background: rgba(56, 189, 248, 0.14);
+    border-color: rgba(56, 189, 248, 0.35);
+    box-shadow: 0 0 12px rgba(56, 189, 248, 0.25);
+}
+
+.web-search-toggle-btn.is-web-disabled {
+    color: #64748b;
+    opacity: 0.55;
+    background: rgba(255, 255, 255, 0.02);
+    border-color: transparent;
+}
+
+.web-search-toggle-btn.is-web-disabled .web-search-mode-label {
+    text-decoration: line-through;
+}
+
+body:not(.dark) .web-search-toggle-btn {
+    color: #64748b;
+    background: rgba(0, 0, 0, 0.03);
+    border-color: rgba(0, 0, 0, 0.07);
+}
+
+body:not(.dark) .web-search-toggle-btn:hover {
+    color: #0f172a;
+    background: rgba(0, 0, 0, 0.07);
+    border-color: rgba(0, 0, 0, 0.12);
+}
+
+body:not(.dark) .web-search-toggle-btn.is-web-forced {
+    color: #0284c7;
+    background: rgba(2, 132, 199, 0.1);
+    border-color: rgba(2, 132, 199, 0.3);
+    box-shadow: 0 0 10px rgba(2, 132, 199, 0.18);
+}
+
+body:not(.dark) .web-search-toggle-btn.is-web-disabled {
+    color: #94a3b8;
+    opacity: 0.55;
+    background: transparent;
+}
+
 .thinking-chevron,
 .thinking-indicator-icon {
     width: 14px;
