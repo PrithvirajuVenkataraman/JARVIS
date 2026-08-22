@@ -5638,3 +5638,227 @@ body:not(.dark) .assistant-followup-chip:hover {
     background: rgba(39, 39, 42, 0.96);
     border-color: rgba(56, 189, 248, 0.4);
 }
+
+/* ==========================================================================
+   Code Block Container & Interactive Action Header
+   ========================================================================== */
+.assistant-md-code-container {
+    margin: 14px 0;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: #09090b;
+    overflow: hidden;
+    box-shadow: 0 4px 16px -2px rgba(0, 0, 0, 0.3);
+}
+
+.assistant-md-code-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 14px;
+    background: rgba(255, 255, 255, 0.03);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.assistant-md-code-lang {
+    font-size: 11.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #94a3b8;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.assistant-md-code-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.code-header-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    padding: 3px 8px;
+    color: #cbd5e1;
+    font-size: 11.5px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.12s ease;
+}
+
+.code-header-btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #ffffff;
+    border-color: rgba(255, 255, 255, 0.2);
+}
+
+.code-header-btn.run-btn {
+    background: rgba(16, 185, 129, 0.15);
+    border-color: rgba(16, 185, 129, 0.35);
+    color: #34d399;
+}
+
+.code-header-btn.run-btn:hover {
+    background: rgba(16, 185, 129, 0.25);
+    color: #6ee7b7;
+}
+
+.code-header-btn.canvas-btn {
+    background: rgba(56, 189, 248, 0.12);
+    border-color: rgba(56, 189, 248, 0.3);
+    color: #38bdf8;
+}
+
+.code-header-btn.canvas-btn:hover {
+    background: rgba(56, 189, 248, 0.22);
+    color: #7dd3fc;
+}
+
+.assistant-md-code-block {
+    margin: 0 !important;
+    padding: 12px 14px !important;
+    overflow-x: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.6;
+    color: #f1f5f9;
+    background: transparent !important;
+    border: none !important;
+}
+
+/* ==========================================================================
+   Code Execution Output Drawer
+   ========================================================================== */
+.code-output-drawer {
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    background: #020617;
+    padding: 10px 14px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 12px;
+}
+
+.code-output-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 6px;
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.code-output-terminal {
+    max-height: 220px;
+    overflow-y: auto;
+    color: #cbd5e1;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.code-output-line {
+    padding: 2px 0;
+}
+
+.code-output-line.error {
+    color: #f87171;
+}
+
+.code-output-line.system {
+    color: #38bdf8;
+}
+
+/* ==========================================================================
+   Artifact Canvas Side Panel
+   ========================================================================== */
+.jarvis-canvas-drawer {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 600px;
+    max-width: 90vw;
+    background: #09090b;
+    border-left: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: -8px 0 32px rgba(0, 0, 0, 0.5);
+    z-index: 9000;
+    display: flex;
+    flex-direction: column;
+    transform: translateX(100%);
+    transition: transform 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.jarvis-canvas-drawer.is-open {
+    transform: translateX(0);
+}
+
+.canvas-drawer-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 18px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    background: #18181b;
+}
+
+.canvas-drawer-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: #f8fafc;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.canvas-tab-bar {
+    display: flex;
+    gap: 4px;
+    background: rgba(0, 0, 0, 0.3);
+    padding: 3px;
+    border-radius: 8px;
+}
+
+.canvas-tab-btn {
+    background: transparent;
+    border: none;
+    color: #94a3b8;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.1s ease;
+}
+
+.canvas-tab-btn.is-active {
+    background: rgba(255, 255, 255, 0.12);
+    color: #ffffff;
+}
+
+.canvas-body {
+    flex: 1;
+    overflow: hidden;
+    position: relative;
+}
+
+.canvas-code-view {
+    height: 100%;
+    overflow: auto;
+    padding: 16px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.6;
+    color: #f8fafc;
+    white-space: pre;
+}
+
+.canvas-preview-frame {
+    width: 100%;
+    height: 100%;
+    border: none;
+    background: #ffffff;
+}
