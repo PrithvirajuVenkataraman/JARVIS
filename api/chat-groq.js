@@ -253,6 +253,43 @@ async function getInstantFactHelper() {
     ]);
     const USER_SELECTABLE_GROQ_MODELS = USER_SELECTABLE_MODELS;
     let __groqKeyRotationIdx = 0;
+    const CIRCUIT_BREAKER_COOLDOWN_MS = 30_000;
+    const CIRCUIT_BREAKER_MAX_FAILURES = 2;
+    const __keyCircuitBreakers = new Map();
+
+    function getKeyCircuitBreaker(key) {
+        if (!__keyCircuitBreakers.has(key)) {
+            __keyCircuitBreakers.set(key, {
+                state: 'CLOSED',
+                failures: 0,
+                lastFailure: 0
+            });
+        }
+        const cb = __keyCircuitBreakers.get(key);
+        const now = Date.now();
+        if (cb.state === 'OPEN' && (now - cb.lastFailure) > CIRCUIT_BREAKER_COOLDOWN_MS) {
+            cb.state = 'HALF_OPEN';
+        }
+        return cb;
+    }
+
+    function recordKeySuccess(key) {
+        if (!key) return;
+        const cb = getKeyCircuitBreaker(key);
+        cb.state = 'CLOSED';
+        cb.failures = 0;
+    }
+
+    function recordKeyFailure(key, isSevere = false) {
+        if (!key) return;
+        const cb = getKeyCircuitBreaker(key);
+        cb.failures++;
+        cb.lastFailure = Date.now();
+        if (cb.failures >= CIRCUIT_BREAKER_MAX_FAILURES || isSevere) {
+            cb.state = 'OPEN';
+        }
+    }
+
     function getGroqApiKeys() {
         const raw = String(process.env.GROQ_API_KEYS || process.env.GROQ_API_KEY || process.env.GROQ_KEY || '').trim();
         if (!raw) return [];
@@ -263,7 +300,9 @@ async function getInstantFactHelper() {
         const keys = getGroqApiKeys();
         if (!keys.length) return [];
         const start = __groqKeyRotationIdx % keys.length;
-        return [...keys.slice(start), ...keys.slice(0, start)];
+        const rotated = [...keys.slice(start), ...keys.slice(0, start)];
+        const healthy = rotated.filter(k => getKeyCircuitBreaker(k).state !== 'OPEN');
+        return healthy.length > 0 ? healthy : rotated;
     }
 
     function advanceGroqKeyRotation() {
@@ -416,6 +455,40 @@ async function getInstantFactHelper() {
         return isLiveRetrievalConfigured() || isPublicFactSearchConfigured();
     }
 
+    function buildCompactedContextBlock(context) {
+        if (!Array.isArray(context) || !context.length) return '';
+        const MAX_VERBATIM_TURNS = 10;
+        if (context.length <= MAX_VERBATIM_TURNS) {
+            return context
+                .map(m => `${m?.role === 'user' ? 'User' : 'Assistant'}: ${String(m?.text || '')}`)
+                .join('\n');
+        }
+
+        // Older turns: condense into a dense structured digest
+        const olderTurns = context.slice(0, context.length - MAX_VERBATIM_TURNS);
+        const recentTurns = context.slice(-MAX_VERBATIM_TURNS);
+
+        const digestLines = [];
+        for (const turn of olderTurns) {
+            const role = turn?.role === 'user' ? 'User' : 'Assistant';
+            const clean = String(turn?.text || '').replace(/\s+/g, ' ').trim();
+            if (clean) {
+                const truncated = clean.length > 200 ? clean.slice(0, 195) + '…' : clean;
+                digestLines.push(`- ${role}: ${truncated}`);
+            }
+        }
+
+        const digestBlock = digestLines.length
+            ? `[Previous Conversation Digest (${olderTurns.length} earlier turns):\n${digestLines.join('\n')}]\n\n`
+            : '';
+
+        const verbatimBlock = recentTurns
+            .map(m => `${m?.role === 'user' ? 'User' : 'Assistant'}: ${String(m?.text || '')}`)
+            .join('\n');
+
+        return `${digestBlock}${verbatimBlock}`;
+    }
+
     export default async function handler(req, res) {
         const guard = applyApiSecurity(req, res, {
             methods: ['POST'],
@@ -446,12 +519,7 @@ async function getInstantFactHelper() {
             }
             const { message, context, preferences, intent, grounding, images } = request.value;
             const systemPrompt = buildServerSystemPrompt(preferences);
-            const contextBlock = Array.isArray(context)
-                ? context
-                    .slice(-20)
-                    .map(m => `${m?.role === 'user' ? 'User' : 'Assistant'}: ${String(m?.text || '')}`)
-                    .join('\n')
-                : '';
+            const contextBlock = buildCompactedContextBlock(context);
             const effectiveMessage = buildGroundedUserMessage(message, intent, grounding);
             const isAttachmentGrounding = isAttachmentGroundingPayload(grounding, intent);
             const clientRoutingProbe = String(req.body?.routingMessage || req.body?.displayUserMessage || '').trim();
@@ -1529,11 +1597,15 @@ CRITICAL: Never output bare "Plan:", "Drafting:", or "Review against constraints
                                 text = '<think>\n' + reasoning + '\n</think>\n' + text;
                             }
                             if (text) {
+                                recordKeySuccess(key);
                                 advanceGroqKeyRotation();
                                 return { ok: true, parsedResponse: parseModelText(text), modelUsed: model, provider: 'groq' };
                             }
+                        } else if (response.status === 429 || response.status >= 500) {
+                            recordKeyFailure(key, true);
                         }
                     } catch (error) {
+                        recordKeyFailure(key, false);
                         logUpstreamModelFailure('groq', model, error);
                     }
                 }
@@ -1760,7 +1832,10 @@ CRITICAL: Never output bare "Plan:", "Drafting:", or "Review against constraints
                     messages
                 })
             });
-            if (!response.ok || !response.body) return { ok: false };
+            if (!response.ok || !response.body) {
+                recordKeyFailure(apiKey, response?.status === 429 || response?.status >= 500);
+                return { ok: false };
+            }
             let text = '';
             let inReasoning = false;
             await readSseStream(response.body, payload => {
@@ -1790,10 +1865,13 @@ CRITICAL: Never output bare "Plan:", "Drafting:", or "Review against constraints
                 text += '\n</think>\n';
                 onDelta('\n</think>\n');
             }
-            return text.trim()
-                ? { ok: true, provider: 'groq', modelUsed: model, text }
-                : { ok: false };
+            if (text.trim()) {
+                recordKeySuccess(apiKey);
+                return { ok: true, provider: 'groq', modelUsed: model, text };
+            }
+            return { ok: false };
         } catch (_) {
+            recordKeyFailure(apiKey, false);
             return { ok: false };
         } finally {
             clearTimeout(timeout);
