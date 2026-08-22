@@ -4510,12 +4510,27 @@ async function streamChatCompletion(payload, options = {}) {
 
     const streamStartedAt = performance.now();
     let thinkingCapped = false;
+    let streamMeta = {};
     if (isConverseStream) {
         startStreamingConverseSpeech(activeTurnId);
     }
     ensureStreamMessage();
     const handleEvent = event => {
         if (!event?.event) return;
+        if (event.event === 'meta') {
+            streamMeta = event.data || {};
+            const id = ensureStreamMessage();
+            if (streamMeta.model || streamMeta.modelUsed) {
+                updateStreamingAssistantMessage(id, accumulated, {
+                    userMessage,
+                    streaming: true,
+                    modelUsed: streamMeta.modelUsed || streamMeta.model || '',
+                    provider: streamMeta.provider || '',
+                    failover: streamMeta.failover || false
+                });
+            }
+            return;
+        }
         if (event.event === 'delta') {
             const delta = String(event.data?.text || '');
             if (!delta) return;
@@ -4541,13 +4556,25 @@ async function streamChatCompletion(payload, options = {}) {
                 });
             }
             const id = ensureStreamMessage();
-            updateStreamingAssistantMessage(id, accumulated, { userMessage, streaming: true });
+            updateStreamingAssistantMessage(id, accumulated, {
+                userMessage,
+                streaming: true,
+                modelUsed: streamMeta.modelUsed || streamMeta.model || '',
+                provider: streamMeta.provider || '',
+                failover: streamMeta.failover || false
+            });
             return;
         }
         if (event.event === 'correction') {
             accumulated = String(event.data?.text || accumulated || '');
             const id = ensureStreamMessage();
-            updateStreamingAssistantMessage(id, accumulated, { userMessage, streaming: true });
+            updateStreamingAssistantMessage(id, accumulated, {
+                userMessage,
+                streaming: true,
+                modelUsed: streamMeta.modelUsed || streamMeta.model || '',
+                provider: streamMeta.provider || '',
+                failover: streamMeta.failover || false
+            });
             return;
         }
         if (event.event === 'done') {
@@ -4561,6 +4588,9 @@ async function streamChatCompletion(payload, options = {}) {
             updateStreamingAssistantMessage(id, doneResponse, {
                 userMessage,
                 streaming: false,
+                modelUsed: donePayload.modelUsed || streamMeta.modelUsed || streamMeta.model || '',
+                provider: donePayload.provider || streamMeta.provider || '',
+                failover: donePayload.failover || streamMeta.failover || false,
                 routing: donePayload.routing || null,
                 route: options?.routeDecision?.route || '',
                 routeReason: options?.routeDecision?.reason || '',
@@ -8284,10 +8314,46 @@ let showRoutingDebugBadge = false;
             }
         };
 
-        function buildThinkingProcessHtml(thoughtContent, steps = [], elapsedSeconds = 2.1, isStreaming = false, selfHealing = null) {
+        function formatModelDisplayName(model, provider, failover = false) {
+            const raw = String(model || '').trim().toLowerCase();
+            const prov = String(provider || '').trim().toLowerCase();
+            let name = '';
+            let icon = '⚡';
+
+            if (raw.includes('gpt-oss-120b')) name = 'GPT-OSS 120B';
+            else if (raw.includes('gpt-oss-20b')) name = 'GPT-OSS 20B';
+            else if (raw.includes('deepseek-r1') || raw.includes('deepseek')) name = 'DeepSeek R1 70B';
+            else if (raw.includes('llama-3.3-70b')) name = 'Llama 3.3 70B';
+            else if (raw.includes('llama-3.1-8b')) name = 'Llama 3.1 8B';
+            else if (raw.includes('llama-3.2-11b') || raw.includes('llama-3.2-90b')) name = 'Llama 3.2 Vision';
+            else if (raw.includes('qwen-2.5-coder')) name = 'Qwen 2.5 Coder';
+            else if (raw.includes('qwen3.6') || raw.includes('qwen-3.6')) name = 'Qwen 3.6 27B';
+            else if (raw.includes('gemini-2.5-pro')) { name = 'Gemini 2.5 Pro'; icon = '✦'; }
+            else if (raw.includes('gemini-2.5-flash-lite')) { name = 'Gemini 2.5 Flash Lite'; icon = '✦'; }
+            else if (raw.includes('gemini-2.5-flash') || raw.includes('gemini-2.0-flash') || raw.includes('gemini-1.5-flash') || raw.includes('gemini')) { name = 'Gemini 2.5 Flash'; icon = '✦'; }
+            else if (raw) {
+                name = raw.split('/').pop().replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+            } else {
+                return null;
+            }
+
+            const isGoogle = prov === 'google' || prov === 'gemini';
+            const isFailover = Boolean(failover) || isGoogle;
+            const providerLabel = isGoogle ? 'Google AI' : 'Groq';
+            const failoverTag = isFailover ? ' (Failover)' : ` (${providerLabel})`;
+            return {
+                label: `${icon} ${name}${failoverTag}`,
+                isFailover
+            };
+        }
+
+        function buildThinkingProcessHtml(thoughtContent, steps = [], elapsedSeconds = 2.1, isStreaming = false, selfHealing = null, modelInfo = null) {
             if (!thoughtContent && (!steps || steps.length === 0) && !selfHealing) return '';
             const stateClass = isStreaming ? 'is-active is-expanded' : 'is-finished';
             const timerText = isStreaming ? `Thinking... ${elapsedSeconds}s` : `Thought for ${elapsedSeconds}s`;
+            const modelTagHtml = modelInfo && modelInfo.label
+                ? `<span class="thinking-model-tag ${modelInfo.isFailover ? 'is-failover' : ''}">${escapeHtml(modelInfo.label)}</span>`
+                : '';
             
             let bodyContentHtml = '';
             if (thoughtContent) {
@@ -8320,6 +8386,7 @@ let showRoutingDebugBadge = false;
                         <div class="thinking-header-left">
                             <span class="thinking-pulse-dot"></span>
                             <span class="thinking-timer">${timerText}</span>
+                            ${modelTagHtml}
                         </div>
                         <svg class="thinking-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <polyline points="6 9 12 15 18 9"></polyline>
@@ -8442,8 +8509,12 @@ let showRoutingDebugBadge = false;
                 const selfHealing = meta?.selfHealing || meta?.routing?.selfHealing || null;
                 const rawElapsed = meta?.latency ? (meta.latency / 1000) : (2.1 + (Math.random() * 0.7));
                 const elapsedSeconds = Number(rawElapsed).toFixed(1);
+                const rawModel = meta?.modelUsed || meta?.model || meta?.routing?.model || '';
+                const rawProvider = meta?.provider || meta?.routing?.provider || '';
+                const rawFailover = meta?.failover || meta?.routing?.failover || false;
+                const modelInfo = typeof formatModelDisplayName === 'function' ? formatModelDisplayName(rawModel, rawProvider, rawFailover) : null;
                 const thinkingHtml = (!allowEmptyAssistant && (thoughtContent || thoughtSteps.length > 0 || selfHealing) && !meta?.systemGreeting)
-                    ? buildThinkingProcessHtml(thoughtContent, thoughtSteps, elapsedSeconds, false, selfHealing)
+                    ? buildThinkingProcessHtml(thoughtContent, thoughtSteps, elapsedSeconds, false, selfHealing, modelInfo)
                     : '';
 
                 messageDiv.innerHTML = `
@@ -8646,14 +8717,28 @@ let showRoutingDebugBadge = false;
                 const elapsed = meta?.latency 
                     ? (meta.latency / 1000).toFixed(1) 
                     : (row.__thinkingStartedAt ? ((performance.now() - row.__thinkingStartedAt) / 1000).toFixed(1) : '1.8');
+                const rawModel = meta?.modelUsed || meta?.model || meta?.routing?.model || '';
+                const rawProvider = meta?.provider || meta?.routing?.provider || '';
+                const rawFailover = meta?.failover || meta?.routing?.failover || false;
+                const modelInfo = typeof formatModelDisplayName === 'function' ? formatModelDisplayName(rawModel, rawProvider, rawFailover) : null;
                 if (!thinkingCard && bubble) {
                     const tempDiv = document.createElement('div');
-                    tempDiv.innerHTML = buildThinkingProcessHtml(thoughtText, thoughtSteps, elapsed, !isFinished, meta?.selfHealing);
+                    tempDiv.innerHTML = buildThinkingProcessHtml(thoughtText, thoughtSteps, elapsed, !isFinished, meta?.selfHealing, modelInfo);
                     if (tempDiv.firstElementChild) {
                         bubble.insertBefore(tempDiv.firstElementChild, bubble.firstChild);
                         thinkingCard = row.querySelector('.thinking-process-card');
                     }
                 } else if (thinkingCard) {
+                    if (modelInfo && modelInfo.label) {
+                        let tagEl = thinkingCard.querySelector('.thinking-model-tag');
+                        if (!tagEl) {
+                            tagEl = document.createElement('span');
+                            const leftHeader = thinkingCard.querySelector('.thinking-header-left');
+                            if (leftHeader) leftHeader.appendChild(tagEl);
+                        }
+                        tagEl.className = `thinking-model-tag ${modelInfo.isFailover ? 'is-failover' : ''}`;
+                        tagEl.textContent = modelInfo.label;
+                    }
                     if (isFinished) {
                         thinkingCard.className = 'thinking-process-card is-finished';
                         const timerEl = thinkingCard.querySelector('.thinking-timer');
