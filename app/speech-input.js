@@ -557,6 +557,7 @@ export function installSpeechInputUI(options = {}) {
     const input = document.getElementById('text-input');
     const vttButton = document.getElementById('voice-to-text-btn');
     const status = document.getElementById('speech-input-status');
+    const vttWaveform = document.getElementById('vtt-waveform-container');
     if (!input || !vttButton) return null;
 
     const Recognition = globalThis.SpeechRecognition || globalThis.webkitSpeechRecognition;
@@ -607,6 +608,8 @@ export function installSpeechInputUI(options = {}) {
                 globalThis.updateLiveConverseOverlay?.(state.processing ? 'thinking' : 'listening', cleaned, true);
             }
             options.onComposerChanged?.();
+            globalThis.handleComposerInput?.();
+            try { input.scrollTop = input.scrollHeight; } catch (_) {}
         },
         async onFinal(text, event) {
             lastInterimText = '';
@@ -617,6 +620,7 @@ export function installSpeechInputUI(options = {}) {
                 input.dataset.inputSource = 'converse';
                 globalThis.updateLiveConverseOverlay?.('thinking', cleaned, false);
                 options.onComposerChanged?.();
+                globalThis.handleComposerInput?.();
                 await options.onSubmit?.({
                     source: 'converse',
                     preserveTranscript: true,
@@ -627,24 +631,31 @@ export function installSpeechInputUI(options = {}) {
                 input.value = committedText;
                 input.dataset.inputSource = 'vtt';
                 options.onComposerChanged?.();
+                globalThis.handleComposerInput?.();
                 input.focus();
+                try { input.scrollTop = input.scrollHeight; } catch (_) {}
             }
         },
         onState(state) {
             if (!state.listening) {
                 lastInterimText = '';
             }
-            vttButton.classList.toggle('is-listening', state.mode === 'dictation' && state.listening);
-            vttButton.setAttribute('aria-pressed', state.mode === 'dictation' && state.listening ? 'true' : 'false');
+            const isVttListening = state.mode === 'dictation' && state.listening;
+            vttButton.classList.toggle('is-listening', isVttListening);
+            vttButton.setAttribute('aria-pressed', isVttListening ? 'true' : 'false');
+            if (vttWaveform) {
+                vttWaveform.classList.toggle('hidden', !isVttListening);
+                vttWaveform.classList.toggle('is-active', isVttListening);
+            }
             input.placeholder = state.converseEnabled
                 ? (state.processing ? 'Thinking...' : 'Listening (speak now)...')
-                : (state.mode === 'dictation' && state.listening ? 'Listening...' : 'Ask anything...');
+                : (isVttListening ? 'Listening...' : 'Ask anything...');
             if (status) {
                 if (!state.supported) {
                     setStatusText('Voice input unavailable in this browser.');
                 } else if (state.converseEnabled) {
                     setStatusText(state.processing ? 'Thinking...' : 'Listening...');
-                } else if (state.mode === 'dictation' && state.listening) {
+                } else if (isVttListening) {
                     setListeningStatus();
                 } else {
                     setStatusText('');
@@ -656,6 +667,10 @@ export function installSpeechInputUI(options = {}) {
         },
         onError(message) {
             lastInterimText = '';
+            if (vttWaveform) {
+                vttWaveform.classList.add('hidden');
+                vttWaveform.classList.remove('is-active');
+            }
             setStatusText(message);
             options.onError?.(message);
         }
