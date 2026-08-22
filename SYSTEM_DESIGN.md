@@ -190,9 +190,9 @@ To maximize throughput, minimize API quota burn, and eliminate latency on repeat
 
 ---
 
-## 11. 100% Free-For-Life Live Web Search Engine
+## 11. ChatGPT & Perplexity-Grade Live Web Search Engine
 
-To ensure real-time web search and citation generation work reliably forever without relying on expensive, paid search APIs (such as Serper or Bing):
+To ensure real-time web search and citation generation work with the fidelity of ChatGPT and Perplexity:
 
 * **Zero-Key Multi-Engine Parallel Fast-Race (`api/_lib/free-live/providers.js`, `api/search.js`):**
   - Concurrently queries multiple free, open public search indexers in parallel:
@@ -200,6 +200,13 @@ To ensure real-time web search and citation generation work reliably forever wit
     - **Wikipedia & Wikidata REST APIs:** Real-time encyclopedia and entity knowledge graphs.
     - **GDELT Global News Document API:** Live breaking news, international headlines, and publisher feeds.
   - Races all providers with a sub-2.5s timeout, deduplicating and ranking the top verified source cards.
+* **Deep Page Scraping & Grounded Synthesis (`api/chat-groq.js`):**
+  - Concurrently fetches and extracts full readable paragraph text (up to 3,000 chars per page) from top 2-3 links.
+  - Feeds actual article extracts into LLM context with structured numbered references `[1]`, `[2]`.
+* **Top Favicon Source Carousel (`index.html`, `styles.css`):**
+  - Displays a sleek horizontal scrollable row of verified source cards at the top of the answer bubble showing high-resolution domain favicons, page titles, and source numbers.
+* **Inline Superscript Citations (`[1]`, `[2]`):**
+  - Interactive clickable citation pills (`.citation-badge`) directly linked to verified source pages.
 * **Zero-Key URL Web Fetcher (`web_fetch`):**
   - Directly scrapes and cleans readable markdown/text from any public URL without proxy credits.
 
