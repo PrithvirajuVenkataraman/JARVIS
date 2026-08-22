@@ -158,7 +158,7 @@ export function applyApiSecurity(req, res, options = {}) {
         return { handled: true };
     }
 
-    if (req.method === 'OPTIONS') {
+    if (req.method === 'OPTIONS' || req.method === 'HEAD') {
         res.status(200).end();
         return { handled: true };
     }
