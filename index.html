@@ -16407,15 +16407,17 @@ function rankSourcesByPolicy(results, domain, queryText = '') {
         .filter(Boolean)
         .slice(0, 12);
 
+    const isPoliticalQuery = domain === 'politics' || /\b(cm|chief minister|pm|prime minister|president|governor|mayor|leader|minister|election|elections|mla|mp|cabinet|party)\b/i.test(queryText);
     const sorted = [...(Array.isArray(results) ? results : [])]
         .map((item, index) => {
             const title = String(item?.title || '').toLowerCase();
             const description = String(item?.description || '').toLowerCase();
             const overlap = tokens.reduce((acc, token) => acc + (title.includes(token) || description.includes(token) ? 1 : 0), 0);
             const recency = computeRecencyScore(item, queryText);
-            const isLiveWeb = item?.sourceType === 'live_web' || item?.sourceType === 'trusted_news' || item?.sourceType === 'public_news';
-            const isWiki = String(item?.url || '').includes('wikipedia.org');
-            const typeBonus = isLiveWeb ? 3 : (isWiki ? -1 : 0);
+            const isLiveNews = item?.sourceType === 'trusted_news' || item?.sourceType === 'public_news';
+            const isLiveWeb = item?.sourceType === 'live_web';
+            const isWiki = String(item?.url || '').includes('wikipedia.org') || String(item?.url || '').includes('wikidata.org');
+            const typeBonus = isLiveNews ? 5 : (isLiveWeb ? 3 : (isWiki ? -2 : 0));
             return {
                 ...item,
                 __policyScore: scoreSourcePolicy(item?.url, domain) + overlap + recency + typeBonus - (index * 0.01),
@@ -16427,8 +16429,9 @@ function rankSourcesByPolicy(results, domain, queryText = '') {
     const finalRanked = [];
     let wikiCount = 0;
     for (const item of sorted) {
-        const isWiki = String(item?.url || '').includes('wikipedia.org');
+        const isWiki = String(item?.url || '').includes('wikipedia.org') || String(item?.url || '').includes('wikidata.org');
         if (isWiki) {
+            if (isPoliticalQuery) continue; // Exclude Wikipedia completely for political/leadership queries
             if (wikiCount >= 1) continue;
             wikiCount++;
         }
