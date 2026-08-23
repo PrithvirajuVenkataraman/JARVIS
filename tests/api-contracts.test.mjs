@@ -1643,6 +1643,7 @@ globalThis.fetch = async (url) => {
     if (href.includes('en.wikipedia.org/w/api.php')) return okJson({ query: { search: [] } });
     if (href.includes('www.wikidata.org')) return okJson({ search: [] });
     if (href.includes('reddit.com')) return okJson({ data: { children: [] } });
+    if (href.includes('duckduckgo.com')) return okText('');
     if (href.includes('api.gdeltproject.org')) {
         return okJson({
             articles: [{
