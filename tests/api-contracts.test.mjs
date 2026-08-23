@@ -856,6 +856,22 @@ globalThis.fetch = async (url) => {
             async text() { return ''; }
         };
     }
+    if (href.includes('news.google.com')) {
+        return {
+            ok: true,
+            status: 200,
+            async json() { return {}; },
+            async text() { return '<rss><channel></channel></rss>'; }
+        };
+    }
+    if (href.includes('duckduckgo.com') || href.includes('wikidata.org') || href.includes('reddit.com')) {
+        return {
+            ok: true,
+            status: 200,
+            async json() { return {}; },
+            async text() { return ''; }
+        };
+    }
     throw new Error(`unexpected URL ${href}`);
 };
 const publicSearch = await callHandler(searchHandler, request('/api/search', { query: 'France facts', limit: 5 }));
@@ -2428,7 +2444,7 @@ function request(url, body) {
 async function callHandler(handler, req) {
     const res = {
         statusCode: 200,
-        body: null, 
+        body: null,
         headers: {},
         setHeader(name, value) {
             this.headers[name] = value;
