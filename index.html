@@ -16976,31 +16976,31 @@ function buildUniversalEntityQueries(userText, liveIntent = null) {
     const expandedSubjectWithCompetition = [expandedSubject, competitionExpanded || competition, entityIntent.year].filter(Boolean).join(' ').trim();
     const relationHints = { 
         title_count: 'total titles total cups total trophies championships all time record', 
-        latest_work: 'latest film latest movie most recent release filmography imdb wikipedia',
+        latest_work: 'latest film latest movie most recent release filmography news',
         team_membership: 'current team club franchise belongs to plays for', 
         party_membership: 'current party political party affiliation belongs to party', 
-        role: 'current role position office profession designation', 
+        role: 'current role position office profession designation news', 
         known_for: 'known for notable works achievements biography profile',
         stats: 'latest stats record numbers official profile',
-        winner: 'winner champion final result official',
+        winner: 'winner champion final result official news',
         score: 'score result official live score',
         standings: 'standings rankings table points table official',
         qualification: 'qualified eliminated standings official',
-        general: 'official profile current information'
+        general: 'official profile current information news'
     };
     const relationHint = relationHints[entityIntent.relationType] || relationHints.general; 
-    const sourceBias = getDomainSourcePolicy(entityIntent.domain).preferredDomains.join(' ') || 'official Reuters AP BBC'; 
+    const sourceBias = getDomainSourcePolicy(entityIntent.domain).preferredDomains.join(' ') || 'official Reuters AP BBC The Hindu'; 
     const officialCompanyHints = entityIntent.domain === 'companies_finance'
         ? getOfficialCompanySourceHints(subject).join(' ')
         : '';
     const officialDomainHints = entityIntent.domain === 'politics'
-        ? 'official government source Reuters AP BBC Wikipedia Wikidata Britannica'
+        ? 'official government source Reuters AP BBC The Hindu Indian Express NDTV'
         : entityIntent.domain === 'space_science'
             ? 'site:nasa.gov OR site:isro.gov.in OR site:esa.int OR site:jaxa.jp OR Reuters'
             : entityIntent.domain === 'arts_literature'
-                ? 'site:britannica.com OR site:wikipedia.org OR site:moma.org OR site:tate.org.uk'
+                ? 'site:britannica.com OR site:moma.org OR site:tate.org.uk'
                 : entityIntent.domain === 'entertainment'
-                    ? 'site:imdb.com OR site:wikipedia.org OR Reuters'
+                    ? 'site:imdb.com OR Reuters'
                     : '';
     const politicalRole = entityIntent.relationType === 'role' && /\b(president|prime minister|pm|governor|mayor|minister|chief minister|cm)\b/.test(roleLabel);
  
@@ -18115,16 +18115,22 @@ async function retrieveUniversalEntitySources(pipeline, controller) {
         })
     );
 
+    const isPolitical = pipeline.entityIntent.domain === 'politics' || /\b(cm|chief minister|pm|prime minister|president|governor|mayor|leader|minister|election|elections|party)\b/i.test(`${pipeline.userText} ${pipeline.entityIntent.subject} ${pipeline.entityIntent.relationType}`);
+    const candidatePool = isPolitical
+        ? resultSets.flat().filter(item => !String(item?.url || '').includes('wikipedia.org') && !String(item?.url || '').includes('wikidata.org'))
+        : resultSets.flat();
+
     const deduped = [];
     const seen = new Set();
     const rankedResults = rankSourcesByPolicy(
-        resultSets.flat(),
+        candidatePool,
         pipeline.entityIntent.domain,
         `${pipeline.userText} ${pipeline.entityIntent.subject} ${pipeline.entityIntent.relationType}`
     );
     for (const item of rankedResults) {
         const url = String(item?.url || '').trim();
         if (!url || seen.has(url)) continue;
+        if (isPolitical && (url.includes('wikipedia.org') || url.includes('wikidata.org'))) continue;
         seen.add(url);
         deduped.push(item);
         if (deduped.length >= 8) break;
