@@ -2428,7 +2428,7 @@ function request(url, body) {
 async function callHandler(handler, req) {
     const res = {
         statusCode: 200,
-        body: null,
+        body: null, 
         headers: {},
         setHeader(name, value) {
             this.headers[name] = value;
