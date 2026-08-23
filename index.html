@@ -17250,6 +17250,9 @@ function extractFactCandidate(result, entityIntent) {
     }
 
     if (entityIntent.relationType === 'role') {
+        if (isPoliticalLeadershipRoleIntent(entityIntent)) {
+            return '';
+        }
         const roleWord = entityIntent.roleLabel
             ? entityIntent.roleLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
             : '(?:ceo|founder|president|prime minister|captain|coach|chairman|chairperson|governor|mayor|head|leader|administrator|director general)';
@@ -18210,31 +18213,7 @@ function isPoliticalLeadershipRoleIntent(entityIntent) {
 }
 
 function extractLeadershipRoleCandidateFromText(text, entityIntent) {
-    const rawText = String(text || '').trim();
-    if (!rawText) return '';
-    if (!isPoliticalLeadershipRoleIntent(entityIntent)) return '';
-
-    const roleLabel = String(entityIntent?.roleLabel || '').trim();
-    const targetEntity = String(entityIntent?.targetEntity || entityIntent?.subject || '').trim();
-    if (!roleLabel || !targetEntity) return '';
-
-    const roleWord = escapeRegexLiteral(roleLabel);
-    const targetWord = escapeRegexLiteral(targetEntity);
-    const namePattern = '([A-Z][A-Za-z.\'-]+(?:\\s+[A-Z][A-Za-z.\'-]+){0,4})';
-    const patterns = [
-        new RegExp(`\\b(?:current\\s+)?${roleWord}\\s+of\\s+${targetWord}\\b[^A-Za-z]{0,16}(?:is|:|-)?\\s*${namePattern}`, 'i'),
-        new RegExp(`\\b${namePattern}\\b\\s+is\\s+(?:the\\s+)?(?:current\\s+)?${roleWord}\\s+of\\s+${targetWord}\\b`, 'i'),
-        new RegExp(`\\b${targetWord}(?:'s|s')\\s+(?:current\\s+)?${roleWord}\\s*(?:is|:|,)\\s*${namePattern}`, 'i'),
-        new RegExp(`\\b${roleWord}\\s+of\\s+${targetWord}\\s*[-:]\\s*${namePattern}`, 'i')
-    ];
-
-    for (const pattern of patterns) {
-        const match = rawText.match(pattern);
-        if (!match?.[1]) continue;
-        const candidate = match[1].trim();
-        if (isLikelyPersonNameCandidate(candidate)) return candidate;
-    }
-
+    // Rely on full grounded RAG or LLM synthesis instead of naive regex on historical snippets
     return '';
 }
 
@@ -18627,6 +18606,10 @@ async function handleUniversalEntityFactQuery(userText, liveIntent = null) {
             if (sportsRoleCandidate) {
                 return publishSportsRoleBestEffortAnswer(pipeline, sportsRoleCandidate);
             }
+            if (isPoliticalLeadershipRoleIntent(pipeline.entityIntent)) {
+                const summarized = await summarizeUniversalEntitySources(pipeline, deduped);
+                if (summarized) return true;
+            }
             const bestEffortPublished = await publishBestEffortFromSources(pipeline, deduped, {
                 summaryText: 'I could not fully verify this, so here is the best-supported answer from available sources.'
             });
@@ -18667,6 +18650,10 @@ async function handleUniversalEntityFactQuery(userText, liveIntent = null) {
             return publishSportsRoleBestEffortAnswer(pipeline, sportsRoleCandidate);
         }
         if (await publishUniversalConsensusAnswer(pipeline, agreement)) return true;
+        if (isPoliticalLeadershipRoleIntent(pipeline.entityIntent)) {
+            const summarized = await summarizeUniversalEntitySources(pipeline, deduped);
+            if (summarized) return true;
+        }
         const generalBestEffort = await publishBestEffortFromSources(pipeline, deduped, {
             summaryText: 'I could not fully verify this, so here is the best-supported answer from available sources.'
         });
