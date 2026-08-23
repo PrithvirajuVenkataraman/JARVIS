@@ -2530,34 +2530,6 @@ CRITICAL: Never output bare "Plan:", "Drafting:", or "Review against constraints
 
     async function buildLiveRagContext(message, req, contextTurns = []) {
         const query = resolveContextualLiveQuery(message, contextTurns);
-        const intentClassification = classifyQueryIntent(query);
-        if (intentClassification.type === 'temporal_fact') {
-            try {
-                const { resolveInstantFact } = await getInstantFactHelper();
-                const instantFact = await resolveInstantFact(query, intentClassification);
-                if (instantFact?.grounded && instantFact?.ragText) {
-                    const sources = instantFact.facts.map((f, i) => ({
-                        title: f.title,
-                        description: f.summary,
-                        url: f.url,
-                        domain: 'wikipedia.org',
-                        favicon: 'https://www.google.com/s2/favicons?domain=wikipedia.org&sz=64',
-                        sourceNumber: i + 1,
-                        sourceType: 'instant_fact_authority',
-                        sourceLabel: f.source,
-                        date: '',
-                        freshness: 'authoritative_live_fact',
-                        evidenceLevel: 'official_current_holder',
-                        qualitySignals: ['instant_fact_authority', 'zero_scrape'],
-                        trusted: true,
-                        query
-                    }));
-                    return { ragText: instantFact.ragText, sources, directAnswerDirective: instantFact.directAnswerDirective };
-                }
-            } catch (_) {
-                // Fallback to standard flow
-            }
-        }
         if (!isFactSearchConfigured()) return { ragText: '', sources: [] };
         const queries = buildChatLiveSearchQueries(query, contextTurns);
         const allResults = [];
@@ -2613,7 +2585,14 @@ CRITICAL: Never output bare "Plan:", "Drafting:", or "Review against constraints
             item.favicon = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(item.domain)}&sz=64`;
         });
 
+        const currentYear = new Date().getFullYear();
+        const todayStr = new Date().toISOString().slice(0, 10);
+
         const ragText = [
+            `=== CURRENT REFERENCE DATE ===`,
+            `Today is ${todayStr} (Year ${currentYear}).`,
+            `When answering questions about who currently holds an office, political leadership, titles, or active roles, verify the incumbent against the current year and prioritize the latest news sources over older historical pages.`,
+            '',
             '=== VERIFIED REAL-TIME WEB SOURCES ===',
             ...sources.map((item, index) => [
                 `[${index + 1}] Title: ${item.title}`,
@@ -2722,6 +2701,7 @@ CRITICAL: Never output bare "Plan:", "Drafting:", or "Review against constraints
 
     function buildChatLiveSearchQueries(query, contextTurns = []) {
         const base = String(query || '').trim();
+        const currentYear = new Date().getFullYear();
         const recentContext = Array.isArray(contextTurns)
             ? contextTurns
                 .slice(-3)
@@ -2729,10 +2709,14 @@ CRITICAL: Never output bare "Plan:", "Drafting:", or "Review against constraints
                 .filter(Boolean)
                 .join(' ')
             : '';
+
+        const isLeadershipOrTemporal = /\b(cm|chief minister|pm|prime minister|president|governor|mayor|chancellor|ceo|leader|minister|who is|current|present|winner|champion|tenure|holding office)\b/i.test(base);
+
         const queries = [
             base,
-            `latest ${base}`,
-            `${base} official source Reuters AP BBC`
+            isLeadershipOrTemporal ? `who is current ${base} ${currentYear}` : `latest ${base}`,
+            isLeadershipOrTemporal ? `${base} incumbent official ${currentYear}` : `${base} official source Reuters AP BBC`,
+            isLeadershipOrTemporal ? `${base} news ${currentYear}` : `current ${base}`
         ];
         if (recentContext && recentContext.length < 220) {
             queries.push(`${base} ${recentContext}`);
@@ -2972,26 +2956,28 @@ CRITICAL: Never output bare "Plan:", "Drafting:", or "Review against constraints
             const hay = `${title} ${desc} ${domain}`.toLowerCase();
             const overlap = queryTerms.reduce((acc, term) => acc + (hay.includes(term) ? 1 : 0), 0);
 
-            let score = 0;
+            // Reciprocal Rank Base
+            let score = 1.0 / (60 + scored.length);
             if (overlap > 0) {
-                score += overlap * 2;
+                score += overlap * 2.5;
             } else if (queryTerms.length > 0) {
-                // Soft penalty only — keep paraphrased titles instead of discarding them.
-                score -= 2;
+                score -= 1.5;
             }
 
-            if (item?.trusted || item?.sourceType === 'official_source' || item?.sourceType === 'trusted_news') score += 3;
+            if (item?.trusted || item?.sourceType === 'official_source' || item?.sourceType === 'trusted_news') score += 3.5;
             if (item?.pageFetched) score += 2;
             if (item?.sourceType === 'official_source' && !item?.pageFetched) score -= 1;
-            if (/\b(latest|today|update|updates|current|now|recent)\b/.test(hay)) score += 2;
-            if (/\b(reuters|the hindu|indian express|bbc|ap news)\b/.test(hay)) score += 2;
+            if (/\b(latest|today|update|updates|current|now|recent|incumbent|sworn in|assumed office|took oath)\b/.test(hay)) score += 3.0;
+            if (/\b(former|ex-|past|previously|retired|resigned|predecessor|stepped down)\b/.test(hay)) score -= 2.0;
+            if (/\b(reuters|the hindu|indian express|bbc|ap news|times of india|ani|pib)\b/.test(hay)) score += 2.5;
 
             const yearMatch = hay.match(/\b(20\d{2})\b/);
             if (yearMatch?.[1]) {
                 const y = Number(yearMatch[1]);
                 if (Number.isFinite(y)) {
-                    if (y >= currentYear - 1) score += 2;
-                    if (y <= currentYear - 3) score -= 3;
+                    if (y >= currentYear) score += 4.0;
+                    else if (y === currentYear - 1) score += 1.5;
+                    else if (y <= currentYear - 3) score -= 3.5;
                 }
             }
 
