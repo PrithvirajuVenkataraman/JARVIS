@@ -21,49 +21,53 @@ const CRYPTO_IDS = Object.freeze({
 });
 
 export async function searchDuckDuckGoHtml(query, options = {}) {
-    const limit = options.limit || 5;
+    const limit = options.limit || 8;
     try {
         const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
         const response = await fetchWithTimeout(url, {
-            method: 'POST',
             headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.5',
-                'Content-Type': 'application/x-www-form-urlencoded'
-            },
-            body: `q=${encodeURIComponent(query)}`
+                'Accept-Language': 'en-US,en;q=0.5'
+            }
         }, 3500);
 
         if (!response.ok) return [];
         const html = await response.text();
         const results = [];
         
-        const snippetBlocks = html.split(/class="result__body"/i);
-        for (let i = 1; i < snippetBlocks.length && results.length < limit; i++) {
-            const block = snippetBlocks[i];
-            
-            const titleMatch = /class="result__a"[^>]*>([\s\S]*?)<\/a>/i.exec(block);
-            const title = titleMatch ? titleMatch[1].replace(/<[^>]+>/g, '').trim() : '';
-            
-            const urlMatch = /href="([^"]+)"/i.exec(titleMatch ? titleMatch[0] : block);
-            let rawUrl = urlMatch ? urlMatch[1] : '';
+        const linkRegex = /<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+        const snippetRegex = /<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>/gi;
+
+        const links = [];
+        let match;
+        while ((match = linkRegex.exec(html)) !== null) {
+            let rawUrl = match[1];
             if (rawUrl.includes('uddg=')) {
                 try {
-                    const match = /uddg=([^&]+)/.exec(rawUrl);
-                    if (match) rawUrl = decodeURIComponent(match[1]);
+                    const u = /uddg=([^&]+)/.exec(rawUrl);
+                    if (u) rawUrl = decodeURIComponent(u[1]);
                 } catch (_) {}
             }
-            
-            const snippetMatch = /class="result__snippet"[^>]*>([\s\S]*?)<\/a>/i.exec(block);
-            const snippet = snippetMatch ? snippetMatch[1].replace(/<[^>]+>/g, '').trim() : '';
-            
-            if (title && snippet && rawUrl.startsWith('http')) {
+            if (rawUrl.startsWith('//')) rawUrl = `https:${rawUrl}`;
+            const title = match[2].replace(/<[^>]+>/g, '').trim();
+            links.push({ title, url: rawUrl });
+        }
+
+        const snippets = [];
+        let sMatch;
+        while ((sMatch = snippetRegex.exec(html)) !== null) {
+            snippets.push(sMatch[1].replace(/<[^>]+>/g, '').trim());
+        }
+
+        for (let i = 0; i < links.length && results.length < limit; i++) {
+            const l = links[i];
+            if (l.title && l.url && l.url.startsWith('http')) {
                 results.push({
-                    title,
-                    description: snippet,
-                    snippet,
-                    url: rawUrl,
+                    title: l.title,
+                    description: snippets[i] || '',
+                    snippet: snippets[i] || '',
+                    url: l.url,
                     source: 'DuckDuckGo Web',
                     sourceType: 'live_web',
                     trusted: true,
@@ -639,7 +643,7 @@ async function fetchWithTimeout(url, init, timeoutMs) {
         clearTimeout(timeout);
     }
 }
- 
+
 function clampInt(value, fallback, min, max) {
     const n = Number.parseInt(value, 10);
     if (!Number.isFinite(n)) return fallback;
