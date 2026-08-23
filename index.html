@@ -1965,7 +1965,10 @@ function setLastVisibleUserMessage(text) {
     const value = sanitizeUserFacingRequestText(text);
     if (!value || isInternalPromptText(value)) return false;
     lastVisibleUserMessage = value;
-    window.__lastUserMessage = value;
+    if (typeof window !== 'undefined') {
+        window.__lastUserMessage = value;
+        window.__lastThinkingPhaseStartedAt = Date.now();
+    }
     return true;
 }
 
@@ -8740,8 +8743,8 @@ let showRoutingDebugBadge = false;
 
                 const thoughtContent = parsedThought.thought || meta?.thought || '';
                 const thoughtSteps = thoughtContent ? [] : generateContextualThoughtSteps(priorUserPrompt);
-                const selfHealing = meta?.selfHealing || meta?.routing?.selfHealing || null;
-                const rawElapsed = meta?.latency ? (meta.latency / 1000) : (2.1 + (Math.random() * 0.7));
+                const actualElapsed = window.__lastThinkingPhaseStartedAt ? Math.max(0.1, (Date.now() - window.__lastThinkingPhaseStartedAt) / 1000) : 0;
+                const rawElapsed = meta?.latency ? (meta.latency / 1000) : (actualElapsed > 0 ? actualElapsed : 1.2);
                 const elapsedSeconds = Number(rawElapsed).toFixed(1);
                 const rawModel = meta?.modelUsed || meta?.model || meta?.routing?.model || '';
                 const rawProvider = meta?.provider || meta?.routing?.provider || '';
@@ -25109,6 +25112,7 @@ function loadHistory() {
 }
 
 function showThinkingIndicator(message = 'Thinking') {
+    window.__lastThinkingPhaseStartedAt = window.__lastThinkingPhaseStartedAt || Date.now();
     const chatContainer = document.getElementById('chat-container');
     if (!chatContainer) return;
 
@@ -25141,7 +25145,8 @@ function startThinkingPhaseTimeline(customSteps = []) {
         clearInterval(thinkingPhaseTimer);
         thinkingPhaseTimer = null;
     }
-    const startedAt = Date.now();
+    const startedAt = window.__lastThinkingPhaseStartedAt || Date.now();
+    window.__lastThinkingPhaseStartedAt = startedAt;
 
     thinkingPhaseTimer = setInterval(() => {
         const row = document.getElementById('chat-thinking-indicator');
@@ -26895,7 +26900,7 @@ function exportActiveChatAsJson() {
 }
 
 function printActiveChatToPdf() {
-    window.print();
+    window.print(); 
 }
 
 async function shareActiveChat() {
