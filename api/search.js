@@ -1980,6 +1980,7 @@ Current Date: ${todayStr} (Year 2026).
 Rules:
 - If the evidence supports the answer, set verified true and answer concisely.
 - Universal Freshness & Incumbency across ALL domains (leadership/office-holders, CEOs/executives, sports champions/winners, technology/product releases, awards, records, prices): identify and extract the most recent, active status or holder from the evidence. Never output a former holder, predecessor, retired entity, or obsolete version as the current state.
+- If the evidence shows an election victory, succession, or new appointment, the answer MUST state the NEW incoming/active leader first, and only mention predecessors in past tense (e.g., 'succeeding former Chief Minister M. K. Stalin'). Never state the predecessor is the current holder.
 - If evidence is missing, weak, or completely irrelevant, set verified false.
 - Do not use model memory. Do not guess. Do not tell the user to check elsewhere.
 - For current/date-sensitive claims, require direct support from the evidence.
