@@ -641,7 +641,7 @@ async function fetchWithTimeout(url, init, timeoutMs) {
         return await fetch(url, { ...init, signal: controller.signal });
     } finally {
         clearTimeout(timeout);
-    }
+    } 
 }
 
 function clampInt(value, fallback, min, max) {
