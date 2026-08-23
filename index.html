@@ -16076,12 +16076,15 @@ const DOMAIN_SOURCE_POLICIES = {
             'sci.gov.in',
             'main.sci.gov.in',
             'egazette.nic.in',
-            'wikipedia.org', 
-            'britannica.com',
             'reuters.com',
             'apnews.com',
             'bbc.com',
             'bbc.co.uk',
+            'thehindu.com',
+            'indianexpress.com',
+            'timesofindia.indiatimes.com',
+            'hindustantimes.com',
+            'ndtv.com',
             'aljazeera.com',
             'npr.org'
         ],
@@ -16400,20 +16403,34 @@ function rankSourcesByPolicy(results, domain, queryText = '') {
         .filter(Boolean)
         .slice(0, 12);
 
-    return [...(Array.isArray(results) ? results : [])]
+    const sorted = [...(Array.isArray(results) ? results : [])]
         .map((item, index) => {
             const title = String(item?.title || '').toLowerCase();
             const description = String(item?.description || '').toLowerCase();
             const overlap = tokens.reduce((acc, token) => acc + (title.includes(token) || description.includes(token) ? 1 : 0), 0);
             const recency = computeRecencyScore(item, queryText);
+            const isLiveWeb = item?.sourceType === 'live_web' || item?.sourceType === 'trusted_news' || item?.sourceType === 'public_news';
+            const isWiki = String(item?.url || '').includes('wikipedia.org');
+            const typeBonus = isLiveWeb ? 3 : (isWiki ? -1 : 0);
             return {
                 ...item,
-                __policyScore: scoreSourcePolicy(item?.url, domain) + overlap + recency - (index * 0.01),
+                __policyScore: scoreSourcePolicy(item?.url, domain) + overlap + recency + typeBonus - (index * 0.01),
                 __recencyScore: recency
             };
         })
-        .sort((a, b) => b.__policyScore - a.__policyScore)
-        .map(({ __policyScore, __recencyScore, ...item }) => item);
+        .sort((a, b) => b.__policyScore - a.__policyScore);
+
+    const finalRanked = [];
+    let wikiCount = 0;
+    for (const item of sorted) {
+        const isWiki = String(item?.url || '').includes('wikipedia.org');
+        if (isWiki) {
+            if (wikiCount >= 1) continue;
+            wikiCount++;
+        }
+        finalRanked.push(item);
+    }
+    return finalRanked.map(({ __policyScore, __recencyScore, ...item }) => item);
 }
 
 function buildLiveSearchQueries(userText, intent = null) {
@@ -26883,7 +26900,7 @@ function exportActiveChatAsJson() {
     showTemporaryMessage('Exported as JSON');
 }
 
-function printActiveChatToPdf() { 
+function printActiveChatToPdf() {
     window.print();
 }
 
