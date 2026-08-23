@@ -418,14 +418,21 @@ export async function searchPublicSources(query, options = {}) {
         ...deterministicQueries,
         ...plannedQueries.map(item => normalizeSearchQuery(item)).filter(Boolean)
     ])).slice(0, 7);
-    const settled = await Promise.allSettled(querySet.flatMap(candidate => [
-        searchDuckDuckGoHtml(candidate, { limit: Math.min(5, limit) }),
-        searchWikipedia(candidate, { limit: Math.min(4, limit) }),
-        searchWikidata(candidate, { limit: Math.min(3, limit) }),
-        searchReddit(candidate, { limit: Math.min(3, limit) }),
-        searchGdeltNews(candidate, { limit })
-    ]));
-    const discovered = settled.flatMap(result => result.status === 'fulfilled' ? result.value : []);
+    const [liveWebSettled, newsSettled, wikiSettled, wikidataSettled, redditSettled] = await Promise.all([
+        Promise.allSettled(querySet.map(candidate => searchDuckDuckGoHtml(candidate, { limit: Math.min(5, limit) }))),
+        Promise.allSettled(querySet.map(candidate => searchGdeltNews(candidate, { limit }))),
+        Promise.allSettled(querySet.map(candidate => searchWikipedia(candidate, { limit: 2 }))),
+        Promise.allSettled(querySet.map(candidate => searchWikidata(candidate, { limit: 2 }))),
+        Promise.allSettled(querySet.map(candidate => searchReddit(candidate, { limit: 2 })))
+    ]);
+
+    const liveWeb = liveWebSettled.flatMap(r => r.status === 'fulfilled' ? r.value : []);
+    const news = newsSettled.flatMap(r => r.status === 'fulfilled' ? r.value : []);
+    const wiki = wikiSettled.flatMap(r => r.status === 'fulfilled' ? r.value : []).slice(0, 2);
+    const wikidata = wikidataSettled.flatMap(r => r.status === 'fulfilled' ? r.value : []).slice(0, 1);
+    const reddit = redditSettled.flatMap(r => r.status === 'fulfilled' ? r.value : []).slice(0, 1);
+
+    const discovered = [...liveWeb, ...news, ...wiki, ...wikidata, ...reddit];
     const officialCandidates = await discoverOfficialSourceCandidates(normalizedQuery, {
         seedResults: discovered,
         limit: Math.min(5, Math.max(2, limit))
@@ -433,12 +440,27 @@ export async function searchPublicSources(query, options = {}) {
     const official = await Promise.all(officialCandidates
         .map((item, index) => normalizeOfficialSourceCandidate(item, normalizedQuery, index)));
     const referenceLookups = buildReferenceLookupResults(normalizedQuery, official.length);
-    return discovered
-        .concat(governmentRoleResults)
-        .concat(official)
-        .concat(referenceLookups)
-        .filter(Boolean)
-        .slice(0, Math.max(limit, 8));
+
+    const combined = [
+        ...governmentRoleResults,
+        ...liveWeb,
+        ...news,
+        ...official,
+        ...referenceLookups,
+        ...wiki,
+        ...wikidata,
+        ...reddit
+    ].filter(Boolean);
+
+    const seenUrls = new Set();
+    const deduped = [];
+    for (const item of combined) {
+        if (!item.url || seenUrls.has(item.url)) continue;
+        seenUrls.add(item.url);
+        deduped.push(item);
+        if (deduped.length >= Math.max(limit, 8)) break;
+    }
+    return deduped;
 }
 
 export async function searchWikipedia(query, options = {}) {
