@@ -1,126 +1,24 @@
-# ========================================
-# Unify Voice Assistant - .gitignore
-# ========================================
+# Dependencies
+node_modules/
 
-# ========== API Keys & Secrets ==========
-# CRITICAL: Never commit API keys!
+# Local Environment Variables & Secrets
 .env
 .env.local
 .env.*.local
-**/api-keys.txt
-**/secrets.txt
-**/config/keys.js
-**/config/secrets.json
 
-# ========== Node Modules ==========
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-
-# ========== Build & Distribution ==========
+# Build, Temp & Scratch Artifacts
+scratch/
 dist/
 build/
-*.tgz
-*.zip
-*.tar.gz
+.vercel/
+.agents/
 
-# ========== Vercel ==========
-.vercel
-.vercel.json
-
-# ========== Operating System Files ==========
-# macOS
-.DS_Store
-.AppleDouble
-.LSOverride
-._*
-
-# Windows
-Thumbs.db
-ehthumbs.db
-Desktop.ini
-$RECYCLE.BIN/
-
-# Linux
-*~
-.directory
-
-# ========== IDE & Editors ==========
-# VSCode
-.vscode/
-*.code-workspace
-
-# JetBrains (WebStorm, IntelliJ)
-.idea/
-*.iml
-*.iws
-*.ipr
-
-# Sublime Text
-*.sublime-project
-*.sublime-workspace
-
-# Vim
-*.swp
-*.swo
-*~
-
-# Emacs
-*~
-\#*\#
-.\#*
-
-# ========== Logs ==========
-logs/
+# System & Editor Logs
 *.log
 npm-debug.log*
 yarn-debug.log*
-pnpm-debug.log*
-lerna-debug.log*
+yarn-error.log*
 
-# ========== Testing ==========
-coverage/
-*.lcov
-.nyc_output/
-
-# ========== Temporary Files ==========
-tmp/
-temp/
-*.tmp
-*.bak
-*.backup
-*.old
-
-# ========== Cache ==========
-.cache/
-.parcel-cache/
-.eslintcache
-.stylelintcache
-
-# ========== User Data (if storing locally) ==========
-# Don't commit user shopping lists, reminders, etc.
-user-data/
-localStorage/
-*.db
-*.sqlite
-
-# ========== Documentation Drafts ==========
-# Keep final docs, ignore drafts
-*-draft.md
-*-WIP.md
-TODO.txt
-NOTES.txt
-
-# ========== Backups ==========
-backup/
-*.backup
-backups/
-
-# ========== Optional: Development Files ==========
-# Uncomment these if you create them
-# test.html
-# debug.html
-# scratch.js
-# experiments/
+# OS Specific Files
+.DS_Store
+Thumbs.db
