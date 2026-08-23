@@ -402,10 +402,16 @@ export function hasLiveSearchProvider() {
     return true;
 }
 
+export function isPoliticalOrLeadershipQuery(query) {
+    const raw = String(query || '').toLowerCase();
+    return /\b(cm|chief minister|prime minister|pm|president|governor|mayor|leader|minister|election|elections|mla|mp|cabinet|tenure|political party|candidate|assembly|parliament)\b/i.test(raw);
+}
+
 export async function searchPublicSources(query, options = {}) {
     const normalizedQuery = normalizeSearchQuery(query);
     if (!normalizedQuery) return [];
     const limit = clampInt(options.limit, 8, 1, 20);
+    const isPolitical = isPoliticalOrLeadershipQuery(normalizedQuery);
     const governmentRoleResults = options.skipStructuredRoles === true
         ? []
         : await searchGovernmentRole(normalizedQuery, { limit: Math.min(3, limit) }).catch(() => []);
@@ -418,21 +424,24 @@ export async function searchPublicSources(query, options = {}) {
         ...deterministicQueries,
         ...plannedQueries.map(item => normalizeSearchQuery(item)).filter(Boolean)
     ])).slice(0, 7);
-    const [liveWebSettled, newsSettled, wikiSettled, wikidataSettled, redditSettled] = await Promise.all([
-        Promise.allSettled(querySet.map(candidate => searchDuckDuckGoHtml(candidate, { limit: Math.min(5, limit) }))),
+
+    const [liveNewsSettled, gdeltSettled, liveWebSettled, wikiSettled, wikidataSettled, redditSettled] = await Promise.all([
+        Promise.allSettled(querySet.map(candidate => searchGoogleNewsRss(candidate, { limit }))),
         Promise.allSettled(querySet.map(candidate => searchGdeltNews(candidate, { limit }))),
+        Promise.allSettled(querySet.map(candidate => searchDuckDuckGoHtml(candidate, { limit: Math.min(5, limit) }))),
         Promise.allSettled(querySet.map(candidate => searchWikipedia(candidate, { limit: 2 }))),
-        Promise.allSettled(querySet.map(candidate => searchWikidata(candidate, { limit: 2 }))),
+        Promise.allSettled(querySet.map(candidate => searchWikidata(candidate, { limit: 1 }))),
         Promise.allSettled(querySet.map(candidate => searchReddit(candidate, { limit: 2 })))
     ]);
 
-    const liveWeb = liveWebSettled.flatMap(r => r.status === 'fulfilled' ? r.value : []);
-    const news = newsSettled.flatMap(r => r.status === 'fulfilled' ? r.value : []);
-    const wiki = wikiSettled.flatMap(r => r.status === 'fulfilled' ? r.value : []).slice(0, 2);
-    const wikidata = wikidataSettled.flatMap(r => r.status === 'fulfilled' ? r.value : []).slice(0, 1);
-    const reddit = redditSettled.flatMap(r => r.status === 'fulfilled' ? r.value : []).slice(0, 1);
+    const liveNews = (Array.isArray(liveNewsSettled) ? liveNewsSettled : []).flatMap(r => r.status === 'fulfilled' ? r.value : []);
+    const gdelt = (Array.isArray(gdeltSettled) ? gdeltSettled : []).flatMap(r => r.status === 'fulfilled' ? r.value : []);
+    const liveWeb = (Array.isArray(liveWebSettled) ? liveWebSettled : []).flatMap(r => r.status === 'fulfilled' ? r.value : []);
+    const wiki = (Array.isArray(wikiSettled) ? wikiSettled : []).flatMap(r => r.status === 'fulfilled' ? r.value : []).slice(0, 2);
+    const wikidata = (Array.isArray(wikidataSettled) ? wikidataSettled : []).flatMap(r => r.status === 'fulfilled' ? r.value : []).slice(0, 1);
+    const reddit = (Array.isArray(redditSettled) ? redditSettled : []).flatMap(r => r.status === 'fulfilled' ? r.value : []).slice(0, 1);
 
-    const discovered = [...liveWeb, ...news, ...wiki, ...wikidata, ...reddit];
+    const discovered = [...liveNews, ...gdelt, ...liveWeb, ...wiki, ...wikidata, ...reddit];
     const officialCandidates = await discoverOfficialSourceCandidates(normalizedQuery, {
         seedResults: discovered,
         limit: Math.min(5, Math.max(2, limit))
@@ -443,8 +452,9 @@ export async function searchPublicSources(query, options = {}) {
 
     const combined = [
         ...governmentRoleResults,
+        ...liveNews,
+        ...gdelt,
         ...liveWeb,
-        ...news,
         ...official,
         ...referenceLookups,
         ...wiki,
@@ -487,6 +497,88 @@ export async function searchWikipedia(query, options = {}) {
         summaries.push(normalizeWikipediaItem(summary || hit, query));
     }
     return summaries.filter(item => item.title && item.url);
+}
+
+export async function searchGoogleNewsRss(query, options = {}) {
+    const limit = clampInt(options.limit, 8, 1, 20);
+    const rawQ = String(query || '').trim();
+    if (!rawQ) return [];
+    const encoded = encodeURIComponent(rawQ);
+
+    const isIndia = /\b(tamil nadu|tn|chennai|kerala|karnataka|delhi|maharashtra|bengaluru|mumbai|india|modi|stalin|vijay|tvk|dmk|bjp|congress|aap)\b/i.test(rawQ);
+    const url = isIndia
+        ? `https://news.google.com/rss/search?q=${encoded}&hl=en-IN&gl=IN&ceid=IN:en`
+        : `https://news.google.com/rss/search?q=${encoded}&hl=en&gl=US&ceid=US:en`;
+
+    const response = await fetchWithTimeout(url, {
+        headers: {
+            'Accept': 'application/rss+xml, application/xml, text/xml, */*',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+        }
+    }, PUBLIC_SOURCE_TIMEOUT_MS).catch(() => null);
+
+    if (!response || !response.ok) return [];
+    const xml = await response.text().catch(() => '');
+    if (!xml || !xml.includes('<item>')) return [];
+
+    return parseGoogleNewsRssXml(xml, rawQ, limit);
+}
+
+function cleanXmlEntities(str) {
+    return String(str || '')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&apos;/g, "'")
+        .trim();
+}
+
+function parseGoogleNewsRssXml(xml, query, limit = 8) {
+    const items = [];
+    const itemRegex = /<item>([\s\S]*?)<\/item>/gi;
+    let match;
+
+    while ((match = itemRegex.exec(xml)) !== null && items.length < limit) {
+        const itemBlock = match[1];
+        const titleMatch = /<title>([\s\S]*?)<\/title>/i.exec(itemBlock);
+        const linkMatch = /<link>([\s\S]*?)<\/link>/i.exec(itemBlock);
+        const pubDateMatch = /<pubDate>([\s\S]*?)<\/pubDate>/i.exec(itemBlock);
+        const descMatch = /<description>([\s\S]*?)<\/description>/i.exec(itemBlock);
+        const sourceMatch = /<source\s+url="([^"]*)"[^>]*>([\s\S]*?)<\/source>/i.exec(itemBlock);
+
+        let rawTitle = cleanXmlEntities(titleMatch?.[1] || '');
+        let link = cleanXmlEntities(linkMatch?.[1] || '');
+        const pubDate = cleanXmlEntities(pubDateMatch?.[1] || '');
+        let desc = cleanXmlEntities(descMatch?.[1] || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+        const sourceName = cleanXmlEntities(sourceMatch?.[2] || '');
+
+        let publisher = sourceName;
+        if (rawTitle.includes(' - ')) {
+            const parts = rawTitle.split(' - ');
+            if (!publisher && parts.length > 1) {
+                publisher = parts[parts.length - 1].trim();
+            }
+        }
+
+        if (rawTitle && link) {
+            const domain = extractDomain(link) || 'news.google.com';
+            items.push({
+                title: rawTitle,
+                description: desc || rawTitle,
+                url: link,
+                domain: domain,
+                sourceType: 'trusted_news',
+                sourceLabel: publisher ? `Google News / ${publisher}` : 'Google News',
+                date: pubDate,
+                timestamp: pubDate ? (new Date(pubDate).getTime() || Date.now()) : Date.now(),
+                confidence: 0.94
+            });
+        }
+    }
+
+    return items.sort((a, b) => b.timestamp - a.timestamp);
 }
 
 export async function searchGdeltNews(query, options = {}) {
@@ -923,9 +1015,7 @@ function buildUnverifiedRagSummary(query, results = [], warnings = []) {
     };
 }
 
-export async function searchGoogleNewsRss(query = '', options = {}) {
-    return searchGdeltNews(query, options);
-}
+
 
 export function extractSearchTopic(text) {
     return String(text || '')
@@ -2741,6 +2831,7 @@ export const __test = {
     searchExa,
     runVerifiedWebSearch,
     runEvidenceFirstWebRag,
+    searchGoogleNewsRss,
     searchGdeltNews,
     searchWikidata,
     searchReddit,
