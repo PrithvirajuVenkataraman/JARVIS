@@ -436,9 +436,12 @@ export async function searchPublicSources(query, options = {}) {
 
     const liveNews = (Array.isArray(liveNewsSettled) ? liveNewsSettled : []).flatMap(r => r.status === 'fulfilled' ? r.value : []);
     const gdelt = (Array.isArray(gdeltSettled) ? gdeltSettled : []).flatMap(r => r.status === 'fulfilled' ? r.value : []);
-    const liveWeb = (Array.isArray(liveWebSettled) ? liveWebSettled : []).flatMap(r => r.status === 'fulfilled' ? r.value : []);
-    const wiki = (Array.isArray(wikiSettled) ? wikiSettled : []).flatMap(r => r.status === 'fulfilled' ? r.value : []).slice(0, 2);
-    const wikidata = (Array.isArray(wikidataSettled) ? wikidataSettled : []).flatMap(r => r.status === 'fulfilled' ? r.value : []).slice(0, 1);
+    const liveWeb = (Array.isArray(liveWebSettled) ? liveWebSettled : [])
+        .flatMap(r => r.status === 'fulfilled' ? r.value : [])
+        .filter(item => !isPolitical || (!String(item?.url || '').includes('wikipedia.org') && !String(item?.url || '').includes('wikidata.org')));
+    const hasLiveResults = liveNews.length > 0 || gdelt.length > 0 || liveWeb.length > 0;
+    const wiki = (isPolitical && hasLiveResults) ? [] : (Array.isArray(wikiSettled) ? wikiSettled : []).flatMap(r => r.status === 'fulfilled' ? r.value : []).slice(0, 2);
+    const wikidata = (isPolitical && hasLiveResults) ? [] : (Array.isArray(wikidataSettled) ? wikidataSettled : []).flatMap(r => r.status === 'fulfilled' ? r.value : []).slice(0, 1);
     const reddit = (Array.isArray(redditSettled) ? redditSettled : []).flatMap(r => r.status === 'fulfilled' ? r.value : []).slice(0, 1);
 
     const discovered = [...liveNews, ...gdelt, ...liveWeb, ...wiki, ...wikidata, ...reddit];
@@ -448,7 +451,7 @@ export async function searchPublicSources(query, options = {}) {
     });
     const official = await Promise.all(officialCandidates
         .map((item, index) => normalizeOfficialSourceCandidate(item, normalizedQuery, index)));
-    const referenceLookups = buildReferenceLookupResults(normalizedQuery, official.length);
+    const referenceLookups = isPolitical ? [] : buildReferenceLookupResults(normalizedQuery, official.length);
 
     const combined = [
         ...governmentRoleResults,
