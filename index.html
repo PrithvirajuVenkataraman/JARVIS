@@ -18420,7 +18420,7 @@ Confidence: <High/Medium/Low based only on source agreement>
 Rules:
 - Answer the exact fact first.
 - Universal Freshness & Incumbency across ALL fields (Political/Civic leadership, Corporate CEOs/Executives, Sports champions/rankings/winners, Technology & hardware releases, Entertainment/Awards, Economics/Finance, and Scientific records): Always identify and output the current active status/leader/winner/version from the latest retrieved evidence. Never state a predecessor, former holder, retired figure, or obsolete version as current.
-- CRITICAL INCUMBENCY RESOLUTION: If the evidence records a transition, election outcome, new appointment, or succession (e.g. 2026 election won by TVK / C. Joseph Vijay), the FIRST sentence of "Direct answer:" MUST state the current outcome/leader resulting from the transition, referring to any previous office-holder strictly in past tense (e.g. "Following the 2026 election, C. Joseph Vijay of TVK was elected to form the government in Tamil Nadu, succeeding former Chief Minister M.K. Stalin."). NEVER open by declaring a predecessor as the current leader if the snippets record a subsequent transition!
+- CRITICAL INCUMBENCY RESOLUTION: If the evidence records a transition, election outcome, new appointment, or succession, the FIRST sentence of "Direct answer:" MUST state the current outcome/leader resulting from the transition, referring to any previous office-holder strictly in past tense (e.g. "...succeeding former office-holder..."). NEVER open by declaring a predecessor as the current leader if the snippets record a subsequent transition!
 - Prefer current membership, party, role, office, title count, stats, standings, rankings, or winners depending on the question.
 - Do not make up numbers, teams, players, parties, offices, dates, or organizations.
 - If snippets show a transition or recent change, prioritize the latest 2026 sources and explicitly state the latest update.
@@ -26906,7 +26906,7 @@ async function shareActiveChat() {
     if (navigator.share) {
         try {
             await navigator.share({
-                title: `JARVIS: ${title}`, 
+                title: `JARVIS: ${title}`,
                 text: summary,
                 url: window.location.href
             });
