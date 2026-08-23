@@ -11728,26 +11728,23 @@ function getCurrentFactCacheKey(query) {
 }
 
 function getCachedCurrentFact(query) {
-    try {
-        const raw = localStorage.getItem(getCurrentFactCacheKey(query));
-        if (!raw) return null;
-        const cached = JSON.parse(raw);
-        if (!cached || Date.now() - Number(cached.cachedAt || 0) > 30 * 60 * 1000) return null;
-        return cached.data || null;
-    } catch (_) {
-        return null;
-    }
+    // Dynamic facts must always query fresh live sources rather than returning stale localStorage caches
+    return null;
 }
 
 function setCachedCurrentFact(query, data) {
-    if (!data?.resolved || !data?.answer) return;
-    try {
-        localStorage.setItem(getCurrentFactCacheKey(query), JSON.stringify({
-            cachedAt: Date.now(),
-            data
-        }));
-    } catch (_) {}
+    // Keep live facts fresh and prevent cross-session staleness
 }
+
+try {
+    if (typeof localStorage !== 'undefined') {
+        Object.keys(localStorage).forEach(key => {
+            if (key.startsWith('jarvis_current_fact_')) {
+                localStorage.removeItem(key);
+            }
+        });
+    }
+} catch (_) {}
 
 function formatCurrentFactAnswer(data = {}) {
     const answer = String(data?.answer || '').trim();
