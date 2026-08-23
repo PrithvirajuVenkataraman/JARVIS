@@ -1644,6 +1644,7 @@ globalThis.fetch = async (url) => {
     if (href.includes('www.wikidata.org')) return okJson({ search: [] });
     if (href.includes('reddit.com')) return okJson({ data: { children: [] } });
     if (href.includes('duckduckgo.com')) return okText('');
+    if (href.includes('example.gov')) return okText('<title>' + ragLeaderTitle + '</title>');
     if (href.includes('api.gdeltproject.org')) {
         return okJson({
             articles: [{
