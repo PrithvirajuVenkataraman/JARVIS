@@ -2721,7 +2721,7 @@ export const __test = {
     isValidCitationSource,
     buildSourceDerivedAnswer,
     discoverOfficialSourceCandidates,
-    fetchWikidataOfficialUrls,
+    fetchWikidataOfficialUrls, 
     isOfficialGovernmentUrl,
     extractOfficialCurrentRoleEvidence,
     parseDiscoveryFactQuery,
