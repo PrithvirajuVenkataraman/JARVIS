@@ -1963,16 +1963,24 @@ function extractDeterministicLiveFactAnswer(query, evidence = []) {
         const bYear = /\b202[6-9]\b/.test(`${b.title} ${b.description}`) ? 1 : 0;
         return bYear - aYear;
     });
+    const isRoleQuery = /\b(cm|chief minister|president|prime minister|pm|governor|mayor|leader|head of state|head of government|ceo)\b/i.test(query);
+    const isDefinitionRegex = /\b(is the head of (?:the )?government|is the leader of the (?:state )?cabinet|is the head of the executive|is the highest-ranking executive|is an elected or appointed official|refers to the office|is a constitutional position)\b/i;
+
     for (let i = 0; i < sorted.length; i++) {
         const item = sorted[i];
         const text = `${item.title}. ${item.description || ''}`.trim();
         if (text.length > 15) {
-            const chosenAnswer = item.description && item.description.length > 25 ? item.description : item.title;
+            if (isRoleQuery && isDefinitionRegex.test(item.description || '')) {
+                continue; // Skip generic dictionary definitions of the office
+            }
+            const chosenAnswer = item.description && item.description.length > 25 && !isDefinitionRegex.test(item.description)
+                ? item.description
+                : item.title;
             return {
                 verified: true,
                 confidence: 0.88,
                 answer: chosenAnswer,
-                evidenceIndexes: [0],
+                evidenceIndexes: [i],
                 modelAssisted: false,
                 reason: `Extracted directly from live web source: ${item.domain || item.sourceLabel}`
             };
