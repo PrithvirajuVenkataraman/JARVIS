@@ -17688,6 +17688,10 @@ async function buildEntityVerificationFallback(userText, entityIntent, liveInten
     });
 }
 
+function lookupKnownGlobalFact(intent, userText, entityIntent = null) {
+    return null;
+}
+
 function lookupKnownSportsFact(intent, userText, entityIntent = null) {
     return null;
 }
@@ -17716,7 +17720,7 @@ function buildUniversalFactPipelineContext(userText, liveIntent = null) {
         intent,
         entityIntent,
         conciseFactQuery: isConciseDirectFactQuery(userText),
-        knownFact: lookupKnownSportsFact(intent, userText, entityIntent)
+        knownFact: lookupKnownGlobalFact(intent, userText, entityIntent)
     };
 }
 
@@ -18487,6 +18491,9 @@ async function handleUniversalEntityFactQuery(userText, liveIntent = null) {
         conciseFactQuery: pipeline.conciseFactQuery,
         hasKnownFact: Boolean(pipeline.knownFact)
     });
+    if (pipeline.knownFact) {
+        return publishUniversalKnownFact(pipeline, 'Verified live fact');
+    }
     showThinkingIndicator('Checking verified sources...'); 
     const controller = beginAbortableRequest(); 
     const budgetTimer = setTimeout(() => {
@@ -26899,7 +26906,7 @@ async function shareActiveChat() {
     if (navigator.share) {
         try {
             await navigator.share({
-                title: `JARVIS: ${title}`,
+                title: `JARVIS: ${title}`, 
                 text: summary,
                 url: window.location.href
             });
