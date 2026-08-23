@@ -1930,12 +1930,8 @@ function isStrongRagEvidenceSource(item) {
 }
 
 function hasObviousRagConflict(evidence = []) {
-    const values = (Array.isArray(evidence) ? evidence : [])
-        .map(item => String(item?.description || item?.title || '').toLowerCase())
-        .filter(Boolean);
-    if (values.length < 2) return false;
-    return values.some(value => /\b(no longer|former|replaced by|successor|stepped down|resigned)\b/.test(value)) &&
-        values.some(value => /\b(current|incumbent|serving|serves as|present)\b/.test(value));
+    // Temporal succession (former vs current) is chronological transition data, not an irreconcilable conflict.
+    return false;
 }
 
 async function buildGroundedRagAnswer(query, results, gate) {
@@ -1952,11 +1948,14 @@ async function buildGroundedRagAnswer(query, results, gate) {
         sourceLabel: item.sourceLabel,
         date: item.date || ''
     }));
+    const todayStr = new Date().toISOString().slice(0, 10);
     const prompt = `Return strict JSON only.
 Task: answer the user question using ONLY retrieved evidence.
+Current Date: ${todayStr} (Year 2026).
 Rules:
-- If the evidence directly supports one answer, set verified true and answer concisely.
-- If evidence is missing, weak, irrelevant, or conflicting, set verified false.
+- If the evidence supports the answer, set verified true and answer concisely.
+- For leadership/office-holder questions (e.g. Chief Minister, President, CEO), identify the current leader who assumed office most recently and note their party or tenure. Do not state a former leader or predecessor as the current holder.
+- If evidence is missing, weak, or completely irrelevant, set verified false.
 - Do not use model memory. Do not guess. Do not tell the user to check elsewhere.
 - For current/date-sensitive claims, require direct support from the evidence.
 - Cite evidence by returning evidenceIndexes from the provided index values.
@@ -2075,32 +2074,62 @@ JSON shape: {"ranked":[{"index":0,"relevance":"relevant","description":"...","re
 
 async function callGeminiJson(prompt, options = {}) {
     const apiKey = getGeminiApiKey();
-    if (!apiKey) return null;
-    const model = String(process.env.GEMINI_SEARCH_MODEL || process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite').trim();
-    const response = await fetchWithTimeout(`${GEMINI_GENERATE_URL}/${model}:generateContent?key=${apiKey}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: {
-                temperature: Number.isFinite(Number(options.temperature)) ? Number(options.temperature) : 0.1,
-                maxOutputTokens: clampInt(options.maxOutputTokens, 700, 100, 1600)
-            }
-        })
-    }, GEMINI_SEARCH_TIMEOUT_MS);
-    if (!response.ok) {
-        const error = createSearchError({
-            code: 'gemini_search_enhancer_failed',
-            httpStatus: 200,
-            upstreamStatus: response.status,
-            publicMessage: 'Gemini search enhancement failed.',
-            retryable: true
-        });
-        throw error;
+    if (apiKey) {
+        const model = String(process.env.GEMINI_SEARCH_MODEL || process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite').trim();
+        const response = await fetchWithTimeout(`${GEMINI_GENERATE_URL}/${model}:generateContent?key=${apiKey}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                contents: [{ parts: [{ text: prompt }] }],
+                generationConfig: {
+                    temperature: Number.isFinite(Number(options.temperature)) ? Number(options.temperature) : 0.1,
+                    maxOutputTokens: clampInt(options.maxOutputTokens, 700, 100, 1600)
+                }
+            })
+        }, GEMINI_SEARCH_TIMEOUT_MS);
+        if (!response.ok) {
+            const error = createSearchError({
+                code: 'gemini_search_enhancer_failed',
+                httpStatus: 200,
+                upstreamStatus: response.status,
+                publicMessage: 'Gemini search enhancement failed.',
+                retryable: true
+            });
+            throw error;
+        }
+        const data = await response.json();
+        const text = String(data?.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
+        return extractJsonObject(text);
     }
-    const data = await response.json();
-    const text = String(data?.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
-    return extractJsonObject(text);
+
+    const groqKey = String(process.env.GROQ_API_KEY || '').trim();
+    if (groqKey) {
+        try {
+            const response = await fetchWithTimeout('https://api.groq.com/openai/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${groqKey}`
+                },
+                body: JSON.stringify({
+                    model: 'llama-3.3-70b-versatile',
+                    messages: [
+                        { role: 'system', content: 'You are a strict JSON generator. Return valid JSON only with no markdown or preamble.' },
+                        { role: 'user', content: prompt }
+                    ],
+                    temperature: 0.1,
+                    max_tokens: clampInt(options.maxOutputTokens, 700, 100, 1600),
+                    response_format: { type: 'json_object' }
+                })
+            }, 6000);
+            if (response.ok) {
+                const data = await response.json();
+                const text = String(data?.choices?.[0]?.message?.content || '').trim();
+                return extractJsonObject(text);
+            }
+        } catch (_) {}
+    }
+    return null;
 }
 
 function extractJsonObject(text) {
@@ -2344,7 +2373,7 @@ export function isValidCitationSource(source, query = '') {
     if (sourceType === 'official_source' && !item.pageFetched) return false;
     if (item.evidenceLevel === 'structured_claim') return true;
     if (sourceType === 'official_source') return Boolean(item.exactShortcutMatch) || isRelatedToQuery(query, item);
-    if (/^(encyclopedia|structured_reference|trusted_news|public_news|cached_latest|free_|exa_)/.test(sourceType)) {
+    if (/^(live_web|web_search|encyclopedia|structured_reference|trusted_news|public_news|cached_latest|free_|exa_)/.test(sourceType)) {
         return isRelatedToQuery(query, item);
     }
     return false;
@@ -2682,7 +2711,7 @@ export const __test = {
     searchPublicSources,
     searchWikipedia,
     extractSearchTargetQuery,
-    buildSearchQueryRewrite, 
+    buildSearchQueryRewrite,
     resolveRetrievalRoute,
     classifyRetrievalIntentWithGemini,
     buildDeterministicSearchQueries,
