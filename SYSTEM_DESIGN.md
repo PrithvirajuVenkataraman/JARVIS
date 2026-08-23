@@ -190,25 +190,26 @@ To maximize throughput, minimize API quota burn, and eliminate latency on repeat
 
 ---
 
-## 11. ChatGPT & Perplexity-Grade Live Web Search Engine
+## 11. 5-Stage Production Hybrid RAG & Live Web Search Engine
 
-To ensure real-time web search and citation generation work with the fidelity of ChatGPT and Perplexity:
+To ensure real-time web search and dynamic facts (political offices, leaders, elections, awards) work with live accuracy and zero stale hallucinations:
 
-* **Zero-Key Multi-Engine Parallel Fast-Race (`api/_lib/free-live/providers.js`, `api/search.js`):**
+* **Stage 1: Dynamic Temporal Query Rewriter & Date-Anchor Engine (`api/chat-groq.js`):**
+  - Dynamically injects current real-world calendar anchors (Year `2026`, `current`, `incumbent`, `official news`) into search query permutations to target active role holders rather than historical snapshots.
+* **Stage 2: Zero-Key Multi-Engine Parallel Fast-Race (`api/_lib/free-live/providers.js`, `api/search.js`):**
   - Concurrently queries multiple free, open public search indexers in parallel:
     - **DuckDuckGo HTML Parser:** Live web search index scraper extracting title, snippet, and clean destination URLs without API keys.
     - **Wikipedia & Wikidata REST APIs:** Real-time encyclopedia and entity knowledge graphs.
     - **GDELT Global News Document API:** Live breaking news, international headlines, and publisher feeds.
   - Races all providers with a sub-2.5s timeout, deduplicating and ranking the top verified source cards.
-* **Deep Page Scraping & Grounded Synthesis (`api/chat-groq.js`):**
+* **Stage 3: Deep Page Scraping & Body Extraction (`api/chat-groq.js`):**
   - Concurrently fetches and extracts full readable paragraph text (up to 3,000 chars per page) from top 2-3 links.
-  - Feeds actual article extracts into LLM context with structured numbered references `[1]`, `[2]`.
-* **Top Favicon Source Carousel (`index.html`, `styles.css`):**
+* **Stage 4: Reciprocal Rank Fusion (RRF) & Pre-Synthesis Recency Gate (`api/chat-groq.js`):**
+  - Ranks candidate documents using Reciprocal Rank Fusion with tenure boost for current incumbency terms (`sworn in`, `assumed office`, `elected in 2026`) and soft penalties for historical terms (`former`, `ex-`, `past`, `stepped down`).
+  - Injects current reference timestamp header into the grounded prompt.
+* **Stage 5: Grounded Synthesis with Superscript Citations & Favicon Carousel (`index.html`, `styles.css`):**
   - Displays a sleek horizontal scrollable row of verified source cards at the top of the answer bubble showing high-resolution domain favicons, page titles, and source numbers.
-* **Inline Superscript Citations (`[1]`, `[2]`):**
-  - Interactive clickable citation pills (`.citation-badge`) directly linked to verified source pages.
-* **Zero-Key URL Web Fetcher (`web_fetch`):**
-  - Directly scrapes and cleans readable markdown/text from any public URL without proxy credits.
+  - Formats citations into interactive clickable superscript pills (`.citation-badge`, `[1]`, `[2]`).
 
 ---
 
