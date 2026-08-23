@@ -2741,7 +2741,7 @@ export const __test = {
     parseStructuredDateWindow,
     roleClaimOverlapsWindow,
     normalizeGovernmentRoleBindings,
-    isValidCitationSource, 
+    isValidCitationSource,
     buildSourceDerivedAnswer,
     discoverOfficialSourceCandidates,
     fetchWikidataOfficialUrls,
