@@ -3,10 +3,29 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
+    <meta name="theme-color" content="#07090e">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <title>JARVIS</title>
+    <meta name="apple-mobile-web-app-title" content="JARVIS">
+    <title>JARVIS - Next-Gen Autonomous AI Assistant</title>
+    <meta name="description" content="Next-generation multimodal AI assistant with live web search, dynamic chain-of-thought reasoning, and real-time voice converse.">
+    
+    <!-- Open Graph / Social Media -->
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="JARVIS - Next-Gen Autonomous AI Assistant">
+    <meta property="og:description" content="Next-generation multimodal AI assistant with live web search, dynamic chain-of-thought reasoning, and real-time voice converse.">
+    
+    <!-- Twitter / X -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="JARVIS - Next-Gen Autonomous AI Assistant">
+    <meta name="twitter:description" content="Next-generation multimodal AI assistant with live web search, dynamic chain-of-thought reasoning, and real-time voice converse.">
+
+    <!-- PWA Manifest & App Icons -->
+    <link rel="manifest" href="/manifest.json">
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2338bdf8' stroke-width='2'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='m4.93 4.93 4.24 4.24'/%3E%3Cpath d='m14.83 9.17 4.24-4.24'/%3E%3Cpath d='m14.83 14.83 4.24 4.24'/%3E%3Cpath d='m9.17 14.83-4.24 4.24'/%3E%3C/svg%3E">
+    <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2338bdf8' stroke-width='2'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='m4.93 4.93 4.24 4.24'/%3E%3Cpath d='m14.83 9.17 4.24-4.24'/%3E%3Cpath d='m14.83 14.83 4.24 4.24'/%3E%3Cpath d='m9.17 14.83-4.24 4.24'/%3E%3C/svg%3E">
+
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="styles.css">
     <script src="science-format.js"></script>
@@ -26771,7 +26790,7 @@ function addTravelHintsToPlan(places){
             travelMinutes: 15,
             travelMode: "drive",
             travelHint: "Transit - ~15 min"
-        }; 
+        };
     });
 }
 
@@ -26786,6 +26805,105 @@ function addTravelHintsToPlan(places){
         planToPromptList
     });
 })();
+
+/* ==========================================================================
+   Production Readiness: PWA Service Worker & Client Error Boundary
+   ========================================================================== */
+if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').catch(() => {});
+    });
+}
+
+// Client-Side Error Shield
+window.addEventListener('error', (event) => {
+    if (event?.filename && !event.filename.includes(window.location.host)) return;
+    console.warn('[JARVIS Error Shield] Handled exception:', event?.message);
+});
+
+window.addEventListener('unhandledrejection', (event) => {
+    console.warn('[JARVIS Rejection Shield] Handled promise rejection:', event?.reason);
+});
+
+/* ==========================================================================
+   Multi-Format Chat Export & Sharing Engine
+   ========================================================================== */
+function exportActiveChatAsMarkdown() {
+    const activeChat = (typeof getActiveConversation === 'function' ? getActiveConversation() : null) || null;
+    const turns = activeChat?.turns || activeChat?.messages || [];
+    if (!turns.length) {
+        showTemporaryMessage('No conversation messages to export');
+        return;
+    }
+    const title = activeChat?.title || 'JARVIS Conversation';
+    const lines = [
+        `# ${title}`,
+        `*Exported from JARVIS on ${new Date().toLocaleString()}*`,
+        '',
+        '---',
+        ''
+    ];
+    for (const turn of turns) {
+        const role = turn.role === 'user' ? 'User' : 'JARVIS';
+        const text = String(turn.text || turn.content || turn.response || '').trim();
+        lines.push(`### ${role}:`);
+        lines.push('');
+        lines.push(text);
+        lines.push('');
+        lines.push('---');
+        lines.push('');
+    }
+    const blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${title.toLowerCase().replace(/[^a-z0-9]+/g, '_')}_${Date.now()}.md`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showTemporaryMessage('Exported as Markdown (.md)');
+}
+
+function exportActiveChatAsJson() {
+    const activeChat = (typeof getActiveConversation === 'function' ? getActiveConversation() : null) || null;
+    if (!activeChat) {
+        showTemporaryMessage('No active conversation to export');
+        return;
+    }
+    const blob = new Blob([JSON.stringify(activeChat, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `jarvis_chat_${activeChat.id || Date.now()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showTemporaryMessage('Exported as JSON');
+}
+
+function printActiveChatToPdf() {
+    window.print();
+}
+
+async function shareActiveChat() {
+    const activeChat = (typeof getActiveConversation === 'function' ? getActiveConversation() : null) || null;
+    const title = activeChat?.title || 'JARVIS Conversation';
+    const turns = activeChat?.turns || activeChat?.messages || [];
+    const summary = turns.slice(0, 2).map(t => `${t.role}: ${t.text}`).join('\n');
+    if (navigator.share) {
+        try {
+            await navigator.share({
+                title: `JARVIS: ${title}`,
+                text: summary,
+                url: window.location.href
+            });
+            return;
+        } catch (_) {}
+    }
+    exportActiveChatAsMarkdown();
+}
 </script>
 </body>
 </html>
