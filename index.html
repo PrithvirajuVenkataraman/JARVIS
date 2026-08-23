@@ -8743,7 +8743,8 @@ let showRoutingDebugBadge = false;
 
                 const thoughtContent = parsedThought.thought || meta?.thought || '';
                 const thoughtSteps = thoughtContent ? [] : generateContextualThoughtSteps(priorUserPrompt);
-                const actualElapsed = window.__lastThinkingPhaseStartedAt ? Math.max(0.1, (Date.now() - window.__lastThinkingPhaseStartedAt) / 1000) : 0;
+                const selfHealing = meta?.selfHealing || meta?.routing?.selfHealing || null;
+                const actualElapsed = (typeof window !== 'undefined' && window.__lastThinkingPhaseStartedAt) ? Math.max(0.1, (Date.now() - window.__lastThinkingPhaseStartedAt) / 1000) : 0;
                 const rawElapsed = meta?.latency ? (meta.latency / 1000) : (actualElapsed > 0 ? actualElapsed : 1.2);
                 const elapsedSeconds = Number(rawElapsed).toFixed(1);
                 const rawModel = meta?.modelUsed || meta?.model || meta?.routing?.model || '';
@@ -26900,7 +26901,7 @@ function exportActiveChatAsJson() {
 }
 
 function printActiveChatToPdf() {
-    window.print(); 
+    window.print();
 }
 
 async function shareActiveChat() {
