@@ -1954,7 +1954,7 @@ Task: answer the user question using ONLY retrieved evidence.
 Current Date: ${todayStr} (Year 2026).
 Rules:
 - If the evidence supports the answer, set verified true and answer concisely.
-- For leadership/office-holder questions (e.g. Chief Minister, President, CEO), identify the current leader who assumed office most recently and note their party or tenure. Do not state a former leader or predecessor as the current holder.
+- Universal Freshness & Incumbency across ALL domains (leadership/office-holders, CEOs/executives, sports champions/winners, technology/product releases, awards, records, prices): identify and extract the most recent, active status or holder from the evidence. Never output a former holder, predecessor, retired entity, or obsolete version as the current state.
 - If evidence is missing, weak, or completely irrelevant, set verified false.
 - Do not use model memory. Do not guess. Do not tell the user to check elsewhere.
 - For current/date-sensitive claims, require direct support from the evidence.
