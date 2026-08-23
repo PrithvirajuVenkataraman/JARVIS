@@ -2604,6 +2604,7 @@ CRITICAL: Never output bare "Plan:", "Drafting:", or "Review against constraints
             '',
             '=== CITATION DIRECTIVE ===',
             'Synthesize a comprehensive, fact-grounded answer based strictly on the verified sources above.',
+            'CRITICAL INCUMBENCY INSTRUCTION: When answering who currently holds an office, political leadership position, or title, state the current incumbent who took office most recently (or in the current year) and clarify any recent transition. Do NOT state a predecessor or former leader as the current holder.',
             'When citing a fact, statistic, or quote from a source, append a clickable markdown link like [1](URL) or [2](URL) immediately after the claim.'
         ].join('\n\n');
 
