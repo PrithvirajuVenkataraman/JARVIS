@@ -428,13 +428,13 @@ export async function searchPublicSources(query, options = {}) {
         ...plannedQueries.map(item => normalizeSearchQuery(item)).filter(Boolean)
     ])).slice(0, 7);
 
-    const [liveNewsSettled, gdeltSettled, liveWebSettled, wikiSettled, wikidataSettled, redditSettled] = await Promise.all([
-        Promise.allSettled(querySet.map(candidate => searchGoogleNewsRss(candidate, { limit }))),
-        Promise.allSettled(querySet.map(candidate => searchGdeltNews(candidate, { limit }))),
-        Promise.allSettled(querySet.map(candidate => searchDuckDuckGoHtml(candidate, { limit: Math.min(5, limit) }))),
-        Promise.allSettled(querySet.map(candidate => searchWikipedia(candidate, { limit: 2 }))),
-        Promise.allSettled(querySet.map(candidate => searchWikidata(candidate, { limit: 1 }))),
-        Promise.allSettled(querySet.map(candidate => searchReddit(candidate, { limit: 2 })))
+    const targetQueries = querySet.slice(0, 2);
+    const [liveNewsSettled, gdeltSettled, wikiSettled, wikidataSettled, liveWebSettled] = await Promise.all([
+        Promise.allSettled(targetQueries.map(candidate => searchGoogleNewsRss(candidate, { limit }))),
+        Promise.allSettled(targetQueries.map(candidate => searchGdeltNews(candidate, { limit }))),
+        Promise.allSettled(targetQueries.map(candidate => searchWikipedia(candidate, { limit: 2 }))),
+        Promise.allSettled([searchWikidata(targetQueries[0] || normalizedQuery, { limit: 2 })]),
+        Promise.allSettled([searchDuckDuckGoHtml(targetQueries[0] || normalizedQuery, { limit: Math.min(5, limit) })])
     ]);
 
     const liveNews = (Array.isArray(liveNewsSettled) ? liveNewsSettled : []).flatMap(r => r.status === 'fulfilled' ? r.value : []);
@@ -444,26 +444,14 @@ export async function searchPublicSources(query, options = {}) {
         .filter(item => !isPolitical || (!String(item?.url || '').includes('wikipedia.org') && !String(item?.url || '').includes('wikidata.org')));
     const wiki = (Array.isArray(wikiSettled) ? wikiSettled : []).flatMap(r => r.status === 'fulfilled' ? r.value : []).slice(0, 3);
     const wikidata = (Array.isArray(wikidataSettled) ? wikidataSettled : []).flatMap(r => r.status === 'fulfilled' ? r.value : []).slice(0, 2);
-    const reddit = (Array.isArray(redditSettled) ? redditSettled : []).flatMap(r => r.status === 'fulfilled' ? r.value : []).slice(0, 1);
 
-    const discovered = [...liveNews, ...gdelt, ...liveWeb, ...wiki, ...wikidata, ...reddit];
-    const officialCandidates = await discoverOfficialSourceCandidates(normalizedQuery, {
-        seedResults: discovered,
-        limit: Math.min(5, Math.max(2, limit))
-    });
-    const official = await Promise.all(officialCandidates
-        .map((item, index) => normalizeOfficialSourceCandidate(item, normalizedQuery, index)));
-    const referenceLookups = isPolitical ? [] : buildReferenceLookupResults(normalizedQuery, official.length);
     const combined = [
         ...governmentRoleResults,
         ...wiki,
         ...wikidata,
         ...liveNews,
         ...gdelt,
-        ...official,
-        ...liveWeb,
-        ...reddit,
-        ...referenceLookups
+        ...liveWeb
     ].filter(Boolean);
 
     const seenUrls = new Set();
@@ -474,7 +462,9 @@ export async function searchPublicSources(query, options = {}) {
         deduped.push(item);
         if (deduped.length >= Math.max(limit, 8)) break;
     }
-    await enrichSearchResultsWithDeepCrawl(deduped, 3).catch(() => {});
+    if (!options.skipAutoDeepCrawl) {
+        await enrichSearchResultsWithDeepCrawl(deduped, 3).catch(() => {});
+    }
     return deduped;
 }
 
@@ -494,14 +484,15 @@ export async function searchWikipedia(query, options = {}) {
     if (!response.ok) return [];
     const data = await response.json();
     const hits = Array.isArray(data?.query?.search) ? data.query.search : [];
-    const summaries = [];
-    for (const hit of hits.slice(0, limit)) {
-        const title = String(hit?.title || '').trim();
-        if (!title) continue;
-        const summary = await fetchWikipediaSummary(title).catch(() => null);
-        summaries.push(normalizeWikipediaItem(summary || hit, query));
-    }
-    return summaries.filter(item => item.title && item.url);
+    const summaries = await Promise.all(
+        hits.slice(0, limit).map(async (hit) => {
+            const title = String(hit?.title || '').trim();
+            if (!title) return null;
+            const summary = await fetchWikipediaSummary(title).catch(() => null);
+            return normalizeWikipediaItem(summary || hit, query);
+        })
+    );
+    return summaries.filter(item => item && item.title && item.url);
 }
 
 export async function searchGoogleNewsRss(query, options = {}) {
@@ -969,18 +960,47 @@ export async function runVerifiedWebSearch(query, options = {}) {
 }
 
 export async function runEvidenceFirstWebRag(query, options = {}) {
+    const totalStart = performance.now();
+    const timing = {
+        intentDetectionMs: 0,
+        queryGenerationMs: 0,
+        exaMs: 0,
+        serperMs: 0,
+        publicSourcesMs: 0,
+        embeddingsMs: 0,
+        rerankingMs: 0,
+        deepCrawlMs: 0,
+        finalLlmMs: 0,
+        totalLatencyMs: 0
+    };
+
+    const intentStart = performance.now();
     const normalizedQuery = normalizeSearchQuery(query);
     const limit = clampInt(options.limit, 8, 1, 20);
     if (!normalizedQuery) {
         return buildUnverifiedRagSummary(normalizedQuery, [], ['Empty query.']);
     }
 
-    const planning = await buildGeminiSearchPlan(normalizedQuery).catch(error => ({
-        queries: [],
-        warning: `gemini_query_planning_failed:${String(error?.code || error?.message || 'unknown')}`
-    }));
-    const phases = buildWebRagQueryPhases(normalizedQuery, planning.queries);
-    const warnings = planning.warning ? [planning.warning] : [];
+    const roleIntent = parseGovernmentRoleQuery(normalizedQuery);
+    const isFastFactual = Boolean(roleIntent || isCurrentTopicSearchQuery(normalizedQuery) || isDatedChangingFactSearchQuery(normalizedQuery));
+    timing.intentDetectionMs = Number((performance.now() - intentStart).toFixed(1));
+
+    // Stage 1: Deterministic Fast Query Generation (Skip Gemini planning on fast path)
+    const queryGenStart = performance.now();
+    let plannedQueries = [];
+    let planningWarning = '';
+    if (!isFastFactual) {
+        const planning = await buildGeminiSearchPlan(normalizedQuery).catch(error => ({
+            queries: [],
+            warning: `gemini_query_planning_failed:${String(error?.code || error?.message || 'unknown')}`
+        }));
+        plannedQueries = planning.queries || [];
+        planningWarning = planning.warning || '';
+    }
+    const phases = buildWebRagQueryPhases(normalizedQuery, plannedQueries);
+    timing.queryGenerationMs = Number((performance.now() - queryGenStart).toFixed(1));
+
+    const warnings = planningWarning ? [planningWarning] : [];
     const seen = new Set();
     let allResults = [];
     let finalGate = null;
@@ -991,67 +1011,150 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
     let rerankUsed = false;
     let rerankModel = '';
 
-    for (let i = 0; i < phases.length; i += 1) {
-        const phaseQueries = phases[i];
-        const [exaResults, phaseResults] = await Promise.all([
-            searchExa(normalizedQuery, {
-                limit,
-                plannedQueries: phaseQueries
-            }).catch(error => {
-                warnings.push(`exa_phase_${i + 1}_failed:${String(error?.code || error?.message || 'unknown')}`);
-                return [];
-            }),
-            searchPublicSources(normalizedQuery, {
-                limit,
-                plannedQueries: phaseQueries,
-                skipStructuredRoles: true
-            }).catch(error => {
-                warnings.push(`rag_phase_${i + 1}_failed:${String(error?.code || error?.message || 'unknown')}`);
-                return [];
-            })
-        ]);
-        for (const item of [...exaResults, ...phaseResults]) {
-            const key = normalizeResultKey(item);
-            if (!key || seen.has(key)) continue;
-            seen.add(key);
-            allResults.push(item);
-        }
-        allResults = rankSources(normalizedQuery, dedupeSearchResults(allResults)
-            .filter(item => isValidCitationSource(item, normalizedQuery)))
-            .slice(0, Math.max(limit, 8));
-        const embeddingRank = await rankRagResultsWithEmbeddings(normalizedQuery, allResults).catch(error => {
-            warnings.push(`nvidia_embedding_ranking_failed:${String(error?.status || error?.message || 'unknown')}`);
-            return { available: false, ranked: allResults, model: '' };
-        });
+    // Stage 2: Single Parallel Search Round (Fast Path)
+    const phase1Queries = phases[0] || [normalizedQuery];
+    const searchStart = performance.now();
+
+    const [exaResults, phaseResults] = await Promise.all([
+        searchExa(normalizedQuery, {
+            limit,
+            plannedQueries: phase1Queries
+        }).then(r => {
+            timing.exaMs = Number((performance.now() - searchStart).toFixed(1));
+            return r;
+        }).catch(error => {
+            warnings.push(`exa_phase_1_failed:${String(error?.code || error?.message || 'unknown')}`);
+            return [];
+        }),
+        searchPublicSources(normalizedQuery, {
+            limit,
+            plannedQueries: phase1Queries,
+            skipStructuredRoles: true,
+            skipAutoDeepCrawl: true
+        }).then(r => {
+            timing.publicSourcesMs = Number((performance.now() - searchStart).toFixed(1));
+            return r;
+        }).catch(error => {
+            warnings.push(`rag_phase_1_failed:${String(error?.code || error?.message || 'unknown')}`);
+            return [];
+        })
+    ]);
+
+    for (const item of [...exaResults, ...phaseResults]) {
+        const key = normalizeResultKey(item);
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        allResults.push(item);
+    }
+
+    allResults = rankSources(normalizedQuery, dedupeSearchResults(allResults)
+        .filter(item => isValidCitationSource(item, normalizedQuery)))
+        .slice(0, Math.max(limit, 8));
+
+    if (process.env.NVIDIA_API_KEY && allResults.length > 0) {
+        const embStart = performance.now();
+        const embeddingRank = await rankRagResultsWithEmbeddings(normalizedQuery, allResults).catch(() => ({ available: false, ranked: allResults, model: '' }));
         if (embeddingRank.available) {
             embeddingUsed = true;
             embeddingModel = embeddingRank.model || embeddingModel;
             allResults = embeddingRank.ranked.slice(0, Math.max(limit, 8));
         }
-        const rerankResult = await rerankRagResults(normalizedQuery, allResults).catch(error => {
-            warnings.push(`nvidia_rerank_failed:${String(error?.status || error?.message || 'unknown')}`);
-            return { available: false, ranked: allResults, model: '' };
-        });
+        timing.embeddingsMs = Number((performance.now() - embStart).toFixed(1));
+
+        const rerankStart = performance.now();
+        const rerankResult = await rerankRagResults(normalizedQuery, allResults).catch(() => ({ available: false, ranked: allResults, model: '' }));
         if (rerankResult.available) {
             rerankUsed = true;
             rerankModel = rerankResult.model || rerankModel;
             allResults = rerankResult.ranked.slice(0, Math.max(limit, 8));
         }
-        finalGate = evaluateWebRagEvidence(normalizedQuery, allResults);
-        finalPhase = i + 1;
-        if (finalGate.pass) {
-            finalAnswer = await buildGroundedRagAnswer(normalizedQuery, allResults, finalGate)
-                .catch(error => {
-                    warnings.push(`rag_answer_failed:${String(error?.code || error?.message || 'unknown')}`);
-                    return null;
-                });
-            if (finalAnswer?.verified && finalAnswer.answer) break;
+        timing.rerankingMs = Number((performance.now() - rerankStart).toFixed(1));
+    }
+
+    finalGate = evaluateWebRagEvidence(normalizedQuery, allResults);
+    finalPhase = 1;
+
+    // Stage 3: Exact Claim Deterministic Fast Path (< 1ms)
+    if (finalGate.pass) {
+        const directAnswer = extractDeterministicLiveFactAnswer(normalizedQuery, allResults);
+        if (directAnswer?.verified && directAnswer.answer) {
+            finalAnswer = directAnswer;
         }
     }
 
+    // Stage 4: Fast Grounded LLM Synthesis (if deterministic text match was not immediate)
+    if (!finalAnswer?.verified && finalGate.pass) {
+        const llmStart = performance.now();
+        finalAnswer = await buildGroundedRagAnswer(normalizedQuery, allResults, finalGate, { skipDeepCrawl: true })
+            .catch(error => {
+                warnings.push(`rag_answer_failed:${String(error?.code || error?.message || 'unknown')}`);
+                return null;
+            });
+        timing.finalLlmMs = Number((performance.now() - llmStart).toFixed(1));
+    }
+
+    // Stage 5: Deep Fallback (Only executed if Phase 1 failed to verify)
+    if (!finalAnswer?.verified && phases.length > 1) {
+        finalPhase = 2;
+        const fallbackQueries = phases[1] || [];
+
+        // Targeted second search + deep crawl
+        const crawlStart = performance.now();
+        await enrichSearchResultsWithDeepCrawl(allResults, 2).catch(() => {});
+        timing.deepCrawlMs = Number((performance.now() - crawlStart).toFixed(1));
+
+        if (fallbackQueries.length) {
+            const extraPublic = await searchPublicSources(normalizedQuery, {
+                limit,
+                plannedQueries: fallbackQueries,
+                skipStructuredRoles: true,
+                skipAutoDeepCrawl: true
+            }).catch(() => []);
+            for (const item of extraPublic) {
+                const key = normalizeResultKey(item);
+                if (!key || seen.has(key)) continue;
+                seen.add(key);
+                allResults.push(item);
+            }
+            allResults = rankSources(normalizedQuery, dedupeSearchResults(allResults)
+                .filter(item => isValidCitationSource(item, normalizedQuery)))
+                .slice(0, Math.max(limit, 8));
+        }
+
+        // If NVIDIA key is configured or during fallback with ambiguous results, run embeddings and rerank
+        if (process.env.NVIDIA_API_KEY && allResults.length > 0) {
+            const embStart = performance.now();
+            const embeddingRank = await rankRagResultsWithEmbeddings(normalizedQuery, allResults).catch(() => ({ available: false, ranked: allResults, model: '' }));
+            if (embeddingRank.available) {
+                embeddingUsed = true;
+                embeddingModel = embeddingRank.model || embeddingModel;
+                allResults = embeddingRank.ranked.slice(0, Math.max(limit, 8));
+            }
+            timing.embeddingsMs = Number((performance.now() - embStart).toFixed(1));
+
+            const rerankStart = performance.now();
+            const rerankResult = await rerankRagResults(normalizedQuery, allResults).catch(() => ({ available: false, ranked: allResults, model: '' }));
+            if (rerankResult.available) {
+                rerankUsed = true;
+                rerankModel = rerankResult.model || rerankModel;
+                allResults = rerankResult.ranked.slice(0, Math.max(limit, 8));
+            }
+            timing.rerankingMs = Number((performance.now() - rerankStart).toFixed(1));
+        }
+
+        finalGate = evaluateWebRagEvidence(normalizedQuery, allResults);
+        if (finalGate.pass) {
+            const llmStart = performance.now();
+            finalAnswer = await buildGroundedRagAnswer(normalizedQuery, allResults, finalGate, { skipDeepCrawl: false })
+                .catch(() => null);
+            timing.finalLlmMs = Number((timing.finalLlmMs + (performance.now() - llmStart)).toFixed(1));
+        }
+    }
+
+    timing.totalLatencyMs = Number((performance.now() - totalStart).toFixed(1));
+
     const results = allResults.slice(0, limit);
     const gate = finalGate || evaluateWebRagEvidence(normalizedQuery, results);
-    const roleIntent = parseGovernmentRoleQuery(normalizedQuery);
     if (!finalAnswer?.verified || !finalAnswer.answer) {
         const unverifiedText = roleIntent
             ? `I couldn't verify the current ${roleIntent.role} from reliable live sources.`
@@ -1078,6 +1181,7 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
             rerankEnhanced: rerankUsed,
             rerankModel: rerankModel || undefined,
             ragPhaseCount: finalPhase,
+            timing,
             warnings: Array.from(new Set([...warnings, gate.reason].filter(Boolean)))
         };
     }
@@ -1110,6 +1214,7 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
         rerankEnhanced: rerankUsed,
         rerankModel: rerankModel || undefined,
         ragPhaseCount: finalPhase,
+        timing,
         warnings: Array.from(new Set(warnings.filter(Boolean)))
     };
 }
@@ -2413,7 +2518,7 @@ function extractDeterministicLiveFactAnswer(query, evidence = []) {
     return null;
 }
 
-async function buildGroundedRagAnswer(query, results, gate) {
+async function buildGroundedRagAnswer(query, results, gate, options = {}) {
     const evidence = (gate?.evidence || results || []).slice(0, 6);
     if (!evidence.length) return null;
     const isCurrent = isCurrentStateQuery(query);
@@ -2434,7 +2539,9 @@ async function buildGroundedRagAnswer(query, results, gate) {
         : evidence;
 
     if (getGeminiApiKey() || process.env.GROQ_API_KEY) {
-        await enrichSearchResultsWithDeepCrawl(orderedEvidence, 3).catch(() => {});
+        if (!options?.skipDeepCrawl) {
+            await enrichSearchResultsWithDeepCrawl(orderedEvidence, 2).catch(() => {});
+        }
         const compact = orderedEvidence.map((item, index) => ({
             index,
             title: item.title,
