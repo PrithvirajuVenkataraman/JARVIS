@@ -2449,7 +2449,7 @@ async function callHandler(handler, req) {
         statusCode: 200,
         body: null,
         headers: {},
-        setHeader(name, value) {
+        setHeader(name, value) { 
             this.headers[name] = value;
             return this;
         },
