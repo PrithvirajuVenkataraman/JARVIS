@@ -2844,13 +2844,16 @@ export function isValidCitationSource(source, query = '') {
     if (/archive\.(today|ph|is)|webcache/i.test(domain)) return false;
 
     if (query) {
-        const isLeadership = /\b(?:who\s+is\s+the\s+)?(?:cm|chief minister|prime minister|pm|president|governor|mayor|ceo|leader|head of state|head of government)\b/i.test(query);
+        const isLeadership = /\b(?:who\s+is\s+the\s+)?(?:cm|chief minister|prime minister|pm|president|governor|mayor|ceo|leader|head of state|head of government|captain|skipper|coach|manager)\b/i.test(query);
         const isExplicitElection = /\b(?:election|polls?|voting)\b/i.test(query);
-        if (isLeadership && !isExplicitElection) {
-            if (/\b(?:202[6-9]|upcoming|next)\s+(?:assembly\s+)?(?:election|legislative assembly election|opinion poll|exit poll|candidates?\s+list)\b/i.test(fullContent)) {
+        if (isLeadership) {
+            if (!isExplicitElection && /\b(?:202[6-9]|upcoming|next)\s+(?:assembly\s+)?(?:election|legislative assembly election|opinion poll|exit poll|candidates?\s+list)\b/i.test(fullContent)) {
                 return false;
             }
             if (/\b(?:all set to swear in|will swear in|predicted to win|landslide victory in 202[6-9]|sworn in today at the jawaharlal|c\.\s*joseph vijay.*chief minister|tvk.*won the 2026)\b/i.test(fullContent)) {
+                return false;
+            }
+            if (/\b(?:makes bold claim|bold claim|will captain|could captain|predicted to captain|maybe|rumou?r|opinion|suggests|urges|WATCH|net practice)\b/i.test(fullContent)) {
                 return false;
             }
         }
