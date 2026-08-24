@@ -1840,10 +1840,30 @@ function buildSearchSummary(results, metadata = {}) {
 
 function filterSearchResultsForAnswerQuery(query, results) {
     const list = Array.isArray(results) ? results : [];
+    const isLeadershipQuery = /\b(who\s+is\s+the\s+)?(cm|chief minister|prime minister|pm|president|governor|mayor|ceo|leader|head of state|head of government)\b/i.test(query);
+    const isExplicitElectionQuery = /\b(election|polls?|candidates?|voting)\b/i.test(query);
+
+    let candidates = list;
+    if (isLeadershipQuery && !isExplicitElectionQuery) {
+        // Exclude future/speculative election predictions or party campaign promotional spam from current office holder queries
+        candidates = list.filter(item => {
+            const title = String(item?.title || '').toLowerCase();
+            const desc = String(item?.description || '').toLowerCase();
+            if (/\b(?:202[6-9]|upcoming|next)\s+(?:assembly\s+)?(?:election|legislative assembly election|opinion poll|exit poll|candidates?\s+list)\b/i.test(title)) {
+                return false;
+            }
+            if (/\b(?:all set to swear in|will swear in|predicted to win|landslide victory in 202[6-9])\b/i.test(desc)) {
+                return false;
+            }
+            return true;
+        });
+        if (!candidates.length) candidates = list;
+    }
+
     const discovery = parseDiscoveryFactQuery(query);
-    if (!discovery) return list;
-    const filtered = list.filter(item => isDiscoveryAnswerSource(discovery, item));
-    return filtered.length ? filtered : list.filter(item => isValidCitationSource(item, query));
+    if (!discovery) return candidates;
+    const filtered = candidates.filter(item => isDiscoveryAnswerSource(discovery, item));
+    return filtered.length ? filtered : candidates.filter(item => isValidCitationSource(item, query));
 }
 
 function buildSourceDerivedAnswer(results, metadata = {}) {
@@ -2324,15 +2344,15 @@ async function buildGroundedRagAnswer(query, results, gate) {
         }));
         const todayStr = new Date().toISOString().slice(0, 10);
         const prompt = `Return strict JSON only.
-Task: Answer the user's question using ONLY the retrieved web evidence below.
+Task: Answer the user's question directly and factually using ONLY the retrieved web evidence below.
 Current Date: ${todayStr} (Year 2026).
 
-STRICT TEMPORAL VALIDITY & DIRECT-NAME GROUNDING RULES:
-1. FIRST SENTENCE MUST DIRECTLY STATE THE CURRENT LEADER'S SPECIFIC NAME AND OFFICE as reported in the active/current evidence (e.g., "The current Chief Minister of Tamil Nadu is...").
-2. FORBIDDEN: DO NOT output generic civics lessons or definitions explaining what the office of CM/PM means. State the specific person's name immediately.
-3. FOR CURRENT QUERIES: Base the active leader strictly on 'current' evidence (where end date is absent or in the future). DO NOT declare historical office holders with past end dates as current leaders.
-4. Historical evidence with past end dates represents predecessors: refer to them only in past tense (e.g., 'succeeding former Chief Minister ...').
-5. If the provided evidence does not contain the answer or is ambiguous, set "verified": false. Do NOT guess from pre-training memory.
+STRICT ANTI-HEDGING & DIRECT-NAME GROUNDING RULES:
+1. FIRST SENTENCE MUST DIRECTLY STATE THE PERSON'S SPECIFIC NAME AND OFFICE (e.g., "The current Chief Minister of Tamil Nadu is M. K. Stalin.").
+2. FORBIDDEN: DO NOT write meta-commentary about the search process or snippets (NEVER say "Based on the provided information...", "The verified web content states...", "However, the content does not explicitly name...").
+3. FORBIDDEN: DO NOT output generic civics lessons or definitions explaining what the office of CM/PM means.
+4. FOR CURRENT QUERIES: Base the active leader strictly on 'current' evidence. DO NOT declare future speculative election winners or past office holders as current leaders.
+5. If the provided evidence does not contain the specific answer or is ambiguous, set "verified": false, "confidence": 0.0, "answer": "". Do NOT guess or write an explanatory disclaimer.
 6. Return evidenceIndexes citing which evidence blocks you used.
 
 User question: ${JSON.stringify(query)}
@@ -2364,6 +2384,14 @@ function sanitizeRagAnswerText(value) {
     if (!clean) return '';
     if (/\b(check|consult|look up)\b.{0,40}\b(latest|official|source|news|website)\b/i.test(clean)) return '';
     if (/\b(i am not sure|not certain|cannot verify|can't verify|unable to verify)\b/i.test(clean)) return '';
+    if (/^(?:based on the (?:provided|retrieved) (?:information|content|sources|evidence)|the verified web content states|according to the (?:provided|retrieved) (?:sources|content|information))\b/i.test(clean)) {
+        if (/\b(?:does not|do not|cannot|fails to)\s+(?:explicitly\s+)?(?:name|state|mention|identify)\b/i.test(clean)) {
+            return '';
+        }
+    }
+    if (/\bhowever,?\s+(?:the\s+)?(?:content|evidence|sources|information)\s+(?:do(?:es)?\s+not|cannot|fails\s+to)\s+(?:explicitly\s+)?(?:name|state|mention|identify)\b/i.test(clean)) {
+        return '';
+    }
     return clean.endsWith('.') ? clean : `${clean}.`;
 }
 
