@@ -732,18 +732,26 @@ export async function searchGovernmentRole(query, options = {}) {
     const intent = parseGovernmentRoleQuery(query);
     if (!intent) return [];
     const limit = clampInt(options.limit, 3, 1, 6);
-    const jurisdiction = await resolveWikidataEntity(intent.jurisdiction);
+    const jurisdiction = await resolveWikidataEntity(intent.jurisdiction).catch(() => null);
     if (!jurisdiction?.id) return [];
     const sparql = buildGovernmentRoleSparql(intent, jurisdiction.id, limit);
-    const response = await fetchWithTimeout(`${WIKIDATA_SPARQL_URL}?query=${encodeURIComponent(sparql)}&format=json`, {
-        headers: {
-            Accept: 'application/sparql-results+json, application/json',
-            'User-Agent': 'JARVISAssistant/1.0 public-source-search'
+    try {
+        const response = await fetchWithTimeout(`${WIKIDATA_SPARQL_URL}?query=${encodeURIComponent(sparql)}&format=json`, {
+            headers: {
+                Accept: 'application/sparql-results+json, application/json',
+                'User-Agent': 'JARVISAssistant/1.0 public-source-search'
+            }
+        }, 1500);
+        if (response.ok) {
+            const data = await response.json();
+            const bindings = normalizeGovernmentRoleBindings(data, intent, jurisdiction, query).slice(0, limit);
+            if (bindings.length) return bindings;
         }
-    }, PUBLIC_SOURCE_TIMEOUT_MS);
-    if (!response.ok) return [];
-    const data = await response.json();
-    return normalizeGovernmentRoleBindings(data, intent, jurisdiction, query).slice(0, limit);
+    } catch (_) {}
+
+    const wikiQuery = `List of ${intent.role}s of ${intent.jurisdiction}`;
+    const wikiResults = await searchWikipedia(wikiQuery, { limit: 2 }).catch(() => []);
+    return wikiResults;
 }
 
 export async function resolveWikidataEntity(label) {
@@ -3020,6 +3028,9 @@ export function isValidCitationSource(source, query = '') {
                 return false;
             }
             if (/\b(?:all set to swear in|will swear in|predicted to win|landslide victory in 202[6-9]|sworn in today at the jawaharlal|c\.\s*joseph vijay.*chief minister|tvk.*won the 2026)\b/i.test(fullContent)) {
+                return false;
+            }
+            if (/\b(?:stakes?\s+claim|claims?\s+to\s+form|to\s+form\s+(?:the\s+)?gov(?:t|ernment)|eyes\s+(?:the\s+)?(?:cm|pm|captain)|future\s+(?:cm|pm)|vows\s+to\s+become|promises\s+to\s+be|if\s+elected|manifesto|election\s+campaign|political\s+rally|party\s+president\s+vijay|tvk\s+chief|why\s+tamil\s+nadu\s+cm)\b/i.test(fullContent)) {
                 return false;
             }
             if (/\b(?:makes bold claim|bold claim|will captain|could captain|predicted to captain|maybe|rumou?r|opinion|suggests|urges|WATCH|net practice)\b/i.test(fullContent)) {
