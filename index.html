@@ -8960,7 +8960,7 @@ let showRoutingDebugBadge = false;
             
             if (thoughtText || (thoughtSteps.length > 0 && !meta?.systemGreeting)) {
                 const isStopped = meta?.stopped === true;
-                const isFinished = isStopped || !meta?.streaming || !!cleanAnswer;
+                const isFinished = isStopped || !meta?.streaming || Boolean(cleanAnswer && cleanAnswer.length > 0);
                 const elapsed = meta?.latency 
                     ? (meta.latency / 1000).toFixed(1) 
                     : (row.__thinkingStartedAt ? ((performance.now() - row.__thinkingStartedAt) / 1000).toFixed(1) : '1.8');
