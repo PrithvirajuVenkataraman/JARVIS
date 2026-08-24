@@ -439,9 +439,8 @@ export async function searchPublicSources(query, options = {}) {
     const liveWeb = (Array.isArray(liveWebSettled) ? liveWebSettled : [])
         .flatMap(r => r.status === 'fulfilled' ? r.value : [])
         .filter(item => !isPolitical || (!String(item?.url || '').includes('wikipedia.org') && !String(item?.url || '').includes('wikidata.org')));
-    const hasLiveSources = liveNews.length > 0 || gdelt.length > 0 || liveWeb.length > 0;
-    const wiki = (isPolitical && hasLiveSources) ? [] : (Array.isArray(wikiSettled) ? wikiSettled : []).flatMap(r => r.status === 'fulfilled' ? r.value : []).slice(0, 2);
-    const wikidata = (isPolitical && hasLiveSources) ? [] : (Array.isArray(wikidataSettled) ? wikidataSettled : []).flatMap(r => r.status === 'fulfilled' ? r.value : []).slice(0, 1);
+    const wiki = (Array.isArray(wikiSettled) ? wikiSettled : []).flatMap(r => r.status === 'fulfilled' ? r.value : []).slice(0, 3);
+    const wikidata = (Array.isArray(wikidataSettled) ? wikidataSettled : []).flatMap(r => r.status === 'fulfilled' ? r.value : []).slice(0, 2);
     const reddit = (Array.isArray(redditSettled) ? redditSettled : []).flatMap(r => r.status === 'fulfilled' ? r.value : []).slice(0, 1);
 
     const discovered = [...liveNews, ...gdelt, ...liveWeb, ...wiki, ...wikidata, ...reddit];
@@ -454,12 +453,12 @@ export async function searchPublicSources(query, options = {}) {
     const referenceLookups = isPolitical ? [] : buildReferenceLookupResults(normalizedQuery, official.length);
     const combined = [
         ...governmentRoleResults,
-        ...liveNews,
-        ...gdelt,
-        ...liveWeb,
-        ...official,
         ...wiki,
         ...wikidata,
+        ...liveNews,
+        ...gdelt,
+        ...official,
+        ...liveWeb,
         ...reddit,
         ...referenceLookups
     ].filter(Boolean);
@@ -2272,8 +2271,8 @@ export function hasObviousRagConflict(evidence = [], query = '') {
 function extractDeterministicLiveFactAnswer(query, evidence = []) {
     if (!Array.isArray(evidence) || !evidence.length) return null;
     const isCurrent = isCurrentStateQuery(query);
-    const isRoleQuery = /\b(cm|chief minister|president|prime minister|pm|governor|mayor|leader|head of state|head of government|ceo)\b/i.test(query);
-    const isDefinitionRegex = /\b(is the head of (?:the )?government|is the leader of the (?:state )?cabinet|is the head of the executive|is the highest-ranking executive|is an elected or appointed official|refers to the office|is a constitutional position)\b/i;
+    const isRoleQuery = /\b(cm|chief minister|president|prime minister|pm|governor|mayor|leader|head of state|head of government|ceo|captain|skipper|coach)\b/i.test(query);
+    const isDefinitionRegex = /\b(is the head of (?:the )?government|is the leader of the (?:state )?cabinet|is the head of the executive|is the highest-ranking executive|is an elected or appointed official|refers to the office|is a constitutional position|debut franchises|Twenty20 cricket team based in|cricket franchise)\b/i;
 
     const sorted = [...evidence].sort((a, b) => {
         if (isCurrent) {
@@ -2292,14 +2291,53 @@ function extractDeterministicLiveFactAnswer(query, evidence = []) {
         if (isCurrent && isRoleQuery && validateClaimTemporalStatus(item) === 'historical') {
             continue; // Do not let historical claim become direct answer for a current-state query
         }
+
+        if (item.evidenceLevel === 'structured_claim' && item.title) {
+            return {
+                verified: true,
+                confidence: 0.95,
+                answer: item.description || item.title,
+                evidenceIndexes: [i],
+                modelAssisted: false,
+                reason: `Extracted from structured reference data: ${item.sourceLabel || item.domain}`
+            };
+        }
+
         const text = `${item.title}. ${item.description || ''}`.trim();
         if (text.length > 15) {
-            if (isRoleQuery && isDefinitionRegex.test(item.description || '')) {
-                continue; // Skip generic dictionary definitions of the office
+            if (isRoleQuery && isDefinitionRegex.test(text)) {
+                continue; // Skip generic dictionary definitions of the office or franchise
             }
-            const chosenAnswer = item.description && item.description.length > 25 && !isDefinitionRegex.test(item.description)
+            if (/\b(?:makes bold claim|bold claim|predicts?|suggests?|speculates?|opinion|rumor|rumour|will captain|could captain|urges?|dances after|net practice|WATCH)\b/i.test(text)) {
+                continue; // Skip clickbait and opinion speculation
+            }
+
+            if (isRoleQuery) {
+                const holderMatch = text.match(/\b(?:captained by|is (?:the )?(?:current )?(?:captain|chief minister|prime minister|president|ceo|governor|leader|coach)(?:\s+of[^.]+)?\s+is|appointed as (?:the )?(?:captain|chief minister|prime minister|ceo))\s+([A-Z][a-zA-Z.'-]+(?:\s+[A-Z][a-zA-Z.'-]+)+)/i);
+                if (holderMatch) {
+                    const sentences = text.split(/[.!?]/).map(s => s.trim()).filter(Boolean);
+                    const matchingSentence = sentences.find(s => s.toLowerCase().includes(holderMatch[0].toLowerCase())) || text;
+                    return {
+                        verified: true,
+                        confidence: 0.92,
+                        answer: matchingSentence.endsWith('.') ? matchingSentence : `${matchingSentence}.`,
+                        evidenceIndexes: [i],
+                        modelAssisted: false,
+                        reason: `Extracted directly from authoritative source: ${item.domain || item.sourceLabel}`
+                    };
+                }
+                continue;
+            }
+
+            let chosenAnswer = item.description && item.description.length > 25 && !isDefinitionRegex.test(item.description)
                 ? item.description
                 : item.title;
+            if (chosenAnswer.includes(' - ')) {
+                const parts = chosenAnswer.split(' - ');
+                if (parts.length > 1 && parts[parts.length - 1].length < 30) {
+                    chosenAnswer = parts.slice(0, -1).join(' - ').trim();
+                }
+            }
             return {
                 verified: true,
                 confidence: 0.88,
@@ -2456,7 +2494,7 @@ Rules:
 User query: ${JSON.stringify(query)}
 Results JSON: ${JSON.stringify(compact)}
 JSON shape: {"ranked":[{"index":0,"relevance":"relevant","description":"...","reason":"..."}]}`;
-    const json = await callGeminiJson(prompt, { maxOutputTokens: 900, temperature: 0.1 });
+    const json = await callGeminiJson(prompt, { maxOutputTokens: 900, temperature: 0.1, throwOnError: true });
     const ranked = Array.isArray(json?.ranked) ? json.ranked : [];
     if (!ranked.length) return { results, enhanced: false };
     const byIndex = new Map(results.map((item, index) => [index, item]));
@@ -2481,31 +2519,36 @@ JSON shape: {"ranked":[{"index":0,"relevance":"relevant","description":"...","re
 async function callGeminiJson(prompt, options = {}) {
     const apiKey = getGeminiApiKey();
     if (apiKey) {
-        const model = String(process.env.GEMINI_SEARCH_MODEL || process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite').trim();
-        const response = await fetchWithTimeout(`${GEMINI_GENERATE_URL}/${model}:generateContent?key=${apiKey}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                contents: [{ parts: [{ text: prompt }] }],
-                generationConfig: {
-                    temperature: Number.isFinite(Number(options.temperature)) ? Number(options.temperature) : 0.1,
-                    maxOutputTokens: clampInt(options.maxOutputTokens, 700, 100, 1600)
-                }
-            })
-        }, GEMINI_SEARCH_TIMEOUT_MS);
-        if (!response.ok) {
-            const error = createSearchError({
-                code: 'gemini_search_enhancer_failed',
-                httpStatus: 200,
-                upstreamStatus: response.status,
-                publicMessage: 'Gemini search enhancement failed.',
-                retryable: true
-            });
-            throw error;
+        try {
+            const model = String(process.env.GEMINI_SEARCH_MODEL || process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite').trim();
+            const response = await fetchWithTimeout(`${GEMINI_GENERATE_URL}/${model}:generateContent?key=${apiKey}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contents: [{ parts: [{ text: prompt }] }],
+                    generationConfig: {
+                        temperature: Number.isFinite(Number(options.temperature)) ? Number(options.temperature) : 0.1,
+                        maxOutputTokens: clampInt(options.maxOutputTokens, 700, 100, 1600)
+                    }
+                })
+            }, GEMINI_SEARCH_TIMEOUT_MS);
+            if (response.ok) {
+                const data = await response.json();
+                const text = String(data?.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
+                const parsed = extractJsonObject(text);
+                if (parsed) return parsed;
+            } else if (options.throwOnError) {
+                throw createSearchError({
+                    code: 'gemini_search_enhancer_failed',
+                    httpStatus: 200,
+                    upstreamStatus: response.status,
+                    publicMessage: 'Gemini search enhancement failed.',
+                    retryable: true
+                });
+            }
+        } catch (err) {
+            if (options.throwOnError) throw err;
         }
-        const data = await response.json();
-        const text = String(data?.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
-        return extractJsonObject(text);
     }
 
     const groqKey = String(process.env.GROQ_API_KEY || '').trim();
@@ -2846,6 +2889,7 @@ function isStrongGenericQuerySourceMatch(query, haystack) {
     const subject = extractSearchSubject(query) || query;
     const text = String(haystack || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
     if (!text) return false;
+
     const compactSubject = String(subject || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
     const subjectTerms = tokenize(subject)
         .filter(term => !COMMON_QUERY_TERMS.has(term))
@@ -2956,7 +3000,6 @@ function buildSearchQueryRewrite(query) {
 function buildDeterministicSearchQueries(query) {
     const normalized = normalizeSearchQuery(query);
     if (!normalized) return [];
-    if (!isCurrentTopicSearchQuery(normalized)) return [];
     const subject = extractSearchSubject(normalized);
     if (!subject) return [];
     const intent = extractSearchIntentTerm(normalized);
@@ -3172,5 +3215,6 @@ export const __test = {
     enhanceResultsWithGemini,
     isTrustedLiveSource,
     routeMessage,
-    runCachedLatestSearch
+    runCachedLatestSearch,
+    callGeminiJson
 };
