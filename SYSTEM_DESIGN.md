@@ -22,6 +22,7 @@ graph TD
         ContextCompactor["Context Window Token Compactor"]
         IntentRouter["Autonomous Model Router & Fallback Cascade"]
         CircuitBreaker["API Circuit Breaker State Machine"]
+        DeepCrawler["Parallel Webpage Deep Crawler (2.5s Budget)"]
     end
 
     subgraph Models["Model & Provider Pool"]
@@ -37,6 +38,7 @@ graph TD
     SecurityShield --> ContextCompactor
     ContextCompactor --> IntentRouter
     IntentRouter --> CircuitBreaker
+    IntentRouter --> DeepCrawler
     CircuitBreaker --> GroqPool
     CircuitBreaker --> GeminiPool
     IntentRouter --> DeterministicFacts
@@ -51,6 +53,7 @@ JARVIS uses an **autonomous, single-pass routing engine** that eliminates manual
 | Request Type | Primary Engine | Model Hierarchy / Fallback | Rationale |
 | :--- | :--- | :--- | :--- |
 | **Standard Text Chat / Coding / Reasoning** | **Groq LPU** | `GPT OSS 120B` &rarr; `GPT OSS 20B` &rarr; `Llama 3.3 70B` &rarr; `Gemini 2.5 Flash` | Ultra-fast token generation and deep reasoning on Groq LPUs. |
+| **Live Political Leaders & Real-Time Facts** | **Deep Web RAG** | `DuckDuckGo Web` + `Google News RSS` &rarr; `Parallel Scraper` &rarr; `Groq / Gemini RAG` | Bypasses obsolete training weights, excludes Wikipedia overview pages, and outputs current leader names in sentence 1. |
 | **Media / Image Uploads / Live Photos** | **Google Gemini** | `Gemini 2.5 Flash` &rarr; `Gemini 2.0 Flash` &rarr; `Groq Vision (Llama 3.2)` &rarr; `Gemini 1.5 Flash` | Native multimodal vision processing with zero 400/404 errors. |
 | **Follow-Up Questions on Images** | **Groq LPU** | `GPT OSS 120B` (with visual context injected) | Routes back to GPT OSS 120B while preserving visual analysis in context. |
 | **Instant Real-Time Facts / Identity** | **Deterministic Layer** | Pre-computed static knowledge base | Sub-10ms instant response without consuming API tokens. |
@@ -88,7 +91,37 @@ stateDiagram-v2
 
 ---
 
-## 5. Context Window Token Compactor & Visual Memory
+## 5. Parallel Fast Deep Web Scraper & Zero-Parametric Anti-Hallucination
+
+For real-time events, political appointments, election outcomes, and leadership queries:
+
+```mermaid
+flowchart TD
+    Query["User Query: 'Who is the CM of Tamil Nadu'"] --> Classify{"Intent Classifier"}
+    Classify -->|Leadership / Real-Time Fact| LiveRequired["Route: live_required"]
+    LiveRequired --> SearchRace["Parallel Fast-Race: DuckDuckGo + Google News RSS"]
+    SearchRace --> FilterWiki["Wikipedia Filter (Exclude generic civics overviews)"]
+    FilterWiki --> DeepCrawl["Parallel Deep Body Scraper (2,500ms Cap)"]
+    DeepCrawl --> ExtractBody["Extract Clean Paragraphs + Publication Timestamps"]
+    ExtractBody --> ZeroParametric["Strict Zero-Parametric Grounding Prompt"]
+    ZeroParametric --> Synthesis["LLM Synthesis: Direct Name in Sentence 1"]
+```
+
+### Key Engineering Guardrails:
+1. **Wikipedia & Wikidata Filtering**:
+   - Generic encyclopedia entries define offices (e.g. *"The Chief Minister is the head of government..."*) rather than naming the current active leader.
+   - The engine automatically filters out Wikipedia/Wikidata for leadership queries when live web news sources are present.
+2. **Parallel Deep Scraper (<2.5s Timeout Budget)**:
+   - Fetches the top 3 live article URLs concurrently with a strict 2.5-second timeout.
+   - Extracts up to 2,500 characters of readable body paragraphs, stripping scripts, navigation, headers, and ads.
+3. **Zero-Parametric Prompt Pinning**:
+   - Instructs the LLM to completely discard pre-training memory cutoffs (2023–2024).
+   - Enforces that the first sentence MUST state the current leader's specific name and office.
+   - Predecessors are strictly constrained to past tense (e.g. *succeeding former Chief Minister...*).
+
+---
+
+## 6. Context Window Token Compactor & Visual Memory
 
 For long conversations (50+ turns), JARVIS maintains full conversational coherence while preventing token limit exhaustion:
 
@@ -108,7 +141,7 @@ flowchart LR
 
 ---
 
-## 6. Converse Voice & Audio Subsystem
+## 7. Converse Voice & Audio Subsystem
 
 JARVIS includes a continuous, hands-free voice conversation engine:
 
@@ -126,41 +159,7 @@ JARVIS includes a continuous, hands-free voice conversation engine:
 
 ---
 
-## 7. Security Shielding & Quota Protection
-
-* **Strict Origin & Referer Verification (`api/_lib/security.js`):**
-  - Shields API endpoints (`/api/chat-groq`, `/api/vision`, `/api/stt`) from unauthorized external domains and web scrapers.
-  - Permits authorized domains (`jarvisjr.vercel.app`, Vercel previews, `localhost`).
-* **Prompt Injection Isolation:**
-  - Strict delimiter boundaries and user role separation.
-
----
-
-## 8. UX Enhancements & Offline Resilience
-
-* **3-State Smart Web Search Composer Toggle (Auto / ON / OFF):**
-  - Interactive pill button (`#web-search-toggle-btn`) and `Alt+W` shortcut in the composer bar.
-  - `Auto`: Model classifies intent dynamically.
-  - `🌐 ON`: Explicitly forces live web retrieval and citations.
-  - `🌐 OFF`: Strict offline knowledge reasoning.
-  - Ephemeral safety: Automatically resets back to `Auto` after message submission.
-* **Spotlight Command Palette (`Ctrl+K` / `⌘K`):**
-  - Instant keyboard launcher for searching sessions, starting new chats, toggling voice mode, and exporting data.
-* **In-Chat Code Execution Sandbox ("▶ Run"):**
-  - Sandboxed execution of JavaScript, HTML, and JSON directly beneath code blocks with live console logs.
-* **Artifact Canvas Side Panel (Split View):**
-  - Slide-over workspace for reviewing large code files, live previewing HTML/SVG components, and one-click file downloads.
-* **One-Click Chat Export:**
-  - Export active conversations to formatted Markdown (`.md`) or structured JSON (`.json`).
-* **Real-Time Sidebar Search:**
-  - Sub-millisecond search across historical chat titles and turns.
-* **Offline Resilience Watchdog (`index.html`):**
-  - Monitors `navigator.onLine` and displays an offline indicator during disconnections.
-  - Allows full viewing, searching, and exporting of saved chat sessions completely offline.
-
----
-
-## 9. Asynchronous IndexedDB Storage Engine
+## 8. Asynchronous IndexedDB Storage Engine
 
 To prevent browser `localStorage` 5MB quota exhaustion with multi-turn conversations and media:
 
@@ -174,7 +173,7 @@ To prevent browser `localStorage` 5MB quota exhaustion with multi-turn conversat
 
 ---
 
-## 10. Edge Semantic Caching & Predictive Pre-warming
+## 9. Edge Semantic Caching & Predictive Pre-warming
 
 To maximize throughput, minimize API quota burn, and eliminate latency on repeated queries:
 
@@ -184,36 +183,10 @@ To maximize throughput, minimize API quota burn, and eliminate latency on repeat
   - Automatic bypass for live temporal queries (`now`, `today`, `live`, `weather`, `price`) and media attachments.
 * **Predictive Connection Pre-warming (`index.html`):**
   - Debounced pre-flight ping (`HEAD /api/chat-groq`) when the user starts typing in the composer, pre-warming TCP/TLS handshakes to save 80–150ms on Time-to-First-Token (TTFT).
-* **Live Token Telemetry & Profiler (`index.html`, `styles.css`):**
-  - Computes real-time streaming velocity (Tokens/Sec) and TTFT duration.
-  - Displays sleek, discrete telemetry badges on message headers (e.g. `⚡ 132 tok/s · TTFT 120ms` or `⚡ Cached`).
 
 ---
 
-## 11. 5-Stage Production Hybrid RAG & Live Web Search Engine
-
-To ensure real-time web search and dynamic facts (political offices, leaders, elections, awards) work with live accuracy and zero stale hallucinations:
-
-* **Stage 1: Dynamic Temporal Query Rewriter & Date-Anchor Engine (`api/chat-groq.js`):**
-  - Dynamically injects current real-world calendar anchors (Year `2026`, `current`, `incumbent`, `official news`) into search query permutations to target active role holders rather than historical snapshots.
-* **Stage 2: Zero-Key Multi-Engine Parallel Fast-Race (`api/_lib/free-live/providers.js`, `api/search.js`):**
-  - Concurrently queries multiple free, open public search indexers in parallel:
-    - **DuckDuckGo HTML Parser:** Live web search index scraper extracting title, snippet, and clean destination URLs without API keys.
-    - **Wikipedia & Wikidata REST APIs:** Real-time encyclopedia and entity knowledge graphs.
-    - **GDELT Global News Document API:** Live breaking news, international headlines, and publisher feeds.
-  - Races all providers with a sub-2.5s timeout, deduplicating and ranking the top verified source cards.
-* **Stage 3: Deep Page Scraping & Body Extraction (`api/chat-groq.js`):**
-  - Concurrently fetches and extracts full readable paragraph text (up to 3,000 chars per page) from top 2-3 links.
-* **Stage 4: Reciprocal Rank Fusion (RRF) & Pre-Synthesis Recency Gate (`api/chat-groq.js`):**
-  - Ranks candidate documents using Reciprocal Rank Fusion with tenure boost for current incumbency terms (`sworn in`, `assumed office`, `elected in 2026`) and soft penalties for historical terms (`former`, `ex-`, `past`, `stepped down`).
-  - Injects current reference timestamp header into the grounded prompt.
-* **Stage 5: Grounded Synthesis with Superscript Citations & Favicon Carousel (`index.html`, `styles.css`):**
-  - Displays a sleek horizontal scrollable row of verified source cards at the top of the answer bubble showing high-resolution domain favicons, page titles, and source numbers.
-  - Formats citations into interactive clickable superscript pills (`.citation-badge`, `[1]`, `[2]`).
-
----
-
-## 12. Verification & Test Suite Matrix
+## 10. Verification & Test Suite Matrix
 
 JARVIS maintains **100% automated test coverage across 81 test suites**:
 
