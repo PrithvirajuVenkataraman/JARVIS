@@ -11591,7 +11591,7 @@ async function buildVerifiedSearchSummary(query, options = {}) {
         let summaryText = cleanLiveAnswerText(String(searchData?.answer || '').trim());
         const snippets = answerResults
             .slice(0, 6)
-            .map((r, i) => `${i + 1}. ${r.title}\nSnippet: ${r.description}\nURL: ${r.url}`)
+            .map((r, i) => `${i + 1}. ${r.title}\nSource: ${r.sourceLabel || r.domain || r.url}\nDate: ${r.date || 'Recent 2026'}\nContent: ${r.fullArticleContent || r.fullArticleText || r.description}\nURL: ${r.url}`)
             .join('\n\n');
 
         if (!summaryText) try {
@@ -11599,18 +11599,18 @@ async function buildVerifiedSearchSummary(query, options = {}) {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    message: `Answer the user's question using ONLY the snippets below.
+                    message: `Answer the user's question using ONLY the verified web content below.
 
 User question: "${userQuery}"
 
-Rules:
+STRICT GROUNDING & ANTI-HALLUCINATION RULES:
+- Discard all pre-training memory for current office holders, political appointments, and breaking news.
+- State the active current leader/status as reported in the content.
+- If a predecessor is mentioned, state them only in past tense (e.g. 'succeeding former Chief Minister ...'). Never state a predecessor is the active leader.
 - Give a direct answer first.
-- If the user asks for top/best/oldest/newest/largest or a numbered list, return a numbered list using only the snippets.
-- Keep it concise and practical.
-- Do not provide "how to search" instructions.
-- If exact figures are uncertain, say what is clearly supported.
+- If exact details are not in the content, say what is clearly supported without guessing.
 
-Snippets:
+Verified Web Evidence:
 ${snippets}`
                 })
             });
