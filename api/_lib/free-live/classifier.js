@@ -171,7 +171,7 @@ function hasDateWindowSignal(text) {
 }
 
 function tokenizeForIntent(text) {
-    return String(text || '').toLowerCase().match(/[a-z0-9]{2,}/g) || [];
+    return String(text || '').toLowerCase().match(/[a-z0-9]{2,}/g) || []; 
 }
 
 function isIntentStopword(token) {
