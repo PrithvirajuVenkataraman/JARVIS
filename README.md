@@ -8,6 +8,8 @@ Static frontend + Node/Vercel API routes. No frontend build step.
 
 - `.gitignore` - Ignores local dependencies and generated files.
 - `README.md` - Documents features, setup notes, environment variables, and this file map.
+- `models.md` - Technical specification of all AI models, provider hierarchies, Vision/Voice/RAG cascades, and token speeds.
+- `system_design.md` - System architecture specification, concurrency models, circuit breakers, and RAG pipelines.
 - `index.html` - Main browser UI and inline app logic for chat, Live Vision, voice, routing, history, and tools.
 - `package.json` - Project metadata, dependencies, Vercel settings, and npm scripts.
 - `science-format.js` - Deterministic formatting helpers for scientific notation, formulas, and units.
