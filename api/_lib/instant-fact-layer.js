@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file api/_lib/instant-fact-layer.js
  * @description Zero-Scraping Instant Fact Grounding Layer using Wikipedia REST API & DuckDuckGo Instant Answers.
  */
@@ -130,34 +130,36 @@ export async function resolveInstantFact(query, intentClassification = {}) {
     // Strategy 1: Targeted Entity Search for political leadership / offices
     if (entityTarget?.role && entityTarget?.jurisdiction) {
         const candidateTitles = [
+            `${entityTarget.role} of ${entityTarget.jurisdiction}`,
             `List of ${entityTarget.role.toLowerCase()}s of ${entityTarget.jurisdiction}`,
             `List of ${entityTarget.role}s of ${entityTarget.jurisdiction}`,
-            `${entityTarget.role} of ${entityTarget.jurisdiction}`,
             `Government of ${entityTarget.jurisdiction}`
         ];
 
         for (const title of candidateTitles) {
             const summary = await fetchWikipediaSummary(title);
             if (summary && summary.extract) {
+                const isGenericDef = /\b(?:is the head of (?:the )?government|is the leader of the (?:state )?cabinet|is the executive authority|is a constitutional position|in accordance with the constitution)\b/i.test(summary.extract);
                 facts.push({
                     title: summary.title,
                     summary: summary.extract,
                     url: summary.url,
                     source: 'Wikipedia'
                 });
-                break;
+                if (!isGenericDef) break;
             }
         }
     }
 
-    // Strategy 2: If no targeted entity summary found, search Wikipedia & DuckDuckGo in parallel
-    if (!facts.length) {
+    // Strategy 2: If no person-level fact found, search Wikipedia & DuckDuckGo in parallel
+    const hasSpecificPersonFact = facts.some(f => !/\b(?:is the head of (?:the )?government|is the leader of the (?:state )?cabinet|is a constitutional position)\b/i.test(f.summary));
+    if (!hasSpecificPersonFact) {
         const [wikiArticles, ddgAnswer] = await Promise.all([
             searchWikipediaArticles(rawQuery),
             fetchDuckDuckGoInstantAnswer(rawQuery)
         ]);
 
-        if (ddgAnswer && ddgAnswer.abstract) {
+        if (ddgAnswer && ddgAnswer.abstract && !/\b(?:202[6-9]|upcoming|next)\s+(?:assembly\s+)?(?:election|legislative assembly election)\b/i.test(ddgAnswer.abstract)) {
             facts.push({
                 title: ddgAnswer.heading,
                 summary: ddgAnswer.abstract,
@@ -166,22 +168,18 @@ export async function resolveInstantFact(query, intentClassification = {}) {
             });
         }
 
-        if (wikiArticles.length > 0) {
-            const topSummary = await fetchWikipediaSummary(wikiArticles[0].title);
-            if (topSummary && topSummary.extract) {
+        const filteredArticles = wikiArticles.filter(art => !/\b(?:202[6-9]|upcoming|next)\s+(?:assembly\s+)?(?:election|legislative assembly election|opinion poll|exit poll)\b/i.test(art.title));
+
+        for (const article of filteredArticles.slice(0, 2)) {
+            const articleSummary = await fetchWikipediaSummary(article.title);
+            if (articleSummary && articleSummary.extract && !/\b(?:202[6-9]|upcoming|next)\s+(?:assembly\s+)?(?:election|legislative assembly election)\b/i.test(articleSummary.extract)) {
                 facts.push({
-                    title: topSummary.title,
-                    summary: topSummary.extract,
-                    url: topSummary.url,
+                    title: articleSummary.title,
+                    summary: articleSummary.extract,
+                    url: articleSummary.url,
                     source: 'Wikipedia'
                 });
-            } else if (wikiArticles[0].snippet) {
-                facts.push({
-                    title: wikiArticles[0].title,
-                    summary: wikiArticles[0].snippet,
-                    url: `https://en.wikipedia.org/wiki/${encodeURIComponent(wikiArticles[0].title.replace(/\s+/g, '_'))}`,
-                    source: 'Wikipedia'
-                });
+                break;
             }
         }
     }
