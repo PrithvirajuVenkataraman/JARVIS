@@ -991,21 +991,23 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
 
     for (let i = 0; i < phases.length; i += 1) {
         const phaseQueries = phases[i];
-        const exaResults = await searchExa(normalizedQuery, {
-            limit,
-            plannedQueries: phaseQueries
-        }).catch(error => {
-            warnings.push(`exa_phase_${i + 1}_failed:${String(error?.code || error?.message || 'unknown')}`);
-            return [];
-        });
-        const phaseResults = await searchPublicSources(normalizedQuery, {
-            limit,
-            plannedQueries: phaseQueries,
-            skipStructuredRoles: true
-        }).catch(error => {
-            warnings.push(`rag_phase_${i + 1}_failed:${String(error?.code || error?.message || 'unknown')}`);
-            return [];
-        });
+        const [exaResults, phaseResults] = await Promise.all([
+            searchExa(normalizedQuery, {
+                limit,
+                plannedQueries: phaseQueries
+            }).catch(error => {
+                warnings.push(`exa_phase_${i + 1}_failed:${String(error?.code || error?.message || 'unknown')}`);
+                return [];
+            }),
+            searchPublicSources(normalizedQuery, {
+                limit,
+                plannedQueries: phaseQueries,
+                skipStructuredRoles: true
+            }).catch(error => {
+                warnings.push(`rag_phase_${i + 1}_failed:${String(error?.code || error?.message || 'unknown')}`);
+                return [];
+            })
+        ]);
         for (const item of [...exaResults, ...phaseResults]) {
             const key = normalizeResultKey(item);
             if (!key || seen.has(key)) continue;
