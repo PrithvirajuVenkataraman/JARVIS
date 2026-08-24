@@ -2965,7 +2965,7 @@ export const __test = {
     fetchWikidataOfficialUrls,
     isOfficialGovernmentUrl,
     extractOfficialCurrentRoleEvidence,
-    parseDiscoveryFactQuery,
+    parseDiscoveryFactQuery, 
     isDiscoveryAnswerSource,
     rankSources,
     searchPublicSources,
