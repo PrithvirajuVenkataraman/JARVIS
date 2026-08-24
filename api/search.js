@@ -473,6 +473,7 @@ export async function searchPublicSources(query, options = {}) {
         deduped.push(item);
         if (deduped.length >= Math.max(limit, 8)) break;
     }
+    await enrichSearchResultsWithDeepCrawl(deduped, 3).catch(() => {});
     return deduped;
 }
 
