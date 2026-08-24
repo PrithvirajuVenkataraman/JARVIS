@@ -35,7 +35,7 @@ const CATEGORY_PATTERNS = Object.freeze([
         category: 'government',
         route: 'live_required',
         reason: 'government_current_fact_requires_public_source',
-        pattern: /\b(government|govt|ministry|minister|president|prime minister|chief minister|governor|mayor|election|parliament|assembly|official announcement|public advisory)\b/i
+        pattern: /\b(government|govt|ministry|minister|ministers|president|prime minister|\bpm\b|chief minister|\bcm\b|governor|mayor|\bmla\b|\bmp\b|cabinet|tenure|election|elections|parliament|assembly|official announcement|public advisory)\b/i
     },
     {
         category: 'tourism_food_places',
