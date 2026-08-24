@@ -174,7 +174,7 @@ To prevent browser `localStorage` 5MB quota exhaustion with multi-turn conversat
 ---
 
 ## 9. Edge Semantic Caching & Predictive Pre-warming
-
+ 
 To maximize throughput, minimize API quota burn, and eliminate latency on repeated queries:
 
 * **Edge Semantic LRU Cache (`api/chat-groq.js`):**
