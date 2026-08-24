@@ -11603,12 +11603,12 @@ async function buildVerifiedSearchSummary(query, options = {}) {
 
 User question: "${userQuery}"
 
-STRICT GROUNDING & ANTI-HALLUCINATION RULES:
+STRICT DIRECT-NAME & ANTI-HALLUCINATION RULES:
+- First sentence MUST directly state the specific person's name and office as reported in the content (e.g. 'The current Chief Minister of Tamil Nadu is...').
+- FORBIDDEN: Do not output generic civics explanations or definitions describing what the office means (e.g. do not say 'The CM serves as the head of government...'). State the person's name immediately.
 - Discard all pre-training memory for current office holders, political appointments, and breaking news.
-- State the active current leader/status as reported in the content.
 - If a predecessor is mentioned, state them only in past tense (e.g. 'succeeding former Chief Minister ...'). Never state a predecessor is the active leader.
-- Give a direct answer first.
-- If exact details are not in the content, say what is clearly supported without guessing.
+- If exact details are not in the content, state what is clearly supported without guessing.
 
 Verified Web Evidence:
 ${snippets}`
