@@ -439,9 +439,9 @@ export async function searchPublicSources(query, options = {}) {
     const liveWeb = (Array.isArray(liveWebSettled) ? liveWebSettled : [])
         .flatMap(r => r.status === 'fulfilled' ? r.value : [])
         .filter(item => !isPolitical || (!String(item?.url || '').includes('wikipedia.org') && !String(item?.url || '').includes('wikidata.org')));
-    const hasLiveResults = liveNews.length > 0 || gdelt.length > 0 || liveWeb.length > 0;
-    const wiki = (isPolitical && hasLiveResults) ? [] : (Array.isArray(wikiSettled) ? wikiSettled : []).flatMap(r => r.status === 'fulfilled' ? r.value : []).slice(0, 2);
-    const wikidata = (isPolitical && hasLiveResults) ? [] : (Array.isArray(wikidataSettled) ? wikidataSettled : []).flatMap(r => r.status === 'fulfilled' ? r.value : []).slice(0, 1);
+    const hasLiveSources = liveNews.length > 0 || gdelt.length > 0 || liveWeb.length > 0;
+    const wiki = (isPolitical && hasLiveSources) ? [] : (Array.isArray(wikiSettled) ? wikiSettled : []).flatMap(r => r.status === 'fulfilled' ? r.value : []).slice(0, 2);
+    const wikidata = (isPolitical && hasLiveSources) ? [] : (Array.isArray(wikidataSettled) ? wikidataSettled : []).flatMap(r => r.status === 'fulfilled' ? r.value : []).slice(0, 1);
     const reddit = (Array.isArray(redditSettled) ? redditSettled : []).flatMap(r => r.status === 'fulfilled' ? r.value : []).slice(0, 1);
 
     const discovered = [...liveNews, ...gdelt, ...liveWeb, ...wiki, ...wikidata, ...reddit];
@@ -452,17 +452,16 @@ export async function searchPublicSources(query, options = {}) {
     const official = await Promise.all(officialCandidates
         .map((item, index) => normalizeOfficialSourceCandidate(item, normalizedQuery, index)));
     const referenceLookups = isPolitical ? [] : buildReferenceLookupResults(normalizedQuery, official.length);
-
     const combined = [
         ...governmentRoleResults,
         ...liveNews,
         ...gdelt,
         ...liveWeb,
         ...official,
-        ...referenceLookups,
         ...wiki,
         ...wikidata,
-        ...reddit
+        ...reddit,
+        ...referenceLookups
     ].filter(Boolean);
 
     const seenUrls = new Set();
@@ -675,8 +674,9 @@ export async function enrichSearchResultsWithDeepCrawl(results, limit = 3) {
     
     const candidates = results.slice(0, limit);
     const crawlPromises = candidates.map(item => {
-        if (!item?.url || String(item.url).includes('wikipedia.org')) return Promise.resolve(null);
-        return crawlArticleBody(item.url).catch(() => null);
+        const u = String(item?.url || '');
+        if (!u || !u.startsWith('http') || u.includes('wikipedia.org') || u.includes('wikidata.org') || u.includes('.example')) return Promise.resolve(null);
+        return crawlArticleBody(item.url, { timeoutMs: 2500 }).catch(() => null);
     });
 
     const settled = await Promise.allSettled(crawlPromises);
@@ -2212,10 +2212,10 @@ async function buildGroundedRagAnswer(query, results, gate) {
 Task: Answer the user's question using ONLY the retrieved web evidence below.
 Current Date: ${todayStr} (Year 2026).
 
-STRICT ANTI-HALLUCINATION & ZERO-PARAMETRIC GROUNDING RULES:
-1. DISCARD ALL PRE-TRAINING MEMORY regarding current office holders, politicians, elections, leaders, and real-time events. Your internal memory cutoff is completely obsolete for current facts.
-2. Rely 100% EXCLUSIVELY on the provided 'fullArticleContent' and 'snippet' content.
-3. If an article mentions an election result, new appointment, or current office holder, state the active/incoming leader directly as reported in the article.
+STRICT DIRECT-NAME & ZERO-PARAMETRIC GROUNDING RULES:
+1. FIRST SENTENCE MUST DIRECTLY STATE THE CURRENT LEADER'S SPECIFIC NAME AND OFFICE as reported in the crawled text (e.g., "The current Chief Minister of Tamil Nadu is...").
+2. FORBIDDEN: DO NOT output generic civics lessons or definitions explaining what the office of CM/PM means (e.g. do not say "The CM is the head of the executive wing..."). State the specific person's name immediately.
+3. DISCARD ALL PRE-TRAINING PARAMETRIC MEMORY for office holders and breaking events. Rely 100% EXCLUSIVELY on the provided 'fullArticleContent' and 'snippet' content.
 4. If the articles discuss previous office holders (predecessors), refer to them only in the past tense (e.g., 'succeeding former Chief Minister ...'). Never claim a predecessor is the active leader.
 5. If the provided evidence does not contain the answer or is ambiguous, set "verified": false. Do NOT guess from pre-training memory.
 6. Return evidenceIndexes citing which evidence blocks you used.
