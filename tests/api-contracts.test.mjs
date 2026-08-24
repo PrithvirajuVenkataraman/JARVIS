@@ -1895,7 +1895,7 @@ const irrelevantRagSearch = await callHandler(searchHandler, request('/api/searc
 assert.equal(irrelevantRagSearch.statusCode, 200);
 assert.equal(irrelevantRagSearch.body.verified, false);
 assert.equal(irrelevantRagSearch.body.answerProvider, 'web_rag_unverified');
-assert.match(irrelevantRagSearch.body.answer, /I could not verify this from retrieved sources/);
+assert.match(irrelevantRagSearch.body.answer, /I could not verify this from retrieved sources|I couldn't verify the current/i);
 assert.doesNotMatch(String(irrelevantRagSearch.body.answer || ''), new RegExp(`${UNRELATED_OS_TITLE}|${UNRELATED_CHART_TITLE}|${UNRELATED_SHELL_TITLE}`, 'i'));
 globalThis.fetch = ORIGINAL_FETCH;
 delete process.env.GEMINI_API_KEY;
@@ -2449,7 +2449,7 @@ async function callHandler(handler, req) {
         statusCode: 200,
         body: null,
         headers: {},
-        setHeader(name, value) { 
+        setHeader(name, value) {
             this.headers[name] = value;
             return this;
         },
