@@ -11,7 +11,7 @@ const CATEGORY_PATTERNS = Object.freeze([
         category: 'weather',
         route: 'live_required',
         reason: 'weather_requires_live_source',
-        pattern: /\b(weather|temperature|forecast|rain|snow|storm|humidity|wind|uv index)\b/i
+        pattern: /\b(weather|temperature|forecast|rain|snow|storm|humidity|wind|uv index|heatwave|drought|climate change|global warming)\b/i
     },
     {
         category: 'crypto',
@@ -23,13 +23,31 @@ const CATEGORY_PATTERNS = Object.freeze([
         category: 'sports',
         route: 'live_required',
         reason: 'sports_updates_require_live_source',
-        pattern: /\b(live scores?|score now|match score|game score|fixtures?|standings|sports news|ipl|nba|nfl|epl|premier league|cricket|football|soccer|tennis)\b/i
+        pattern: /\b(live scores?|score now|match score|game score|fixtures?|standings|sports news|ipl|nba|nfl|epl|premier league|cricket|football|soccer|tennis|f1|formula\s*1|grand prix|basketball|motorsport|racing|driver standings|constructors)\b/i
     },
     {
         category: 'disasters',
         route: 'live_required',
         reason: 'disaster_updates_require_live_source',
-        pattern: /\b(earthquake|wildfire|flood|cyclone|hurricane|typhoon|tsunami|volcano|landslide|natural disaster|calamity|emergency alert)\b/i
+        pattern: /\b(earthquake|wildfire|flood|cyclone|hurricane|typhoon|tsunami|volcano|landslide|natural disaster|calamity|emergency alert|eruption|storm surge)\b/i
+    },
+    {
+        category: 'conflicts_geopolitics',
+        route: 'live_required',
+        reason: 'geopolitical_conflict_requires_live_source',
+        pattern: /\b(war|wars|conflict|ceasefire|military operation|invasion|airstrike|battle|peace talks|hostage|treaty|geopolitics|sanctions|frontline|missile attack)\b/i
+    },
+    {
+        category: 'space_science',
+        route: 'live_required',
+        reason: 'space_updates_require_live_source',
+        pattern: /\b(nasa|isro|spacex|starship|artemis|rocket launch|moon mission|mars rover|space telescope|james webb|satellite launch|lunar landing|astronauts?)\b/i
+    },
+    {
+        category: 'technology',
+        route: 'live_required',
+        reason: 'tech_updates_require_live_source',
+        pattern: /\b(nvidia|openai|anthropic|chatgpt|gemini|claude|deepseek|apple keynote|wwdc|blackwell|quantum computer|flagship launch)\b.*\b(latest|current|new|specs|launch|news|update|announcement)\b|\b(latest|current|new|breaking)\b.*\b(ai model|gpu|processor|chip|smartphone|flagship|software update|llm)\b/i
     },
     {
         category: 'government',
@@ -171,7 +189,7 @@ function hasDateWindowSignal(text) {
 }
 
 function tokenizeForIntent(text) {
-    return String(text || '').toLowerCase().match(/[a-z0-9]{2,}/g) || []; 
+    return String(text || '').toLowerCase().match(/[a-z0-9]{2,}/g) || [];
 }
 
 function isIntentStopword(token) {
