@@ -41,6 +41,9 @@ const COMMON_QUERY_TERMS = new Set([
 ]);
 
 const GOVERNMENT_ROLE_ALIASES = Object.freeze([
+    { role: 'captain', pattern: /\bcaptain\b|\bskipper\b/i, sportsRole: true },
+    { role: 'coach', pattern: /\bhead coach\b|\bcoach\b/i, sportsRole: true },
+    { role: 'manager', pattern: /\bmanager\b/i, sportsRole: true },
     { role: 'ceo', pattern: /\bceo\b|\bchief\s+executive\s+officer\b/i, property: 'P169', organizationRole: true },
     { role: 'prime minister', pattern: /\bprime\s+minister\b|\bpm\b/i, property: 'P6' },
     { role: 'chief minister', pattern: /\bchief\s+minister\b|\bcm\b/i, property: 'P39' },
@@ -1048,13 +1051,17 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
 
     const results = allResults.slice(0, limit);
     const gate = finalGate || evaluateWebRagEvidence(normalizedQuery, results);
+    const roleIntent = parseGovernmentRoleQuery(normalizedQuery);
     if (!finalAnswer?.verified || !finalAnswer.answer) {
+        const unverifiedText = roleIntent
+            ? `I couldn't verify the current ${roleIntent.role} from reliable live sources.`
+            : 'I could not verify this from retrieved sources.';
         return {
             provider: 'web_rag',
             answerProvider: 'web_rag_unverified',
             answer: gate.conflict
                 ? 'Retrieved sources conflict, so I cannot verify this confidently.'
-                : 'I could not verify this from retrieved sources.',
+                : unverifiedText,
             verified: false,
             confidence: gate.confidence,
             evidenceUsed: [],
@@ -2073,21 +2080,35 @@ function normalizeLatestCacheResult(item) {
 
 function buildWebRagQueryPhases(query, plannedQueries = []) {
     const normalized = normalizeSearchQuery(query);
+    const roleIntent = parseGovernmentRoleQuery(normalized);
     const rewrite = buildSearchQueryRewrite(normalized);
-    const subject = rewrite.subject || extractSearchSubject(normalized) || normalized;
+    const subject = roleIntent?.jurisdiction || rewrite.subject || extractSearchSubject(normalized) || normalized;
+    const role = roleIntent?.role || extractSearchIntentTerm(normalized);
+
+    const targeted = roleIntent ? [
+        `${subject} current ${role}`,
+        `${subject} ${role} 2026`,
+        `${subject} ${role}`,
+        `${subject} ${role} official`,
+        `${subject} ${role} Wikipedia`
+    ] : [];
+
     const broad = Array.from(new Set([
         normalized,
+        ...targeted,
         ...buildDeterministicSearchQueries(normalized),
         ...plannedQueries.map(item => normalizeSearchQuery(item)).filter(Boolean)
-    ].filter(Boolean))).slice(0, 5);
+    ].filter(Boolean))).slice(0, 6);
+
     const officialReference = Array.from(new Set([
         `${normalized} official source`,
         `${subject} official`,
         `${normalized} Wikipedia Wikidata`,
         `${subject} current source`
     ].map(normalizeSearchQuery).filter(Boolean))).slice(0, 5);
+
     return [
-        [normalized],
+        targeted.length ? targeted.slice(0, 4) : [normalized],
         broad,
         officialReference
     ].filter(phase => phase.length);
@@ -2097,27 +2118,60 @@ function evaluateWebRagEvidence(query, results = []) {
     const evidence = (Array.isArray(results) ? results : [])
         .filter(item => isValidCitationSource(item, query))
         .filter(item => isRelatedToQuery(query, item));
-    const domains = Array.from(new Set(evidence.map(item => {
+    const roleIntent = parseGovernmentRoleQuery(query);
+    const isCurrent = isCurrentStateQuery(query);
+
+    let explicitEvidence = evidence;
+    if (roleIntent && isCurrent) {
+        explicitEvidence = evidence.filter(item => {
+            const text = `${item.title} ${item.description || ''} ${item.fullArticleText || ''}`.toLowerCase();
+            const jurisdiction = roleIntent.jurisdiction.toLowerCase();
+            const role = roleIntent.role.toLowerCase();
+            
+            const hasEntity = text.includes(jurisdiction) || tokenize(jurisdiction).some(t => t.length > 2 && text.includes(t));
+            if (!hasEntity) return false;
+
+            if (item.evidenceLevel === 'structured_claim') return true;
+            
+            const hasExplicitRoleClaim = /\b(?:captained by|is (?:the )?(?:current )?(?:captain|chief minister|prime minister|president|ceo|governor|leader|coach)(?:\s+of[^.]+)?\s+(?:is|named)?|appointed as (?:the )?(?:captain|chief minister|prime minister|ceo)|(?:captain|skipper|coach|leader|ceo|pm|cm)\s*[:-]\s*[a-z]|\([a-z.'-]+\s+(?:captain|c)\))\b/i.test(text);
+            
+            if (hasExplicitRoleClaim) {
+                return validateClaimTemporalStatus(item) !== 'historical';
+            }
+            return false;
+        });
+    }
+
+    const effectiveEvidence = (roleIntent && isCurrent && explicitEvidence.length) ? explicitEvidence : evidence;
+    const domains = Array.from(new Set(effectiveEvidence.map(item => {
         if (item.sourceLabel && item.sourceLabel.startsWith('Google News / ')) {
             return item.sourceLabel.replace('Google News / ', '').trim();
         }
         return item.domain;
     }).filter(Boolean)));
-    const strong = evidence.filter(isStrongRagEvidenceSource);
-    const dated = evidence.filter(item => String(item.date || item.startDate || item.endDate || '').trim());
-    const conflict = hasObviousRagConflict(evidence, query);
-    const confidence = Math.min(0.99, (strong.length ? 0.74 : 0) + (domains.length >= 2 ? 0.16 : 0) + (dated.length ? 0.05 : 0));
-    const pass = !conflict && (strong.length >= 1 || domains.length >= 2) && evidence.length >= 1;
+    const strong = effectiveEvidence.filter(isStrongRagEvidenceSource);
+    const dated = effectiveEvidence.filter(item => String(item.date || item.startDate || item.endDate || '').trim());
+    const conflict = hasObviousRagConflict(effectiveEvidence, query);
+    const confidence = Math.min(0.99, (strong.length ? 0.74 : 0.6) + (domains.length >= 2 ? 0.2 : 0.1) + (dated.length ? 0.05 : 0));
+    
+    const pass = !conflict && (
+        roleIntent
+            ? explicitEvidence.length >= 1
+            : ((strong.length >= 1 || domains.length >= 2) && evidence.length >= 1)
+    );
+
     return {
         pass,
         conflict,
         confidence: pass ? Math.max(0.86, confidence) : Math.min(0.6, confidence),
-        evidence,
+        evidence: effectiveEvidence,
         reason: conflict
             ? 'Retrieved sources conflict.'
             : pass
                 ? ''
-                : 'Insufficient authoritative retrieved evidence.'
+                : (roleIntent
+                    ? `I couldn't verify the current ${roleIntent.role} from reliable live sources.`
+                    : 'Insufficient authoritative retrieved evidence.')
     };
 }
 
@@ -2313,18 +2367,26 @@ function extractDeterministicLiveFactAnswer(query, evidence = []) {
             }
 
             if (isRoleQuery) {
-                const holderMatch = text.match(/\b(?:captained by|is (?:the )?(?:current )?(?:captain|chief minister|prime minister|president|ceo|governor|leader|coach)(?:\s+of[^.]+)?\s+is|appointed as (?:the )?(?:captain|chief minister|prime minister|ceo))\s+([A-Z][a-zA-Z.'-]+(?:\s+[A-Z][a-zA-Z.'-]+)+)/i);
+                const roleIntent = parseGovernmentRoleQuery(query);
+                const holderMatch = text.match(/\b(?:captained by|is (?:the )?(?:current )?(?:captain|chief minister|prime minister|president|ceo|governor|leader|coach)(?:\s+of[^.]+)?\s+(?:is|named)?|appointed as (?:the )?(?:captain|chief minister|prime minister|ceo))\s+([A-Z][a-zA-Z.'-]+(?:\s+[A-Z][a-zA-Z.'-]+)+)/i)
+                    || text.match(/\b([A-Z][a-zA-Z.'-]+(?:\s+[A-Z][a-zA-Z.'-]+)+)\s+(?:is|serves as|appointed as)\s+(?:the )?(?:current )?(?:captain|chief minister|prime minister|president|ceo|governor|leader|coach)/i)
+                    || text.match(/\b([A-Z][a-zA-Z.'-]+(?:\s+[A-Z][a-zA-Z.'-]+)+)\s*\((?:captain|c)\)/i);
                 if (holderMatch) {
-                    const sentences = text.split(/[.!?]/).map(s => s.trim()).filter(Boolean);
-                    const matchingSentence = sentences.find(s => s.toLowerCase().includes(holderMatch[0].toLowerCase())) || text;
-                    return {
-                        verified: true,
-                        confidence: 0.92,
-                        answer: matchingSentence.endsWith('.') ? matchingSentence : `${matchingSentence}.`,
-                        evidenceIndexes: [i],
-                        modelAssisted: false,
-                        reason: `Extracted directly from authoritative source: ${item.domain || item.sourceLabel}`
-                    };
+                    const rawName = holderMatch[1] || '';
+                    const holderName = cleanHolderName(rawName);
+                    if (holderName) {
+                        const answerText = roleIntent
+                            ? `${holderName} is the current ${roleIntent.role} of ${roleIntent.jurisdiction}.`
+                            : `${holderName} is the current leader/holder.`;
+                        return {
+                            verified: true,
+                            confidence: 0.94,
+                            answer: answerText,
+                            evidenceIndexes: [i],
+                            modelAssisted: false,
+                            reason: `Extracted directly from authoritative source: ${item.domain || item.sourceLabel}`
+                        };
+                    }
                 }
                 continue;
             }
