@@ -724,6 +724,8 @@ globalThis.fetch = async (url, init) => {
     if (href.includes('www.wikidata.org/w/api.php')) return okJson({ search: [] });
     if (href.includes('reddit.com/search.json')) return okJson({ data: { children: [] } });
     if (href.includes('api.gdeltproject.org')) return okJson({ articles: [] });
+    if (href.includes('news.google.com')) return okText('');
+    if (href.includes('duckduckgo.com')) return okText('');
     if (href === 'https://crawl4ai.example/crawl') {
         fallbackCrawlCalls += 1;
         return okJson({
