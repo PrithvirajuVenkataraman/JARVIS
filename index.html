@@ -10040,6 +10040,7 @@ let showRoutingDebugBadge = false;
                     : (Array.isArray(meta?.evidenceSources) && meta.evidenceSources.length
                         ? meta.evidenceSources
                         : split.sources));
+            const hasTopSources = Array.isArray(sources) && sources.length > 0;
             const footerMeta = {
                 ...meta,
                 sources,
@@ -10047,10 +10048,11 @@ let showRoutingDebugBadge = false;
                 verified: meta?.verified === true || String(meta?.sourceType || '').toLowerCase() === 'verified',
                 reason: meta?.reason || meta?.sourceReason || ''
             };
-            const footerHtml = window.JarvisSourceTransparency?.buildSourceTransparencyHtml?.(footerMeta, raw) || '';
-            const shouldStripSources = Boolean(footerHtml) && Array.isArray(split.sources) && split.sources.length > 0;
+            // The top interactive Sources Carousel displays the verified sources; omit the redundant bottom text list.
+            const footerHtml = hasTopSources ? '' : (window.JarvisSourceTransparency?.buildSourceTransparencyHtml?.(footerMeta, raw) || '');
+            const cleanAnswer = (split.answer || raw).replace(/\n\s*Sources:\s*[\s\S]*$/i, '').trim();
             return {
-                answerText: shouldStripSources ? (split.answer || raw) : raw,
+                answerText: cleanAnswer || raw,
                 footerHtml,
                 sources
             };
