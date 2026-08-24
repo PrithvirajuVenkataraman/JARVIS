@@ -1445,14 +1445,45 @@ function stripDatePhrasesFromText(value) {
         .replace(/\b(?:in|during|for|as of|by|before|after)\s+\d{4}\b/gi, ' ');
 }
 
+export function validateClaimTemporalStatus(item, referenceDate = new Date()) {
+    const todayNum = compactDateNumber(referenceDate.toISOString().slice(0, 10));
+    const startNum = compactDateNumber(item?.startDate);
+    const endNum = compactDateNumber(item?.endDate);
+
+    if (startNum && startNum > todayNum) return 'future';
+    if (endNum && endNum < todayNum) return 'historical';
+    if (startNum && (!endNum || endNum >= todayNum)) return 'current';
+    if (!startNum && endNum) {
+        return endNum >= todayNum ? 'current' : 'historical';
+    }
+    if (!startNum && !endNum) {
+        if (item?.evidenceLevel === 'official_current_holder') return 'current';
+        if (item?.freshness === 'current_structured_claim') return 'current';
+        if (item?.freshness === 'historical_structured_claim') return 'historical';
+    }
+    return 'unknown';
+}
+
+export function isCurrentStateQuery(query) {
+    const raw = normalizeSearchQuery(query);
+    if (!raw) return false;
+    const dateIntent = parseStructuredDateWindow(raw);
+    if (dateIntent?.hasDate) return false;
+    const isHistoricalTerm = /\b(former|previous|past|first|ex-|history|earlier|was\s+the|were\s+the|served\s+as|served\s+until|in\s+\d{4}|during\s+\d{4})\b/i.test(raw);
+    if (isHistoricalTerm) return false;
+    return true;
+}
+
 function filterGovernmentRoleResultsByDate(results, dateIntent = null) {
     const list = Array.isArray(results) ? results : [];
     if (!dateIntent?.hasDate) {
         const current = list
-            .filter(item => !item.endDate)
+            .filter(item => validateClaimTemporalStatus(item) === 'current')
             .sort(compareRoleClaimsForCurrent);
-        return (current.length ? current : [...list].sort(compareRoleClaimsForCurrent))
-            .map((item, index) => ({ ...item, position: index + 1 }));
+        const nonCurrent = list
+            .filter(item => validateClaimTemporalStatus(item) !== 'current')
+            .sort(compareRoleClaimsForCurrent);
+        return [...current, ...nonCurrent].map((item, index) => ({ ...item, position: index + 1 }));
     }
     const filtered = list
         .filter(item => roleClaimOverlapsWindow(item, dateIntent))
@@ -1471,6 +1502,12 @@ export function roleClaimOverlapsWindow(item, dateIntent) {
 }
 
 function compareRoleClaimsForCurrent(a, b) {
+    const aStatus = validateClaimTemporalStatus(a);
+    const bStatus = validateClaimTemporalStatus(b);
+    if (aStatus === 'current' && bStatus !== 'current') return -1;
+    if (bStatus === 'current' && aStatus !== 'current') return 1;
+    if (aStatus === 'historical' && bStatus !== 'historical') return 1;
+    if (bStatus === 'historical' && aStatus !== 'historical') return -1;
     return (compactDateNumber(b?.startDate) || 0) - (compactDateNumber(a?.startDate) || 0);
 }
 
@@ -1877,15 +1914,16 @@ function buildSourceDerivedAnswer(results, metadata = {}) {
 function buildStructuredRoleAnswer(results, roleIntent = null) {
     const list = (Array.isArray(results) ? results : [])
         .filter(item => item?.holderName && item?.role && item?.jurisdiction && item?.url);
-    const top = list[0];
-    if (!top) return {};
-    const role = String(top.role || roleIntent?.role || '').trim();
-    const jurisdiction = String(top.jurisdiction || roleIntent?.jurisdiction || '').trim();
+    if (!list.length) return {};
+    const role = String(list[0].role || roleIntent?.role || '').trim();
+    const jurisdiction = String(list[0].jurisdiction || roleIntent?.jurisdiction || '').trim();
     if (!role || !jurisdiction) return {};
-    const dateIntent = top.dateIntent || roleIntent?.dateIntent || null;
+    const dateIntent = list[0].dateIntent || roleIntent?.dateIntent || null;
     if (dateIntent?.hasDate) {
+        const matching = list.filter(item => roleClaimOverlapsWindow(item, dateIntent));
+        const chosenList = matching.length ? matching : list;
         const prefix = buildDateSpecificAnswerPrefix(dateIntent);
-        const holdersWithRanges = list.slice(0, 4).map(item => {
+        const holdersWithRanges = chosenList.slice(0, 4).map(item => {
             const holder = String(item.holderName || '').trim();
             const range = formatClaimDateRange(item);
             return { holder, range };
@@ -1907,6 +1945,8 @@ function buildStructuredRoleAnswer(results, roleIntent = null) {
             provider: 'wikidata_dated_structured_claim'
         };
     }
+    const currentClaims = list.filter(item => validateClaimTemporalStatus(item) === 'current');
+    const top = currentClaims.length ? currentClaims[0] : list[0];
     const holder = String(top.holderName || '').trim();
     if (!holder) return {};
     const startDate = String(top.startDate || '').trim();
@@ -2038,8 +2078,8 @@ function evaluateWebRagEvidence(query, results = []) {
         .filter(item => isRelatedToQuery(query, item));
     const domains = Array.from(new Set(evidence.map(item => item.domain).filter(Boolean)));
     const strong = evidence.filter(isStrongRagEvidenceSource);
-    const dated = evidence.filter(item => String(item.date || '').trim());
-    const conflict = hasObviousRagConflict(evidence);
+    const dated = evidence.filter(item => String(item.date || item.startDate || item.endDate || '').trim());
+    const conflict = hasObviousRagConflict(evidence, query);
     const confidence = Math.min(0.99, (strong.length ? 0.74 : 0) + (domains.length >= 2 ? 0.16 : 0) + (dated.length ? 0.05 : 0));
     const pass = !conflict && (strong.length >= 1 || domains.length >= 2) && evidence.length >= 1;
     return {
@@ -2153,23 +2193,78 @@ function isStrongRagEvidenceSource(item) {
     return /(?:\.gov$|\.gov\.|\.go\.|gov\.|wikipedia\.org$|wikidata\.org$|bbc\.com$|reuters\.com$|apnews\.com$|thehindu\.com$)/i.test(domain);
 }
 
-function hasObviousRagConflict(evidence = []) {
-    // Temporal succession (former vs current) is chronological transition data, not an irreconcilable conflict.
+export function hasObviousRagConflict(evidence = [], query = '') {
+    const list = Array.isArray(evidence) ? evidence : [];
+    const claims = list.filter(item => item?.holderName && item?.role && item?.jurisdiction);
+    if (claims.length < 2) return false;
+
+    const isCurrent = isCurrentStateQuery(query);
+    const byRoleJurisdiction = new Map();
+    for (const claim of claims) {
+        const key = `${String(claim.role || '').toLowerCase()}:::${String(claim.jurisdiction || '').toLowerCase()}`;
+        if (!byRoleJurisdiction.has(key)) byRoleJurisdiction.set(key, []);
+        byRoleJurisdiction.get(key).push(claim);
+    }
+
+    for (const [key, group] of byRoleJurisdiction.entries()) {
+        const distinctHolders = Array.from(new Set(group.map(item => String(item.holderName || '').toLowerCase().trim()))).filter(Boolean);
+        if (distinctHolders.length <= 1) continue;
+
+        if (isCurrent) {
+            // Temporal succession resolution:
+            const currentClaims = group.filter(item => validateClaimTemporalStatus(item) === 'current');
+            const currentDistinctHolders = Array.from(new Set(currentClaims.map(item => String(item.holderName || '').toLowerCase().trim())));
+
+            if (currentDistinctHolders.length === 1) {
+                // Resolved via temporal succession: exactly 1 current holder, others are historical predecessors
+                continue;
+            }
+            if (currentDistinctHolders.length > 1) {
+                // Competing concurrent current claims: genuine conflict!
+                return true;
+            }
+            const unknownClaims = group.filter(item => validateClaimTemporalStatus(item) === 'unknown');
+            if (unknownClaims.length > 1) {
+                return true;
+            }
+        } else {
+            const dateIntent = parseStructuredDateWindow(query);
+            if (dateIntent?.hasDate) {
+                const matchingClaims = group.filter(item => roleClaimOverlapsWindow(item, dateIntent));
+                const matchingHolders = Array.from(new Set(matchingClaims.map(item => String(item.holderName || '').toLowerCase().trim())));
+                if (matchingHolders.length > 1) {
+                    return true;
+                }
+            }
+        }
+    }
+
     return false;
 }
 
 function extractDeterministicLiveFactAnswer(query, evidence = []) {
     if (!Array.isArray(evidence) || !evidence.length) return null;
-    const sorted = [...evidence].sort((a, b) => {
-        const aYear = /\b202[6-9]\b/.test(`${a.title} ${a.description}`) ? 1 : 0;
-        const bYear = /\b202[6-9]\b/.test(`${b.title} ${b.description}`) ? 1 : 0;
-        return bYear - aYear;
-    });
+    const isCurrent = isCurrentStateQuery(query);
     const isRoleQuery = /\b(cm|chief minister|president|prime minister|pm|governor|mayor|leader|head of state|head of government|ceo)\b/i.test(query);
     const isDefinitionRegex = /\b(is the head of (?:the )?government|is the leader of the (?:state )?cabinet|is the head of the executive|is the highest-ranking executive|is an elected or appointed official|refers to the office|is a constitutional position)\b/i;
 
+    const sorted = [...evidence].sort((a, b) => {
+        if (isCurrent) {
+            const aStatus = validateClaimTemporalStatus(a);
+            const bStatus = validateClaimTemporalStatus(b);
+            if (aStatus === 'current' && bStatus !== 'current') return -1;
+            if (bStatus === 'current' && aStatus !== 'current') return 1;
+            if (aStatus === 'historical' && bStatus !== 'historical') return 1;
+            if (bStatus === 'historical' && aStatus !== 'historical') return -1;
+        }
+        return (b?.position || 0) - (a?.position || 0);
+    });
+
     for (let i = 0; i < sorted.length; i++) {
         const item = sorted[i];
+        if (isCurrent && isRoleQuery && validateClaimTemporalStatus(item) === 'historical') {
+            continue; // Do not let historical claim become direct answer for a current-state query
+        }
         const text = `${item.title}. ${item.description || ''}`.trim();
         if (text.length > 15) {
             if (isRoleQuery && isDefinitionRegex.test(item.description || '')) {
@@ -2192,11 +2287,28 @@ function extractDeterministicLiveFactAnswer(query, evidence = []) {
 }
 
 async function buildGroundedRagAnswer(query, results, gate) {
-    const evidence = gate.evidence.slice(0, 6);
+    const evidence = (gate?.evidence || results || []).slice(0, 6);
     if (!evidence.length) return null;
+    const isCurrent = isCurrentStateQuery(query);
+
+    const currentEvidence = [];
+    const historicalContext = [];
+    for (const item of evidence) {
+        const temporalStatus = validateClaimTemporalStatus(item);
+        if (temporalStatus === 'historical') {
+            historicalContext.push({ ...item, temporalStatus: 'historical' });
+        } else {
+            currentEvidence.push({ ...item, temporalStatus });
+        }
+    }
+
+    const orderedEvidence = isCurrent && currentEvidence.length
+        ? [...currentEvidence, ...historicalContext]
+        : evidence;
+
     if (getGeminiApiKey() || process.env.GROQ_API_KEY) {
-        await enrichSearchResultsWithDeepCrawl(evidence, 3).catch(() => {});
-        const compact = evidence.map((item, index) => ({
+        await enrichSearchResultsWithDeepCrawl(orderedEvidence, 3).catch(() => {});
+        const compact = orderedEvidence.map((item, index) => ({
             index,
             title: item.title,
             snippet: item.description,
@@ -2205,18 +2317,21 @@ async function buildGroundedRagAnswer(query, results, gate) {
             domain: item.domain,
             sourceType: item.sourceType,
             sourceLabel: item.sourceLabel,
-            date: item.date || ''
+            date: item.date || '',
+            startDate: item.startDate || '',
+            endDate: item.endDate || '',
+            temporalStatus: validateClaimTemporalStatus(item)
         }));
         const todayStr = new Date().toISOString().slice(0, 10);
         const prompt = `Return strict JSON only.
 Task: Answer the user's question using ONLY the retrieved web evidence below.
 Current Date: ${todayStr} (Year 2026).
 
-STRICT DIRECT-NAME & ZERO-PARAMETRIC GROUNDING RULES:
-1. FIRST SENTENCE MUST DIRECTLY STATE THE CURRENT LEADER'S SPECIFIC NAME AND OFFICE as reported in the crawled text (e.g., "The current Chief Minister of Tamil Nadu is...").
-2. FORBIDDEN: DO NOT output generic civics lessons or definitions explaining what the office of CM/PM means (e.g. do not say "The CM is the head of the executive wing..."). State the specific person's name immediately.
-3. DISCARD ALL PRE-TRAINING PARAMETRIC MEMORY for office holders and breaking events. Rely 100% EXCLUSIVELY on the provided 'fullArticleContent' and 'snippet' content.
-4. If the articles discuss previous office holders (predecessors), refer to them only in the past tense (e.g., 'succeeding former Chief Minister ...'). Never claim a predecessor is the active leader.
+STRICT TEMPORAL VALIDITY & DIRECT-NAME GROUNDING RULES:
+1. FIRST SENTENCE MUST DIRECTLY STATE THE CURRENT LEADER'S SPECIFIC NAME AND OFFICE as reported in the active/current evidence (e.g., "The current Chief Minister of Tamil Nadu is...").
+2. FORBIDDEN: DO NOT output generic civics lessons or definitions explaining what the office of CM/PM means. State the specific person's name immediately.
+3. FOR CURRENT QUERIES: Base the active leader strictly on 'current' evidence (where end date is absent or in the future). DO NOT declare historical office holders with past end dates as current leaders.
+4. Historical evidence with past end dates represents predecessors: refer to them only in past tense (e.g., 'succeeding former Chief Minister ...').
 5. If the provided evidence does not contain the answer or is ambiguous, set "verified": false. Do NOT guess from pre-training memory.
 6. Return evidenceIndexes citing which evidence blocks you used.
 
@@ -2241,7 +2356,7 @@ JSON shape: {"verified":true,"confidence":0.0,"answer":"...","evidenceIndexes":[
             };
         }
     }
-    return extractDeterministicLiveFactAnswer(query, evidence);
+    return extractDeterministicLiveFactAnswer(query, orderedEvidence);
 }
 
 function sanitizeRagAnswerText(value) {
@@ -2568,10 +2683,10 @@ function rankSearchResults(query, results) {
 
 export function rankSources(query, results) {
     const terms = tokenize(query);
-    return [...(Array.isArray(results) ? results : [])].sort((a, b) => scoreSearchResult(b, terms) - scoreSearchResult(a, terms));
+    return [...(Array.isArray(results) ? results : [])].sort((a, b) => scoreSearchResult(b, terms, query) - scoreSearchResult(a, terms, query));
 }
 
-function scoreSearchResult(item, terms) {
+function scoreSearchResult(item, terms, query = '') {
     const title = String(item?.title || '').toLowerCase();
     const description = String(item?.description || '').toLowerCase();
     const domain = String(item?.domain || '').toLowerCase();
@@ -2591,6 +2706,28 @@ function scoreSearchResult(item, terms) {
         if (description.includes(term)) score += 2;
     }
     if (item?.date) score += 2;
+
+    if (query) {
+        const roleIntent = parseGovernmentRoleQuery(query);
+        const dateIntent = roleIntent?.dateIntent || parseStructuredDateWindow(query);
+        if (dateIntent?.hasDate) {
+            if (roleClaimOverlapsWindow(item, dateIntent)) {
+                score += 50;
+            } else if (item?.startDate || item?.endDate) {
+                score -= 40;
+            }
+        } else if (isCurrentStateQuery(query)) {
+            const temporalStatus = validateClaimTemporalStatus(item);
+            if (temporalStatus === 'current') {
+                score += 50;
+            } else if (temporalStatus === 'historical') {
+                score -= 40;
+            } else if (temporalStatus === 'future') {
+                score -= 30;
+            }
+        }
+    }
+
     return score;
 }
 
@@ -2961,11 +3098,14 @@ export const __test = {
     normalizeGovernmentRoleBindings,
     isValidCitationSource,
     buildSourceDerivedAnswer,
+    validateClaimTemporalStatus,
+    isCurrentStateQuery,
+    hasObviousRagConflict,
     discoverOfficialSourceCandidates,
     fetchWikidataOfficialUrls,
     isOfficialGovernmentUrl,
     extractOfficialCurrentRoleEvidence,
-    parseDiscoveryFactQuery, 
+    parseDiscoveryFactQuery,
     isDiscoveryAnswerSource,
     rankSources,
     searchPublicSources,
