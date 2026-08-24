@@ -87,7 +87,7 @@ graph TD
 
 For live world queries (e.g. current politicians, election winners, breaking news, sports standings):
 
-1. **Pre-Training Knowledge Bypass**:
+1. **Pre-Training Knowledge Bypass**: 
    - The LLM's parametric memory (frozen at 2023–2024 training cutoffs) is explicitly deprecated for real-time questions.
 2. **Parallel Deep Webpage Scraper (<2.5s Timeout)**:
    - Scrapes full HTML article body text (up to 2,500 characters) across top live URLs simultaneously.
