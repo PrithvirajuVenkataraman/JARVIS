@@ -17781,8 +17781,8 @@ function shouldRequireVerifiedSources(classificationOrText, liveIntent = null, e
         isDirectFactLiveQuery(text)
     );
 
-    const leadershipOrOffice = entity?.relationType === 'role' &&
-        /\b(president|prime minister|governor|mayor|minister|chief minister|ceo|captain|coach|chairman|chairperson|head of|secretary general|director|director general|dean|chancellor|principal|administrator)\b/.test(lower);
+    const leadershipOrOffice = (entity?.relationType === 'role' || /\b(who is the|who is|current|latest|present|who leads)\b/i.test(lower)) &&
+        /\b(president|prime minister|\bpm\b|governor|mayor|minister|ministers|chief minister|\bcm\b|\bmla\b|\bmp\b|leader|ceo|captain|coach|chairman|chairperson|head of|secretary general|director|director general|dean|chancellor|principal|administrator)\b/i.test(lower);
 
     const newsworthy = flags.news ||
         isNewsworthyLiveTopic(text) ||
@@ -17790,6 +17790,10 @@ function shouldRequireVerifiedSources(classificationOrText, liveIntent = null, e
         /\b(war|conflict|attack|ceasefire|election|layoff|layoffs|firing|job cuts|restructuring|earnings|merger|acquisition|recall|bankruptcy|investigation|antitrust|strike|walkout)\b/.test(lower);
 
     if (isExchangeRateQuery(text) || isMarketPriceQuery(text) || isMarketMoversQuery(text) || isSportsLiveResultQuery(text)) {
+        return true;
+    }
+
+    if (leadershipOrOffice) {
         return true;
     }
 
@@ -18226,7 +18230,7 @@ function isPoliticalLeadershipRoleIntent(entityIntent) {
     if (String(entityIntent?.relationType || '').toLowerCase() !== 'role') return false;
     if (String(entityIntent?.domain || '').toLowerCase() !== 'politics') return false;
     const role = String(entityIntent?.roleLabel || '').toLowerCase();
-    return /\b(president|prime minister|chief minister|governor|mayor|minister|head|leader|administrator|director general|secretary)\b/.test(role);
+    return /\b(president|prime minister|\bpm\b|chief minister|\bcm\b|\bmla\b|\bmp\b|governor|mayor|minister|head|leader|administrator|director general|secretary)\b/.test(role);
 }
 
 function extractLeadershipRoleCandidateFromText(text, entityIntent) {
