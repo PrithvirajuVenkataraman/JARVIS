@@ -584,6 +584,114 @@ function parseGoogleNewsRssXml(xml, query, limit = 8) {
     return items.sort((a, b) => b.timestamp - a.timestamp);
 }
 
+export async function crawlArticleBody(url, options = {}) {
+    const targetUrl = String(url || '').trim();
+    if (!targetUrl || !targetUrl.startsWith('http')) return null;
+    if (/\.(pdf|jpg|jpeg|png|gif|svg|mp4|mp3|zip|gz|tar)$/i.test(targetUrl)) return null;
+
+    const timeoutMs = options.timeoutMs || 3500;
+    try {
+        const response = await fetchWithTimeout(targetUrl, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9'
+            }
+        }, timeoutMs);
+
+        if (!response.ok) return null;
+        const html = await response.text();
+        if (!html || typeof html !== 'string') return null;
+
+        return extractCleanArticleText(html, targetUrl);
+    } catch (_) {
+        return null;
+    }
+}
+
+export function extractCleanArticleText(html, url = '') {
+    if (!html) return null;
+    
+    let pubDate = '';
+    const dateMatch = html.match(/<meta\s+(?:property|name)=["'](?:article:published_time|pubdate|date|og:published_time|dc\.date)["']\s+content=["']([^"']+)["']/i)
+        || html.match(/<meta\s+content=["']([^"']+)["']\s+(?:property|name)=["'](?:article:published_time|pubdate|date|og:published_time|dc\.date)["']/i);
+    if (dateMatch?.[1]) {
+        pubDate = dateMatch[1].trim();
+    }
+
+    let pageTitle = '';
+    const ogTitleMatch = html.match(/<meta\s+(?:property|name)=["']og:title["']\s+content=["']([^"']+)["']/i);
+    if (ogTitleMatch?.[1]) {
+        pageTitle = cleanXmlEntities(ogTitleMatch[1]);
+    } else {
+        const titleTagMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+        if (titleTagMatch?.[1]) {
+            pageTitle = cleanXmlEntities(titleTagMatch[1]);
+        }
+    }
+
+    let cleaned = html
+        .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, ' ')
+        .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, ' ')
+        .replace(/<noscript\b[^<]*(?:(?!<\/noscript>)<[^<]*)*<\/noscript>/gi, ' ')
+        .replace(/<nav\b[^<]*(?:(?!<\/nav>)<[^<]*)*<\/nav>/gi, ' ')
+        .replace(/<header\b[^<]*(?:(?!<\/header>)<[^<]*)*<\/header>/gi, ' ')
+        .replace(/<footer\b[^<]*(?:(?!<\/footer>)<[^<]*)*<\/footer>/gi, ' ')
+        .replace(/<svg\b[^<]*(?:(?!<\/svg>)<[^<]*)*<\/svg>/gi, ' ')
+        .replace(/<form\b[^<]*(?:(?!<\/form>)<[^<]*)*<\/form>/gi, ' ')
+        .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, ' ');
+
+    let bodyText = '';
+    const articleMatch = cleaned.match(/<article\b[^>]*>([\s\S]*?)<\/article>/i)
+        || cleaned.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i);
+    
+    const sourceHtml = articleMatch?.[1] || cleaned;
+    const pMatches = sourceHtml.match(/<p\b[^>]*>([\s\S]*?)<\/p>/gi) || [];
+    
+    if (pMatches.length > 0) {
+        const paragraphs = pMatches.map(p => {
+            return p.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+        }).filter(p => p.length > 30);
+        bodyText = paragraphs.slice(0, 10).join('\n\n');
+    }
+
+    if (!bodyText) {
+        bodyText = sourceHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    }
+
+    bodyText = bodyText.slice(0, 2500).trim();
+
+    return {
+        title: pageTitle,
+        pubDate,
+        bodyText,
+        url
+    };
+}
+
+export async function enrichSearchResultsWithDeepCrawl(results, limit = 3) {
+    if (!Array.isArray(results) || !results.length) return results;
+    
+    const candidates = results.slice(0, limit);
+    const crawlPromises = candidates.map(item => {
+        if (!item?.url || String(item.url).includes('wikipedia.org')) return Promise.resolve(null);
+        return crawlArticleBody(item.url).catch(() => null);
+    });
+
+    const settled = await Promise.allSettled(crawlPromises);
+    settled.forEach((res, i) => {
+        if (res.status === 'fulfilled' && res.value?.bodyText) {
+            candidates[i].fullArticleText = res.value.bodyText;
+            if (res.value.pubDate && !candidates[i].date) {
+                candidates[i].date = res.value.pubDate;
+            }
+            candidates[i].deepCrawled = true;
+        }
+    });
+
+    return results;
+}
+
 export async function searchGdeltNews(query, options = {}) {
     const limit = clampInt(options.limit, 8, 1, 20);
     const url = new URL(GDELT_DOC_URL);
@@ -2083,13 +2191,15 @@ function extractDeterministicLiveFactAnswer(query, evidence = []) {
 }
 
 async function buildGroundedRagAnswer(query, results, gate) {
-    const evidence = gate.evidence.slice(0, 8);
+    const evidence = gate.evidence.slice(0, 6);
     if (!evidence.length) return null;
     if (getGeminiApiKey() || process.env.GROQ_API_KEY) {
+        await enrichSearchResultsWithDeepCrawl(evidence, 3).catch(() => {});
         const compact = evidence.map((item, index) => ({
             index,
             title: item.title,
-            description: item.description,
+            snippet: item.description,
+            fullArticleContent: item.fullArticleText || item.description,
             url: item.url,
             domain: item.domain,
             sourceType: item.sourceType,
@@ -2098,18 +2208,20 @@ async function buildGroundedRagAnswer(query, results, gate) {
         }));
         const todayStr = new Date().toISOString().slice(0, 10);
         const prompt = `Return strict JSON only.
-Task: answer the user question using ONLY retrieved evidence.
+Task: Answer the user's question using ONLY the retrieved web evidence below.
 Current Date: ${todayStr} (Year 2026).
-Rules:
-- If the evidence supports the answer, set verified true and answer concisely.
-- Universal Freshness & Incumbency across ALL domains (leadership/office-holders, CEOs/executives, sports champions/winners, technology/product releases, awards, records, prices): identify and extract the most recent, active status or holder from the evidence. Never output a former holder, predecessor, retired entity, or obsolete version as the current state.
-- If the evidence shows an election victory, succession, or new appointment, the answer MUST state the NEW incoming/active leader first, and only mention predecessors in past tense (e.g., 'succeeding former Chief Minister M. K. Stalin'). Never state the predecessor is the current holder.
-- If evidence is missing, weak, or completely irrelevant, set verified false.
-- Do not use model memory. Do not guess. Do not tell the user to check elsewhere.
-- For current/date-sensitive claims, require direct support from the evidence.
-- Cite evidence by returning evidenceIndexes from the provided index values.
+
+STRICT ANTI-HALLUCINATION & ZERO-PARAMETRIC GROUNDING RULES:
+1. DISCARD ALL PRE-TRAINING MEMORY regarding current office holders, politicians, elections, leaders, and real-time events. Your internal memory cutoff is completely obsolete for current facts.
+2. Rely 100% EXCLUSIVELY on the provided 'fullArticleContent' and 'snippet' content.
+3. If an article mentions an election result, new appointment, or current office holder, state the active/incoming leader directly as reported in the article.
+4. If the articles discuss previous office holders (predecessors), refer to them only in the past tense (e.g., 'succeeding former Chief Minister ...'). Never claim a predecessor is the active leader.
+5. If the provided evidence does not contain the answer or is ambiguous, set "verified": false. Do NOT guess from pre-training memory.
+6. Return evidenceIndexes citing which evidence blocks you used.
+
 User question: ${JSON.stringify(query)}
-Evidence JSON: ${JSON.stringify(compact)}
+Evidence JSON:
+${JSON.stringify(compact, null, 2)}
 JSON shape: {"verified":true,"confidence":0.0,"answer":"...","evidenceIndexes":[0],"conflict":false,"reason":"..."}`;
         const json = await callGeminiJson(prompt, { maxOutputTokens: 700, temperature: 0 });
         const verified = json?.verified === true && Number(json?.confidence) >= 0.86;
@@ -2835,6 +2947,9 @@ export const __test = {
     runVerifiedWebSearch,
     runEvidenceFirstWebRag,
     searchGoogleNewsRss,
+    crawlArticleBody,
+    extractCleanArticleText,
+    enrichSearchResultsWithDeepCrawl,
     searchGdeltNews,
     searchWikidata,
     searchReddit,
