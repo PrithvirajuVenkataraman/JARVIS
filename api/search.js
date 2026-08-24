@@ -566,7 +566,7 @@ function parseGoogleNewsRssXml(xml, query, limit = 8) {
         }
 
         if (rawTitle && link) {
-            const domain = extractDomain(link) || 'news.google.com';
+            const domain = getDomainFromUrl(link) || 'news.google.com';
             items.push({
                 title: rawTitle,
                 description: desc || rawTitle,
@@ -2098,7 +2098,12 @@ function evaluateWebRagEvidence(query, results = []) {
     const evidence = (Array.isArray(results) ? results : [])
         .filter(item => isValidCitationSource(item, query))
         .filter(item => isRelatedToQuery(query, item));
-    const domains = Array.from(new Set(evidence.map(item => item.domain).filter(Boolean)));
+    const domains = Array.from(new Set(evidence.map(item => {
+        if (item.sourceLabel && item.sourceLabel.startsWith('Google News / ')) {
+            return item.sourceLabel.replace('Google News / ', '').trim();
+        }
+        return item.domain;
+    }).filter(Boolean)));
     const strong = evidence.filter(isStrongRagEvidenceSource);
     const dated = evidence.filter(item => String(item.date || item.startDate || item.endDate || '').trim());
     const conflict = hasObviousRagConflict(evidence, query);
@@ -2788,11 +2793,26 @@ export function isValidCitationSource(source, query = '') {
     const sourceType = String(item.sourceType || '').trim();
     const domain = String(item.domain || getDomainFromUrl(url)).toLowerCase();
     const combined = `${title} ${description} ${url}`.toLowerCase();
+    const fullContent = `${title} ${description} ${item.fullArticleText || ''} ${item.text || ''} ${url}`.toLowerCase();
     if (!title || !url) return false;
     if (!sourceType || LOOKUP_ONLY_SOURCE_TYPES.has(sourceType)) return false;
     if (!description || description.length < 20) return false;
     if (/search:|webcache|cache\.google|\/search(?:[/?#]|$)|[?&]q=/.test(combined)) return false;
     if (/archive\.(today|ph|is)|webcache/i.test(domain)) return false;
+
+    if (query) {
+        const isLeadership = /\b(?:who\s+is\s+the\s+)?(?:cm|chief minister|prime minister|pm|president|governor|mayor|ceo|leader|head of state|head of government)\b/i.test(query);
+        const isExplicitElection = /\b(?:election|polls?|voting)\b/i.test(query);
+        if (isLeadership && !isExplicitElection) {
+            if (/\b(?:202[6-9]|upcoming|next)\s+(?:assembly\s+)?(?:election|legislative assembly election|opinion poll|exit poll|candidates?\s+list)\b/i.test(fullContent)) {
+                return false;
+            }
+            if (/\b(?:all set to swear in|will swear in|predicted to win|landslide victory in 202[6-9]|sworn in today at the jawaharlal|c\.\s*joseph vijay.*chief minister|tvk.*won the 2026)\b/i.test(fullContent)) {
+                return false;
+            }
+        }
+    }
+
     if (sourceType === 'official_source' && !item.pageFetched) return false;
     if (item.evidenceLevel === 'structured_claim') return true;
     if (sourceType === 'official_source') return Boolean(item.exactShortcutMatch) || isRelatedToQuery(query, item);
