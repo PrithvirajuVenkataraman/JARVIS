@@ -18916,6 +18916,7 @@ async function handleLiveRetrievalQuery(userText, options = {}) {
             }
         }
 
+        showThinkingIndicator('Searching live web sources...');
         const resultSets = await Promise.all(
             queries.map(async (q) => {
                 try {
