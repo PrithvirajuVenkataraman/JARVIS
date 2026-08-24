@@ -6271,6 +6271,7 @@ let showRoutingDebugBadge = false;
 
         function beginAssistantProcessing() {
             assistantProcessingDepth += 1;
+            window.__lastThinkingPhaseStartedAt = Date.now();
             window.dispatchEvent(new CustomEvent('jarvis:assistant-processing', {
                 detail: { active: true, depth: assistantProcessingDepth }
             }));
@@ -6279,6 +6280,9 @@ let showRoutingDebugBadge = false;
 
         function endAssistantProcessing() {
             assistantProcessingDepth = Math.max(0, assistantProcessingDepth - 1);
+            if (assistantProcessingDepth === 0) {
+                window.__lastThinkingPhaseStartedAt = null;
+            }
             window.dispatchEvent(new CustomEvent('jarvis:assistant-processing', {
                 detail: { active: assistantProcessingDepth > 0, depth: assistantProcessingDepth }
             }));
@@ -25132,6 +25136,7 @@ function showThinkingIndicator(message = 'Thinking') {
 
     const userPrompt = String(window.__lastUserMessage || '').trim();
     const thoughtSteps = generateContextualThoughtSteps(userPrompt);
+    const phaseInfo = resolveThinkingPhase(message);
 
     let row = document.getElementById('chat-thinking-indicator');
     if (!row) {
@@ -25139,6 +25144,8 @@ function showThinkingIndicator(message = 'Thinking') {
         row.id = 'chat-thinking-indicator';
         row.className = 'chat-row flex justify-start items-start gap-3 fade-in';
         row.dataset.role = 'assistant';
+        row.dataset.phase = phaseInfo.key;
+        row.dataset.phaseLabel = phaseInfo.label;
         const cardHtml = buildThinkingProcessHtml('', thoughtSteps, '0.1', true);
         row.innerHTML = `
             <div class="w-full max-w-3xl flex flex-col items-start">
@@ -25149,12 +25156,22 @@ function showThinkingIndicator(message = 'Thinking') {
             </div>
         `;
         chatContainer.appendChild(row);
-        startThinkingPhaseTimeline(thoughtSteps);
+        startThinkingPhaseTimeline(thoughtSteps, phaseInfo.label);
+    } else {
+        row.dataset.phase = phaseInfo.key;
+        row.dataset.phaseLabel = phaseInfo.label;
+        const timerEl = row.querySelector('.thinking-timer');
+        if (timerEl) {
+            const startedAt = window.__lastThinkingPhaseStartedAt || Date.now();
+            const elapsed = Math.max(0.1, (Date.now() - startedAt) / 1000).toFixed(1);
+            const baseAction = phaseInfo.label.replace(/\.\.\..*$/, '').trim();
+            timerEl.textContent = `${baseAction}... ${elapsed}s`;
+        }
     }
     maybeAutoScroll(chatContainer);
 }
 
-function startThinkingPhaseTimeline(customSteps = []) {
+function startThinkingPhaseTimeline(customSteps = [], initialLabel = 'Thinking...') {
     if (thinkingPhaseTimer) {
         clearInterval(thinkingPhaseTimer);
         thinkingPhaseTimer = null;
@@ -25162,7 +25179,7 @@ function startThinkingPhaseTimeline(customSteps = []) {
     const startedAt = window.__lastThinkingPhaseStartedAt || Date.now();
     window.__lastThinkingPhaseStartedAt = startedAt;
 
-    thinkingPhaseTimer = setInterval(() => {
+    const updateTimer = () => {
         const row = document.getElementById('chat-thinking-indicator');
         if (!row) {
             clearInterval(thinkingPhaseTimer);
@@ -25170,12 +25187,17 @@ function startThinkingPhaseTimeline(customSteps = []) {
             return;
         }
         const elapsedNum = (Date.now() - startedAt) / 1000;
-        const elapsed = Math.min(10.0, elapsedNum).toFixed(1);
+        const elapsed = Math.max(0.1, elapsedNum).toFixed(1);
         const timerEl = row.querySelector('.thinking-timer');
+        const phaseLabel = row.dataset.phaseLabel || initialLabel || 'Thinking...';
+        const baseAction = phaseLabel.replace(/\.\.\..*$/, '').trim();
         if (timerEl) {
-            timerEl.textContent = elapsedNum >= 10 ? 'Finalizing response...' : `Thinking... ${elapsed}s`;
+            timerEl.textContent = `${baseAction}... ${elapsed}s`;
         }
-    }, 250);
+    };
+
+    updateTimer();
+    thinkingPhaseTimer = setInterval(updateTimer, 100);
 }
 
 function resolveThinkingPhase(message = '') {
@@ -25188,6 +25210,9 @@ function resolveThinkingPhase(message = '') {
     }
     if (/\b(translat|language)\b/.test(lower)) {
         return { key: 'translating', label: 'Translating text...' };
+    }
+    if (/\b(generat|synthesiz|writing|build|formulat|finaliz)\b/.test(lower)) {
+        return { key: 'synthesizing', label: 'Synthesizing answer...' };
     }
     return { key: 'thinking', label: 'Thinking...' };
 }
