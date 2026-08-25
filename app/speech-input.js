@@ -491,12 +491,37 @@ export function createSpeechInputController(options = {}) {
                         whisperRecorder.start(language);
                     }
                 }
-            }, 250);
+            }, 200);
         }
         if (typeof document !== 'undefined' && document.body) {
             document.body.classList.toggle('is-processing', processing);
         }
         emitState();
+    }
+
+    function resumeListening() {
+        if (!converseEnabled || explicitlyStopped) return false;
+        processing = false;
+        if (processingTimer) {
+            clearTimeout(processingTimer);
+            processingTimer = null;
+        }
+        if (restartTimer) {
+            clearTimeout(restartTimer);
+            restartTimer = null;
+        }
+        if (typeof document !== 'undefined' && document.body) {
+            document.body.classList.toggle('is-processing', false);
+        }
+        if (!globalThis.isConverseSpeechActive?.()) {
+            if (Recognition && !fallbackMode) {
+                startBrowserRecognition();
+            } else {
+                whisperRecorder.start(language);
+            }
+        }
+        emitState();
+        return true;
     }
 
     function stop(options = {}) {
@@ -546,6 +571,7 @@ export function createSpeechInputController(options = {}) {
         toggleDictation,
         toggleConverse,
         setProcessing,
+        resumeListening,
         stop
     };
 }
