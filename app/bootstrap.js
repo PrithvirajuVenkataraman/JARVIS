@@ -20,6 +20,7 @@ import * as JarvisToolDispatcher from './tool-dispatcher.js';
 import { highlightCode, normalizeLang } from './code-highlighter.js';
 import { renderMathInText, formatLatexExpression } from './math-renderer.js';
 import { renderMarkdown } from './markdown-renderer.js';
+import * as JarvisAgentOrchestrator from './agent-orchestrator.js';
 
 const engine = createConversationEngine({
     maxTurns: 12,
@@ -48,6 +49,7 @@ globalThis.JarvisToolDispatcher = Object.freeze({ ...JarvisToolDispatcher });
 globalThis.JarvisCodeHighlighter = Object.freeze({ highlightCode, normalizeLang });
 globalThis.JarvisMathRenderer = Object.freeze({ renderMathInText, formatLatexExpression });
 globalThis.JarvisMarkdownRenderer = Object.freeze({ renderMarkdown });
+globalThis.JarvisAgentOrchestrator = Object.freeze({ ...JarvisAgentOrchestrator });
 
 function initializeSpeechInput() {
     if (globalThis.__jarvisSpeechInputInstalled) return;
