@@ -127,10 +127,20 @@
                 </div>
             </div>
             <div class="chat-sidebar-search-field">
-                <input id="chat-sidebar-search-input" type="search" placeholder="Type to search chats" aria-label="Search chats" oninput="renderChatSidebarList()">
+                <input id="chat-sidebar-search-input" type="search" placeholder="Search chats & messages..." aria-label="Search chats" oninput="renderChatSidebarList()">
+            </div>
+            <div class="sidebar-view-tabs" role="tablist" aria-label="Sidebar view filter">
+                <button type="button" id="sidebar-tab-chats" class="sidebar-view-tab is-active" onclick="setSidebarViewTab('chats')" role="tab" aria-selected="true">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                    <span>Chats</span>
+                </button>
+                <button type="button" id="sidebar-tab-bookmarks" class="sidebar-view-tab" onclick="setSidebarViewTab('bookmarks')" role="tab" aria-selected="false">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16l-7-3.5L5 21V5z"/></svg>
+                    <span>Bookmarked</span>
+                </button>
             </div>
         </div>
-        <div class="chat-sidebar-section-title">Recents</div>
+        <div id="chat-sidebar-section-title" class="chat-sidebar-section-title">Recents</div>
         <div id="chat-sidebar-list" class="chat-sidebar-list" role="list"></div>
     </aside>
     <div id="chat-session-menu" class="chat-session-menu hidden" role="menu" aria-label="Chat actions">
@@ -10283,6 +10293,10 @@ let showRoutingDebugBadge = false;
                         <svg class="w-3.5 h-3.5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
                         <span>Thought</span>
                     </button>` : ''}
+                    <button type="button" class="assistant-action-btn" title="Bookmark message" onclick="toggleBookmarkAssistantMessage(this)">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/></svg>
+                        <span>Bookmark</span>
+                    </button>
                     <button type="button" class="assistant-action-btn" title="Read answer aloud" onclick="toggleSpeakAssistantMessage(this)">
                         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/></svg>
                         <span>Speak</span>
@@ -10341,6 +10355,50 @@ let showRoutingDebugBadge = false;
                 }
             } catch (err) {
                 showTemporaryMessage('Failed to copy thought');
+            }
+        }
+
+        const BOOKMARKED_MESSAGES_STORAGE_KEY = 'jarvis_bookmarked_messages';
+
+        function getBookmarkedMessages() {
+            try {
+                const saved = localStorage.getItem(BOOKMARKED_MESSAGES_STORAGE_KEY);
+                return saved ? JSON.parse(saved) : [];
+            } catch {
+                return [];
+            }
+        }
+
+        function saveBookmarkedMessages(list) {
+            try {
+                localStorage.setItem(BOOKMARKED_MESSAGES_STORAGE_KEY, JSON.stringify(list || []));
+            } catch (_) {}
+        }
+
+        function toggleBookmarkAssistantMessage(button, text) {
+            const targetText = text || getAssistantMessageTextFromButton(button);
+            if (!targetText) return;
+            const bookmarks = getBookmarkedMessages();
+            const existingIndex = bookmarks.findIndex(b => b.text === targetText);
+            if (existingIndex >= 0) {
+                bookmarks.splice(existingIndex, 1);
+                saveBookmarkedMessages(bookmarks);
+                if (button) button.classList.remove('is-bookmarked');
+                showTemporaryMessage('Bookmark removed.');
+            } else {
+                bookmarks.unshift({
+                    id: `bm_${Date.now()}`,
+                    text: targetText,
+                    sessionId: typeof activeChatSessionId !== 'undefined' ? activeChatSessionId : '',
+                    timestamp: new Date().toISOString(),
+                    title: document.querySelector('.chat-session-row.is-active .chat-session-title')?.textContent || 'Saved insight'
+                });
+                saveBookmarkedMessages(bookmarks);
+                if (button) button.classList.add('is-bookmarked');
+                showTemporaryMessage('Message bookmarked.');
+            }
+            if (typeof currentSidebarViewTab !== 'undefined' && currentSidebarViewTab === 'bookmarks') {
+                renderChatSidebarList();
             }
         }
 
@@ -19455,6 +19513,16 @@ function exportChatHistoryMarkdown() {
     }
 }
 
+function exportChatHistoryPdf() {
+    closeChatExportFormatPicker();
+    try {
+        window.print();
+        showTemporaryMessage('Opening print / PDF preview...');
+    } catch (_) {
+        showTemporaryMessage('Could not open print preview.');
+    }
+}
+
 function closeChatExportFormatPicker() {
     document.getElementById('chat-export-format-picker')?.remove();
 }
@@ -19474,9 +19542,10 @@ function showChatExportFormatPicker() {
                 <button type="button" onclick="closeChatExportFormatPicker()" aria-label="Close export options">×</button>
             </div>
             <div class="export-format-actions">
-                <button type="button" onclick="exportChatHistoryJson(); closeChatExportFormatPicker();">JSON</button>
+                <button type="button" onclick="exportChatHistoryMarkdown(); closeChatExportFormatPicker();">Markdown (.md)</button>
+                <button type="button" onclick="exportChatHistoryPdf(); closeChatExportFormatPicker();">PDF (Print)</button>
+                <button type="button" onclick="exportChatHistoryJson(); closeChatExportFormatPicker();">JSON (.json)</button>
                 <button type="button" onclick="exportChatHistoryText(); closeChatExportFormatPicker();">TXT</button>
-                <button type="button" onclick="exportChatHistoryMarkdown(); closeChatExportFormatPicker();">Markdown</button>
             </div>
         </div>
     `;
@@ -24363,21 +24432,75 @@ function formatChatSessionDate(value) {
     return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
 
+let currentSidebarViewTab = 'chats';
+
+function setSidebarViewTab(tab) {
+    currentSidebarViewTab = tab === 'bookmarks' ? 'bookmarks' : 'chats';
+    const chatsTab = document.getElementById('sidebar-tab-chats');
+    const bookmarksTab = document.getElementById('sidebar-tab-bookmarks');
+    const sectionTitle = document.getElementById('chat-sidebar-section-title');
+    if (chatsTab) {
+        chatsTab.classList.toggle('is-active', currentSidebarViewTab === 'chats');
+        chatsTab.setAttribute('aria-selected', currentSidebarViewTab === 'chats' ? 'true' : 'false');
+    }
+    if (bookmarksTab) {
+        bookmarksTab.classList.toggle('is-active', currentSidebarViewTab === 'bookmarks');
+        bookmarksTab.setAttribute('aria-selected', currentSidebarViewTab === 'bookmarks' ? 'true' : 'false');
+    }
+    if (sectionTitle) {
+        sectionTitle.textContent = currentSidebarViewTab === 'bookmarks' ? 'Saved Insights' : 'Recents';
+    }
+    renderChatSidebarList();
+}
+
+function togglePinChatSession(sessionId) {
+    const session = chatSessions.find(s => s.id === sessionId);
+    if (!session) return;
+    session.pinned = !session.pinned;
+    saveChatSessions();
+    renderChatSidebarList();
+    showTemporaryMessage(session.pinned ? 'Chat pinned to top.' : 'Chat unpinned.');
+}
+
 function renderChatSidebarList() {
     const list = document.getElementById('chat-sidebar-list');
     if (!list) return;
     const query = String(document.getElementById('chat-sidebar-search-input')?.value || '').toLowerCase().trim();
+
+    if (currentSidebarViewTab === 'bookmarks') {
+        const bookmarks = getBookmarkedMessages().filter(b => !query || b.text.toLowerCase().includes(query) || (b.title || '').toLowerCase().includes(query));
+        if (!bookmarks.length) {
+            list.innerHTML = `<p class="chat-sidebar-empty">${query ? 'No matching bookmarks.' : 'No bookmarked insights yet. Click the Bookmark icon under any answer to save it.'}</p>`;
+            return;
+        }
+        list.innerHTML = bookmarks.map(b => `
+            <div class="bookmarked-item-card" onclick="copyAssistantMessageText(null, '${escapeJsString(b.text)}')">
+                <div class="bookmarked-item-meta">
+                    <span>${escapeHtml(b.title || 'Saved insight')}</span>
+                    <span>${formatChatSessionDate(b.timestamp)}</span>
+                </div>
+                <div class="bookmarked-item-snippet">${escapeHtml(b.text)}</div>
+            </div>
+        `).join('');
+        return;
+    }
+
     const sessions = getVisibleChatSessions()
         .filter(session => !query || searchChatSessionText(session).includes(query))
         .sort((a, b) => {
             if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
             return new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime();
         });
+
     if (!sessions.length) {
-        list.innerHTML = '<p class="chat-sidebar-empty">No saved chats yet.</p>';
+        list.innerHTML = `<p class="chat-sidebar-empty">${query ? 'No matching chats found.' : 'No saved chats yet.'}</p>`;
         return;
     }
-    list.innerHTML = sessions.map(session => {
+
+    const pinnedSessions = sessions.filter(s => s.pinned);
+    const recentSessions = sessions.filter(s => !s.pinned);
+
+    const renderRow = session => {
         const snippet = getChatSessionSearchSnippet(session, query);
         return `
         <div class="chat-session-row ${session.id === activeChatSessionId ? 'is-active' : ''} ${session.pinned ? 'is-pinned' : ''}"
@@ -24394,16 +24517,34 @@ function renderChatSidebarList() {
                 <span class="chat-session-meta">${session.pinned ? 'Pinned' : formatChatSessionDate(session.updatedAt)}</span>
                 ${snippet ? `<span class="chat-session-snippet">${escapeHtml(snippet)}</span>` : ''}
             </div>
-            <button type="button" class="chat-session-more" onclick="openChatSessionMenu(event, '${escapeJsString(session.id)}')" aria-label="Chat actions">
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
-                    <circle cx="12" cy="5" r="1"></circle>
-                    <circle cx="12" cy="12" r="1"></circle>
-                    <circle cx="12" cy="19" r="1"></circle>
-                </svg>
-            </button>
+            <div class="chat-session-actions-group">
+                <button type="button" class="chat-session-pin-btn ${session.pinned ? 'is-pinned' : ''}" title="${session.pinned ? 'Unpin chat' : 'Pin chat to top'}" onclick="event.stopPropagation(); togglePinChatSession('${escapeJsString(session.id)}')">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="${session.pinned ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2"><line x1="12" y1="17" x2="12" y2="22"></line><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"></path></svg>
+                </button>
+                <button type="button" class="chat-session-more" onclick="event.stopPropagation(); openChatSessionMenu(event, '${escapeJsString(session.id)}')" aria-label="Chat actions">
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+                        <circle cx="12" cy="5" r="1"></circle>
+                        <circle cx="12" cy="12" r="1"></circle>
+                        <circle cx="12" cy="19" r="1"></circle>
+                    </svg>
+                </button>
+            </div>
         </div>
     `;
-    }).join('');
+    };
+
+    let html = '';
+    if (pinnedSessions.length && !query) {
+        html += '<div class="chat-sidebar-section-title" style="margin-top:4px;">Pinned</div>';
+        html += pinnedSessions.map(renderRow).join('');
+        if (recentSessions.length) {
+            html += '<div class="chat-sidebar-section-title" style="margin-top:12px;">Recents</div>';
+            html += recentSessions.map(renderRow).join('');
+        }
+    } else {
+        html = sessions.map(renderRow).join('');
+    }
+    list.innerHTML = html;
 }
 
 function restoreChatSessionFromSidebar(sessionId) {
