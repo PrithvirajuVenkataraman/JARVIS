@@ -9265,38 +9265,73 @@ let showRoutingDebugBadge = false;
                 .replace(/\[Metro\]/g, '\u{1F687}');
         }
 
-        function sanitizeTextForConverseSpeech(text) {
-            let result = String(text || '')
-                .replace(/```[\s\S]*?```/g, ' code block omitted ')
-                .replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '$1')
-                .replace(/https?:\/\/\S+/gi, '')
-                .replace(/(?:^|\n)\s*Sources:\s*[\s\S]*$/i, '')
-                .replace(/[*_`#>~|]/g, ' ');
+        let cachedVoicesList = [];
+        function refreshAvailableVoices() {
+            if (!('speechSynthesis' in window)) return [];
+            try {
+                const list = window.speechSynthesis.getVoices() || [];
+                if (list.length > 0) {
+                    cachedVoicesList = list;
+                }
+            } catch (_) {}
+            return cachedVoicesList;
+        }
 
-            // Convert caret powers: x^2 -> x squared, x^3 -> x cubed, x^N -> x to the power of N
+        if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+            refreshAvailableVoices();
+            window.speechSynthesis.onvoiceschanged = refreshAvailableVoices;
+        }
+
+        function sanitizeTextForConverseSpeech(text) {
+            let result = String(text || '');
+
+            // 1. Remove code blocks and inline code
+            result = result.replace(/```[\s\S]*?```/g, ' The code has been provided on your screen. ');
+            result = result.replace(/`([^`]+)`/g, '$1');
+
+            // 2. Remove markdown tables
+            result = result.replace(/\|[^\n]+\|(?:\n\|[^\n]+\|)*/g, ' The details are displayed on your screen. ');
+
+            // 3. Remove markdown image tags & links: [text](url) -> text
+            result = result.replace(/!\[[^\]]*\]\([^)]*\)/g, '');
+            result = result.replace(/\[([^\]]+)\]\((?:https?:\/\/[^)]+)\)/g, '$1');
+            result = result.replace(/https?:\/\/\S+/gi, '');
+
+            // 4. Remove source citations, HTML tags & footnote markers
+            result = result.replace(/(?:^|\n)\s*Sources:\s*[\s\S]*$/i, '');
+            result = result.replace(/<[^>]+>/g, ' ');
+            result = result.replace(/\[\d+\]/g, '');
+            result = result.replace(/【[^】]+】/g, '');
+
+            // 5. Convert bullet points / numbered lists into natural spoken pauses
+            result = result.replace(/^\s*[-*•]\s+/gm, '. ');
+            result = result.replace(/^\s*\d+\.\s+/gm, '. ');
+
+            // 6. Remove markdown headers & symbols
+            result = result.replace(/^[#\s]+/gm, '');
+            result = result.replace(/[*_~|#>]+/g, ' ');
+
+            // 7. Math & number pronunciation expansions
             result = result.replace(/(\b[a-zA-Z0-9]+|\))\s*\^\s*2\b/g, '$1 squared');
             result = result.replace(/(\b[a-zA-Z0-9]+|\))\s*\^\s*3\b/g, '$1 cubed');
             result = result.replace(/(\b[a-zA-Z0-9]+|\))\s*\^\s*([0-9a-zA-Z]+)\b/g, '$1 to the power of $2');
-
-            // Convert Unicode superscripts: x² -> x squared, x³ -> x cubed
             result = result.replace(/(\b[a-zA-Z0-9]+|\))²/g, '$1 squared');
             result = result.replace(/(\b[a-zA-Z0-9]+|\))³/g, '$1 cubed');
             result = result.replace(/²/g, ' squared');
             result = result.replace(/³/g, ' cubed');
-            result = result.replace(/⁴/g, ' to the power of 4');
-            result = result.replace(/⁵/g, ' to the power of 5');
-            result = result.replace(/⁶/g, ' to the power of 6');
-            result = result.replace(/⁷/g, ' to the power of 7');
-            result = result.replace(/⁸/g, ' to the power of 8');
-            result = result.replace(/⁹/g, ' to the power of 9');
-
-            // Convert decimals: 11.2 -> 11 point 2, 3.14 -> 3 point 14
             result = result.replace(/(\b\d+)\.(\d+\b)/g, '$1 point $2');
 
-            return result
-                .replace(/\s+/g, ' ')
-                .trim()
-                .slice(0, 900);
+            // 8. Clean up whitespace and punctuation
+            result = result.replace(/\s+/g, ' ').replace(/\s+([,.:;?!])/g, '$1').trim();
+
+            // 9. Conversational Voice Condensation:
+            // Extract complete sentences and condense long explanations to 1-3 spoken sentences
+            const sentences = result.match(/[^.!?]+[.!?]+/g) || [result];
+            if (sentences.length > 3) {
+                result = sentences.slice(0, 3).map(s => s.trim()).join(' ');
+            }
+
+            return result.slice(0, 500).trim();
         }
 
         function splitConverseSpeechSegments(text) {
@@ -9324,7 +9359,7 @@ let showRoutingDebugBadge = false;
                 }
                 if (buffer.trim()) segments.push(buffer.trim());
             }
-            return segments.slice(0, 12);
+            return segments.slice(0, 8);
         }
 
         function detectScriptLanguage(text) {
@@ -9340,14 +9375,32 @@ let showRoutingDebugBadge = false;
 
         function getBestVoiceForLanguage(lang = 'en-US') {
             if (!('speechSynthesis' in window)) return null;
-            const voices = window.speechSynthesis.getVoices() || [];
+            const voices = refreshAvailableVoices();
             if (!voices.length) return null;
-            const normalized = String(lang || 'en-US').toLowerCase();
+
+            const normalized = String(lang || 'en-US').toLowerCase().replace('_', '-');
             const prefix = normalized.split('-')[0];
-            return voices.find(v => v.lang && v.lang.toLowerCase() === normalized) ||
-                   voices.find(v => v.lang && v.lang.toLowerCase().replace('_', '-').startsWith(prefix)) ||
-                   voices.find(v => v.default) ||
-                   voices[0] || null;
+
+            const langVoices = voices.filter(v => {
+                const vl = String(v.lang || '').toLowerCase().replace('_', '-');
+                return vl === normalized || vl.startsWith(prefix);
+            });
+
+            const candidates = langVoices.length > 0 ? langVoices : voices;
+
+            // Prioritize modern high-fidelity Natural neural browser voices:
+            // 1. Windows/Edge Natural neural voices (e.g. "Jenny", "Guy", "Aria", "Christopher")
+            // 2. Google neural voices (e.g. "Google US English", "Google UK English")
+            // 3. Apple Enhanced/Siri voices (e.g. "Samantha (Enhanced)", "Alex", "Ava", "Siri")
+            // 4. Default system voices for language
+            const naturalVoice = candidates.find(v => /\b(?:natural|online\s*\(natural\))\b/i.test(v.name)) ||
+                                 candidates.find(v => /\b(?:google|enhanced|premium|siri)\b/i.test(v.name)) ||
+                                 candidates.find(v => /\b(?:jenny|guy|aria|christopher|samantha|alex|ava|karen)\b/i.test(v.name)) ||
+                                 candidates.find(v => v.lang && v.lang.toLowerCase().replace('_', '-') === normalized) ||
+                                 candidates.find(v => v.default) ||
+                                 candidates[0] || null;
+
+            return naturalVoice;
         }
 
         function createConverseUtterance(spokenText, index, total) {
@@ -9361,8 +9414,8 @@ let showRoutingDebugBadge = false;
             const question = /\?$/.test(text);
             const emphasis = /!$/.test(text) || /\b(important|key|remember|careful|exactly)\b/i.test(text);
             const finalSegment = index >= total - 1;
-            utterance.rate = question ? 1.03 : (emphasis ? 0.96 : 0.99);
-            utterance.pitch = question ? 1.12 : (emphasis ? 1.06 : (finalSegment ? 0.94 : 1.01));
+            utterance.rate = question ? 1.02 : (emphasis ? 0.96 : 0.98);
+            utterance.pitch = question ? 1.08 : (emphasis ? 1.04 : (finalSegment ? 0.96 : 1.00));
             utterance.volume = 1;
             return utterance;
         }
@@ -9577,6 +9630,18 @@ let showRoutingDebugBadge = false;
                 if (window.speechSynthesis.paused) {
                     window.speechSynthesis.resume();
                 }
+                refreshAvailableVoices();
+                const silentUtterance = new SpeechSynthesisUtterance(' ');
+                silentUtterance.volume = 0.01;
+                silentUtterance.rate = 10;
+                window.speechSynthesis.speak(silentUtterance);
+                setTimeout(() => {
+                    try {
+                        if (window.speechSynthesis.speaking) {
+                            window.speechSynthesis.cancel();
+                        }
+                    } catch (_) {}
+                }, 30);
                 return true;
             } catch (error) {
                 return false;
