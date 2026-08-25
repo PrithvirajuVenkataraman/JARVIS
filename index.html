@@ -9555,7 +9555,9 @@ let showRoutingDebugBadge = false;
                     setConverseUiState('listening', 'speech_finished');
                     // 150ms acoustic echo debounce before auto-rearming recognition
                     setTimeout(() => {
-                        window.JarvisSpeechInput?.setProcessing?.(false);
+                        const speechInput = window.JarvisSpeechInput;
+                        if (speechInput?.resumeListening) speechInput.resumeListening();
+                        else speechInput?.setProcessing?.(false);
                         toggleSendButton();
                     }, 150);
                 }
@@ -9570,7 +9572,8 @@ let showRoutingDebugBadge = false;
 
             if (!('speechSynthesis' in window) || !('SpeechSynthesisUtterance' in window)) {
                 streamingConverseSpeech.active = false;
-                setConverseUiState('recovering', 'speech_unsupported');
+                setConverseUiState('listening', 'speech_unsupported');
+                window.JarvisSpeechInput?.resumeListening?.();
                 return;
             }
 
@@ -9581,7 +9584,21 @@ let showRoutingDebugBadge = false;
             activeConverseSpeechUtterance = utterance;
             activeConverseUtterances.add(utterance);
 
+            let segmentDone = false;
+            const segmentWatchdog = setTimeout(() => {
+                if (segmentDone) return;
+                segmentDone = true;
+                activeConverseUtterances.delete(utterance);
+                if (activeConverseSpeechUtterance === utterance) activeConverseSpeechUtterance = null;
+                streamingConverseSpeech.spokenSegments.push(nextSegment);
+                streamingConverseSpeech.isPlaying = false;
+                processStreamingSpeechQueue();
+            }, 10000);
+
             utterance.onend = () => {
+                if (segmentDone) return;
+                segmentDone = true;
+                clearTimeout(segmentWatchdog);
                 activeConverseUtterances.delete(utterance);
                 if (activeConverseSpeechUtterance === utterance) activeConverseSpeechUtterance = null;
                 streamingConverseSpeech.spokenSegments.push(nextSegment);
@@ -9590,17 +9607,26 @@ let showRoutingDebugBadge = false;
             };
 
             utterance.onerror = () => {
+                if (segmentDone) return;
+                segmentDone = true;
+                clearTimeout(segmentWatchdog);
                 activeConverseUtterances.delete(utterance);
                 if (activeConverseSpeechUtterance === utterance) activeConverseSpeechUtterance = null;
                 streamingConverseSpeech.isPlaying = false;
                 if (streamingConverseSpeech.active) {
                     processStreamingSpeechQueue();
+                } else {
+                    setConverseUiState('listening', 'speech_error');
+                    window.JarvisSpeechInput?.resumeListening?.();
                 }
             };
 
             try {
                 window.speechSynthesis.speak(utterance);
             } catch (err) {
+                if (segmentDone) return;
+                segmentDone = true;
+                clearTimeout(segmentWatchdog);
                 activeConverseUtterances.delete(utterance);
                 streamingConverseSpeech.isPlaying = false;
                 processStreamingSpeechQueue();
@@ -9616,16 +9642,25 @@ let showRoutingDebugBadge = false;
                 return;
             }
             if (!('speechSynthesis' in window) || !('SpeechSynthesisUtterance' in window)) {
-                setConverseUiState('recovering', 'speech_unsupported');
+                setConverseUiState('listening', 'speech_unsupported');
                 logLatencyTrace('speech_blocked', { stage: 'unsupported' });
+                window.JarvisSpeechInput?.resumeListening?.();
                 showConverseSpeechUnlockPrompt();
                 return;
             }
             const spokenText = sanitizeTextForConverseSpeech(text);
-            if (!spokenText) return;
+            if (!spokenText) {
+                setConverseUiState('listening', 'no_spoken_content');
+                window.JarvisSpeechInput?.resumeListening?.();
+                return;
+            }
             stopConverseSpeech();
             const segments = splitConverseSpeechSegments(spokenText);
-            if (!segments.length) return;
+            if (!segments.length) {
+                setConverseUiState('listening', 'no_speech_segments');
+                window.JarvisSpeechInput?.resumeListening?.();
+                return;
+            }
             const speechRun = { cancelled: false, index: 0, total: segments.length };
             activeConverseSpeechRun = speechRun;
             const finishSpeechRun = reason => {
@@ -9636,7 +9671,9 @@ let showRoutingDebugBadge = false;
                 setConverseUiState('listening', reason || 'speech_finished');
                 logLatencyTrace('speech_end', { source: 'converse', segments: speechRun.total });
                 setTimeout(() => {
-                    window.JarvisSpeechInput?.setProcessing?.(false);
+                    const speechInput = window.JarvisSpeechInput;
+                    if (speechInput?.resumeListening) speechInput.resumeListening();
+                    else speechInput?.setProcessing?.(false);
                     toggleSendButton();
                 }, 150);
             };
@@ -9650,19 +9687,35 @@ let showRoutingDebugBadge = false;
                 speechRun.index += 1;
                 activeConverseSpeechUtterance = utterance;
                 activeConverseUtterances.add(utterance);
+
+                let segDone = false;
+                const segWatchdog = setTimeout(() => {
+                    if (segDone) return;
+                    segDone = true;
+                    activeConverseUtterances.delete(utterance);
+                    if (activeConverseSpeechUtterance === utterance) activeConverseSpeechUtterance = null;
+                    speakNextSegment();
+                }, 10000);
+
                 utterance.onend = () => {
+                    if (segDone) return;
+                    segDone = true;
+                    clearTimeout(segWatchdog);
                     activeConverseUtterances.delete(utterance);
                     if (activeConverseSpeechUtterance === utterance) activeConverseSpeechUtterance = null;
                     speakNextSegment();
                 };
                 utterance.onerror = event => {
+                    if (segDone) return;
+                    segDone = true;
+                    clearTimeout(segWatchdog);
                     activeConverseUtterances.delete(utterance);
                     if (activeConverseSpeechUtterance === utterance) activeConverseSpeechUtterance = null;
                     if (speechRun.cancelled) return;
                     activeConverseSpeechRun = null;
-                    setConverseUiState('recovering', `speech_blocked:${String(event?.error || 'unknown')}`);
+                    setConverseUiState('listening', `speech_blocked:${String(event?.error || 'unknown')}`);
                     logLatencyTrace('speech_blocked', { stage: 'synthesis', error: String(event?.error || 'unknown') });
-                    window.JarvisSpeechInput?.setProcessing?.(false);
+                    window.JarvisSpeechInput?.resumeListening?.();
                     showConverseSpeechUnlockPrompt();
                 };
                 window.speechSynthesis.speak(utterance);
