@@ -6285,3 +6285,112 @@ body:not(.dark) .assistant-followup-chip:hover {
     -webkit-box-orient: vertical;
     overflow: hidden;
 }
+
+/* ==========================================================================
+   Code Block Syntax Highlighting (Modern Dark Theme)
+   ========================================================================== */
+.assistant-md-code-block code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 13.5px;
+    line-height: 1.6;
+    color: #e2e8f0;
+}
+
+.tok-kw {
+    color: #c084fc;
+    font-weight: 600;
+}
+
+.tok-str {
+    color: #4ade80;
+}
+
+.tok-num {
+    color: #fb923c;
+}
+
+.tok-comm {
+    color: #64748b;
+    font-style: italic;
+}
+
+.tok-fn {
+    color: #60a5fa;
+}
+
+.tok-type {
+    color: #38bdf8;
+    font-weight: 500;
+}
+
+.tok-tag {
+    color: #f43f5e;
+}
+
+.tok-attr {
+    color: #fbbf24;
+}
+
+/* ==========================================================================
+   LaTeX Math Formula Styles
+   ========================================================================== */
+.math-inline {
+    font-family: "KaTeX_Math", "Times New Roman", Times, serif, "Cambria Math";
+    font-style: italic;
+    padding: 0 3px;
+    color: #38bdf8;
+}
+
+.math-display-block {
+    display: flex;
+    justify-content: center;
+    margin: 14px 0;
+    overflow-x: auto;
+    padding: 10px 16px;
+    background: rgba(15, 23, 42, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+}
+
+.math-display-inner {
+    font-family: "KaTeX_Math", "Times New Roman", Times, serif, "Cambria Math";
+    font-size: 1.15em;
+    color: #7dd3fc;
+    letter-spacing: 0.5px;
+}
+
+.math-fraction {
+    display: inline-flex;
+    flex-direction: column;
+    vertical-align: middle;
+    text-align: center;
+    padding: 0 4px;
+    font-size: 0.9em;
+}
+
+.math-num {
+    border-bottom: 1.5px solid currentColor;
+    padding-bottom: 1px;
+}
+
+.math-den {
+    padding-top: 1px;
+}
+
+.math-sqrt {
+    display: inline-flex;
+    align-items: baseline;
+    padding: 0 2px;
+}
+
+.math-radicand {
+    border-top: 1.5px solid currentColor;
+    padding-top: 1px;
+    margin-left: 1px;
+}
+
+.math-text {
+    font-family: var(--app-font-family);
+    font-style: normal;
+    color: inherit;
+}
