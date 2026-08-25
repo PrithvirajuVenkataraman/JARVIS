@@ -718,14 +718,14 @@ function isRecipeRequest(text) {
 function isMathCalculationRequest(text) {
     const t = String(text || '').toLowerCase().trim();
     if (!t) return false;
-    if (/\b(weather|forecast|news|headline|translate|joke|hotel|restaurant|code|algorithm|complexity|function|class|architecture|plan|migration|protocol|dijkstra|byzantine)\b/.test(t)) return false;
     if (isAlgebraEquationRequest(t)) return false;
-    // Pure arithmetic expressions like "25 * 4 + 10" or "what is 50 / 2"
-    if (/^[\d\s()+\-*/^%.=,]+$/.test(t) && /[+\-*/^%]/.test(t)) return true;
-    if (/^(what is|what's|calculate|calc|compute|evaluate|solve)\s+[-+*/^%().,\d\s]+=?$/.test(t)) return true;
+    // Pure arithmetic expressions like "25 * 4 + 10"
+    if (/^[\d\s()+\-*/^%.=,]+$/.test(t) && /[+\-*/^%]/.test(t) && /\d/.test(t)) return true;
+    // Calculation prefixes followed strictly by arithmetic symbols & numbers (e.g. "what is 50 / 2", "calc 12 * 8")
+    if (/^(?:what is|what's|calculate|calc|compute|evaluate|solve)\s+[-+*/^%().,\d\s]+=?$/i.test(t) && /\d/.test(t)) return true;
     // Scientific function calls with numbers like "sqrt(144)" or "sin(30)" or "log(100)"
-    if (/\b(?:sqrt|sin|cos|tan|log|ln|pow|exp|abs|floor|ceil)\s*\(\s*[-+*/^%().,\d\s]+\s*\)/i.test(t)) return true;
-    if (/\b(?:scientific calculation|scientific calculator)\b/i.test(t)) return true;
+    if (/^(?:what is\s+|calculate\s+|compute\s+|eval\s+)?(?:sqrt|sin|cos|tan|log|ln|pow|exp|abs|floor|ceil)\s*\(\s*[-+*/^%().,\d\s]+\s*\)$/i.test(t)) return true;
+    if (/^(?:scientific calculation|scientific calculator)$/i.test(t)) return true;
     return false;
 }
 
@@ -10863,16 +10863,17 @@ let showRoutingDebugBadge = false;
 
             // 2. Explicit financial bill/expense splitting directive
             const hasFinancialSplit = /\bsplit\s+(?:the\s+)?(?:bill|check|receipt|dinner|lunch|trip|rent|groceries|tab|expense|expenses|cost|amount|total)\b/i.test(t);
-            const hasPersonSplit = /\bsplit\s+(?:between|among|across|with)\s+\d+\s*(?:people|persons|friends|members)?\b/i.test(t);
-            const hasPaymentVerb = /\b(?:paid|spent|contributed|pay|owes?|owed)\b/i.test(t);
-            const hasCurrency = /(?:[\$€£₹]|rs\.?|inr|usd|eur|gbp|bucks|rupees|dollars|euros)/i.test(t);
+            const hasPersonSplit = /\bsplit\s+(?:between|among|across|with)\s+\d+\s+(?:people|persons|friends|members|roommates|ways)\b/i.test(t) ||
+                                   /\bsplit\s+(?:between|among|with)\s+[A-Za-z]+\s+(?:and|&)\s+[A-Za-z]+\b/i.test(t);
+            const hasPaymentVerb = /\b(?:paid|spent|contributed|owes?|owed)\b/i.test(t);
+            const hasCurrency = /(?:[\$€£₹]|\b(?:rs\.?|inr|usd|eur|gbp|bucks|rupees|dollars|euros)\b)/i.test(t);
 
             if ((hasFinancialSplit || hasPersonSplit) && (hasPaymentVerb || hasCurrency)) {
                 return true;
             }
 
             // 3. Person-payment contributions (e.g. "Alice paid 500, Bob paid 300, split...")
-            const paymentPattern = /\b[a-z]+\s+(?:paid|spent|contributed)\s*(?:[\$€£₹]|rs\.?|inr|usd|eur)?\s*\d+/i;
+            const paymentPattern = /\b[A-Za-z]+\s+(?:paid|spent|contributed)\s*(?:[\$€£₹]|\b(?:rs\.?|inr|usd|eur)\b)?\s*\d+/i;
             if (paymentPattern.test(raw) && /\b(?:split|owe|owes|between|among|share|total)\b/i.test(t)) {
                 return true;
             }
