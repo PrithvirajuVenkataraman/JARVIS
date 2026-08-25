@@ -129,11 +129,13 @@ assert.equal(detectLanguageSwitchCommand('change language to Telugu'), 'te-IN');
 assert.equal(detectLanguageSwitchCommand('talk in Kannada'), 'kn-IN');
 assert.equal(detectLanguageSwitchCommand('switch to English'), 'en-US');
 
-// 9. Test Speech Filler Cleaner
+// 9. Test Speech Filler Cleaner & Auto-Corrector
 import { cleanSpeechFillers } from '../app/speech-input.js';
-assert.equal(cleanSpeechFillers('um hello uh world er'), 'hello world');
-assert.equal(cleanSpeechFillers('ah explain more details please'), 'explain more details please');
-assert.equal(cleanSpeechFillers('yes sure'), 'yes sure');
+assert.equal(cleanSpeechFillers('um hello uh world er'), 'Hello world');
+assert.equal(cleanSpeechFillers('ah explain more details please'), 'Explain more details please');
+assert.equal(cleanSpeechFillers('yes sure'), 'Yes sure');
+assert.equal(cleanSpeechFillers('um i dont know like what is the answer'), "I don't know what is the answer");
+assert.equal(cleanSpeechFillers('the the algorithm is is optimal'), "The algorithm is optimal");
 
 // 10. Test Dictation onend Natural Completion and Single-Click Restart
 const dictTestController = createSpeechInputController({
@@ -160,11 +162,11 @@ assert.equal(typeof whisper.cancel, 'function');
 whisper.cancel();
 assert.equal(whisper.isRecording(), false);
 
-// 12. Test Elongated Speech Filler Cleaning
-assert.equal(cleanSpeechFillers('ummm hello uhhh world errr'), 'hello world');
-assert.equal(cleanSpeechFillers('ahhh explain more details please'), 'explain more details please');
-assert.equal(cleanSpeechFillers('ermmm wait a second'), 'wait a second');
-assert.equal(cleanSpeechFillers('human umbrella summary'), 'human umbrella summary');
+// 12. Test Elongated Speech Filler Cleaning & Auto-Correction
+assert.equal(cleanSpeechFillers('ummm hello uhhh world errr'), 'Hello world');
+assert.equal(cleanSpeechFillers('ahhh explain more details please'), 'Explain more details please');
+assert.equal(cleanSpeechFillers('ermmm wait a second'), 'Wait a second');
+assert.equal(cleanSpeechFillers('human umbrella summary'), 'Human umbrella summary');
 
 // 13. Test Early Toggle-Off Does Not Trigger Fallback Whisper Leak
 const earlyStopCtrl = createSpeechInputController({
@@ -179,7 +181,7 @@ earlyStopCtrl.stop();
 assert.equal(earlyStopCtrl.getState().listening, false);
 assert.equal(earlyStopCtrl.getState().mode, 'idle');
 
-// 14. Test UI Interim Typing Duplication Prevention
+// 14. Test Live On-Screen Speech Rendering and Clean Prompt Box (Not Stuffed into Composer)
 import { installSpeechInputUI } from '../app/speech-input.js';
 
 class MockDOMElement {
@@ -230,31 +232,45 @@ globalThis.document = {
 globalThis.SpeechRecognition = FakeRecognition;
 globalThis.addEventListener = () => {};
 
-const uiCtrl = installSpeechInputUI();
+let liveScreenSpeechUpdates = [];
+let submittedTranscripts = [];
+globalThis.updateLiveSpeechTranscriptionOnScreen = (text, isInterim, mode) => {
+    liveScreenSpeechUpdates.push({ text, isInterim, mode });
+};
+globalThis.clearLiveSpeechTranscriptionOnScreen = () => {
+    liveScreenSpeechUpdates.push({ cleared: true });
+};
+
+const uiCtrl = installSpeechInputUI({
+    async onSubmit(submission) {
+        submittedTranscripts.push(submission);
+    }
+});
 const textInput = globalThis.document.getElementById('text-input');
-textInput.value = 'hello';
+textInput.value = '';
 textInput.dispatchEvent({ type: 'input' });
 
 await globalThis.toggleVoiceToText();
 const activeUiRec = FakeRecognition.instances.at(-1);
 
-// Interim result
+// Interim result: appears immediately on screen, NOT stuffed into textInput
 activeUiRec.onresult?.({
     resultIndex: 0,
-    results: [{ 0: { transcript: 'world how are you' }, isFinal: false }]
+    results: [{ 0: { transcript: 'um what is the capital of france' }, isFinal: false }]
 });
-assert.equal(textInput.value, 'hello world how are you');
+assert.equal(textInput.value, '', 'Prompt box must remain clean');
+assert.ok(liveScreenSpeechUpdates.length > 0);
+assert.equal(liveScreenSpeechUpdates.at(-1).text, 'What is the capital of france');
 
-// User edits input (adds comma)
-textInput.value = 'hello, world how are you';
-textInput.dispatchEvent({ type: 'input' });
-
-// Final result arrives
+// Final result arrives: Auto-corrected and submitted directly onto screen
 activeUiRec.onresult?.({
     resultIndex: 0,
-    results: [{ 0: { transcript: 'world how are you' }, isFinal: true }]
+    results: [{ 0: { transcript: 'um what is the capital of france' }, isFinal: true }]
 });
-assert.equal(textInput.value, 'hello, world how are you');
+assert.equal(textInput.value, '', 'Prompt box stays clean on final submit');
+assert.ok(submittedTranscripts.length > 0);
+assert.equal(submittedTranscripts.at(-1).text, 'What is the capital of france');
+assert.equal(submittedTranscripts.at(-1).source, 'vtt');
 await globalThis.toggleVoiceToText(); // stop
 
 // 14b. Test Converse Mode toggle via UI without recursion
