@@ -9316,15 +9316,42 @@ let showRoutingDebugBadge = false;
             const statusText = document.getElementById('converse-live-status-text');
             const transcriptEl = document.getElementById('converse-live-transcript');
             const langSelect = document.getElementById('converse-live-language');
-            if (!overlay) return;
+            if (overlay) {
+                // Ensure detached modal popup is always hidden so interaction happens directly in main chat window
+                overlay.classList.add('hidden');
+            }
 
             const speechState = window.JarvisSpeechInput?.getState?.() || {};
             const isConverseActive = Boolean(speechState.converseEnabled);
 
-            overlay.classList.toggle('hidden', !isConverseActive);
-
             if (langSelect && speechState.language) {
                 langSelect.value = speechState.language;
+            }
+
+            const vttBtn = document.getElementById('voice-to-text-btn');
+            const vttWaveform = document.getElementById('vtt-waveform-container');
+            const speechStatus = document.getElementById('speech-input-status');
+
+            if (vttBtn) {
+                vttBtn.classList.toggle('is-listening', isConverseActive);
+                vttBtn.classList.toggle('is-converse-active', isConverseActive);
+                vttBtn.setAttribute('aria-pressed', isConverseActive ? 'true' : 'false');
+            }
+            if (vttWaveform) {
+                vttWaveform.classList.toggle('hidden', !isConverseActive);
+                vttWaveform.classList.toggle('is-active', isConverseActive && !speechState.processing);
+            }
+
+            if (speechStatus && isConverseActive) {
+                if (state === 'speaking') {
+                    speechStatus.textContent = 'Speaking...';
+                } else if (state === 'thinking' || speechState.processing) {
+                    speechStatus.textContent = 'Thinking...';
+                } else if (transcriptText) {
+                    speechStatus.textContent = `Hearing: "${transcriptText}"`;
+                } else {
+                    speechStatus.textContent = 'Listening (speak now)...';
+                }
             }
 
             if (orb) {
