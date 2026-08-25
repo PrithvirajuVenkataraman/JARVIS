@@ -892,7 +892,7 @@ export function installSpeechInputUI(options = {}) {
         return toggled;
     };
 
-    globalThis.JarvisSpeechInput = controller;
+    globalThis.JarvisSpeechInput = controller; 
     globalThis.JarvisSpeechInput.toggleConverse = globalThis.toggleConverseMode;
     globalThis.JarvisSpeechInput.resetCommittedText = globalThis.resetSpeechInputCommittedText;
     globalThis.syncVttUiState = () => controller.getState();
