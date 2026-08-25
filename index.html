@@ -358,18 +358,23 @@
                     class="composer-input"
                     onkeydown="handleComposerKeydown(event)"
                     oninput="handleComposerInput()"></textarea>
-                <div id="vtt-waveform-container" class="vtt-waveform-container hidden" aria-hidden="true">
-                    <div class="vtt-waveform-bars">
-                        <span class="vtt-waveform-bar" style="--i:1"></span>
-                        <span class="vtt-waveform-bar" style="--i:2"></span>
-                        <span class="vtt-waveform-bar" style="--i:3"></span>
-                        <span class="vtt-waveform-bar" style="--i:4"></span>
-                        <span class="vtt-waveform-bar" style="--i:5"></span>
-                        <span class="vtt-waveform-bar" style="--i:6"></span>
-                        <span class="vtt-waveform-bar" style="--i:7"></span>
-                        <span class="vtt-waveform-bar" style="--i:8"></span>
+                <div id="vtt-waveform-container" class="composer-voice-visualizer hidden" aria-hidden="true">
+                    <div class="composer-voice-waveform" id="composer-voice-waveform">
+                        <span class="voice-wave-bar" style="--bar-index:0; --bar-scale:0.12"></span>
+                        <span class="voice-wave-bar" style="--bar-index:1; --bar-scale:0.12"></span>
+                        <span class="voice-wave-bar" style="--bar-index:2; --bar-scale:0.12"></span>
+                        <span class="voice-wave-bar" style="--bar-index:3; --bar-scale:0.12"></span>
+                        <span class="voice-wave-bar" style="--bar-index:4; --bar-scale:0.12"></span>
+                        <span class="voice-wave-bar" style="--bar-index:5; --bar-scale:0.12"></span>
+                        <span class="voice-wave-bar" style="--bar-index:6; --bar-scale:0.12"></span>
+                        <span class="voice-wave-bar" style="--bar-index:7; --bar-scale:0.12"></span>
+                        <span class="voice-wave-bar" style="--bar-index:8; --bar-scale:0.12"></span>
+                        <span class="voice-wave-bar" style="--bar-index:9; --bar-scale:0.12"></span>
+                        <span class="voice-wave-bar" style="--bar-index:10; --bar-scale:0.12"></span>
+                        <span class="voice-wave-bar" style="--bar-index:11; --bar-scale:0.12"></span>
+                        <span class="voice-wave-bar" style="--bar-index:12; --bar-scale:0.12"></span>
+                        <span class="voice-wave-bar" style="--bar-index:13; --bar-scale:0.12"></span>
                     </div>
-                    <span class="vtt-waveform-label">Listening...</span>
                 </div>
                 <div class="composer-trailing">
                     <button
@@ -5760,15 +5765,6 @@ let showRoutingDebugBadge = false;
             const input = document.getElementById('text-input');
             if (!input || input.dataset.inputSource) return;
             const hasChat = hasAnyRenderedChatMessages?.() || chatHistory?.length > 0;
-            const speechState = window.JarvisSpeechInput?.getState?.() || {};
-            if (speechState.converseEnabled) {
-                input.placeholder = speechState.processing ? 'Thinking' : 'Listening...';
-                return;
-            }
-            if (speechState.mode === 'dictation' && speechState.listening) {
-                input.placeholder = 'Listening...';
-                return;
-            }
             input.placeholder = hasChat ? 'Type something' : 'Ask anything...';
         }
 
@@ -9349,15 +9345,21 @@ let showRoutingDebugBadge = false;
             const vttBtn = document.getElementById('voice-to-text-btn');
             const vttWaveform = document.getElementById('vtt-waveform-container');
             const speechStatus = document.getElementById('speech-input-status');
+            const composerShell = document.getElementById('input-bar-inner');
 
             if (vttBtn) {
-                vttBtn.classList.toggle('is-listening', isConverseActive);
+                vttBtn.classList.toggle('is-listening', isConverseActive && !speechState.processing);
                 vttBtn.classList.toggle('is-converse-active', isConverseActive);
                 vttBtn.setAttribute('aria-pressed', isConverseActive ? 'true' : 'false');
+            }
+            if (composerShell) {
+                composerShell.classList.toggle('is-voice-active', isConverseActive);
+                composerShell.classList.toggle('is-processing', Boolean(speechState.processing));
             }
             if (vttWaveform) {
                 vttWaveform.classList.toggle('hidden', !isConverseActive);
                 vttWaveform.classList.toggle('is-active', isConverseActive && !speechState.processing);
+                vttWaveform.classList.toggle('is-processing', Boolean(speechState.processing));
             }
 
             if (speechStatus && isConverseActive) {
@@ -9368,7 +9370,7 @@ let showRoutingDebugBadge = false;
                 } else if (transcriptText) {
                     speechStatus.textContent = `Hearing: "${transcriptText}"`;
                 } else {
-                    speechStatus.textContent = 'Listening (speak now)...';
+                    speechStatus.textContent = '';
                 }
             }
 
@@ -9382,7 +9384,7 @@ let showRoutingDebugBadge = false;
                     if (statusText) statusText.textContent = 'Thinking...';
                 } else {
                     orb.classList.add('is-listening');
-                    if (statusText) statusText.textContent = 'Listening (speak now)...';
+                    if (statusText) statusText.textContent = '';
                 }
             }
 
@@ -9421,15 +9423,15 @@ let showRoutingDebugBadge = false;
             const status = document.getElementById('speech-input-status');
             if (status) {
                 if (snapshot.state === 'speaking') status.textContent = 'Speaking';
-                if (snapshot.state === 'recovering') status.textContent = 'Tap to enable voice replies';
-                if (snapshot.state === 'listening') status.textContent = window.JarvisSpeechInput?.getState?.().converseEnabled ? 'Listening...' : '';
+                else if (snapshot.state === 'recovering') status.textContent = 'Tap to enable voice replies';
+                else status.textContent = '';
             }
             const input = document.getElementById('text-input');
             if (input && !input.value) {
                 if (window.JarvisSpeechInput?.getState?.().converseEnabled) {
                     if (snapshot.state === 'speaking') input.placeholder = 'Speaking...';
                     else if (snapshot.state === 'thinking' || snapshot.state === 'responding') input.placeholder = 'Thinking...';
-                    else input.placeholder = 'Listening (speak now)...';
+                    else input.placeholder = 'Ask anything...';
                 } else {
                     input.placeholder = 'Ask anything...';
                 }
