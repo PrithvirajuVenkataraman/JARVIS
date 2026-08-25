@@ -7159,9 +7159,17 @@ let showRoutingDebugBadge = false;
             }
         }
 
-        function renderAssistantMarkdown(rawText, linkClass) {
+        function renderAssistantMarkdown(rawText, linkClass = 'assistant-link') {
             const text = String(rawText ?? '');
             if (!text.trim()) return '';
+
+            if (globalThis.JarvisMarkdownRenderer?.renderMarkdown) {
+                let rendered = globalThis.JarvisMarkdownRenderer.renderMarkdown(text, { linkClass });
+                if (window.JarvisScienceFormat?.enhanceHtml) {
+                    rendered = window.JarvisScienceFormat.enhanceHtml(rendered);
+                }
+                return rendered;
+            }
 
             const codeBlocks = [];
             let working = text.replace(/```([\w+-]*)\n([\s\S]*?)```/g, (_, lang, code) => {
