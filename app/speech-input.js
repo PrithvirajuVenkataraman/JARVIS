@@ -287,17 +287,6 @@ export function createSpeechInputController(options = {}) {
                 const cleanedInterim = cleanSpeechFillers(interim);
                 const cleanedFinal = cleanSpeechFillers(final);
 
-                const detectedCommandLang = detectLanguageSwitchCommand(cleanedFinal || cleanedInterim);
-                const detectedScriptLang = detectSpokenLanguage(cleanedFinal || cleanedInterim);
-                const targetNewLang = detectedCommandLang || detectedScriptLang;
-                if (targetNewLang && targetNewLang !== language) {
-                    setLanguage(targetNewLang);
-                    globalThis.localStorage?.setItem?.('jarvis_voice_input_language', targetNewLang);
-                    try {
-                        globalThis.dispatchEvent?.(new CustomEvent('jarvis:voice-language-changed', { detail: { language: targetNewLang } }));
-                    } catch (_) {}
-                }
-
                 if (cleanedInterim) callbacks.onInterim(cleanedInterim, getState());
                 if (cleanedFinal) {
                     callbacks.onFinal(cleanedFinal, {
@@ -305,7 +294,7 @@ export function createSpeechInputController(options = {}) {
                         source: converseEnabled ? 'converse' : 'vtt',
                         transcriptFinal: true,
                         interrupt: true,
-                        language
+                        language: 'en-US'
                     });
                 }
             };
@@ -616,6 +605,28 @@ export function createAudioVisualizer(containerEl) {
     async function start(existingStream = null) {
         stop();
         initDom();
+
+        const requestAnimFrame = typeof globalThis.requestAnimationFrame === 'function'
+            ? globalThis.requestAnimationFrame
+            : (cb) => setTimeout(cb, 16);
+
+        function drawAmbientFallback() {
+            let frame = 0;
+            function drawLoop() {
+                animationFrameId = requestAnimFrame(drawLoop);
+                frame += 0.06;
+                for (let i = 0; i < NUM_BARS; i++) {
+                    const dist = Math.abs(i - NUM_BARS / 2) / (NUM_BARS / 2);
+                    const wave = Math.sin(frame + i * 0.45) * 0.16 + 0.26;
+                    const scale = Math.max(0.12, wave * (1 - dist * 0.35));
+                    if (barElements[i]) {
+                        barElements[i].style.setProperty?.('--bar-scale', scale.toFixed(3));
+                    }
+                }
+            }
+            drawLoop();
+        }
+
         try {
             if (existingStream && existingStream.active && existingStream.getAudioTracks().some(t => t.readyState === 'live')) {
                 activeStream = existingStream;
@@ -623,14 +634,19 @@ export function createAudioVisualizer(containerEl) {
                 try {
                     activeStream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 } catch (_) {
+                    drawAmbientFallback();
                     return;
                 }
             } else {
+                drawAmbientFallback();
                 return;
             }
 
             const AudioCtx = globalThis.AudioContext || globalThis.webkitAudioContext;
-            if (!AudioCtx) return;
+            if (!AudioCtx) {
+                drawAmbientFallback();
+                return;
+            }
             audioContext = new AudioCtx();
             if (audioContext.state === 'suspended') {
                 try { await audioContext.resume(); } catch (_) {}
@@ -647,7 +663,7 @@ export function createAudioVisualizer(containerEl) {
             const dataArray = new Uint8Array(bufferLength);
 
             function draw() {
-                animationFrameId = requestAnimationFrame(draw);
+                animationFrameId = requestAnimFrame(draw);
                 if (!analyser || barElements.length === 0) return;
 
                 analyser.getByteFrequencyData(dataArray);
@@ -669,20 +685,24 @@ export function createAudioVisualizer(containerEl) {
 
                     smoothedLevels[i] += (targetScale - smoothedLevels[i]) * 0.32;
                     if (barElements[i]) {
-                        barElements[i].style.setProperty('--bar-scale', smoothedLevels[i].toFixed(3));
+                        barElements[i].style.setProperty?.('--bar-scale', smoothedLevels[i].toFixed(3));
                     }
                 }
             }
 
             draw();
         } catch (err) {
-            // AudioContext initialization failed or blocked by autoplay policy
+            drawAmbientFallback();
         }
     }
 
     function stop() {
         if (animationFrameId) {
-            cancelAnimationFrame(animationFrameId);
+            if (typeof globalThis.cancelAnimationFrame === 'function') {
+                globalThis.cancelAnimationFrame(animationFrameId);
+            } else {
+                clearTimeout(animationFrameId);
+            }
             animationFrameId = null;
         }
         if (source) {
@@ -700,7 +720,7 @@ export function createAudioVisualizer(containerEl) {
         activeStream = null;
         smoothedLevels = new Array(NUM_BARS).fill(0.12);
         barElements.forEach(bar => {
-            bar.style.setProperty('--bar-scale', '0.12');
+            bar.style?.setProperty?.('--bar-scale', '0.12');
         });
     }
 
@@ -720,6 +740,7 @@ export function installSpeechInputUI(options = {}) {
     const status = document.getElementById('speech-input-status');
     const vttWaveform = document.getElementById('vtt-waveform-container');
     const composerShell = document.getElementById('input-bar-inner');
+    const sendBtn = document.getElementById('send-message-btn');
     if (!input || !vttButton) return null;
 
     const visualizer = vttWaveform ? createAudioVisualizer(vttWaveform) : null;
@@ -748,10 +769,9 @@ export function installSpeechInputUI(options = {}) {
         status.textContent = message;
     }
 
-    const savedLanguage = globalThis.localStorage?.getItem?.('jarvis_voice_input_language');
     const controller = createSpeechInputController({
         Recognition,
-        language: savedLanguage || navigator.language || 'en-US',
+        language: 'en-US',
         onInterim(text, state) {
             const cleaned = cleanSpeechFillers(text);
             lastInterimText = cleaned;
@@ -794,9 +814,15 @@ export function installSpeechInputUI(options = {}) {
             }
             const isListening = Boolean(state.listening);
             const isProcessing = Boolean(state.processing);
+            const isDictation = state.mode === 'dictation' && isListening;
+            const isConverse = Boolean(state.converseEnabled);
 
-            vttButton.classList.toggle('is-listening', isListening);
-            vttButton.setAttribute('aria-pressed', isListening ? 'true' : 'false');
+            vttButton.classList.toggle('is-listening', isDictation);
+            vttButton.setAttribute('aria-pressed', isDictation ? 'true' : 'false');
+
+            if (sendBtn) {
+                sendBtn.classList.toggle('is-converse-active', isConverse);
+            }
 
             if (composerShell) {
                 composerShell.classList.toggle('is-voice-active', isListening || isProcessing);
