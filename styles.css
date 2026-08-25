@@ -4505,71 +4505,107 @@ body:not(.dark) .permissions-btn-secondary:hover {
 }
 
 /* ==========================================================================
-   VTT Prompt Waveform Visualizer (In-Composer)
+   Modern Voice Waveform & Visualizer (ChatGPT / VTT-style)
    ========================================================================== */
-.vtt-waveform-container {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    padding: 0.25rem 0.6rem;
-    margin-top: 0.25rem;
-    border-radius: 999px;
-    background: rgba(245, 158, 11, 0.08);
-    border: 1px solid rgba(245, 158, 11, 0.25);
-    width: fit-content;
-    animation: vttFadeIn 0.25s ease-out;
+.composer-shell.is-voice-active {
+    background: #111827 !important;
+    border-color: rgba(56, 189, 248, 0.5) !important;
+    box-shadow: 0 0 24px rgba(56, 189, 248, 0.16), 0 0 0 1px rgba(56, 189, 248, 0.28) !important;
+    transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-body:not(.dark) .vtt-waveform-container {
-    background: rgba(217, 119, 6, 0.08);
-    border-color: rgba(217, 119, 6, 0.3);
-}
-
-.vtt-waveform-container.hidden {
+.composer-shell.is-voice-active #text-input {
     display: none !important;
 }
 
-.vtt-waveform-bars {
+.composer-shell.is-voice-active .composer-leading {
+    opacity: 0.35;
+    pointer-events: none;
+}
+
+.composer-voice-visualizer {
+    flex: 1 1 auto;
     display: flex;
     align-items: center;
-    gap: 3px;
-    height: 16px;
+    justify-content: center;
+    height: 40px;
+    min-width: 0;
+    padding: 0 12px;
+    animation: voiceVisualizerFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.vtt-waveform-bar {
+.composer-voice-visualizer.hidden {
+    display: none !important;
+}
+
+.composer-voice-waveform {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4.5px;
+    height: 36px;
+    width: 100%;
+    max-width: 260px;
+}
+
+.voice-wave-bar {
     display: inline-block;
-    width: 3px;
-    height: 6px;
-    border-radius: 3px;
-    background: linear-gradient(180deg, #f59e0b, #fbbf24);
-    animation: vttBarPulse 1s ease-in-out infinite alternate;
-    animation-delay: calc(var(--i, 1) * 0.12s);
-    transform-origin: center bottom;
+    width: 4px;
+    height: 32px;
+    border-radius: 999px;
+    background: linear-gradient(180deg, #38bdf8 0%, #818cf8 100%);
+    transform: scaleY(var(--bar-scale, 0.12));
+    transform-origin: center center;
+    transition: transform 0.06s linear;
+    opacity: calc(0.45 + (var(--bar-scale, 0.12) * 0.55));
 }
 
-body:not(.dark) .vtt-waveform-bar {
-    background: linear-gradient(180deg, #d97706, #f59e0b);
+.composer-shell.is-processing .voice-wave-bar {
+    background: linear-gradient(180deg, #f59e0b 0%, #fbbf24 100%);
+    animation: voiceProcessingWave 1.1s ease-in-out infinite;
+    animation-delay: calc(var(--bar-index, 0) * 0.07s);
 }
 
-.vtt-waveform-label {
-    font-size: 0.75rem;
-    font-weight: 600;
-    color: #f59e0b;
-    letter-spacing: 0.02em;
+@keyframes voiceVisualizerFadeIn {
+    from {
+        opacity: 0;
+        transform: scale(0.96);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
 }
 
-body:not(.dark) .vtt-waveform-label {
-    color: #b45309;
+@keyframes voiceProcessingWave {
+    0%, 100% {
+        transform: scaleY(0.15);
+        opacity: 0.4;
+    }
+    50% {
+        transform: scaleY(0.85);
+        opacity: 1;
+    }
 }
 
-@keyframes vttBarPulse {
-    0% { height: 4px; opacity: 0.4; }
-    100% { height: 16px; opacity: 1; transform: scaleY(1.1); }
+/* Microphone button active pulse styling */
+.speech-input-btn.is-listening {
+    color: #ef4444 !important;
+    background: rgba(239, 68, 68, 0.15) !important;
+    border-color: rgba(239, 68, 68, 0.4) !important;
+    animation: voiceMicPulse 1.8s infinite;
 }
 
-@keyframes vttFadeIn {
-    from { opacity: 0; transform: translateY(4px); }
-    to { opacity: 1; transform: translateY(0); }
+@keyframes voiceMicPulse {
+    0% {
+        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.45);
+    }
+    70% {
+        box-shadow: 0 0 0 8px rgba(239, 68, 68, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+    }
 }
 
 /* ==========================================================================
