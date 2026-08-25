@@ -345,5 +345,96 @@ assert.equal(globalThis.JarvisSpeechInput.getState().converseEnabled, false);
     globalThis.fetch = origFetch;
 }
 
+// 13. Test createAudioVisualizer & installSpeechInputUI UI polish
+{
+    const { createAudioVisualizer, installSpeechInputUI } = await import('../app/speech-input.js');
+
+    // Test DOM mock elements
+    class MockElement {
+        constructor(id = '') {
+            this.id = id;
+            const classes = new Set();
+            this.classList = {
+                add: (c) => classes.add(c),
+                remove: (c) => classes.delete(c),
+                toggle: (c, val) => {
+                    if (val === undefined) {
+                        if (classes.has(c)) classes.delete(c);
+                        else classes.add(c);
+                    } else if (val) {
+                        classes.add(c);
+                    } else {
+                        classes.delete(c);
+                    }
+                },
+                contains: (c) => classes.has(c)
+            };
+            this.style = {
+                setProperty: (k, v) => { this.style[k] = v; }
+            };
+            this.children = [];
+            this.textContent = '';
+            this.value = '';
+            this.placeholder = '';
+            this.dataset = {};
+            this.listeners = {};
+        }
+        appendChild(child) {
+            this.children.push(child);
+            return child;
+        }
+        addEventListener(event, fn) {
+            this.listeners[event] = this.listeners[event] || [];
+            this.listeners[event].push(fn);
+        }
+        setAttribute(k, v) {
+            this[k] = v;
+        }
+        focus() {}
+    }
+
+    const containerEl = new MockElement('vtt-waveform-container');
+    const visualizer = createAudioVisualizer(containerEl);
+    assert.equal(typeof visualizer.start, 'function');
+    assert.equal(typeof visualizer.stop, 'function');
+
+    // Visualizer DOM init
+    visualizer.stop();
+
+    // Test installSpeechInputUI
+    const textInput = new MockElement('text-input');
+    const vttBtn = new MockElement('voice-to-text-btn');
+    const statusEl = new MockElement('speech-input-status');
+    const composerShell = new MockElement('input-bar-inner');
+
+    globalThis.document = {
+        getElementById(id) {
+            if (id === 'text-input') return textInput;
+            if (id === 'voice-to-text-btn') return vttBtn;
+            if (id === 'speech-input-status') return statusEl;
+            if (id === 'vtt-waveform-container') return containerEl;
+            if (id === 'input-bar-inner') return composerShell;
+            return null;
+        },
+        createElement(tag) {
+            return new MockElement(tag);
+        },
+        addEventListener(event, fn) {}
+    };
+
+    const uiController = installSpeechInputUI();
+    assert.ok(uiController);
+
+    // Toggle dictation
+    await uiController.toggleDictation();
+    assert.equal(composerShell.classList.contains('is-voice-active'), true);
+    assert.equal(statusEl.textContent, '', 'Status text should not contain prototype Listening text');
+
+    // Stop dictation
+    uiController.stop();
+    assert.equal(composerShell.classList.contains('is-voice-active'), false);
+    assert.equal(statusEl.textContent, '', 'Status text should remain clean');
+}
+
 console.log('speech-input-tests-ok');
 
