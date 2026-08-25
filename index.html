@@ -8475,83 +8475,131 @@ let showRoutingDebugBadge = false;
             const isProceduralOrCulinary = /\b(recipe|cook|cooking|bake|baking|ingredient|ingredients|dish|food|cuisine|itinerary|travel to|places to visit|things to do in|steps to|how to make)\b/i.test(prompt);
             const isCreativeOrMedia = /\b(song|songs|music|track|tracks|album|artist|singer|band|discography|movie|movies|film|films|cinema|actor|actress|director|series|show|shows|sitcom|anime|watchlist|novel|author)\b/i.test(prompt);
 
-            // Construct 3-Stage Dynamic Narratives (Compact 3-6 word micro-steps):
+            // Construct 5-Stage Human-Like Chain-of-Thought Narratives (Cognitive inner monologue):
 
-            // --- STAGE 1: CONTEXTUALIZATION ---
+            // --- STAGE 1: INTENT & SCOPE ---
             let stage1 = '';
             if (isComparison && (entityA || entityB)) {
                 const left = entityA || 'options';
                 const right = entityB || '';
-                stage1 = `Scoping criteria for ${left}${right ? ' vs ' + right : ''}`;
+                stage1 = `Scoping criteria for ${left}${right ? ' vs ' + right : ''}: I'm evaluating the criteria for comparing ${left} and ${right || 'alternatives'}. I need to establish a balanced framework covering architecture, throughput, developer experience, and cost.`;
             } else if (isCode) {
-                stage1 = `Analyzing requirements for ${subjectSnippet}${lang ? ' in ' + lang : ''}`;
+                stage1 = `Analyzing requirements for ${subjectSnippet}${lang ? ' in ' + lang : ''}: I'm currently focused on the core requirements for ${subjectSnippet}${lang ? ' in ' + lang : ''}. I need to break down the architectural requirements, function signatures, and expected inputs and outputs before writing code.`;
             } else if (isMath) {
-                stage1 = `Parsing variables and equations for ${subjectSnippet}`;
+                stage1 = `Parsing variables and equations for ${subjectSnippet}: I'm examining the mathematical statement for ${subjectSnippet}. Identifying all given parameters, independent variables, and the target value to solve for.`;
             } else if (isScience) {
-                stage1 = `Isolating governing principles for ${subjectSnippet}`;
+                stage1 = `Isolating governing principles for ${subjectSnippet}: I'm analyzing the governing physical and theoretical laws behind ${subjectSnippet}. Identifying the core concepts and observable quantities involved.`;
             } else if (isHistory) {
-                stage1 = `Contextualizing historical timeline for ${subjectSnippet}`;
+                stage1 = `Contextualizing historical timeline for ${subjectSnippet}: I'm examining the historical context and background of ${subjectSnippet}, identifying the era, key actors, and geopolitical landscape.`;
             } else if (isGeography) {
-                stage1 = `Mapping regional boundaries for ${subjectSnippet}`;
+                stage1 = `Mapping regional boundaries for ${subjectSnippet}: I'm analyzing the geographical and geopolitical context of ${subjectSnippet}, establishing the precise location, borders, and administrative status.`;
             } else if (isEconOrSocial) {
-                stage1 = `Framing structural dynamics for ${subjectSnippet}`;
+                stage1 = `Framing structural dynamics for ${subjectSnippet}: I'm examining the economic and social mechanisms behind ${subjectSnippet}, scoping market dynamics, incentives, and policy variables.`;
             } else if (isProceduralOrCulinary) {
-                stage1 = `Analyzing prerequisites for ${subjectSnippet}`;
+                stage1 = `Analyzing prerequisites for ${subjectSnippet}: I'm breaking down the essential steps, required tools, and preliminary conditions necessary for executing ${subjectSnippet} properly.`;
             } else if (isCreativeOrMedia) {
-                stage1 = `Analyzing thematic elements for ${subjectSnippet}`;
+                stage1 = `Analyzing thematic elements for ${subjectSnippet}: I'm reviewing the creative themes, stylistic patterns, and cultural background associated with ${subjectSnippet}.`;
             } else {
-                stage1 = `Analyzing inquiry premises for ${subjectSnippet}`;
+                stage1 = `Analyzing inquiry premises for ${subjectSnippet}: I'm currently focused on the user's premise regarding ${subjectSnippet}. I need to clarify what key information is requested and establish the most direct, accurate angle to answer.`;
             }
 
-            // --- STAGE 2: MECHANISTIC EVALUATION ---
+            // --- STAGE 2: KNOWLEDGE & CONTEXT RETRIEVAL ---
             let stage2 = '';
-            if (isComparison && (entityA || entityB)) {
-                stage2 = `Evaluating performance & architectural trade-offs`;
+            if (isComparison) {
+                stage2 = `Retrieving feature benchmarks & architectural paradigms: Reviewing empirical benchmarks and operational trade-offs. I want to identify where each option excels and where its primary limitations lie.`;
             } else if (isCode) {
-                stage2 = `Evaluating algorithmic design & boundary conditions`;
+                stage2 = `Retrieving idiomatic ${lang || 'syntax'} patterns & API specifications: I need to consider idiomatic ${lang || 'syntax'} constructs and standard library features. Selecting appropriate data structures that will keep time and space complexity optimal.`;
             } else if (isMath) {
-                stage2 = `Applying step-by-step mathematical transformations`;
+                stage2 = `Identifying relevant theorems & transformation formulas: Determining the most direct formula or analytical technique to apply, verifying that all prerequisite domain assumptions and bounds are satisfied.`;
             } else if (isScience) {
-                stage2 = `Tracing causal mechanisms & observable dynamics`;
+                stage2 = `Reviewing empirical laws & theoretical models: Examining the underlying physical models and empirical mechanisms that explain how this phenomenon operates in nature.`;
             } else if (isHistory) {
-                stage2 = `Analyzing institutional forces & historical outcomes`;
+                stage2 = `Tracing primary records & causal precedents: Analyzing the underlying socioeconomic, political, and institutional factors that precipitated these events.`;
             } else if (isGeography) {
-                stage2 = `Evaluating spatial distribution & territorial factors`;
+                stage2 = `Querying geographical datasets & coordinate references: Examining topographies, demographic data, climate characteristics, and territorial significance.`;
             } else if (isEconOrSocial) {
-                stage2 = `Examining systemic interactions & market effects`;
+                stage2 = `Retrieving econometric models & macro frameworks: Reviewing established macroeconomic frameworks and behavioral incentives governing these interactions.`;
             } else if (isProceduralOrCulinary) {
-                stage2 = `Evaluating timing precision & execution details`;
+                stage2 = `Reviewing procedural stages & material requirements: Inspecting timing precision, ingredient ratios, and necessary prep work to ensure seamless step execution.`;
             } else if (isCreativeOrMedia) {
-                stage2 = `Evaluating structural design & stylistic traits`;
+                stage2 = `Querying cultural background & historical canon: Examining relevant artistic history, structural composition, and distinctive nuances.`;
             } else {
-                stage2 = `Evaluating domain principles & logical mechanisms`;
+                stage2 = `Retrieving domain facts & authoritative context: Identifying relevant factual foundations and contextual details needed to provide a thorough, accurate answer.`;
             }
 
-            // --- STAGE 3: SYNTHESIS & STRUCTURED OUTPUT ---
+            // --- STAGE 3: MECHANISTIC & LOGICAL EVALUATION ---
             let stage3 = '';
-            if (isComparison && (entityA || entityB)) {
-                stage3 = `Structuring balanced recommendation`;
+            if (isComparison) {
+                stage3 = `Evaluating performance & architectural trade-offs: Analyzing real-world scenarios—which one is better suited for high throughput versus rapid prototyping, and how maintenance overhead compares.`;
             } else if (isCode) {
-                stage3 = `Structuring clean ${lang || 'code'} implementation`;
+                stage3 = `Evaluating algorithmic design & complexity bounds: Tracing the execution flow step by step. I'll design the core loop and state transformations carefully to avoid redundant memory allocations or off-by-one errors.`;
             } else if (isMath) {
-                stage3 = `Verifying step-by-step derivation & values`;
+                stage3 = `Applying step-by-step mathematical transformations: Working through algebraic and calculus transformations systematically, keeping intermediate steps clear and checking arithmetic.`;
             } else if (isScience) {
-                stage3 = `Synthesizing first-principles explanation`;
+                stage3 = `Tracing causal mechanisms & observable dynamics: Walking through the step-by-step causal chain and physical interactions to explain what happens at macroscopic and microscopic scales.`;
             } else if (isHistory) {
-                stage3 = `Synthesizing grounded historical narrative`;
+                stage3 = `Analyzing institutional forces & historical outcomes: Tracing the key turning points, pivotal decisions, and strategic shifts that determined the historical trajectory.`;
             } else if (isGeography) {
-                stage3 = `Structuring comprehensive geographic overview`;
+                stage3 = `Evaluating spatial distribution & territorial factors: Tracing regional connectivity, trade routes, urbanization patterns, and strategic importance.`;
             } else if (isEconOrSocial) {
-                stage3 = `Synthesizing theoretical and practical implications`;
+                stage3 = `Examining systemic interactions & market effects: Analyzing how shifts in policy, supply/demand, or interest rates ripple through markets and consumer behavior.`;
             } else if (isProceduralOrCulinary) {
-                stage3 = `Formulating structured, actionable instructions`;
+                stage3 = `Evaluating timing precision & execution details: Checking critical checkpoints, temperature controls, and transition indicators throughout the process.`;
             } else if (isCreativeOrMedia) {
-                stage3 = `Structuring curated overview with highlights`;
+                stage3 = `Evaluating structural design & stylistic traits: Analyzing narrative pacing, emotional resonance, and structural craftsmanship.`;
             } else {
-                stage3 = `Structuring clear, verified response`;
+                stage3 = `Evaluating domain principles & logical mechanisms: Breaking down the underlying logic, causes, and practical details to ensure the explanation is easy to understand.`;
             }
 
-            return [stage1, stage2, stage3];
+            // --- STAGE 4: BOUNDARY CONDITIONS & INTEGRITY CHECKS ---
+            let stage4 = '';
+            if (isComparison) {
+                stage4 = `Validating edge-case workflows & niche scenarios: Checking community maturity, tooling integration, operational complexity in production, and long-term maintainability.`;
+            } else if (isCode) {
+                stage4 = `Validating edge cases, error handling & types: Evaluating boundary conditions such as empty collections, extreme scale, and error states to ensure robust exception handling.`;
+            } else if (isMath) {
+                stage4 = `Verifying intermediate arithmetic & constraint limits: Checking limiting behaviors, domain restrictions, and dimensional consistency to ensure the derived result is logically sound.`;
+            } else if (isScience) {
+                stage4 = `Checking boundary conditions & physical consistency: Checking scale limits, theoretical edge cases, and modern empirical consensus to avoid common misconceptions.`;
+            } else if (isHistory) {
+                stage4 = `Cross-verifying historical dates & entity accuracy: Checking dates, primary records, and historical consensus across multiple authoritative accounts.`;
+            } else if (isGeography) {
+                stage4 = `Verifying territorial overlap & administrative status: Cross-verifying administrative boundaries, official naming, and contemporary geographical facts.`;
+            } else if (isEconOrSocial) {
+                stage4 = `Assessing assumption sensitivity & counter-arguments: Examining potential unintended consequences, market frictions, and alternative policy perspectives.`;
+            } else if (isProceduralOrCulinary) {
+                stage4 = `Checking common pitfalls & corrective measures: Identifying frequent failure points and adding preemptive tips for consistent execution.`;
+            } else if (isCreativeOrMedia) {
+                stage4 = `Validating narrative coherence & factual chronology: Verifying releases, discography/filmography chronologies, and historical facts.`;
+            } else {
+                stage4 = `Verifying factual consistency & logical coherence: Double-checking key claims, distinctions, and nuance to ensure there are no ambiguities or inaccuracies.`;
+            }
+
+            // --- STAGE 5: SYNTHESIS & STRUCTURED OUTPUT ---
+            let stage5 = '';
+            if (isComparison) {
+                stage5 = `Structuring balanced recommendation: Structuring a direct, unbiased recommendation matrix with actionable decision criteria tailored to specific project needs.`;
+            } else if (isCode) {
+                stage5 = `Structuring clean ${lang || 'code'} implementation: Putting together the complete, production-grade code with concise commentary, clear variable names, and complexity guarantees.`;
+            } else if (isMath) {
+                stage5 = `Verifying step-by-step derivation & final result: Synthesizing the complete derivation into clean, structured notation with the final result clearly highlighted.`;
+            } else if (isScience) {
+                stage5 = `Synthesizing first-principles explanation: Formulating a clear, intuitive explanation that builds from first principles to the final concept without jargon overload.`;
+            } else if (isHistory) {
+                stage5 = `Synthesizing grounded historical narrative: Assembling an objective, evidence-based historical overview that clearly explains cause and effect.`;
+            } else if (isGeography) {
+                stage5 = `Structuring comprehensive geographic overview: Structuring a comprehensive, well-organized geographic overview with key statistics and context.`;
+            } else if (isEconOrSocial) {
+                stage5 = `Synthesizing theoretical and practical implications: Structuring an objective, well-reasoned overview combining theoretical foundations with real-world implications.`;
+            } else if (isProceduralOrCulinary) {
+                stage5 = `Formulating structured, actionable instructions: Formatting clean, sequential steps with ingredient measurements and practical timing.`;
+            } else if (isCreativeOrMedia) {
+                stage5 = `Structuring curated overview with highlights: Formatting a comprehensive summary highlighting standout works, themes, and critical impact.`;
+            } else {
+                stage5 = `Structuring clear, verified response: Synthesizing the final answer in a clear, well-structured format that directly satisfies the user's intent.`;
+            }
+
+            return [stage1, stage2, stage3, stage4, stage5];
         }
 
         window.toggleThinkingProcessCard = function(card, event) {
@@ -8615,12 +8663,21 @@ let showRoutingDebugBadge = false;
             } else if (steps && steps.length > 0) {
                 bodyContentHtml = `
                     <div class="thinking-chain-of-thought">
-                        ${steps.map((step, idx) => `
-                            <div class="thinking-cot-step">
-                                <span class="thinking-cot-number">${idx + 1}</span>
-                                <span class="thinking-cot-text">${escapeHtml(step)}</span>
-                            </div>
-                        `).join('')}
+                        ${steps.map((step, idx) => {
+                            const rawStep = String(step || '').trim();
+                            const colonIdx = rawStep.indexOf(':');
+                            const hasHeader = colonIdx > 0 && colonIdx < 65;
+                            const title = hasHeader ? rawStep.slice(0, colonIdx).trim() : '';
+                            const text = hasHeader ? rawStep.slice(colonIdx + 1).trim() : rawStep;
+                            return `
+                                <div class="thinking-cot-step">
+                                    <span class="thinking-cot-number">${idx + 1}</span>
+                                    <div class="thinking-cot-text">
+                                        ${title ? `<strong class="thinking-cot-title">${escapeHtml(title)}</strong><span class="thinking-cot-body">${escapeHtml(text)}</span>` : `<span class="thinking-cot-body">${escapeHtml(text)}</span>`}
+                                    </div>
+                                </div>
+                            `;
+                        }).join('')}
                     </div>
                 `;
             }
@@ -8769,8 +8826,9 @@ let showRoutingDebugBadge = false;
                 const rawProvider = meta?.provider || meta?.routing?.provider || '';
                 const rawFailover = meta?.failover || meta?.routing?.failover || false;
                 const modelInfo = typeof formatModelDisplayName === 'function' ? formatModelDisplayName(rawModel, rawProvider, rawFailover) : null;
-                const thinkingHtml = (!allowEmptyAssistant && (thoughtContent || thoughtSteps.length > 0 || selfHealing) && !meta?.systemGreeting)
-                    ? buildThinkingProcessHtml(thoughtContent, thoughtSteps, elapsedSeconds, false, selfHealing, modelInfo)
+                const isThinkingStreaming = allowEmptyAssistant || Boolean(meta?.streaming);
+                const thinkingHtml = ((thoughtContent || thoughtSteps.length > 0 || selfHealing) && !meta?.systemGreeting)
+                    ? buildThinkingProcessHtml(thoughtContent, thoughtSteps, elapsedSeconds, isThinkingStreaming, selfHealing, modelInfo)
                     : '';
 
                 const topSourcesCarouselHtml = (!allowEmptyAssistant && Array.isArray(sourcePresentation?.sources) && sourcePresentation.sources.length > 0)
@@ -14487,7 +14545,7 @@ async function handleArtistSongRequest(text) {
             const catalogSummary = await composeApiReply('artist_song_verified', {
                 artist
             }, {
-                fallbackText: `Here are song suggestions for ${artist}.`
+                fallbackText: `Verified music query for ${artist}.`
             });
             saveToHistory(text, catalogMsg);
             return;
@@ -14647,7 +14705,7 @@ ${snippetsBlock}`;
             const fallbackSummary = await composeApiReply('artist_song_general', {
                 artist
             }, {
-                fallbackText: `Here are song suggestions for ${artist}.`
+                fallbackText: `General music suggestions for ${artist}.`
             });
             saveToHistory(text, fallbackReply);
         } catch (fallbackError) {
