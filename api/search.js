@@ -21,9 +21,9 @@ const ARCHIVE_TODAY_SEARCH_URL = 'https://archive.today/search/';
 const GDELT_DOC_URL = 'https://api.gdeltproject.org/api/v2/doc/doc';
 const EXA_SEARCH_URL = 'https://api.exa.ai/search';
 const GEMINI_GENERATE_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
-const SEARCH_TIMEOUT_MS = 8_000;
-const PUBLIC_SOURCE_TIMEOUT_MS = 5_000;
-const GEMINI_SEARCH_TIMEOUT_MS = 6_000;
+const SEARCH_TIMEOUT_MS = 3_000;
+const PUBLIC_SOURCE_TIMEOUT_MS = 2_500;
+const GEMINI_SEARCH_TIMEOUT_MS = 3_000;
 const MAX_QUERY_LENGTH = 500;
 const LATEST_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 let lastLatestRefreshAt = 0;
@@ -2547,7 +2547,7 @@ async function buildGroundedRagAnswer(query, results, gate, options = {}) {
         : evidence;
 
     if (getGeminiApiKey() || process.env.GROQ_API_KEY) {
-        if (!options?.skipDeepCrawl) {
+        if (options?.allowDeepCrawl === true) {
             await enrichSearchResultsWithDeepCrawl(orderedEvidence, 2).catch(() => {});
         }
         const compact = orderedEvidence.map((item, index) => ({
