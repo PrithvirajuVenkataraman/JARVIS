@@ -949,6 +949,9 @@ export function installSpeechInputUI(options = {}) {
         input.value = '';
         delete input.dataset.inputSource;
         options.onComposerChanged?.();
+        if (!wasConverseEnabled) {
+            globalThis.unlockConverseSpeechFromGesture?.();
+        }
         const toggled = await rawToggleConverse();
         if (wasConverseEnabled) {
             globalThis.stopActiveGeneration?.('converse_stop');
