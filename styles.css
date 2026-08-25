@@ -6119,7 +6119,7 @@ body:not(.dark) .assistant-followup-chip:hover {
     overflow: auto;
     padding: 16px;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    font-size: 13px; 
+    font-size: 13px;
     line-height: 1.6;
     color: #f8fafc;
     white-space: pre;
@@ -6130,4 +6130,158 @@ body:not(.dark) .assistant-followup-chip:hover {
     height: 100%;
     border: none;
     background: #ffffff;
+}
+
+/* ==========================================================================
+   Print-Ready Export Styles
+   ========================================================================== */
+@media print {
+    body {
+        background: #ffffff !important;
+        color: #000000 !important;
+        overflow: visible !important;
+        position: static !important;
+    }
+    #chat-sidebar-panel,
+    #chat-sidebar-backdrop,
+    #chat-sidebar-toggle,
+    #input-bar-container,
+    #scroll-to-bottom-btn,
+    #jump-to-latest-btn,
+    .assistant-action-bar,
+    .chat-sidebar-close,
+    .header-enhanced,
+    .floating-input-bar {
+        display: none !important;
+    }
+    .app-shell,
+    #main-card,
+    #chat-panel,
+    #chat-container {
+        background: transparent !important;
+        box-shadow: none !important;
+        border: none !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        overflow: visible !important;
+        max-height: none !important;
+        height: auto !important;
+    }
+    .chat-row-assistant,
+    .chat-row-user {
+        page-break-inside: avoid;
+        margin-bottom: 16px;
+    }
+}
+
+/* ==========================================================================
+   Sidebar Tabs, Bookmarks & Pinning Enhancements
+   ========================================================================== */
+.sidebar-view-tabs {
+    display: flex;
+    gap: 6px;
+    padding: 4px 10px 10px;
+}
+
+.sidebar-view-tab {
+    flex: 1;
+    height: 32px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    color: #94a3b8;
+    font-size: 12px;
+    font-weight: 650;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    transition: all 0.15s ease;
+}
+
+.sidebar-view-tab:hover {
+    background: rgba(255, 255, 255, 0.10);
+    color: #ffffff;
+}
+
+.sidebar-view-tab.is-active {
+    background: rgba(56, 189, 248, 0.18);
+    border-color: rgba(56, 189, 248, 0.45);
+    color: #38bdf8;
+}
+
+.chat-session-actions-group {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.chat-session-pin-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    background: transparent;
+    border: none;
+    color: rgba(255, 255, 255, 0.45);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: all 0.15s ease;
+}
+
+.chat-session-row:hover .chat-session-pin-btn,
+.chat-session-row:focus-within .chat-session-pin-btn,
+.chat-session-row.is-pinned .chat-session-pin-btn {
+    opacity: 1;
+}
+
+.chat-session-pin-btn:hover {
+    background: rgba(255, 255, 255, 0.10);
+    color: #ffffff;
+}
+
+.chat-session-pin-btn.is-pinned {
+    color: #38bdf8;
+}
+
+.assistant-action-btn.is-bookmarked {
+    color: #facc15 !important;
+    background: rgba(250, 204, 21, 0.14) !important;
+    border-color: rgba(250, 204, 21, 0.35) !important;
+}
+
+.bookmarked-item-card {
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    margin-bottom: 8px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.bookmarked-item-card:hover {
+    background: rgba(255, 255, 255, 0.09);
+    border-color: rgba(255, 255, 255, 0.20);
+}
+
+.bookmarked-item-meta {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.55);
+    margin-bottom: 4px;
+    display: flex;
+    justify-content: space-between;
+}
+
+.bookmarked-item-snippet {
+    font-size: 13px;
+    color: #f1f5f9;
+    line-height: 1.4;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
 }
