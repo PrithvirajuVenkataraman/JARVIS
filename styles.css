@@ -5410,6 +5410,29 @@ body:not(.dark) .thinking-cot-number {
     word-break: break-word;
 }
 
+.thinking-cot-title {
+    display: block;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #e2e8f0;
+    margin-bottom: 2px;
+}
+
+body:not(.dark) .thinking-cot-title {
+    color: #0f172a;
+}
+
+.thinking-cot-body {
+    display: block;
+    color: #94a3b8;
+    line-height: 1.55;
+    font-size: 0.80rem;
+}
+
+body:not(.dark) .thinking-cot-body {
+    color: #475569;
+}
+
 .thinking-step {
     display: flex;
     align-items: flex-start;
@@ -6281,6 +6304,12 @@ body:not(.dark) .assistant-followup-chip:hover {
 
 .chat-session-pin-btn.is-pinned {
     color: #38bdf8;
+}
+
+@media (max-width: 768px), (pointer: coarse) {
+    .chat-session-pin-btn {
+        display: none !important;
+    }
 }
 
 .assistant-action-btn.is-bookmarked {
