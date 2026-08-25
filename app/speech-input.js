@@ -14,10 +14,73 @@ const ERROR_MESSAGES = {
 };
 
 export function cleanSpeechFillers(text = '') {
-    return String(text || '')
-        .replace(/\b(um+|uh+|er+|ah+|erm+)\b/gi, '')
-        .replace(/\s{2,}/g, ' ')
-        .trim();
+    let s = String(text || '').trim();
+    if (!s) return '';
+
+    // 1. Remove verbal fillers & hesitations (e.g. "um", "uh", "umm", "uhh", "er", "erm", "ah", "ahh", "hmm", "hm")
+    s = s.replace(/\b(?:um+|uh+|er+|ah+|erm+|hmm+|hm+)\b/gi, '');
+
+    // 2. Remove filler phrases when surrounded by boundaries or at start/end
+    s = s.replace(/\b(?:you know|i mean|sort of|kind of)\b/gi, '');
+    s = s.replace(/^(?:like|basically|literally)[,\s]+/gi, '');
+    s = s.replace(/[,\s]+(?:like|basically|literally)[,\s]+/gi, ' ');
+    s = s.replace(/[,\s]+(?:like|basically|literally)$/gi, '');
+
+    // 3. Remove speech stutter / immediate duplicate words (e.g. "the the", "I I", "to to")
+    s = s.replace(/\b([a-zA-Z]+)\s+\1\b/gi, '$1');
+    s = s.replace(/\b([a-zA-Z]+)\s+\1\b/gi, '$1');
+
+    // 4. Auto-correct common speech-to-text contractions, pronouns & slips
+    const autoCorrectMap = [
+        [/\bi\b/g, 'I'],
+        [/\bi'm\b/gi, "I'm"],
+        [/\bi'll\b/gi, "I'll"],
+        [/\bi'd\b/gi, "I'd"],
+        [/\bi've\b/gi, "I've"],
+        [/\bim\b/gi, "I'm"],
+        [/\bive\b/gi, "I've"],
+        [/\bill\b/gi, "I'll"],
+        [/\bid\b/g, "I'd"],
+        [/\bdont\b/gi, "don't"],
+        [/\bcant\b/gi, "can't"],
+        [/\bwont\b/gi, "won't"],
+        [/\bdidnt\b/gi, "didn't"],
+        [/\bdoesnt\b/gi, "doesn't"],
+        [/\bisnt\b/gi, "isn't"],
+        [/\barent\b/gi, "aren't"],
+        [/\bwasnt\b/gi, "wasn't"],
+        [/\bwerent\b/gi, "weren't"],
+        [/\bhavent\b/gi, "haven't"],
+        [/\bhasnt\b/gi, "hasn't"],
+        [/\bhadnt\b/gi, "hadn't"],
+        [/\bcouldnt\b/gi, "couldn't"],
+        [/\bshouldnt\b/gi, "shouldn't"],
+        [/\bwouldnt\b/gi, "wouldn't"],
+        [/\bwhats\b/gi, "what's"],
+        [/\bhows\b/gi, "how's"],
+        [/\bwheres\b/gi, "where's"],
+        [/\bwhos\b/gi, "who's"],
+        [/\bthats\b/gi, "that's"],
+        [/\btheres\b/gi, "there's"],
+        [/\bheres\b/gi, "here's"],
+        [/\blets\b/gi, "let's"]
+    ];
+
+    for (const [pattern, replacement] of autoCorrectMap) {
+        s = s.replace(pattern, replacement);
+    }
+
+    // 5. Clean punctuation spacing (e.g. "word , next" -> "word, next")
+    s = s.replace(/\s+([,.:;?!])/g, '$1');
+    s = s.replace(/([,.:;?!])(?=[^\s\d])/g, '$1 ');
+
+    // 6. Sentence capitalization
+    s = s.replace(/(^\s*|[.!?]\s+)([a-z])/g, (_, prefix, letter) => prefix + letter.toUpperCase());
+
+    // 7. Clean excessive whitespace
+    s = s.replace(/\s{2,}/g, ' ').trim();
+
+    return s;
 }
 
 export function normalizeVoiceInputLanguage(language = '') {
@@ -775,42 +838,45 @@ export function installSpeechInputUI(options = {}) {
         onInterim(text, state) {
             const cleaned = cleanSpeechFillers(text);
             lastInterimText = cleaned;
-            input.value = [committedText, cleaned].filter(Boolean).join(' ').trim();
+            // Spoken text appears immediately on screen, not inside the prompt box
+            input.value = '';
+            delete input.dataset.inputSource;
+
+            globalThis.updateLiveSpeechTranscriptionOnScreen?.(cleaned, true, state?.mode || (state?.converseEnabled ? 'converse' : 'vtt'));
             if (state?.converseEnabled) {
                 globalThis.updateLiveConverseOverlay?.(state.processing ? 'thinking' : 'listening', cleaned, true);
             }
             options.onComposerChanged?.();
             globalThis.handleComposerInput?.();
-            try { input.scrollTop = input.scrollHeight; } catch (_) {}
         },
         async onFinal(text, event) {
             lastInterimText = '';
             const cleaned = cleanSpeechFillers(text);
-            if (event.autoSubmit) {
-                committedText = '';
-                input.value = cleaned;
-                input.dataset.inputSource = 'converse';
-                globalThis.updateLiveConverseOverlay?.('thinking', cleaned, false);
+            globalThis.clearLiveSpeechTranscriptionOnScreen?.();
+            input.value = '';
+            delete input.dataset.inputSource;
+
+            if (cleaned) {
+                const isConverse = event.autoSubmit || event.source === 'converse' || controller.getState().converseEnabled;
+                if (isConverse) {
+                    globalThis.updateLiveConverseOverlay?.('thinking', cleaned, false);
+                }
                 options.onComposerChanged?.();
                 globalThis.handleComposerInput?.();
                 await options.onSubmit?.({
-                    source: 'converse',
+                    text: cleaned,
+                    source: isConverse ? 'converse' : 'vtt',
                     preserveTranscript: true,
                     interrupt: event.interrupt === true
                 });
-            } else {
-                committedText = [committedText, cleaned].filter(Boolean).join(' ').trim();
-                input.value = committedText;
-                input.dataset.inputSource = 'vtt';
-                options.onComposerChanged?.();
-                globalThis.handleComposerInput?.();
-                input.focus();
-                try { input.scrollTop = input.scrollHeight; } catch (_) {}
             }
         },
         onState(state) {
             if (!state.listening) {
                 lastInterimText = '';
+                if (!state.processing) {
+                    globalThis.clearLiveSpeechTranscriptionOnScreen?.();
+                }
             }
             const isListening = Boolean(state.listening);
             const isProcessing = Boolean(state.processing);
@@ -855,6 +921,7 @@ export function installSpeechInputUI(options = {}) {
         },
         onError(message) {
             lastInterimText = '';
+            globalThis.clearLiveSpeechTranscriptionOnScreen?.();
             if (vttWaveform) {
                 vttWaveform.classList.add('hidden');
                 vttWaveform.classList.remove('is-active', 'is-processing');
@@ -892,7 +959,7 @@ export function installSpeechInputUI(options = {}) {
         return toggled;
     };
 
-    globalThis.JarvisSpeechInput = controller; 
+    globalThis.JarvisSpeechInput = controller;
     globalThis.JarvisSpeechInput.toggleConverse = globalThis.toggleConverseMode;
     globalThis.JarvisSpeechInput.resetCommittedText = globalThis.resetSpeechInputCommittedText;
     globalThis.syncVttUiState = () => controller.getState();
