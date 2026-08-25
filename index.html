@@ -10849,16 +10849,35 @@ let showRoutingDebugBadge = false;
             ctx.restore();
         }
         function isSplitwiseExpenseIntent(text) {
-            const t = String(text || '').toLowerCase();
-            if (!t.trim()) return false;
-            // Exclude technical, architecture, coding, and engineering queries that contain 'split' (e.g. split-brain, train-test split, string split, split across shards)
-            if (/\b(split[- ]brain|split[- ]test|string split|split string|database|consensus|paxos|raft|distributed|region|partition|shard|sharding|dataset|array|table|query|code|function|migration|protocol|cluster|failover)\b/i.test(t)) {
-                return false;
+            const raw = String(text || '').trim();
+            if (!raw) return false;
+            const t = raw.toLowerCase();
+
+            // Must contain numeric values (financial amounts or participant count)
+            if (!/\d+/.test(t)) return false;
+
+            // 1. Explicit mention of Splitwise or debt settlement
+            if (/\b(?:splitwise|who\s+owes\s+(?:whom|who)|settle\s+up)\b/i.test(t)) {
+                return true;
             }
-            // Must have clear financial or bill splitting phrase
-            const hasBillContext = /\b(bill|check|receipt|dinner|lunch|trip|rent|groceries|expense|expenses|cost|money|rupees|rs\.?|inr|\$|usd|eur|pounds|owe|owes|owed|settle|settlement|splitwise)\b/i.test(t);
-            const hasSplitAction = /\b(split\s+(?:the\s+)?(?:bill|check|expense|cost|rent|amount|total)|split\s+(?:between|among|across|with)\s+\d+|splitwise|who\s+owes\s+whom|settle\s+up|share\s+equally|divide\s+equally)\b/i.test(t);
-            return (hasSplitAction || (hasBillContext && /\b(split|paid\s+by|who\s+paid)\b/i.test(t))) && /\b(?:paid|spent|contributed|owe|owes|owed|share|splitwise|between|among)\b/i.test(t);
+
+            // 2. Explicit financial bill/expense splitting directive
+            const hasFinancialSplit = /\bsplit\s+(?:the\s+)?(?:bill|check|receipt|dinner|lunch|trip|rent|groceries|tab|expense|expenses|cost|amount|total)\b/i.test(t);
+            const hasPersonSplit = /\bsplit\s+(?:between|among|across|with)\s+\d+\s*(?:people|persons|friends|members)?\b/i.test(t);
+            const hasPaymentVerb = /\b(?:paid|spent|contributed|pay|owes?|owed)\b/i.test(t);
+            const hasCurrency = /(?:[\$€£₹]|rs\.?|inr|usd|eur|gbp|bucks|rupees|dollars|euros)/i.test(t);
+
+            if ((hasFinancialSplit || hasPersonSplit) && (hasPaymentVerb || hasCurrency)) {
+                return true;
+            }
+
+            // 3. Person-payment contributions (e.g. "Alice paid 500, Bob paid 300, split...")
+            const paymentPattern = /\b[a-z]+\s+(?:paid|spent|contributed)\s*(?:[\$€£₹]|rs\.?|inr|usd|eur)?\s*\d+/i;
+            if (paymentPattern.test(raw) && /\b(?:split|owe|owes|between|among|share|total)\b/i.test(t)) {
+                return true;
+            }
+
+            return false;
         }
 
         function normalizeExpensePersonName(name) {
