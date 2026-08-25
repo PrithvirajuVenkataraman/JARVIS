@@ -267,8 +267,12 @@ export function createSpeechInputController(options = {}) {
 
             r.onresult = event => {
                 resultReceived = true;
-                if (globalThis.speechSynthesis?.speaking || globalThis.isConverseSpeechActive?.()) {
+                if (globalThis.speechSynthesis?.speaking || globalThis.isConverseSpeechActive?.() || processing) {
+                    if (globalThis.speechSynthesis?.speaking) {
+                        try { globalThis.speechSynthesis.cancel(); } catch (_) {}
+                    }
                     globalThis.stopConverseSpeech?.('barge_in');
+                    globalThis.stopActiveGeneration?.('converse_interruption');
                 }
                 let interim = '';
                 let final = '';
@@ -300,6 +304,7 @@ export function createSpeechInputController(options = {}) {
                         autoSubmit: converseEnabled,
                         source: converseEnabled ? 'converse' : 'vtt',
                         transcriptFinal: true,
+                        interrupt: true,
                         language
                     });
                 }
