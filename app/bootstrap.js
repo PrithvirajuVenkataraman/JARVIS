@@ -17,6 +17,9 @@ import * as JarvisAttachments from './attachments.js';
 import * as JarvisAgentWorkflows from './agent-workflows.js';
 import JarvisDataVerification from './data-tracking-verification.js';
 import * as JarvisToolDispatcher from './tool-dispatcher.js';
+import { highlightCode, normalizeLang } from './code-highlighter.js';
+import { renderMathInText, formatLatexExpression } from './math-renderer.js';
+import { renderMarkdown } from './markdown-renderer.js';
 
 const engine = createConversationEngine({
     maxTurns: 12,
@@ -42,6 +45,9 @@ globalThis.JarvisAttachments = Object.freeze({ ...JarvisAttachments });
 globalThis.JarvisAgentWorkflows = Object.freeze({ ...JarvisAgentWorkflows });
 globalThis.JarvisDataVerification = Object.freeze({ ...JarvisDataVerification });
 globalThis.JarvisToolDispatcher = Object.freeze({ ...JarvisToolDispatcher });
+globalThis.JarvisCodeHighlighter = Object.freeze({ highlightCode, normalizeLang });
+globalThis.JarvisMathRenderer = Object.freeze({ renderMathInText, formatLatexExpression });
+globalThis.JarvisMarkdownRenderer = Object.freeze({ renderMarkdown });
 
 function initializeSpeechInput() {
     if (globalThis.__jarvisSpeechInputInstalled) return;
@@ -64,12 +70,20 @@ function initializeSpeechInput() {
     }
 }
 
-if (globalThis.__jarvisAppReady || document.readyState !== 'loading') {
-    initializeSpeechInput();
+globalThis.initializeSpeechInput = initializeSpeechInput;
+
+if (typeof document !== 'undefined') {
+    if (globalThis.__jarvisAppReady || document.readyState !== 'loading') {
+        initializeSpeechInput();
+    } else {
+        globalThis.addEventListener?.('jarvis:app-ready', initializeSpeechInput, { once: true });
+        document.addEventListener?.('DOMContentLoaded', initializeSpeechInput, { once: true });
+    }
+    if (typeof window !== 'undefined') {
+        window.addEventListener?.('load', initializeSpeechInput, { once: true });
+    }
 } else {
-    globalThis.addEventListener('jarvis:app-ready', initializeSpeechInput, { once: true });
-    document.addEventListener('DOMContentLoaded', initializeSpeechInput, { once: true });
+    initializeSpeechInput();
 }
-window.addEventListener('load', initializeSpeechInput, { once: true });
 
 globalThis.dispatchEvent(new CustomEvent('jarvis:modules-ready'));
