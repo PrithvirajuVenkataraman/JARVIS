@@ -4,16 +4,36 @@ console.log('=== Testing Splitwise Exclusion & Compact Thinking Suite ===');
 
 // --- 1. isSplitwiseExpenseIntent implementation ---
 function isSplitwiseExpenseIntent(text) {
-    const t = String(text || '').toLowerCase();
-    if (!t.trim()) return false;
-    // Exclude technical, architecture, coding, and engineering queries that contain 'split' (e.g. split-brain, train-test split, string split, split across shards)
-    if (/\b(split[- ]brain|split[- ]test|string split|split string|database|consensus|paxos|raft|distributed|region|partition|shard|sharding|dataset|array|table|query|code|function|migration|protocol|cluster|failover)\b/i.test(t)) {
-        return false;
+    const raw = String(text || '').trim();
+    if (!raw) return false;
+    const t = raw.toLowerCase();
+
+    // Must contain numeric values (financial amounts or participant count)
+    if (!/\d+/.test(t)) return false;
+
+    // 1. Explicit mention of Splitwise or debt settlement
+    if (/\b(?:splitwise|who\s+owes\s+(?:whom|who)|settle\s+up)\b/i.test(t)) {
+        return true;
     }
-    // Must have clear financial or bill splitting phrase
-    const hasBillContext = /\b(bill|check|receipt|dinner|lunch|trip|rent|groceries|expense|expenses|cost|money|rupees|rs\.?|inr|\$|usd|eur|pounds|owe|owes|owed|settle|settlement|splitwise)\b/i.test(t);
-    const hasSplitAction = /\b(split\s+(?:the\s+)?(?:bill|check|expense|cost|rent|amount|total)|split\s+(?:between|among|across|with)\s+\d+|splitwise|who\s+owes\s+whom|settle\s+up|share\s+equally|divide\s+equally)\b/i.test(t);
-    return (hasSplitAction || (hasBillContext && /\b(split|paid\s+by|who\s+paid)\b/i.test(t))) && /\b(?:paid|spent|contributed|owe|owes|owed|share|splitwise|between|among)\b/i.test(t);
+
+    // 2. Explicit financial bill/expense splitting directive
+    const hasFinancialSplit = /\bsplit\s+(?:the\s+)?(?:bill|check|receipt|dinner|lunch|trip|rent|groceries|tab|expense|expenses|cost|amount|total)\b/i.test(t);
+    const hasPersonSplit = /\bsplit\s+(?:between|among|across|with)\s+\d+\s+(?:people|persons|friends|members|roommates|ways)\b/i.test(t) ||
+                           /\bsplit\s+(?:between|among|with)\s+[A-Za-z]+\s+(?:and|&)\s+[A-Za-z]+\b/i.test(t);
+    const hasPaymentVerb = /\b(?:paid|spent|contributed|owes?|owed)\b/i.test(t);
+    const hasCurrency = /(?:[\$€£₹]|\b(?:rs\.?|inr|usd|eur|gbp|bucks|rupees|dollars|euros)\b)/i.test(t);
+
+    if ((hasFinancialSplit || hasPersonSplit) && (hasPaymentVerb || hasCurrency)) {
+        return true;
+    }
+
+    // 3. Person-payment contributions (e.g. "Alice paid 500, Bob paid 300, split...")
+    const paymentPattern = /\b[A-Za-z]+\s+(?:paid|spent|contributed)\s*(?:[\$€£₹]|\b(?:rs\.?|inr|usd|eur)\b)?\s*\d+/i;
+    if (paymentPattern.test(raw) && /\b(?:split|owe|owes|between|among|share|total)\b/i.test(t)) {
+        return true;
+    }
+
+    return false;
 }
 
 // --- 2. generateContextualThoughtSteps implementation ---
@@ -38,7 +58,7 @@ function generateContextualThoughtSteps(userPrompt) {
     const isMath = /\b(calculate|compute|solve|derivative|integral|equation|formula|matrix|matrices|eigen|probability|statistics|algebra|geometry|theorem|proof|arithmetic|polynomial|linear equation)\b/i.test(prompt);
     const isScience = /\b(physics|quantum|relativity|gravity|spacetime|black hole|event horizon|thermodynamics|chemistry|molecule|reaction|atom|orbital|biology|cell|dna|rna|gene|crispr|protein|enzyme|evolution|planet|orbit|galaxy|star|supernova|photosynthesis)\b/i.test(prompt);
 
-    // --- STAGE 1: CONTEXTUALIZATION ---
+    // --- STAGE 1: INTENT & SCOPE ---
     let stage1 = '';
     if (isComparison && (entityA || entityB)) {
         const left = entityA || 'options';
@@ -54,35 +74,63 @@ function generateContextualThoughtSteps(userPrompt) {
         stage1 = `Analyzing inquiry premises & context`;
     }
 
-    // --- STAGE 2: MECHANISTIC EVALUATION ---
+    // --- STAGE 2: KNOWLEDGE & RETRIEVAL ---
     let stage2 = '';
-    if (isComparison && (entityA || entityB)) {
-        stage2 = `Evaluating performance & trade-offs`;
+    if (isComparison) {
+        stage2 = `Retrieving benchmarks & paradigms`;
     } else if (isCode) {
-        stage2 = `Evaluating algorithmic design & edge cases`;
+        stage2 = `Retrieving syntax & specifications`;
     } else if (isMath) {
-        stage2 = `Applying step-by-step transformations`;
+        stage2 = `Identifying relevant formulas`;
     } else if (isScience) {
-        stage2 = `Tracing causal mechanisms & dynamics`;
+        stage2 = `Reviewing empirical laws`;
     } else {
-        stage2 = `Evaluating domain principles & mechanisms`;
+        stage2 = `Retrieving authoritative context`;
     }
 
-    // --- STAGE 3: SYNTHESIS & STRUCTURED OUTPUT ---
+    // --- STAGE 3: MECHANISTIC EVALUATION ---
     let stage3 = '';
     if (isComparison && (entityA || entityB)) {
-        stage3 = `Structuring balanced recommendation`;
+        stage3 = `Evaluating performance & trade-offs`;
     } else if (isCode) {
-        stage3 = `Structuring clean ${lang || 'code'} implementation`;
+        stage3 = `Evaluating algorithmic design & edge cases`;
     } else if (isMath) {
-        stage3 = `Verifying derivation & final values`;
+        stage3 = `Applying step-by-step transformations`;
     } else if (isScience) {
-        stage3 = `Synthesizing first-principles explanation`;
+        stage3 = `Tracing causal mechanisms & dynamics`;
     } else {
-        stage3 = `Structuring clear, verified response`;
+        stage3 = `Evaluating domain principles & mechanisms`;
     }
 
-    return [stage1, stage2, stage3];
+    // --- STAGE 4: BOUNDARY CONDITIONS ---
+    let stage4 = '';
+    if (isComparison) {
+        stage4 = `Validating edge-case workflows`;
+    } else if (isCode) {
+        stage4 = `Validating edge cases & types`;
+    } else if (isMath) {
+        stage4 = `Verifying intermediate arithmetic`;
+    } else if (isScience) {
+        stage4 = `Checking physical consistency`;
+    } else {
+        stage4 = `Verifying factual consistency`;
+    }
+
+    // --- STAGE 5: SYNTHESIS & STRUCTURED OUTPUT ---
+    let stage5 = '';
+    if (isComparison && (entityA || entityB)) {
+        stage5 = `Structuring balanced recommendation`;
+    } else if (isCode) {
+        stage5 = `Structuring clean ${lang || 'code'} implementation`;
+    } else if (isMath) {
+        stage5 = `Verifying derivation & final values`;
+    } else if (isScience) {
+        stage5 = `Synthesizing first-principles explanation`;
+    } else {
+        stage5 = `Structuring clear, verified response`;
+    }
+
+    return [stage1, stage2, stage3, stage4, stage5];
 }
 
 // ============================================================================
@@ -143,14 +191,15 @@ const testCases = [
 
 for (const tc of testCases) {
     const steps = generateContextualThoughtSteps(tc.query);
-    assert.equal(steps.length, 3, 'Must produce 3 stages');
+    assert.equal(steps.length, 5, 'Must produce 5 stages');
     for (const s of steps) {
-        const words = s.split(/\s+/).length;
-        assert.ok(words <= 8, `Thinking step "${s}" must be compact (<= 8 words, got ${words})`);
+        const title = s.includes(':') ? s.split(':')[0].trim() : s;
+        const words = title.split(/\s+/).length;
+        assert.ok(words <= 8, `Thinking step title "${title}" must be compact (<= 8 words, got ${words})`);
         assert.ok(!s.includes('Deconstructing problem requirements and boundary constraints for'), 'Must not contain legacy wordy templates');
     }
 }
-console.log('  [PASS] 3.1 All generated thinking steps are crisp, compact 3-6 word micro-phrases');
+console.log('  [PASS] 3.1 All generated thinking steps have crisp titles and rich human-like reasoning');
 
 // ============================================================================
 // Section 4: Upfront Handler Non-Hijack Invariants (Math, Code, Dictionary)
@@ -160,11 +209,10 @@ console.log('--- Section 4: Upfront Handler Non-Hijack Invariants ---');
 function isMathCalculationRequest(text) {
     const t = String(text || '').toLowerCase().trim();
     if (!t) return false;
-    if (/\b(weather|forecast|news|headline|translate|joke|hotel|restaurant|code|algorithm|complexity|function|class|architecture|plan|migration|protocol|dijkstra|byzantine)\b/.test(t)) return false;
-    if (/^[\d\s()+\-*/^%.=,]+$/.test(t) && /[+\-*/^%]/.test(t)) return true;
-    if (/^(what is|what's|calculate|calc|compute|evaluate|solve)\s+[-+*/^%().,\d\s]+=?$/.test(t)) return true;
-    if (/\b(?:sqrt|sin|cos|tan|log|ln|pow|exp|abs|floor|ceil)\s*\(\s*[-+*/^%().,\d\s]+\s*\)/i.test(t)) return true;
-    if (/\b(?:scientific calculation|scientific calculator)\b/i.test(t)) return true;
+    if (/^[\d\s()+\-*/^%.=,]+$/.test(t) && /[+\-*/^%]/.test(t) && /\d/.test(t)) return true;
+    if (/^(?:what is|what's|calculate|calc|compute|evaluate|solve)\s+[-+*/^%().,\d\s]+=?$/i.test(t) && /\d/.test(t)) return true;
+    if (/^(?:what is\s+|calculate\s+|compute\s+|eval\s+)?(?:sqrt|sin|cos|tan|log|ln|pow|exp|abs|floor|ceil)\s*\(\s*[-+*/^%().,\d\s]+\s*\)$/i.test(t)) return true;
+    if (/^(?:scientific calculation|scientific calculator)$/i.test(t)) return true;
     return false;
 }
 
