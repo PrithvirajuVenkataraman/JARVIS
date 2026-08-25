@@ -582,6 +582,136 @@ export function createSpeechInputController(options = {}) {
 }
 
 /**
+/**
+ * Creates a real-time Web Audio API amplitude visualizer attached to the active mic stream.
+ */
+export function createAudioVisualizer(containerEl) {
+    let audioContext = null;
+    let analyser = null;
+    let source = null;
+    let activeStream = null;
+    let animationFrameId = null;
+    let barElements = [];
+    let smoothedLevels = [];
+    const NUM_BARS = 14;
+
+    function initDom() {
+        if (!containerEl || typeof document === 'undefined' || typeof document.createElement !== 'function') return;
+        containerEl.innerHTML = '';
+        const waveWrap = document.createElement('div');
+        waveWrap.className = 'composer-voice-waveform';
+        barElements = [];
+        smoothedLevels = new Array(NUM_BARS).fill(0.12);
+        for (let i = 0; i < NUM_BARS; i++) {
+            const bar = document.createElement('span');
+            bar.className = 'voice-wave-bar';
+            bar.style.setProperty?.('--bar-index', String(i));
+            bar.style.setProperty?.('--bar-scale', '0.12');
+            waveWrap.appendChild(bar);
+            barElements.push(bar);
+        }
+        containerEl.appendChild(waveWrap);
+    }
+
+    async function start(existingStream = null) {
+        stop();
+        initDom();
+        try {
+            if (existingStream && existingStream.active && existingStream.getAudioTracks().some(t => t.readyState === 'live')) {
+                activeStream = existingStream;
+            } else if (typeof navigator !== 'undefined' && navigator?.mediaDevices?.getUserMedia) {
+                try {
+                    activeStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                } catch (_) {
+                    return;
+                }
+            } else {
+                return;
+            }
+
+            const AudioCtx = globalThis.AudioContext || globalThis.webkitAudioContext;
+            if (!AudioCtx) return;
+            audioContext = new AudioCtx();
+            if (audioContext.state === 'suspended') {
+                try { await audioContext.resume(); } catch (_) {}
+            }
+
+            analyser = audioContext.createAnalyser();
+            analyser.fftSize = 64;
+            analyser.smoothingTimeConstant = 0.75;
+
+            source = audioContext.createMediaStreamSource(activeStream);
+            source.connect(analyser);
+
+            const bufferLength = analyser.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
+
+            function draw() {
+                animationFrameId = requestAnimationFrame(draw);
+                if (!analyser || barElements.length === 0) return;
+
+                analyser.getByteFrequencyData(dataArray);
+
+                let total = 0;
+                for (let i = 0; i < bufferLength; i++) {
+                    total += dataArray[i];
+                }
+                const avgVolume = total / (bufferLength * 255);
+
+                for (let i = 0; i < NUM_BARS; i++) {
+                    const half = NUM_BARS / 2;
+                    const distFromCenter = Math.abs(i - half) / half;
+                    const binIndex = Math.min(bufferLength - 1, Math.floor((1 - distFromCenter * 0.5) * (bufferLength / 2)));
+                    const rawVal = (dataArray[binIndex] || 0) / 255;
+
+                    const centerWeight = Math.cos(distFromCenter * Math.PI * 0.42);
+                    const targetScale = Math.min(1.0, Math.max(0.12, (rawVal * 0.85 + avgVolume * 0.5) * centerWeight * 1.9));
+
+                    smoothedLevels[i] += (targetScale - smoothedLevels[i]) * 0.32;
+                    if (barElements[i]) {
+                        barElements[i].style.setProperty('--bar-scale', smoothedLevels[i].toFixed(3));
+                    }
+                }
+            }
+
+            draw();
+        } catch (err) {
+            // AudioContext initialization failed or blocked by autoplay policy
+        }
+    }
+
+    function stop() {
+        if (animationFrameId) {
+            cancelAnimationFrame(animationFrameId);
+            animationFrameId = null;
+        }
+        if (source) {
+            try { source.disconnect(); } catch (_) {}
+            source = null;
+        }
+        if (analyser) {
+            try { analyser.disconnect(); } catch (_) {}
+            analyser = null;
+        }
+        if (audioContext && audioContext.state !== 'closed') {
+            try { audioContext.close(); } catch (_) {}
+            audioContext = null;
+        }
+        activeStream = null;
+        smoothedLevels = new Array(NUM_BARS).fill(0.12);
+        barElements.forEach(bar => {
+            bar.style.setProperty('--bar-scale', '0.12');
+        });
+    }
+
+    return {
+        start,
+        stop,
+        getBarCount: () => barElements.length
+    };
+}
+
+/**
  * Attaches the speech input controller to DOM UI elements.
  */
 export function installSpeechInputUI(options = {}) {
@@ -589,8 +719,10 @@ export function installSpeechInputUI(options = {}) {
     const vttButton = document.getElementById('voice-to-text-btn');
     const status = document.getElementById('speech-input-status');
     const vttWaveform = document.getElementById('vtt-waveform-container');
+    const composerShell = document.getElementById('input-bar-inner');
     if (!input || !vttButton) return null;
 
+    const visualizer = vttWaveform ? createAudioVisualizer(vttWaveform) : null;
     const Recognition = globalThis.SpeechRecognition || globalThis.webkitSpeechRecognition;
     let committedText = '';
     let lastInterimText = '';
@@ -602,7 +734,6 @@ export function installSpeechInputUI(options = {}) {
             committedText = currentVal.slice(0, currentVal.length - lastInterimText.length).trim();
         } else {
             committedText = currentVal.trim();
-            lastInterimText = '';
         }
     });
 
@@ -617,12 +748,6 @@ export function installSpeechInputUI(options = {}) {
         status.textContent = message;
     }
 
-    function setListeningStatus() {
-        if (!status) return;
-        status.classList.add('speech-listening-status');
-        status.innerHTML = 'Listening<span class="speech-listening-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>';
-    }
-
     const savedLanguage = globalThis.localStorage?.getItem?.('jarvis_voice_input_language');
     const controller = createSpeechInputController({
         Recognition,
@@ -631,10 +756,6 @@ export function installSpeechInputUI(options = {}) {
             const cleaned = cleanSpeechFillers(text);
             lastInterimText = cleaned;
             input.value = [committedText, cleaned].filter(Boolean).join(' ').trim();
-            if (state?.mode === 'dictation' && state.listening && status) {
-                if (cleaned) setStatusText('Listening');
-                else setListeningStatus();
-            }
             if (state?.converseEnabled) {
                 globalThis.updateLiveConverseOverlay?.(state.processing ? 'thinking' : 'listening', cleaned, true);
             }
@@ -671,27 +792,37 @@ export function installSpeechInputUI(options = {}) {
             if (!state.listening) {
                 lastInterimText = '';
             }
-            const isVttListening = state.mode === 'dictation' && state.listening;
-            vttButton.classList.toggle('is-listening', isVttListening);
-            vttButton.setAttribute('aria-pressed', isVttListening ? 'true' : 'false');
-            if (vttWaveform) {
-                vttWaveform.classList.toggle('hidden', !isVttListening);
-                vttWaveform.classList.toggle('is-active', isVttListening);
+            const isListening = Boolean(state.listening);
+            const isProcessing = Boolean(state.processing);
+
+            vttButton.classList.toggle('is-listening', isListening);
+            vttButton.setAttribute('aria-pressed', isListening ? 'true' : 'false');
+
+            if (composerShell) {
+                composerShell.classList.toggle('is-voice-active', isListening || isProcessing);
+                composerShell.classList.toggle('is-processing', isProcessing);
             }
-            input.placeholder = state.converseEnabled
-                ? (state.processing ? 'Thinking...' : 'Listening (speak now)...')
-                : (isVttListening ? 'Listening...' : 'Ask anything...');
+
+            if (vttWaveform) {
+                vttWaveform.classList.toggle('hidden', !isListening && !isProcessing);
+                vttWaveform.classList.toggle('is-active', isListening);
+                vttWaveform.classList.toggle('is-processing', isProcessing);
+            }
+
+            if (isListening) {
+                visualizer?.start();
+            } else {
+                visualizer?.stop();
+            }
+
             if (status) {
                 if (!state.supported) {
                     setStatusText('Voice input unavailable in this browser.');
-                } else if (state.converseEnabled) {
-                    setStatusText(state.processing ? 'Thinking...' : 'Listening...');
-                } else if (isVttListening) {
-                    setListeningStatus();
                 } else {
                     setStatusText('');
                 }
             }
+
             globalThis.updateLiveConverseOverlay?.(state.processing ? 'thinking' : (state.listening ? 'listening' : 'idle'));
             options.onStateChanged?.(state);
             globalThis.updateComposerPlaceholder?.();
@@ -700,8 +831,12 @@ export function installSpeechInputUI(options = {}) {
             lastInterimText = '';
             if (vttWaveform) {
                 vttWaveform.classList.add('hidden');
-                vttWaveform.classList.remove('is-active');
+                vttWaveform.classList.remove('is-active', 'is-processing');
             }
+            if (composerShell) {
+                composerShell.classList.remove('is-voice-active', 'is-processing');
+            }
+            visualizer?.stop();
             setStatusText(message);
             options.onError?.(message);
         }
@@ -738,14 +873,16 @@ export function installSpeechInputUI(options = {}) {
     globalThis.setVoiceInputLanguage = language => controller.setLanguage(language);
 
     vttButton.addEventListener('click', globalThis.toggleVoiceToText);
-    globalThis.addEventListener('jarvis:assistant-processing', event => {
+    globalThis.addEventListener?.('jarvis:assistant-processing', event => {
         controller.setProcessing(Boolean(event.detail?.active));
     });
-    document.addEventListener('keydown', event => {
-        if (event.key === 'Escape' && controller.getState().listening) {
-            controller.stop({ disableConverse: true });
-        }
-    });
+    if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+        document.addEventListener('keydown', event => {
+            if (event.key === 'Escape' && controller.getState().listening) {
+                controller.stop({ disableConverse: true });
+            }
+        });
+    }
 
     return controller;
 }
