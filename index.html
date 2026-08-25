@@ -9453,6 +9453,49 @@ let showRoutingDebugBadge = false;
             }
         }
 
+        function updateLiveSpeechTranscriptionOnScreen(text = '', isInterim = false, source = 'voice') {
+            const chatMessages = document.getElementById('chat-messages');
+            if (!chatMessages) return;
+
+            const trimmed = String(text || '').trim();
+            let liveRow = document.getElementById('live-speech-transcription-row');
+
+            if (!trimmed) {
+                if (liveRow) liveRow.remove();
+                return;
+            }
+
+            if (!liveRow) {
+                liveRow = document.createElement('div');
+                liveRow.id = 'live-speech-transcription-row';
+                liveRow.className = 'chat-message-row user-message-row is-live-speech flex justify-end';
+                chatMessages.appendChild(liveRow);
+            }
+
+            const modeLabel = source === 'converse' ? 'Converse' : 'Listening';
+            const safeText = typeof escapeHtml === 'function' ? escapeHtml(trimmed) : trimmed;
+            liveRow.innerHTML = `
+                <div class="chat-bubble-user text-white relative group is-live-speech-bubble">
+                    <div class="flex items-center gap-1.5 mb-1 opacity-80 text-xs text-sky-300 font-medium">
+                        <span class="live-speech-pulse"></span>
+                        <span>${modeLabel}...</span>
+                    </div>
+                    <p class="text-sm font-medium leading-relaxed">${safeText}</p>
+                </div>
+            `;
+
+            try {
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            } catch (_) {}
+        }
+
+        function clearLiveSpeechTranscriptionOnScreen() {
+            const liveRow = document.getElementById('live-speech-transcription-row');
+            if (liveRow) liveRow.remove();
+        }
+
+        globalThis.updateLiveSpeechTranscriptionOnScreen = updateLiveSpeechTranscriptionOnScreen;
+        globalThis.clearLiveSpeechTranscriptionOnScreen = clearLiveSpeechTranscriptionOnScreen;
         globalThis.updateLiveConverseOverlay = updateLiveConverseOverlay;
 
         function toggleConverseMic() {
@@ -11384,10 +11427,11 @@ async function sendTextInput(submission = {}) {
             closeComposerActionsMenu();
             closeSlashCommandPicker();
             const input = document.getElementById('text-input');
-            if (!input) return;
-            const text = input.value.trim();
+            if (!input && submission?.text === undefined) return;
+            const text = String(submission?.text !== undefined ? submission.text : (input?.value || '')).trim();
             const pendingAttachments = window.JarvisAttachments?.getPendingAttachments?.() || [];
             const inputSource = String(submission?.source || input.dataset.inputSource || 'text').trim() || 'text';
+            globalThis.clearLiveSpeechTranscriptionOnScreen?.();
             if (activeRequestController || isAssistantProcessing() || isConverseSpeechActive()) {
                 const canInterruptFromConverse = inputSource === 'converse' &&
                     (submission?.interrupt === true || isConverseSpeechActive());
@@ -14770,11 +14814,10 @@ function extractComparisonEntities(text) {
     const normalized = String(text || '').replace(/\s+/g, ' ').trim();
     if (!normalized) return null;
 
-    // Strictly do not hijack complex design, system architecture, programming, or planning queries
-    if (/\b(design|plan|architecture|database|migration|step by step|protocol|split-brain|failover|algorithm|implement|benchmark|workflow|system|explain|how to|create)\b/i.test(normalized)) {
-        return null;
-    }
-    if (normalized.split(/\s+/).length > 15) {
+    // Concise comparison query structure
+    const isExplicitComparison = /^(?:compare|what is the difference between|difference between|which is better|who is better)\b/i.test(normalized);
+    const wordCount = normalized.split(/\s+/).length;
+    if (!isExplicitComparison && wordCount > 10) {
         return null;
     }
 
@@ -14782,11 +14825,12 @@ function extractComparisonEntities(text) {
     if (!vsMatches.length) return null;
 
     const last = vsMatches[vsMatches.length - 1];
-    const left = String(last[1] || '').replace(/\b(who is|who's|which is|best|better|between|among)\b/gi, '').trim();
+    const left = String(last[1] || '').replace(/\b(who is|who's|which is|best|better|between|among|compare)\b/gi, '').trim();
     const right = String(last[2] || '').replace(/[?.!,;]+$/g, '').trim();
 
     if (!left || !right) return null;
     if (left.length < 2 || right.length < 2) return null;
+    if (left.split(/\s+/).length > 4 || right.split(/\s+/).length > 4) return null;
 
     const genericTerms = new Set([
         'something', 'anything', 'everything', 'nothing',
