@@ -3385,7 +3385,7 @@ export const __test = {
     isDiscoveryAnswerSource,
     rankSources,
     searchPublicSources,
-    searchWikipedia,
+    searchWikipedia, 
     extractSearchTargetQuery,
     buildSearchQueryRewrite,
     resolveRetrievalRoute,
