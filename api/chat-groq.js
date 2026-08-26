@@ -713,7 +713,11 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             const imagesToPass = Array.isArray(images)
                 ? images
                 : (Array.isArray(grounding?.images) ? grounding.images : undefined);
-            const firstPass = await runModelWithFallback(firstPrompt, lengthPolicy, preferences?.selectedModel || null, imagesToPass);
+            const firstPass = await runModelWithFallback(firstPrompt, lengthPolicy, preferences?.selectedModel || null, imagesToPass, {
+                systemPrompt,
+                userMessage: effectiveMessage,
+                isAttachmentGrounding
+            });
             timing.modelMs += Date.now() - modelStartedAt;
             if (!firstPass.ok) {
                 return res.status(503).json({
@@ -764,7 +768,11 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                         intent
                     );
                     const secondStartedAt = Date.now();
-                    const secondPass = await runModelWithFallback(secondPrompt, lengthPolicy, preferences?.selectedModel || null);
+                    const secondPass = await runModelWithFallback(secondPrompt, lengthPolicy, preferences?.selectedModel || null, undefined, {
+                        systemPrompt,
+                        userMessage: effectiveMessage,
+                        isAttachmentGrounding
+                    });
                     timing.modelMs += Date.now() - secondStartedAt;
                     if (secondPass.ok) {
                         selectedPass = secondPass;
@@ -967,16 +975,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             return 'Return only the final assistant answer as natural text.';
         }
         return `Reasoning instruction: Before your final answer, wrap your entire internal thinking process strictly inside <think>...</think> tags. This reasoning is hidden from the user and does not count toward your answer length.
-
-In your <think> block, briefly show your actual thought process (capped at max 10 seconds of deliberation, 5-10 lines). Reference the specific system rules you are applying, for example:
-- Analyze User Input: What is the user asking? Language? Intent?
-- Check Constraints & Rules: (e.g., "Start directly with the answer", "NO META-TALK", "Never invent facts", language matching, response length/format preference).
-- Standalone Entity/Object Rule: If the user query is a standalone name, object, person, place, or concept alone (e.g. "Photosynthesis", "Tesla", "Alan Turing", "PostgreSQL", "Taj Mahal"): directly provide a crisp, informative 2-4 sentence factual overview immediately.
-- Ambiguity & Clarification Rule: If the user query is genuinely ambiguous, fragmented, or underspecified (e.g. "that thing", "it", "start") and context is insufficient: conclude thinking and ask a single polite, targeted clarification question instead of guessing.
-- Draft & Self-Correct: Verify factual accuracy and format constraints.
-
-Keep the reasoning concise (5-10 lines, max 10 seconds). Do not repeat the full system prompt.
-CRITICAL: Never output bare "Plan:", "Drafting:", or "Review against constraints:" outside of <think> tags. Everything after </think> must be ONLY the final, polished answer for the user with zero meta-commentary.`;
+Keep the reasoning concise (5-10 lines, max 10 seconds). Do not echo or parrot prompt rules, system instructions, or "Analyze User Input" labels in the final response. Everything after </think> must be ONLY the final, polished answer for the user with zero meta-commentary.`;
     }
 
     function composeStreamingPrompt(systemPrompt, contextBlock, message, lengthGuidance = '', intent = 'chat') {
@@ -1660,7 +1659,7 @@ CRITICAL: Never output bare "Plan:", "Drafting:", or "Review against constraints
         });
     }
 
-    async function runModelWithFallback(finalPrompt, lengthPolicy = {}, userSelectedModel = null, images = undefined) {
+    async function runModelWithFallback(finalPrompt, lengthPolicy = {}, userSelectedModel = null, images = undefined, options = {}) {
         const temp = Number.isFinite(Number(lengthPolicy?.temperature)) ? Number(lengthPolicy.temperature) : 0.7;
         const maxTokens = clampInt(lengthPolicy?.maxTokens, 8000, 256, 16000) + REASONING_TOKEN_ALLOWANCE;
         const hasImages = Array.isArray(images) && images.length > 0;
@@ -1750,16 +1749,22 @@ CRITICAL: Never output bare "Plan:", "Drafting:", or "Review against constraints
                         }
                     }
                 }
+                const geminiBody = {
+                    contents: [{ parts }],
+                    generationConfig: { temperature: temp, topK: 40, topP: 0.95, maxOutputTokens: maxTokens }
+                };
+                if (options?.systemPrompt) {
+                    geminiBody.system_instruction = {
+                        parts: [{ text: options.systemPrompt }]
+                    };
+                }
                 try {
                     const response = await fetchWithTimeoutRetry(
                         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`,
                         {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                contents: [{ parts }],
-                                generationConfig: { temperature: temp, topK: 40, topP: 0.95, maxOutputTokens: maxTokens }
-                            })
+                            body: JSON.stringify(geminiBody)
                         },
                         {
                             timeoutMs: clampInt(lengthPolicy?.timeoutMs, MODEL_FETCH_TIMEOUT_MS, 1000, MODEL_FETCH_TIMEOUT_MS),
@@ -2133,21 +2138,35 @@ CRITICAL: Never output bare "Plan:", "Drafting:", or "Review against constraints
             .replace(/<\/?think>/gi, '')
             .trim();
 
-        // Capture unclosed model scratchpad/planning blocks (e.g. Plan: ... Review against constraints: ... Looks good. Proceeding to output.)
+        // Capture unclosed model scratchpad/planning blocks or leaked system instruction meta-talk
         if (!thought) {
-            const planPattern = /^(?:1\s*\n[^\n]+\s*\n2\s*\n[^\n]+\s*\n3\s*\n[^\n]+\s*\.\s*\n+)?(?:Plan:|Drafting:|Thinking Process:|Reasoning:)\s*[\s\S]*?(?:Proceeding to output\.?|Final Answer:?|Output:?)\s*/i;
-            const planMatch = cleanResponse.match(planPattern);
-            if (planMatch) {
-                thought = planMatch[0].trim();
-                cleanResponse = cleanResponse.slice(planMatch[0].length).trim();
+            const metaTransitionPattern = /^(?:1\s*\n[^\n]+\s*\n2\s*\n[^\n]+\s*\n3\s*\n[^\n]+\s*\.\s*\n+)?(?:Plan:|Drafting:|Thinking Process:|Reasoning:|Analyze User Input:?|Analyzing User Input:?|User Intent:|Check Constraints(?: & Rules)?:?|System Instructions?:?|The user (?:asked|is asking|wants|said)|The prompt asks)[\s\S]*?(?:Proceeding to output\.?|Final Answer:?|Output:?|Here is the (?:solution|answer|result):?)(?:\s*\n*)?/i;
+            const transMatch = cleanResponse.match(metaTransitionPattern);
+            if (transMatch && cleanResponse.length > transMatch[0].length) {
+                thought = transMatch[0].trim();
+                cleanResponse = cleanResponse.slice(transMatch[0].length).trim();
             } else {
-                const reviewPattern = /^(?:Plan:[\s\S]*?)?(?:Review against constraints:[\s\S]*?Proceeding to output\.?\s*)/i;
-                const reviewMatch = cleanResponse.match(reviewPattern);
-                if (reviewMatch) {
-                    thought = reviewMatch[0].trim();
-                    cleanResponse = cleanResponse.slice(reviewMatch[0].length).trim();
+                const planPattern = /^(?:1\s*\n[^\n]+\s*\n2\s*\n[^\n]+\s*\n3\s*\n[^\n]+\s*\.\s*\n+)?(?:Plan:|Drafting:|Thinking Process:|Reasoning:)\s*[\s\S]*?(?:Proceeding to output\.?|Final Answer:?|Output:?)\s*/i;
+                const planMatch = cleanResponse.match(planPattern);
+                if (planMatch) {
+                    thought = planMatch[0].trim();
+                    cleanResponse = cleanResponse.slice(planMatch[0].length).trim();
+                } else {
+                    const reviewPattern = /^(?:Plan:[\s\S]*?)?(?:Review against constraints:[\s\S]*?Proceeding to output\.?\s*)/i;
+                    const reviewMatch = cleanResponse.match(reviewPattern);
+                    if (reviewMatch) {
+                        thought = reviewMatch[0].trim();
+                        cleanResponse = cleanResponse.slice(reviewMatch[0].length).trim();
+                    }
                 }
             }
+        }
+
+        const leakedLinePattern = /^(?:(?:The user (?:asked|is asking|said|wants|provided)|User query:|User request:|Applying rules?:|Checking constraints?:|Rule checked:)[^\n]*\n+)+/i;
+        const leakedMatch = cleanResponse.match(leakedLinePattern);
+        if (leakedMatch && cleanResponse.length > leakedMatch[0].length) {
+            thought = (thought ? thought + '\n\n' : '') + leakedMatch[0].trim();
+            cleanResponse = cleanResponse.slice(leakedMatch[0].length).trim();
         }
 
         return { thought, response: cleanResponse };
