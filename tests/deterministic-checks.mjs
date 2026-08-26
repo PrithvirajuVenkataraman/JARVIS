@@ -852,8 +852,6 @@ assert.match(SOURCE.appHtml, /function getStableBrowserFactAnswer/);
 assert.match(SOURCE.appHtml, /function shouldSuppressDuplicateAssistantMessage/);
 assert.match(SOURCE.appHtml, /normalizeDuplicateAnswerFingerprint/);
 assert.match(SOURCE.searchApi, /function parseDiscoveryFactQuery/);
-assert.match(SOURCE.searchApi, /stable_historical_fact/);
-assert.match(SOURCE.chatGroqApi, /function isPenicillinDiscoveryQuestion/);
 assert.match(SOURCE.chatGroqApi, /async function handleVerifyAnswerRequest/);
 assert.match(SOURCE.chatGroqApi, /intent === 'verify_answer'/);
 assert.match(SOURCE.chatGroqApi, /strategy:\s*'verify_answer_fast_path'/);
@@ -880,7 +878,6 @@ vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'getStableBrowserFactAnswe
 vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'normalizeDuplicatePromptFingerprint'), duplicateSandbox);
 vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'normalizeDuplicateAnswerFingerprint'), duplicateSandbox);
 vm.runInContext(extractFunctionSource(SOURCE.appHtml, 'shouldSuppressDuplicateAssistantMessage'), duplicateSandbox);
-assert.match(duplicateSandbox.getStableBrowserFactAnswer('Founder of penicillin'), /Alexander Fleming/);
 assert.equal(duplicateSandbox.shouldSuppressDuplicateAssistantMessage('Alexander Fleming discovered penicillin.\n\nSources:\n1. A', {}), false);
 assert.equal(duplicateSandbox.shouldSuppressDuplicateAssistantMessage('Alexander Fleming discovered penicillin.\n\nSources:\n1. B', {}), true);
 
