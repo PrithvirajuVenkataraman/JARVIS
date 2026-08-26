@@ -77,10 +77,9 @@ console.log('  [PASS] 2.2 User-chosen Qwen coder model is placed first');
 // ============================================================================
 // Section 3: Provider Cascade & Vision Fallback Order (Groq -> Gemini only)
 // ============================================================================
-console.log('--- Section 3: Provider Cascade & Vision Fallback Order (Groq -> Gemini only) ---');
-
-function determineProviderOrder() {
-    return ['groq', 'gemini'];
+function determineProviderOrder({ hasImages = false, userSelectedModel = null } = {}) {
+    const prioritizeGemini = Boolean(userSelectedModel && String(userSelectedModel).toLowerCase().startsWith('gemini-')) || hasImages;
+    return prioritizeGemini ? ['gemini', 'groq'] : ['groq', 'gemini'];
 }
 
 // 3.1 Standard text query in Auto mode
@@ -88,15 +87,20 @@ const autoProviderOrder = determineProviderOrder();
 assert.deepEqual(autoProviderOrder, ['groq', 'gemini'], 'Provider order must route directly Groq -> Gemini fallback (0 OpenAI key dependency)');
 console.log('  [PASS] 3.1 Text queries always route to Groq API with Gemini fallback (no OpenAI API key required)');
 
-// 3.2 Vision / Image query in Auto mode
-const visionProviderOrder = determineProviderOrder();
-assert.deepEqual(visionProviderOrder, ['groq', 'gemini'], 'Vision queries attempt Groq Vision first before Gemini fallback');
-console.log('  [PASS] 3.2 Vision queries route to Groq Vision first before Gemini fallback');
+// 3.2 Vision / Image query routes to Gemini first with Groq fallback
+const visionProviderOrder = determineProviderOrder({ hasImages: true });
+assert.deepEqual(visionProviderOrder, ['gemini', 'groq'], 'Vision queries route to Gemini first with Groq fallback');
+console.log('  [PASS] 3.2 Vision queries route to Gemini first with Groq fallback');
 
-// 3.3 Groq Vision candidate hierarchy
+// 3.3 Explicit selection of Gemini 2.5 Pro or Gemini 3.7 Flash routes to Gemini first
+const geminiSelectedOrder = determineProviderOrder({ userSelectedModel: 'gemini-2.5-pro' });
+assert.deepEqual(geminiSelectedOrder, ['gemini', 'groq'], 'Explicit Gemini selection routes to Gemini first');
+console.log('  [PASS] 3.3 Explicit Gemini selection routes to Gemini API first');
+
+// 3.4 Groq Vision candidate hierarchy
 const groqVisionCandidates = getPreferredGroqVisionCandidates('', null);
 assert.equal(groqVisionCandidates[0], 'llama-3.2-11b-vision-preview');
-console.log('  [PASS] 3.3 Groq vision candidate list correctly configured for Llama 3.2 Vision Preview');
+console.log('  [PASS] 3.4 Groq vision candidate list correctly configured for Llama 3.2 Vision Preview');
 
 // ============================================================================
 // Section 4: Millisecond Fast-Failover Simulation
