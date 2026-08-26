@@ -2246,9 +2246,14 @@ function evaluateWebRagEvidence(query, results = []) {
 
             if (item.evidenceLevel === 'structured_claim') return true;
             
-            const hasExplicitRoleClaim = /\b(?:captained by|is (?:the )?(?:current )?(?:captain|chief minister|prime minister|president|ceo|governor|leader|coach)(?:\s+of[^.]+)?\s+(?:is|named)?|appointed as (?:the )?(?:captain|chief minister|prime minister|ceo)|(?:captain|skipper|coach|leader|ceo|pm|cm)\s*[:-]\s*[a-z]|\([a-z.'-]+\s+(?:captain|c)\))\b/i.test(text);
+            const roleTokens = tokenize(role).filter(t => t.length > 2);
+            const hasRole = text.includes(role) || (roleTokens.length > 0 && roleTokens.every(t => text.includes(t))) ||
+                            (role === 'prime minister' && (text.includes('pm') || text.includes('premier'))) ||
+                            (role === 'chief minister' && (text.includes('cm') || text.includes('premier'))) ||
+                            (role === 'captain' && text.includes('skipper')) ||
+                            (role === 'ceo' && text.includes('chief executive'));
             
-            if (hasExplicitRoleClaim) {
+            if (hasRole) {
                 return validateClaimTemporalStatus(item) !== 'historical';
             }
             return false;
@@ -2481,24 +2486,25 @@ function extractDeterministicLiveFactAnswer(query, evidence = []) {
 
             if (isRoleQuery) {
                 const roleIntent = parseGovernmentRoleQuery(query);
-                const holderMatch = text.match(/\b(?:captained by|is (?:the )?(?:current )?(?:captain|chief minister|prime minister|president|ceo|governor|leader|coach)(?:\s+of[^.]+)?\s+(?:is|named)?|appointed as (?:the )?(?:captain|chief minister|prime minister|ceo))\s+([A-Z][a-zA-Z.'-]+(?:\s+[A-Z][a-zA-Z.'-]+)+)/i)
-                    || text.match(/\b([A-Z][a-zA-Z.'-]+(?:\s+[A-Z][a-zA-Z.'-]+)+)\s+(?:is|serves as|appointed as)\s+(?:the )?(?:current )?(?:captain|chief minister|prime minister|president|ceo|governor|leader|coach)/i)
-                    || text.match(/\b([A-Z][a-zA-Z.'-]+(?:\s+[A-Z][a-zA-Z.'-]+)+)\s*\((?:captain|c)\)/i);
-                if (holderMatch) {
-                    const rawName = holderMatch[1] || '';
-                    const holderName = cleanHolderName(rawName);
-                    if (holderName) {
-                        const answerText = roleIntent
-                            ? `${holderName} is the current ${roleIntent.role} of ${roleIntent.jurisdiction}.`
-                            : `${holderName} is the current leader/holder.`;
-                        return {
-                            verified: true,
-                            confidence: 0.94,
-                            answer: answerText,
-                            evidenceIndexes: [i],
-                            modelAssisted: false,
-                            reason: `Extracted directly from authoritative source: ${item.domain || item.sourceLabel}`
-                        };
+                if (roleIntent) {
+                    const holderMatch = text.match(/\b(?:captained by|is (?:the )?(?:current )?(?:captain|chief minister|prime minister|president|ceo|governor|leader|coach)(?:\s+of[^.]+)?\s+(?:is|named)?|appointed as (?:the )?(?:captain|chief minister|prime minister|ceo))\s+([A-Z][a-zA-Z.'-]+(?:\s+[A-Z][a-zA-Z.'-]+)+)/i)
+                        || text.match(/\b([A-Z][a-zA-Z.'-]+(?:\s+[A-Z][a-zA-Z.'-]+)+)\s+(?:is|serves as|appointed as|becomes|takes over as|elected as)\s+(?:the )?(?:new |current )?(?:[A-Za-z]+\s+)?(?:captain|chief minister|prime minister|president|ceo|governor|leader|coach)/i)
+                        || text.match(/\b(?:new |current )?(?:[A-Za-z]+\s+)?(?:captain|chief minister|prime minister|president|ceo|governor|leader|coach)\s+([A-Z][a-zA-Z.'-]+(?:\s+[A-Z][a-zA-Z.'-]+)+)/i)
+                        || text.match(/\b([A-Z][a-zA-Z.'-]+(?:\s+[A-Z][a-zA-Z.'-]+)+)\s*\((?:captain|c)\)/i);
+                    if (holderMatch) {
+                        const rawName = holderMatch[1] || '';
+                        const holderName = cleanHolderName(rawName);
+                        if (holderName) {
+                            const answerText = `${holderName} is the current ${roleIntent.role} of ${roleIntent.jurisdiction}.`;
+                            return {
+                                verified: true,
+                                confidence: 0.94,
+                                answer: answerText,
+                                evidenceIndexes: [i],
+                                modelAssisted: false,
+                                reason: `Extracted directly from authoritative source: ${item.domain || item.sourceLabel}`
+                            };
+                        }
                     }
                 }
                 continue;
@@ -2922,14 +2928,17 @@ function extractOfficialCurrentRoleEvidence(text, query, sourceUrl = '') {
 }
 
 function cleanHolderName(value) {
-    const text = String(value || '')
+    let text = String(value || '')
+        .replace(/^.*?\b(?:after|trading|star|actor|exec|executive|author|politician|leader|player|batsman|bowler|keeper|director|will be|named)\s+/i, '')
         .replace(/\b(?:the|current|present|incumbent|hon'?ble|honorable|shri|smt|mr|ms|dr)\b\.?/gi, ' ')
         .replace(/[,;:].*$/g, ' ')
         .replace(/\s+/g, ' ')
         .trim();
-    if (!text || text.length < 3 || text.length > 90) return '';
-    if (/\b(?:chief|minister|president|governor|mayor|office|government|current|former|served)\b/i.test(text)) return '';
-    return text;
+    if (!text || text.length < 3 || text.length > 50) return '';
+    if (/\b(?:chief|minister|president|governor|mayor|office|government|current|former|served|hardware|trading|apple|ipl)\b/i.test(text)) return '';
+    const nameTokens = text.split(/\s+/).filter(t => /^[A-Z][a-zA-Z.'-]*$/.test(t));
+    if (nameTokens.length < 1 || nameTokens.length > 5) return '';
+    return nameTokens.join(' ');
 }
 
 function rankSearchResults(query, results) {
@@ -3377,7 +3386,7 @@ export const __test = {
     validateClaimTemporalStatus,
     isCurrentStateQuery,
     hasObviousRagConflict,
-    discoverOfficialSourceCandidates,
+    discoverOfficialSourceCandidates, 
     fetchWikidataOfficialUrls,
     isOfficialGovernmentUrl,
     extractOfficialCurrentRoleEvidence,
@@ -3385,7 +3394,7 @@ export const __test = {
     isDiscoveryAnswerSource,
     rankSources,
     searchPublicSources,
-    searchWikipedia, 
+    searchWikipedia,
     extractSearchTargetQuery,
     buildSearchQueryRewrite,
     resolveRetrievalRoute,
