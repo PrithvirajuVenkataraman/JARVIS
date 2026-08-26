@@ -562,12 +562,20 @@ assert.ok(chatTest.getQualityRiskReasons(
     `${fixtureSubject('Executive')} is the current CEO of ${fixtureSubject('Company')}.`,
     'chat'
 ).includes('current_or_date_sensitive_claim'));
-assert.equal(chatTest.getStableFactAnswer('What is the capital of France?'), 'The capital of France is Paris.');
+process.env.GROQ_API_KEY = 'test-groq-key';
+globalThis.fetch = async (url) => {
+    const href = String(url);
+    if (href.includes('api.groq.com')) {
+        return okJson({ choices: [{ message: { content: 'The capital of France is Paris.' } }] });
+    }
+    throw new Error(`unexpected URL ${href}`);
+};
 const capitalReply = await callHandler(chatHandler, request('/api/chat-groq', { message: 'What is the capital of France?' }));
 assert.equal(capitalReply.statusCode, 200);
-assert.equal(capitalReply.body.provider, 'deterministic');
-assert.equal(capitalReply.body.response, 'The capital of France is Paris.');
+assert.match(capitalReply.body.response, /Paris/);
 assert.equal(capitalReply.body.webEscalation.escalated, false);
+globalThis.fetch = ORIGINAL_FETCH;
+delete process.env.GROQ_API_KEY;
 assert.equal(chatTest.classifyRoutingDecision('What is the capital of France?', '', {}).strategy, 'direct');
 assert.equal(chatTest.classifyRoutingDecision('Generate chat title', '', { intent: 'chat_title' }).strategy, 'direct');
 process.env.SERPER_API_KEY = 'test-serper-key';
@@ -679,7 +687,7 @@ globalThis.fetch = async (url, init) => {
 const confidentStableChat = await callHandler(chatHandler, request('/api/chat-groq', { message: 'Who discovered penicillin?' }));
 assert.equal(confidentStableChat.statusCode, 200);
 assert.equal(confidentStableChat.body.webEscalation.escalated, false);
-assert.equal(confidentStableChat.body.webEscalation.reason, 'stable_fact_answered_directly');
+assert.equal(confidentStableChat.body.webEscalation.reason, 'pre_trained_answer_accepted');
 assert.match(confidentStableChat.body.response, /Alexander Fleming discovered penicillin/);
 assert.equal(confidentSearchCalls, 0);
 globalThis.fetch = ORIGINAL_FETCH;
@@ -1018,7 +1026,9 @@ assert.equal(searchTest.isDiscoveryAnswerSource(searchTest.parseDiscoveryFactQue
     description: 'Al Capone was treated with penicillin late in his life.',
     sourceType: 'encyclopedia'
 }), false);
-const penicillinAnswer = searchTest.buildSourceDerivedAnswer([], { query: 'Founder of penicillin' });
+const penicillinAnswer = searchTest.buildSourceDerivedAnswer([
+    { title: 'Penicillin discovery', description: 'Alexander Fleming discovered penicillin in 1928.', url: 'https://en.wikipedia.org/wiki/Penicillin', sourceType: 'encyclopedia', domain: 'wikipedia.org', relevanceScore: 0.9, evidenceLevel: 'strong' }
+], { query: 'Founder of penicillin' });
 assert.match(penicillinAnswer.answer, /Alexander Fleming discovered penicillin/i);
 assert.doesNotMatch(penicillinAnswer.answer, /^Ernst Chain/i);
 
