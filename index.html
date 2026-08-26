@@ -9405,17 +9405,18 @@ let showRoutingDebugBadge = false;
 
         function createConverseUtterance(spokenText, index, total) {
             const utterance = new SpeechSynthesisUtterance(spokenText);
-            utterance.lang = 'en-US';
-            const voice = getBestVoiceForLanguage('en-US');
+            const text = String(spokenText || '').trim();
+            const lang = detectLanguageFromText(text) || 'en-US';
+            utterance.lang = lang;
+            const voice = getBestVoiceForLanguage(lang);
             if (voice) {
                 utterance.voice = voice;
             }
-            const text = String(spokenText || '').trim();
             const question = /\?$/.test(text);
             const emphasis = /!$/.test(text) || /\b(important|key|remember|careful|exactly)\b/i.test(text);
             const finalSegment = index >= total - 1;
             utterance.rate = question ? 1.02 : (emphasis ? 0.96 : 0.98);
-            utterance.pitch = question ? 1.08 : (emphasis ? 1.04 : (finalSegment ? 0.96 : 1.00));
+            utterance.pitch = question ? 1.06 : (emphasis ? 1.03 : (finalSegment ? 0.98 : 1.00));
             utterance.volume = 1;
             return utterance;
         }
@@ -9507,7 +9508,7 @@ let showRoutingDebugBadge = false;
         }
 
         function updateLiveSpeechTranscriptionOnScreen(text = '', isInterim = false, source = 'voice') {
-            const chatMessages = document.getElementById('chat-messages');
+            const chatMessages = document.getElementById('chat-container') || document.getElementById('chat-messages');
             if (!chatMessages) return;
 
             const trimmed = String(text || '').trim();
@@ -9631,17 +9632,6 @@ let showRoutingDebugBadge = false;
                     window.speechSynthesis.resume();
                 }
                 refreshAvailableVoices();
-                const silentUtterance = new SpeechSynthesisUtterance(' ');
-                silentUtterance.volume = 0.01;
-                silentUtterance.rate = 10;
-                window.speechSynthesis.speak(silentUtterance);
-                setTimeout(() => {
-                    try {
-                        if (window.speechSynthesis.speaking) {
-                            window.speechSynthesis.cancel();
-                        }
-                    } catch (_) {}
-                }, 30);
                 return true;
             } catch (error) {
                 return false;
@@ -9836,6 +9826,9 @@ let showRoutingDebugBadge = false;
             };
 
             try {
+                if (window.speechSynthesis.paused) {
+                    try { window.speechSynthesis.resume(); } catch (_) {}
+                }
                 window.speechSynthesis.speak(utterance);
             } catch (err) {
                 if (segmentDone) return;
@@ -9860,6 +9853,9 @@ let showRoutingDebugBadge = false;
                 logLatencyTrace('speech_blocked', { stage: 'unsupported' });
                 window.JarvisSpeechInput?.resumeListening?.();
                 showConverseSpeechUnlockPrompt();
+                return;
+            }
+            if (streamingConverseSpeech && streamingConverseSpeech.active && (streamingConverseSpeech.isPlaying || streamingConverseSpeech.spokenSegments?.length > 0 || streamingConverseSpeech.queue?.length > 0)) {
                 return;
             }
             const spokenText = sanitizeTextForConverseSpeech(text);
@@ -9932,6 +9928,9 @@ let showRoutingDebugBadge = false;
                     window.JarvisSpeechInput?.resumeListening?.();
                     showConverseSpeechUnlockPrompt();
                 };
+                if (window.speechSynthesis.paused) {
+                    try { window.speechSynthesis.resume(); } catch (_) {}
+                }
                 window.speechSynthesis.speak(utterance);
             };
             setConverseUiState('speaking', 'speech_start');
