@@ -463,10 +463,11 @@ export async function searchWikipedia(query, options = {}) {
     url.searchParams.set('srsearch', query);
     url.searchParams.set('srlimit', String(limit));
     url.searchParams.set('format', 'json');
-    url.searchParams.set('origin', '*');
-
     const response = await fetchWithTimeout(url.toString(), {
-        headers: { Accept: 'application/json' }
+        headers: {
+            Accept: 'application/json',
+            'User-Agent': 'UnifyAssistant/2.0 (https://github.com/unify; contact@unify.ai)'
+        }
     }, PUBLIC_SOURCE_TIMEOUT_MS);
     if (!response.ok) return [];
     const data = await response.json();
@@ -702,10 +703,12 @@ export async function searchWikidata(query, options = {}) {
     url.searchParams.set('uselang', 'en');
     url.searchParams.set('limit', String(limit));
     url.searchParams.set('format', 'json');
-    url.searchParams.set('origin', '*');
 
     const response = await fetchWithTimeout(url.toString(), {
-        headers: { Accept: 'application/json' }
+        headers: {
+            Accept: 'application/json',
+            'User-Agent': 'UnifyAssistant/2.0 (https://github.com/unify; contact@unify.ai)'
+        }
     }, PUBLIC_SOURCE_TIMEOUT_MS);
     if (!response.ok) return [];
     const data = await response.json();
@@ -726,9 +729,9 @@ export async function searchGovernmentRole(query, options = {}) {
         const response = await fetchWithTimeout(`${WIKIDATA_SPARQL_URL}?query=${encodeURIComponent(sparql)}&format=json`, {
             headers: {
                 Accept: 'application/sparql-results+json, application/json',
-                'User-Agent': 'JARVISAssistant/1.0 public-source-search'
+                'User-Agent': 'UnifyAssistant/2.0 (https://github.com/unify; contact@unify.ai)'
             }
-        }, 1500);
+        }, 3500);
         if (response.ok) {
             const data = await response.json();
             const bindings = normalizeGovernmentRoleBindings(data, intent, jurisdiction, query).slice(0, limit);
@@ -751,9 +754,11 @@ export async function resolveWikidataEntity(label) {
     url.searchParams.set('uselang', 'en');
     url.searchParams.set('limit', '5');
     url.searchParams.set('format', 'json');
-    url.searchParams.set('origin', '*');
     const response = await fetchWithTimeout(url.toString(), {
-        headers: { Accept: 'application/json' }
+        headers: {
+            Accept: 'application/json',
+            'User-Agent': 'UnifyAssistant/2.0 (https://github.com/unify; contact@unify.ai)'
+        }
     }, PUBLIC_SOURCE_TIMEOUT_MS);
     if (!response.ok) return null;
     const data = await response.json();
@@ -1024,7 +1029,7 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
         searchPublicSources(normalizedQuery, {
             limit,
             plannedQueries: phase1Queries,
-            skipStructuredRoles: true,
+            skipStructuredRoles: !isPoliticalOrLeadershipQuery(normalizedQuery) || false,
             skipAutoDeepCrawl: true
         }).then(r => {
             timing.publicSourcesMs = Number((performance.now() - searchStart).toFixed(1));
@@ -1102,7 +1107,7 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
             const extraPublic = await searchPublicSources(normalizedQuery, {
                 limit,
                 plannedQueries: fallbackQueries,
-                skipStructuredRoles: true,
+                skipStructuredRoles: false,
                 skipAutoDeepCrawl: true
             }).catch(() => []);
             for (const item of extraPublic) {
@@ -1384,7 +1389,10 @@ export function parseUniversalEntityQuery(query) {
         normalizedRole = 'chief minister';
     } else if (normalizedRole === 'pm') {
         normalizedRole = 'prime minister';
-    } else if (normalizedRole === 'president') {
+        property = 'P6';
+    } else if (normalizedRole === 'prime minister' || normalizedRole === 'head of government' || normalizedRole === 'premier' || normalizedRole === 'chancellor') {
+        property = 'P6';
+    } else if (normalizedRole === 'president' || normalizedRole === 'head of state' || normalizedRole === 'monarch') {
         property = 'P35';
     } else if (normalizedRole === 'ceo') {
         property = 'P169';
@@ -1436,7 +1444,7 @@ function buildGovernmentRoleSparql(intent, jurisdictionId, limit = 3) {
   BIND("p:${directProperty}" AS ?claimType)
 }`
         : '';
-    const p39Branch = intent.organizationRole ? '' : `{
+    const p39Branch = intent.organizationRole || directProperty ? '' : `{
     ?holder p:P39 ?statement.
     ?statement ps:P39 ?office.
     OPTIONAL { ?statement pq:P580 ?start. }
@@ -1448,8 +1456,6 @@ function buildGovernmentRoleSparql(intent, jurisdictionId, limit = 3) {
       ?office wdt:P1001 wd:${qid}.
     } UNION {
       ?office wdt:P17 wd:${qid}.
-    } UNION {
-      ?holder wdt:P131* wd:${qid}.
     }
     BIND("p:P39" AS ?claimType)
   }`;
@@ -1476,11 +1482,18 @@ function normalizeGovernmentRoleBindings(data, intent, jurisdiction, query) {
 }
 
 function normalizeGovernmentRoleBinding(binding, intent, jurisdiction, query, index) {
-    const holderName = bindingValue(binding?.holderLabel);
+    let holderName = bindingValue(binding?.holderLabel);
     const holderUri = bindingValue(binding?.holder);
     const holderId = extractWikidataId(holderUri);
     const officeLabel = bindingValue(binding?.officeLabel) || intent.role;
     const article = bindingValue(binding?.article);
+    if (!holderName || /^Q\d+$/i.test(holderName)) {
+        if (article) {
+            try {
+                holderName = decodeURIComponent(article.replace(/^.*\/wiki\//, '').replace(/_/g, ' '));
+            } catch (_) {}
+        }
+    }
     const startDate = normalizeWikidataDate(bindingValue(binding?.start));
     const endDate = normalizeWikidataDate(bindingValue(binding?.end));
     const url = holderId ? `https://www.wikidata.org/wiki/${holderId}` : holderUri;
@@ -2500,35 +2513,7 @@ function extractDeterministicLiveFactAnswer(query, evidence = []) {
             }
 
             if (isRoleQuery) {
-                const roleIntent = parseGovernmentRoleQuery(query);
-                if (roleIntent) {
-                    const escRole = escapeRegex(roleIntent.role);
-                    const escRoleText = escapeRegex(roleIntent.roleText || roleIntent.role);
-                    const rolePattern = `${escRole}|${escRoleText}`;
-                    const holderMatch = text.match(new RegExp(`\\b([A-Z][a-z]+(?:\\s+[A-Z][a-z]+){1,2}),\\s*(?:the\\s+)?(?:current\\s+|new\\s+)?(?:${rolePattern})\\s+(?:of|for|in)\\b`, 'i'))
-                        || text.match(new RegExp(`\\b(?:is|appointed as|serves as|elected as)\\s+(?:the\\s+)?(?:current\\s+|new\\s+)?(?:${rolePattern})(?:\\s+of[^.]+)?\\s+(?:is|named)?\\s+([A-Z][a-zA-Z.'-]+(?:\\s+[A-Z][a-zA-Z.'-]+){1,3})`, 'i'))
-                        || text.match(new RegExp(`\\b([A-Z][a-zA-Z.'-]+(?:\\s+[A-Z][a-zA-Z.'-]+){1,3})\\s+(?:is|serves as|appointed as|becomes|takes over as|elected as)\\s+(?:the\\s+)?(?:new\\s+|current\\s+)?(?:${rolePattern})`, 'i'))
-                        || text.match(new RegExp(`\\b(?:new\\s+|current\\s+)?(?:${rolePattern})\\s+([A-Z][a-zA-Z.'-]+(?:\\s+[A-Z][a-zA-Z.'-]+){1,3})`, 'i'))
-                        || text.match(new RegExp(`(?:by|with|of|:)\\s+([A-Z][a-zA-Z.'-]+(?:\\s+[A-Z][a-zA-Z.'-]+){1,3}),\\s+(?:the\\s+)?(?:current\\s+|new\\s+)?(?:${rolePattern})\\s+(?:of|for|in)\\b`, 'i'))
-                        || text.match(new RegExp(`\\b([A-Z][a-zA-Z.'-]+(?:\\s+[A-Z][a-zA-Z.'-]+){1,3}),\\s+(?:the\\s+)?(?:current\\s+|new\\s+)?(?:${rolePattern})\\s+(?:of|for|in)\\b`, 'i'))
-                        || text.match(new RegExp(`\\b([A-Z][a-zA-Z.'-]+(?:\\s+[A-Z][a-zA-Z.'-]+)+)\\s*\\((?:${rolePattern}|c)\\)`, 'i'));
-                    if (holderMatch) {
-                        const rawName = holderMatch[1] || '';
-                        const holderName = cleanHolderName(rawName, roleIntent.jurisdiction, roleIntent.role);
-                        if (holderName) {
-                            const answerText = `${holderName} is the current ${roleIntent.role} of ${roleIntent.jurisdiction}.`;
-                            return {
-                                verified: true,
-                                confidence: 0.94,
-                                answer: answerText,
-                                evidenceIndexes: [i],
-                                modelAssisted: false,
-                                reason: `Extracted directly from authoritative source: ${item.domain || item.sourceLabel}`
-                            };
-                        }
-                    }
-                }
-                continue;
+                continue; // Defer unstructured text synthesis to buildGroundedRagAnswer
             }
 
             let chosenAnswer = item.description && item.description.length > 25 && !isDefinitionRegex.test(item.description)
@@ -2871,9 +2856,11 @@ async function fetchWikidataOfficialUrls(entityId) {
     url.searchParams.set('ids', id);
     url.searchParams.set('props', 'claims');
     url.searchParams.set('format', 'json');
-    url.searchParams.set('origin', '*');
     const response = await fetchWithTimeout(url.toString(), {
-        headers: { Accept: 'application/json' }
+        headers: {
+            Accept: 'application/json',
+            'User-Agent': 'UnifyAssistant/2.0 (https://github.com/unify; contact@unify.ai)'
+        }
     }, PUBLIC_SOURCE_TIMEOUT_MS);
     if (!response.ok) return [];
     const data = await response.json();
@@ -2963,7 +2950,7 @@ function cleanHolderName(value, jurisdiction = '', role = '') {
     if (jurisdiction && text.toLowerCase().includes(jurisdiction.toLowerCase())) return '';
     if (role && text.toLowerCase().includes(role.toLowerCase())) return '';
     const nameTokens = text.split(/\s+/).filter(t => /^[A-Z][a-zA-Z.'-]*$/.test(t));
-    if (nameTokens.length < 1 || nameTokens.length > 5) return '';
+    if (nameTokens.length < 2 || nameTokens.length > 5) return '';
     if (jurisdiction && nameTokens.some(t => jurisdiction.toLowerCase().includes(t.toLowerCase()))) return '';
     if (role && nameTokens.some(t => role.toLowerCase().includes(t.toLowerCase()))) return '';
     return nameTokens.join(' ');
