@@ -8418,21 +8418,35 @@ let showRoutingDebugBadge = false;
             }
             let cleanAnswer = textStr.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/^<think>[\s\S]*$/gi, '').replace(/<\/?think>/gi, '').trim();
 
-            // Also detect and tuck raw unclosed model scratchpad/planning blocks (e.g. Plan: ... Review against constraints: ... Looks good. Proceeding to output.)
+            // Also detect and tuck raw unclosed model scratchpad/planning blocks or leaked system instruction meta-talk
             if (!thought) {
-                const planPattern = /^(?:1\s*\n[^\n]+\s*\n2\s*\n[^\n]+\s*\n3\s*\n[^\n]+\s*\.\s*\n+)?(?:Plan:|Drafting:|Thinking Process:|Reasoning:)\s*[\s\S]*?(?:Proceeding to output\.?|Final Answer:?|Output:?)\s*/i;
-                const planMatch = cleanAnswer.match(planPattern);
-                if (planMatch) {
-                    thought = planMatch[0].trim();
-                    cleanAnswer = cleanAnswer.slice(planMatch[0].length).trim();
+                const metaTransitionPattern = /^(?:1\s*\n[^\n]+\s*\n2\s*\n[^\n]+\s*\n3\s*\n[^\n]+\s*\.\s*\n+)?(?:Plan:|Drafting:|Thinking Process:|Reasoning:|Analyze User Input:?|Analyzing User Input:?|User Intent:|Check Constraints(?: & Rules)?:?|System Instructions?:?|The user (?:asked|is asking|wants|said)|The prompt asks)[\s\S]*?(?:Proceeding to output\.?|Final Answer:?|Output:?|Here is the (?:solution|answer|result):?)(?:\s*\n*)?/i;
+                const transMatch = cleanAnswer.match(metaTransitionPattern);
+                if (transMatch && cleanAnswer.length > transMatch[0].length) {
+                    thought = transMatch[0].trim();
+                    cleanAnswer = cleanAnswer.slice(transMatch[0].length).trim();
                 } else {
-                    const reviewPattern = /^(?:Plan:[\s\S]*?)?(?:Review against constraints:[\s\S]*?Proceeding to output\.?\s*)/i;
-                    const reviewMatch = cleanAnswer.match(reviewPattern);
-                    if (reviewMatch) {
-                        thought = reviewMatch[0].trim();
-                        cleanAnswer = cleanAnswer.slice(reviewMatch[0].length).trim();
+                    const planPattern = /^(?:1\s*\n[^\n]+\s*\n2\s*\n[^\n]+\s*\n3\s*\n[^\n]+\s*\.\s*\n+)?(?:Plan:|Drafting:|Thinking Process:|Reasoning:)\s*[\s\S]*?(?:Proceeding to output\.?|Final Answer:?|Output:?)\s*/i;
+                    const planMatch = cleanAnswer.match(planPattern);
+                    if (planMatch) {
+                        thought = planMatch[0].trim();
+                        cleanAnswer = cleanAnswer.slice(planMatch[0].length).trim();
+                    } else {
+                        const reviewPattern = /^(?:Plan:[\s\S]*?)?(?:Review against constraints:[\s\S]*?Proceeding to output\.?\s*)/i;
+                        const reviewMatch = cleanAnswer.match(reviewPattern);
+                        if (reviewMatch) {
+                            thought = reviewMatch[0].trim();
+                            cleanAnswer = cleanAnswer.slice(reviewMatch[0].length).trim();
+                        }
                     }
                 }
+            }
+
+            const leakedLinePattern = /^(?:(?:The user (?:asked|is asking|said|wants|provided)|User query:|User request:|Applying rules?:|Checking constraints?:|Rule checked:)[^\n]*\n+)+/i;
+            const leakedMatch = cleanAnswer.match(leakedLinePattern);
+            if (leakedMatch && cleanAnswer.length > leakedMatch[0].length) {
+                thought = (thought ? thought + '\n\n' : '') + leakedMatch[0].trim();
+                cleanAnswer = cleanAnswer.slice(leakedMatch[0].length).trim();
             }
 
             return { thought, answer: cleanAnswer };
