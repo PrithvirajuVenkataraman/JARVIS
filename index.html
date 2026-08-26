@@ -8489,128 +8489,128 @@ let showRoutingDebugBadge = false;
             const isProceduralOrCulinary = /\b(recipe|cook|cooking|bake|baking|ingredient|ingredients|dish|food|cuisine|itinerary|travel to|places to visit|things to do in|steps to|how to make)\b/i.test(prompt);
             const isCreativeOrMedia = /\b(song|songs|music|track|tracks|album|artist|singer|band|discography|movie|movies|film|films|cinema|actor|actress|director|series|show|shows|sitcom|anime|watchlist|novel|author)\b/i.test(prompt);
 
-            // Construct 5-Stage Human-Like Chain-of-Thought Narratives (Cognitive inner monologue):
+            // Construct 5-Stage Human-Like Chain-of-Thought Narratives (Cognitive inner monologue without subheadings, ~40-50 words per stage):
 
             // --- STAGE 1: INTENT & SCOPE ---
             let stage1 = '';
             if (isComparison && (entityA || entityB)) {
                 const left = entityA || 'options';
                 const right = entityB || '';
-                stage1 = `Scoping criteria for ${left}${right ? ' vs ' + right : ''}: I'm evaluating the criteria for comparing ${left} and ${right || 'alternatives'}. I need to establish a balanced framework covering architecture, throughput, developer experience, and cost.`;
+                stage1 = `I am looking at the comparison between ${left} and ${right || 'the alternative options'} to understand what really matters here. I want to break down the architectural differences, runtime performance, developer convenience, and operational costs so the comparison is genuinely useful and balanced.`;
             } else if (isCode) {
-                stage1 = `Analyzing requirements for ${subjectSnippet}${lang ? ' in ' + lang : ''}: I'm currently focused on the core requirements for ${subjectSnippet}${lang ? ' in ' + lang : ''}. I need to break down the architectural requirements, function signatures, and expected inputs and outputs before writing code.`;
+                stage1 = `I am looking at what is needed for ${subjectSnippet}${lang ? ' in ' + lang : ''} and thinking through how to structure the logic cleanly from the start. Let me break down the main arguments, edge cases, and algorithmic flow before putting together the actual code.`;
             } else if (isMath) {
-                stage1 = `Parsing variables and equations for ${subjectSnippet}: I'm examining the mathematical statement for ${subjectSnippet}. Identifying all given parameters, independent variables, and the target value to solve for.`;
+                stage1 = `I am reading through the mathematical problem for ${subjectSnippet} to clearly identify all given values, unknown variables, and the target result. Setting up the initial equation and checking the domain constraints will ensure the derivation starts on solid ground.`;
             } else if (isScience) {
-                stage1 = `Isolating governing principles for ${subjectSnippet}: I'm analyzing the governing physical and theoretical laws behind ${subjectSnippet}. Identifying the core concepts and observable quantities involved.`;
+                stage1 = `I am considering the scientific principles behind ${subjectSnippet} to understand the underlying physical laws and observable phenomena involved. Identifying the core concepts and fundamental forces at play helps establish a clear, intuitive foundation for the explanation.`;
             } else if (isHistory) {
-                stage1 = `Contextualizing historical timeline for ${subjectSnippet}: I'm examining the historical context and background of ${subjectSnippet}, identifying the era, key actors, and geopolitical landscape.`;
+                stage1 = `I am exploring the historical context around ${subjectSnippet} to identify the key time period, geographical setting, and major historical figures involved. Understanding the broader era and prevailing conditions provides essential background for explaining what happened.`;
             } else if (isGeography) {
-                stage1 = `Mapping regional boundaries for ${subjectSnippet}: I'm analyzing the geographical and geopolitical context of ${subjectSnippet}, establishing the precise location, borders, and administrative status.`;
+                stage1 = `I am examining the geographical context of ${subjectSnippet} to pinpoint its location, administrative boundaries, and regional significance. Establishing the physical landscape and geopolitical setting gives a solid starting point for a comprehensive answer.`;
             } else if (isEconOrSocial) {
-                stage1 = `Framing structural dynamics for ${subjectSnippet}: I'm examining the economic and social mechanisms behind ${subjectSnippet}, scoping market dynamics, incentives, and policy variables.`;
+                stage1 = `I am looking into the economic and social dynamics behind ${subjectSnippet} to frame the core mechanisms, market forces, and human incentives at work. Clarifying the fundamental concepts first helps build a clear and relatable explanation.`;
             } else if (isProceduralOrCulinary) {
-                stage1 = `Analyzing prerequisites for ${subjectSnippet}: I'm breaking down the essential steps, required tools, and preliminary conditions necessary for executing ${subjectSnippet} properly.`;
+                stage1 = `I am breaking down the essential steps and requirements for ${subjectSnippet} so the process is clear, practical, and easy to execute. Identifying key ingredients, required equipment, and prep work up front sets everything up for success.`;
             } else if (isCreativeOrMedia) {
-                stage1 = `Analyzing thematic elements for ${subjectSnippet}: I'm reviewing the creative themes, stylistic patterns, and cultural background associated with ${subjectSnippet}.`;
+                stage1 = `I am exploring the themes, artistic style, and creative background of ${subjectSnippet} to understand its place in contemporary culture. Looking at the creators, influences, and historical timing helps set a rich stage for the discussion.`;
             } else {
-                stage1 = `Analyzing inquiry premises for ${subjectSnippet}: I'm currently focused on the user's premise regarding ${subjectSnippet}. I need to clarify what key information is requested and establish the most direct, accurate angle to answer.`;
+                stage1 = `I am looking closely at the question about ${subjectSnippet} to understand the core context and what specific information will be most helpful. Clarifying the user's intent allows me to focus directly on the most relevant details right away.`;
             }
 
             // --- STAGE 2: KNOWLEDGE & CONTEXT RETRIEVAL ---
             let stage2 = '';
             if (isComparison) {
-                stage2 = `Retrieving feature benchmarks & architectural paradigms: Reviewing empirical benchmarks and operational trade-offs. I want to identify where each option excels and where its primary limitations lie.`;
+                stage2 = `Let me review the main benchmarks and design philosophies behind both technologies to see where each one truly shines. Understanding the core strengths and limitations of both approaches will help highlight exactly when one should be chosen over the other.`;
             } else if (isCode) {
-                stage2 = `Retrieving idiomatic ${lang || 'syntax'} patterns & API specifications: I need to consider idiomatic ${lang || 'syntax'} constructs and standard library features. Selecting appropriate data structures that will keep time and space complexity optimal.`;
+                stage2 = `Now I am recalling the standard patterns and best library practices in ${lang || 'this language'} to make sure the syntax is clean, idiomatic, and readable. Selecting appropriate data structures here will keep execution fast and memory usage minimal while avoiding unnecessary overhead.`;
             } else if (isMath) {
-                stage2 = `Identifying relevant theorems & transformation formulas: Determining the most direct formula or analytical technique to apply, verifying that all prerequisite domain assumptions and bounds are satisfied.`;
+                stage2 = `Recalling the relevant mathematical theorems, identities, and transformation rules that apply directly to this type of problem. Choosing the most direct analytical method here will keep the algebraic steps clean and reduce the chance of any calculation mistakes.`;
             } else if (isScience) {
-                stage2 = `Reviewing empirical laws & theoretical models: Examining the underlying physical models and empirical mechanisms that explain how this phenomenon operates in nature.`;
+                stage2 = `Reviewing established empirical research, theoretical models, and experimental observations that explain how this phenomenon occurs in nature. Connecting microscopic interactions to macroscopic observations makes the scientific mechanics much easier to visualize and understand.`;
             } else if (isHistory) {
-                stage2 = `Tracing primary records & causal precedents: Analyzing the underlying socioeconomic, political, and institutional factors that precipitated these events.`;
+                stage2 = `Looking at the underlying social, political, economic, and institutional forces that built up over time and precipitated these events. Primary records and historical consensus help clarify the motivations and tensions that drove key decisions.`;
             } else if (isGeography) {
-                stage2 = `Querying geographical datasets & coordinate references: Examining topographies, demographic data, climate characteristics, and territorial significance.`;
+                stage2 = `Gathering key details about topography, climate patterns, population demographics, and natural landmarks that define the region. Understanding how geography shaped local history, trade routes, and culture adds valuable depth to the overview.`;
             } else if (isEconOrSocial) {
-                stage2 = `Retrieving econometric models & macro frameworks: Reviewing established macroeconomic frameworks and behavioral incentives governing these interactions.`;
+                stage2 = `Reviewing established macroeconomic frameworks, behavioral theories, and empirical real-world examples that illustrate how these systems function. Looking at how supply, demand, and regulatory policies interact gives valuable insight into the overall picture.`;
             } else if (isProceduralOrCulinary) {
-                stage2 = `Reviewing procedural stages & material requirements: Inspecting timing precision, ingredient ratios, and necessary prep work to ensure seamless step execution.`;
+                stage2 = `Reviewing the ideal ratios, technique nuances, and timing considerations that make a noticeable difference in the final result. Understanding why specific steps or temperatures matter helps ensure consistent, high-quality outcomes every time.`;
             } else if (isCreativeOrMedia) {
-                stage2 = `Querying cultural background & historical canon: Examining relevant artistic history, structural composition, and distinctive nuances.`;
+                stage2 = `Reviewing the standout releases, key artistic milestones, and critical reception that shaped their career and creative evolution. Examining how their work resonated with audiences gives great insight into their lasting impact.`;
             } else {
-                stage2 = `Retrieving domain facts & authoritative context: Identifying relevant factual foundations and contextual details needed to provide a thorough, accurate answer.`;
+                stage2 = `Gathering the most accurate facts, background context, and key concepts needed to provide a thorough and reliable answer. Connecting the fundamental ideas ensures the explanation is both informative and easy to follow.`;
             }
 
             // --- STAGE 3: MECHANISTIC & LOGICAL EVALUATION ---
             let stage3 = '';
             if (isComparison) {
-                stage3 = `Evaluating performance & architectural trade-offs: Analyzing real-world scenarios—which one is better suited for high throughput versus rapid prototyping, and how maintenance overhead compares.`;
+                stage3 = `Thinking through real-world workloads, scalability requirements, and maintenance considerations to see how each option behaves in practice. I need to weigh high-throughput write handling against query flexibility and overall team productivity over the long run.`;
             } else if (isCode) {
-                stage3 = `Evaluating algorithmic design & complexity bounds: Tracing the execution flow step by step. I'll design the core loop and state transformations carefully to avoid redundant memory allocations or off-by-one errors.`;
+                stage3 = `Walking through the step-by-step logic and execution flow to ensure the state transitions, loop bounds, and return values behave exactly as expected. I want to double-check that variable names are intuitive and that the time complexity remains optimal across standard inputs.`;
             } else if (isMath) {
-                stage3 = `Applying step-by-step mathematical transformations: Working through algebraic and calculus transformations systematically, keeping intermediate steps clear and checking arithmetic.`;
+                stage3 = `Working systematically through the calculations step by step, carefully applying each algebraic or calculus rule and keeping intermediate values organized. I want to trace the arithmetic at each step to ensure full precision and clarity throughout the entire working.`;
             } else if (isScience) {
-                stage3 = `Tracing causal mechanisms & observable dynamics: Walking through the step-by-step causal chain and physical interactions to explain what happens at macroscopic and microscopic scales.`;
+                stage3 = `Tracing the causal chain of events step by step to explain how each interaction triggers the next across physical or biological scales. I want to make sure the explanation describes the actual mechanism clearly without relying on unnecessary jargon.`;
             } else if (isHistory) {
-                stage3 = `Analyzing institutional forces & historical outcomes: Tracing the key turning points, pivotal decisions, and strategic shifts that determined the historical trajectory.`;
+                stage3 = `Tracing the chronological progression of events, major turning points, and decisive moments that altered the course of history. Examining how individual actions and broader systemic pressures interacted gives a much deeper and more realistic perspective.`;
             } else if (isGeography) {
-                stage3 = `Evaluating spatial distribution & territorial factors: Tracing regional connectivity, trade routes, urbanization patterns, and strategic importance.`;
+                stage3 = `Analyzing the relationships between physical terrain, urbanization, connectivity, and modern economic activity across the area. Exploring these connections helps explain why the region developed the way it did and what makes it distinct.`;
             } else if (isEconOrSocial) {
-                stage3 = `Examining systemic interactions & market effects: Analyzing how shifts in policy, supply/demand, or interest rates ripple through markets and consumer behavior.`;
+                stage3 = `Tracing how policy decisions, market shifts, or institutional changes ripple through different sectors of the economy and affect everyday people. I want to explain both short-term market reactions and long-term structural trends in plain, conversational language.`;
             } else if (isProceduralOrCulinary) {
-                stage3 = `Evaluating timing precision & execution details: Checking critical checkpoints, temperature controls, and transition indicators throughout the process.`;
+                stage3 = `Walking through the procedure step by step, focusing on visual cues, sensory checkpoints, and transition points that guide the process. Keeping the instructions intuitive and sequential makes following along straightforward and stress-free.`;
             } else if (isCreativeOrMedia) {
-                stage3 = `Evaluating structural design & stylistic traits: Analyzing narrative pacing, emotional resonance, and structural craftsmanship.`;
+                stage3 = `Analyzing narrative structure, stylistic craftsmanship, and distinctive motifs that define their signature approach. Exploring what makes their work unique helps bring out the finer artistic details and emotional resonance.`;
             } else {
-                stage3 = `Evaluating domain principles & logical mechanisms: Breaking down the underlying logic, causes, and practical details to ensure the explanation is easy to understand.`;
+                stage3 = `Working through the logic and practical details step by step to build a clear, well-reasoned explanation. I want to explain the why and the how in a natural, conversational way without unnecessary complexity.`;
             }
 
             // --- STAGE 4: BOUNDARY CONDITIONS & INTEGRITY CHECKS ---
             let stage4 = '';
             if (isComparison) {
-                stage4 = `Validating edge-case workflows & niche scenarios: Checking community maturity, tooling integration, operational complexity in production, and long-term maintainability.`;
+                stage4 = `I should also check ecosystem maturity, community support, tooling, and common migration pitfalls that teams run into. Considering subtle operational friction like backup workflows, schema changes, and hosting expenses will ensure there are no surprises.`;
             } else if (isCode) {
-                stage4 = `Validating edge cases, error handling & types: Evaluating boundary conditions such as empty collections, extreme scale, and error states to ensure robust exception handling.`;
+                stage4 = `Let me check boundary conditions like empty inputs, single elements, null checks, and large data bounds to confirm there are no subtle off-by-one bugs or uncaught exceptions. Ensuring the implementation handles unusual edge cases gracefully is essential for solid reliability.`;
             } else if (isMath) {
-                stage4 = `Verifying intermediate arithmetic & constraint limits: Checking limiting behaviors, domain restrictions, and dimensional consistency to ensure the derived result is logically sound.`;
+                stage4 = `Double-checking the intermediate expressions, domain limits, and physical or dimensional consistency to make sure the calculation holds up under sanity checks. Testing boundary values and edge conditions helps confirm that the solution is completely sound and consistent.`;
             } else if (isScience) {
-                stage4 = `Checking boundary conditions & physical consistency: Checking scale limits, theoretical edge cases, and modern empirical consensus to avoid common misconceptions.`;
+                stage4 = `Checking for common misconceptions, theoretical boundary conditions, and modern scientific consensus to ensure all facts are completely accurate. Making sure edge cases and conservation laws are respected gives the explanation scientific rigor and reliability.`;
             } else if (isHistory) {
-                stage4 = `Cross-verifying historical dates & entity accuracy: Checking dates, primary records, and historical consensus across multiple authoritative accounts.`;
+                stage4 = `Cross-checking historical dates, key locations, and different historiographical perspectives to make sure the narrative is accurate and balanced. Verifying the sequence of events across reliable historical accounts helps avoid common myths and oversimplifications.`;
             } else if (isGeography) {
-                stage4 = `Verifying territorial overlap & administrative status: Cross-verifying administrative boundaries, official naming, and contemporary geographical facts.`;
+                stage4 = `Verifying official naming conventions, boundary changes, and current statistical data to ensure every detail is up to date and accurate. Cross-referencing authoritative geographic records prevents confusion around overlapping regional definitions.`;
             } else if (isEconOrSocial) {
-                stage4 = `Assessing assumption sensitivity & counter-arguments: Examining potential unintended consequences, market frictions, and alternative policy perspectives.`;
+                stage4 = `Considering different perspectives, potential unintended consequences, and counterarguments to ensure the analysis is balanced and objective. Checking data trends and assumption limits helps keep the explanation realistic and grounded.`;
             } else if (isProceduralOrCulinary) {
-                stage4 = `Checking common pitfalls & corrective measures: Identifying frequent failure points and adding preemptive tips for consistent execution.`;
+                stage4 = `Anticipating common pitfalls, troubleshooting scenarios, and practical recovery tips in case something doesn't go exactly as planned. Adding these helpful reminders ensures that even beginner-friendly hurdles can be easily handled.`;
             } else if (isCreativeOrMedia) {
-                stage4 = `Validating narrative coherence & factual chronology: Verifying releases, discography/filmography chronologies, and historical facts.`;
+                stage4 = `Verifying release chronologies, awards, and cultural trivia to make sure every factual reference is accurate. Checking these details against authoritative sources ensures the overview is both informative and dependable.`;
             } else {
-                stage4 = `Verifying factual consistency & logical coherence: Double-checking key claims, distinctions, and nuance to ensure there are no ambiguities or inaccuracies.`;
+                stage4 = `Double-checking the factual accuracy, nuance, and clarity of the explanation to make sure there are no ambiguities or misunderstandings. Ensuring every detail is consistent gives the answer solid credibility.`;
             }
 
             // --- STAGE 5: SYNTHESIS & STRUCTURED OUTPUT ---
             let stage5 = '';
             if (isComparison) {
-                stage5 = `Structuring balanced recommendation: Structuring a direct, unbiased recommendation matrix with actionable decision criteria tailored to specific project needs.`;
+                stage5 = `Now I can pull everything together into a clear, direct comparison that highlights the key trade-offs and decision factors. This will give a balanced recommendation that makes choosing the right option straightforward based on specific project needs.`;
             } else if (isCode) {
-                stage5 = `Structuring clean ${lang || 'code'} implementation: Putting together the complete, production-grade code with concise commentary, clear variable names, and complexity guarantees.`;
+                stage5 = `Everything looks solid, so I am now ready to present the clean, working ${lang || 'code'} with a concise explanation and complexity summary. Formatting the solution clearly so it is immediately practical, accurate, and easy to run or integrate.`;
             } else if (isMath) {
-                stage5 = `Verifying step-by-step derivation & final result: Synthesizing the complete derivation into clean, structured notation with the final result clearly highlighted.`;
+                stage5 = `The derivation is complete and verified, so I can now present the final answer clearly with step-by-step working that is easy to follow. Highlighting the key intermediate breakthroughs ensures anyone reading can see exactly how the result was reached.`;
             } else if (isScience) {
-                stage5 = `Synthesizing first-principles explanation: Formulating a clear, intuitive explanation that builds from first principles to the final concept without jargon overload.`;
+                stage5 = `Now I can synthesize the complete explanation into a clear, engaging overview that builds naturally from basic principles to the full picture. The goal is to provide an answer that is informative, accessible, and scientifically grounded.`;
             } else if (isHistory) {
-                stage5 = `Synthesizing grounded historical narrative: Assembling an objective, evidence-based historical overview that clearly explains cause and effect.`;
+                stage5 = `Putting together a well-structured historical overview that explains both the immediate events and their lasting consequences on the world. The resulting narrative will be engaging, factual, and easy to follow from start to finish.`;
             } else if (isGeography) {
-                stage5 = `Structuring comprehensive geographic overview: Structuring a comprehensive, well-organized geographic overview with key statistics and context.`;
+                stage5 = `Assembling a well-organized geographical summary that brings together location data, physical characteristics, and cultural context. The final response will give a clear, vivid picture that directly answers what the user wants to know.`;
             } else if (isEconOrSocial) {
-                stage5 = `Synthesizing theoretical and practical implications: Structuring an objective, well-reasoned overview combining theoretical foundations with real-world implications.`;
+                stage5 = `Synthesizing the analysis into a clear, approachable overview that connects economic theory with practical real-world impact. The response will break down complex concepts into straightforward insights that are easy to digest.`;
             } else if (isProceduralOrCulinary) {
-                stage5 = `Formulating structured, actionable instructions: Formatting clean, sequential steps with ingredient measurements and practical timing.`;
+                stage5 = `Formatting the complete guide into clean, actionable steps with accurate measurements and clear instructions. The final guide will be straightforward, inspiring, and ready for immediate hands-on use.`;
             } else if (isCreativeOrMedia) {
-                stage5 = `Structuring curated overview with highlights: Formatting a comprehensive summary highlighting standout works, themes, and critical impact.`;
+                stage5 = `Structuring an engaging, well-curated summary that highlights notable achievements, memorable highlights, and creative significance. The response will provide an enjoyable, insightful read tailored to what the user asked about.`;
             } else {
-                stage5 = `Structuring clear, verified response: Synthesizing the final answer in a clear, well-structured format that directly satisfies the user's intent.`;
+                stage5 = `Putting everything together into a clean, direct response that satisfies the inquiry completely and conversationally. The final answer will be engaging, accurate, and immediately useful to the user.`;
             }
 
             return [stage1, stage2, stage3, stage4, stage5];
@@ -8679,15 +8679,12 @@ let showRoutingDebugBadge = false;
                     <div class="thinking-chain-of-thought">
                         ${steps.map((step, idx) => {
                             const rawStep = String(step || '').trim();
-                            const colonIdx = rawStep.indexOf(':');
-                            const hasHeader = colonIdx > 0 && colonIdx < 65;
-                            const title = hasHeader ? rawStep.slice(0, colonIdx).trim() : '';
-                            const text = hasHeader ? rawStep.slice(colonIdx + 1).trim() : rawStep;
+                            const cleanStep = rawStep.replace(/^[A-Za-z0-9\s&,/-]{2,65}:\s*/, '');
                             return `
                                 <div class="thinking-cot-step">
                                     <span class="thinking-cot-number">${idx + 1}</span>
                                     <div class="thinking-cot-text">
-                                        ${title ? `<strong class="thinking-cot-title">${escapeHtml(title)}</strong><span class="thinking-cot-body">${escapeHtml(text)}</span>` : `<span class="thinking-cot-body">${escapeHtml(text)}</span>`}
+                                        <span class="thinking-cot-body">${escapeHtml(cleanStep || rawStep)}</span>
                                     </div>
                                 </div>
                             `;
