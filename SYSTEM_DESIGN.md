@@ -26,8 +26,8 @@ graph TD
     end
 
     subgraph Models["Model & Provider Pool"]
-        GroqPool["Groq LPU Pool (Multi-Key Round-Robin)"]
-        GeminiPool["Google Gemini 2.5 Flash / 2.0 / Pro (Vision & Multimodal)"]
+        GroqPool["Groq LPU Pool (Multi-Key Round-Robin: GPT OSS 120B/20B, Llama 3.3 70B, Qwen 2.5)"]
+        GeminiPool["Google Gemini Pool (Gemini 3.7 Flash, 2.5 Pro, 2.5 Flash)"]
         DeterministicFacts["Deterministic Instant Fact Layer"]
     end
 
@@ -48,14 +48,15 @@ graph TD
 
 ## 2. Model Routing & Multimodal Dispatch Matrix
 
-JARVIS uses an **autonomous, single-pass routing engine** that eliminates manual model toggling:
+JARVIS uses an **autonomous, single-pass routing engine** with user model override and native attachment prioritization:
 
 | Request Type | Primary Engine | Model Hierarchy / Fallback | Rationale |
 | :--- | :--- | :--- | :--- |
-| **Standard Text Chat / Coding / Reasoning** | **Groq LPU** | `GPT OSS 120B` &rarr; `GPT OSS 20B` &rarr; `Llama 3.3 70B` &rarr; `Gemini 2.5 Flash` | Ultra-fast token generation and deep reasoning on Groq LPUs. |
+| **Standard Text Chat / Coding / Reasoning** | **Groq LPU** | `GPT OSS 120B` &rarr; `GPT OSS 20B` &rarr; `Llama 3.3 70B` &rarr; `Gemini 3.7 Flash` | Ultra-fast token generation and deep reasoning on Groq LPUs. |
 | **Live Political Leaders & Real-Time Facts** | **Deep Web RAG** | `DuckDuckGo Web` + `Google News RSS` &rarr; `Parallel Scraper` &rarr; `Groq / Gemini RAG` | Bypasses obsolete training weights, excludes Wikipedia overview pages, and outputs current leader names in sentence 1. |
-| **Media / Image Uploads / Live Photos** | **Google Gemini** | `Gemini 2.5 Flash` &rarr; `Gemini 2.0 Flash` &rarr; `Groq Vision (Llama 3.2)` &rarr; `Gemini 1.5 Flash` | Native multimodal vision processing with zero 400/404 errors. |
-| **Follow-Up Questions on Images** | **Groq LPU** | `GPT OSS 120B` (with visual context injected) | Routes back to GPT OSS 120B while preserving visual analysis in context. |
+| **Media / Image Uploads / Live Photos** | **Google Gemini** | `Gemini 3.7 Flash` &rarr; `Gemini 2.5 Pro` &rarr; `Gemini 2.5 Flash` &rarr; `Groq Vision (Llama 3.2)` | Native multimodal vision processing with direct base64 `inline_data` encoding. |
+| **Explicit Gemini Model Selection** | **Google Gemini** | `Gemini 3.7 Flash` / `Gemini 2.5 Pro` / `Gemini 2.5 Flash` &rarr; `Groq Fallback` | Direct priority routing to Google Gemini API whenever a Gemini model is chosen in the selector. |
+| **Follow-Up Questions on Images** | **Groq / Gemini** | `GPT OSS 120B` or `Gemini 3.7 Flash` (with visual context injected) | Preserves visual grounding context across conversation turns. |
 | **Instant Real-Time Facts / Identity** | **Deterministic Layer** | Pre-computed static knowledge base | Sub-10ms instant response without consuming API tokens. |
 
 ---
@@ -174,7 +175,7 @@ To prevent browser `localStorage` 5MB quota exhaustion with multi-turn conversat
 ---
 
 ## 9. Edge Semantic Caching & Predictive Pre-warming
- 
+
 To maximize throughput, minimize API quota burn, and eliminate latency on repeated queries:
 
 * **Edge Semantic LRU Cache (`api/chat-groq.js`):**
@@ -188,7 +189,7 @@ To maximize throughput, minimize API quota burn, and eliminate latency on repeat
 
 ## 10. Verification & Test Suite Matrix
 
-JARVIS maintains **100% automated test coverage across 81 test suites**:
+JARVIS maintains **100% automated test coverage across all test suites**:
 
 | Test Suite | Focus Area | Status |
 | :--- | :--- | :--- |
@@ -196,5 +197,29 @@ JARVIS maintains **100% automated test coverage across 81 test suites**:
 | `test:context` | Sliding-window context compaction & memory | **PASS (0 errors)** |
 | `test:speech-input` | Voice controller, barge-in & multilingual STT | **PASS (0 errors)** |
 | `test:api` | API contracts, streaming SSE & payload validation | **PASS (0 errors)** |
-| `test:verification` | Data integrity monitor, entity verifier & tools | **PASS (0 errors)** |
-| `test:hygiene` | Security, clean DOM & hardcoded content scanner | **PASS (0 errors)** |
+| `test:verification` | Data integrity monitor, entity verifier, tools & self-improving loops | **PASS (0 errors)** |
+| `test:hygiene` | Security, clean DOM & hardcoded content scanner (92 files) | **PASS (0 errors)** |
+
+---
+
+## 11. Conversational Chain of Thought & Responsive UI Architecture
+
+* **Conversational Inner Monologue**:
+  - Chain of Thought steps are rendered as natural human-like cognitive reflections (~40–50 words per stage) across 10 distinct knowledge domains without rigid bold subheadings, colons, or bullet tags.
+  - Server prompt directives instruct upstream LLMs to keep `<think>` tokens purely conversational and free of meta-prompt leakage.
+* **Unified Sidebar & Session Management**:
+  - Streamlined sidebar without redundant view tabs, featuring real-time search across session titles and message contents.
+  - Unified 3-dot context menu for chat session management (`Pin` / `Unpin`, `Rename`, `Share`, `Delete`) with pinned chats automatically anchored to the top.
+
+---
+
+## 12. Autonomous Self-Improving Loops Architecture
+
+* **In-Conversation User Preference Learning**:
+  - Dynamically intercepts user feedback, tone corrections, and style directives (`app/self-improving-memory.js`).
+  - Automatically deduplicates and persists learned rules in IndexedDB `kv_store` (`jarvis_learned_preferences`).
+  - Injects learned directives into upstream system prompts on subsequent requests.
+* **Fast Inline Code & Math Self-Healing**:
+  - Automatically validates code fences, LaTeX math delimiters (`$$`, `\(`), and JSON trailing commas before delivery (`api/_lib/code-math-validator.js`).
+* **Adaptive Search Reflection**:
+  - Automatically executes multi-phase query reformulation and deep-crawl fallback if evidence confidence is below threshold (`api/search.js`).
