@@ -1,5 +1,6 @@
 export const config = { maxDuration: 60 };
 import { applyApiSecurity } from './_lib/security.js';
+import { validateAndRepairCodeAndMath } from './_lib/code-math-validator.js';
 
 /* ── Cost Controls (Inlined for 0-dep cold boot) ────────── */
 function readCostBool(name, fallback = false) {
@@ -2243,7 +2244,20 @@ Write your thinking in natural conversational sentences (around 40-50 words) lik
 
             const primaryResponse = typeof normalized.response === 'string' ? normalized.response.trim() : '';
             const alternateResponse = typeof normalized.text === 'string' ? normalized.text.trim() : '';
-            normalized.response = primaryResponse || alternateResponse || 'I could not generate a response this time. Please try again.';
+            const candidateResponse = primaryResponse || alternateResponse || 'I could not generate a response this time. Please try again.';
+            
+            const repairFn = typeof validateAndRepairCodeAndMath === 'function'
+                ? validateAndRepairCodeAndMath
+                : (t) => ({ text: String(t || ''), modified: false, issues: [] });
+            const repaired = repairFn(candidateResponse);
+            normalized.response = repaired.text;
+            if (repaired.modified) {
+                normalized.selfHealing = {
+                    ...(normalized.selfHealing || {}),
+                    autoRepaired: true,
+                    repairIssues: repaired.issues
+                };
+            }
 
             if (!Object.prototype.hasOwnProperty.call(normalized, 'action')) {
                 normalized.action = null;
@@ -2254,9 +2268,13 @@ Write your thinking in natural conversational sentences (around 40-50 words) lik
 
             return normalized;
         } catch (_) {
+            const repairFn = typeof validateAndRepairCodeAndMath === 'function'
+                ? validateAndRepairCodeAndMath
+                : (t) => ({ text: String(t || ''), modified: false, issues: [] });
+            const fallbackRepaired = repairFn(text);
             return {
                 intent: 'casual_chat',
-                response: text,
+                response: fallbackRepaired.text,
                 action: null,
                 ...(extractedThought ? { thought: extractedThought } : {})
             };
