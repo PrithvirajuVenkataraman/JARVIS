@@ -173,11 +173,12 @@ async function fetchWithTimeout(url, init = {}) {
 
 const GEMINI_API_VERSIONS = ['v1beta', 'v1'];
 const GEMINI_MODEL_FALLBACKS = [
+    'gemini-3.7-flash',
+    'gemini-2.5-pro',
     'gemini-2.5-flash',
     'gemini-2.0-flash',
     'gemini-2.5-flash-lite',
-    'gemini-flash-latest',
-    'gemini-3.5-flash'
+    'gemini-flash-latest'
 ];
 const GROQ_VISION_MODEL_FALLBACKS = [
     'llama-3.2-11b-vision-preview',
@@ -510,8 +511,7 @@ async function runFastMathOcrSolvePipeline({ providers, mimeType, imageBase64, u
     }
 
     const lines = [];
-    lines.push(`Problem: ${problemText}`);
-    if (ambiguities.length) lines.push(`Ambiguities: ${ambiguities.join(' | ')}`);
+    if (problemText) lines.push(`Problem: ${problemText}`);
     if (steps.length) {
         lines.push('Solution:');
         steps.forEach((step, idx) => lines.push(`${idx + 1}. ${step}`));
@@ -686,127 +686,44 @@ function formatPaperAnswerOverlayResponse(details = {}) {
 }
 
 async function runMathOcrSolvePipeline({ providers, mimeType, imageBase64, userPrompt }) { 
-    const extractionPrompt = [
-        'Extract the math problem from the image.',
+    const solvePrompt = [
+        'Read the mathematical problem from the image and provide a rigorous, step-by-step solution.',
         'Return strict JSON only:',
         '{',
-        '  "problemText": "<normalized problem statement with equations>",',
-        '  "knowns": ["..."],',
-        '  "unknowns": ["..."],',
-        '  "ambiguities": ["..."],',
-        '  "ocrConfidence": "high|medium|low"',
+        '  "problemText": "<clean transcription of the problem statement and equations>",',
+        '  "steps": ["step 1 ...", "step 2 ..."],',
+        '  "finalAnswer": "<exact final answer>",',
+        '  "verification": ["check or sanity verification step"],',
+        '  "confidence": "high|medium|low"',
         '}',
         'Rules:',
-        '- Preserve symbols and equation structure.',
-        '- If unreadable, mention in ambiguities.',
-        `User intent: ${String(userPrompt || 'Solve the problem in the image.').trim()}`
+        '- Accurately preserve all numbers, exponents, symbols, and mathematical notation.',
+        '- Provide clean, clear, human-like solution steps.',
+        '- Do not include meta-commentary, persona preambles, or prompt regurgitation.',
+        `User request: ${String(userPrompt || 'Solve the problem in the image.').trim()}`
     ].join('\n');
 
-    const ocrRawText = await callVisionText({
+    const rawText = await callVisionText({
         providers,
-        systemPrompt: extractionPrompt,
+        systemPrompt: solvePrompt,
         mimeType,
         imageBase64
     });
-    if (!ocrRawText) throw new Error('OCR stage returned empty response');
+    if (!rawText) throw new Error('Vision OCR solve returned empty response');
 
-    const ocrJson = extractJsonFromText(ocrRawText) || {};
-    const normalizedProblem = String(ocrJson?.problemText || '').trim();
-    const fallbackDetails = extractJsonFromText(ocrRawText) || {};
-    const fallbackText = normalizeMathOcrText(fallbackDetails);
-    const effectiveProblem = normalizedProblem || fallbackText;
-    if (!effectiveProblem) {
-        throw new Error('Could not read the math problem clearly from image');
+    const parsed = extractJsonFromText(rawText) || safeParseJson(rawText) || {};
+    const problemText = String(parsed?.problemText || '').trim();
+    const steps = Array.isArray(parsed?.steps) ? parsed.steps.map(s => String(s || '').trim()).filter(Boolean) : [];
+    const checks = Array.isArray(parsed?.verification) ? parsed.verification.map(s => String(s || '').trim()).filter(Boolean) : [];
+    const finalAnswer = String(parsed?.finalAnswer || '').trim() || 'Unable to compute final answer confidently.';
+    const confidence = String(parsed?.confidence || 'high').trim();
+
+    if (!problemText && !steps.length) {
+        throw new Error('Could not read the math problem clearly from the image');
     }
 
-    const plannerSystemPrompt = [
-        'You are Planner Agent for hard math.',
-        'Return strict JSON only:',
-        '{',
-        '  "classification": "<algebra|calculus|geometry|number_theory|probability|other>",',
-        '  "strategy": ["step1", "step2", "step3"],',
-        '  "keyFormulas": ["..."],',
-        '  "riskPoints": ["..."]',
-        '}',
-        'No prose outside JSON.'
-    ].join('\n');
-
-    const plannerText = await callModelText({
-        providers,
-        systemPrompt: plannerSystemPrompt,
-        userPrompt: `Problem:\n${effectiveProblem}`
-    });
-    const plannerJson = extractJsonFromText(plannerText);
-    if (!plannerJson) throw new Error('Planner stage returned invalid JSON');
-
-    const criticSystemPrompt = [
-        'You are Critic Agent for math solving quality.',
-        'Review OCR output and plan.',
-        'Return strict JSON only:',
-        '{',
-        '  "approved": true,',
-        '  "issues": ["..."],',
-        '  "revisedPlan": ["..."],',
-        '  "normalizedProblem": "<clean canonical problem text>",',
-        '  "assumptions": ["..."]',
-        '}',
-        'Set approved=false if core symbols/values are ambiguous.'
-    ].join('\n');
-
-    const criticText = await callModelText({
-        providers,
-        systemPrompt: criticSystemPrompt,
-        userPrompt: `OCR JSON:\n${JSON.stringify(ocrJson, null, 2)}\n\nPlanner JSON:\n${JSON.stringify(plannerJson, null, 2)}`
-    });
-    const criticJson = extractJsonFromText(criticText);
-    if (!criticJson) throw new Error('Critic stage returned invalid JSON');
-
-    const approved = Boolean(criticJson?.approved);
-    const canonicalProblem = String(criticJson?.normalizedProblem || effectiveProblem).trim();
-    if (!canonicalProblem) throw new Error('Critic stage did not produce a valid problem statement');
-
-    const solverSystemPrompt = [
-        'You are Solver Agent for advanced math.',
-        'Use the approved/revised plan and solve correctly.',
-        'Return strict JSON only:',
-        '{',
-        '  "steps": ["step 1 ...", "step 2 ..."],',
-        '  "finalAnswer": "<final answer>",',
-        '  "verification": ["check 1", "check 2"],',
-        '  "confidence": "high|medium|low"',
-        '}',
-        'No prose outside JSON.'
-    ].join('\n');
-
-    const planToUse = Array.isArray(criticJson?.revisedPlan) && criticJson.revisedPlan.length
-        ? criticJson.revisedPlan
-        : (Array.isArray(plannerJson?.strategy) ? plannerJson.strategy : []);
-
-    const solverText = await callModelText({
-        providers,
-        systemPrompt: solverSystemPrompt,
-        userPrompt: [
-            `Problem:\n${canonicalProblem}`,
-            `Plan:\n${JSON.stringify(planToUse, null, 2)}`,
-            `Issues from critic:\n${JSON.stringify(criticJson?.issues || [], null, 2)}`,
-            `Assumptions:\n${JSON.stringify(criticJson?.assumptions || [], null, 2)}`
-        ].join('\n\n'),
-        maxOutputTokens: 3000
-    });
-    const solverJson = extractJsonFromText(solverText);
-    if (!solverJson) throw new Error('Solver stage returned invalid JSON');
-
-    const steps = Array.isArray(solverJson?.steps) ? solverJson.steps.map(s => String(s || '').trim()).filter(Boolean) : [];
-    const checks = Array.isArray(solverJson?.verification) ? solverJson.verification.map(s => String(s || '').trim()).filter(Boolean) : [];
-    const issues = Array.isArray(criticJson?.issues) ? criticJson.issues.map(s => String(s || '').trim()).filter(Boolean) : [];
-    const assumptions = Array.isArray(criticJson?.assumptions) ? criticJson.assumptions.map(s => String(s || '').trim()).filter(Boolean) : [];
-    const finalAnswer = String(solverJson?.finalAnswer || '').trim() || 'Unable to compute final answer confidently.';
-    const confidence = String(solverJson?.confidence || (approved ? 'medium' : 'low')).trim();
-
     const lines = [];
-    lines.push(`Problem: ${canonicalProblem}`);
-    if (issues.length) lines.push(`Critic notes: ${issues.join(' | ')}`);
-    if (assumptions.length) lines.push(`Assumptions: ${assumptions.join(' | ')}`);
+    if (problemText) lines.push(`Problem: ${problemText}`);
     if (steps.length) {
         lines.push('Solution:');
         steps.forEach((step, idx) => lines.push(`${idx + 1}. ${step}`));
@@ -818,14 +735,11 @@ async function runMathOcrSolvePipeline({ providers, mimeType, imageBase64, userP
         response: lines.join('\n\n'),
         details: { 
             pipeline: 'planner-critic-solver', 
-            fullText: canonicalProblem,
-            textDetected: [canonicalProblem],
-            ocrConfidence: String(ocrJson?.ocrConfidence || '').trim() || (approved ? 'medium' : 'low'),
+            fullText: problemText,
+            textDetected: [problemText].filter(Boolean),
+            ocrConfidence: confidence,
             confidence,
-            ocr: ocrJson, 
-            planner: plannerJson, 
-            critic: criticJson, 
-            solver: solverJson
+            solver: parsed
         }
     };
 }
