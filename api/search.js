@@ -3413,6 +3413,8 @@ export const __test = {
     resolveRetrievalRoute,
     classifyRetrievalIntentWithGemini,
     buildDeterministicSearchQueries,
+    buildWebRagQueryPhases,
+    evaluateWebRagEvidence,
     isCurrentTopicSearchQuery,
     isRelatedCurrentTopicSource,
     isRelatedToQuery,
