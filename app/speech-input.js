@@ -393,21 +393,13 @@ export function createSpeechInputController(options = {}) {
                     return;
                 }
 
-                const duration = Date.now() - sessionStartTime;
-                if (!resultReceived && duration < 600 && (converseEnabled || mode === 'dictation') && !fallbackMode && whisperRecorder.isSupported()) {
-                    fallbackMode = true;
-                    browserRecognition = null;
-                    whisperRecorder.start(language);
-                    return;
-                }
-
                 if (converseEnabled && !processing && !globalThis.isConverseSpeechActive?.()) {
                     if (restartTimer) clearTimeout(restartTimer);
                     restartTimer = setTimeout(() => {
                         if (!explicitlyStopped && converseEnabled && !processing && !globalThis.isConverseSpeechActive?.()) {
                             startBrowserRecognition();
                         }
-                    }, 200);
+                    }, 150);
                 } else {
                     if (mode === 'dictation') {
                         mode = 'idle';
@@ -838,12 +830,12 @@ export function installSpeechInputUI(options = {}) {
         onInterim(text, state) {
             const cleaned = cleanSpeechFillers(text);
             lastInterimText = cleaned;
-            // Spoken text appears immediately on screen, not inside the prompt box
             input.value = '';
             delete input.dataset.inputSource;
+            const isConverse = Boolean(state?.converseEnabled);
 
-            globalThis.updateLiveSpeechTranscriptionOnScreen?.(cleaned, true, state?.mode || (state?.converseEnabled ? 'converse' : 'vtt'));
-            if (state?.converseEnabled) {
+            globalThis.updateLiveSpeechTranscriptionOnScreen?.(cleaned, true, isConverse ? 'converse' : 'vtt');
+            if (isConverse) {
                 globalThis.updateLiveConverseOverlay?.(state.processing ? 'thinking' : 'listening', cleaned, true);
             }
             options.onComposerChanged?.();
