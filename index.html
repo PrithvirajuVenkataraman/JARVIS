@@ -4967,16 +4967,18 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
                 maxTurns: 12,
                 maxContextChars: 9000
             }) || []);
-        conversationContext = engineContext;
-        const intent = getUserIntent(normalizedUserMessage); 
         window.__intentContext = { 
           allowHotels: intent.wantsHotels,
           itineraryOnly:
             intent.wantsItinerary &&
             !intent.wantsHotels, 
-          __retried: false };
+          __retried: false 
+        };
 
         setLastVisibleUserMessage(normalizedUserMessage);  
+        if (typeof JarvisSelfImprovingMemory !== 'undefined' && normalizedUserMessage) {
+            JarvisSelfImprovingMemory.processUserMessage(normalizedUserMessage);
+        }
  
         const responseMode = detectRequestedResponseLength(normalizedUserMessage); 
         const responseHint = RESPONSE_LENGTH_HINTS[responseMode] || RESPONSE_LENGTH_HINTS.normal; 
@@ -5012,25 +5014,28 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
 
          
         const selectedModel = getSelectedModel();
-            const requestPayload = {
-                message: effectiveMessage,
-                context: engineContext,
-                preferences: {
-                    userName,
-                    responseLength: responseMode,
-                    responseFormat: formatMode,
-                    responseStyle,
-                    customSystemPrompt,
-                    selectedModel: selectedModel !== 'auto' ? selectedModel : undefined
-                },
-                intent: requestOptions?.intent || (requestOptions?.fastExplainer === true ? 'fast_explainer' : 'chat'),
-                grounding: requestOptions?.grounding || null,
-                images: Array.isArray(requestOptions?.images)
-                    ? requestOptions.images
-                    : (Array.isArray(requestOptions?.grounding?.images) ? requestOptions.grounding.images : undefined),
-                routingMessage: String(requestOptions?.routingMessage || requestOptions?.displayUserMessage || '').trim() || undefined,
-                displayUserMessage: String(requestOptions?.displayUserMessage || '').trim() || undefined
-            };
+        const effectiveSystemPrompt = typeof JarvisSelfImprovingMemory !== 'undefined'
+            ? JarvisSelfImprovingMemory.injectIntoSystemPrompt(customSystemPrompt)
+            : customSystemPrompt;
+        const requestPayload = {
+            message: effectiveMessage,
+            context: engineContext,
+            preferences: {
+                userName,
+                responseLength: responseMode,
+                responseFormat: formatMode,
+                responseStyle,
+                customSystemPrompt: effectiveSystemPrompt,
+                selectedModel: selectedModel !== 'auto' ? selectedModel : undefined
+            },
+            intent: requestOptions?.intent || (requestOptions?.fastExplainer === true ? 'fast_explainer' : 'chat'),
+            grounding: requestOptions?.grounding || null,
+            images: Array.isArray(requestOptions?.images)
+                ? requestOptions.images
+                : (Array.isArray(requestOptions?.grounding?.images) ? requestOptions.grounding.images : undefined),
+            routingMessage: String(requestOptions?.routingMessage || requestOptions?.displayUserMessage || '').trim() || undefined,
+            displayUserMessage: String(requestOptions?.displayUserMessage || '').trim() || undefined
+        };
         latencyTrace.apiStartedAt = performance.now();
         logLatencyTrace('chat_api_start', {
             requestId: latencyTrace.requestId,
@@ -23320,8 +23325,111 @@ const JarvisIndexedDbStorage = {
         } catch (_) {}
     }
 };
+
+const JarvisSelfImprovingMemory = {
+    STORAGE_KEY: 'jarvis_learned_preferences',
+    preferences: [],
+    
+    async init() {
+        try {
+            const raw = await JarvisIndexedDbStorage.getItem(this.STORAGE_KEY);
+            const data = typeof raw === 'string' ? JSON.parse(raw) : raw;
+            if (Array.isArray(data)) {
+                this.preferences = data.filter(p => p && typeof p.directive === 'string' && p.directive.trim());
+            }
+        } catch (_) {
+            this.preferences = [];
+        }
+    },
+    
+    async save() {
+        try {
+            await JarvisIndexedDbStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.preferences));
+        } catch (_) {}
+    },
+    
+    detectCorrectionOrPreference(userMessage = '') {
+        const raw = String(userMessage || '').trim();
+        if (!raw || raw.length < 4 || raw.length > 500) return null;
+        const lower = raw.toLowerCase();
+
+        const negativeMatch = raw.match(/\b(?:don'?t|do\s+not|stop|never|avoid|no\s+more)\s+(?:use|using|include|including|give|giving|make|making|write|writing)\s+([^.!?\n]{3,80})/i);
+        if (negativeMatch) {
+            const subject = negativeMatch[1].trim().replace(/\b(?:please|from\s+now\s+on|anymore|again)\b/gi, '').trim();
+            if (subject) return { category: 'negative_constraint', directive: `Avoid ${subject}.`, rawPrompt: raw, detectedAt: Date.now() };
+        }
+
+        const positiveMatch = raw.match(/\b(?:always|from\s+now\s+on\s*,?\s*always|prefer|make\s+sure\s+to|please\s+always)\s+(?:use|give|write|respond\s+in|format\s+in|answer\s+in)\s+([^.!?\n]{3,80})/i);
+        if (positiveMatch) {
+            const subject = positiveMatch[1].trim().replace(/\b(?:please|from\s+now\s+on)\b/gi, '').trim();
+            if (subject) return { category: 'positive_preference', directive: `Prefer ${subject}.`, rawPrompt: raw, detectedAt: Date.now() };
+        }
+
+        const identityMatch = raw.match(/\b(?:call\s+me|address\s+me\s+as|my\s+name\s+is)\s+([^\r\n!?]+?)(?:[!?\n]|$)/i);
+        if (identityMatch) {
+            const nameOrTitle = identityMatch[1].trim().replace(/[.,;:!?]+$/, '').trim();
+            if (nameOrTitle) return { category: 'user_identity', directive: `Address the user as ${nameOrTitle}.`, rawPrompt: raw, detectedAt: Date.now() };
+        }
+
+        if (/\b(?:be\s+(?:more\s+)?concise|keep\s+it\s+(?:very\s+)?brief|shorter\s+answers?|no\s+fluff|give\s+direct\s+answers?)\b/i.test(lower)) {
+            return { category: 'conciseness', directive: 'Keep answers direct, concise, and free of conversational filler.', rawPrompt: raw, detectedAt: Date.now() };
+        }
+
+        return null;
+    },
+    
+    async processUserMessage(userMessage = '') {
+        const detected = this.detectCorrectionOrPreference(userMessage);
+        if (!detected) return null;
+        const exists = this.preferences.some(p => p.directive.toLowerCase() === detected.directive.toLowerCase());
+        if (!exists) {
+            const item = {
+                id: 'pref_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+                ...detected
+            };
+            this.preferences.push(item);
+            await this.save();
+            return item;
+        }
+        return null;
+    },
+    
+    getDirectives() {
+        return this.preferences.map(p => p.directive).filter(Boolean);
+    },
+    
+    getAll() {
+        return [...this.preferences];
+    },
+    
+    async remove(id) {
+        this.preferences = this.preferences.filter(p => p.id !== id);
+        await this.save();
+    },
+    
+    async clear() {
+        this.preferences = [];
+        await this.save();
+    },
+    
+    injectIntoSystemPrompt(baseSystemPrompt = '') {
+        const directives = this.getDirectives();
+        if (!directives.length) return baseSystemPrompt;
+        const learnedBlock = [
+            '',
+            '=== USER LEARNED PREFERENCES & ADAPTATIONS ===',
+            ...directives.map(d => `- ${d}`),
+            '=============================================='
+        ].join('\n');
+        return (baseSystemPrompt || '').trim() + '\n' + learnedBlock;
+    }
+};
+
 if (typeof window !== 'undefined') {
-    setTimeout(() => JarvisIndexedDbStorage.autoMigrate(), 800);
+    setTimeout(() => {
+        JarvisIndexedDbStorage.autoMigrate();
+        JarvisSelfImprovingMemory.init();
+    }, 800);
 }
 
         function saveUserData() {
