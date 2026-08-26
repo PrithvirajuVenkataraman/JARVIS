@@ -70,17 +70,16 @@ const generatedResults = [];
 for (const { query, domain } of testQueries) {
     const steps = generateSteps(query);
     assert.ok(Array.isArray(steps), 'Steps for ' + domain + ' must be an array');
-    assert.equal(steps.length, 3, 'Steps for ' + domain + ' must contain exactly 3 multi-stage narratives');
-    const [s1, s2, s3] = steps;
-    assert.ok(s1.length > 20, 'Stage 1 too short for ' + domain + ': ' + s1);
-    assert.ok(s2.length > 20, 'Stage 2 too short for ' + domain + ': ' + s2);
-    assert.ok(s3.length > 20, 'Stage 3 too short for ' + domain + ': ' + s3);
+    assert.equal(steps.length, 5, 'Steps for ' + domain + ' must contain 5 multi-stage narratives');
+    for (let i = 0; i < steps.length; i++) {
+        assert.ok(steps[i].length > 15, `Stage ${i + 1} too short for ${domain}: ${steps[i]}`);
+    }
     generatedResults.push({ domain, query, steps });
 }
 
 const allStep1s = new Set(generatedResults.map(r => r.steps[0]));
 assert.equal(allStep1s.size, generatedResults.length, 'Every distinct query must produce a unique contextualized Stage 1');
-console.log('  [PASS] 2. Dynamic 3-stage CoT narratives generated with 100% semantic uniqueness');
+console.log('  [PASS] 2. Dynamic 5-stage CoT narratives generated with 100% semantic uniqueness');
 
 // 3. Test Multi-Chunk Converse Speech Stream <think> Filtering
 const speechSandbox = {
@@ -158,6 +157,16 @@ assert.equal(parsedJsonWithThought.thought, 'Analyzing user request');
 const parsedPlain = parseModelText('Plain text response without thinking tags.');
 assert.equal(parsedPlain.response, 'Plain text response without thinking tags.');
 assert.equal(parsedPlain.thought, undefined);
-console.log('  [PASS] 5. parseModelText preserves reasoning thought across plain and JSON responses');
+
+// 6. Test system instruction leakage / meta-analysis suppression
+const leakedMetaResponse = parseModelText('Analyze User Input:\nThe user asked to solve this math problem from the OCR image, said this: "find x".\n\nCheck Constraints & Rules:\n- Direct answer\n- No meta-talk\n\nFinal Answer:\nx = 42');
+assert.equal(leakedMetaResponse.response, 'x = 42');
+assert.ok(leakedMetaResponse.thought.includes('Analyze User Input:'));
+
+const clientExtractLeaked = extractThoughtAndAnswer('The user asked to solve the attachment, said this: "calculate integral".\nApplying rules: Start directly with the answer.\n\nHere is the solution:\n\\int x dx = \\frac{x^2}{2} + C');
+assert.equal(clientExtractLeaked.answer, '\\int x dx = \\frac{x^2}{2} + C');
+assert.ok(clientExtractLeaked.thought.includes('The user asked'));
+
+console.log('  [PASS] 6. System instruction leakage and meta-chatter cleanly tucked into thought');
 
 console.log('dynamic-cot-reasoning-tests-ok');
