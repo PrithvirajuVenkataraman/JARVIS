@@ -519,18 +519,22 @@ const TRUST_LEVEL = {VERIFIED: 'verified', GENERATED: 'generated'};
 const LIVE_DISABLED_MESSAGE = 'Live search is off for now.';
 
 function isLiveRetrievalEnabled() {
+    if (typeof getWebSearchMode === 'function' && getWebSearchMode() === 'off') return false;
     return globalThis.JARVIS_LIVE_RETRIEVAL_ENABLED === true;
 }
 
 function isPublicFactSearchEnabled() {
+    if (typeof getWebSearchMode === 'function' && getWebSearchMode() === 'off') return false;
     return globalThis.JARVIS_PUBLIC_FACT_SEARCH_ENABLED !== false;
 }
 
 function isStructuredCurrentFactsEnabled() {
+    if (typeof getWebSearchMode === 'function' && getWebSearchMode() === 'off') return false;
     return globalThis.JARVIS_STRUCTURED_CURRENT_FACTS_ENABLED !== false;
 }
 
 function isFactSearchEnabled() {
+    if (typeof getWebSearchMode === 'function' && getWebSearchMode() === 'off') return false;
     return isLiveRetrievalEnabled() || isPublicFactSearchEnabled();
 }
 
@@ -2910,12 +2914,21 @@ async function processUserQuery(text, options = {}) {
         return { intent: 'converse_resumption', response: remaining };
     }
 
+    const activeWebMode = typeof getWebSearchMode === 'function' ? getWebSearchMode() : 'auto';
     const frontendRoute = decideFrontendRoute(t, {
-        turnSource: options?.source || options?.turnSource || activeResponseRenderContext?.source || ''
+        turnSource: options?.source || options?.turnSource || activeResponseRenderContext?.source || '',
+        webMode: activeWebMode
     });
-    logRoutingDebug('processUserQuery route_decision', t, { frontendRoute });
+    logRoutingDebug('processUserQuery route_decision', t, { frontendRoute, activeWebMode });
     if (frontendRoute.route === 'fast_simple') {
         return await handleFastSimpleQuery(t, {
+            stream: options?.stream === true,
+            displayUserMessage: options?.displayUserMessage || t,
+            routeDecision: frontendRoute
+        });
+    }
+    if (activeWebMode === 'off') {
+        return await askGeminiAI(t, {
             stream: options?.stream === true,
             displayUserMessage: options?.displayUserMessage || t,
             routeDecision: frontendRoute
@@ -11770,11 +11783,6 @@ async function sendTextInput(submission = {}) {
         }
 
 function getStableBrowserFactAnswer(text) {
-    const lower = String(text || '').toLowerCase().replace(/[?.!]+$/g, '').replace(/\s+/g, ' ').trim();
-    if (/\b(latest|current|today|now|as of|with sources?|source links?)\b/.test(lower)) return '';
-    if (/\bpenicillin\b/.test(lower) && /\b(who discovered|discoverer|discovered|founder|inventor|invented|discovery of)\b/.test(lower)) {
-        return 'Alexander Fleming discovered penicillin in 1928. Ernst Chain and Howard Florey later helped develop penicillin into an effective medical treatment.';
-    }
     return '';
 }
 
@@ -22990,21 +22998,24 @@ function shouldUseMinimalThinking(text, intent = '') {
 
 function buildFrontendRouteContext(text, options = {}) {
     const value = String(text || '').trim();
-    const liveIntent = extractLiveQueryIntent(value);
-    const entityIntent = extractUniversalEntityIntent(value, liveIntent);
+    const webMode = typeof getWebSearchMode === 'function' ? getWebSearchMode() : (options?.webMode || 'auto');
+    const isWebOff = webMode === 'off';
+    const liveIntent = isWebOff ? { requiresLive: false } : extractLiveQueryIntent(value);
+    const entityIntent = isWebOff ? { isLiveRequired: false } : extractUniversalEntityIntent(value, liveIntent);
     const risk = getRiskTierForQuery(value, liveIntent, entityIntent);
     return {
+        webMode,
         turnSource: options?.turnSource || options?.source || activeResponseRenderContext?.source || '',
         liveIntent,
         entityIntent,
         risk,
-        explicitWeb: isExplicitWebSearchRequest(value),
-        strictLatest: isStrictLatestQuery(value),
-        currentInfo: isCurrentInfoQuery(value),
-        liveRetrieval: isLiveRetrievalQuery(value),
-        requiresSources: isExplicitWebSearchRequest(value) || isStrictLatestQuery(value) || isCurrentInfoQuery(value),
+        explicitWeb: !isWebOff && isExplicitWebSearchRequest(value),
+        strictLatest: !isWebOff && isStrictLatestQuery(value),
+        currentInfo: !isWebOff && isCurrentInfoQuery(value),
+        liveRetrieval: !isWebOff && isLiveRetrievalQuery(value),
+        requiresSources: !isWebOff && (isExplicitWebSearchRequest(value) || isStrictLatestQuery(value) || isCurrentInfoQuery(value)),
         safetySensitive: isMedicalAdviceIntent(value) || isMedicalEmergencyIntent(value),
-        placeGrounded: isLikelyLocationOrTravelQuery(value) || /\b(museum|museums|landmark|attraction|restaurant|hotel|nearby|near me|open now|places to visit)\b/i.test(value),
+        placeGrounded: !isWebOff && (isLikelyLocationOrTravelQuery(value) || /\b(museum|museums|landmark|attraction|restaurant|hotel|nearby|near me|open now|places to visit)\b/i.test(value)),
         toolAction: !!options?.toolAction,
         toolReason: options?.toolReason || '',
         ambiguousContext: !!options?.ambiguousContext
@@ -23020,6 +23031,12 @@ function decideFrontendRoute(text, context = {}) {
         return globalThis.JarvisFrontendRouting.decideFrontendRoute(text, routeContext);
     }
     const speakResponse = String(routeContext.turnSource || '').toLowerCase() === 'converse';
+    if (routeContext.webMode === 'off') {
+        if (isFastSimpleQuery(text)) {
+            return { route: 'fast_simple', reason: 'web_off_stable_fact', risk: 'low_risk', requiresSources: false, minimalThinking: true, speakResponse, sourcePolicy: 'none' };
+        }
+        return { route: 'chat_direct', reason: 'web_off_direct_chat', risk: 'low_risk', requiresSources: false, minimalThinking: false, speakResponse, sourcePolicy: 'none' };
+    }
     if (routeContext.requiresSources || routeContext.liveRetrieval || routeContext.placeGrounded) {
         return { route: 'live_required', reason: 'source_or_freshness_required', risk: routeContext.risk || 'medium_risk', requiresSources: true, minimalThinking: false, speakResponse, sourcePolicy: 'required' };
     }
