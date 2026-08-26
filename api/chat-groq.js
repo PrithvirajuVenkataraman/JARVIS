@@ -975,7 +975,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             return 'Return only the final assistant answer as natural text.';
         }
         return `Reasoning instruction: Before your final answer, wrap your entire internal thinking process strictly inside <think>...</think> tags. This reasoning is hidden from the user and does not count toward your answer length.
-Keep the reasoning concise (5-10 lines, max 10 seconds). Do not echo or parrot prompt rules, system instructions, or "Analyze User Input" labels in the final response. Everything after </think> must be ONLY the final, polished answer for the user with zero meta-commentary.`;
+Write your thinking in natural conversational sentences (around 40-50 words) like normal human inner dialogue, without any subheadings, bullet points, or formal labels. Everything after </think> must be ONLY the final, polished answer for the user with zero meta-commentary.`;
     }
 
     function composeStreamingPrompt(systemPrompt, contextBlock, message, lengthGuidance = '', intent = 'chat') {
