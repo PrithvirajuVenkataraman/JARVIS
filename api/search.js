@@ -34,28 +34,6 @@ const LOOKUP_ONLY_SOURCE_TYPES = new Set([
     'community_discussion'
 ]);
 
-const COMMON_QUERY_TERMS = new Set([
-    'who', 'what', 'when', 'where', 'which', 'current', 'latest', 'present',
-    'the', 'of', 'for', 'in', 'is', 'are', 'and', 'or', 'official', 'source',
-    'tell', 'me', 'about', 'facts', 'fact', 'answer', 'please'
-]);
-
-const GOVERNMENT_ROLE_ALIASES = Object.freeze([
-    { role: 'captain', pattern: /\bcaptain\b|\bskipper\b/i, sportsRole: true },
-    { role: 'coach', pattern: /\bhead coach\b|\bcoach\b/i, sportsRole: true },
-    { role: 'manager', pattern: /\bmanager\b/i, sportsRole: true },
-    { role: 'ceo', pattern: /\bceo\b|\bchief\s+executive\s+officer\b/i, property: 'P169', organizationRole: true },
-    { role: 'prime minister', pattern: /\bprime\s+minister\b|\bpm\b/i, property: 'P6' },
-    { role: 'chief minister', pattern: /\bchief\s+minister\b|\bcm\b/i, property: 'P39' },
-    { role: 'first minister', pattern: /\bfirst\s+minister\b/i, property: 'P39' },
-    { role: 'president', pattern: /\bpresident\b/i, property: 'P35' },
-    { role: 'governor', pattern: /\bgovernor\b/i, property: 'P39' },
-    { role: 'premier', pattern: /\bpremier\b/i, property: 'P39' },
-    { role: 'mayor', pattern: /\bmayor\b/i, property: 'P39' },
-    { role: 'head of government', pattern: /\bhead\s+of\s+government\b/i, property: 'P6' },
-    { role: 'head of state', pattern: /\bhead\s+of\s+state\b/i, property: 'P35' }
-]);
-
 export const LIVE_SEARCH_DISABLED_RESPONSE = Object.freeze({
     success: false,
     disabled: true,
@@ -220,8 +198,10 @@ export default async function handler(req, res) {
                     route,
                     searchRequired: true,
                     searchSkipped: false,
-                    category: route.category,
-                    ...search
+                    ...search,
+                    category: search.category || route.category,
+                    answerProvider: search.answerProvider || (search.answer ? 'public_source_result' : undefined),
+                    answer: search.answer
                 });
             }
             const search = await runFreeLiveSearch(query, route, { limit });
@@ -248,6 +228,8 @@ export default async function handler(req, res) {
                     geminiEnhanced: false,
                     warnings: search.warnings || []
                 }),
+                answerProvider: search.answerProvider || (search.provider === 'thesportsdb' ? 'sports_reference_source' : search.provider === 'wikimedia+openstreetmap' ? 'public_place_source' : search.provider ? `${String(search.provider).replace(/-/g, '_')}_source` : undefined),
+                answer: search.answer || (search.results?.[0] ? `${search.results[0].title}: ${search.results[0].description}` : undefined),
                 category: search.category || route.category
             });
         }
@@ -387,14 +369,19 @@ export async function runCachedLatestSearch(query, options = {}) {
         refreshed = await refreshLatestCacheIfStale(options);
         results = searchItems(query, { limit });
     }
-    return buildSearchSummary(results.map(normalizeLatestCacheResult), {
-        query,
-        provider: 'latest_cache',
-        publicSourceCount: results.length,
-        geminiEnhanced: false,
-        warnings: results.length ? [] : ['No cached freshness articles matched this request.'],
-        refreshed
-    });
+    const normalized = results.map(normalizeLatestCacheResult);
+    return {
+        ...buildSearchSummary(normalized, {
+            query,
+            provider: 'latest_cache',
+            publicSourceCount: results.length,
+            geminiEnhanced: false,
+            warnings: results.length ? [] : ['No cached freshness articles matched this request.'],
+            refreshed
+        }),
+        answerProvider: results[0] ? 'latest_cache_source' : undefined,
+        answer: results[0] ? `${results[0].title}. ${results[0].summary || ''}`.trim() : undefined
+    };
 }
 
 export function hasSerperKey() {
@@ -444,19 +431,19 @@ export async function searchPublicSources(query, options = {}) {
         .filter(item => !isPolitical || (!String(item?.url || '').includes('wikipedia.org') && !String(item?.url || '').includes('wikidata.org')));
     const wiki = (Array.isArray(wikiSettled) ? wikiSettled : []).flatMap(r => r.status === 'fulfilled' ? r.value : []).slice(0, 3);
     const wikidata = (Array.isArray(wikidataSettled) ? wikidataSettled : []).flatMap(r => r.status === 'fulfilled' ? r.value : []).slice(0, 2);
-
     const combined = [
-        ...governmentRoleResults,
         ...wiki,
         ...wikidata,
+        ...governmentRoleResults,
         ...liveNews,
         ...gdelt,
         ...liveWeb
     ].filter(Boolean);
 
+    const rankedCandidates = rankSources(normalizedQuery, combined);
     const seenUrls = new Set();
     const deduped = [];
-    for (const item of combined) {
+    for (const item of rankedCandidates) {
         if (!item.url || seenUrls.has(item.url)) continue;
         seenUrls.add(item.url);
         deduped.push(item);
@@ -1164,9 +1151,7 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
     const results = allResults.slice(0, limit);
     const gate = finalGate || evaluateWebRagEvidence(normalizedQuery, results);
     if (!finalAnswer?.verified || !finalAnswer.answer) {
-        const unverifiedText = roleIntent
-            ? `I couldn't verify the current ${roleIntent.role} from reliable live sources.`
-            : 'I could not verify this from retrieved sources.';
+        const unverifiedText = 'I could not verify this from retrieved sources.';
         return {
             provider: 'web_rag',
             answerProvider: 'web_rag_unverified',
@@ -1355,52 +1340,83 @@ function normalizeWikidataItem(item, query, index) {
     };
 }
 
-export function parseGovernmentRoleQuery(query) {
+export function parseUniversalEntityQuery(query) {
     const raw = normalizeSearchQuery(query);
     if (!raw) return null;
-    const roleEntry = GOVERNMENT_ROLE_ALIASES.find(item => item.pattern.test(raw));
-    if (!roleEntry) return null;
     const dateIntent = parseStructuredDateWindow(raw);
 
-    const roleTextMatch = raw.match(roleEntry.pattern);
-    const roleText = String(roleTextMatch?.[0] || roleEntry.role).trim();
-    const escapedRoleText = escapeRegex(roleText);
-    const patterns = [
-        new RegExp(`\\b(?:who\\s+is|what\\s+is)?\\s*(?:the\\s+)?(?:current\\s+|latest\\s+)?${escapedRoleText}\\s+(?:of|for|in)\\s+(.+?)[?.!]*$`, 'i'),
-        new RegExp(`\\b(.+?)\\s+(?:current\\s+|latest\\s+)?${escapedRoleText}\\b[?.!]*$`, 'i')
-    ];
-    let jurisdiction = '';
-    for (const pattern of patterns) {
-        const match = raw.match(pattern);
-        if (match?.[1]) {
-            jurisdiction = cleanGovernmentRoleJurisdiction(match[1]);
-            break;
+    let predicate = '';
+    let subject = '';
+    let roleText = '';
+
+    // 1. "[Who/What is/was the] [Predicate] of/for/in [Subject]?"
+    const ofMatch = raw.match(/^(?:(?:who|what)\s+(?:is|was|are|were)\s+)?(?:the\s+)?(?:current\s+|latest\s+)?(.+?)\s+(?:of|for|in|during)\s+(.+?)[?.!]*$/i);
+    if (ofMatch && ofMatch[1] && ofMatch[2]) {
+        predicate = cleanPredicateText(ofMatch[1]);
+        subject = cleanSubjectText(ofMatch[2]);
+        roleText = ofMatch[1].trim();
+    }
+
+    // 2. "[Subject] [Predicate]" e.g. "Tamil Nadu CM", "Apollo 11 commander", "France president"
+    if (!predicate || !subject) {
+        const withoutLead = raw.replace(/^\s*(?:who|what)\s+(?:is|was|are|were)\s+(?:the\s+)?(?:current\s+|latest\s+)?/i, '').replace(/[?.!]+$/, '').trim();
+        const words = withoutLead.split(/\s+/);
+        if (words.length >= 2) {
+            const lastTwo = words.slice(-2).join(' ');
+            if (words.length >= 3 && /^(?:prime minister|chief minister|head of state|head of government|god of war|god of underworld)$/i.test(lastTwo)) {
+                predicate = cleanPredicateText(lastTwo);
+                subject = cleanSubjectText(words.slice(0, -2).join(' '));
+                roleText = lastTwo;
+            } else {
+                const lastOne = words[words.length - 1];
+                predicate = cleanPredicateText(lastOne);
+                subject = cleanSubjectText(words.slice(0, -1).join(' '));
+                roleText = lastOne;
+            }
         }
     }
-    if (!jurisdiction) {
-        const withoutLead = raw
-            .replace(/^\s*(who|what)\s+is\s+(?:the\s+)?/i, ' ')
-            .replace(/\b(current|latest|present|incumbent)\b/gi, ' ');
-        const parts = withoutLead.split(roleTextMatch?.[0] || roleEntry.role);
-        jurisdiction = cleanGovernmentRoleJurisdiction(parts[1] || parts[0] || '');
+
+    if (!predicate || !subject || predicate.length < 2 || subject.length < 2) return null;
+
+    let normalizedRole = predicate.toLowerCase();
+    let property = 'P39';
+    if (normalizedRole === 'cm') {
+        normalizedRole = 'chief minister';
+    } else if (normalizedRole === 'pm') {
+        normalizedRole = 'prime minister';
+    } else if (normalizedRole === 'president') {
+        property = 'P35';
+    } else if (normalizedRole === 'ceo') {
+        property = 'P169';
     }
-    if (!jurisdiction || jurisdiction.length < 2) return null;
+
     return {
-        role: roleEntry.role,
+        role: normalizedRole,
         roleText,
-        jurisdiction,
-        property: roleEntry.property,
+        jurisdiction: subject,
+        property,
         ...(dateIntent?.hasDate ? { dateIntent } : {})
     };
 }
 
-function cleanGovernmentRoleJurisdiction(value) {
+export const parseGovernmentRoleQuery = parseUniversalEntityQuery;
+
+function cleanPredicateText(value) {
     return stripDatePhrasesFromText(value)
         .replace(/^\s*(?:who|what)\s+(?:is|was|are|were)\s+(?:the\s+)?/i, ' ')
         .replace(/^\s*(?:the|a|an)\s+/i, ' ')
-        .replace(/\b(current|latest|present|incumbent|official|government|leader|office|holder|name|country|state|province)\b$/gi, ' ')
+        .replace(/\b(current|latest|present|incumbent|official)\b/gi, ' ')
         .replace(/^[,:\s]+|[,:\s?!.]+$/g, '')
-        .replace(/\s*,\s*/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function cleanSubjectText(value) {
+    return stripDatePhrasesFromText(value)
+        .replace(/^\s*(?:who|what)\s+(?:is|was|are|were)\s+(?:the\s+)?/i, ' ')
+        .replace(/^\s*(?:the|a|an)\s+/i, ' ')
+        .replace(/\b(current|latest|present|incumbent|official)\b/gi, ' ')
+        .replace(/^[,:\s]+|[,:\s?!.]+$/g, '')
         .replace(/\s+/g, ' ')
         .trim();
 }
@@ -1590,7 +1606,7 @@ export function isCurrentStateQuery(query) {
     if (!raw) return false;
     const dateIntent = parseStructuredDateWindow(raw);
     if (dateIntent?.hasDate) return false;
-    const isHistoricalTerm = /\b(former|previous|past|first|ex-|history|earlier|was\s+the|were\s+the|served\s+as|served\s+until|in\s+\d{4}|during\s+\d{4})\b/i.test(raw);
+    const isHistoricalTerm = /\b(was|were|former|previous|past|first|ex-|history|historical|earlier|ancient|mythological|mythology|myth|origin|invented|founded|created|discovered|painted|wrote|author|composer|during|died|buried)\b/i.test(raw);
     if (isHistoricalTerm) return false;
     return true;
 }
@@ -2017,7 +2033,7 @@ function buildSourceDerivedAnswer(results, metadata = {}) {
             };
         }
     }
-    if (roleIntent) return {};
+    if (roleIntent && /^(?:cm|chief minister|prime minister|pm|president|governor|mayor|leader|head of state|head of government|ceo|captain|coach)$/i.test(roleIntent.role)) return {};
 
     const top = list.find(item => isAnswerEvidenceResult(item) && isAcceptableSourceDerivedAnswer(query, item));
     if (!top) return {};
@@ -2152,7 +2168,7 @@ function isDiscoveryAnswerSource(discovery, item) {
     const title = String(item?.title || '').toLowerCase();
     const description = String(item?.description || '').toLowerCase();
     const hay = `${title} ${description}`;
-    const subjectTerms = tokenize(subject).filter(term => !COMMON_QUERY_TERMS.has(term));
+    const subjectTerms = tokenize(subject).filter(term => term.length > 2);
     if (!subjectTerms.length) return false;
     const subjectHit = subjectTerms.every(term => hay.includes(term));
     if (!subjectHit) return false;
@@ -2235,32 +2251,31 @@ function evaluateWebRagEvidence(query, results = []) {
     const isCurrent = isCurrentStateQuery(query);
 
     let explicitEvidence = evidence;
-    if (roleIntent && isCurrent) {
+    if (roleIntent) {
+        const targetSubject = (roleIntent.subject || roleIntent.jurisdiction || '').toLowerCase();
+        const targetPredicate = (roleIntent.predicate || roleIntent.role || '').toLowerCase();
+        const subjectTokens = tokenize(targetSubject).filter(t => t.length > 2);
+        const predicateTokens = tokenize(targetPredicate).filter(t => t.length > 2);
+
         explicitEvidence = evidence.filter(item => {
             const text = `${item.title} ${item.description || ''} ${item.fullArticleText || ''}`.toLowerCase();
-            const jurisdiction = roleIntent.jurisdiction.toLowerCase();
-            const role = roleIntent.role.toLowerCase();
-            
-            const hasEntity = text.includes(jurisdiction) || tokenize(jurisdiction).some(t => t.length > 2 && text.includes(t));
-            if (!hasEntity) return false;
+            const hasSubject = !targetSubject || text.includes(targetSubject) || subjectTokens.some(t => text.includes(t));
+            if (!hasSubject) return false;
 
             if (item.evidenceLevel === 'structured_claim') return true;
-            
-            const roleTokens = tokenize(role).filter(t => t.length > 2);
-            const hasRole = text.includes(role) || (roleTokens.length > 0 && roleTokens.every(t => text.includes(t))) ||
-                            (role === 'prime minister' && (text.includes('pm') || text.includes('premier'))) ||
-                            (role === 'chief minister' && (text.includes('cm') || text.includes('premier'))) ||
-                            (role === 'captain' && text.includes('skipper')) ||
-                            (role === 'ceo' && text.includes('chief executive'));
-            
-            if (hasRole) {
-                return validateClaimTemporalStatus(item) !== 'historical';
+
+            const hasPredicate = !targetPredicate || text.includes(targetPredicate) || predicateTokens.some(t => text.includes(t));
+            if (hasPredicate) {
+                if (isCurrent) {
+                    return validateClaimTemporalStatus(item) !== 'historical';
+                }
+                return true;
             }
             return false;
         });
     }
 
-    const effectiveEvidence = (roleIntent && isCurrent && explicitEvidence.length) ? explicitEvidence : evidence;
+    const effectiveEvidence = (roleIntent && explicitEvidence.length) ? explicitEvidence : evidence;
     const domains = Array.from(new Set(effectiveEvidence.map(item => {
         if (item.sourceLabel && item.sourceLabel.startsWith('Google News / ')) {
             return item.sourceLabel.replace('Google News / ', '').trim();
@@ -2273,9 +2288,9 @@ function evaluateWebRagEvidence(query, results = []) {
     const confidence = Math.min(0.99, (strong.length ? 0.74 : 0.6) + (domains.length >= 2 ? 0.2 : 0.1) + (dated.length ? 0.05 : 0));
     
     const pass = !conflict && (
-        roleIntent
-            ? explicitEvidence.length >= 1
-            : ((strong.length >= 1 || domains.length >= 2) && evidence.length >= 1)
+        (explicitEvidence.length >= 1) ||
+        (evidence.length >= 2) ||
+        (strong.length >= 1 && evidence.length >= 1)
     );
 
     return {
@@ -2288,7 +2303,7 @@ function evaluateWebRagEvidence(query, results = []) {
             : pass
                 ? ''
                 : (roleIntent
-                    ? `I couldn't verify the current ${roleIntent.role} from reliable live sources.`
+                    ? `I couldn't verify the ${roleIntent.predicate || roleIntent.role || 'information'} from reliable live sources.`
                     : 'Insufficient authoritative retrieved evidence.')
     };
 }
@@ -2487,13 +2502,19 @@ function extractDeterministicLiveFactAnswer(query, evidence = []) {
             if (isRoleQuery) {
                 const roleIntent = parseGovernmentRoleQuery(query);
                 if (roleIntent) {
-                    const holderMatch = text.match(/\b(?:captained by|is (?:the )?(?:current )?(?:captain|chief minister|prime minister|president|ceo|governor|leader|coach)(?:\s+of[^.]+)?\s+(?:is|named)?|appointed as (?:the )?(?:captain|chief minister|prime minister|ceo))\s+([A-Z][a-zA-Z.'-]+(?:\s+[A-Z][a-zA-Z.'-]+)+)/i)
-                        || text.match(/\b([A-Z][a-zA-Z.'-]+(?:\s+[A-Z][a-zA-Z.'-]+)+)\s+(?:is|serves as|appointed as|becomes|takes over as|elected as)\s+(?:the )?(?:new |current )?(?:[A-Za-z]+\s+)?(?:captain|chief minister|prime minister|president|ceo|governor|leader|coach)/i)
-                        || text.match(/\b(?:new |current )?(?:[A-Za-z]+\s+)?(?:captain|chief minister|prime minister|president|ceo|governor|leader|coach)\s+([A-Z][a-zA-Z.'-]+(?:\s+[A-Z][a-zA-Z.'-]+)+)/i)
-                        || text.match(/\b([A-Z][a-zA-Z.'-]+(?:\s+[A-Z][a-zA-Z.'-]+)+)\s*\((?:captain|c)\)/i);
+                    const escRole = escapeRegex(roleIntent.role);
+                    const escRoleText = escapeRegex(roleIntent.roleText || roleIntent.role);
+                    const rolePattern = `${escRole}|${escRoleText}`;
+                    const holderMatch = text.match(new RegExp(`\\b([A-Z][a-z]+(?:\\s+[A-Z][a-z]+){1,2}),\\s*(?:the\\s+)?(?:current\\s+|new\\s+)?(?:${rolePattern})\\s+(?:of|for|in)\\b`, 'i'))
+                        || text.match(new RegExp(`\\b(?:is|appointed as|serves as|elected as)\\s+(?:the\\s+)?(?:current\\s+|new\\s+)?(?:${rolePattern})(?:\\s+of[^.]+)?\\s+(?:is|named)?\\s+([A-Z][a-zA-Z.'-]+(?:\\s+[A-Z][a-zA-Z.'-]+){1,3})`, 'i'))
+                        || text.match(new RegExp(`\\b([A-Z][a-zA-Z.'-]+(?:\\s+[A-Z][a-zA-Z.'-]+){1,3})\\s+(?:is|serves as|appointed as|becomes|takes over as|elected as)\\s+(?:the\\s+)?(?:new\\s+|current\\s+)?(?:${rolePattern})`, 'i'))
+                        || text.match(new RegExp(`\\b(?:new\\s+|current\\s+)?(?:${rolePattern})\\s+([A-Z][a-zA-Z.'-]+(?:\\s+[A-Z][a-zA-Z.'-]+){1,3})`, 'i'))
+                        || text.match(new RegExp(`(?:by|with|of|:)\\s+([A-Z][a-zA-Z.'-]+(?:\\s+[A-Z][a-zA-Z.'-]+){1,3}),\\s+(?:the\\s+)?(?:current\\s+|new\\s+)?(?:${rolePattern})\\s+(?:of|for|in)\\b`, 'i'))
+                        || text.match(new RegExp(`\\b([A-Z][a-zA-Z.'-]+(?:\\s+[A-Z][a-zA-Z.'-]+){1,3}),\\s+(?:the\\s+)?(?:current\\s+|new\\s+)?(?:${rolePattern})\\s+(?:of|for|in)\\b`, 'i'))
+                        || text.match(new RegExp(`\\b([A-Z][a-zA-Z.'-]+(?:\\s+[A-Z][a-zA-Z.'-]+)+)\\s*\\((?:${rolePattern}|c)\\)`, 'i'));
                     if (holderMatch) {
                         const rawName = holderMatch[1] || '';
-                        const holderName = cleanHolderName(rawName);
+                        const holderName = cleanHolderName(rawName, roleIntent.jurisdiction, roleIntent.role);
                         if (holderName) {
                             const answerText = `${holderName} is the current ${roleIntent.role} of ${roleIntent.jurisdiction}.`;
                             return {
@@ -2736,30 +2757,34 @@ async function callGeminiJson(prompt, options = {}) {
 
     const groqKey = String(process.env.GROQ_API_KEY || '').trim();
     if (groqKey) {
-        try {
-            const response = await fetchWithTimeout('https://api.groq.com/openai/v1/chat/completions', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${groqKey}`
-                },
-                body: JSON.stringify({
-                    model: 'llama-3.3-70b-versatile',
-                    messages: [
-                        { role: 'system', content: 'You are a strict JSON generator. Return valid JSON only with no markdown or preamble.' },
-                        { role: 'user', content: prompt }
-                    ],
-                    temperature: 0.1,
-                    max_tokens: clampInt(options.maxOutputTokens, 700, 100, 1600),
-                    response_format: { type: 'json_object' }
-                })
-            }, 6000);
-            if (response.ok) {
-                const data = await response.json();
-                const text = String(data?.choices?.[0]?.message?.content || '').trim();
-                return extractJsonObject(text);
-            }
-        } catch (_) {}
+        const groqModels = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'openai/gpt-oss-120b'];
+        for (const model of groqModels) {
+            try {
+                const response = await fetchWithTimeout('https://api.groq.com/openai/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${groqKey}`
+                    },
+                    body: JSON.stringify({
+                        model,
+                        messages: [
+                            { role: 'system', content: 'You are a strict JSON generator. Return valid JSON only with no markdown or preamble.' },
+                            { role: 'user', content: prompt }
+                        ],
+                        temperature: 0.1,
+                        max_tokens: clampInt(options.maxOutputTokens, 700, 100, 1600),
+                        response_format: { type: 'json_object' }
+                    })
+                }, 4500);
+                if (response.ok) {
+                    const data = await response.json();
+                    const text = String(data?.choices?.[0]?.message?.content || '').trim();
+                    const parsed = extractJsonObject(text);
+                    if (parsed) return parsed;
+                }
+            } catch (_) {}
+        }
     }
     return null;
 }
@@ -2927,17 +2952,20 @@ function extractOfficialCurrentRoleEvidence(text, query, sourceUrl = '') {
     return null;
 }
 
-function cleanHolderName(value) {
+function cleanHolderName(value, jurisdiction = '', role = '') {
     let text = String(value || '')
-        .replace(/^.*?\b(?:after|trading|star|actor|exec|executive|author|politician|leader|player|batsman|bowler|keeper|director|will be|named)\s+/i, '')
-        .replace(/\b(?:the|current|present|incumbent|hon'?ble|honorable|shri|smt|mr|ms|dr)\b\.?/gi, ' ')
+        .replace(/^.*?\b(?:by|with|for|as|named|called|known as|titled)\s+/i, '')
+        .replace(/\b(?:the|current|present|incumbent|hon'?ble|honorable|shri|smt|mr|ms|mrs|dr|prof|sir|lord|lady)\b\.?/gi, ' ')
         .replace(/[,;:].*$/g, ' ')
         .replace(/\s+/g, ' ')
         .trim();
-    if (!text || text.length < 3 || text.length > 50) return '';
-    if (/\b(?:chief|minister|president|governor|mayor|office|government|current|former|served|hardware|trading|apple|ipl)\b/i.test(text)) return '';
+    if (!text || text.length < 2 || text.length > 60) return '';
+    if (jurisdiction && text.toLowerCase().includes(jurisdiction.toLowerCase())) return '';
+    if (role && text.toLowerCase().includes(role.toLowerCase())) return '';
     const nameTokens = text.split(/\s+/).filter(t => /^[A-Z][a-zA-Z.'-]*$/.test(t));
     if (nameTokens.length < 1 || nameTokens.length > 5) return '';
+    if (jurisdiction && nameTokens.some(t => jurisdiction.toLowerCase().includes(t.toLowerCase()))) return '';
+    if (role && nameTokens.some(t => role.toLowerCase().includes(t.toLowerCase()))) return '';
     return nameTokens.join(' ');
 }
 
@@ -3065,7 +3093,7 @@ function isRelatedToQuery(query, item) {
     const discovery = parseDiscoveryFactQuery(query);
     if (discovery) return isDiscoveryAnswerSource(discovery, item);
     if (/^free_/i.test(String(item?.sourceType || ''))) return true;
-    const terms = tokenize(query).filter(term => !COMMON_QUERY_TERMS.has(term));
+    const terms = tokenize(query).filter(term => term.length >= 2);
     if (!terms.length) return true;
     const hay = `${item?.title || ''} ${item?.description || ''} ${item?.sourceLabel || ''}`.toLowerCase();
     if (isCurrentTopicSearchQuery(query)) {
@@ -3084,23 +3112,21 @@ function isStrongGenericQuerySourceMatch(query, haystack) {
 
     const compactSubject = String(subject || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
     const subjectTerms = tokenize(subject)
-        .filter(term => !COMMON_QUERY_TERMS.has(term))
-        .filter(term => term.length > 2 || /^\d{4}$/.test(term));
+        .filter(term => term.length >= 2 || /^\d{4}$/.test(term));
     const queryTerms = tokenize(query)
-        .filter(term => !COMMON_QUERY_TERMS.has(term))
-        .filter(term => term.length > 2 || /^\d{4}$/.test(term));
+        .filter(term => term.length >= 2 || /^\d{4}$/.test(term));
     if (compactSubject && compactSubject.split(/\s+/).length >= 2 && text.includes(compactSubject)) return true;
     const terms = subjectTerms.length ? subjectTerms : queryTerms;
     if (!terms.length) return false;
     const matched = terms.filter(term => text.includes(term));
-    if (terms.length === 1) return terms[0].length >= 4 && matched.length === 1;
+    if (terms.length === 1) return terms[0].length >= 2 && matched.length === 1;
     return matched.length >= Math.min(terms.length, Math.max(2, Math.ceil(terms.length * 0.67)));
 }
 
 function isRelatedCurrentTopicSource(query, haystack) {
     const subject = extractSearchSubject(query);
-    const subjectTerms = tokenize(subject).filter(term => !COMMON_QUERY_TERMS.has(term) && !/^\d$/.test(term));
-    const queryTerms = tokenize(query).filter(term => !COMMON_QUERY_TERMS.has(term) && !/^\d$/.test(term));
+    const subjectTerms = tokenize(subject).filter(term => term.length >= 2 && !/^\d$/.test(term));
+    const queryTerms = tokenize(query).filter(term => term.length >= 2 && !/^\d$/.test(term));
     const text = String(haystack || '').toLowerCase();
     const matchedSubjectTerms = subjectTerms.filter(term => text.includes(term));
     const matchedQueryTerms = queryTerms.filter(term => text.includes(term));
@@ -3215,9 +3241,9 @@ function isDatedChangingFactSearchQuery(query) {
 }
 
 function extractSearchSubject(query) {
+    const universal = parseUniversalEntityQuery(query);
+    if (universal?.jurisdiction) return cleanQueryTarget(universal.jurisdiction);
     const normalized = normalizeSearchQuery(query);
-    const roleMatch = normalized.match(/\b(?:ceo|cfo|cto|chair(?:person|man)?|president|prime minister|chief minister|mayor|governor|captain|coach)\s+(?:of|for|at|in)\s+(.+)$/i);
-    if (roleMatch?.[1]) return cleanQueryTarget(roleMatch[1]);
     const text = normalized
         .replace(/\b(?:latest|recent|current|newest|reviews?|review|hands-on|worth\s+it|good|best|price|available|availability|launched|released?|winner|won|champion|rankings?|standings?|compare|comparison|vs|movies?|films?|songs?|albums?|releases?)\b/gi, ' ')
         .replace(/\b(?:in|during|as of|by|before|after)\s+\d{4}\b/gi, ' ')
@@ -3386,7 +3412,7 @@ export const __test = {
     validateClaimTemporalStatus,
     isCurrentStateQuery,
     hasObviousRagConflict,
-    discoverOfficialSourceCandidates, 
+    discoverOfficialSourceCandidates,
     fetchWikidataOfficialUrls,
     isOfficialGovernmentUrl,
     extractOfficialCurrentRoleEvidence,
