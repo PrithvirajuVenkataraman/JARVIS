@@ -489,10 +489,7 @@ export async function searchGoogleNewsRss(query, options = {}) {
     if (!rawQ) return [];
     const encoded = encodeURIComponent(rawQ);
 
-    const isIndia = /\b(tamil nadu|tn|chennai|kerala|karnataka|delhi|maharashtra|bengaluru|mumbai|india|modi|stalin|vijay|tvk|dmk|bjp|congress|aap)\b/i.test(rawQ);
-    const url = isIndia
-        ? `https://news.google.com/rss/search?q=${encoded}&hl=en-IN&gl=IN&ceid=IN:en`
-        : `https://news.google.com/rss/search?q=${encoded}&hl=en&gl=US&ceid=US:en`;
+    const url = `https://news.google.com/rss/search?q=${encoded}&hl=en&gl=US&ceid=US:en`;
 
     const response = await fetchWithTimeout(url, {
         headers: {
@@ -510,12 +507,24 @@ export async function searchGoogleNewsRss(query, options = {}) {
 
 function cleanXmlEntities(str) {
     return String(str || '')
-        .replace(/&amp;/g, '&')
-        .replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>')
-        .replace(/&quot;/g, '"')
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/&#160;/g, ' ')
+        .replace(/&amp;/gi, '&')
+        .replace(/&lt;/gi, '<')
+        .replace(/&gt;/gi, '>')
+        .replace(/&quot;/gi, '"')
         .replace(/&#39;/g, "'")
-        .replace(/&apos;/g, "'")
+        .replace(/&apos;/gi, "'")
+        .replace(/&mdash;/gi, '—')
+        .replace(/&ndash;/gi, '–')
+        .replace(/&#8217;/g, "'")
+        .replace(/&#8216;/g, "'")
+        .replace(/&#8220;/g, '"')
+        .replace(/&#8221;/g, '"')
+        .replace(/&#8211;/g, '-')
+        .replace(/&#8212;/g, '—')
+        .replace(/&hellip;/gi, '...')
+        .replace(/\s+/g, ' ')
         .trim();
 }
 
@@ -2019,13 +2028,6 @@ function filterSearchResultsForAnswerQuery(query, results) {
 function buildSourceDerivedAnswer(results, metadata = {}) {
     const list = Array.isArray(results) ? results : [];
     const query = String(metadata.query || list.find(item => item?.query)?.query || '').trim();
-    const discovery = parseDiscoveryFactQuery(query);
-    if (discovery?.subject === 'penicillin') {
-        return {
-            answer: 'Alexander Fleming discovered penicillin in 1928. Ernst Chain and Howard Florey later helped develop penicillin into an effective medical treatment.',
-            provider: 'stable_historical_fact'
-        };
-    }
     const roleIntent = parseGovernmentRoleQuery(query);
     const structuredRole = list
         .filter(item => item?.evidenceLevel === 'structured_claim' && item?.holderName && item?.role && item?.jurisdiction && item?.url);
@@ -2076,7 +2078,12 @@ function buildSourceDerivedAnswer(results, metadata = {}) {
         return sourceAnswer(`${title}${sourceLabel ? ` (${sourceLabel})` : ''}${description ? `: ${description}` : ''}`, 'latest_cache_source');
     }
     if (/^(official_source|trusted_news|public_news|encyclopedia|structured_reference)$/.test(sourceType)) {
-        return sourceAnswer(`${title}${description ? `: ${description}` : ''}`, 'public_source_result');
+        const isSpecificEntityQuestion = /\b(?:who\s+(?:won|is|was)|what\s+(?:is|was)|which\s+team|how\s+many|where\s+is)\b/i.test(query);
+        if (!isSpecificEntityQuestion || /^(official_source|encyclopedia)$/.test(sourceType)) {
+            const cleanTitle = cleanXmlEntities(title);
+            const cleanDesc = cleanXmlEntities(description);
+            return sourceAnswer(`${cleanTitle}${cleanDesc ? `: ${cleanDesc}` : ''}`, 'public_source_result');
+        }
     }
     return {};
 }
