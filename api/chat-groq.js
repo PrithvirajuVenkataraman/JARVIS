@@ -246,8 +246,9 @@ async function getInstantFactHelper() {
         'qwen-2.5-coder-32b',
         'qwen/qwen3.6-27b',
         'qwen-3.6-27b',
-        'gemini-2.5-flash',
+        'gemini-3.7-flash',
         'gemini-2.5-pro',
+        'gemini-2.5-flash',
         'llama-3.2-11b-vision-preview',
         'meta-llama/llama-3.2-11b-vision-instruct'
     ]);
@@ -366,17 +367,18 @@ async function getInstantFactHelper() {
         } else if (['openai/gpt-oss-120b', 'llama-3.3-70b-versatile', 'deepseek-r1-distill-llama-70b', 'qwen-2.5-coder-32b'].includes(userSelected)) {
             mappedGemini = 'gemini-2.5-pro';
         } else if (['openai/gpt-oss-20b', 'llama-3.1-8b-instant'].includes(userSelected)) {
-            mappedGemini = 'gemini-2.5-flash-lite';
+            mappedGemini = 'gemini-3.7-flash';
         }
-        return [...new Set([mappedGemini, configured, 'gemini-3.5-flash', 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'].filter(Boolean))];
+        return [...new Set([mappedGemini, configured, 'gemini-3.7-flash', 'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'].filter(Boolean))];
     }
 
     const KNOWN_GEMINI_VISION_MODELS = new Set([
+        'gemini-3.7-flash',
+        'gemini-2.5-pro',
         'gemini-2.5-flash',
         'gemini-2.0-flash',
         'gemini-1.5-flash',
-        'gemini-2.5-flash-lite',
-        'gemini-2.5-pro'
+        'gemini-2.5-flash-lite'
     ]);
 
     function getPreferredGeminiVisionCandidates(configuredModel = '', userSelectedModel = null) {
@@ -385,13 +387,14 @@ async function getInstantFactHelper() {
             : '';
         const userSelected = KNOWN_GEMINI_VISION_MODELS.has(String(userSelectedModel || '').trim())
             ? String(userSelectedModel || '').trim()
-            : '';
+            : (String(userSelectedModel || '').startsWith('gemini-') ? String(userSelectedModel) : '');
         const visionModels = [
+            'gemini-3.7-flash',
+            'gemini-2.5-pro',
             'gemini-2.5-flash',
             'gemini-2.0-flash',
             'gemini-1.5-flash',
-            'gemini-2.5-flash-lite',
-            'gemini-2.5-pro'
+            'gemini-2.5-flash-lite'
         ];
         return [...new Set([userSelected, configured, ...visionModels].filter(Boolean))];
     }
@@ -1801,7 +1804,8 @@ Write your thinking in natural conversational sentences (around 40-50 words) lik
             return null;
         };
 
-        const providerFns = [tryRunGroq, tryRunGemini];
+        const prioritizeGemini = Boolean(userSelectedModel && String(userSelectedModel).toLowerCase().startsWith('gemini-')) || hasImages;
+        const providerFns = prioritizeGemini ? [tryRunGemini, tryRunGroq] : [tryRunGroq, tryRunGemini];
 
         let attemptIndex = 0;
         for (const fn of providerFns) {
@@ -1901,7 +1905,8 @@ Write your thinking in natural conversational sentences (around 40-50 words) lik
             return null;
         };
 
-        const streamFns = [tryStreamGroq, tryStreamGemini];
+        const prioritizeGemini = Boolean(userSelectedModel && String(userSelectedModel).toLowerCase().startsWith('gemini-')) || hasImages;
+        const streamFns = prioritizeGemini ? [tryStreamGemini, tryStreamGroq] : [tryStreamGroq, tryStreamGemini];
 
         for (const fn of streamFns) {
             const result = await fn();
