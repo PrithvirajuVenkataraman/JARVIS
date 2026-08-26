@@ -431,11 +431,13 @@ async function getInstantFactHelper() {
 
     function isSqlQueryGenerationRequest(text) {
         const t = String(text || '').toLowerCase();
-        if (/\b(?:sql|database|postgres|mysql|sqlite|bigquery|snowflake)\b/.test(t)) {
+        if (/\b(?:write|generate|create|provide|give\s+me|show\s+me)\b.*\b(?:sql\s+query|sql\s+script|sql\s+statement|sql\s+code|postgres\s+query|mysql\s+query|sqlite\s+query|database\s+query)\b/i.test(t)) {
             return true;
         }
-        return /\b(?:find|list|show|select|fetch|get|generate|write)\b.*\b(?:all|top|customers|orders|users|products|rows|items|sales|revenue|table|schema|records)\b/i.test(t) &&
-            /\b(?:where|over|greater|less|group by|order by|joined|total|sum|count|amount|days|date|status|showing|having)\b/i.test(t);
+        if (/^\s*(?:write|generate|create)\s+(?:an?\s+)?sql\b/i.test(t)) {
+            return true;
+        }
+        return false;
     }
 
 
@@ -594,41 +596,6 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                     message: effectiveMessage,
                     grounding,
                     preferences
-                });
-            }
-            const stableFactAnswer = isAttachmentGrounding ? '' : getStableFactAnswer(routingMessage);
-            if (stableFactAnswer) {
-                return res.status(200).json({
-                    success: true,
-                    requestId,
-                    intent: 'stable_fact',
-                    response: stableFactAnswer,
-                    action: null,
-                    provider: 'deterministic',
-                    modelUsed: 'stable-facts-v1',
-                    routing: {
-                        mode: CHAT_ROUTER_MODE,
-                        strategy: 'direct',
-                        reason: 'deterministic_stable_fact',
-                        webEligible: false,
-                        preloadedSources: 0
-                    },
-                    webEscalation: {
-                        considered: false,
-                        escalated: false,
-                        reason: 'stable_fact_answered_directly',
-                        sourceCount: 0,
-                        requestType: 'user_query'
-                    },
-                    quality: {
-                        performed: false,
-                        verdict: 'not_required',
-                        passes: 0,
-                        corrected: false,
-                        reasons: ['deterministic_stable_fact'],
-                        elapsedMs: 0,
-                        externalVerification: false
-                    }
                 });
             }
             const prefersStreamGeneration = req.body?.stream === true &&
@@ -1509,78 +1476,6 @@ Write your thinking in natural conversational sentences (around 40-50 words) lik
         ].filter(Boolean).join('\n\n');
     }
 
-    const STABLE_CAPITALS = Object.freeze({
-        afghanistan: 'Kabul',
-        argentina: 'Buenos Aires',
-        australia: 'Canberra',
-        bangladesh: 'Dhaka',
-        brazil: 'Brasilia',
-        canada: 'Ottawa',
-        china: 'Beijing',
-        france: 'Paris',
-        germany: 'Berlin',
-        india: 'New Delhi',
-        indonesia: 'Jakarta',
-        italy: 'Rome',
-        japan: 'Tokyo',
-        mexico: 'Mexico City',
-        nepal: 'Kathmandu',
-        pakistan: 'Islamabad',
-        russia: 'Moscow',
-        'south africa': 'Pretoria',
-        'south korea': 'Seoul',
-        spain: 'Madrid',
-        'sri lanka': 'Sri Jayawardenepura Kotte',
-        uk: 'London',
-        'united kingdom': 'London',
-        us: 'Washington, DC',
-        usa: 'Washington, DC',
-        'united states': 'Washington, DC',
-        'united states of america': 'Washington, DC'
-    });
-
-    function getStableFactAnswer(message) {
-        const text = String(message || '').trim();
-        const lower = text.toLowerCase().replace(/[?.!]+$/g, '').replace(/\s+/g, ' ');
-        if (/\b(latest|current|today|now|as of|who is the current)\b/.test(lower)) return '';
-
-        if (isPenicillinDiscoveryQuestion(lower)) {
-            return 'Alexander Fleming discovered penicillin in 1928. Ernst Chain and Howard Florey later helped develop penicillin into an effective medical treatment.';
-        }
-
-        const capitalMatch = lower.match(/^(?:what(?:'s| is)|which city is|name)\s+(?:the\s+)?capital\s+(?:city\s+)?of\s+(.+?)$/) ||
-            lower.match(/^(.+?)\s+capital$/);
-        if (!capitalMatch) return '';
-
-        const rawCountry = String(capitalMatch[1] || '')
-            .replace(/^(?:the\s+)?/, '')
-            .replace(/\b(country|nation)\b/g, '')
-            .replace(/\s+/g, ' ')
-            .trim();
-        const capital = STABLE_CAPITALS[rawCountry];
-        if (!capital) return '';
-        return `The capital of ${formatCountryName(rawCountry)} is ${capital}.`;
-    }
-
-    function isPenicillinDiscoveryQuestion(message) {
-        const text = String(message || '').toLowerCase();
-        return /\bpenicillin\b/.test(text) &&
-            /\b(who discovered|discoverer|discovered|founder|inventor|invented|discovery of)\b/.test(text);
-    }
-
-    function formatCountryName(country) {
-        const special = {
-            uk: 'the United Kingdom',
-            us: 'the United States',
-            usa: 'the United States'
-        };
-        if (special[country]) return special[country];
-        return String(country || '')
-            .split(' ')
-            .map(part => part ? `${part[0].toUpperCase()}${part.slice(1)}` : '')
-            .join(' ');
-    }
-
     async function classifySafetyWithGroq(message, options = {}) {
         if (options?.isInternalSummary) return { blocked: false };
         const groqApiKey = process.env.GROQ_API_KEY || process.env.GROQ_KEY;
@@ -2209,7 +2104,7 @@ Write your thinking in natural conversational sentences (around 40-50 words) lik
                 };
             }
 
-            if (parsed.query && (parsed.query_type || parsed.tables_used || parsed.validation_status)) {
+            if (parsed.intent === 'sql_generation' && parsed.query && (parsed.query_type || parsed.tables_used || parsed.validation_status)) {
                 const sqlCode = String(parsed.query || '').trim();
                 const queryType = String(parsed.query_type || 'SELECT').toUpperCase();
                 const tables = Array.isArray(parsed.tables_used) && parsed.tables_used.length ? parsed.tables_used.join(', ') : 'N/A';
@@ -4115,7 +4010,6 @@ Write your thinking in natural conversational sentences (around 40-50 words) lik
         buildServerSystemPrompt,
         composeFinalPrompt,
         classifyRoutingDecision,
-        getStableFactAnswer,
         getQualityRiskReasons,
         getUnknownGeneralKnowledgeEscalationDecision,
         normalizeChatRequest,
