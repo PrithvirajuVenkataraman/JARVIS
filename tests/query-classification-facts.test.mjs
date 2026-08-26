@@ -254,4 +254,47 @@ for (const query of placeNavQueries) {
 }
 console.log('  [PASS] Actionable place and navigation queries correctly trigger place grounding.');
 
+// =========================================================================
+// 6. AI, NLP, ML & Computer Science Definitions (Must route to fast_simple)
+// =========================================================================
+console.log('6. Testing AI/ML/NLP conceptual definition query classification...');
+
+const csDefQueries = [
+    'What is NLP',
+    'What is machine learning',
+    'Explain neural networks',
+    'What is deep learning',
+    'Define computer vision',
+    'How do transformers work in NLP'
+];
+
+for (const query of csDefQueries) {
+    const frontendStable = frontendIsStable(query);
+    assert.equal(frontendStable, true, `Expected isStable to be true for CS query "${query}"`);
+    const route = decideFrontendRoute(query);
+    assert.equal(route.route, 'fast_simple', `Expected fast_simple for "${query}", got ${route.route}`);
+    assert.equal(route.requiresSources, false);
+}
+console.log('  [PASS] AI/ML/NLP concepts correctly route to fast_simple without search.');
+
+// =========================================================================
+// 7. Explicit Web Search Mode 'off' Enforcement
+// =========================================================================
+console.log('7. Testing webMode: "off" strict bypass...');
+
+const offQueries = [
+    'What is NLP',
+    'Who won the latest FIFA cup',
+    'Who is the current Prime Minister of the UK',
+    'Weather in Paris right now'
+];
+
+for (const query of offQueries) {
+    const route = decideFrontendRoute(query, { webMode: 'off' });
+    assert.notEqual(route.route, 'live_required', `webMode 'off' must never produce live_required for "${query}"`);
+    assert.notEqual(route.route, 'place_grounded', `webMode 'off' must never produce place_grounded for "${query}"`);
+    assert.equal(route.requiresSources, false, `webMode 'off' must set requiresSources to false for "${query}"`);
+}
+console.log('  [PASS] webMode "off" strictly disables all live search routes.');
+
 console.log('query-classification-facts-tests-ok');
