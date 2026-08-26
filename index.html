@@ -129,16 +129,6 @@
             <div class="chat-sidebar-search-field">
                 <input id="chat-sidebar-search-input" type="search" placeholder="Search chats & messages..." aria-label="Search chats" oninput="renderChatSidebarList()">
             </div>
-            <div class="sidebar-view-tabs" role="tablist" aria-label="Sidebar view filter">
-                <button type="button" id="sidebar-tab-chats" class="sidebar-view-tab is-active" onclick="setSidebarViewTab('chats')" role="tab" aria-selected="true">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                    <span>Chats</span>
-                </button>
-                <button type="button" id="sidebar-tab-bookmarks" class="sidebar-view-tab" onclick="setSidebarViewTab('bookmarks')" role="tab" aria-selected="false">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16l-7-3.5L5 21V5z"/></svg>
-                    <span>Bookmarked</span>
-                </button>
-            </div>
         </div>
         <div id="chat-sidebar-section-title" class="chat-sidebar-section-title">Recents</div>
         <div id="chat-sidebar-list" class="chat-sidebar-list" role="list"></div>
@@ -24661,37 +24651,10 @@ function setSidebarViewTab(tab) {
     renderChatSidebarList();
 }
 
-function togglePinChatSession(sessionId) {
-    const session = chatSessions.find(s => s.id === sessionId);
-    if (!session) return;
-    session.pinned = !session.pinned;
-    saveChatSessions();
-    renderChatSidebarList();
-    showTemporaryMessage(session.pinned ? 'Chat pinned to top.' : 'Chat unpinned.');
-}
-
 function renderChatSidebarList() {
     const list = document.getElementById('chat-sidebar-list');
     if (!list) return;
     const query = String(document.getElementById('chat-sidebar-search-input')?.value || '').toLowerCase().trim();
-
-    if (currentSidebarViewTab === 'bookmarks') {
-        const bookmarks = getBookmarkedMessages().filter(b => !query || b.text.toLowerCase().includes(query) || (b.title || '').toLowerCase().includes(query));
-        if (!bookmarks.length) {
-            list.innerHTML = `<p class="chat-sidebar-empty">${query ? 'No matching bookmarks.' : 'No bookmarked insights yet. Click the Bookmark icon under any answer to save it.'}</p>`;
-            return;
-        }
-        list.innerHTML = bookmarks.map(b => `
-            <div class="bookmarked-item-card" onclick="copyAssistantMessageText(null, '${escapeJsString(b.text)}')">
-                <div class="bookmarked-item-meta">
-                    <span>${escapeHtml(b.title || 'Saved insight')}</span>
-                    <span>${formatChatSessionDate(b.timestamp)}</span>
-                </div>
-                <div class="bookmarked-item-snippet">${escapeHtml(b.text)}</div>
-            </div>
-        `).join('');
-        return;
-    }
 
     const sessions = getVisibleChatSessions()
         .filter(session => !query || searchChatSessionText(session).includes(query))
@@ -24725,18 +24688,13 @@ function renderChatSidebarList() {
                 <span class="chat-session-meta">${session.pinned ? 'Pinned' : formatChatSessionDate(session.updatedAt)}</span>
                 ${snippet ? `<span class="chat-session-snippet">${escapeHtml(snippet)}</span>` : ''}
             </div>
-            <div class="chat-session-actions-group">
-                <button type="button" class="chat-session-pin-btn ${session.pinned ? 'is-pinned' : ''}" title="${session.pinned ? 'Unpin chat' : 'Pin chat to top'}" onclick="event.stopPropagation(); togglePinChatSession('${escapeJsString(session.id)}')">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="${session.pinned ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2"><line x1="12" y1="17" x2="12" y2="22"></line><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"></path></svg>
-                </button>
-                <button type="button" class="chat-session-more" onclick="event.stopPropagation(); openChatSessionMenu(event, '${escapeJsString(session.id)}')" aria-label="Chat actions">
-                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
-                        <circle cx="12" cy="5" r="1"></circle>
-                        <circle cx="12" cy="12" r="1"></circle>
-                        <circle cx="12" cy="19" r="1"></circle>
-                    </svg>
-                </button>
-            </div>
+            <button type="button" class="chat-session-more" onclick="event.stopPropagation(); openChatSessionMenu(event, '${escapeJsString(session.id)}')" aria-label="Chat actions">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+                    <circle cx="12" cy="5" r="1"></circle>
+                    <circle cx="12" cy="12" r="1"></circle>
+                    <circle cx="12" cy="19" r="1"></circle>
+                </svg>
+            </button>
         </div>
     `;
     };
@@ -24750,7 +24708,7 @@ function renderChatSidebarList() {
             html += recentSessions.map(renderRow).join('');
         }
     } else {
-        html = sessions.map(renderRow).join('');
+        html += sessions.map(renderRow).join('');
     }
     list.innerHTML = html;
 }
