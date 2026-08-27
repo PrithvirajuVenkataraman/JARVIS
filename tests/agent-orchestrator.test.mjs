@@ -27,9 +27,9 @@ describe('Multi-Agent Workflow & DAG Orchestration Suite', () => {
     });
 
     describe('2. DAG Task Generation', () => {
-        it('2.1 Generates 4-agent DAG with dependencies for research + code goals', () => {
+        it('2.1 Generates 4-agent parallel DAG with concurrent branches', () => {
             const goal = 'Research the best vector databases for Node.js, write sample code, and compile a report.';
-            const dag = buildAgentWorkflowDag(goal);
+            const dag = buildAgentWorkflowDag(goal, { parallel: true });
 
             assert.equal(dag.goal, goal);
             assert.ok(dag.tasks.length >= 3);
@@ -44,16 +44,17 @@ describe('Multi-Agent Workflow & DAG Orchestration Suite', () => {
             assert.ok(coderTask, 'Coder task exists');
             assert.ok(synthTask, 'Synthesizer task exists');
 
-            // Verify dependency chain
+            // Verify parallel dependency chain: Researcher & Coder can execute concurrently
             assert.deepEqual(plannerTask.dependencies, []);
             assert.deepEqual(researchTask.dependencies, ['task_plan']);
-            assert.deepEqual(coderTask.dependencies, ['task_research']);
-            assert.deepEqual(synthTask.dependencies, ['task_code']);
+            assert.deepEqual(coderTask.dependencies, ['task_plan']);
+            assert.ok(synthTask.dependencies.includes('task_research'));
+            assert.ok(synthTask.dependencies.includes('task_code'));
         });
     });
 
     describe('3. Orchestration & Execution Flow', () => {
-        it('3.1 Executes DAG tasks sequentially and reports step status updates', async () => {
+        it('3.1 Executes DAG tasks concurrently in parallel and reports step status updates', async () => {
             const events = [];
             const orchestrator = createAgentOrchestrator({
                 onWorkflowStart(dag) {
@@ -70,6 +71,7 @@ describe('Multi-Agent Workflow & DAG Orchestration Suite', () => {
             const result = await orchestrator.runWorkflow(
                 'Build a full benchmark of SQLite vs IndexedDB in TypeScript',
                 async (task, previousOutputs, goal) => {
+                    await new Promise(r => setTimeout(r, 10));
                     return `Simulated output for ${task.role}`;
                 }
             );
@@ -84,6 +86,28 @@ describe('Multi-Agent Workflow & DAG Orchestration Suite', () => {
             assert.ok(events.some(e => e.type === 'task_update' && e.status === TASK_STATUS.RUNNING));
             assert.ok(events.some(e => e.type === 'task_update' && e.status === TASK_STATUS.COMPLETED));
             assert.ok(events.some(e => e.type === 'complete'));
+        });
+
+        it('3.2 Gracefully degrades when an intermediate parallel sub-task fails', async () => {
+            const orchestrator = createAgentOrchestrator();
+
+            const result = await orchestrator.runWorkflow(
+                'Research quantum computing and write Python script',
+                async (task) => {
+                    if (task.id === 'task_research') {
+                        throw new Error('Web search network timeout.');
+                    }
+                    return `Output for ${task.role}`;
+                }
+            );
+
+            const researchTask = result.dag.tasks.find(t => t.id === 'task_research');
+            const coderTask = result.dag.tasks.find(t => t.id === 'task_code');
+            const synthTask = result.dag.tasks.find(t => t.id === 'task_synthesize');
+
+            assert.equal(researchTask.status, TASK_STATUS.FAILED);
+            assert.equal(coderTask.status, TASK_STATUS.COMPLETED);
+            assert.equal(synthTask.status, TASK_STATUS.COMPLETED, 'Synthesizer must complete using remaining outputs');
         });
     });
 });
