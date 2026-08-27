@@ -105,7 +105,7 @@ for (let i = 1; i <= 3; i++) {
     const y = 7 + i;
     const correct = x * y;
     const chunk = `Calc: ${x} * ${y} = ${correct + 10}. `;
-    const emitted = guard.ingest(chunk);
+    const emitted = guard.ingest(chunk); 
     assert.match(emitted, new RegExp(`${x} \\* ${y} = ${correct}`));
 }
 const flushed = guard.flushRemaining();
