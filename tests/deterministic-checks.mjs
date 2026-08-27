@@ -12,6 +12,9 @@ import { classifyFailure, shouldShowFailureFallbackCard as routeFailureCard } fr
 import { scorePlaceEvidence as scoreFrontendPlaceEvidence, isRelevantPlaceResult as isFrontendRelevantPlaceResult } from '../app/place-grounding.js';
 import { createConverseStateTracker, normalizeConverseState } from '../app/converse-state.js';
 import { __test as attachmentIngestTest } from '../api/_lib/attachment-ingest.js';
+import { highlightCode } from '../app/code-highlighter.js';
+import { renderMathInText, formatLatexExpression } from '../app/math-renderer.js';
+import { renderMarkdown } from '../app/markdown-renderer.js';
 
 const SOURCE = Object.freeze({ 
     science: fs.readFileSync(new URL('../science-format.js', import.meta.url), 'utf8'), 
@@ -1443,3 +1446,92 @@ async function callJsonHandler(handler, req) {
     await handler(req, res);
     return res;
 }
+
+// ============================================================================
+// Markdown Renderer, Code Syntax Highlighter & Math Formula Assertions
+// ============================================================================
+{
+    // 1. Syntax Highlighter Tokenization
+    const jsCode = 'async function getData(url) {\n  const res = await fetch(url);\n  return res.json();\n}';
+    const jsHighlighted = highlightCode(jsCode, 'javascript');
+    assert.ok(jsHighlighted.includes('<span class="tok-kw">async</span>'));
+    assert.ok(jsHighlighted.includes('<span class="tok-kw">function</span>'));
+    assert.ok(jsHighlighted.includes('<span class="tok-kw">const</span>'));
+    assert.ok(jsHighlighted.includes('<span class="tok-kw">await</span>'));
+    assert.ok(jsHighlighted.includes('<span class="tok-fn">getData</span>'));
+    assert.ok(jsHighlighted.includes('<span class="tok-fn">fetch</span>'));
+
+    const pyCode = '# Calculate total\ndef calculate(n: int) -> float:\n    total = 42.5\n    return total * n';
+    const pyHighlighted = highlightCode(pyCode, 'python');
+    assert.ok(pyHighlighted.includes('<span class="tok-comm"># Calculate total</span>'));
+    assert.ok(pyHighlighted.includes('<span class="tok-kw">def</span>'));
+    assert.ok(pyHighlighted.includes('<span class="tok-fn">calculate</span>'));
+    assert.ok(pyHighlighted.includes('<span class="tok-num">42.5</span>'));
+
+    const sqlCode = 'SELECT id, name FROM users WHERE age >= 21;';
+    const sqlHighlighted = highlightCode(sqlCode, 'sql');
+    assert.ok(sqlHighlighted.includes('<span class="tok-kw">SELECT</span>'));
+    assert.ok(sqlHighlighted.includes('<span class="tok-kw">FROM</span>'));
+    assert.ok(sqlHighlighted.includes('<span class="tok-kw">WHERE</span>'));
+    assert.ok(sqlHighlighted.includes('<span class="tok-num">21</span>'));
+
+    const jsonCode = '{\n  "status": "success",\n  "count": 10,\n  "active": true\n}';
+    const jsonHighlighted = highlightCode(jsonCode, 'json');
+    assert.ok(jsonHighlighted.includes('<span class="tok-kw">&quot;status&quot;</span>'));
+    assert.ok(jsonHighlighted.includes('<span class="tok-str">&quot;success&quot;</span>'));
+    assert.ok(jsonHighlighted.includes('<span class="tok-num">10</span>'));
+    assert.ok(jsonHighlighted.includes('<span class="tok-kw">true</span>'));
+
+    // 2. LaTeX Math & Exponent Formatter
+    const inlineMath = 'The mass-energy equivalence is $E = mc^2$.';
+    const renderedInline = renderMathInText(inlineMath);
+    assert.ok(renderedInline.includes('<span class="math-inline">E = mc<sup>2</sup></span>'));
+
+    const varPowerMath = 'Calculate the derivative of $f(x) = x^x$.';
+    const renderedVarPower = renderMathInText(varPowerMath);
+    assert.ok(renderedVarPower.includes('<span class="math-inline">f(x) = x<sup>x</sup></span>'));
+
+    const plainPowerText = 'The expression x^x grows faster than 2^x.';
+    const renderedPlainPower = renderMathInText(plainPowerText);
+    assert.ok(renderedPlainPower.includes('x<sup>x</sup>'));
+    assert.ok(renderedPlainPower.includes('2<sup>x</sup>'));
+
+    const displayMath = '$$\\frac{\\alpha + \\beta}{2} = \\pi$$';
+    const renderedDisplay = renderMathInText(displayMath);
+    assert.ok(renderedDisplay.includes('<div class="math-display-block">'));
+    assert.ok(renderedDisplay.includes('<span class="math-fraction">'));
+    assert.ok(renderedDisplay.includes('α'));
+    assert.ok(renderedDisplay.includes('β'));
+    assert.ok(renderedDisplay.includes('π'));
+
+    const sqrtExpr = '\\sqrt{x_1 + x_2}';
+    const formattedSqrt = formatLatexExpression(sqrtExpr);
+    assert.ok(formattedSqrt.includes('<span class="math-sqrt">'));
+    assert.ok(formattedSqrt.includes('x<sub>1</sub>'));
+    assert.ok(formattedSqrt.includes('x<sub>2</sub>'));
+
+    // 3. Unified Markdown Rendering
+    const md = `# Quantum Mechanics
+Einstein established that $E = mc^2$.
+
+Here is Python code:
+\`\`\`python
+def energy(m):
+    c = 3e8
+    return m * c**2
+\`\`\`
+
+| Symbol | Meaning |
+|---|---|
+| E | Energy |
+| m | Mass |
+`;
+    const renderedMd = renderMarkdown(md);
+    assert.ok(renderedMd.includes('<h2 class="assistant-md-heading">Quantum Mechanics</h2>'));
+    assert.ok(renderedMd.includes('<span class="math-inline">E = mc<sup>2</sup></span>'));
+    assert.ok(renderedMd.includes('assistant-md-code-container'));
+    assert.ok(renderedMd.includes('PYTHON'));
+    assert.ok(renderedMd.includes('<span class="tok-kw">def</span>'));
+    assert.ok(renderedMd.includes('<table class="assistant-md-table">'));
+}
+
