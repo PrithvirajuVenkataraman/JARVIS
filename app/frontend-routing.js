@@ -1,18 +1,7 @@
-const CASUAL_FILLER_PATTERN = /\b(?:no|nope|nah|just|generally|actually|i'?m|im|i am|asking|so|well|um|uh|like)\b/g;
-const LIVE_SIGNAL_PATTERN = /\b(latest|current|currently|today|tonight|now|recent|news|update|updates|as of|live|real[-\s]?time|open now|near me|nearby|weather|price|stock|crypto|score|sources?|cite|citation|web|search)\b|\b(?:what'?s\s+new|new\s+(?:update|updates|release|version|announcement|news|info|findings|development|features?))\b/i;
-const PLACE_SIGNAL_PATTERN = /\b(museum|museums|landmark|landmarks|attraction|attractions|restaurant|restaurants|hotel|hotels|near me|nearby|near\s+[a-z]|directions|map|places to visit|tourist|tourism|beach|beaches|hill station|hill stations|waterfall|temple|park|sightseeing|things to do|how to reach|visiting hours|ticket price|open now)\b/i;
-const SAFETY_SIGNAL_PATTERN = /\b(medical|medicine|diagnosis|symptom|dose|dosage|drug|treatment|legal|lawyer|contract|court|tax|investment|financial advice|self[-\s]?harm|suicide|weapon|malware)\b/i;
-const CURRENT_ROLE_PATTERN = /\b(ceo|cfo|cto|president|prime minister|chief minister|governor|mayor|minister|captain|coach|founder|founded|head of|leader)\b/i;
-const SIMPLE_STABLE_PATTERN = /^(?:what\s+is|what'?s|who\s+is|who\s+was|how\s+does|how\s+do|explain|define|tell\s+me\s+about)\s+[\w\s.'-]{2,80}\??$/i;
-const CAPABILITY_QUESTION_PATTERN = /^(?:do|can|are|will)\s+you\b|^do\s+you\s+understand\s+[A-Za-z][A-Za-z\s-]{1,40}\??$/i;
-const TRANSFORM_FAST_PATTERN = /^(?:rewrite|rephrase|summarize|summarise|translate|make (?:it|this|that) (?:shorter|simpler|more professional)|explain (?:this|that|it) (?:simply|in simple terms)|turn (?:this|that|it) into (?:bullets|steps))\b/i;
-const JOKE_FAST_PATTERN = /^(?:tell me a joke|make me laugh|say something funny)\b/i;
-
 export function normalizeCasualConversationText(text) {
     return String(text || '')
         .toLowerCase()
         .replace(/[^\p{L}\p{N}\s']/gu, ' ')
-        .replace(CASUAL_FILLER_PATTERN, ' ')
         .replace(/\s+/g, ' ')
         .trim();
 }
@@ -21,18 +10,11 @@ export function isCasualConversationQuery(text) {
     const t = normalizeCasualConversationText(text);
     if (!t) return false;
     if (/^(?:hi|hello|hey|yo|sup|thanks|thank you|good morning|good afternoon|good evening)$/.test(t)) return true;
-    if (/\b(how are you|how are you doing|how you doing|how is your day|how's your day|what'?s up|are you there|you there)\b/.test(t)) return true;
+    if (/\b(?:how are you|how are you doing|how you doing|what'?s up|are you there)\b/.test(t)) return true;
     if (/^(?:thanks|thank you|thank u|appreciate it)\b/.test(t)) return true;
     return false;
 }
 
-/**
- * Determines whether a query represents stable encyclopedic knowledge.
- *
- * @param {string} text
- * @param {object} [context={}]
- * @returns {boolean}
- */
 export function isStableGeographyOrGeneralFactQuery(text, context = {}) {
     const raw = String(text || '').trim();
     if (!raw) return false;
@@ -40,19 +22,6 @@ export function isStableGeographyOrGeneralFactQuery(text, context = {}) {
     return !intent.isLiveRequired;
 }
 
-/**
- * Universal entity intent classifier.
- *
- * @param {string} text
- * @param {object} [context={}]
- * @returns {{
- *   isLiveRequired: boolean,
- *   isStableKnowledge: boolean,
- *   entityTarget: { role: string, jurisdiction: string } | null,
- *   category: string,
- *   reason: string
- * }}
- */
 export function classifyUniversalEntityIntent(text = '', context = {}) {
     const raw = String(text || '').trim();
     if (!raw) {
@@ -77,8 +46,7 @@ export function classifyUniversalEntityIntent(text = '', context = {}) {
 
     const lower = raw.toLowerCase();
 
-    // 1. Explicit search requests
-    if (context.explicitWeb || context.webMode === 'on' || /\b(?:search\s+(?:for|the\s+web|online|google)|look\s+up\s+online|google\s+for|with\s+sources?|source\s+links?)\b/i.test(lower)) {
+    if (context.explicitWeb || context.webMode === 'on' || /\b(?:search\s+(?:for|the\s+web|online)|look\s+up\s+online|google\s+for|with\s+sources?)\b/i.test(lower)) {
         return {
             isLiveRequired: true,
             isStableKnowledge: false,
@@ -88,9 +56,8 @@ export function classifyUniversalEntityIntent(text = '', context = {}) {
         };
     }
 
-    // 2. Actionable location / place / freshness
-    if (/\b(?:near\s+me|nearby|open\s+now|directions\s+to|route\s+to|visiting\s+hours|ticket\s+price|hotels?\s+near|restaurants?\s+near|museum\s+near|places\s+to\s+visit|things\s+to\s+do)\b/i.test(lower) ||
-        /\b(?:what'?s\s+new|new\s+(?:update|updates|release|version|announcement|news|development|features?))\b/i.test(lower)) {
+    if (/\b(?:near|nearby|open\s+now|directions|places\s+to\s+visit|things\s+to\s+do)\b/i.test(lower) ||
+        /\b(?:what'?s\s+new|new\s+(?:feature|release|update))\b/i.test(lower)) {
         return {
             isLiveRequired: true,
             isStableKnowledge: false,
@@ -100,8 +67,7 @@ export function classifyUniversalEntityIntent(text = '', context = {}) {
         };
     }
 
-    // 3. Live domains (weather, live prices, news, sports scores)
-    if (/\b(?:weather|forecast|temperature|stock|bitcoin|crypto|ethereum|eth|solana|(?:price\s+of\s+)?(?:gold|silver|crude)\s*(?:price|rate)|price\s+of|market\s+cap|live\s+score|ipl|news|earthquake|latest\s+update)\b/i.test(lower)) {
+    if (/\b(?:weather|forecast|stock|crypto|bitcoin|ethereum|price|score|news)\b/i.test(lower)) {
         return {
             isLiveRequired: true,
             isStableKnowledge: false,
@@ -111,9 +77,8 @@ export function classifyUniversalEntityIntent(text = '', context = {}) {
         };
     }
 
-    // 4. Mutable political leadership & civic officeholders
     const isHistoricalLeader = /\b(?:first|former|past|in\s+\d{4}|during\s+\d{4}|who\s+was|history)\b/i.test(lower);
-    if (!isHistoricalLeader && (CURRENT_ROLE_PATTERN.test(lower) || /\b(?:who\s+is\s+(?:the\s+)?(?:cm|pm)\s+of)\b/i.test(lower))) {
+    if (!isHistoricalLeader && (/\b(?:prime\s+minister|chief\s+minister|governor|pm|cm|president|chancellor|minister|mayor|ceo|chairman|leader)\b/i.test(lower) || /\b(?:who\s+is\s+(?:the\s+)?(?:cm|pm)\s+of)\b/i.test(lower))) {
         return {
             isLiveRequired: true,
             isStableKnowledge: false,
@@ -123,7 +88,6 @@ export function classifyUniversalEntityIntent(text = '', context = {}) {
         };
     }
 
-    // 5. Default: Direct conversational & general reasoning
     return {
         isLiveRequired: false,
         isStableKnowledge: true,
@@ -135,41 +99,22 @@ export function classifyUniversalEntityIntent(text = '', context = {}) {
 
 export function isSimpleStableQuestion(text, context = {}) {
     const raw = String(text || '').trim();
-    const lower = raw.toLowerCase();
     if (!raw || raw.length > 200) return false;
     if (isCasualConversationQuery(raw)) return true;
-    if (isStableGeographyOrGeneralFactQuery(raw)) return true;
-    if (
-        context.requiresSources ||
-        context.liveIntent ||
-        context.explicitWeb ||
-        context.strictLatest ||
-        context.currentInfo ||
-        LIVE_SIGNAL_PATTERN.test(lower) ||
-        SAFETY_SIGNAL_PATTERN.test(lower) ||
-        PLACE_SIGNAL_PATTERN.test(lower) ||
-        CURRENT_ROLE_PATTERN.test(lower)
-    ) {
-        return false;
-    }
-    if (SIMPLE_STABLE_PATTERN.test(raw) || CAPABILITY_QUESTION_PATTERN.test(raw)) return true;
-    // Short definitional / explainer questions without live signals.
-    if (/^(?:what\s+does|why\s+do|why\s+does|why\s+is|how\s+to|difference\s+between)\b/i.test(raw) && raw.length <= 160) {
-        return true;
-    }
+    if (isStableGeographyOrGeneralFactQuery(raw, context)) return true;
     return false;
 }
 
 export function isTransformFastQuery(text) {
     const raw = String(text || '').trim();
     if (!raw || raw.length > 180) return false;
-    return TRANSFORM_FAST_PATTERN.test(raw);
+    return /^(?:rewrite|rephrase|summarize|translate|explain\s+simply)\b/i.test(raw);
 }
 
 export function isJokeFastQuery(text) {
     const raw = String(text || '').trim();
     if (!raw || raw.length > 120) return false;
-    return JOKE_FAST_PATTERN.test(raw);
+    return /^(?:tell\s+me\s+a\s+joke|make\s+me\s+laugh|say\s+something\s+funny)\b/i.test(raw);
 }
 
 export function isFastSimpleQuery(text, context = {}) {
@@ -242,7 +187,7 @@ export function decideFrontendRoute(text, context = {}) {
         };
     }
 
-    if (context.safetySensitive || SAFETY_SIGNAL_PATTERN.test(lower)) {
+    if (context.safetySensitive || /\b(?:medicine|dosage|drug\s+dose|prescription|legal\s+advice|financial\s+advice|self\s*harm)\b/i.test(lower)) {
         return {
             ...base,
             route: 'safety_sensitive',
@@ -253,7 +198,6 @@ export function decideFrontendRoute(text, context = {}) {
         };
     }
 
-    // When webMode is explicitly set to 'off', bypass all web search and live grounding
     if (isWebOff) {
         if (isStableGeographyOrGeneralFactQuery(raw) || isSimpleStableQuestion(raw, { ...context, webMode: 'off' })) {
             return {
@@ -272,6 +216,15 @@ export function decideFrontendRoute(text, context = {}) {
             reason: 'web_off_direct_chat',
             requiresSources: false,
             sourcePolicy: 'none'
+        };
+    }
+
+    if (context.ambiguousContext) {
+        return {
+            ...base,
+            route: 'clarify',
+            reason: 'ambiguous_context',
+            minimalThinking: true
         };
     }
 
@@ -296,7 +249,6 @@ export function decideFrontendRoute(text, context = {}) {
         };
     }
 
-    // Stable geography, encyclopedic history, science, math, definitions, and code route directly to fast reasoning
     return {
         ...base,
         route: 'fast_simple',
@@ -306,27 +258,6 @@ export function decideFrontendRoute(text, context = {}) {
         requiresSources: false,
         sourcePolicy: 'none'
     };
-
-    if (context.ambiguousContext) {
-        return {
-            ...base,
-            route: 'clarify',
-            reason: 'ambiguous_context',
-            minimalThinking: true
-        };
-    }
-
-    if (isSimpleStableQuestion(raw, context)) {
-        return {
-            ...base,
-            route: 'fast_simple',
-            reason: 'simple_stable_question',
-            risk: 'low_risk',
-            minimalThinking: true
-        };
-    }
-
-    return base;
 }
 
 export function shouldUseMinimalThinking(text, intent = '', context = {}) {
