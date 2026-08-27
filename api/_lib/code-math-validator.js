@@ -1,8 +1,73 @@
 /**
  * Fast Inline Code & Math Validator & Self-Correction Module
- * Validates markdown fences, syntax integrity, and LaTeX delimiters,
- * automatically applying instant sub-millisecond repairs.
+ * Validates markdown fences, syntax integrity, LaTeX delimiters,
+ * and speculative arithmetic correctness, automatically applying instant repairs.
  */
+
+/**
+ * Safely evaluates an arithmetic expression without global code execution.
+ * @param {string} expr
+ * @returns {number | null}
+ */
+export function safeEvaluateArithmetic(expr) {
+    const raw = String(expr || '').trim()
+        .replace(/\\times|×/g, '*')
+        .replace(/\\div|÷/g, '/')
+        .replace(/\\sqrt\{([^}]+)\}/g, 'Math.sqrt($1)')
+        .replace(/\\sqrt\(([^)]+)\)/g, 'Math.sqrt($1)')
+        .replace(/\\pi|\bpi\b/gi, 'Math.PI')
+        .replace(/\\log\(([^)]+)\)/g, 'Math.log($1)')
+        .replace(/\^/g, '**');
+
+    // Only allow safe arithmetic characters
+    if (!/^[\d\s+\-*/().%<>=,MathPIsqrtlog]+$/.test(raw)) return null;
+
+    try {
+        const fn = new Function('Math', `"use strict"; return (${raw});`);
+        const res = fn(Math);
+        return typeof res === 'number' && Number.isFinite(res) ? res : null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * P2: Verifies inline arithmetic equality claims and auto-repairs calculation hallucinations.
+ * @param {string} text
+ * @returns {{ text: string, repaired: boolean, repairs: Array<{ expr: string, claimed: number, actual: number }> }}
+ */
+export function verifyAndRepairMathClaims(text = '') {
+    let result = String(text || '');
+    if (!result.trim()) return { text: result, repaired: false, repairs: [] };
+
+    const repairs = [];
+
+    // Match arithmetic equality patterns: e.g., "12 * 15 = 175" or "\(25 + 5\) = 30" or "$144 / 12 = 13$"
+    const mathEqualityPattern = /(?:\$|\\\(|\b)([\d\s+\-*/().^%×÷\\]+?)\s*(?:=|\\approx|≈)\s*(-?[\d.]+)(?:\$|\\\)|\b)/g;
+
+    result = result.replace(mathEqualityPattern, (fullMatch, leftExpr, claimedValStr) => {
+        const claimedVal = parseFloat(claimedValStr);
+        if (isNaN(claimedVal)) return fullMatch;
+
+        const evaluated = safeEvaluateArithmetic(leftExpr);
+        if (evaluated === null) return fullMatch;
+
+        // If the calculation differs by more than 1e-4 from the claimed value, auto-repair it!
+        if (Math.abs(evaluated - claimedVal) > 1e-4) {
+            repairs.push({ expr: leftExpr.trim(), claimed: claimedVal, actual: evaluated });
+            const prefix = fullMatch.startsWith('$') ? '$' : (fullMatch.startsWith('\\(') ? '\\(' : '');
+            const suffix = fullMatch.endsWith('$') ? '$' : (fullMatch.endsWith('\\)') ? '\\)' : '');
+            return `${prefix}${leftExpr.trim()} = ${evaluated}${suffix}`;
+        }
+        return fullMatch;
+    });
+
+    return {
+        text: result,
+        repaired: repairs.length > 0,
+        repairs
+    };
+}
 
 export function validateAndRepairCodeAndMath(text = '') {
     let result = String(text || '');
@@ -44,6 +109,13 @@ export function validateAndRepairCodeAndMath(text = '') {
         issues.push('json_trailing_comma_repaired');
         return prefix + '\n' + closingBrace + suffix;
     });
+
+    // 5. P2: Speculative Math Arithmetic Auto-Repair
+    const mathRepairResult = verifyAndRepairMathClaims(result);
+    if (mathRepairResult.repaired) {
+        result = mathRepairResult.text;
+        issues.push('hallucinated_arithmetic_repaired');
+    }
 
     return {
         text: result,
