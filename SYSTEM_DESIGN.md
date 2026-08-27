@@ -49,21 +49,36 @@ graph TD
 
 ---
 
-## 2. 512-Dimensional Dense Vector Embeddings & Cosine Similarity Engine
+## 2. 512-Dimensional Dense Vector Embeddings & ANN Partitioned IVF Vector Index
 
-To eliminate brittle hardcoded keyword matching, regex dictionaries, and exact substring limitations, JARVIS uses a unified, ultra-fast in-memory **Dense Vector Semantic Engine**:
+To eliminate brittle hardcoded keyword matching, regex dictionaries, and exact substring limitations, JARVIS uses a unified, ultra-fast in-memory **Dense Vector Semantic Engine** and an **Approximate Nearest Neighbor (ANN) Partitioned Inverted File (IVF) Index (`PartitionedIVFIndex`)**:
 
 ```mermaid
-flowchart LR
-    Input["Input Text / Query"] --> Tokenizer["Universal Unicode Tokenizer + Trigram Projector"]
-    Tokenizer --> Hasher["Double FNV-1a / Murmur Hashing (512 Dimensions)"]
-    Hasher --> Normalizer["L2 Unit Vector Normalization (||v|| = 1.0)"]
-    Normalizer --> DenseVector["512-Dim Float32Array Unit Vector"]
-    DenseVector --> CosineMetric["Vector Cosine Similarity: dot(vA, vB)"]
-    CosineMetric --> SemanticRank["Top-K Semantic Ranking & Prototype Scoring"]
+flowchart TD
+    DocStream["Incoming Turns, Documents & Memories"] --> Embedding["512-Dim Vector Projection (textToEmbeddingVector)"]
+    Embedding --> IVFIndex["PartitionedIVFIndex (app/storage.js)"]
+    
+    subgraph IVFStructure["Partitioned Inverted File (IVF) Index Structure"]
+        CentroidPool["Centroid Pool (C1, C2, ..., Ck)"]
+        Bucket1["Cluster 1: Technical & Code"]
+        Bucket2["Cluster 2: Knowledge & Entities"]
+        Bucket3["Cluster 3: Conversations & Directives"]
+        Bucket4["Cluster 4: Travel, Places & Live Facts"]
+        CentroidPool --> Bucket1
+        CentroidPool --> Bucket2
+        CentroidPool --> Bucket3
+        CentroidPool --> Bucket4
+    end
+
+    IVFIndex --> IVFStructure
+    
+    Query["Search Query (e.g. 'PostgreSQL database setup')"] --> QueryVec["512-Dim Query Vector"]
+    QueryVec --> CentroidMatch["Centroid Pruning: Rank Top-2 Nearest Centroids (O(K))"]
+    CentroidMatch --> CandidateSearch["Exhaustive Search on Candidate Buckets (O(N/K))"]
+    CandidateSearch --> TopK["Instant Sub-Millisecond Top-K Results"]
 ```
 
-### Core Mathematical Formulations:
+### Core Mathematical Formulations & ANN Indexing:
 1. **Trigram + Token Feature Projection (`textToEmbeddingVector`)**:
    - Tokenizes input into normalized words and character trigrams.
    - Dual-hashes each feature into a 512-dimensional vector space using non-linear integer multiplications:
@@ -73,16 +88,20 @@ flowchart LR
 2. **Instant Cosine Similarity (`vectorCosineSimilarity`)**:
    - Computes the geometric dot product in $O(d)$ time ($<0.05\text{ms}$ execution latency with zero external API calls):
      $$\text{CosineSimilarity}(\mathbf{a}, \mathbf{b}) = \mathbf{\hat{a}} \cdot \mathbf{\hat{b}} = \sum_{i=1}^{512} a_i b_i$$
+3. **Partitioned Inverted File (IVF) ANN Index (`PartitionedIVFIndex`)**:
+   - **Centroid Inverted Bucketing**: Quantizes dense vectors into $K$ dynamic centroids.
+   - **$n$-Probe Candidate Pruning**: Queries only the top $n$-probe closest cluster buckets, reducing retrieval time complexity from $O(N \cdot d)$ to $O(K \cdot d + \frac{n \cdot N}{K} \cdot d)$ with sub-millisecond retrieval.
+   - **Dynamic K-Means Online Rebalancing**: Automatically recalculates cluster centroids in background batches after 50 new items to prevent cluster drift.
 
-### Subsystems Powered by Vector Cosine Similarity:
+### Subsystems Powered by Vector Cosine Similarity & ANN Indexing:
+* **Chat History & Bookmark Semantic Search ([`app/storage.js`](file:///c:/Users/drkan/Desktop/AI%20Projects/unify-assistant/app/storage.js))**:
+  - `semanticSearchConversations` and `semanticSearchBookmarks`: Uses `PartitionedIVFIndex` for sub-millisecond ANN search across stored chat sessions and saved bookmarks.
+* **Agentic Tool Dispatcher ([`app/tool-dispatcher.js`](file:///c:/Users/drkan/Desktop/AI%20Projects/unify-assistant/app/tool-dispatcher.js))**:
+  - `executeSessionMemory`: Powered by `PartitionedIVFIndex` to scale over thousands of conversation turns and multi-page document attachments.
 * **Context Engine ([`app/context-engine.js`](file:///c:/Users/drkan/Desktop/AI%20Projects/unify-assistant/app/context-engine.js))**:
   - Semantic turn classification, conversation repair detection, and dynamic multi-turn thread continuity without keyword dictionaries.
-* **Chat History & Bookmark Semantic Search ([`app/storage.js`](file:///c:/Users/drkan/Desktop/AI%20Projects/unify-assistant/app/storage.js))**:
-  - `semanticSearchConversations` and `semanticSearchBookmarks`: Finds conceptually related conversations (e.g. querying *"database schema"* retrieves *"PostgreSQL table setup"*).
 * **Self-Improving Memory Engine ([`app/self-improving-memory.js`](file:///c:/Users/drkan/Desktop/AI%20Projects/unify-assistant/app/self-improving-memory.js))**:
   - `findRelevantPreferences`: Dynamically retrieves stored user constraints and style guidelines matching the active prompt using vector cosine similarity.
-* **Agentic Tool Dispatcher ([`app/tool-dispatcher.js`](file:///c:/Users/drkan/Desktop/AI%20Projects/unify-assistant/app/tool-dispatcher.js))**:
-  - `executeSessionMemory`: Vector similarity scoring across multi-turn histories and uploaded document attachments.
 * **Multi-Agent Orchestrator ([`app/agent-orchestrator.js`](file:///c:/Users/drkan/Desktop/AI%20Projects/unify-assistant/app/agent-orchestrator.js))**:
   - `isComplexAgentGoal` & `buildAgentWorkflowDag`: Prototype vector projections for decomposing complex research/code tasks.
 * **Live Query Intent Classifier ([`api/_lib/free-live/classifier.js`](file:///c:/Users/drkan/Desktop/AI%20Projects/unify-assistant/api/_lib/free-live/classifier.js))**:
