@@ -7267,6 +7267,18 @@ let showRoutingDebugBadge = false;
 
             let html = out.join('\n');
 
+            if (globalThis.JarvisMathRenderer?.renderMathInText) {
+                html = globalThis.JarvisMathRenderer.renderMathInText(html);
+            } else {
+                html = html.replace(/([a-zA-Z0-9_\)\]\}])\^\{([^{}]+)\}/g, '$1<sup>$2</sup>');
+                html = html.replace(/([a-zA-Z0-9_\)\]\}])\^\(([^()]+)\)/g, '$1<sup>$2</sup>');
+                html = html.replace(/([a-zA-Z0-9_\)\]\}])\^([a-zA-Z0-9_+-]+)/g, '$1<sup>$2</sup>');
+                html = html.replace(/([a-zA-Z0-9_\)\]\}])_\{([^{}]+)\}/g, '$1<sub>$2</sub>');
+                html = html.replace(/([a-zA-Z0-9_\)\]\}])_\(([^()]+)\)/g, '$1<sub>$2</sub>');
+                html = html.replace(/([a-zA-Z0-9_\)\]\}])_([a-zA-Z0-9_+-]+)/g, '$1<sub>$2</sub>');
+                html = html.replace(/(?<!\\)\$(?!\s)([^\$\n]+?)(?<!\s)\$(?!\d)/g, '<span class="math-inline">$1</span>');
+            }
+
             html = html.replace(/`([^`\n]+)`/g, '<code class="assistant-md-inline-code">$1</code>');
             html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
             html = html.replace(/\[(\d+)\]\((https?:\/\/[^)]+)\)/g, `<a href="$2" target="_blank" rel="noopener noreferrer" class="citation-badge" title="Source [$1]"><sup>[$1]</sup></a>`);
@@ -8490,139 +8502,53 @@ let showRoutingDebugBadge = false;
 
             // Domain categorizations
             const isCode = Boolean(lang) || /\b(code|algorithm|function|class|method|struct|pointer|interface|refactor|debug|bug|async|await|promise|regex|stack|queue|tree|graph|dp|recursion|api|database|query|table|schema|endpoint|implementation|quicksort|binary search|palindrome)\b/i.test(prompt);
-            const isMath = /\b(calculate|compute|solve|derivative|integral|equation|formula|matrix|matrices|eigen|probability|statistics|algebra|geometry|theorem|proof|arithmetic|polynomial|linear equation)\b/i.test(prompt);
-            const isScience = /\b(physics|quantum|relativity|gravity|spacetime|black hole|event horizon|thermodynamics|chemistry|molecule|reaction|atom|orbital|biology|cell|dna|rna|gene|crispr|protein|enzyme|evolution|planet|orbit|galaxy|star|supernova|photosynthesis)\b/i.test(prompt);
+            const isMath = /\b(calculate|compute|solve|derivative|integral|equation|formula|matrix|matrices|eigen|probability|statistics|algebra|geometry|theorem|proof|arithmetic|polynomial|linear equation|\^|\+|\*|\/|=)\b/i.test(prompt);
+            const isScience = /\b(physics|quantum|relativity|gravity|spacetime|black hole|event horizon|thermodynamics|chemistry|molecule|reaction|atom|orbital|biology|cell|dna|rna|gene|crispr|protein|enzyme|evolution|planet|orbit|galaxy|star|supernova|photosynthesis|tectonic|plate)\b/i.test(prompt);
             const isHistory = /\b(history|historical|war|battle|empire|dynasty|revolution|century|treaty|monarch|king|queen|ancient|medieval|republic|colony|colonial|independence|civilization|collapse|roman empire|french revolution)\b/i.test(prompt);
-            const isGeography = /\b(capital|capitals|country|countries|continent|geography|geographic|border|borders|territory|provinces?|state|states|city|cities|mountains?|ocean|river|latitude|longitude)\b/i.test(prompt);
-            const isEconOrSocial = /\b(economy|economics|gdp|inflation|monetary|fiscal|interest rate|market|supply and demand|philosophy|ethics|moral|utilitarianism|deontology|epistemology|sociology)\b/i.test(prompt);
-            const isProceduralOrCulinary = /\b(recipe|cook|cooking|bake|baking|ingredient|ingredients|dish|food|cuisine|itinerary|travel to|places to visit|things to do in|steps to|how to make)\b/i.test(prompt);
-            const isCreativeOrMedia = /\b(song|songs|music|track|tracks|album|artist|singer|band|discography|movie|movies|film|films|cinema|actor|actress|director|series|show|shows|sitcom|anime|watchlist|novel|author)\b/i.test(prompt);
+            const isGeography = /\b(capital|capitals|country|countries|continent|geography|geographic|border|borders|territory|provinces?|state|states|city|cities|mountains?|ocean|river|latitude|longitude|bengaluru|bangalore|india|paris|london|tokyo)\b/i.test(prompt);
 
-            // Construct 5-Stage Human-Like Chain-of-Thought Narratives (Cognitive inner monologue without subheadings, ~40-50 words per stage):
+            let s1, s2, s3, s4, s5;
 
-            // --- STAGE 1: INTENT & SCOPE ---
-            let stage1 = '';
-            if (isComparison && (entityA || entityB)) {
-                const left = entityA || 'options';
-                const right = entityB || '';
-                stage1 = `I am looking at the comparison between ${left} and ${right || 'the alternative options'} to understand what really matters here. I want to break down the architectural differences, runtime performance, developer convenience, and operational costs so the comparison is genuinely useful and balanced.`;
+            if (isMath) {
+                s1 = `Parsing the mathematical problem for ${subjectSnippet}. Identifying known variables, domain constraints, and the target value.`;
+                s2 = `Setting up the governing equation and selecting the most direct analytical or numerical method.`;
+                s3 = `Working through the algebraic steps and arithmetic, keeping precision intact at each step.`;
+                s4 = `Checking boundary conditions, integer bounds, and numerical convergence to confirm the result.`;
+                s5 = `Formulating the final exact and approximate solution with clear, step-by-step reasoning.`;
             } else if (isCode) {
-                stage1 = `I am looking at what is needed for ${subjectSnippet}${lang ? ' in ' + lang : ''} and thinking through how to structure the logic cleanly from the start. Let me break down the main arguments, edge cases, and algorithmic flow before putting together the actual code.`;
-            } else if (isMath) {
-                stage1 = `I am reading through the mathematical problem for ${subjectSnippet} to clearly identify all given values, unknown variables, and the target result. Setting up the initial equation and checking the domain constraints will ensure the derivation starts on solid ground.`;
+                s1 = `Analyzing requirements and input/output contracts for ${subjectSnippet}${lang ? ' in ' + lang : ''}.`;
+                s2 = `Selecting appropriate data structures and algorithmic approach for optimal time/space complexity.`;
+                s3 = `Drafting the implementation with clean idiomatic syntax and intuitive variable naming.`;
+                s4 = `Reviewing edge cases: empty collections, off-by-one bounds, null safety, and error handling.`;
+                s5 = `Finalizing the working code solution accompanied by concise usage notes.`;
+            } else if (isComparison) {
+                const target = entityA && entityB ? `${entityA} vs ${entityB}` : subjectSnippet;
+                s1 = `Breaking down the comparative architecture and design philosophies for ${target}.`;
+                s2 = `Evaluating core dimensions: performance, developer ergonomics, ecosystem maturity, and cost.`;
+                s3 = `Analyzing real-world tradeoffs and identifying the sweet spot for each approach.`;
+                s4 = `Checking practical migration caveats, hosting friction, and operational edge cases.`;
+                s5 = `Synthesizing a balanced, actionable recommendation based on typical project requirements.`;
             } else if (isScience) {
-                stage1 = `I am considering the scientific principles behind ${subjectSnippet} to understand the underlying physical laws and observable phenomena involved. Identifying the core concepts and fundamental forces at play helps establish a clear, intuitive foundation for the explanation.`;
-            } else if (isHistory) {
-                stage1 = `I am exploring the historical context around ${subjectSnippet} to identify the key time period, geographical setting, and major historical figures involved. Understanding the broader era and prevailing conditions provides essential background for explaining what happened.`;
-            } else if (isGeography) {
-                stage1 = `I am examining the geographical context of ${subjectSnippet} to pinpoint its location, administrative boundaries, and regional significance. Establishing the physical landscape and geopolitical setting gives a solid starting point for a comprehensive answer.`;
-            } else if (isEconOrSocial) {
-                stage1 = `I am looking into the economic and social dynamics behind ${subjectSnippet} to frame the core mechanisms, market forces, and human incentives at work. Clarifying the fundamental concepts first helps build a clear and relatable explanation.`;
-            } else if (isProceduralOrCulinary) {
-                stage1 = `I am breaking down the essential steps and requirements for ${subjectSnippet} so the process is clear, practical, and easy to execute. Identifying key ingredients, required equipment, and prep work up front sets everything up for success.`;
-            } else if (isCreativeOrMedia) {
-                stage1 = `I am exploring the themes, artistic style, and creative background of ${subjectSnippet} to understand its place in contemporary culture. Looking at the creators, influences, and historical timing helps set a rich stage for the discussion.`;
+                s1 = `Examining the physical and scientific principles underlying ${subjectSnippet}.`;
+                s2 = `Connecting fundamental theoretical laws with observable empirical phenomena.`;
+                s3 = `Tracing the mechanistic sequence of events and causal interactions step-by-step.`;
+                s4 = `Verifying against scientific consensus and checking for common misconceptions.`;
+                s5 = `Synthesizing a clear, intuitive explanation grounded in rigorous fundamentals.`;
+            } else if (isGeography || isHistory) {
+                s1 = `Establishing geographical coordinates, regional context, and historical background for ${subjectSnippet}.`;
+                s2 = `Gathering authoritative spatial, geological, or historical records for accuracy.`;
+                s3 = `Analyzing relationships between terrain, tectonic/administrative borders, and regional dynamics.`;
+                s4 = `Cross-verifying specific place names, dates, and classifications across reliable sources.`;
+                s5 = `Structuring a crisp, informative answer that directly addresses the question.`;
             } else {
-                stage1 = `I am looking closely at the question about ${subjectSnippet} to understand the core context and what specific information will be most helpful. Clarifying the user's intent allows me to focus directly on the most relevant details right away.`;
+                s1 = `Understanding the core question and intent behind ${subjectSnippet}.`;
+                s2 = `Recalling the most accurate facts, domain context, and foundational concepts.`;
+                s3 = `Evaluating the logical connections and structuring a coherent explanation.`;
+                s4 = `Double-checking clarity, nuances, and factual accuracy of every detail.`;
+                s5 = `Synthesizing a direct, helpful response tailored to what was asked.`;
             }
 
-            // --- STAGE 2: KNOWLEDGE & CONTEXT RETRIEVAL ---
-            let stage2 = '';
-            if (isComparison) {
-                stage2 = `Let me review the main benchmarks and design philosophies behind both technologies to see where each one truly shines. Understanding the core strengths and limitations of both approaches will help highlight exactly when one should be chosen over the other.`;
-            } else if (isCode) {
-                stage2 = `Now I am recalling the standard patterns and best library practices in ${lang || 'this language'} to make sure the syntax is clean, idiomatic, and readable. Selecting appropriate data structures here will keep execution fast and memory usage minimal while avoiding unnecessary overhead.`;
-            } else if (isMath) {
-                stage2 = `Recalling the relevant mathematical theorems, identities, and transformation rules that apply directly to this type of problem. Choosing the most direct analytical method here will keep the algebraic steps clean and reduce the chance of any calculation mistakes.`;
-            } else if (isScience) {
-                stage2 = `Reviewing established empirical research, theoretical models, and experimental observations that explain how this phenomenon occurs in nature. Connecting microscopic interactions to macroscopic observations makes the scientific mechanics much easier to visualize and understand.`;
-            } else if (isHistory) {
-                stage2 = `Looking at the underlying social, political, economic, and institutional forces that built up over time and precipitated these events. Primary records and historical consensus help clarify the motivations and tensions that drove key decisions.`;
-            } else if (isGeography) {
-                stage2 = `Gathering key details about topography, climate patterns, population demographics, and natural landmarks that define the region. Understanding how geography shaped local history, trade routes, and culture adds valuable depth to the overview.`;
-            } else if (isEconOrSocial) {
-                stage2 = `Reviewing established macroeconomic frameworks, behavioral theories, and empirical real-world examples that illustrate how these systems function. Looking at how supply, demand, and regulatory policies interact gives valuable insight into the overall picture.`;
-            } else if (isProceduralOrCulinary) {
-                stage2 = `Reviewing the ideal ratios, technique nuances, and timing considerations that make a noticeable difference in the final result. Understanding why specific steps or temperatures matter helps ensure consistent, high-quality outcomes every time.`;
-            } else if (isCreativeOrMedia) {
-                stage2 = `Reviewing the standout releases, key artistic milestones, and critical reception that shaped their career and creative evolution. Examining how their work resonated with audiences gives great insight into their lasting impact.`;
-            } else {
-                stage2 = `Gathering the most accurate facts, background context, and key concepts needed to provide a thorough and reliable answer. Connecting the fundamental ideas ensures the explanation is both informative and easy to follow.`;
-            }
-
-            // --- STAGE 3: MECHANISTIC & LOGICAL EVALUATION ---
-            let stage3 = '';
-            if (isComparison) {
-                stage3 = `Thinking through real-world workloads, scalability requirements, and maintenance considerations to see how each option behaves in practice. I need to weigh high-throughput write handling against query flexibility and overall team productivity over the long run.`;
-            } else if (isCode) {
-                stage3 = `Walking through the step-by-step logic and execution flow to ensure the state transitions, loop bounds, and return values behave exactly as expected. I want to double-check that variable names are intuitive and that the time complexity remains optimal across standard inputs.`;
-            } else if (isMath) {
-                stage3 = `Working systematically through the calculations step by step, carefully applying each algebraic or calculus rule and keeping intermediate values organized. I want to trace the arithmetic at each step to ensure full precision and clarity throughout the entire working.`;
-            } else if (isScience) {
-                stage3 = `Tracing the causal chain of events step by step to explain how each interaction triggers the next across physical or biological scales. I want to make sure the explanation describes the actual mechanism clearly without relying on unnecessary jargon.`;
-            } else if (isHistory) {
-                stage3 = `Tracing the chronological progression of events, major turning points, and decisive moments that altered the course of history. Examining how individual actions and broader systemic pressures interacted gives a much deeper and more realistic perspective.`;
-            } else if (isGeography) {
-                stage3 = `Analyzing the relationships between physical terrain, urbanization, connectivity, and modern economic activity across the area. Exploring these connections helps explain why the region developed the way it did and what makes it distinct.`;
-            } else if (isEconOrSocial) {
-                stage3 = `Tracing how policy decisions, market shifts, or institutional changes ripple through different sectors of the economy and affect everyday people. I want to explain both short-term market reactions and long-term structural trends in plain, conversational language.`;
-            } else if (isProceduralOrCulinary) {
-                stage3 = `Walking through the procedure step by step, focusing on visual cues, sensory checkpoints, and transition points that guide the process. Keeping the instructions intuitive and sequential makes following along straightforward and stress-free.`;
-            } else if (isCreativeOrMedia) {
-                stage3 = `Analyzing narrative structure, stylistic craftsmanship, and distinctive motifs that define their signature approach. Exploring what makes their work unique helps bring out the finer artistic details and emotional resonance.`;
-            } else {
-                stage3 = `Working through the logic and practical details step by step to build a clear, well-reasoned explanation. I want to explain the why and the how in a natural, conversational way without unnecessary complexity.`;
-            }
-
-            // --- STAGE 4: BOUNDARY CONDITIONS & INTEGRITY CHECKS ---
-            let stage4 = '';
-            if (isComparison) {
-                stage4 = `I should also check ecosystem maturity, community support, tooling, and common migration pitfalls that teams run into. Considering subtle operational friction like backup workflows, schema changes, and hosting expenses will ensure there are no surprises.`;
-            } else if (isCode) {
-                stage4 = `Let me check boundary conditions like empty inputs, single elements, null checks, and large data bounds to confirm there are no subtle off-by-one bugs or uncaught exceptions. Ensuring the implementation handles unusual edge cases gracefully is essential for solid reliability.`;
-            } else if (isMath) {
-                stage4 = `Double-checking the intermediate expressions, domain limits, and physical or dimensional consistency to make sure the calculation holds up under sanity checks. Testing boundary values and edge conditions helps confirm that the solution is completely sound and consistent.`;
-            } else if (isScience) {
-                stage4 = `Checking for common misconceptions, theoretical boundary conditions, and modern scientific consensus to ensure all facts are completely accurate. Making sure edge cases and conservation laws are respected gives the explanation scientific rigor and reliability.`;
-            } else if (isHistory) {
-                stage4 = `Cross-checking historical dates, key locations, and different historiographical perspectives to make sure the narrative is accurate and balanced. Verifying the sequence of events across reliable historical accounts helps avoid common myths and oversimplifications.`;
-            } else if (isGeography) {
-                stage4 = `Verifying official naming conventions, boundary changes, and current statistical data to ensure every detail is up to date and accurate. Cross-referencing authoritative geographic records prevents confusion around overlapping regional definitions.`;
-            } else if (isEconOrSocial) {
-                stage4 = `Considering different perspectives, potential unintended consequences, and counterarguments to ensure the analysis is balanced and objective. Checking data trends and assumption limits helps keep the explanation realistic and grounded.`;
-            } else if (isProceduralOrCulinary) {
-                stage4 = `Anticipating common pitfalls, troubleshooting scenarios, and practical recovery tips in case something doesn't go exactly as planned. Adding these helpful reminders ensures that even beginner-friendly hurdles can be easily handled.`;
-            } else if (isCreativeOrMedia) {
-                stage4 = `Verifying release chronologies, awards, and cultural trivia to make sure every factual reference is accurate. Checking these details against authoritative sources ensures the overview is both informative and dependable.`;
-            } else {
-                stage4 = `Double-checking the factual accuracy, nuance, and clarity of the explanation to make sure there are no ambiguities or misunderstandings. Ensuring every detail is consistent gives the answer solid credibility.`;
-            }
-
-            // --- STAGE 5: SYNTHESIS & STRUCTURED OUTPUT ---
-            let stage5 = '';
-            if (isComparison) {
-                stage5 = `Now I can pull everything together into a clear, direct comparison that highlights the key trade-offs and decision factors. This will give a balanced recommendation that makes choosing the right option straightforward based on specific project needs.`;
-            } else if (isCode) {
-                stage5 = `Everything looks solid, so I am now ready to present the clean, working ${lang || 'code'} with a concise explanation and complexity summary. Formatting the solution clearly so it is immediately practical, accurate, and easy to run or integrate.`;
-            } else if (isMath) {
-                stage5 = `The derivation is complete and verified, so I can now present the final answer clearly with step-by-step working that is easy to follow. Highlighting the key intermediate breakthroughs ensures anyone reading can see exactly how the result was reached.`;
-            } else if (isScience) {
-                stage5 = `Now I can synthesize the complete explanation into a clear, engaging overview that builds naturally from basic principles to the full picture. The goal is to provide an answer that is informative, accessible, and scientifically grounded.`;
-            } else if (isHistory) {
-                stage5 = `Putting together a well-structured historical overview that explains both the immediate events and their lasting consequences on the world. The resulting narrative will be engaging, factual, and easy to follow from start to finish.`;
-            } else if (isGeography) {
-                stage5 = `Assembling a well-organized geographical summary that brings together location data, physical characteristics, and cultural context. The final response will give a clear, vivid picture that directly answers what the user wants to know.`;
-            } else if (isEconOrSocial) {
-                stage5 = `Synthesizing the analysis into a clear, approachable overview that connects economic theory with practical real-world impact. The response will break down complex concepts into straightforward insights that are easy to digest.`;
-            } else if (isProceduralOrCulinary) {
-                stage5 = `Formatting the complete guide into clean, actionable steps with accurate measurements and clear instructions. The final guide will be straightforward, inspiring, and ready for immediate hands-on use.`;
-            } else if (isCreativeOrMedia) {
-                stage5 = `Structuring an engaging, well-curated summary that highlights notable achievements, memorable highlights, and creative significance. The response will provide an enjoyable, insightful read tailored to what the user asked about.`;
-            } else {
-                stage5 = `Putting everything together into a clean, direct response that satisfies the inquiry completely and conversationally. The final answer will be engaging, accurate, and immediately useful to the user.`;
-            }
-
-            return [stage1, stage2, stage3, stage4, stage5];
+            return [s1, s2, s3, s4, s5];
         }
 
         window.toggleThinkingProcessCard = function(card, event) {
@@ -10459,24 +10385,7 @@ let showRoutingDebugBadge = false;
                 bubble.appendChild(interactiveFooter);
             }
 
-            const priorUserPrompt = String(meta?.userMessage || getAssistantMessageMeta(row.dataset?.messageId)?.priorUserPrompt || '').trim();
-            const chips = generateContextualFollowUpChips(priorUserPrompt, cleanAnswer);
-
             const hasThought = Boolean(thoughtText);
-            const escapedAnswer = escapeHtml(cleanAnswer).replace(/"/g, '&quot;');
-            const escapedThought = hasThought ? escapeHtml(thoughtText).replace(/"/g, '&quot;') : '';
-
-            let chipsHtml = '';
-            if (chips && chips.length > 0) {
-                chipsHtml = `
-                    <div class="assistant-followup-container">
-                        <span class="assistant-followup-label">Suggested follow-ups</span>
-                        <div class="assistant-followup-chips">
-                            ${chips.map(chip => `<button type="button" class="assistant-followup-chip" onclick="triggerFollowUpChip('${escapeHtml(chip).replace(/'/g, "\\'")}')">${escapeHtml(chip)}</button>`).join('')}
-                        </div>
-                    </div>
-                `;
-            }
 
             interactiveFooter.innerHTML = `
                 <div class="assistant-action-bar">
@@ -10498,7 +10407,6 @@ let showRoutingDebugBadge = false;
                         <span>Speak</span>
                     </button>
                 </div>
-                ${chipsHtml}
             `;
         }
 
@@ -10673,31 +10581,85 @@ let showRoutingDebugBadge = false;
             const template = document.createElement('template');
             template.innerHTML = String(html || '');
 
-            const allowedTags = new Set(['A', 'BLOCKQUOTE', 'BR', 'CODE', 'DIV', 'H1', 'H2', 'H3', 'H4', 'IFRAME', 'IMG', 'LI', 'OL', 'P', 'PRE', 'SPAN', 'STRONG', 'TABLE', 'TBODY', 'TD', 'TH', 'THEAD', 'TR', 'UL']);
+            const allowedTags = new Set([
+                'A', 'BLOCKQUOTE', 'BR', 'CODE', 'DIV', 'H1', 'H2', 'H3', 'H4', 'IFRAME', 'IMG', 'LI', 'OL', 'P', 'PRE', 'SPAN', 'STRONG', 'TABLE', 'TBODY', 'TD', 'TH', 'THEAD', 'TR', 'UL',
+                'SUP', 'SUB', 'EM', 'I', 'B', 'SMALL', 'HR', 'S', 'DEL', 'MARK', 'ABBR',
+                'MATH', 'ANNOTATION', 'SEMANTICS', 'MROW', 'MI', 'MN', 'MO', 'MSUP', 'MSUB', 'MSUBSUP', 'MFRAC', 'MSQRT', 'MROOT', 'MTABLE', 'MTR', 'MTD', 'MTEXT', 'MSPACE', 'MOVER', 'MUNDER', 'MUNDEROVER', 'MENCLOSE', 'MPADDED', 'MPHANTOM', 'MERROR',
+                'SVG', 'PATH', 'LINE', 'POLYGON', 'POLYLINE', 'RECT', 'CIRCLE', 'USE', 'G', 'DEFS', 'SYMBOL'
+            ]);
+            const mathAttrs = new Set(['class', 'style', 'mathvariant', 'stretchy', 'fence', 'separator', 'lspace', 'rspace', 'form', 'accent', 'xmlns', 'display', 'encoding']);
+            const svgAttrs = new Set(['class', 'style', 'width', 'height', 'viewbox', 'fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin', 'points', 'x', 'y', 'x1', 'y1', 'x2', 'y2', 'r', 'cx', 'cy', 'd', 'xmlns', 'aria-hidden', 'role', 'href', 'xlink:href']);
             const allowedAttrs = {
-                A: new Set(['href', 'target', 'rel', 'class', 'style']),
-                BLOCKQUOTE: new Set(['class']),
-                CODE: new Set(['class']),
+                A: new Set(['href', 'target', 'rel', 'class', 'style', 'title']),
+                BLOCKQUOTE: new Set(['class', 'style']),
+                CODE: new Set(['class', 'style']),
                 DIV: new Set(['class', 'style', 'id']),
-                H1: new Set(['class']),
-                H2: new Set(['class']),
-                H3: new Set(['class']),
-                H4: new Set(['class']),
+                H1: new Set(['class', 'style']),
+                H2: new Set(['class', 'style']),
+                H3: new Set(['class', 'style']),
+                H4: new Set(['class', 'style']),
                 IFRAME: new Set(['src', 'width', 'height', 'loading', 'allowfullscreen', 'class', 'style', 'referrerpolicy', 'frameborder']),
                 IMG: new Set(['src', 'alt', 'class', 'style']),
-                P: new Set(['class']),
-                PRE: new Set(['class']),
-                SPAN: new Set(['class']),
-                TABLE: new Set(['class']),
-                TBODY: new Set(['class']),
-                TD: new Set(['class', 'colspan', 'rowspan']),
-                TH: new Set(['class', 'colspan', 'rowspan']),
-                THEAD: new Set(['class']),
-                TR: new Set(['class']),
-                UL: new Set(['class']),
-                OL: new Set(['class']),
-                LI: new Set(['class']),
-                STRONG: new Set(),
+                P: new Set(['class', 'style']),
+                PRE: new Set(['class', 'style']),
+                SPAN: new Set(['class', 'style', 'title']),
+                TABLE: new Set(['class', 'style']),
+                TBODY: new Set(['class', 'style']),
+                TD: new Set(['class', 'style', 'colspan', 'rowspan']),
+                TH: new Set(['class', 'style', 'colspan', 'rowspan']),
+                THEAD: new Set(['class', 'style']),
+                TR: new Set(['class', 'style']),
+                UL: new Set(['class', 'style']),
+                OL: new Set(['class', 'style']),
+                LI: new Set(['class', 'style']),
+                SUP: new Set(['class', 'style', 'title']),
+                SUB: new Set(['class', 'style', 'title']),
+                EM: new Set(['class', 'style']),
+                I: new Set(['class', 'style']),
+                B: new Set(['class', 'style']),
+                SMALL: new Set(['class', 'style']),
+                STRONG: new Set(['class', 'style']),
+                S: new Set(['class', 'style']),
+                DEL: new Set(['class', 'style']),
+                HR: new Set(['class', 'style']),
+                MARK: new Set(['class', 'style']),
+                ABBR: new Set(['class', 'style', 'title']),
+                MATH: mathAttrs,
+                ANNOTATION: mathAttrs,
+                SEMANTICS: mathAttrs,
+                MROW: mathAttrs,
+                MI: mathAttrs,
+                MN: mathAttrs,
+                MO: mathAttrs,
+                MSUP: mathAttrs,
+                MSUB: mathAttrs,
+                MSUBSUP: mathAttrs,
+                MFRAC: mathAttrs,
+                MSQRT: mathAttrs,
+                MROOT: mathAttrs,
+                MTABLE: mathAttrs,
+                MTR: mathAttrs,
+                MTD: mathAttrs,
+                MTEXT: mathAttrs,
+                MSPACE: mathAttrs,
+                MOVER: mathAttrs,
+                MUNDER: mathAttrs,
+                MUNDEROVER: mathAttrs,
+                MENCLOSE: mathAttrs,
+                MPADDED: mathAttrs,
+                MPHANTOM: mathAttrs,
+                MERROR: mathAttrs,
+                SVG: svgAttrs,
+                PATH: svgAttrs,
+                LINE: svgAttrs,
+                POLYGON: svgAttrs,
+                POLYLINE: svgAttrs,
+                RECT: svgAttrs,
+                CIRCLE: svgAttrs,
+                USE: svgAttrs,
+                G: svgAttrs,
+                DEFS: svgAttrs,
+                SYMBOL: svgAttrs,
                 BR: new Set()
             };
 
