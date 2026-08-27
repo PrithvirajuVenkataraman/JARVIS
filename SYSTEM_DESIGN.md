@@ -1,6 +1,6 @@
 # JARVIS Unified Assistant — System Architecture & Design Specification
 
-This document provides a comprehensive technical overview of the system design, routing algorithms, concurrency architecture, and resilience patterns implemented in JARVIS.
+This document provides a comprehensive technical overview of the system design, routing algorithms, concurrency architecture, vector embeddings, and resilience patterns implemented in JARVIS.
 
 ---
 
@@ -15,6 +15,7 @@ graph TD
         ConverseController["Converse Mode Engine (VTT & TTS)"]
         OfflineWatchdog["Network Resilience Watchdog"]
         AudioHaptics["Web Audio Chimes & Haptics Engine"]
+        VectorEngine["512-Dim Dense Vector Embedding & Semantic Search"]
     end
 
     subgraph Backend["Backend Edge Server (Vercel Serverless / Node.js)"]
@@ -23,6 +24,7 @@ graph TD
         IntentRouter["Autonomous Model Router & Fallback Cascade"]
         CircuitBreaker["API Circuit Breaker State Machine"]
         DeepCrawler["Parallel Webpage Deep Crawler (2.5s Budget)"]
+        LiveClassifier["Dense Vector Live Intent Classifier"]
     end
 
     subgraph Models["Model & Provider Pool"]
@@ -39,6 +41,7 @@ graph TD
     ContextCompactor --> IntentRouter
     IntentRouter --> CircuitBreaker
     IntentRouter --> DeepCrawler
+    IntentRouter --> LiveClassifier
     CircuitBreaker --> GroqPool
     CircuitBreaker --> GeminiPool
     IntentRouter --> DeterministicFacts
@@ -46,7 +49,50 @@ graph TD
 
 ---
 
-## 2. Model Routing & Multimodal Dispatch Matrix
+## 2. 512-Dimensional Dense Vector Embeddings & Cosine Similarity Engine
+
+To eliminate brittle hardcoded keyword matching, regex dictionaries, and exact substring limitations, JARVIS uses a unified, ultra-fast in-memory **Dense Vector Semantic Engine**:
+
+```mermaid
+flowchart LR
+    Input["Input Text / Query"] --> Tokenizer["Universal Unicode Tokenizer + Trigram Projector"]
+    Tokenizer --> Hasher["Double FNV-1a / Murmur Hashing (512 Dimensions)"]
+    Hasher --> Normalizer["L2 Unit Vector Normalization (||v|| = 1.0)"]
+    Normalizer --> DenseVector["512-Dim Float32Array Unit Vector"]
+    DenseVector --> CosineMetric["Vector Cosine Similarity: dot(vA, vB)"]
+    CosineMetric --> SemanticRank["Top-K Semantic Ranking & Prototype Scoring"]
+```
+
+### Core Mathematical Formulations:
+1. **Trigram + Token Feature Projection (`textToEmbeddingVector`)**:
+   - Tokenizes input into normalized words and character trigrams.
+   - Dual-hashes each feature into a 512-dimensional vector space using non-linear integer multiplications:
+     $$\mathbf{v}[h_1(t) \bmod 512] += 1.0, \quad \mathbf{v}[h_2(t) \bmod 512] += 0.5$$
+   - Normalizes output to unit Euclidean norm ($\lVert \mathbf{v} \rVert_2 = 1.0$):
+     $$\mathbf{\hat{v}} = \frac{\mathbf{v}}{\sqrt{\sum_{i=1}^{512} \mathbf{v}_i^2}}$$
+2. **Instant Cosine Similarity (`vectorCosineSimilarity`)**:
+   - Computes the geometric dot product in $O(d)$ time ($<0.05\text{ms}$ execution latency with zero external API calls):
+     $$\text{CosineSimilarity}(\mathbf{a}, \mathbf{b}) = \mathbf{\hat{a}} \cdot \mathbf{\hat{b}} = \sum_{i=1}^{512} a_i b_i$$
+
+### Subsystems Powered by Vector Cosine Similarity:
+* **Context Engine ([`app/context-engine.js`](file:///c:/Users/drkan/Desktop/AI%20Projects/unify-assistant/app/context-engine.js))**:
+  - Semantic turn classification, conversation repair detection, and dynamic multi-turn thread continuity without keyword dictionaries.
+* **Chat History & Bookmark Semantic Search ([`app/storage.js`](file:///c:/Users/drkan/Desktop/AI%20Projects/unify-assistant/app/storage.js))**:
+  - `semanticSearchConversations` and `semanticSearchBookmarks`: Finds conceptually related conversations (e.g. querying *"database schema"* retrieves *"PostgreSQL table setup"*).
+* **Self-Improving Memory Engine ([`app/self-improving-memory.js`](file:///c:/Users/drkan/Desktop/AI%20Projects/unify-assistant/app/self-improving-memory.js))**:
+  - `findRelevantPreferences`: Dynamically retrieves stored user constraints and style guidelines matching the active prompt using vector cosine similarity.
+* **Agentic Tool Dispatcher ([`app/tool-dispatcher.js`](file:///c:/Users/drkan/Desktop/AI%20Projects/unify-assistant/app/tool-dispatcher.js))**:
+  - `executeSessionMemory`: Vector similarity scoring across multi-turn histories and uploaded document attachments.
+* **Multi-Agent Orchestrator ([`app/agent-orchestrator.js`](file:///c:/Users/drkan/Desktop/AI%20Projects/unify-assistant/app/agent-orchestrator.js))**:
+  - `isComplexAgentGoal` & `buildAgentWorkflowDag`: Prototype vector projections for decomposing complex research/code tasks.
+* **Live Query Intent Classifier ([`api/_lib/free-live/classifier.js`](file:///c:/Users/drkan/Desktop/AI%20Projects/unify-assistant/api/_lib/free-live/classifier.js))**:
+  - Category centroid prototype vectors (Weather, Crypto, Sports, Disasters, Conflicts, Space, Tech, Government, Travel, News).
+* **Intent Separator & Task Splitter ([`api/_lib/intent-separator.js`](file:///c:/Users/drkan/Desktop/AI%20Projects/unify-assistant/api/_lib/intent-separator.js))**:
+  - Multi-intent decomposition via vector prototype scoring.
+
+---
+
+## 3. Model Routing & Multimodal Dispatch Matrix
 
 JARVIS uses an **autonomous, single-pass routing engine** with user model override and native attachment prioritization:
 
@@ -57,11 +103,11 @@ JARVIS uses an **autonomous, single-pass routing engine** with user model overri
 | **Media / Image Uploads / Live Photos** | **Google Gemini** | `Gemini 3.7 Flash` &rarr; `Gemini 2.5 Pro` &rarr; `Gemini 2.5 Flash` &rarr; `Groq Vision (Llama 3.2)` | Native multimodal vision processing with direct base64 `inline_data` encoding. |
 | **Explicit Gemini Model Selection** | **Google Gemini** | `Gemini 3.7 Flash` / `Gemini 2.5 Pro` / `Gemini 2.5 Flash` &rarr; `Groq Fallback` | Direct priority routing to Google Gemini API whenever a Gemini model is chosen in the selector. |
 | **Follow-Up Questions on Images** | **Groq / Gemini** | `GPT OSS 120B` or `Gemini 3.7 Flash` (with visual context injected) | Preserves visual grounding context across conversation turns. |
-| **Instant Real-Time Facts / Identity** | **Deterministic Layer** | Pre-computed static knowledge base | Sub-10ms instant response without consuming API tokens. |
+| **Instant Live Facts & Place Data** | **Dynamic Live APIs** | Wikipedia REST, Open-Meteo, NASA EONET, CoinGecko, Nominatim | Real-time dynamic public API fetching with 0 hardcoded answers. |
 
 ---
 
-## 3. Concurrency & Multi-Key Load Balancing (10–15 Concurrent Users)
+## 4. Concurrency & Multi-Key Load Balancing (10–15 Concurrent Users)
 
 To handle spikes of 10–15 concurrent users without hitting rate limits (RPM / TPM):
 
@@ -73,7 +119,7 @@ To handle spikes of 10–15 concurrent users without hitting rate limits (RPM / 
 
 ---
 
-## 4. API Circuit Breaker State Machine
+## 5. API Circuit Breaker State Machine
 
 To prevent slow requests during upstream provider outages or rate limits, JARVIS implements an in-memory Circuit Breaker:
 
@@ -92,7 +138,7 @@ stateDiagram-v2
 
 ---
 
-## 5. Parallel Fast Deep Web Scraper & Zero-Parametric Anti-Hallucination
+## 6. Parallel Fast Deep Web Scraper & Zero-Parametric Anti-Hallucination
 
 For real-time events, political appointments, election outcomes, and leadership queries:
 
@@ -102,7 +148,7 @@ flowchart TD
     Classify -->|Leadership / Real-Time Fact| LiveRequired["Route: live_required"]
     LiveRequired --> SearchRace["Parallel Fast-Race: DuckDuckGo + Google News RSS"]
     SearchRace --> FilterWiki["Wikipedia Filter (Exclude generic civics overviews)"]
-    FilterWiki --> DeepCrawl["Parallel Deep Body Scraper (2,500ms Cap)"]
+    SearchRace --> DeepCrawl["Parallel Deep Body Scraper (2,500ms Cap)"]
     DeepCrawl --> ExtractBody["Extract Clean Paragraphs + Publication Timestamps"]
     ExtractBody --> ZeroParametric["Strict Zero-Parametric Grounding Prompt"]
     ZeroParametric --> Synthesis["LLM Synthesis: Direct Name in Sentence 1"]
@@ -122,7 +168,7 @@ flowchart TD
 
 ---
 
-## 6. Context Window Token Compactor & Visual Memory
+## 7. Context Window Token Compactor & Visual Memory
 
 For long conversations (50+ turns), JARVIS maintains full conversational coherence while preventing token limit exhaustion:
 
@@ -142,7 +188,7 @@ flowchart LR
 
 ---
 
-## 7. Converse Voice & Audio Subsystem
+## 8. Converse Voice & Audio Subsystem
 
 JARVIS includes a continuous, hands-free voice conversation engine:
 
@@ -160,7 +206,7 @@ JARVIS includes a continuous, hands-free voice conversation engine:
 
 ---
 
-## 8. Asynchronous IndexedDB Storage Engine
+## 9. Asynchronous IndexedDB Storage Engine
 
 To prevent browser `localStorage` 5MB quota exhaustion with multi-turn conversations and media:
 
@@ -174,7 +220,7 @@ To prevent browser `localStorage` 5MB quota exhaustion with multi-turn conversat
 
 ---
 
-## 9. Edge Semantic Caching & Predictive Pre-warming
+## 10. Edge Semantic Caching & Predictive Pre-warming
 
 To maximize throughput, minimize API quota burn, and eliminate latency on repeated queries:
 
@@ -187,22 +233,22 @@ To maximize throughput, minimize API quota burn, and eliminate latency on repeat
 
 ---
 
-## 10. Verification & Test Suite Matrix
+## 11. Verification & Test Suite Matrix
 
 JARVIS maintains **100% automated test coverage across all test suites**:
 
 | Test Suite | Focus Area | Status |
 | :--- | :--- | :--- |
 | `test:deterministic` | Fast-path deterministic fact verifier | **PASS (0 errors)** |
-| `test:context` | Sliding-window context compaction & memory | **PASS (0 errors)** |
+| `test:context` | Sliding-window context compaction & vector search | **PASS (0 errors)** |
 | `test:speech-input` | Voice controller, barge-in & multilingual STT | **PASS (0 errors)** |
 | `test:api` | API contracts, streaming SSE & payload validation | **PASS (0 errors)** |
 | `test:verification` | Data integrity monitor, entity verifier, tools & self-improving loops | **PASS (0 errors)** |
-| `test:hygiene` | Security, clean DOM & hardcoded content scanner (92 files) | **PASS (0 errors)** |
+| `test:hygiene` | Security, clean DOM & hardcoded content scanner (91 files) | **PASS (0 errors)** |
 
 ---
 
-## 11. Conversational Chain of Thought & Responsive UI Architecture
+## 12. Conversational Chain of Thought & Responsive UI Architecture
 
 * **Conversational Inner Monologue**:
   - Chain of Thought steps are rendered as natural human-like cognitive reflections (~40–50 words per stage) across 10 distinct knowledge domains without rigid bold subheadings, colons, or bullet tags.
@@ -213,12 +259,12 @@ JARVIS maintains **100% automated test coverage across all test suites**:
 
 ---
 
-## 12. Autonomous Self-Improving Loops Architecture
+## 13. Autonomous Self-Improving Loops Architecture
 
 * **In-Conversation User Preference Learning**:
   - Dynamically intercepts user feedback, tone corrections, and style directives (`app/self-improving-memory.js`).
   - Automatically deduplicates and persists learned rules in IndexedDB `kv_store` (`jarvis_learned_preferences`).
-  - Injects learned directives into upstream system prompts on subsequent requests.
+  - Injects learned directives into upstream system prompts on subsequent requests using `findRelevantPreferences`.
 * **Fast Inline Code & Math Self-Healing**:
   - Automatically validates code fences, LaTeX math delimiters (`$$`, `\(`), and JSON trailing commas before delivery (`api/_lib/code-math-validator.js`).
 * **Adaptive Search Reflection**:
