@@ -12,26 +12,23 @@ function escapeHtml(text) {
         .replace(/'/g, '&#39;');
 }
 
-const GREEK_SYMBOLS = {
-    alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ', epsilon: 'ε',
-    zeta: 'ζ', eta: 'η', theta: 'θ', iota: 'ι', kappa: 'κ',
-    lambda: 'λ', mu: 'μ', nu: 'ν', xi: 'ξ', pi: 'π',
-    rho: 'ρ', sigma: 'σ', tau: 'τ', upsilon: 'υ', phi: 'φ',
-    chi: 'χ', psi: 'ψ', omega: 'ω',
-    Alpha: 'Α', Beta: 'Β', Gamma: 'Γ', Delta: 'Δ', Epsilon: 'Ε',
-    Theta: 'Θ', Lambda: 'Λ', Xi: 'Ξ', Pi: 'Π', Sigma: 'Σ',
-    Phi: 'Φ', Psi: 'Ψ', Omega: 'Ω'
-};
-
-const MATH_OPERATORS = {
-    pm: '±', mp: '∓', times: '×', div: '÷', cdot: '·',
-    approx: '≈', neq: '≠', ne: '≠', leq: '≤', le: '≤',
-    geq: '≥', ge: '≥', infty: '∞', to: '→', leftarrow: '←',
-    rightarrow: '→', Leftarrow: '⇐', Rightarrow: '⇒',
-    sum: '∑', prod: '∏', int: '∫', partial: '∂', nabla: '∇',
-    forall: '∀', exists: '∃', subset: '⊂', supset: '⊃',
-    cup: '∪', cap: '∩', emptyset: '∅'
-};
+const UNICODE_MATH_MAP = new Map([
+    ['alpha', 'α'], ['beta', 'β'], ['gamma', 'γ'], ['delta', 'δ'], ['epsilon', 'ε'],
+    ['zeta', 'ζ'], ['eta', 'η'], ['theta', 'θ'], ['iota', 'ι'], ['kappa', 'κ'],
+    ['lambda', 'λ'], ['mu', 'μ'], ['nu', 'ν'], ['xi', 'ξ'], ['pi', 'π'],
+    ['rho', 'ρ'], ['sigma', 'σ'], ['tau', 'τ'], ['upsilon', 'υ'], ['phi', 'φ'],
+    ['chi', 'χ'], ['psi', 'ψ'], ['omega', 'ω'],
+    ['Alpha', 'Α'], ['Beta', 'Β'], ['Gamma', 'Γ'], ['Delta', 'Δ'], ['Epsilon', 'Ε'],
+    ['Theta', 'Θ'], ['Lambda', 'Λ'], ['Xi', 'Ξ'], ['Pi', 'Π'], ['Sigma', 'Σ'],
+    ['Phi', 'Φ'], ['Psi', 'Ψ'], ['Omega', 'Ω'],
+    ['pm', '±'], ['mp', '∓'], ['times', '×'], ['div', '÷'], ['cdot', '·'],
+    ['approx', '≈'], ['neq', '≠'], ['ne', '≠'], ['leq', '≤'], ['le', '≤'],
+    ['geq', '≥'], ['ge', '≥'], ['infty', '∞'], ['to', '→'], ['leftarrow', '←'],
+    ['rightarrow', '→'], ['Leftarrow', '⇐'], ['Rightarrow', '⇒'],
+    ['sum', '∑'], ['prod', '∏'], ['int', '∫'], ['partial', '∂'], ['nabla', '∇'],
+    ['forall', '∀'], ['exists', '∃'], ['subset', '⊂'], ['supset', '⊃'],
+    ['cup', '∪'], ['cap', '∩'], ['emptyset', '∅']
+]);
 
 export function formatLatexExpression(expr = '') {
     let raw = String(expr || '').trim();
@@ -51,19 +48,28 @@ export function formatLatexExpression(expr = '') {
         return `<span class="math-text">${escapeHtml(text)}</span>`;
     });
 
-    // Replace Greek letters \alpha -> α
+    // Replace LaTeX symbols \alpha -> α, \pm -> ±
     raw = raw.replace(/\\([a-zA-Z]+)/g, (match, name) => {
-        if (GREEK_SYMBOLS[name]) return GREEK_SYMBOLS[name];
-        if (MATH_OPERATORS[name]) return MATH_OPERATORS[name];
-        return match;
+        return UNICODE_MATH_MAP.get(name) || match;
     });
 
-    // Subscripts and superscripts x_{i+1} or x^2
+    // Subscripts and superscripts x_{i+1}, x^(x+1), x^x, x^2, e^x
     raw = raw.replace(/([a-zA-Z0-9_\)\]\}])\^\{([^{}]+)\}/g, '$1<sup>$2</sup>');
-    raw = raw.replace(/([a-zA-Z0-9_\)\]\}])\^([a-zA-Z0-9])/g, '$1<sup>$2</sup>');
+    raw = raw.replace(/([a-zA-Z0-9_\)\]\}])\^\(([^()]+)\)/g, '$1<sup>$2</sup>');
+    raw = raw.replace(/([a-zA-Z0-9_\)\]\}])\^([a-zA-Z0-9_+-]+)/g, '$1<sup>$2</sup>');
     raw = raw.replace(/([a-zA-Z0-9_\)\]\}])_\{([^{}]+)\}/g, '$1<sub>$2</sub>');
-    raw = raw.replace(/([a-zA-Z0-9_\)\]\}])_([a-zA-Z0-9])/g, '$1<sub>$2</sub>');
+    raw = raw.replace(/([a-zA-Z0-9_\)\]\}])_\(([^()]+)\)/g, '$1<sub>$2</sub>');
+    raw = raw.replace(/([a-zA-Z0-9_\)\]\}])_([a-zA-Z0-9_+-]+)/g, '$1<sub>$2</sub>');
 
+    return raw;
+}
+
+export function formatInlineMathPowers(text = '') {
+    let raw = String(text || '');
+    // Convert unescaped power expressions like x^x, x^2, n^k, (x+1)^2 outside of tags
+    raw = raw.replace(/([a-zA-Z0-9_\)\]])\^\{([^{}]+)\}/g, '$1<sup>$2</sup>');
+    raw = raw.replace(/([a-zA-Z0-9_\)\]])\^\(([^()]+)\)/g, '$1<sup>$2</sup>');
+    raw = raw.replace(/([a-zA-Z0-9_\)\]])\^([a-zA-Z0-9_+-]+)/g, '$1<sup>$2</sup>');
     return raw;
 }
 
@@ -85,6 +91,9 @@ export function renderMathInText(text = '') {
     raw = raw.replace(/\\\(([\s\S]+?)\\\)/g, (_, math) => {
         return `<span class="math-inline">${formatLatexExpression(math)}</span>`;
     });
+
+    // Format any remaining unbracketed inline exponents (e.g. x^x, 2^x) outside HTML tags
+    raw = formatInlineMathPowers(raw);
 
     return raw;
 }
