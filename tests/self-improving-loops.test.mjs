@@ -91,6 +91,14 @@ assert.equal(validResult.modified, false);
 assert.equal(validResult.text, validText);
 console.log('  [PASS] 2.4 Valid code/math is untouched');
 
+// 2.5 P2: Speculative arithmetic auto-repair
+const hallucinatedCalculation = 'The total cost is 15 * 12 = 175 dollars for the whole team.';
+const repairedCalculation = validateAndRepairCodeAndMath(hallucinatedCalculation);
+assert.equal(repairedCalculation.modified, true);
+assert.match(repairedCalculation.text, /15 \* 12 = 180/);
+assert.equal(repairedCalculation.issues.includes('hallucinated_arithmetic_repaired'), true);
+console.log('  [PASS] 2.5 Speculative arithmetic calculation automatically verified & repaired');
+
 // ============================================================================
 // Section 3: Adaptive Search Multi-Query Reflection Loop
 // ============================================================================
