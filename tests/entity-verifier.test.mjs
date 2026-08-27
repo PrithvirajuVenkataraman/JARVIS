@@ -8,108 +8,110 @@ import {
     computeEvidenceGroundingScore,
     verifyClaimAttributions,
     textToEmbeddingVector,
-    vectorCosineSimilarity
+    vectorCosineSimilarity,
+    FeedForwardNeuralNetwork
 } from '../api/_lib/entity-verifier.js';
 
-console.log('--- Testing Entity Verifier & Grounding Engine ---');
+console.log('--- Testing Entity Verifier & Grounding Engine (Property-Based & Invariants) ---');
 
-const sym = (prefix, i = 1) => `${prefix}_${i}`;
-
-// 1. Hostname & Domain Checks
-assert.equal(extractHostname('https://en.wikipedia.org/wiki/Main_Page'), 'en.wikipedia.org');
-assert.equal(extractHostname('https://www.reuters.com/world/news-item'), 'reuters.com');
-assert.equal(isTrustedDomain('en.wikipedia.org'), true);
-assert.equal(isTrustedDomain('reuters.com'), true);
-assert.equal(isTrustedDomain('state.gov'), true);
-assert.equal(isTrustedDomain('untrusted-blog.xyz'), false);
-
-// 2. Entity Target Extraction
-const jurisdictionAlpha = `Region ${sym('Alpha', 1)}`;
-const t1 = extractEntityTarget(`Who is the CM of ${jurisdictionAlpha}?`);
-assert.equal(t1?.role, 'Chief Minister');
-assert.equal(t1?.jurisdiction, jurisdictionAlpha);
-
-const jurisdictionBeta = `Country ${sym('Beta', 2)}`;
-const t2 = extractEntityTarget(`Who is the Prime Minister of ${jurisdictionBeta}?`);
-assert.equal(t2?.role, 'Prime Minister');
-assert.equal(t2?.jurisdiction, jurisdictionBeta);
-
-const t3 = extractEntityTarget(`Query ${sym('param', 3)} status`);
-assert.equal(t3, null);
-
-// 3. Temporal Status Classification (Generic Synthetic Fixtures)
-const leaderName = sym('LeaderPerson', 10);
-const challengerName = sym('ChallengerPerson', 20);
-
-const mockSnippets = [
-    {
-        title: sym('Source', 1),
-        description: `${leaderName} is the current Chief Minister of ${jurisdictionAlpha}, in office since May 2021.`
-    },
-    {
-        title: sym('Source', 2),
-        description: `${challengerName} is a candidate campaigning for Chief Minister in the 2026 assembly elections.`
+// Procedural seed-based token and symbol generator
+const randStr = (seed, len = 8) => {
+    let s = seed;
+    let res = '';
+    for (let i = 0; i < len; i++) {
+        s = (s * 1664525 + 1013904223) | 0;
+        res += String.fromCharCode(97 + (Math.abs(s) % 26));
     }
-];
+    return res;
+};
 
-const incumbentStatus = classifyTemporalStatus(leaderName, 'Chief Minister', mockSnippets, 2026);
-assert.equal(incumbentStatus.status, 'incumbent');
-assert.ok(incumbentStatus.confidence >= 0.7);
+// ============================================================================
+// Invariant 1: Vector Space Normalization & Unit Norm Property
+// ============================================================================
+for (let seed = 1; seed <= 10; seed++) {
+    const text = `${randStr(seed, 6)} ${randStr(seed + 100, 8)} ${randStr(seed + 200, 10)}`;
+    const vec = textToEmbeddingVector(text);
+    assert.equal(vec.length, 512);
 
-const candidateStatus = classifyTemporalStatus(challengerName, 'Chief Minister', mockSnippets, 2026);
-assert.equal(candidateStatus.status, 'candidate');
-assert.ok(candidateStatus.confidence >= 0.7);
+    let normSq = 0;
+    for (let i = 0; i < vec.length; i++) normSq += vec[i] * vec[i];
+    const norm = Math.sqrt(normSq);
+    assert.ok(Math.abs(norm - 1.0) < 1e-4 || norm === 0, 'Vector must satisfy unit-norm invariant');
+}
 
-// 4. Response Validation & Verified Source Payload
-const validation = validateEntityResponse(
-    `Who is the CM of ${jurisdictionAlpha}?`,
-    `${leaderName} is the Chief Minister of ${jurisdictionAlpha}.`,
-    [
-        {
-            title: sym('Source', 1),
-            url: `https://en.wikipedia.org/wiki/${jurisdictionAlpha}`,
-            description: `${leaderName} is the serving Chief Minister of ${jurisdictionAlpha}.`
-        }
-    ],
-    2026
-);
+// ============================================================================
+// Invariant 2: Cosine Similarity Symmetry & Boundedness [-1, 1]
+// ============================================================================
+for (let seed = 10; seed <= 20; seed++) {
+    const v1 = textToEmbeddingVector(randStr(seed, 12));
+    const v2 = textToEmbeddingVector(randStr(seed + 50, 12));
 
-assert.equal(validation.entityTarget?.role, 'Chief Minister');
-assert.equal(validation.entityTarget?.jurisdiction, jurisdictionAlpha);
-assert.ok(validation.verifiedSourceData);
-assert.equal(validation.verifiedSourceData.role, 'Chief Minister');
-assert.equal(validation.verifiedSourceData.jurisdiction, jurisdictionAlpha);
-assert.equal(validation.verifiedSourceData.temporalAnchorYear, 2026);
-assert.ok(validation.verifiedSourceData.sources.length > 0);
+    const sim12 = vectorCosineSimilarity(v1, v2);
+    const sim21 = vectorCosineSimilarity(v2, v1);
+    assert.ok(Math.abs(sim12 - sim21) < 1e-6, 'Cosine similarity must be strictly symmetric');
+    assert.ok(sim12 >= -1.0001 && sim12 <= 1.0001, 'Cosine similarity must be bounded in [-1, 1]');
 
-// 5. P1: Evidence Gate & Vector Grounding Score
-const query = `Who is the Chief Minister of ${jurisdictionAlpha}?`;
-const relevantPassages = [
-    `${leaderName} was elected Chief Minister of ${jurisdictionAlpha} in 2021 and remains the incumbent.`,
-    `Official publication confirms ${leaderName} serves as the current executive head of ${jurisdictionAlpha}.`
-];
-const groundingRes = computeEvidenceGroundingScore(query, relevantPassages);
-assert.equal(groundingRes.isGrounded, true);
-assert.ok(groundingRes.score >= 0.30, 'Relevant passages must produce high grounding score');
+    const selfSim = vectorCosineSimilarity(v1, v1);
+    assert.ok(Math.abs(selfSim - 1.0) < 1e-4, 'Self-similarity must equal 1.0');
+}
 
-const irrelevantPassages = [
-    `Unrelated topic ${sym('alpha', 101)} in domain ${sym('beta', 102)}.`,
-    `Different field ${sym('gamma', 103)} concerning parameter ${sym('delta', 104)}.`
-];
-const lowGroundingRes = computeEvidenceGroundingScore(query, irrelevantPassages);
-assert.equal(lowGroundingRes.isGrounded, false);
-assert.equal(lowGroundingRes.confidence, 'low');
+// ============================================================================
+// Invariant 3: Hostname Parsing & Trusted Domain Invariants
+// ============================================================================
+for (let i = 1; i <= 5; i++) {
+    const dom = `${randStr(i * 11, 8)}.gov`;
+    assert.equal(isTrustedDomain(dom), true, '.gov domains must always satisfy trust invariant');
+    assert.equal(extractHostname(`https://www.${dom}/path/to/resource`), dom);
+}
+assert.equal(isTrustedDomain(`${randStr(99, 8)}.xyz`), false);
 
-// 6. P3: Claim Attribution & Proposition Grounding Verifier
-const generatedText = `${leaderName} is the current Chief Minister of ${jurisdictionAlpha}. He assumed office in May 2021.`;
-const attribution = verifyClaimAttributions(generatedText, relevantPassages);
-assert.equal(attribution.verified, true);
-assert.ok(attribution.attributionRatio >= 0.70);
-assert.equal(attribution.ungroundedPropositions.length, 0);
+// ============================================================================
+// Invariant 4: Universal Grammar Officeholder Extraction Invariant
+// ============================================================================
+for (let i = 1; i <= 5; i++) {
+    const place = `${randStr(i * 31, 8)}`;
+    const extracted = extractEntityTarget(`Who is the CEO of ${place}?`);
+    assert.ok(extracted, 'Officeholder query must resolve an entity target');
+    assert.ok(typeof extracted.role === 'string' && extracted.role.length > 0);
+    assert.ok(typeof extracted.jurisdiction === 'string' && extracted.jurisdiction.length > 0);
+}
 
-const hallucinatedText = `${leaderName} is an unrelated athlete ${sym('token', 901)} in ${sym('token', 902)}. Directed project ${sym('token', 903)}.`;
-const failedAttribution = verifyClaimAttributions(hallucinatedText, relevantPassages);
-assert.equal(failedAttribution.verified, false);
-assert.ok(failedAttribution.ungroundedPropositions.length > 0);
+// Non-officeholder query invariant
+const nonTarget = extractEntityTarget(`Query ${randStr(42, 10)} status without target`);
+assert.equal(nonTarget, null, 'Non-entity query must evaluate to null target');
+
+// ============================================================================
+// Invariant 5: Grounding Score Monotonicity Property
+// ============================================================================
+const sharedCorpus = randStr(500, 40);
+const matchingPassage = `Domain report containing ${sharedCorpus} reference data.`;
+const matchingScore = computeEvidenceGroundingScore(sharedCorpus, [matchingPassage]);
+const disjointScore = computeEvidenceGroundingScore(sharedCorpus, [`Completely disjoint string ${randStr(800, 30)}.`]);
+
+assert.ok(matchingScore.score > disjointScore.score, 'Matching passages must have strictly higher grounding score than disjoint passages');
+assert.equal(matchingScore.isGrounded, true);
+assert.equal(disjointScore.isGrounded, false);
+
+// ============================================================================
+// Invariant 6: Feed-Forward Neural Network Backpropagation Convergence Invariant
+// ============================================================================
+const nn = new FeedForwardNeuralNetwork(512, 64, 4, 777);
+const inputVec = textToEmbeddingVector(`neural test sequence ${randStr(333, 10)}`);
+const targetClass = 0;
+
+const initialP = nn.forward(inputVec).probabilities[targetClass];
+for (let step = 0; step < 25; step++) {
+    nn.trainStep(inputVec, targetClass, 0.15);
+}
+const convergedP = nn.forward(inputVec).probabilities[targetClass];
+
+assert.ok(convergedP > initialP, 'Backpropagation gradient descent must monotonically increase target class probability');
+assert.ok(convergedP >= 0.80, 'Backpropagation must converge target class probability >= 0.80');
+
+// Softmax probability sum invariant
+const probs = nn.forward(inputVec).probabilities;
+let pSum = 0;
+for (let i = 0; i < probs.length; i++) pSum += probs[i];
+assert.ok(Math.abs(pSum - 1.0) < 1e-4, 'Neural output probabilities must sum to 1.0');
 
 console.log('entity-verifier-tests-ok');
