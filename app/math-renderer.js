@@ -45,9 +45,11 @@ export function formatLatexExpression(expr = '', isDisplay = false) {
 
 export function formatInlineMathPowers(text = '') {
     let raw = String(text || '');
-    raw = raw.replace(/([a-zA-Z0-9_\)\]])\^\{([^{}]+)\}/g, '$1<sup>$2</sup>');
-    raw = raw.replace(/([a-zA-Z0-9_\)\]])\^\(([^()]+)\)/g, '$1<sup>$2</sup>');
-    raw = raw.replace(/([a-zA-Z0-9_\)\]])\^([a-zA-Z0-9_+-]+)/g, '$1<sup>$2</sup>');
+    raw = raw.replace(/([a-zA-Z0-9_\)\]\}])\^\{([^{}]+)\}/g, '$1<sup>$2</sup>');
+    raw = raw.replace(/([a-zA-Z0-9_\)\]\}])\^\(([^()]+)\)/g, '$1<sup>$2</sup>');
+    raw = raw.replace(/([a-zA-Z0-9_\)\]\}])\^([a-zA-Z0-9_+-]+)/g, '$1<sup>$2</sup>');
+    raw = raw.replace(/([a-zA-Z0-9_\)\]\}])_\{([^{}]+)\}/g, '$1<sub>$2</sub>');
+    raw = raw.replace(/([a-zA-Z0-9_\)\]\}])_\(([^()]+)\)/g, '$1<sub>$2</sub>');
     return raw;
 }
 
@@ -61,7 +63,7 @@ export function renderMathInText(text = '') {
         return `<div class="math-display-block"><span class="math-display-inner">${formatLatexExpression(math, true)}</span></div>`;
     });
 
-    raw = raw.replace(/\$([^\$\n]+?)\$/g, (_, math) => {
+    raw = raw.replace(/(?<!\\)\$(?!\s)([^\$\n]+?)(?<!\s)\$(?!\d)/g, (_, math) => {
         return `<span class="math-inline">${formatLatexExpression(math, false)}</span>`;
     });
     raw = raw.replace(/\\\(([\s\S]+?)\\\)/g, (_, math) => {
