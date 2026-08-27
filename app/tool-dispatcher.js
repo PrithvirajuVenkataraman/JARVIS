@@ -1,7 +1,4 @@
-/**
- * Agentic Tool Definitions and Client-Side Execution Dispatcher.
- * Provides safe sandboxed computation, knowledge lookup, time/calendar context, and session memory search.
- */
+import { PartitionedIVFIndex, textToEmbeddingVector, vectorCosineSimilarity } from './storage.js';
 
 /**
  * Tool schemas provided to OpenAI/Groq compatible chat completions API.
@@ -211,50 +208,8 @@ export function executeDatetimeContext(timezone = '', operation = '') {
     }
 }
 
-export function textToEmbeddingVector(text, dim = 512) {
-    const v = new Float32Array(dim);
-    const tokens = String(text || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').trim().split(/\s+/).filter(Boolean);
-    if (!tokens.length) return v;
-    for (const token of tokens) {
-        let h1 = 0x811c9dc5;
-        let h2 = 0x5bd1e995;
-        for (let i = 0; i < token.length; i++) {
-            const code = token.charCodeAt(i);
-            h1 ^= code;
-            h1 = Math.imul(h1, 0x01000193);
-            h2 ^= code;
-            h2 = Math.imul(h2, 0x5bd1e995);
-        }
-        const idx1 = Math.abs(h1) % dim;
-        const idx2 = Math.abs(h2) % dim;
-        v[idx1] += 1.0;
-        v[idx2] += 0.5;
-        if (token.length >= 4) {
-            for (let i = 0; i < token.length - 2; i++) {
-                const trigram = token.slice(i, i + 3);
-                let th = 0;
-                for (let j = 0; j < trigram.length; j++) th = (th * 31 + trigram.charCodeAt(j)) | 0;
-                v[Math.abs(th) % dim] += 0.2;
-            }
-        }
-    }
-    let norm = 0;
-    for (let i = 0; i < dim; i++) norm += v[i] * v[i];
-    norm = Math.sqrt(norm);
-    if (norm > 0) {
-        for (let i = 0; i < dim; i++) v[i] /= norm;
-    }
-    return v;
-}
-
-export function vectorCosineSimilarity(a, b) {
-    let dot = 0;
-    for (let i = 0; i < a.length; i++) dot += a[i] * b[i];
-    return dot;
-}
-
 /**
- * Searches active conversation turns and attachments using semantic vector search and exact token matching.
+ * Searches active conversation turns and attachments using Approximate Nearest Neighbor (ANN) Partitioned IVF semantic vector search.
  * @param {string} query
  * @param {Array<{ role: string, content: string }>} [conversationHistory]
  * @param {Array<{ name?: string, text?: string }>} [attachments]
@@ -264,49 +219,36 @@ export function executeSessionMemory(query = '', conversationHistory = [], attac
     const q = String(query || '').trim();
     if (!q) return { success: false, matches: [] };
 
-    const queryVec = textToEmbeddingVector(q);
-    const scoredMatches = [];
+    const totalCount = conversationHistory.length + attachments.length;
+    const numClusters = Math.min(8, Math.max(2, Math.floor(totalCount / 3)));
+    const index = new PartitionedIVFIndex({ numClusters, nProbe: 2 });
 
-    // Search conversation turns
+    // Index conversation turns
     for (let i = 0; i < conversationHistory.length; i++) {
         const turn = conversationHistory[i];
         const content = String(turn?.content || '');
         if (!content) continue;
-        const docVec = textToEmbeddingVector(content);
-        const sim = vectorCosineSimilarity(queryVec, docVec);
-        const subMatch = content.toLowerCase().includes(q.toLowerCase());
-        const finalScore = subMatch ? Math.max(sim, 0.75) : sim;
-        if (finalScore >= 0.15) {
-            scoredMatches.push({
-                source: `turn_${i + 1}_${turn.role || 'unknown'}`,
-                snippet: content.length > 300 ? `${content.slice(0, 300)}...` : content,
-                score: finalScore
-            });
-        }
+        index.add({
+            source: `turn_${i + 1}_${turn.role || 'unknown'}`,
+            snippet: content.length > 300 ? `${content.slice(0, 300)}...` : content
+        }, content);
     }
 
-    // Search attachments
+    // Index attachments
     for (const att of attachments) {
         const text = String(att?.text || att?.content || '');
         if (!text) continue;
-        const docVec = textToEmbeddingVector(text);
-        const sim = vectorCosineSimilarity(queryVec, docVec);
-        const subMatch = text.toLowerCase().includes(q.toLowerCase());
-        const finalScore = subMatch ? Math.max(sim, 0.75) : sim;
-        if (finalScore >= 0.15) {
-            scoredMatches.push({
-                source: `attachment_${att.name || 'document'}`,
-                snippet: text.length > 400 ? `${text.slice(0, 400)}...` : text,
-                score: finalScore
-            });
-        }
+        index.add({
+            source: `attachment_${att.name || 'document'}`,
+            snippet: text.length > 400 ? `${text.slice(0, 400)}...` : text
+        }, text);
     }
 
-    scoredMatches.sort((a, b) => b.score - a.score);
+    const results = index.search(q, 4, 0.15);
 
     return {
         success: true,
-        matches: scoredMatches.slice(0, 4)
+        matches: results.map(r => ({ ...r.item, score: r.score }))
     };
 }
 
