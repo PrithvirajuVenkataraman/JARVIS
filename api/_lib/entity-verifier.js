@@ -411,7 +411,7 @@ export function verifyClaimAttributions(generatedText = '', passages = [], thres
     }
 
     const attributionRatio = Number((supportedPropositions.length / sentences.length).toFixed(3));
-    return {
+    return { 
         verified: attributionRatio >= 0.70,
         attributionRatio,
         supportedPropositions,
