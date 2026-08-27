@@ -4,6 +4,48 @@
  * persists them in IndexedDB, and injects them into system context.
  */
 
+export function textToEmbeddingVector(text, dim = 512) {
+    const v = new Float32Array(dim);
+    const tokens = String(text || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').trim().split(/\s+/).filter(Boolean);
+    if (!tokens.length) return v;
+    for (const token of tokens) {
+        let h1 = 0x811c9dc5;
+        let h2 = 0x5bd1e995;
+        for (let i = 0; i < token.length; i++) {
+            const code = token.charCodeAt(i);
+            h1 ^= code;
+            h1 = Math.imul(h1, 0x01000193);
+            h2 ^= code;
+            h2 = Math.imul(h2, 0x5bd1e995);
+        }
+        const idx1 = Math.abs(h1) % dim;
+        const idx2 = Math.abs(h2) % dim;
+        v[idx1] += 1.0;
+        v[idx2] += 0.5;
+        if (token.length >= 4) {
+            for (let i = 0; i < token.length - 2; i++) {
+                const trigram = token.slice(i, i + 3);
+                let th = 0;
+                for (let j = 0; j < trigram.length; j++) th = (th * 31 + trigram.charCodeAt(j)) | 0;
+                v[Math.abs(th) % dim] += 0.2;
+            }
+        }
+    }
+    let norm = 0;
+    for (let i = 0; i < dim; i++) norm += v[i] * v[i];
+    norm = Math.sqrt(norm);
+    if (norm > 0) {
+        for (let i = 0; i < dim; i++) v[i] /= norm;
+    }
+    return v;
+}
+
+export function vectorCosineSimilarity(a, b) {
+    let dot = 0;
+    for (let i = 0; i < a.length; i++) dot += a[i] * b[i];
+    return dot;
+}
+
 const STORAGE_KEY = 'jarvis_learned_preferences';
 
 export class SelfImprovingMemoryEngine {
@@ -59,7 +101,6 @@ export class SelfImprovingMemoryEngine {
         const lower = raw.toLowerCase();
 
         // 1. Negative formatting / style correction
-        // e.g. "Don't use bullet points", "Stop using bullet points", "No more bullet lists", "Never give long answers"
         const negativeMatch = raw.match(/\b(?:don'?t|do\s+not|stop|never|avoid|no\s+more)\s+(?:use|using|include|including|give|giving|make|making|write|writing)\s+([^.!?\n]{3,80})/i);
         if (negativeMatch) {
             const subject = negativeMatch[1].trim().replace(/\b(?:please|from\s+now\s+on|anymore|again)\b/gi, '').trim();
@@ -74,7 +115,6 @@ export class SelfImprovingMemoryEngine {
         }
 
         // 2. Positive style / format directive
-        // e.g. "Always use bullet points", "Always respond in TypeScript", "From now on, give concise answers", "Prefer Python 3.12"
         const positiveMatch = raw.match(/\b(?:always|from\s+now\s+on\s*,?\s*always|prefer|make\s+sure\s+to|please\s+always)\s+(?:use|give|write|respond\s+in|format\s+in|answer\s+in)\s+([^.!?\n]{3,80})/i);
         if (positiveMatch) {
             const subject = positiveMatch[1].trim().replace(/\b(?:please|from\s+now\s+on)\b/gi, '').trim();
@@ -89,7 +129,6 @@ export class SelfImprovingMemoryEngine {
         }
 
         // 3. User Identity / Title declaration
-        // e.g. "Call me Dr. Kan", "My name is John", "Address me as Professor"
         const identityMatch = raw.match(/\b(?:call\s+me|address\s+me\s+as|my\s+name\s+is)\s+([^\r\n!?]+?)(?:[!?\n]|$)/i);
         if (identityMatch) {
             const nameOrTitle = identityMatch[1].trim().replace(/[.,;:!?]+$/, '').trim();
@@ -120,7 +159,6 @@ export class SelfImprovingMemoryEngine {
         const detected = this.detectCorrectionOrPreference(userMessage, previousAssistantMessage);
         if (!detected) return null;
 
-        // Check if an identical or similar directive already exists
         const exists = this.preferences.some(p => p.directive.toLowerCase() === detected.directive.toLowerCase());
         if (!exists) {
             const item = {
@@ -132,6 +170,27 @@ export class SelfImprovingMemoryEngine {
             return item;
         }
         return null;
+    }
+
+    /**
+     * Performs semantic vector retrieval across stored preferences against an active query.
+     */
+    findRelevantPreferences(query = '', threshold = 0.20, topK = 5) {
+        const q = String(query || '').trim();
+        if (!q || !this.preferences.length) return this.preferences.slice(0, topK);
+
+        const queryVec = textToEmbeddingVector(q);
+        return this.preferences
+            .map(p => {
+                const text = `${p.directive || ''} ${p.rawPrompt || ''}`.trim();
+                const pVec = textToEmbeddingVector(text);
+                const score = vectorCosineSimilarity(queryVec, pVec);
+                return { preference: p, score };
+            })
+            .filter(item => item.score >= threshold)
+            .sort((a, b) => b.score - a.score)
+            .slice(0, topK)
+            .map(item => item.preference);
     }
 
     getDirectives() {
@@ -152,8 +211,11 @@ export class SelfImprovingMemoryEngine {
         await this.savePreferences();
     }
 
-    injectIntoSystemPrompt(baseSystemPrompt = '') {
-        const directives = this.getDirectives();
+    injectIntoSystemPrompt(baseSystemPrompt = '', activeQuery = '') {
+        const relevant = activeQuery
+            ? this.findRelevantPreferences(activeQuery, 0.15)
+            : this.preferences;
+        const directives = relevant.map(p => p.directive).filter(Boolean);
         if (!directives.length) return baseSystemPrompt;
 
         const learnedBlock = [
