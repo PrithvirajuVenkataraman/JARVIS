@@ -211,30 +211,76 @@ export function executeDatetimeContext(timezone = '', operation = '') {
     }
 }
 
+export function textToEmbeddingVector(text, dim = 512) {
+    const v = new Float32Array(dim);
+    const tokens = String(text || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').trim().split(/\s+/).filter(Boolean);
+    if (!tokens.length) return v;
+    for (const token of tokens) {
+        let h1 = 0x811c9dc5;
+        let h2 = 0x5bd1e995;
+        for (let i = 0; i < token.length; i++) {
+            const code = token.charCodeAt(i);
+            h1 ^= code;
+            h1 = Math.imul(h1, 0x01000193);
+            h2 ^= code;
+            h2 = Math.imul(h2, 0x5bd1e995);
+        }
+        const idx1 = Math.abs(h1) % dim;
+        const idx2 = Math.abs(h2) % dim;
+        v[idx1] += 1.0;
+        v[idx2] += 0.5;
+        if (token.length >= 4) {
+            for (let i = 0; i < token.length - 2; i++) {
+                const trigram = token.slice(i, i + 3);
+                let th = 0;
+                for (let j = 0; j < trigram.length; j++) th = (th * 31 + trigram.charCodeAt(j)) | 0;
+                v[Math.abs(th) % dim] += 0.2;
+            }
+        }
+    }
+    let norm = 0;
+    for (let i = 0; i < dim; i++) norm += v[i] * v[i];
+    norm = Math.sqrt(norm);
+    if (norm > 0) {
+        for (let i = 0; i < dim; i++) v[i] /= norm;
+    }
+    return v;
+}
+
+export function vectorCosineSimilarity(a, b) {
+    let dot = 0;
+    for (let i = 0; i < a.length; i++) dot += a[i] * b[i];
+    return dot;
+}
+
 /**
- * Searches active conversation turns and attachments for matching query terms.
+ * Searches active conversation turns and attachments using semantic vector search and exact token matching.
  * @param {string} query
  * @param {Array<{ role: string, content: string }>} [conversationHistory]
  * @param {Array<{ name?: string, text?: string }>} [attachments]
- * @returns {{ success: boolean, matches: Array<{ source: string, snippet: string }> }}
+ * @returns {{ success: boolean, matches: Array<{ source: string, snippet: string, score: number }> }}
  */
 export function executeSessionMemory(query = '', conversationHistory = [], attachments = []) {
-    const q = String(query || '').toLowerCase().trim();
+    const q = String(query || '').trim();
     if (!q) return { success: false, matches: [] };
 
-    const terms = q.split(/\s+/).filter(t => t.length >= 3);
-    const matches = [];
+    const queryVec = textToEmbeddingVector(q);
+    const scoredMatches = [];
 
     // Search conversation turns
     for (let i = 0; i < conversationHistory.length; i++) {
         const turn = conversationHistory[i];
         const content = String(turn?.content || '');
-        const contentLower = content.toLowerCase();
-        const score = terms.reduce((acc, term) => acc + (contentLower.includes(term) ? 1 : 0), 0);
-        if (score > 0) {
-            matches.push({
+        if (!content) continue;
+        const docVec = textToEmbeddingVector(content);
+        const sim = vectorCosineSimilarity(queryVec, docVec);
+        const subMatch = content.toLowerCase().includes(q.toLowerCase());
+        const finalScore = subMatch ? Math.max(sim, 0.75) : sim;
+        if (finalScore >= 0.15) {
+            scoredMatches.push({
                 source: `turn_${i + 1}_${turn.role || 'unknown'}`,
-                snippet: content.length > 300 ? `${content.slice(0, 300)}...` : content
+                snippet: content.length > 300 ? `${content.slice(0, 300)}...` : content,
+                score: finalScore
             });
         }
     }
@@ -242,19 +288,25 @@ export function executeSessionMemory(query = '', conversationHistory = [], attac
     // Search attachments
     for (const att of attachments) {
         const text = String(att?.text || att?.content || '');
-        const textLower = text.toLowerCase();
-        const score = terms.reduce((acc, term) => acc + (textLower.includes(term) ? 1 : 0), 0);
-        if (score > 0) {
-            matches.push({
+        if (!text) continue;
+        const docVec = textToEmbeddingVector(text);
+        const sim = vectorCosineSimilarity(queryVec, docVec);
+        const subMatch = text.toLowerCase().includes(q.toLowerCase());
+        const finalScore = subMatch ? Math.max(sim, 0.75) : sim;
+        if (finalScore >= 0.15) {
+            scoredMatches.push({
                 source: `attachment_${att.name || 'document'}`,
-                snippet: text.length > 400 ? `${text.slice(0, 400)}...` : text
+                snippet: text.length > 400 ? `${text.slice(0, 400)}...` : text,
+                score: finalScore
             });
         }
     }
 
+    scoredMatches.sort((a, b) => b.score - a.score);
+
     return {
         success: true,
-        matches: matches.slice(0, 4)
+        matches: scoredMatches.slice(0, 4)
     };
 }
 
