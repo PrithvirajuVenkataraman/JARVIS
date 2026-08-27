@@ -1,3 +1,45 @@
+export function textToEmbeddingVector(text, dim = 512) {
+    const v = new Float32Array(dim);
+    const tokens = String(text || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').trim().split(/\s+/).filter(Boolean);
+    if (!tokens.length) return v;
+    for (const token of tokens) {
+        let h1 = 0x811c9dc5;
+        let h2 = 0x5bd1e995;
+        for (let i = 0; i < token.length; i++) {
+            const code = token.charCodeAt(i);
+            h1 ^= code;
+            h1 = Math.imul(h1, 0x01000193);
+            h2 ^= code;
+            h2 = Math.imul(h2, 0x5bd1e995);
+        }
+        const idx1 = Math.abs(h1) % dim;
+        const idx2 = Math.abs(h2) % dim;
+        v[idx1] += 1.0;
+        v[idx2] += 0.5;
+        if (token.length >= 4) {
+            for (let i = 0; i < token.length - 2; i++) {
+                const trigram = token.slice(i, i + 3);
+                let th = 0;
+                for (let j = 0; j < trigram.length; j++) th = (th * 31 + trigram.charCodeAt(j)) | 0;
+                v[Math.abs(th) % dim] += 0.2;
+            }
+        }
+    }
+    let norm = 0;
+    for (let i = 0; i < dim; i++) norm += v[i] * v[i];
+    norm = Math.sqrt(norm);
+    if (norm > 0) {
+        for (let i = 0; i < dim; i++) v[i] /= norm;
+    }
+    return v;
+}
+
+export function vectorCosineSimilarity(a, b) {
+    let dot = 0;
+    for (let i = 0; i < a.length; i++) dot += a[i] * b[i];
+    return dot;
+}
+
 const ROUTES = Object.freeze(['llm', 'cached_latest', 'live_required', 'clarify']);
 
 const CATEGORY_PATTERNS = Object.freeze([
@@ -5,67 +47,78 @@ const CATEGORY_PATTERNS = Object.freeze([
         category: 'web_search',
         route: 'live_required',
         reason: 'explicit_or_current_topic_search_requires_web_sources',
-        pattern: /\b(?:search(?:\s+the\s+web)?|web\s+search|look\s+up|find)\b.+/i
+        pattern: /\b(?:search(?:\s+the\s+web)?|web\s+search|look\s+up|find)\b.+/i,
+        vector: textToEmbeddingVector('search the web find articles lookup query online sources')
     },
     {
         category: 'weather',
         route: 'live_required',
         reason: 'weather_requires_live_source',
-        pattern: /\b(weather|temperature|forecast|rain|snow|storm|humidity|wind|uv index|heatwave|drought|climate change|global warming)\b/i
+        pattern: /\b(weather|temperature|forecast|rain|snow|storm|humidity|wind|uv index|heatwave|drought|climate change|global warming)\b/i,
+        vector: textToEmbeddingVector('weather temperature forecast rain snow storm humidity climate conditions')
     },
     {
         category: 'crypto',
         route: 'live_required',
         reason: 'crypto_price_requires_live_source',
-        pattern: /\b(crypto|bitcoin|btc|ethereum|eth|solana|dogecoin)\b.*\b(price|now|today|live|current|rate)\b|\b(price|rate|quote)\b.*\b(bitcoin|btc|ethereum|eth|crypto)\b/i
+        pattern: /\b(crypto|bitcoin|btc|ethereum|eth|solana|dogecoin)\b.*\b(price|now|today|live|current|rate)\b|\b(price|rate|quote)\b.*\b(bitcoin|btc|ethereum|eth|crypto)\b/i,
+        vector: textToEmbeddingVector('crypto bitcoin btc ethereum eth solana price quote rate now live')
     },
     {
         category: 'sports',
         route: 'live_required',
         reason: 'sports_updates_require_live_source',
-        pattern: /\b(live scores?|score now|match score|game score|fixtures?|standings|sports news|ipl|nba|nfl|epl|premier league|cricket|football|soccer|tennis|f1|formula\s*1|grand prix|basketball|motorsport|racing|driver standings|constructors)\b/i
+        pattern: /\b(live scores?|score now|match score|game score|fixtures?|standings|sports news|ipl|nba|nfl|epl|premier league|cricket|football|soccer|tennis|f1|formula\s*1|grand prix|basketball|motorsport|racing|driver standings|constructors)\b/i,
+        vector: textToEmbeddingVector('live scores match score game standings sports news cricket football soccer tournament')
     },
     {
         category: 'disasters',
         route: 'live_required',
         reason: 'disaster_updates_require_live_source',
-        pattern: /\b(earthquake|wildfire|flood|cyclone|hurricane|typhoon|tsunami|volcano|landslide|natural disaster|calamity|emergency alert|eruption|storm surge)\b/i
+        pattern: /\b(earthquake|wildfire|flood|cyclone|hurricane|typhoon|tsunami|volcano|landslide|natural disaster|calamity|emergency alert|eruption|storm surge)\b/i,
+        vector: textToEmbeddingVector('earthquake wildfire flood cyclone hurricane tsunami natural disaster emergency alert')
     },
     {
         category: 'conflicts_geopolitics',
         route: 'live_required',
         reason: 'geopolitical_conflict_requires_live_source',
-        pattern: /\b(war|wars|conflict|ceasefire|military operation|invasion|airstrike|battle|peace talks|hostage|treaty|geopolitics|sanctions|frontline|missile attack)\b/i
+        pattern: /\b(war|wars|conflict|ceasefire|military operation|invasion|airstrike|battle|peace talks|hostage|treaty|geopolitics|sanctions|frontline|missile attack)\b/i,
+        vector: textToEmbeddingVector('war conflict ceasefire military operation invasion battle peace talks sanctions')
     },
     {
         category: 'space_science',
         route: 'live_required',
         reason: 'space_updates_require_live_source',
-        pattern: /\b(nasa|isro|spacex|starship|artemis|rocket launch|moon mission|mars rover|space telescope|james webb|satellite launch|lunar landing|astronauts?)\b/i
+        pattern: /\b(nasa|isro|spacex|starship|artemis|rocket launch|moon mission|mars rover|space telescope|james webb|satellite launch|lunar landing|astronauts?)\b/i,
+        vector: textToEmbeddingVector('nasa isro spacex starship rocket launch moon mission mars space telescope')
     },
     {
         category: 'technology',
         route: 'live_required',
         reason: 'tech_updates_require_live_source',
-        pattern: /\b(nvidia|openai|anthropic|chatgpt|gemini|claude|deepseek|apple keynote|wwdc|blackwell|quantum computer|flagship launch)\b.*\b(latest|current|new|specs|launch|news|update|announcement)\b|\b(latest|current|new|breaking)\b.*\b(ai model|gpu|processor|chip|smartphone|flagship|software update|llm)\b/i
+        pattern: /\b(nvidia|openai|anthropic|chatgpt|gemini|claude|deepseek|apple keynote|wwdc|blackwell|quantum computer|flagship launch)\b.*\b(latest|current|new|specs|launch|news|update|announcement)\b|\b(latest|current|new|breaking)\b.*\b(ai model|gpu|processor|chip|smartphone|flagship|software update|llm)\b/i,
+        vector: textToEmbeddingVector('latest technology chip gpu ai model flagship processor update announcement')
     },
     {
         category: 'government',
         route: 'live_required',
         reason: 'government_current_fact_requires_public_source',
-        pattern: /\b(government|govt|ministry|minister|ministers|president|prime minister|\bpm\b|chief minister|\bcm\b|governor|mayor|\bmla\b|\bmp\b|cabinet|tenure|election|elections|parliament|assembly|official announcement|public advisory)\b/i
+        pattern: /\b(government|govt|ministry|minister|ministers|president|prime minister|\bpm\b|chief minister|\bcm\b|governor|mayor|\bmla\b|\bmp\b|cabinet|tenure|election|elections|parliament|assembly|official announcement|public advisory)\b/i,
+        vector: textToEmbeddingVector('government minister president prime minister chief minister elections parliament')
     },
     {
         category: 'tourism_food_places',
         route: 'live_required',
         reason: 'place_or_travel_request_needs_location_source',
-        pattern: /\b(tourism|tourist|travel|places to visit|attractions?|temple|museum|hotel|where am i|where i am)\b/i
+        pattern: /\b(tourism|tourist|travel|places to visit|attractions?|temple|museum|hotel|where am i|where i am)\b/i,
+        vector: textToEmbeddingVector('tourism tourist travel places to visit attractions sightseeing hotels')
     },
     {
         category: 'news',
         route: 'cached_latest',
         reason: 'freshness_news_query',
-        pattern: /\b(latest|recent|new|newest|today'?s|this week|current|breaking)\b.*\b(news|announcement|announcements|release|releases|changelog|updates?|papers?|blog posts?)\b|\b(news|announcements|releases|changelog|updates?|papers?|blog posts?)\b.*\b(latest|recent|new|newest|today'?s|this week|current|breaking)\b/i
+        pattern: /\b(latest|recent|new|newest|today'?s|this week|current|breaking)\b.*\b(news|announcement|announcements|release|releases|changelog|updates?|papers?|blog posts?)\b|\b(news|announcements|releases|changelog|updates?|papers?|blog posts?)\b.*\b(latest|recent|new|newest|today'?s|this week|current|breaking)\b/i,
+        vector: textToEmbeddingVector('latest news breaking announcements releases updates papers articles')
     }
 ]);
 
@@ -96,7 +149,6 @@ export function classifyFreeLiveIntent(message) {
     if (isExplicitSearchCommand(text)) {
         return strictRoute('live_required', 'web_search', 0.88, ['explicit_or_product_search_requires_web_sources']);
     }
-
 
     for (const pattern of UNSUPPORTED_FREE_LIVE_PATTERNS) {
         if (pattern.test(text)) {
@@ -156,10 +208,6 @@ function normalizeMessage(message) {
     return String(message || '').replace(/\s+/g, ' ').trim().slice(0, 500);
 }
 
-function isExplicitOrProductSearch(text) {
-    return isExplicitSearchCommand(text) || isImplicitCurrentTopicSearch(text);
-}
-
 function isExplicitSearchCommand(text) {
     return CATEGORY_PATTERNS[0].pattern.test(text);
 }
@@ -198,9 +246,9 @@ function isIntentStopword(token) {
 
 export const __test = {
     CATEGORY_PATTERNS,
+    LLM_PATTERNS,
     UNSUPPORTED_FREE_LIVE_PATTERNS,
-    isExplicitOrProductSearch,
-    isImplicitCurrentTopicSearch,
     isDatedChangingFactSearch,
-    scorePatterns
+    hasDateWindowSignal,
+    isImplicitCurrentTopicSearch
 };
