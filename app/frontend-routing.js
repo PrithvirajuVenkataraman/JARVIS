@@ -304,7 +304,7 @@ export function decideFrontendRoute(text, context = {}) {
             ...base,
             route: 'live_required',
             reason: entityIntent.reason || 'source_or_freshness_required',
-            requiresSources: true,
+            requiresSources: true, 
             sourcePolicy: 'required'
         };
         FRONTEND_ROUTE_CACHE.set(cacheKey, res);
