@@ -945,8 +945,8 @@ const edgeResponseCache = new EdgeSemanticLruCache();
         if (suppressedIntents.includes(String(intent || ''))) {
             return 'Return only the final assistant answer as natural text.';
         }
-        return `Reasoning instruction: Before your final answer, wrap your entire internal thinking process strictly inside <think>...</think> tags. This reasoning is hidden from the user and does not count toward your answer length.
-Write your thinking in natural conversational sentences (around 40-50 words) like normal human inner dialogue, without any subheadings, bullet points, or formal labels. Everything after </think> must be ONLY the final, polished answer for the user with zero meta-commentary.`;
+        return `Reasoning instruction: Before your final answer, think through the problem inside <think>...</think> tags.
+Write your thinking as genuine, natural inner thoughts exploring the specific query, calculating or verifying key details step-by-step, checking for nuances or constraints, and developing the solution intuitively before delivering the response. Keep it natural and focused on the actual subject and reasoning steps without robotic meta-templates, artificial checklists, or repetitive boilerplate. Everything after </think> must be ONLY the final, polished answer for the user with zero meta-commentary.`;
     }
 
     function composeStreamingPrompt(systemPrompt, contextBlock, message, lengthGuidance = '', intent = 'chat') {
