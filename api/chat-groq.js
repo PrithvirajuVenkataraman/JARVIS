@@ -461,38 +461,103 @@ async function getInstantFactHelper() {
         return isLiveRetrievalConfigured() || isPublicFactSearchConfigured();
     }
 
-    function buildCompactedContextBlock(context) {
+    function extractRollingExecutiveSummary(olderTurns) {
+        if (!Array.isArray(olderTurns) || !olderTurns.length) return null;
+        
+        const constraints = [];
+        const decisions = [];
+        const topics = [];
+
+        const constraintRegex = /\b(?:only in|must be|don't use|do not use|always|never|keep it|format as|use typescript|use python|use javascript|use rust|no external|no third-party|in english|in spanish|in french|short answer|concise|step by step|my name is|i am a)\b/i;
+        const decisionRegex = /\b(?:we will use|chosen|selected|decided|let's go with|solution is|answer is|result is|theorem|formula|algorithm|architecture|database|framework)\b/i;
+
+        for (const turn of olderTurns) {
+            const isUser = turn?.role === 'user';
+            const text = String(turn?.text || '').replace(/\s+/g, ' ').trim();
+            if (!text) continue;
+
+            if (isUser && constraintRegex.test(text)) {
+                const snippet = text.length > 140 ? text.slice(0, 137) + '...' : text;
+                if (!constraints.some(c => c.toLowerCase() === snippet.toLowerCase())) {
+                    constraints.push(snippet);
+                }
+            }
+
+            if (decisionRegex.test(text)) {
+                const snippet = text.length > 140 ? text.slice(0, 137) + '...' : text;
+                if (!decisions.some(d => d.toLowerCase() === snippet.toLowerCase())) {
+                    decisions.push(snippet);
+                }
+            }
+
+            if (isUser && text.length > 10 && text.length < 90) {
+                const topicCandidate = text.replace(/^[¿¡"'\s]+|[?"'\s]+$/g, '').replace(/^(?:can you|please|help me|tell me|what is|how to)\s+/i, '').trim();
+                if (topicCandidate && !topics.some(t => t.toLowerCase() === topicCandidate.toLowerCase())) {
+                    topics.push(topicCandidate);
+                }
+            }
+        }
+
+        return {
+            constraints: constraints.slice(-4),
+            decisions: decisions.slice(-4),
+            topics: topics.slice(-4)
+        };
+    }
+
+    function buildCompactedContextBlock(context, options = {}) {
         if (!Array.isArray(context) || !context.length) return '';
-        const MAX_VERBATIM_TURNS = 10;
+        const MAX_VERBATIM_TURNS = 8;
         if (context.length <= MAX_VERBATIM_TURNS) {
             return context
                 .map(m => `${m?.role === 'user' ? 'User' : 'Assistant'}: ${String(m?.text || '')}`)
                 .join('\n');
         }
 
-        // Older turns: condense into a dense structured digest
+        // Older turns: condense into structured rolling executive summary
         const olderTurns = context.slice(0, context.length - MAX_VERBATIM_TURNS);
         const recentTurns = context.slice(-MAX_VERBATIM_TURNS);
 
-        const digestLines = [];
-        for (const turn of olderTurns) {
-            const role = turn?.role === 'user' ? 'User' : 'Assistant';
-            const clean = String(turn?.text || '').replace(/\s+/g, ' ').trim();
-            if (clean) {
-                const truncated = clean.length > 200 ? clean.slice(0, 195) + '…' : clean;
-                digestLines.push(`- ${role}: ${truncated}`);
+        const summary = options.rollingSummary || extractRollingExecutiveSummary(olderTurns);
+        const summarySections = [];
+
+        if (summary) {
+            if (Array.isArray(summary.constraints) && summary.constraints.length > 0) {
+                summarySections.push(`- User Constraints & Preferences: ${summary.constraints.join('; ')}`);
+            }
+            if (Array.isArray(summary.decisions) && summary.decisions.length > 0) {
+                summarySections.push(`- Key Technical Decisions & Established Facts: ${summary.decisions.join('; ')}`);
+            }
+            if (Array.isArray(summary.topics) && summary.topics.length > 0) {
+                summarySections.push(`- Topics Explored: ${summary.topics.join(' -> ')}`);
             }
         }
 
-        const digestBlock = digestLines.length
-            ? `[Previous Conversation Digest (${olderTurns.length} earlier turns):\n${digestLines.join('\n')}]\n\n`
+        if (summarySections.length === 0) {
+            const digestLines = [];
+            for (const turn of olderTurns.slice(-6)) {
+                const role = turn?.role === 'user' ? 'User' : 'Assistant';
+                const clean = String(turn?.text || '').replace(/\s+/g, ' ').trim();
+                if (clean) {
+                    const truncated = clean.length > 150 ? clean.slice(0, 145) + '…' : clean;
+                    digestLines.push(`- ${role}: ${truncated}`);
+                }
+            }
+            if (digestLines.length > 0) {
+                summarySections.push(digestLines.join('\n'));
+            }
+        }
+
+        const digestBlock = summarySections.length > 0
+            ? `[Executive Conversation Context (Distilled from ${olderTurns.length} earlier turns):\n${summarySections.join('\n')}]\n\n`
             : '';
 
         const verbatimBlock = recentTurns
             .map(m => `${m?.role === 'user' ? 'User' : 'Assistant'}: ${String(m?.text || '')}`)
             .join('\n');
 
-        return `${digestBlock}${verbatimBlock}`;
+        const combined = `${digestBlock}${verbatimBlock}`;
+        return combined.length > 6000 ? combined.slice(-6000) : combined;
     }
 
 /* ==========================================================================
@@ -582,7 +647,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             }
             const { message, context, preferences, intent, grounding, images } = request.value;
             const systemPrompt = buildServerSystemPrompt(preferences);
-            const contextBlock = buildCompactedContextBlock(context);
+            const contextBlock = buildCompactedContextBlock(context, { rollingSummary: req.body?.rollingSummary || null });
             const effectiveMessage = buildGroundedUserMessage(message, intent, grounding);
             const isAttachmentGrounding = isAttachmentGroundingPayload(grounding, intent);
             const clientRoutingProbe = String(req.body?.routingMessage || req.body?.displayUserMessage || '').trim();
