@@ -4,10 +4,14 @@ import {
     isTrustedDomain,
     extractEntityTarget,
     classifyTemporalStatus,
-    validateEntityResponse
+    validateEntityResponse,
+    computeEvidenceGroundingScore,
+    verifyClaimAttributions,
+    textToEmbeddingVector,
+    vectorCosineSimilarity
 } from '../api/_lib/entity-verifier.js';
 
-console.log('--- Testing Entity Verifier ---');
+console.log('--- Testing Entity Verifier & Grounding Engine ---');
 
 // 1. Hostname & Domain Checks
 assert.equal(extractHostname('https://en.wikipedia.org/wiki/Main_Page'), 'en.wikipedia.org');
@@ -74,5 +78,35 @@ assert.equal(validation.verifiedSourceData.role, 'Chief Minister');
 assert.equal(validation.verifiedSourceData.jurisdiction, 'Region Alpha');
 assert.equal(validation.verifiedSourceData.temporalAnchorYear, 2026);
 assert.ok(validation.verifiedSourceData.sources.length > 0);
+
+// 5. P1: Evidence Gate & Vector Grounding Score
+const query = 'Who is the Chief Minister of Region Alpha?';
+const relevantPassages = [
+    'Alex Rivera was elected Chief Minister of Region Alpha in 2021 and remains the incumbent.',
+    'Government gazette confirms Alex Rivera serves as the current executive head of Region Alpha.'
+];
+const groundingRes = computeEvidenceGroundingScore(query, relevantPassages);
+assert.equal(groundingRes.isGrounded, true);
+assert.ok(groundingRes.score >= 0.35, 'Relevant passages must produce high grounding score');
+
+const irrelevantPassages = [
+    'The gravitational constant is an empirical physical constant used in gravitational physics.',
+    'Photosynthesis is a biological process used by plants to convert light energy into chemical energy.'
+];
+const lowGroundingRes = computeEvidenceGroundingScore(query, irrelevantPassages);
+assert.equal(lowGroundingRes.isGrounded, false);
+assert.equal(lowGroundingRes.confidence, 'low');
+
+// 6. P3: Claim Attribution & Proposition Grounding Verifier
+const generatedText = 'Alex Rivera is the current Chief Minister of Region Alpha. He assumed office in May 2021.';
+const attribution = verifyClaimAttributions(generatedText, relevantPassages);
+assert.equal(attribution.verified, true);
+assert.ok(attribution.attributionRatio >= 0.70);
+assert.equal(attribution.ungroundedPropositions.length, 0);
+
+const hallucinatedText = 'Alex Rivera is an Olympic swimming champion who won gold in Paris 2024. He also directed a Hollywood film.';
+const failedAttribution = verifyClaimAttributions(hallucinatedText, relevantPassages);
+assert.equal(failedAttribution.verified, false);
+assert.ok(failedAttribution.ungroundedPropositions.length > 0);
 
 console.log('entity-verifier-tests-ok');
