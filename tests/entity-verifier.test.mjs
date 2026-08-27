@@ -97,7 +97,7 @@ assert.equal(disjointScore.isGrounded, false);
 // ============================================================================
 const nn = new FeedForwardNeuralNetwork(512, 64, 4, 777);
 const inputVec = textToEmbeddingVector(`neural test sequence ${randStr(333, 10)}`);
-const targetClass = 0;
+const targetClass = 0; 
 
 const initialP = nn.forward(inputVec).probabilities[targetClass];
 for (let step = 0; step < 25; step++) {
