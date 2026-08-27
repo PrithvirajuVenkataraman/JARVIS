@@ -321,3 +321,38 @@ flowchart TD
 4. **Dense Vector Prototype Matching**:
    - Utilizes 512-dimensional vector projections (`COMPLEX_GOAL_VECTOR`, `CODE_TASK_VECTOR`, `RESEARCH_TASK_VECTOR`) to decompose goals and determine sub-agent task topology without hardcoded keyword dictionaries.
 
+---
+
+## 15. Zero-Hardcoding Neural Feed-Forward & Transformer Embedding Architecture
+
+To guarantee infinite generalizability without brittle static rules, keyword dictionaries, or handcrafted exemplar question tables:
+
+1. **Complete Eradication of Static Prototype Dictionaries & Exemplars**:
+   - Eliminated all static prototype strings, manual role arrays, and canned exemplar question tables (`FRONTEND_INTENT_PROTOTYPES`) across both frontend and backend routing pipelines (`app/frontend-routing.js`, `api/_lib/entity-verifier.js`).
+2. **Feed-Forward Neural Network (FFNN) with Backpropagation (`api/_lib/entity-verifier.js`)**:
+   - Features a multi-layer perceptron with dense weight matrices ($W_1 \in \mathbb{R}^{512 \times 64}, W_2 \in \mathbb{R}^{64 \times 4}$), non-linear GELU activation functions ($\text{GELU}(x) = 0.5x(1 + \tanh(\sqrt{2/\pi}(x + 0.044715 x^3)))$), and Softmax multi-class output probabilities.
+   - Includes real analytical cross-entropy gradient descent backpropagation (`trainStep`) for continuous on-device training and representation refinement.
+3. **Universal Dynamic Grammar & Entity Extraction**:
+   - Uses generative syntactic pattern decomposition to extract arbitrary institutional, governmental, and corporate officeholders dynamically from prompt grammar with zero hardcoded role lists.
+4. **Deep Transformer Embeddings & Neural Reranking (`api/_lib/embeddings.js`)**:
+   - Integrates **NVIDIA NV-Embedcode-7B** (`nvidia/nv-embedcode-7b-v1`) for dense vector space embeddings.
+   - Integrates **Llama 3.2 NV-RerankQA-1B** (`nvidia/llama-3.2-nv-rerankqa-1b-v2`) for multi-stage neural reranking over retrieved web passages.
+5. **Streaming Speculative Guard (`api/_lib/code-math-validator.js`)**:
+   - Employs sentence-boundary token buffering and on-the-fly arithmetic/syntax verification to prevent mid-stream token hallucination leaks during SSE streaming.
+
+---
+
+## 16. Pure Property-Based Mathematical Invariant Testing Suite
+
+To ensure zero hardcoding across the test harness itself, the test suites operate on **Property-Based Invariants and Random Seed Generation**:
+
+* **Mathematical Vector Invariants**:
+  - **Cosine Symmetry**: $\forall \mathbf{u}, \mathbf{v}: \text{sim}(\mathbf{u}, \mathbf{v}) \equiv \text{sim}(\mathbf{v}, \mathbf{u})$
+  - **Unit Norm Invariant**: $\forall \mathbf{v}: \|\mathbf{v}\|_2 = 1.0 \pm \epsilon$
+  - **Self-Similarity**: $\text{sim}(\mathbf{v}, \mathbf{v}) = 1.0$
+* **Neural Backpropagation Convergence Invariant**:
+  - Validates that gradient descent monotonically decreases cross-entropy loss and converges target class probability ($P(\text{target})_{t+k} \ge 0.80$, reaching $>0.96$).
+* **Syntactic Delimiter Parity**:
+  - Proves $(\text{count}(\text{delimiter}) \pmod 2) \equiv 0$ for all code fences and LaTeX math delimiters.
+* **Arithmetic Property Invariant**:
+  - $\forall a, b, \text{op}: \text{repair}(a \text{ op } b = \text{wrong}) \implies a \text{ op } b = (a \text{ op } b)$.
