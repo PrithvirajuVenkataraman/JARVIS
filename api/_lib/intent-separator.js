@@ -1,21 +1,5 @@
-/**
- * @file api/_lib/intent-separator.js
- * @description Upfront Query Intent Separator that categorizes queries into:
- * 1. static_reasoning (History, Science, Space, Tech, AI, CS, Social Science, Coding, Math -> Direct Fast LLM)
- * 2. temporal_fact (Current political leaders, officeholders, live facts -> Instant Fact Layer)
- * 3. domain_specific (Weather, Crypto, Markets -> Targeted JSON APIs)
- * 4. explicit_search (User explicitly asked to search or find articles)
- */
-
 import { extractEntityTarget } from './entity-verifier.js';
 
-/**
- * Determines whether a query is asking for stable general knowledge.
- *
- * @param {string} rawQuery 
- * @param {object} [context={}]
- * @returns {boolean}
- */
 export function isStableGeographyOrGeneralFactQuery(rawQuery = '', context = {}) {
     const query = String(rawQuery || '').trim();
     if (!query) return false;
@@ -23,19 +7,6 @@ export function isStableGeographyOrGeneralFactQuery(rawQuery = '', context = {})
     return !intent.isLiveRequired;
 }
 
-/**
- * Universal entity intent classifier.
- *
- * @param {string} rawQuery 
- * @param {object} [context={}]
- * @returns {{
- *   isLiveRequired: boolean,
- *   isStableKnowledge: boolean,
- *   entityTarget: { role: string, jurisdiction: string } | null,
- *   category: string,
- *   reason: string
- * }}
- */
 export function classifyUniversalEntityIntent(rawQuery = '', context = {}) {
     const query = String(rawQuery || '').trim();
     if (!query) {
@@ -60,8 +31,7 @@ export function classifyUniversalEntityIntent(rawQuery = '', context = {}) {
 
     const lower = query.toLowerCase();
 
-    // 1. Explicit search requests
-    if (context.explicitWeb || context.webMode === 'on' || /\b(?:search\s+(?:for|the\s+web|online|google)|look\s+up\s+online|google\s+for|with\s+sources?|source\s+links?)\b/i.test(lower)) {
+    if (context.explicitWeb || context.webMode === 'on' || /\b(?:search\s+(?:for|the\s+web|online)|look\s+up\s+online|google\s+for|with\s+sources?)\b/i.test(lower)) {
         return {
             isLiveRequired: true,
             isStableKnowledge: false,
@@ -71,9 +41,8 @@ export function classifyUniversalEntityIntent(rawQuery = '', context = {}) {
         };
     }
 
-    // 2. Actionable location / place / freshness
-    if (/\b(?:near\s+me|nearby|open\s+now|directions\s+to|route\s+to|visiting\s+hours|ticket\s+price|hotels?\s+near|restaurants?\s+near|museum\s+near|places\s+to\s+visit|things\s+to\s+do)\b/i.test(lower) ||
-        /\b(?:what'?s\s+new|new\s+(?:update|updates|release|version|announcement|news|development|features?))\b/i.test(lower)) {
+    if (/\b(?:near|nearby|open\s+now|directions|places\s+to\s+visit|things\s+to\s+do)\b/i.test(lower) ||
+        /\b(?:what'?s\s+new|new\s+(?:feature|release|update))\b/i.test(lower)) {
         return {
             isLiveRequired: true,
             isStableKnowledge: false,
@@ -83,8 +52,7 @@ export function classifyUniversalEntityIntent(rawQuery = '', context = {}) {
         };
     }
 
-    // 3. Live domains (weather, live prices, news, sports scores)
-    if (/\b(?:weather|forecast|temperature|stock|bitcoin|crypto|ethereum|eth|solana|(?:price\s+of\s+)?(?:gold|silver|crude)\s*(?:price|rate)|price\s+of|market\s+cap|live\s+score|ipl|news|earthquake|latest\s+update)\b/i.test(lower)) {
+    if (/\b(?:weather|forecast|stock|crypto|bitcoin|ethereum|price|score|news)\b/i.test(lower)) {
         return {
             isLiveRequired: true,
             isStableKnowledge: false,
@@ -94,7 +62,6 @@ export function classifyUniversalEntityIntent(rawQuery = '', context = {}) {
         };
     }
 
-    // 4. Mutable political leadership & civic officeholders
     const isHistorical = /\b(?:first|former|past|in\s+\d{4}|during\s+\d{4}|who\s+was|history)\b/i.test(lower);
     const entityTarget = extractEntityTarget(query);
     if (entityTarget && !isHistorical) {
@@ -107,21 +74,6 @@ export function classifyUniversalEntityIntent(rawQuery = '', context = {}) {
         };
     }
 
-    if (
-        !isHistorical &&
-        (/\b(?:prime\s+minister|chief\s+minister|governor|pm|cm|president|chancellor|minister|mayor|ceo|chairman|leader)\b/i.test(lower) ||
-        /\b(?:who\s+is\s+(?:the\s+)?(?:cm|pm)\s+of)\b/i.test(lower))
-    ) {
-        return {
-            isLiveRequired: true,
-            isStableKnowledge: false,
-            entityTarget: entityTarget || extractEntityTarget(query),
-            category: 'political_leadership',
-            reason: 'mutable_officeholder'
-        };
-    }
-
-    // 5. Default: Stable encyclopedic knowledge & direct reasoning
     return {
         isLiveRequired: false,
         isStableKnowledge: true,
@@ -131,17 +83,6 @@ export function classifyUniversalEntityIntent(rawQuery = '', context = {}) {
     };
 }
 
-/**
- * Classifies a user query into clean intent categories.
- * @param {string} rawQuery 
- * @param {object} [context={}]
- * @returns {{
- *   type: 'static_reasoning' | 'temporal_fact' | 'domain_specific' | 'explicit_search',
- *   category: string,
- *   requiresLiveGrounding: boolean,
- *   entityTarget?: { role: string, jurisdiction: string } | null
- * }}
- */
 export function classifyQueryIntent(rawQuery = '', context = {}) {
     const query = String(rawQuery || '').trim();
     if (!query) {
@@ -152,10 +93,23 @@ export function classifyQueryIntent(rawQuery = '', context = {}) {
         };
     }
 
-    const lower = query.toLowerCase();
+    const universal = classifyUniversalEntityIntent(query, context);
+    if (!universal.isLiveRequired) {
+        const lower = query.toLowerCase();
+        let cat = universal.category || 'general_reasoning';
+        if (/\b(?:function|def|class|write\s+a\s+python|javascript|c\+\+|coding|algorithm|quicksort)\b/i.test(lower)) {
+            cat = 'coding';
+        } else if (/\b(?:calculate|compute|solve|integral|derivative|equation|matrix)\b/i.test(lower) || /^\s*[\d\s+\-*/^().=xXyYzZ]+\s*$/.test(query)) {
+            cat = 'mathematics';
+        }
+        return {
+            type: 'static_reasoning',
+            category: cat,
+            requiresLiveGrounding: false
+        };
+    }
 
-    // 1. Explicit search
-    if (context.explicitWeb || context.webMode === 'on' || /\b(?:search\s+(?:for|the\s+web|online|google)|look\s+up\s+online|google\s+for|with\s+sources?|source\s+links?)\b/i.test(lower)) {
+    if (universal.category === 'explicit_search') {
         return {
             type: 'explicit_search',
             category: 'web_search',
@@ -163,87 +117,32 @@ export function classifyQueryIntent(rawQuery = '', context = {}) {
         };
     }
 
-    // 2. Domain Specific: Weather
-    if (/\b(?:weather|forecast|temperature)\b/i.test(lower)) {
-        return {
-            type: 'domain_specific',
-            category: 'weather',
-            requiresLiveGrounding: true
-        };
-    }
-
-    // 3. Domain Specific: Finance & Crypto
-    if (/\b(?:stock\s+price|price\s+of\s+(?:bitcoin|btc|eth|crypto|gold|silver)|bitcoin|crypto)\b/i.test(lower)) {
-        return {
-            type: 'domain_specific',
-            category: 'finance_crypto',
-            requiresLiveGrounding: true
-        };
-    }
-
-    // 4. Temporal Political & Civic Leadership
-    const isHistorical = /\b(?:first|former|past|in\s+\d{4}|during\s+\d{4}|who\s+was|history)\b/i.test(lower);
-    const entityTarget = extractEntityTarget(query);
-    if (entityTarget && !isHistorical) {
+    if (universal.category === 'political_leadership') {
         return {
             type: 'temporal_fact',
             category: 'political_leadership',
             requiresLiveGrounding: true,
-            entityTarget
+            entityTarget: universal.entityTarget
         };
     }
 
-    if (
-        !isHistorical &&
-        (/\b(?:current|latest|present|today|now)\s+(?:governor|pm|cm|president|chancellor|minister|mayor|ceo|chairman|leader)\b/i.test(lower) ||
-        /\b(?:who\s+is\s+(?:the\s+)?(?:current|present|latest)?\s*(?:chief\s+minister|prime\s+minister|president|governor|mayor|chancellor|ceo|cm|pm))\b/i.test(lower) ||
-        /\b(?:who\s+is\s+(?:the\s+)?(?:cm|pm)\s+of)\b/i.test(lower))
-    ) {
+    if (universal.category === 'live_domain') {
+        const lower = query.toLowerCase();
+        const cat = /\b(?:weather|forecast|temperature)\b/i.test(lower) ? 'weather' : 'finance_crypto';
         return {
-            type: 'temporal_fact',
-            category: 'political_leadership',
-            requiresLiveGrounding: true,
-            entityTarget: entityTarget || extractEntityTarget(query)
-        };
-    }
-
-    // 5. Coding & Mathematics
-    if (/\b(?:function|def|class|write\s+a\s+python|javascript|c\+\+|coding|algorithm|quicksort)\b/i.test(lower)) {
-        return {
-            type: 'static_reasoning',
-            category: 'coding',
-            requiresLiveGrounding: false
-        };
-    }
-    if (/\b(?:calculate|compute|solve|integral|derivative|equation|matrix)\b/i.test(lower) || /^\s*[\d\s+\-*/^().=xXyYzZ]+\s*$/.test(query)) {
-        return {
-            type: 'static_reasoning',
-            category: 'mathematics',
-            requiresLiveGrounding: false
+            type: 'domain_specific',
+            category: cat,
+            requiresLiveGrounding: true
         };
     }
 
     return {
-        type: 'static_reasoning',
-        category: 'general_reasoning',
-        requiresLiveGrounding: false
+        type: 'explicit_search',
+        category: universal.category || 'live_required',
+        requiresLiveGrounding: true
     };
 }
 
-/**
- * Semantic vector-based query intent classifier.
- * Uses embedding cosine similarity against intent prototypes.
- *
- * @param {string} rawQuery
- * @param {object} [options={}]
- * @returns {Promise<{
- *   type: string,
- *   category: string,
- *   requiresLiveGrounding: boolean,
- *   confidence: number,
- *   method: 'semantic_embedding' | 'structural'
- * }>}
- */
 export async function classifyQueryIntentSemantic(rawQuery = '', options = {}) {
     const query = String(rawQuery || '').trim();
     if (!query) {
@@ -294,9 +193,7 @@ export async function classifyQueryIntentSemantic(rawQuery = '', options = {}) {
                 };
             }
         }
-    } catch (_) {
-        // Fall back gracefully to standard structural classification
-    }
+    } catch (_) {}
 
     const fallback = classifyQueryIntent(query);
     return {
