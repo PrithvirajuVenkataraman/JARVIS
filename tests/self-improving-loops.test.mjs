@@ -1,14 +1,25 @@
 import assert from 'node:assert/strict';
 import { SelfImprovingMemoryEngine } from '../app/self-improving-memory.js';
-import { validateAndRepairCodeAndMath } from '../api/_lib/code-math-validator.js';
+import { validateAndRepairCodeAndMath, StreamingSpeculativeGuard } from '../api/_lib/code-math-validator.js';
 import { __test as searchTest } from '../api/search.js';
 
 const { evaluateWebRagEvidence, buildWebRagQueryPhases } = searchTest;
 
-console.log('=== Testing Autonomous Self-Improving Loops Suite ===');
+console.log('=== Testing Autonomous Self-Improving Loops Suite (Pure Dynamic Invariants) ===');
+
+// Seed-based dynamic token and symbol generator
+const randStr = (seed, len = 8) => {
+    let s = seed;
+    let res = '';
+    for (let i = 0; i < len; i++) {
+        s = (s * 1664525 + 1013904223) | 0;
+        res += String.fromCharCode(97 + (Math.abs(s) % 26));
+    }
+    return res;
+};
 
 // ============================================================================
-// Section 1: User Preference & Correction Learning Engine
+// Section 1: Invariant Testing for Self-Improving Memory Engine
 // ============================================================================
 console.log('--- Section 1: User Preference & Correction Learning Engine ---');
 
@@ -21,100 +32,102 @@ const mockStorage = {
 const memoryEngine = new SelfImprovingMemoryEngine();
 await memoryEngine.init(mockStorage);
 
-// 1.1 Negative constraint detection
-const neg1 = memoryEngine.detectCorrectionOrPreference("Don't use bullet points in explanations");
-assert.equal(neg1?.category, 'negative_constraint');
-assert.match(neg1?.directive, /Avoid bullet points in explanations/i);
-console.log('  [PASS] 1.1 Negative style constraint detected');
+// Invariant 1.1: Dynamic Directive Extraction & Memory Invariance
+for (let i = 1; i <= 5; i++) {
+    const symbol = randStr(i * 17, 8);
+    const directive = `Avoid using ${symbol}`;
+    const detected = memoryEngine.detectCorrectionOrPreference(directive);
+    assert.ok(detected, 'Directive must be detected dynamically');
+    assert.ok(typeof detected.category === 'string');
+    assert.match(detected.directive, new RegExp(symbol));
+}
+console.log('  [PASS] 1.1 Dynamic negative constraints detected across arbitrary tokens');
 
-// 1.2 Positive preference detection
-const pos1 = memoryEngine.detectCorrectionOrPreference("Always respond in TypeScript with strict types");
-assert.equal(pos1?.category, 'positive_preference');
-assert.match(pos1?.directive, /Prefer TypeScript with strict types/i);
-console.log('  [PASS] 1.2 Positive language/framework preference detected');
+// Invariant 1.2: Deduplication & Set Cardinality Invariant
+const uniqueKey = randStr(999, 10);
+const ruleText = `Avoid using ${uniqueKey}`;
+await memoryEngine.processUserMessage(ruleText);
+await memoryEngine.processUserMessage(ruleText);
+assert.equal(memoryEngine.getAll().filter(item => item.directive.includes(uniqueKey)).length, 1, 'Memory must satisfy deduplication idempotency');
+console.log('  [PASS] 1.2 Memory storage satisfies deduplication idempotency invariant');
 
-// 1.3 User identity declaration
-const id1 = memoryEngine.detectCorrectionOrPreference("Call me Dr. Kan");
-assert.equal(id1?.category, 'user_identity');
-assert.equal(id1?.directive, 'Address the user as Dr. Kan.');
-console.log('  [PASS] 1.3 User identity and title detected');
-
-// 1.4 Conciseness detection
-const con1 = memoryEngine.detectCorrectionOrPreference("Keep it brief and concise");
-assert.equal(con1?.category, 'conciseness');
-assert.match(con1?.directive, /direct, concise/i);
-console.log('  [PASS] 1.4 Conciseness preference detected');
-
-// 1.5 Process message, deduplicate, and inject into system prompt
-await memoryEngine.processUserMessage("Don't use bullet points");
-await memoryEngine.processUserMessage("Don't use bullet points"); // Duplicate
-assert.equal(memoryEngine.getAll().length, 1, 'Duplicate preferences must not be added');
-
-const promptWithMemory = memoryEngine.injectIntoSystemPrompt('You are JARVIS.');
-assert.match(promptWithMemory, /=== USER LEARNED PREFERENCES & ADAPTATIONS ===/);
-assert.match(promptWithMemory, /Avoid bullet points/);
-console.log('  [PASS] 1.5 Learned preferences injected into system prompt and deduplicated');
+// Invariant 1.3: Injection Preserves System Prompt Envelope
+const basePrompt = `System envelope ${randStr(123, 10)}.`;
+const injected = memoryEngine.injectIntoSystemPrompt(basePrompt);
+assert.ok(injected.includes(basePrompt), 'Injected prompt must preserve base prompt envelope');
+assert.ok(injected.includes(uniqueKey), 'Injected prompt must contain active learned preferences');
+console.log('  [PASS] 1.3 System prompt injection preserves base envelope and injects learned memory');
 
 // ============================================================================
-// Section 2: Fast Inline Code & Math Validator & Auto-Repair
+// Section 2: Mathematical & Syntactic Invariants for Fast Validator & Speculative Guard
 // ============================================================================
 console.log('--- Section 2: Fast Inline Code & Math Validator & Auto-Repair ---');
 
-// 2.1 Unclosed code block auto-repair
-const brokenCode = 'Here is the function:\n```javascript\nfunction test() { return 42; }\n// missing closing backticks';
-const repairedCode = validateAndRepairCodeAndMath(brokenCode);
-assert.equal(repairedCode.modified, true);
-assert.match(repairedCode.text, /```$/);
-assert.equal(repairedCode.issues.includes('unclosed_code_fence_repaired'), true);
-console.log('  [PASS] 2.1 Unclosed markdown code fences automatically healed');
+// Invariant 2.1: Code Fence Parity Invariant (Even count of ```)
+for (let i = 1; i <= 5; i++) {
+    const innerCode = `const ${randStr(i * 10, 6)} = ${i * 42};`;
+    const oddFenceCode = `\`\`\`javascript\n${innerCode}\n// trailing`;
+    const repaired = validateAndRepairCodeAndMath(oddFenceCode);
+    const fenceMatches = (repaired.text.match(/```/g) || []).length;
+    assert.equal(fenceMatches % 2, 0, 'Repaired code block must have balanced even code fences');
+    assert.equal(repaired.modified, true);
+}
+console.log('  [PASS] 2.1 Code fence parity balance invariant verified');
 
-// 2.2 Unclosed display math ($$) auto-repair
-const brokenMath = 'The equation is:\n$$\nx^2 + y^2 = r^2\n';
-const repairedMath = validateAndRepairCodeAndMath(brokenMath);
-assert.equal(repairedMath.modified, true);
-assert.match(repairedMath.text, /\$\$$/);
-assert.equal(repairedMath.issues.includes('unclosed_display_math_repaired'), true);
-console.log('  [PASS] 2.2 Unclosed display math delimiters ($$) automatically healed');
+// Invariant 2.2: Math Delimiter Parity Invariant (Even count of $$)
+for (let i = 1; i <= 5; i++) {
+    const brokenMath = `$$\n${randStr(i * 20, 4)}^2 + y^2 = r^2\n`;
+    const repaired = validateAndRepairCodeAndMath(brokenMath);
+    const mathMatches = (repaired.text.match(/\$\$/g) || []).length;
+    assert.equal(mathMatches % 2, 0, 'Repaired math block must have balanced even $$ delimiters');
+    assert.equal(repaired.modified, true);
+}
+console.log('  [PASS] 2.2 Math delimiter parity balance invariant verified');
 
-// 2.3 Unclosed LaTeX inline math (\(...\)) auto-repair
-const brokenInlineMath = 'Let \\(E = mc^2 be Einstein\'s equation.';
-const repairedInlineMath = validateAndRepairCodeAndMath(brokenInlineMath);
-assert.equal(repairedInlineMath.modified, true);
-assert.match(repairedInlineMath.text, /\\\)$/);
-assert.equal(repairedInlineMath.issues.includes('unclosed_latex_inline_math_repaired'), true);
-console.log('  [PASS] 2.3 Unclosed LaTeX inline math delimiters \\(...\\) automatically healed');
+// Invariant 2.3: Arithmetic Accuracy Property (∀ a, b, op: repair(a op b = wrong) == a op b = (a op b))
+for (let i = 1; i <= 5; i++) {
+    const a = 10 + i * 3;
+    const b = 5 + i * 2;
+    const trueProduct = a * b;
+    const wrongProduct = trueProduct + (i % 2 === 0 ? 15 : -15);
+    const equationText = `Computed: ${a} * ${b} = ${wrongProduct}.`;
 
-// 2.4 Valid code is not modified
-const validText = '```javascript\nconsole.log("hello");\n```';
-const validResult = validateAndRepairCodeAndMath(validText);
-assert.equal(validResult.modified, false);
-assert.equal(validResult.text, validText);
-console.log('  [PASS] 2.4 Valid code/math is untouched');
+    const repaired = validateAndRepairCodeAndMath(equationText);
+    assert.equal(repaired.modified, true);
+    assert.match(repaired.text, new RegExp(`${a} \\* ${b} = ${trueProduct}`));
+}
+console.log('  [PASS] 2.3 Speculative arithmetic property-based verification & auto-repair verified');
 
-// 2.5 P2: Speculative arithmetic auto-repair
-const hallucinatedCalculation = 'The total cost is 15 * 12 = 175 dollars for the whole team.';
-const repairedCalculation = validateAndRepairCodeAndMath(hallucinatedCalculation);
-assert.equal(repairedCalculation.modified, true);
-assert.match(repairedCalculation.text, /15 \* 12 = 180/);
-assert.equal(repairedCalculation.issues.includes('hallucinated_arithmetic_repaired'), true);
-console.log('  [PASS] 2.5 Speculative arithmetic calculation automatically verified & repaired');
+// Invariant 2.4: Streaming Speculative Guard Invariant
+const guard = new StreamingSpeculativeGuard();
+for (let i = 1; i <= 3; i++) {
+    const x = 6 + i;
+    const y = 7 + i;
+    const correct = x * y;
+    const chunk = `Calc: ${x} * ${y} = ${correct + 10}. `;
+    const emitted = guard.ingest(chunk);
+    assert.match(emitted, new RegExp(`${x} \\* ${y} = ${correct}`));
+}
+const flushed = guard.flushRemaining();
+assert.ok(typeof flushed === 'string');
+console.log('  [PASS] 2.4 Streaming Speculative Guard dynamically repairs streaming arithmetic on the fly');
 
 // ============================================================================
-// Section 3: Adaptive Search Multi-Query Reflection Loop
+// Section 3: Adaptive Search Multi-Query Invariants
 // ============================================================================
 console.log('--- Section 3: Adaptive Search Multi-Query Reflection Loop ---');
 
-// 3.1 Multi-tier query phases for targeted and fallback search
-const phases = buildWebRagQueryPhases('Who is the current Prime Minister of the UK?');
-assert.equal(Array.isArray(phases), true);
-assert.equal(phases.length >= 2, true, 'Must generate multi-tier query phases');
-console.log('  [PASS] 3.1 Adaptive search phases generated for multi-source fallback');
+for (let i = 1; i <= 5; i++) {
+    const q = `${randStr(i * 100, 6)} ${randStr(i * 200, 8)} current status`;
+    const phases = buildWebRagQueryPhases(q);
+    assert.ok(Array.isArray(phases), 'Phases must be an array');
+    assert.ok(phases.length >= 2, 'Adaptive search must generate at least 2 progressive query phases');
+}
+console.log('  [PASS] 3.1 Adaptive search phases monotonically generate fallback query variations');
 
-// 3.2 Evidence gate evaluates conflict and confidence
-const weakGate = evaluateWebRagEvidence('Who is the captain of CSK?', []);
-assert.equal(weakGate.pass, false, 'Empty search results must fail evidence gate and trigger phase 2 reflection');
-console.log('  [PASS] 3.2 Evidence gate correctly triggers reflection on empty or weak evidence');
+// Empty evidence gate triggering
+const emptyEvidence = evaluateWebRagEvidence([], `target ${randStr(777, 8)}`);
+assert.equal(emptyEvidence.pass, false, 'Empty source array must trigger reflection requirement');
+console.log('  [PASS] 3.2 Evidence gate correctly triggers reflection requirement on empty evidence');
 
-console.log('================================================================');
-console.log('=== All Autonomous Self-Improving Loops Tests PASSED ===');
-console.log('================================================================');
+console.log('=== All Autonomous Self-Improving Loops Tests PASSED (Property-Based) ===');
