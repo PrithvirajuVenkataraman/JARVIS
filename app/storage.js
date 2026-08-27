@@ -40,31 +40,168 @@ export function vectorCosineSimilarity(a, b) {
     return dot;
 }
 
+/**
+ * Approximate Nearest Neighbor (ANN) Partitioned Inverted File (IVF) Vector Index.
+ * Clusters dense 512-dimensional vectors into K centroids and prunes searches to the top-N closest candidate buckets.
+ */
+export class PartitionedIVFIndex {
+    constructor(options = {}) {
+        this.numClusters = Math.max(2, Math.min(64, Number(options.numClusters) || 8));
+        this.nProbe = Math.max(1, Math.min(this.numClusters, Number(options.nProbe) || 2));
+        this.dim = Number(options.dim) || 512;
+        this.centroids = [];
+        this.buckets = [];
+        this.totalItems = 0;
+        this.itemsSinceRebalance = 0;
+        this._initClusters();
+    }
+
+    _initClusters() {
+        this.centroids = [];
+        this.buckets = [];
+        for (let i = 0; i < this.numClusters; i++) {
+            const v = new Float32Array(this.dim);
+            let norm = 0;
+            for (let j = 0; j < this.dim; j++) {
+                const seed = (i + 1) * 31 + (j + 1) * 17;
+                v[j] = Math.sin(seed);
+                norm += v[j] * v[j];
+            }
+            norm = Math.sqrt(norm);
+            if (norm > 0) {
+                for (let j = 0; j < this.dim; j++) v[j] /= norm;
+            }
+            this.centroids.push(v);
+            this.buckets.push([]);
+        }
+    }
+
+    add(item, text) {
+        const textStr = String(text || '').trim();
+        const vector = textToEmbeddingVector(textStr, this.dim);
+        const clusterIdx = this._findNearestCentroid(vector);
+        const entry = { item, vector, text: textStr, id: `entry_${this.totalItems++}` };
+        this.buckets[clusterIdx].push(entry);
+        this.itemsSinceRebalance++;
+        if (this.itemsSinceRebalance >= 50 && this.totalItems >= this.numClusters * 3) {
+            this.rebalance();
+        }
+        return entry;
+    }
+
+    _findNearestCentroid(vector) {
+        let bestIdx = 0;
+        let bestSim = -Infinity;
+        for (let i = 0; i < this.centroids.length; i++) {
+            const sim = vectorCosineSimilarity(vector, this.centroids[i]);
+            if (sim > bestSim) {
+                bestSim = sim;
+                bestIdx = i;
+            }
+        }
+        return bestIdx;
+    }
+
+    _findTopCentroids(vector, nProbe = this.nProbe) {
+        const scores = this.centroids.map((c, idx) => ({
+            idx,
+            score: vectorCosineSimilarity(vector, c)
+        }));
+        scores.sort((a, b) => b.score - a.score);
+        return scores.slice(0, nProbe).map(s => s.idx);
+    }
+
+    search(query, topK = 10, threshold = 0.15) {
+        const q = String(query || '').trim();
+        if (!q || this.totalItems === 0) return [];
+        const queryVec = textToEmbeddingVector(q, this.dim);
+
+        // ANN pruning: query top-N closest cluster centroids
+        const probeIndices = this._findTopCentroids(queryVec, this.nProbe);
+        const candidates = [];
+
+        for (const cIdx of probeIndices) {
+            const bucket = this.buckets[cIdx] || [];
+            for (const entry of bucket) {
+                const sim = vectorCosineSimilarity(queryVec, entry.vector);
+                const subMatch = entry.text.toLowerCase().includes(q.toLowerCase());
+                const finalScore = subMatch ? Math.max(sim, 0.75) : sim;
+                if (finalScore >= threshold) {
+                    candidates.push({ item: entry.item, score: finalScore, text: entry.text });
+                }
+            }
+        }
+
+        candidates.sort((a, b) => b.score - a.score);
+        return candidates.slice(0, topK);
+    }
+
+    rebalance() {
+        const allEntries = this.buckets.flat();
+        if (allEntries.length < this.numClusters) return;
+
+        const newCentroids = [];
+        for (let k = 0; k < this.numClusters; k++) {
+            const seedEntry = allEntries[Math.floor((k * allEntries.length) / this.numClusters)];
+            newCentroids.push(new Float32Array(seedEntry.vector));
+        }
+
+        const newBuckets = Array.from({ length: this.numClusters }, () => []);
+
+        for (const entry of allEntries) {
+            let bestIdx = 0;
+            let bestSim = -Infinity;
+            for (let k = 0; k < newCentroids.length; k++) {
+                const sim = vectorCosineSimilarity(entry.vector, newCentroids[k]);
+                if (sim > bestSim) {
+                    bestSim = sim;
+                    bestIdx = k;
+                }
+            }
+            newBuckets[bestIdx].push(entry);
+        }
+
+        for (let k = 0; k < this.numClusters; k++) {
+            const bucket = newBuckets[k];
+            if (bucket.length > 0) {
+                const mean = new Float32Array(this.dim);
+                for (const e of bucket) {
+                    for (let j = 0; j < this.dim; j++) mean[j] += e.vector[j];
+                }
+                let norm = 0;
+                for (let j = 0; j < this.dim; j++) norm += mean[j] * mean[j];
+                norm = Math.sqrt(norm);
+                if (norm > 0) {
+                    for (let j = 0; j < this.dim; j++) mean[j] /= norm;
+                    newCentroids[k] = mean;
+                }
+            }
+        }
+
+        this.centroids = newCentroids;
+        this.buckets = newBuckets;
+        this.itemsSinceRebalance = 0;
+    }
+}
+
 export function semanticSearchConversations(conversations = [], query = '', topK = 10, threshold = 0.15) {
     const list = Array.isArray(conversations) ? conversations : [];
     const q = String(query || '').trim();
     if (!q || !list.length) return list;
 
-    const queryVec = textToEmbeddingVector(q);
-    return list
-        .map(conv => {
-            const title = String(conv?.title || '');
-            const msgs = Array.isArray(conv?.messages)
-                ? conv.messages.map(m => m?.text || m?.content || '').join(' ')
-                : '';
-            const fullText = `${title} ${msgs}`.trim();
-            const docVec = textToEmbeddingVector(fullText);
-            const score = vectorCosineSimilarity(queryVec, docVec);
-            const exactSubMatch = fullText.toLowerCase().includes(q.toLowerCase());
-            return {
-                conversation: conv,
-                score: exactSubMatch ? Math.max(score, 0.75) : score
-            };
-        })
-        .filter(item => item.score >= threshold)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, topK)
-        .map(item => item.conversation);
+    // Use ANN Partitioned IVF Index for retrieval
+    const index = new PartitionedIVFIndex({ numClusters: Math.min(8, Math.max(2, Math.floor(list.length / 4))), nProbe: 2 });
+    for (const conv of list) {
+        const title = String(conv?.title || '');
+        const msgs = Array.isArray(conv?.messages)
+            ? conv.messages.map(m => m?.text || m?.content || '').join(' ')
+            : '';
+        const fullText = `${title} ${msgs}`.trim();
+        index.add(conv, fullText);
+    }
+
+    const results = index.search(q, topK, threshold);
+    return results.map(r => r.item);
 }
 
 export function semanticSearchBookmarks(bookmarks = [], query = '', topK = 10, threshold = 0.15) {
@@ -72,24 +209,17 @@ export function semanticSearchBookmarks(bookmarks = [], query = '', topK = 10, t
     const q = String(query || '').trim();
     if (!q || !list.length) return list;
 
-    const queryVec = textToEmbeddingVector(q);
-    return list
-        .map(bm => {
-            const text = String(bm?.text || bm?.content || '');
-            const title = String(bm?.title || '');
-            const fullText = `${title} ${text}`.trim();
-            const docVec = textToEmbeddingVector(fullText);
-            const score = vectorCosineSimilarity(queryVec, docVec);
-            const exactSubMatch = fullText.toLowerCase().includes(q.toLowerCase());
-            return {
-                bookmark: bm,
-                score: exactSubMatch ? Math.max(score, 0.75) : score
-            };
-        })
-        .filter(item => item.score >= threshold)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, topK)
-        .map(item => item.bookmark);
+    // Use ANN Partitioned IVF Index for retrieval
+    const index = new PartitionedIVFIndex({ numClusters: Math.min(8, Math.max(2, Math.floor(list.length / 4))), nProbe: 2 });
+    for (const bm of list) {
+        const text = String(bm?.text || bm?.content || '');
+        const title = String(bm?.title || '');
+        const fullText = `${title} ${text}`.trim();
+        index.add(bm, fullText);
+    }
+
+    const results = index.search(q, topK, threshold);
+    return results.map(r => r.item);
 }
 
 export function createSafeStorage(storage = globalThis.localStorage) {
