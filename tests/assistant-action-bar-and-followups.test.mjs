@@ -84,76 +84,47 @@ globalThis.speechSynthesis = {
 };
 
 // ============================================================================
-// Section 1: Contextual Follow-Up Suggestion Generation
+// Section 1: Assistant Action Bar Clean Layout (No Suggested Follow-Up Chips)
 // ============================================================================
-console.log('--- Section 1: Dynamic Contextual Follow-Up Suggestions ---');
+console.log('--- Section 1: Clean Action Bar Layout ---');
 
-function generateContextualFollowUpChips(userPrompt, answerText) {
-    const p = String(userPrompt || '').toLowerCase();
-    const a = String(answerText || '').toLowerCase();
-    
-    // Code / programming context
-    if (/```|function|const |def |class |import |async |select |<html|sql|javascript|python/i.test(answerText) ||
-        /\b(code|function|program|script|regex|sql|query|api|component|bug|error)\b/i.test(p)) {
-        return [
-            'Add comments and explanations',
-            'Write unit tests for this',
-            'Can we optimize this further?'
-        ];
-    }
-    
-    // Comparison context
-    if (/\b(compare|versus|vs|difference|better|pros and cons)\b/i.test(p)) {
-        return [
-            'Which one is better for beginners?',
-            'Give a real-world use case example',
-            'Summary table of key trade-offs'
-        ];
-    }
-    
-    // Factual / Explain context
-    if (/\b(explain|how does|what is|why is|who was|history|tell me about|capital|country)\b/i.test(p)) {
-        return [
-            'Give a concrete example',
-            'Explain more simply',
-            'What are the key takeaways?'
-        ];
-    }
-    
-    // Default smart chips
-    return [
-        'Tell me more about this',
-        'Summarize in 3 bullet points',
-        'What is an alternative viewpoint?'
-    ];
+function buildAssistantActionBarHtml(hasThought = false) {
+    return `
+        <div class="assistant-action-bar">
+            <button type="button" class="assistant-action-btn" title="Copy answer">
+                <span>Copy</span>
+            </button>
+            ${hasThought ? `
+            <button type="button" class="assistant-action-btn" title="Copy thought process">
+                <span>Thought</span>
+            </button>` : ''}
+            <button type="button" class="assistant-action-btn" title="Bookmark message">
+                <span>Bookmark</span>
+            </button>
+            <button type="button" class="assistant-action-btn" title="Read answer aloud">
+                <span>Speak</span>
+            </button>
+        </div>
+    `;
 }
 
-// 1.1 Coding context
-const codeChips = generateContextualFollowUpChips('write a python script to parse json', '```python\nimport json\n```');
-assert.deepEqual(codeChips, [
-    'Add comments and explanations',
-    'Write unit tests for this',
-    'Can we optimize this further?'
-]);
-console.log('  [PASS] 1.1 Code context produces relevant developer follow-ups');
+// 1.1 Action bar with thought
+const barWithThought = buildAssistantActionBarHtml(true);
+assert.ok(barWithThought.includes('Copy'), 'Action bar must contain Copy button');
+assert.ok(barWithThought.includes('Thought'), 'Action bar must contain Thought button when thought exists');
+assert.ok(barWithThought.includes('Bookmark'), 'Action bar must contain Bookmark button');
+assert.ok(barWithThought.includes('Speak'), 'Action bar must contain Speak button');
+assert.ok(!barWithThought.includes('SUGGESTED FOLLOW-UPS'), 'Must never render suggested follow-ups banner');
+console.log('  [PASS] 1.1 Action bar contains Copy, Thought, Bookmark, and Speak without suggested follow-up chips');
 
-// 1.2 Comparison context
-const compareChips = generateContextualFollowUpChips('compare React vs Vue for modern web apps', 'Both React and Vue are popular frontend frameworks...');
-assert.deepEqual(compareChips, [
-    'Which one is better for beginners?',
-    'Give a real-world use case example',
-    'Summary table of key trade-offs'
-]);
-console.log('  [PASS] 1.2 Comparison query produces trade-off and use-case follow-ups');
-
-// 1.3 Factual / Concept context
-const factChips = generateContextualFollowUpChips('what is quantum computing', 'Quantum computing leverages superposition and entanglement...');
-assert.deepEqual(factChips, [
-    'Give a concrete example',
-    'Explain more simply',
-    'What are the key takeaways?'
-]);
-console.log('  [PASS] 1.3 Concept/Fact query produces explainer follow-ups');
+// 1.2 Action bar without thought
+const barWithoutThought = buildAssistantActionBarHtml(false);
+assert.ok(barWithoutThought.includes('Copy'), 'Action bar must contain Copy button');
+assert.ok(!barWithoutThought.includes('Thought'), 'Action bar must omit Thought button when no thought');
+assert.ok(barWithoutThought.includes('Bookmark'), 'Action bar must contain Bookmark button');
+assert.ok(barWithoutThought.includes('Speak'), 'Action bar must contain Speak button');
+assert.ok(!barWithoutThought.includes('SUGGESTED FOLLOW-UPS'), 'Must never render suggested follow-ups banner');
+console.log('  [PASS] 1.2 Action bar renders cleanly without thought and without suggested follow-up banner');
 
 // ============================================================================
 // Section 2: Action Bar Actions (Copy Answer, Copy Thought, Speak)
@@ -217,31 +188,32 @@ assert.equal(speakBtn.classList.contains('is-speaking'), false);
 console.log('  [PASS] 2.3 Speak button plays audio and toggles stop on second press');
 
 // ============================================================================
-// Section 3: Follow-Up Chip Submission
+// Section 3: Bookmark Storage & State Toggle
 // ============================================================================
-console.log('--- Section 3: Follow-Up Chip Submission ---');
+console.log('--- Section 3: Bookmark Storage & State Toggle ---');
 
-let dispatchedSubmission = null;
-const textInput = new MockDOMElement('text-input', 'textarea');
-
-globalThis.document = {
-    getElementById: id => (id === 'text-input' ? textInput : null)
-};
-
-function triggerFollowUpChip(chipText) {
-    const input = document.getElementById('text-input');
-    if (input) {
-        input.value = chipText;
+const mockStorage = new Map();
+function saveBookmark(text) {
+    const list = JSON.parse(mockStorage.get('bookmarks') || '[]');
+    const idx = list.indexOf(text);
+    if (idx >= 0) {
+        list.splice(idx, 1);
+    } else {
+        list.push(text);
     }
-    dispatchedSubmission = { source: 'followup_chip', text: chipText };
+    mockStorage.set('bookmarks', JSON.stringify(list));
+    return list.includes(text);
 }
 
-triggerFollowUpChip('Give a concrete example');
-assert.equal(textInput.value, 'Give a concrete example');
-assert.equal(dispatchedSubmission.source, 'followup_chip');
-assert.equal(dispatchedSubmission.text, 'Give a concrete example');
-console.log('  [PASS] 3.1 Clicking follow-up chip immediately loads and dispatches the query');
+const isBookmarked1 = saveBookmark('Insight 1');
+assert.equal(isBookmarked1, true, 'Message should be bookmarked');
+assert.equal(JSON.parse(mockStorage.get('bookmarks')).length, 1);
+
+const isBookmarked2 = saveBookmark('Insight 1');
+assert.equal(isBookmarked2, false, 'Message bookmark should toggle off');
+assert.equal(JSON.parse(mockStorage.get('bookmarks')).length, 0);
+console.log('  [PASS] 3.1 Bookmark toggles properly in persistent storage');
 
 console.log('================================================================');
-console.log('=== All Action Bar & Follow-Up Chips Tests PASSED ===');
+console.log('=== All Action Bar Tests PASSED ===');
 console.log('================================================================');
