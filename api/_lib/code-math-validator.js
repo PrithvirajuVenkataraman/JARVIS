@@ -123,3 +123,54 @@ export function validateAndRepairCodeAndMath(text = '') {
         issues
     };
 }
+
+/**
+ * StreamingSpeculativeGuard: Buffers token chunks along sentence & block boundaries,
+ * verifying and auto-repairing arithmetic, LaTeX math, and syntax before emitting to SSE stream.
+ */
+export class StreamingSpeculativeGuard {
+    constructor(options = {}) {
+        this.buffer = '';
+        this.fullAccumulated = '';
+        this.onVerifiedChunk = typeof options.onVerifiedChunk === 'function' ? options.onVerifiedChunk : null;
+    }
+
+    /**
+     * Ingests a new streaming token chunk and yields any verified sentence blocks.
+     * @param {string} chunk
+     * @returns {string} Verified clean text to emit immediately.
+     */
+    ingest(chunk = '') {
+        const str = String(chunk || '');
+        this.buffer += str;
+        this.fullAccumulated += str;
+
+        // Split buffer along safe sentence/paragraph delimiters
+        const delimiterMatch = this.buffer.match(/^(.*?(?:[.!?]\s+|\n\n|```[\w]*\n))([\s\S]*)$/);
+        if (delimiterMatch && delimiterMatch[1]) {
+            const sentenceToVerify = delimiterMatch[1];
+            const remaining = delimiterMatch[2] || '';
+
+            const repaired = validateAndRepairCodeAndMath(sentenceToVerify);
+            this.buffer = remaining;
+            const output = repaired.text;
+            if (this.onVerifiedChunk) this.onVerifiedChunk(output);
+            return output;
+        }
+
+        return '';
+    }
+
+    /**
+     * Flushes any remaining tokens in buffer at stream completion with full terminal validation.
+     * @returns {string} Final verified trailing text.
+     */
+    flushRemaining() {
+        if (!this.buffer && !this.fullAccumulated) return '';
+        const finalRepaired = validateAndRepairCodeAndMath(this.fullAccumulated);
+        const remainingToEmit = finalRepaired.text.slice(this.fullAccumulated.length - this.buffer.length);
+        this.buffer = '';
+        if (this.onVerifiedChunk && remainingToEmit) this.onVerifiedChunk(remainingToEmit);
+        return remainingToEmit;
+    }
+}
