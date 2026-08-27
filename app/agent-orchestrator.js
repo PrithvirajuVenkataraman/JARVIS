@@ -1,6 +1,7 @@
 /**
- * Multi-Agent Workflow Engine (DAG Task Orchestration)
+ * Multi-Agent Workflow Engine (Concurrent Parallel DAG Task Orchestration)
  * Coordinates 4 specialized agents: Planner, Researcher, Coder, and Synthesizer.
+ * Supports concurrent parallel branch execution via dynamic event-driven wave scheduling.
  */
 
 export function textToEmbeddingVector(text, dim = 512) {
@@ -86,15 +87,16 @@ export function cleanAgentPrompt(text = '') {
     return String(text || '').replace(/^\/(?:agent|workflow|swarm)\s*/i, '').trim();
 }
 
-export function buildAgentWorkflowDag(userGoal = '') {
+export function buildAgentWorkflowDag(userGoal = '', options = {}) {
     const goal = cleanAgentPrompt(userGoal);
     const goalVec = textToEmbeddingVector(goal);
+    const allowParallel = options.parallel !== false;
 
     const codeSim = vectorCosineSimilarity(goalVec, CODE_TASK_VECTOR);
     const researchSim = vectorCosineSimilarity(goalVec, RESEARCH_TASK_VECTOR);
 
     const requiresCode = codeSim >= 0.16 || /\b(?:code|script|function|app|config|implement|class|component|api|html|python|javascript|ts|css)\b/i.test(goal);
-    const requiresSearch = researchSim >= 0.16 || /\b(?:latest|current|recent|compare|review|market|pricing|vs|best|trends?|breakthrough|news|202\d)\b/i.test(goal) || !requiresCode;
+    const requiresSearch = researchSim >= 0.16 || /\b(?:research|investigate|search|find|latest|current|recent|compare|review|market|pricing|vs|best|trends?|breakthrough|news|202\d)\b/i.test(goal) || !requiresCode;
 
     const tasks = [
         {
@@ -107,6 +109,8 @@ export function buildAgentWorkflowDag(userGoal = '') {
         }
     ];
 
+    const parallelBranchIds = [];
+
     if (requiresSearch) {
         tasks.push({
             id: 'task_research',
@@ -116,6 +120,7 @@ export function buildAgentWorkflowDag(userGoal = '') {
             dependencies: ['task_plan'],
             status: TASK_STATUS.PENDING
         });
+        parallelBranchIds.push('task_research');
     }
 
     if (requiresCode) {
@@ -124,9 +129,10 @@ export function buildAgentWorkflowDag(userGoal = '') {
             role: AGENT_ROLES.CODER,
             title: 'Generate verified code & architecture blueprints',
             description: 'Builds implementation examples with syntax validity and clean types.',
-            dependencies: requiresSearch ? ['task_research'] : ['task_plan'],
+            dependencies: allowParallel ? ['task_plan'] : (requiresSearch ? ['task_research'] : ['task_plan']),
             status: TASK_STATUS.PENDING
         });
+        parallelBranchIds.push('task_code');
     }
 
     tasks.push({
@@ -134,12 +140,13 @@ export function buildAgentWorkflowDag(userGoal = '') {
         role: AGENT_ROLES.SYNTHESIZER,
         title: 'Cross-verify evidence & compile executive report',
         description: 'Harmonizes agent findings into a structured, executive-ready response.',
-        dependencies: [tasks[tasks.length - 1].id],
+        dependencies: allowParallel ? (parallelBranchIds.length > 0 ? parallelBranchIds : ['task_plan']) : [tasks[tasks.length - 1].id],
         status: TASK_STATUS.PENDING
     });
 
     return {
         goal,
+        parallel: allowParallel,
         createdAt: new Date().toISOString(),
         tasks
     };
@@ -158,63 +165,96 @@ export function createAgentOrchestrator(options = {}) {
         },
         async runWorkflow(userGoal, executorFn = null) {
             isAborted = false;
-            currentDag = buildAgentWorkflowDag(userGoal);
+            currentDag = buildAgentWorkflowDag(userGoal, options);
 
             if (typeof options.onWorkflowStart === 'function') {
                 options.onWorkflowStart(currentDag);
             }
 
             const taskOutputs = {};
+            const activePromises = new Map();
+            const pendingTasks = new Set(currentDag.tasks);
 
-            for (const task of currentDag.tasks) {
-                if (isAborted) {
-                    task.status = TASK_STATUS.SKIPPED;
-                    if (typeof options.onTaskUpdate === 'function') {
-                        options.onTaskUpdate(task);
-                    }
-                    continue;
-                }
-
-                // Check dependencies
-                const unmet = task.dependencies.some(depId => {
-                    const dep = currentDag.tasks.find(t => t.id === depId);
-                    return !dep || dep.status !== TASK_STATUS.COMPLETED;
+            while (pendingTasks.size > 0 && !isAborted) {
+                // Find all tasks whose dependencies are satisfied
+                const readyTasks = Array.from(pendingTasks).filter(task => {
+                    if (activePromises.has(task.id)) return false;
+                    return task.dependencies.every(depId => {
+                        const dep = currentDag.tasks.find(t => t.id === depId);
+                        return dep && (dep.status === TASK_STATUS.COMPLETED || dep.status === TASK_STATUS.FAILED);
+                    });
                 });
 
-                if (unmet) {
-                    task.status = TASK_STATUS.FAILED;
-                    task.error = 'Unmet task dependencies.';
+                if (readyTasks.length === 0 && activePromises.size === 0) {
+                    // Deadlock or unmet dependencies
+                    for (const task of pendingTasks) {
+                        task.status = TASK_STATUS.FAILED;
+                        task.error = 'Unresolvable task dependencies.';
+                        if (typeof options.onTaskUpdate === 'function') options.onTaskUpdate(task);
+                    }
+                    break;
+                }
+
+                // Dispatch all ready tasks in parallel concurrently!
+                for (const task of readyTasks) {
+                    if (isAborted) {
+                        task.status = TASK_STATUS.SKIPPED;
+                        pendingTasks.delete(task);
+                        if (typeof options.onTaskUpdate === 'function') options.onTaskUpdate(task);
+                        continue;
+                    }
+
+                    const hasFailedDeps = task.dependencies.some(depId => {
+                        const dep = currentDag.tasks.find(t => t.id === depId);
+                        return dep && dep.status === TASK_STATUS.FAILED;
+                    });
+
+                    // Graceful degradation: synthesizer still proceeds with partial outputs
+                    if (hasFailedDeps && task.role !== AGENT_ROLES.SYNTHESIZER) {
+                        task.status = TASK_STATUS.FAILED;
+                        task.error = 'Prerequisite dependency failed.';
+                        pendingTasks.delete(task);
+                        if (typeof options.onTaskUpdate === 'function') options.onTaskUpdate(task);
+                        continue;
+                    }
+
+                    task.status = TASK_STATUS.RUNNING;
+                    task.startedAt = new Date().toISOString();
                     if (typeof options.onTaskUpdate === 'function') {
                         options.onTaskUpdate(task);
                     }
-                    continue;
+
+                    const taskPromise = (async () => {
+                        try {
+                            let output = '';
+                            if (typeof executorFn === 'function') {
+                                output = await executorFn(task, taskOutputs, currentDag.goal);
+                            } else {
+                                output = `Agent ${task.role} completed step for: ${task.title}`;
+                            }
+                            task.status = TASK_STATUS.COMPLETED;
+                            task.completedAt = new Date().toISOString();
+                            task.output = output;
+                            taskOutputs[task.id] = output;
+                        } catch (err) {
+                            task.status = TASK_STATUS.FAILED;
+                            task.error = String(err?.message || err || 'Task execution failed.');
+                        }
+
+                        if (typeof options.onTaskUpdate === 'function') {
+                            options.onTaskUpdate(task);
+                        }
+
+                        pendingTasks.delete(task);
+                        activePromises.delete(task.id);
+                    })();
+
+                    activePromises.set(task.id, taskPromise);
                 }
 
-                task.status = TASK_STATUS.RUNNING;
-                task.startedAt = new Date().toISOString();
-                if (typeof options.onTaskUpdate === 'function') {
-                    options.onTaskUpdate(task);
-                }
-
-                try {
-                    let output = '';
-                    if (typeof executorFn === 'function') {
-                        output = await executorFn(task, taskOutputs, currentDag.goal);
-                    } else {
-                        output = `Agent ${task.role} completed step for: ${task.title}`;
-                    }
-
-                    task.status = TASK_STATUS.COMPLETED;
-                    task.completedAt = new Date().toISOString();
-                    task.output = output;
-                    taskOutputs[task.id] = output;
-                } catch (err) {
-                    task.status = TASK_STATUS.FAILED;
-                    task.error = String(err?.message || err || 'Task execution failed.');
-                }
-
-                if (typeof options.onTaskUpdate === 'function') {
-                    options.onTaskUpdate(task);
+                // Wait for at least one in-flight task to complete before advancing the wave loop
+                if (activePromises.size > 0) {
+                    await Promise.race(activePromises.values());
                 }
             }
 
