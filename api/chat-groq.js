@@ -461,6 +461,51 @@ async function getInstantFactHelper() {
         return isLiveRetrievalConfigured() || isPublicFactSearchConfigured();
     }
 
+    function textToEmbeddingVector(text, dim = 512) {
+        const v = new Float32Array(dim);
+        const tokens = String(text || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').trim().split(/\s+/).filter(Boolean);
+        if (!tokens.length) return v;
+        for (const token of tokens) {
+            let h1 = 0x811c9dc5;
+            let h2 = 0x5bd1e995;
+            for (let i = 0; i < token.length; i++) {
+                const code = token.charCodeAt(i);
+                h1 ^= code;
+                h1 = Math.imul(h1, 0x01000193);
+                h2 ^= code;
+                h2 = Math.imul(h2, 0x5bd1e995);
+            }
+            const idx1 = Math.abs(h1) % dim;
+            const idx2 = Math.abs(h2) % dim;
+            v[idx1] += 1.0;
+            v[idx2] += 0.5;
+            if (token.length >= 4) {
+                for (let i = 0; i < token.length - 2; i++) {
+                    const trigram = token.slice(i, i + 3);
+                    let th = 0;
+                    for (let j = 0; j < trigram.length; j++) th = (th * 31 + trigram.charCodeAt(j)) | 0;
+                    v[Math.abs(th) % dim] += 0.2;
+                }
+            }
+        }
+        let norm = 0;
+        for (let i = 0; i < dim; i++) norm += v[i] * v[i];
+        norm = Math.sqrt(norm);
+        if (norm > 0) {
+            for (let i = 0; i < dim; i++) v[i] /= norm;
+        }
+        return v;
+    }
+
+    function vectorCosineSimilarity(a, b) {
+        let dot = 0;
+        for (let i = 0; i < a.length; i++) dot += a[i] * b[i];
+        return dot;
+    }
+
+    const CONSTRAINT_PROTOTYPE_VECTOR = textToEmbeddingVector('must be strictly required rules constraints format only concise in typescript python no external dependencies');
+    const DECISION_PROTOTYPE_VECTOR = textToEmbeddingVector('we will use selected architecture chosen database framework postgresql prisma redis solution implementation decision');
+
     function extractRollingExecutiveSummary(olderTurns) {
         if (!Array.isArray(olderTurns) || !olderTurns.length) return null;
         
@@ -468,22 +513,23 @@ async function getInstantFactHelper() {
         const decisions = [];
         const topics = [];
 
-        const constraintRegex = /\b(?:only in|must be|don't use|do not use|always|never|keep it|format as|use typescript|use python|use javascript|use rust|no external|no third-party|in english|in spanish|in french|short answer|concise|step by step|my name is|i am a)\b/i;
-        const decisionRegex = /\b(?:we will use|chosen|selected|decided|let's go with|solution is|answer is|result is|theorem|formula|algorithm|architecture|database|framework)\b/i;
-
         for (const turn of olderTurns) {
             const isUser = turn?.role === 'user';
             const text = String(turn?.text || '').replace(/\s+/g, ' ').trim();
             if (!text) continue;
 
-            if (isUser && constraintRegex.test(text)) {
+            const vec = textToEmbeddingVector(text);
+            const constraintSim = vectorCosineSimilarity(vec, CONSTRAINT_PROTOTYPE_VECTOR);
+            const decisionSim = vectorCosineSimilarity(vec, DECISION_PROTOTYPE_VECTOR);
+
+            if (isUser && constraintSim >= 0.18) {
                 const snippet = text.length > 140 ? text.slice(0, 137) + '...' : text;
                 if (!constraints.some(c => c.toLowerCase() === snippet.toLowerCase())) {
                     constraints.push(snippet);
                 }
             }
 
-            if (decisionRegex.test(text)) {
+            if (decisionSim >= 0.18) {
                 const snippet = text.length > 140 ? text.slice(0, 137) + '...' : text;
                 if (!decisions.some(d => d.toLowerCase() === snippet.toLowerCase())) {
                     decisions.push(snippet);
