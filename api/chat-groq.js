@@ -1,6 +1,8 @@
 export const config = { maxDuration: 60 };
 import { applyApiSecurity } from './_lib/security.js';
 import { validateAndRepairCodeAndMath } from './_lib/code-math-validator.js';
+import { inspectPromptSecurity } from './_lib/prompt-guard.js';
+import { redactSensitiveData } from './_lib/pii-redactor.js';
 
 /* ── Cost Controls (Inlined for 0-dep cold boot) ────────── */
 function readCostBool(name, fallback = false) {
@@ -692,13 +694,32 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 });
             }
             const { message, context, preferences, intent, grounding, images } = request.value;
+
+            // Security Guardrail 1: Prompt Injection & Jailbreak Scanner
+            const promptCheck = inspectPromptSecurity(message);
+            if (!promptCheck.safe) {
+                return res.status(200).json({
+                    success: true,
+                    requestId,
+                    text: promptCheck.rejectionMessage,
+                    message: promptCheck.rejectionMessage,
+                    guardrailBlocked: true,
+                    guardrailReason: promptCheck.reason,
+                    model: 'security-guardrail'
+                });
+            }
+
+            // Security Guardrail 2: PII & Secrets Redaction
+            const piiCheck = redactSensitiveData(message);
+            const sanitizedMessage = piiCheck.text;
+
             const systemPrompt = buildServerSystemPrompt(preferences);
             const contextBlock = buildCompactedContextBlock(context, { rollingSummary: req.body?.rollingSummary || null });
-            const effectiveMessage = buildGroundedUserMessage(message, intent, grounding);
+            const effectiveMessage = buildGroundedUserMessage(sanitizedMessage, intent, grounding);
             const isAttachmentGrounding = isAttachmentGroundingPayload(grounding, intent);
             const clientRoutingProbe = String(req.body?.routingMessage || req.body?.displayUserMessage || '').trim();
             const routingMessage = isAttachmentGrounding
-                ? String(grounding?.originalRequest || message || 'Analyze the attached file(s).').trim()
+                ? String(grounding?.originalRequest || sanitizedMessage || 'Analyze the attached file(s).').trim()
                 : (clientRoutingProbe || effectiveMessage);
             const isInternalSummary = isInternalSummarizerPrompt(effectiveMessage, '');
             if (intent === 'verify_answer') {
