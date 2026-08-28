@@ -28,6 +28,9 @@ const MAX_QUERY_LENGTH = 500;
 const LATEST_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 let lastLatestRefreshAt = 0;
 
+const WIKIDATA_ENTITY_CACHE = new Map();
+const WIKIDATA_ROLE_CACHE = new Map();
+
 const LOOKUP_ONLY_SOURCE_TYPES = new Set([
     'reference_lookup',
     'archive_lookup',
@@ -402,9 +405,6 @@ export async function searchPublicSources(query, options = {}) {
     if (!normalizedQuery) return [];
     const limit = clampInt(options.limit, 8, 1, 20);
     const isPolitical = isPoliticalOrLeadershipQuery(normalizedQuery);
-    const governmentRoleResults = options.skipStructuredRoles === true
-        ? []
-        : await searchGovernmentRole(normalizedQuery, { limit: Math.min(3, limit) }).catch(() => []);
     const deterministicQueries = buildDeterministicSearchQueries(normalizedQuery);
     const plannedQueries = Array.isArray(options.plannedQueries) && options.plannedQueries.length
         ? options.plannedQueries
@@ -416,21 +416,30 @@ export async function searchPublicSources(query, options = {}) {
     ])).slice(0, 7);
 
     const targetQueries = querySet.slice(0, 2);
-    const [liveNewsSettled, gdeltSettled, wikiSettled, wikidataSettled, liveWebSettled] = await Promise.all([
+
+    const asyncTasks = [
         Promise.allSettled(targetQueries.map(candidate => searchGoogleNewsRss(candidate, { limit }))),
-        Promise.allSettled(targetQueries.map(candidate => searchGdeltNews(candidate, { limit }))),
         Promise.allSettled(targetQueries.map(candidate => searchWikipedia(candidate, { limit: 2 }))),
         Promise.allSettled([searchWikidata(targetQueries[0] || normalizedQuery, { limit: 2 })]),
-        Promise.allSettled([searchDuckDuckGoHtml(targetQueries[0] || normalizedQuery, { limit: Math.min(5, limit) })])
-    ]);
+        Promise.allSettled([searchDuckDuckGoHtml(targetQueries[0] || normalizedQuery, { limit: Math.min(5, limit) })]),
+        options.skipStructuredRoles === true
+            ? Promise.resolve([])
+            : Promise.allSettled([searchGovernmentRole(normalizedQuery, { limit: Math.min(3, limit) })]),
+        options.skipGdelt === true
+            ? Promise.resolve([])
+            : Promise.allSettled(targetQueries.map(candidate => searchGdeltNews(candidate, { limit })))
+    ];
 
-    const liveNews = (Array.isArray(liveNewsSettled) ? liveNewsSettled : []).flatMap(r => r.status === 'fulfilled' ? r.value : []);
-    const gdelt = (Array.isArray(gdeltSettled) ? gdeltSettled : []).flatMap(r => r.status === 'fulfilled' ? r.value : []);
-    const liveWeb = (Array.isArray(liveWebSettled) ? liveWebSettled : [])
+    const settled = await Promise.all(asyncTasks);
+    const liveNews = (Array.isArray(settled[0]) ? settled[0] : []).flatMap(r => r.status === 'fulfilled' ? r.value : []);
+    const wiki = (Array.isArray(settled[1]) ? settled[1] : []).flatMap(r => r.status === 'fulfilled' ? r.value : []).slice(0, 3);
+    const wikidata = (Array.isArray(settled[2]) ? settled[2] : []).flatMap(r => r.status === 'fulfilled' ? r.value : []).slice(0, 2);
+    const liveWeb = (Array.isArray(settled[3]) ? settled[3] : [])
         .flatMap(r => r.status === 'fulfilled' ? r.value : [])
         .filter(item => !isPolitical || (!String(item?.url || '').includes('wikipedia.org') && !String(item?.url || '').includes('wikidata.org')));
-    const wiki = (Array.isArray(wikiSettled) ? wikiSettled : []).flatMap(r => r.status === 'fulfilled' ? r.value : []).slice(0, 3);
-    const wikidata = (Array.isArray(wikidataSettled) ? wikidataSettled : []).flatMap(r => r.status === 'fulfilled' ? r.value : []).slice(0, 2);
+    const governmentRoleResults = (Array.isArray(settled[4]) ? settled[4] : []).flatMap(r => r.status === 'fulfilled' ? r.value : []);
+    const gdelt = (Array.isArray(settled[5]) ? settled[5] : []).flatMap(r => r.status === 'fulfilled' ? r.value : []);
+
     const combined = [
         ...wiki,
         ...wikidata,
@@ -449,7 +458,7 @@ export async function searchPublicSources(query, options = {}) {
         deduped.push(item);
         if (deduped.length >= Math.max(limit, 8)) break;
     }
-    if (!options.skipAutoDeepCrawl) {
+    if (options.skipAutoDeepCrawl !== true && options.allowDeepCrawl === true) {
         await enrichSearchResultsWithDeepCrawl(deduped, 3).catch(() => {});
     }
     return deduped;
@@ -756,6 +765,10 @@ export async function searchGovernmentRole(query, options = {}) {
 export async function resolveWikidataEntity(label) {
     const query = normalizeSearchQuery(label);
     if (!query) return null;
+    const cacheKey = query.toLowerCase();
+    if (WIKIDATA_ENTITY_CACHE.has(cacheKey)) {
+        return WIKIDATA_ENTITY_CACHE.get(cacheKey);
+    }
     const url = new URL(WIKIDATA_SEARCH_URL);
     url.searchParams.set('action', 'wbsearchentities');
     url.searchParams.set('search', query);
@@ -782,7 +795,15 @@ export async function resolveWikidataEntity(label) {
         }))
         .filter(item => /^Q\d+$/.test(item.id) && item.label)
         .sort((a, b) => b.score - a.score);
-    return ranked[0] || null;
+    const result = ranked[0] || null;
+    if (result) {
+        if (WIKIDATA_ENTITY_CACHE.size > 500) {
+            const first = WIKIDATA_ENTITY_CACHE.keys().next().value;
+            WIKIDATA_ENTITY_CACHE.delete(first);
+        }
+        WIKIDATA_ENTITY_CACHE.set(cacheKey, result);
+    }
+    return result;
 }
 
 export async function searchReddit(query, options = {}) {
@@ -930,40 +951,65 @@ export async function searchExa(query, options = {}) {
 
 export async function runVerifiedWebSearch(query, options = {}) {
     const limit = clampInt(options.limit, 8, 1, 20);
-    const planning = await buildGeminiSearchPlan(query).catch(error => ({
-        queries: [],
-        warning: `gemini_query_planning_failed:${String(error?.code || error?.message || 'unknown')}`
-    }));
-    const [publicSources, exaSources] = await Promise.all([
-        searchPublicSources(query, {
+    const normalizedQuery = normalizeSearchQuery(query);
+    const deterministicQueries = buildDeterministicSearchQueries(normalizedQuery);
+    
+    const planning = hasGeminiKey()
+        ? await buildGeminiSearchPlan(normalizedQuery).catch(error => ({
+            queries: [],
+            warning: `gemini_query_planning_failed:${String(error?.code || error?.message || 'unknown')}`
+        }))
+        : { queries: [], warning: '' };
+
+    const searchQueries = Array.from(new Set([
+        ...deterministicQueries,
+        ...(planning.queries || [])
+    ]));
+
+    // Concurrent multi-provider search (Serper + Exa + Public Sources)
+    const [publicSources, exaSources, serperSources] = await Promise.all([
+        searchPublicSources(normalizedQuery, {
             limit,
-            plannedQueries: planning.queries
+            plannedQueries: searchQueries,
+            skipAutoDeepCrawl: true
         }).catch(() => []),
-        searchExa(query, {
+        searchExa(normalizedQuery, {
             limit,
-            plannedQueries: planning.queries
+            plannedQueries: searchQueries
+        }).catch(() => []),
+        searchSerper(normalizedQuery, {
+            limit
         }).catch(() => [])
     ]);
-    const publicResults = rankSources(query, dedupeSearchResults([...exaSources, ...publicSources])
-        .filter(item => isValidCitationSource(item, query))).slice(0, limit);
+
+    const allSources = dedupeSearchResults([...serperSources, ...exaSources, ...publicSources]);
+    const publicResults = rankSources(normalizedQuery, allSources
+        .filter(item => isValidCitationSource(item, normalizedQuery))).slice(0, limit);
+
     let warnings = buildSearchWarnings(publicResults, planning.warning ? [planning.warning] : []);
-    const enhanced = await enhanceResultsWithGemini(query, publicResults, { limit }).catch(error => ({
-        results: publicResults,
-        enhanced: false,
-        warning: `gemini_enhancement_failed:${String(error?.code || error?.message || 'unknown')}`
-    }));
-    const enhancedResults = rankSources(query, dedupeSearchResults(enhanced.results || publicResults)
-        .filter(item => isValidCitationSource(item, query))).slice(0, limit);
-    warnings = buildSearchWarnings(enhancedResults, [
-        ...warnings,
-        enhanced.warning || ''
-    ].filter(Boolean));
+    
+    let enhancedResults = publicResults;
+    let geminiEnhanced = false;
+    if (hasGeminiKey()) {
+        const enhanced = await enhanceResultsWithGemini(normalizedQuery, publicResults, { limit }).catch(error => ({
+            results: publicResults,
+            enhanced: false,
+            warning: `gemini_enhancement_failed:${String(error?.code || error?.message || 'unknown')}`
+        }));
+        enhancedResults = rankSources(normalizedQuery, dedupeSearchResults(enhanced.results || publicResults)
+            .filter(item => isValidCitationSource(item, normalizedQuery))).slice(0, limit);
+        geminiEnhanced = Boolean(enhanced.enhanced);
+        warnings = buildSearchWarnings(enhancedResults, [
+            ...warnings,
+            enhanced.warning || ''
+        ].filter(Boolean));
+    }
 
     return buildSearchSummary(enhancedResults, {
-        query,
-        provider: exaSources.length ? 'exa_and_public_sources' : 'public_sources',
+        query: normalizedQuery,
+        provider: serperSources.length && exaSources.length ? 'serper_exa_and_public_sources' : (exaSources.length ? 'exa_and_public_sources' : (serperSources.length ? 'serper_and_public_sources' : 'public_sources')),
         publicSourceCount: enhancedResults.length,
-        geminiEnhanced: Boolean(enhanced.enhanced),
+        geminiEnhanced,
         warnings
     });
 }
@@ -971,11 +1017,20 @@ export async function runVerifiedWebSearch(query, options = {}) {
 export async function runEvidenceFirstWebRag(query, options = {}) {
     const totalStart = performance.now();
     const timing = {
-        intentDetectionMs: 0,
-        queryGenerationMs: 0,
+        intentMs: 0,
+        planningMs: 0,
         exaMs: 0,
         serperMs: 0,
         publicSourcesMs: 0,
+        structuredLookupMs: 0,
+        embeddingMs: 0,
+        rerankMs: 0,
+        crawlMs: 0,
+        llmMs: 0,
+        totalMs: 0,
+        // Backward-compatibility aliases
+        intentDetectionMs: 0,
+        queryGenerationMs: 0,
         embeddingsMs: 0,
         rerankingMs: 0,
         deepCrawlMs: 0,
@@ -983,6 +1038,7 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
         totalLatencyMs: 0
     };
 
+    // Stage 0: Fast Deterministic Intent (< 1ms)
     const intentStart = performance.now();
     const normalizedQuery = normalizeSearchQuery(query);
     const limit = clampInt(options.limit, 8, 1, 20);
@@ -992,22 +1048,24 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
 
     const roleIntent = parseGovernmentRoleQuery(normalizedQuery);
     const isFastFactual = Boolean(roleIntent || isCurrentTopicSearchQuery(normalizedQuery) || isDatedChangingFactSearchQuery(normalizedQuery));
-    timing.intentDetectionMs = Number((performance.now() - intentStart).toFixed(1));
+    timing.intentMs = Number((performance.now() - intentStart).toFixed(1));
+    timing.intentDetectionMs = timing.intentMs;
 
-    // Stage 1: Deterministic Fast Query Generation (Skip Gemini planning on fast path)
+    // Stage 1: Fast Query Planning (Deterministic first, Gemini only as fallback)
     const queryGenStart = performance.now();
-    let plannedQueries = [];
+    let plannedQueries = buildDeterministicSearchQueries(normalizedQuery);
     let planningWarning = '';
-    if (!isFastFactual) {
+    if (!isFastFactual && !plannedQueries.length && options.forceGeminiPlanning === true) {
         const planning = await buildGeminiSearchPlan(normalizedQuery).catch(error => ({
             queries: [],
             warning: `gemini_query_planning_failed:${String(error?.code || error?.message || 'unknown')}`
         }));
-        plannedQueries = planning.queries || [];
+        plannedQueries = planning.queries || plannedQueries;
         planningWarning = planning.warning || '';
     }
     const phases = buildWebRagQueryPhases(normalizedQuery, plannedQueries);
-    timing.queryGenerationMs = Number((performance.now() - queryGenStart).toFixed(1));
+    timing.planningMs = Number((performance.now() - queryGenStart).toFixed(1));
+    timing.queryGenerationMs = timing.planningMs;
 
     const warnings = planningWarning ? [planningWarning] : [];
     const seen = new Set();
@@ -1020,11 +1078,11 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
     let rerankUsed = false;
     let rerankModel = '';
 
-    // Stage 2: Single Parallel Search Round (Fast Path)
+    // Stage 2: Concurrent Parallel Search Round (Exa + Serper + Public + Structured Roles)
     const phase1Queries = phases[0] || [normalizedQuery];
     const searchStart = performance.now();
 
-    const [exaResults, phaseResults] = await Promise.all([
+    const [exaResults, serperResults, phaseResults, structRoleResults] = await Promise.all([
         searchExa(normalizedQuery, {
             limit,
             plannedQueries: phase1Queries
@@ -1035,10 +1093,19 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
             warnings.push(`exa_phase_1_failed:${String(error?.code || error?.message || 'unknown')}`);
             return [];
         }),
+        searchSerper(normalizedQuery, {
+            limit
+        }).then(r => {
+            timing.serperMs = Number((performance.now() - searchStart).toFixed(1));
+            return r;
+        }).catch(error => {
+            warnings.push(`serper_phase_1_failed:${String(error?.code || error?.message || 'unknown')}`);
+            return [];
+        }),
         searchPublicSources(normalizedQuery, {
             limit,
             plannedQueries: phase1Queries,
-            skipStructuredRoles: !isPoliticalOrLeadershipQuery(normalizedQuery) || false,
+            skipStructuredRoles: true, // Handled concurrently in structRoleResults
             skipAutoDeepCrawl: true
         }).then(r => {
             timing.publicSourcesMs = Number((performance.now() - searchStart).toFixed(1));
@@ -1046,10 +1113,14 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
         }).catch(error => {
             warnings.push(`rag_phase_1_failed:${String(error?.code || error?.message || 'unknown')}`);
             return [];
-        })
+        }),
+        (roleIntent ? searchGovernmentRole(normalizedQuery, { limit: Math.min(3, limit) }) : Promise.resolve([])).then(r => {
+            timing.structuredLookupMs = Number((performance.now() - searchStart).toFixed(1));
+            return r;
+        }).catch(() => [])
     ]);
 
-    for (const item of [...exaResults, ...phaseResults]) {
+    for (const item of [...structRoleResults, ...serperResults, ...exaResults, ...phaseResults]) {
         const key = normalizeResultKey(item);
         if (!key || seen.has(key)) continue;
         seen.add(key);
@@ -1060,7 +1131,7 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
         .filter(item => isValidCitationSource(item, normalizedQuery)))
         .slice(0, Math.max(limit, 8));
 
-    if (process.env.NVIDIA_API_KEY && allResults.length > 0) {
+    if (process.env.NVIDIA_API_KEY && allResults.length > 0 && options.skipEmbedding !== true) {
         const embStart = performance.now();
         const embeddingRank = await rankRagResultsWithEmbeddings(normalizedQuery, allResults).catch(() => ({ available: false, ranked: allResults, model: '' }));
         if (embeddingRank.available) {
@@ -1068,7 +1139,8 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
             embeddingModel = embeddingRank.model || embeddingModel;
             allResults = embeddingRank.ranked.slice(0, Math.max(limit, 8));
         }
-        timing.embeddingsMs = Number((performance.now() - embStart).toFixed(1));
+        timing.embeddingMs = Number((performance.now() - embStart).toFixed(1));
+        timing.embeddingsMs = timing.embeddingMs;
 
         const rerankStart = performance.now();
         const rerankResult = await rerankRagResults(normalizedQuery, allResults).catch(() => ({ available: false, ranked: allResults, model: '' }));
@@ -1077,21 +1149,22 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
             rerankModel = rerankResult.model || rerankModel;
             allResults = rerankResult.ranked.slice(0, Math.max(limit, 8));
         }
-        timing.rerankingMs = Number((performance.now() - rerankStart).toFixed(1));
+        timing.rerankMs = Number((performance.now() - rerankStart).toFixed(1));
+        timing.rerankingMs = timing.rerankMs;
     }
 
     finalGate = evaluateWebRagEvidence(normalizedQuery, allResults);
     finalPhase = 1;
 
     // Stage 3: Exact Claim Deterministic Fast Path (< 1ms)
-    if (finalGate.pass) {
+    if (finalGate.pass || allResults.some(r => r.evidenceLevel === 'structured_claim')) {
         const directAnswer = extractDeterministicLiveFactAnswer(normalizedQuery, allResults);
         if (directAnswer?.verified && directAnswer.answer) {
             finalAnswer = directAnswer;
         }
     }
 
-    // Stage 4: Fast Grounded LLM Synthesis (if deterministic text match was not immediate)
+    // Stage 4: Fast Grounded LLM Synthesis without Deep Crawl (1-2s)
     if (!finalAnswer?.verified && finalGate.pass) {
         const llmStart = performance.now();
         finalAnswer = await buildGroundedRagAnswer(normalizedQuery, allResults, finalGate, { skipDeepCrawl: true })
@@ -1099,23 +1172,26 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
                 warnings.push(`rag_answer_failed:${String(error?.code || error?.message || 'unknown')}`);
                 return null;
             });
-        timing.finalLlmMs = Number((performance.now() - llmStart).toFixed(1));
+        timing.llmMs = Number((performance.now() - llmStart).toFixed(1));
+        timing.finalLlmMs = timing.llmMs;
     }
 
-    // Stage 5: Deep Fallback (Only executed if Phase 1 failed to verify)
-    if (!finalAnswer?.verified && phases.length > 1) {
+    // Stage 5: Targeted Second Search & Fallback (ONLY if Phase 1 failed to verify or conflict detected)
+    if (!finalAnswer?.verified) {
         finalPhase = 2;
         const fallbackQueries = phases[1] || [];
 
-        // Targeted second search + deep crawl
+        // Targeted deep crawl on top 2 results
         const crawlStart = performance.now();
         await enrichSearchResultsWithDeepCrawl(allResults, 2).catch(() => {});
-        timing.deepCrawlMs = Number((performance.now() - crawlStart).toFixed(1));
+        timing.crawlMs = Number((performance.now() - crawlStart).toFixed(1));
+        timing.deepCrawlMs = timing.crawlMs;
 
         if (fallbackQueries.length) {
             const extraPublic = await searchPublicSources(normalizedQuery, {
                 limit,
                 plannedQueries: fallbackQueries,
+                includeGdelt: true,
                 skipStructuredRoles: false,
                 skipAutoDeepCrawl: true
             }).catch(() => []);
@@ -1130,7 +1206,7 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
                 .slice(0, Math.max(limit, 8));
         }
 
-        // If NVIDIA key is configured or during fallback with ambiguous results, run embeddings and rerank
+        // Run embeddings & rerank ONLY on fallback when results are ambiguous
         if (process.env.NVIDIA_API_KEY && allResults.length > 0) {
             const embStart = performance.now();
             const embeddingRank = await rankRagResultsWithEmbeddings(normalizedQuery, allResults).catch(() => ({ available: false, ranked: allResults, model: '' }));
@@ -1139,7 +1215,8 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
                 embeddingModel = embeddingRank.model || embeddingModel;
                 allResults = embeddingRank.ranked.slice(0, Math.max(limit, 8));
             }
-            timing.embeddingsMs = Number((performance.now() - embStart).toFixed(1));
+            timing.embeddingMs = Number((performance.now() - embStart).toFixed(1));
+            timing.embeddingsMs = timing.embeddingMs;
 
             const rerankStart = performance.now();
             const rerankResult = await rerankRagResults(normalizedQuery, allResults).catch(() => ({ available: false, ranked: allResults, model: '' }));
@@ -1148,7 +1225,8 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
                 rerankModel = rerankResult.model || rerankModel;
                 allResults = rerankResult.ranked.slice(0, Math.max(limit, 8));
             }
-            timing.rerankingMs = Number((performance.now() - rerankStart).toFixed(1));
+            timing.rerankMs = Number((performance.now() - rerankStart).toFixed(1));
+            timing.rerankingMs = timing.rerankMs;
         }
 
         finalGate = evaluateWebRagEvidence(normalizedQuery, allResults);
@@ -1156,11 +1234,16 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
             const llmStart = performance.now();
             finalAnswer = await buildGroundedRagAnswer(normalizedQuery, allResults, finalGate, { skipDeepCrawl: false })
                 .catch(() => null);
-            timing.finalLlmMs = Number((timing.finalLlmMs + (performance.now() - llmStart)).toFixed(1));
+            const extraLlm = Number((performance.now() - llmStart).toFixed(1));
+            timing.llmMs = Number((timing.llmMs + extraLlm).toFixed(1));
+            timing.finalLlmMs = timing.llmMs;
         }
     }
 
-    timing.totalLatencyMs = Number((performance.now() - totalStart).toFixed(1));
+    timing.totalMs = Number((performance.now() - totalStart).toFixed(1));
+    timing.totalLatencyMs = timing.totalMs;
+
+    console.log(`[Search Latency Breakdown] query="${normalizedQuery}" total=${timing.totalMs}ms | intent=${timing.intentMs}ms planning=${timing.planningMs}ms exa=${timing.exaMs}ms serper=${timing.serperMs}ms public=${timing.publicSourcesMs}ms structured=${timing.structuredLookupMs}ms embedding=${timing.embeddingMs}ms rerank=${timing.rerankMs}ms crawl=${timing.crawlMs}ms llm=${timing.llmMs}ms phase=${finalPhase}`);
 
     const results = allResults.slice(0, limit);
     const gate = finalGate || evaluateWebRagEvidence(normalizedQuery, results);
@@ -2499,11 +2582,12 @@ function extractDeterministicLiveFactAnswer(query, evidence = []) {
             continue; // Do not let historical claim become direct answer for a current-state query
         }
 
-        if (item.evidenceLevel === 'structured_claim' && item.title) {
+        if (item.evidenceLevel === 'structured_claim') {
+            const derived = buildSourceDerivedAnswer([item], { query });
             return {
                 verified: true,
                 confidence: 0.95,
-                answer: item.description || item.title,
+                answer: derived?.answer || item.description || item.title,
                 evidenceIndexes: [i],
                 modelAssisted: false,
                 reason: `Extracted from structured reference data: ${item.sourceLabel || item.domain}`
