@@ -329,6 +329,25 @@
                             <div class="composer-action-group" data-composer-group="root">
                                 <button type="button" class="composer-action-item" data-composer-nav="photos" role="menuitem">Photos</button>
                                 <button type="button" class="composer-action-item" data-composer-nav="files" role="menuitem">Files</button>
+                                <button
+                                    id="web-search-toggle-btn"
+                                    type="button"
+                                    class="composer-action-item composer-web-search-menuitem"
+                                    onclick="cycleWebSearchMode()"
+                                    data-web-mode="auto"
+                                    role="menuitem"
+                                    title="Web search mode (Auto / On / Off)"
+                                    aria-label="Web search mode">
+                                    <span class="composer-web-search-item-left">
+                                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                            <circle cx="12" cy="12" r="10"></circle>
+                                            <line x1="2" y1="12" x2="22" y2="12"></line>
+                                            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1 4-10z"></path>
+                                        </svg>
+                                        <span>Web Search</span>
+                                    </span>
+                                    <span class="web-search-mode-badge web-search-mode-label">Auto</span>
+                                </button>
                             </div>
                             <div class="composer-action-group hidden" data-composer-group="photos">
                                 <button type="button" class="composer-action-item composer-action-back" data-composer-nav="root" role="menuitem">Back</button>
@@ -369,24 +388,9 @@
                 </div>
                 <div class="composer-trailing">
                     <button
-                        id="web-search-toggle-btn"
-                        type="button"
-                        class="composer-icon-btn web-search-toggle-btn"
-                        onclick="cycleWebSearchMode()"
-                        data-web-mode="auto"
-                        title="Web search (Auto)"
-                        aria-label="Web search (Auto)">
-                        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                            <circle cx="12" cy="12" r="10"></circle>
-                            <line x1="2" y1="12" x2="22" y2="12"></line>
-                            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1 4-10z"></path>
-                        </svg>
-                        <span class="web-search-mode-label">Auto</span>
-                    </button>
-                    <button
                         id="voice-to-text-btn"
                         type="button"
-                        class="composer-icon-btn speech-input-btn"
+                        class="composer-icon-btn speech-input-btn vtt-shifted-left"
                         title="Transcribe one message"
                         aria-label="Transcribe one message"
                         aria-pressed="false">
