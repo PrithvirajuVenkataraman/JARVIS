@@ -9,6 +9,10 @@ import { runFreeLiveSearch, searchDuckDuckGoHtml } from './_lib/free-live/provid
 import { extractWithCrawl4Ai } from './_lib/crawl4ai-client.js';
 import { rankTextsByEmbedding, chunkTextForEmbedding, hasNvidiaEmbeddingKey, rerankTexts, getNvidiaRerankModel } from './_lib/embeddings.js';
 import { cleanQueryTarget, extractQueryTargetMetadata } from './_lib/query-target-cleanup.js';
+import { buildCacheKey, getCachedRAGEntry, setCachedRAGEntry } from './_lib/distributed-cache.js';
+import { hybridRerank } from './_lib/hybrid-reranker.js';
+import { buildParentChildChunks, expandChildMatchesToParentContext } from './_lib/parent-child-chunker.js';
+import { computeRagTriadEvaluation } from './_lib/rag-triad-evaluator.js';
 
 const SERPER_SEARCH_URL = 'https://google.serper.dev/search';
 const WIKIPEDIA_SEARCH_URL = 'https://en.wikipedia.org/w/api.php';
@@ -1028,6 +1032,29 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
     timing.intentMs = Number((performance.now() - intentStart).toFixed(1));
     timing.intentDetectionMs = timing.intentMs;
 
+    // Cache Check: Sub-25ms L1/L2 Distributed Edge Cache
+    const cacheKey = buildCacheKey('web_rag', normalizedQuery, { limit, hasNvidia: Boolean(process.env.NVIDIA_API_KEY) });
+    if (options.skipCache !== true) {
+        const cached = await getCachedRAGEntry(cacheKey).catch(() => null);
+        if (cached && cached.data) {
+            timing.totalMs = Number((performance.now() - totalStart).toFixed(1));
+            timing.totalLatencyMs = timing.totalMs;
+            return {
+                ...cached.data,
+                cached: true,
+                cacheTier: cached.tier,
+                cacheStale: cached.stale,
+                cacheAgeMs: cached.ageMs,
+                timing: {
+                    ...cached.data.timing,
+                    cacheLookupMs: timing.totalMs,
+                    totalMs: timing.totalMs,
+                    totalLatencyMs: timing.totalMs
+                }
+            };
+        }
+    }
+
     // Stage 1: Deterministic Query Generation (skip Gemini on fast path)
     const queryGenStart = performance.now();
     let plannedQueries = buildDeterministicSearchQueries(normalizedQuery);
@@ -1099,9 +1126,12 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
         allResults.push(item);
     }
 
-    allResults = rankSources(normalizedQuery, dedupeSearchResults(allResults)
-        .filter(item => isValidCitationSource(item, normalizedQuery)))
-        .slice(0, Math.max(limit, 8));
+    // In-Process Hybrid Reranking (BM25 + Semantic Embeddings + Reciprocal Rank Fusion)
+    allResults = await hybridRerank(normalizedQuery, dedupeSearchResults(allResults)
+        .filter(item => isValidCitationSource(item, normalizedQuery)), {
+            skipEmbedding: options.skipEmbedding === true
+        }).catch(() => rankSources(normalizedQuery, dedupeSearchResults(allResults).filter(item => isValidCitationSource(item, normalizedQuery))));
+    allResults = allResults.slice(0, Math.max(limit, 8));
 
     if (process.env.NVIDIA_API_KEY && allResults.length > 0 && options.skipEmbedding !== true) {
         const embStart = performance.now();
@@ -1160,6 +1190,23 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
         await enrichSearchResultsWithDeepCrawl(allResults, 2).catch(() => {});
         timing.crawlMs = Number((performance.now() - crawlStart).toFixed(1));
         timing.deepCrawlMs = timing.crawlMs;
+
+        // Parent-child chunk expansion on crawled / full articles
+        const expandedChunks = [];
+        for (const doc of allResults) {
+            if (doc.fullArticleText && doc.fullArticleText.length > 400) {
+                const parents = buildParentChildChunks(doc.fullArticleText, { url: doc.url, title: doc.title });
+                parents.forEach(p => expandedChunks.push({
+                    ...doc,
+                    text: p.parentText,
+                    description: p.parentText.slice(0, 300),
+                    expandedFromParent: true
+                }));
+            }
+        }
+        if (expandedChunks.length) {
+            allResults = [...expandedChunks.slice(0, 4), ...allResults];
+        }
 
         if (fallbackQueries.length) {
             const extraPublic = await searchPublicSources(normalizedQuery, {
@@ -1221,9 +1268,11 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
 
     const results = allResults.slice(0, limit);
     const gate = finalGate || evaluateWebRagEvidence(normalizedQuery, results);
+    const triadScores = computeRagTriadEvaluation(normalizedQuery, finalAnswer?.answer || '', results);
+
     if (!finalAnswer?.verified || !finalAnswer.answer) {
         const unverifiedText = 'I could not verify this from retrieved sources.';
-        return {
+        const unverifiedPayload = {
             provider: 'web_rag',
             answerProvider: 'web_rag_unverified',
             answer: gate.conflict
@@ -1245,14 +1294,16 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
             rerankEnhanced: rerankUsed,
             rerankModel: rerankModel || undefined,
             ragPhaseCount: finalPhase,
+            triadScores,
             timing,
             warnings: Array.from(new Set([...warnings, gate.reason].filter(Boolean)))
         };
+        return unverifiedPayload;
     }
 
     const evidencePool = gate.evidence.length ? gate.evidence : results;
     const evidence = selectEvidenceByIndexes(evidencePool, finalAnswer.evidenceIndexes).slice(0, 6);
-    return {
+    const verifiedPayload = {
         provider: 'web_rag',
         answerProvider: 'web_rag_grounded',
         answer: finalAnswer.answer,
@@ -1278,9 +1329,15 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
         rerankEnhanced: rerankUsed,
         rerankModel: rerankModel || undefined,
         ragPhaseCount: finalPhase,
+        triadScores,
         timing,
         warnings: Array.from(new Set(warnings.filter(Boolean)))
     };
+
+    // Store in distributed edge cache
+    setCachedRAGEntry(cacheKey, verifiedPayload, isFastFactual ? 60 * 60 * 1000 : 15 * 60 * 1000).catch(() => {});
+
+    return verifiedPayload;
 }
 
 function buildUnverifiedRagSummary(query, results = [], warnings = []) {
