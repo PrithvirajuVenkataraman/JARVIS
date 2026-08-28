@@ -5294,7 +5294,8 @@ body:not(.dark) .source-card-badge {
 }
 
 /* Inline Superscript Citation Badges */
-.citation-badge {
+.citation-badge,
+.citation-badge-static {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -5312,7 +5313,8 @@ body:not(.dark) .source-card-badge {
     transition: all 0.18s ease;
 }
 
-.citation-badge:hover {
+.citation-badge:hover,
+.citation-badge-static:hover {
     color: #ffffff;
     background: #0284c7;
     border-color: #38bdf8;
