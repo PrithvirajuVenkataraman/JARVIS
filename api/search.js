@@ -89,21 +89,6 @@ const OFFICIAL_GOVERNMENT_DOMAIN_PATTERNS = Object.freeze([
     /^un\.org$/i
 ]);
 
-const OFFICIAL_GOVERNMENT_PORTALS = Object.freeze([
-    { pattern: /\b(?:united states|usa|u\.s\.|american government)\b/i, label: 'USA.gov official', url: 'https://www.usa.gov/' },
-    { pattern: /\b(?:united kingdom|uk|british government|england|scotland|wales)\b/i, label: 'GOV.UK official', url: 'https://www.gov.uk/' },
-    { pattern: /\b(?:india|indian government|bharat)\b/i, label: 'India.gov.in official', url: 'https://www.india.gov.in/' },
-    { pattern: /\b(?:canada|canadian government)\b/i, label: 'Canada.ca official', url: 'https://www.canada.ca/' },
-    { pattern: /\b(?:australia|australian government)\b/i, label: 'Australia.gov.au official', url: 'https://www.australia.gov.au/' },
-    { pattern: /\b(?:france|french government)\b/i, label: 'Gouvernement.fr official', url: 'https://www.gouvernement.fr/' },
-    { pattern: /\b(?:germany|german government|deutschland)\b/i, label: 'Bundesregierung official', url: 'https://www.bundesregierung.de/' },
-    { pattern: /\b(?:japan|japanese government)\b/i, label: 'Japan government official', url: 'https://www.japan.go.jp/' },
-    { pattern: /\b(?:singapore|singapore government)\b/i, label: 'Singapore government official', url: 'https://www.gov.sg/' },
-    { pattern: /\b(?:south africa|south african government)\b/i, label: 'South African Government official', url: 'https://www.gov.za/' },
-    { pattern: /\b(?:european union|eu commission|eu parliament|eu\b)\b/i, label: 'European Union official', url: 'https://european-union.europa.eu/' },
-    { pattern: /\b(?:united nations|un\b)\b/i, label: 'United Nations official', url: 'https://www.un.org/' }
-]);
-
 export default async function handler(req, res) {
     const guard = applyApiSecurity(req, res, {
         methods: ['POST'],
@@ -411,8 +396,8 @@ export async function searchPublicSources(query, options = {}) {
         : [normalizedQuery];
     const querySet = Array.from(new Set([
         normalizedQuery,
-        ...deterministicQueries,
-        ...plannedQueries.map(item => normalizeSearchQuery(item)).filter(Boolean)
+        ...plannedQueries.map(item => normalizeSearchQuery(item)).filter(Boolean),
+        ...deterministicQueries
     ])).slice(0, 7);
 
     const targetQueries = querySet.slice(0, 2);
@@ -962,28 +947,19 @@ export async function runVerifiedWebSearch(query, options = {}) {
         : { queries: [], warning: '' };
 
     const searchQueries = Array.from(new Set([
+        normalizedQuery,
         ...deterministicQueries,
         ...(planning.queries || [])
     ]));
 
-    // Concurrent multi-provider search (Serper + Exa + Public Sources)
-    const [publicSources, exaSources, serperSources] = await Promise.all([
-        searchPublicSources(normalizedQuery, {
-            limit,
-            plannedQueries: searchQueries,
-            skipAutoDeepCrawl: true
-        }).catch(() => []),
-        searchExa(normalizedQuery, {
-            limit,
-            plannedQueries: searchQueries
-        }).catch(() => []),
-        searchSerper(normalizedQuery, {
-            limit
-        }).catch(() => [])
-    ]);
+    // Search using our own scrapers only (no paid APIs)
+    const publicSources = await searchPublicSources(normalizedQuery, {
+        limit,
+        plannedQueries: searchQueries,
+        skipAutoDeepCrawl: true
+    }).catch(() => []);
 
-    const allSources = dedupeSearchResults([...serperSources, ...exaSources, ...publicSources]);
-    const publicResults = rankSources(normalizedQuery, allSources
+    const publicResults = rankSources(normalizedQuery, dedupeSearchResults(publicSources)
         .filter(item => isValidCitationSource(item, normalizedQuery))).slice(0, limit);
 
     let warnings = buildSearchWarnings(publicResults, planning.warning ? [planning.warning] : []);
@@ -1007,7 +983,7 @@ export async function runVerifiedWebSearch(query, options = {}) {
 
     return buildSearchSummary(enhancedResults, {
         query: normalizedQuery,
-        provider: serperSources.length && exaSources.length ? 'serper_exa_and_public_sources' : (exaSources.length ? 'exa_and_public_sources' : (serperSources.length ? 'serper_and_public_sources' : 'public_sources')),
+        provider: 'public_sources',
         publicSourceCount: enhancedResults.length,
         geminiEnhanced,
         warnings
@@ -1016,6 +992,7 @@ export async function runVerifiedWebSearch(query, options = {}) {
 
 export async function runEvidenceFirstWebRag(query, options = {}) {
     const totalStart = performance.now();
+    const FAST_PATH_BUDGET_MS = 8_000;
     const timing = {
         intentMs: 0,
         planningMs: 0,
@@ -1051,7 +1028,7 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
     timing.intentMs = Number((performance.now() - intentStart).toFixed(1));
     timing.intentDetectionMs = timing.intentMs;
 
-    // Stage 1: Fast Query Planning (Deterministic first, Gemini only as fallback)
+    // Stage 1: Deterministic Query Generation (skip Gemini on fast path)
     const queryGenStart = performance.now();
     let plannedQueries = buildDeterministicSearchQueries(normalizedQuery);
     let planningWarning = '';
@@ -1078,34 +1055,18 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
     let rerankUsed = false;
     let rerankModel = '';
 
-    // Stage 2: Concurrent Parallel Search Round (Exa + Serper + Public + Structured Roles)
+    // Stage 2: Tiered Parallel Scraper Round (Fast Path)
+    // Tier 1 scrapers: Google News RSS, Wikipedia, DuckDuckGo, Wikidata generic
+    // Structured Wikidata SPARQL runs concurrently but independently
+    // GDELT, Reddit, deep crawl, embeddings, reranking = fallback only
     const phase1Queries = phases[0] || [normalizedQuery];
     const searchStart = performance.now();
 
-    const [exaResults, serperResults, phaseResults, structRoleResults] = await Promise.all([
-        searchExa(normalizedQuery, {
-            limit,
-            plannedQueries: phase1Queries
-        }).then(r => {
-            timing.exaMs = Number((performance.now() - searchStart).toFixed(1));
-            return r;
-        }).catch(error => {
-            warnings.push(`exa_phase_1_failed:${String(error?.code || error?.message || 'unknown')}`);
-            return [];
-        }),
-        searchSerper(normalizedQuery, {
-            limit
-        }).then(r => {
-            timing.serperMs = Number((performance.now() - searchStart).toFixed(1));
-            return r;
-        }).catch(error => {
-            warnings.push(`serper_phase_1_failed:${String(error?.code || error?.message || 'unknown')}`);
-            return [];
-        }),
+    const tier1Tasks = [
         searchPublicSources(normalizedQuery, {
             limit,
             plannedQueries: phase1Queries,
-            skipStructuredRoles: true, // Handled concurrently in structRoleResults
+            skipStructuredRoles: true,
             skipAutoDeepCrawl: true
         }).then(r => {
             timing.publicSourcesMs = Number((performance.now() - searchStart).toFixed(1));
@@ -1113,14 +1074,25 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
         }).catch(error => {
             warnings.push(`rag_phase_1_failed:${String(error?.code || error?.message || 'unknown')}`);
             return [];
-        }),
-        (roleIntent ? searchGovernmentRole(normalizedQuery, { limit: Math.min(3, limit) }) : Promise.resolve([])).then(r => {
-            timing.structuredLookupMs = Number((performance.now() - searchStart).toFixed(1));
-            return r;
-        }).catch(() => [])
-    ]);
+        })
+    ];
 
-    for (const item of [...structRoleResults, ...serperResults, ...exaResults, ...phaseResults]) {
+    // Structured Wikidata role lookup runs concurrently (only for role queries)
+    if (roleIntent) {
+        tier1Tasks.push(
+            searchGovernmentRole(normalizedQuery, { limit: Math.min(3, limit) }).then(r => {
+                timing.structuredLookupMs = Number((performance.now() - searchStart).toFixed(1));
+                return r;
+            }).catch(() => [])
+        );
+    }
+
+    const tier1Settled = await Promise.all(tier1Tasks);
+    const publicResults = tier1Settled[0] || [];
+    const structRoleResults = tier1Settled[1] || [];
+
+    // Structured claims go first for priority
+    for (const item of [...structRoleResults, ...publicResults]) {
         const key = normalizeResultKey(item);
         if (!key || seen.has(key)) continue;
         seen.add(key);
@@ -1156,7 +1128,7 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
     finalGate = evaluateWebRagEvidence(normalizedQuery, allResults);
     finalPhase = 1;
 
-    // Stage 3: Exact Claim Deterministic Fast Path (< 1ms)
+    // Stage 3: Early Exit — Deterministic Structured Claim (<1ms)
     if (finalGate.pass || allResults.some(r => r.evidenceLevel === 'structured_claim')) {
         const directAnswer = extractDeterministicLiveFactAnswer(normalizedQuery, allResults);
         if (directAnswer?.verified && directAnswer.answer) {
@@ -1164,7 +1136,7 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
         }
     }
 
-    // Stage 4: Fast Grounded LLM Synthesis without Deep Crawl (1-2s)
+    // Stage 4: Fast LLM synthesis if deterministic didn't match but evidence passed gate
     if (!finalAnswer?.verified && finalGate.pass) {
         const llmStart = performance.now();
         finalAnswer = await buildGroundedRagAnswer(normalizedQuery, allResults, finalGate, { skipDeepCrawl: true })
@@ -1176,12 +1148,14 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
         timing.finalLlmMs = timing.llmMs;
     }
 
-    // Stage 5: Targeted Second Search & Fallback (ONLY if Phase 1 failed to verify or conflict detected)
-    if (!finalAnswer?.verified) {
+    // Stage 5: Fallback — ONLY if Phase 1 failed to verify
+    // Activates: GDELT, deep crawl, embeddings/reranking, secondary search, LLM
+    const elapsed = performance.now() - totalStart;
+    if (!finalAnswer?.verified && elapsed < FAST_PATH_BUDGET_MS) {
         finalPhase = 2;
         const fallbackQueries = phases[1] || [];
 
-        // Targeted deep crawl on top 2 results
+        // Deep crawl top 2 results for more evidence
         const crawlStart = performance.now();
         await enrichSearchResultsWithDeepCrawl(allResults, 2).catch(() => {});
         timing.crawlMs = Number((performance.now() - crawlStart).toFixed(1));
@@ -1191,9 +1165,9 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
             const extraPublic = await searchPublicSources(normalizedQuery, {
                 limit,
                 plannedQueries: fallbackQueries,
-                includeGdelt: true,
                 skipStructuredRoles: false,
-                skipAutoDeepCrawl: true
+                skipAutoDeepCrawl: true,
+                skipGdelt: false
             }).catch(() => []);
             for (const item of extraPublic) {
                 const key = normalizeResultKey(item);
@@ -1206,7 +1180,7 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
                 .slice(0, Math.max(limit, 8));
         }
 
-        // Run embeddings & rerank ONLY on fallback when results are ambiguous
+        // Embeddings & reranking ONLY on fallback
         if (process.env.NVIDIA_API_KEY && allResults.length > 0) {
             const embStart = performance.now();
             const embeddingRank = await rankRagResultsWithEmbeddings(normalizedQuery, allResults).catch(() => ({ available: false, ranked: allResults, model: '' }));
@@ -1243,7 +1217,7 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
     timing.totalMs = Number((performance.now() - totalStart).toFixed(1));
     timing.totalLatencyMs = timing.totalMs;
 
-    console.log(`[Search Latency Breakdown] query="${normalizedQuery}" total=${timing.totalMs}ms | intent=${timing.intentMs}ms planning=${timing.planningMs}ms exa=${timing.exaMs}ms serper=${timing.serperMs}ms public=${timing.publicSourcesMs}ms structured=${timing.structuredLookupMs}ms embedding=${timing.embeddingMs}ms rerank=${timing.rerankMs}ms crawl=${timing.crawlMs}ms llm=${timing.llmMs}ms phase=${finalPhase}`);
+    console.log(`[Search Latency Breakdown] query="${normalizedQuery}" total=${timing.totalMs}ms | intent=${timing.intentMs}ms planning=${timing.planningMs}ms public=${timing.publicSourcesMs}ms structured=${timing.structuredLookupMs}ms embedding=${timing.embeddingMs}ms rerank=${timing.rerankMs}ms crawl=${timing.crawlMs}ms llm=${timing.llmMs}ms phase=${finalPhase}`);
 
     const results = allResults.slice(0, limit);
     const gate = finalGate || evaluateWebRagEvidence(normalizedQuery, results);
@@ -1506,6 +1480,7 @@ function cleanPredicateText(value) {
         .replace(/^\s*(?:who|what)\s+(?:is|was|are|were)\s+(?:the\s+)?/i, ' ')
         .replace(/^\s*(?:the|a|an)\s+/i, ' ')
         .replace(/\b(current|latest|present|incumbent|official)\b/gi, ' ')
+        .replace(/['’]s\b/gi, ' ')
         .replace(/^[,:\s]+|[,:\s?!.]+$/g, '')
         .replace(/\s+/g, ' ')
         .trim();
@@ -1516,6 +1491,7 @@ function cleanSubjectText(value) {
         .replace(/^\s*(?:who|what)\s+(?:is|was|are|were)\s+(?:the\s+)?/i, ' ')
         .replace(/^\s*(?:the|a|an)\s+/i, ' ')
         .replace(/\b(current|latest|present|incumbent|official)\b/gi, ' ')
+        .replace(/['’]s\b/gi, ' ')
         .replace(/^[,:\s]+|[,:\s?!.]+$/g, '')
         .replace(/\s+/g, ' ')
         .trim();
@@ -1525,18 +1501,23 @@ function buildGovernmentRoleSparql(intent, jurisdictionId, limit = 3) {
     const qid = String(jurisdictionId || '').trim();
     if (!/^Q\d+$/.test(qid)) return '';
     const roleFilter = escapeSparqlString(intent.role);
-    const directProperty = ['P35', 'P6', 'P169'].includes(intent.property) ? intent.property : '';
-    const directBranch = directProperty
-        ? `{
-  wd:${qid} p:${directProperty} ?statement.
-  ?statement ps:${directProperty} ?holder.
+    const directProps = intent.property === 'P35'
+        ? ['P35', 'P488', 'P1037']
+        : intent.property === 'P6'
+            ? ['P6']
+            : intent.property === 'P169'
+                ? ['P169', 'P1037', 'P488']
+                : [];
+    const directBranches = directProps.map(prop => `{
+  wd:${qid} p:${prop} ?statement.
+  ?statement ps:${prop} ?holder.
   OPTIONAL { ?statement pq:P580 ?start. }
   OPTIONAL { ?statement pq:P582 ?end. }
   BIND("${escapeSparqlString(intent.role)}" AS ?officeLabel)
-  BIND("p:${directProperty}" AS ?claimType)
-}`
-        : '';
-    const p39Branch = intent.organizationRole || directProperty ? '' : `{
+  BIND("p:${prop}" AS ?claimType)
+}`);
+    const directBranch = directBranches.join(' UNION ');
+    const p39Branch = intent.organizationRole || directProps.length ? '' : `{
     ?holder p:P39 ?statement.
     ?statement ps:P39 ?office.
     OPTIONAL { ?statement pq:P580 ?start. }
@@ -1793,11 +1774,11 @@ function scoreWikidataEntityCandidate(query, item, index) {
     let score = Math.max(0, 20 - index);
     if (label === q) score += 30;
     if (label.includes(q) || q.includes(label)) score += 12;
-    if (/\b(country|sovereign state|state|province|city|municipality|administrative territorial entity|federal state)\b/.test(description)) {
-        score += 10;
+    if (/\b(country|sovereign state|state|province|city|municipality|administrative territorial entity|federal state|company|corporation|enterprise|business|technology company|multinational|financial institution|organization|international organization)\b/.test(description)) {
+        score += 15;
     }
-    if (/\b(disambiguation|family name|given name|film|song|album|book)\b/.test(description)) {
-        score -= 15;
+    if (/\b(fruit|species|plant|taxon|organism|disambiguation|family name|given name|film|song|album|book|video game)\b/.test(description)) {
+        score -= 25;
     }
     return score;
 }
@@ -2902,10 +2883,6 @@ async function discoverOfficialSourceCandidates(query, options = {}) {
         });
     };
 
-    for (const portal of OFFICIAL_GOVERNMENT_PORTALS.filter(item => item.pattern.test(cleanQuery))) {
-        add({ ...portal, discoverySignal: 'official_registry', officialConfidence: 'medium' });
-    }
-
     const roleIntent = parseGovernmentRoleQuery(cleanQuery);
     if (roleIntent) {
         const wikidataOfficial = await discoverWikidataOfficialCandidates(roleIntent.jurisdiction)
@@ -3131,6 +3108,8 @@ export function isValidCitationSource(source, query = '') {
     const fullContent = `${title} ${description} ${item.fullArticleText || ''} ${item.text || ''} ${url}`.toLowerCase();
     if (!title || !url) return false;
     if (!sourceType || LOOKUP_ONLY_SOURCE_TYPES.has(sourceType)) return false;
+    // Structured claims (e.g., Wikidata role lookups) always pass — check before description filter
+    if (item.evidenceLevel === 'structured_claim') return true;
     if (!description || description.length < 20) return false;
     if (/search:|webcache|cache\.google|\/search(?:[/?#]|$)|[?&]q=/.test(combined)) return false;
     if (/archive\.(today|ph|is)|webcache/i.test(domain)) return false;
@@ -3155,7 +3134,6 @@ export function isValidCitationSource(source, query = '') {
     }
 
     if (sourceType === 'official_source' && !item.pageFetched) return false;
-    if (item.evidenceLevel === 'structured_claim') return true;
     if (sourceType === 'official_source') return Boolean(item.exactShortcutMatch) || isRelatedToQuery(query, item);
     if (/^(live_web|web_search|encyclopedia|structured_reference|trusted_news|public_news|cached_latest|free_|exa_)/.test(sourceType)) {
         return isRelatedToQuery(query, item);
@@ -3333,10 +3311,11 @@ function extractSearchSubject(query) {
 
 function extractSearchIntentTerm(query) {
     const text = String(query || '').toLowerCase();
-    if (/\bprice|available|availability|launched|released?\b/.test(text)) return 'latest';
-    if (/\bvs|compare|comparison\b/.test(text)) return 'comparison';
-    if (/\bworth\s+it|best\b/.test(text)) return 'review';
-    return 'reviews';
+    if (/\b(?:news|update|updates|breaking|developments?|government|policy|election)\b/.test(text)) return 'news';
+    if (/\b(?:price|available|availability|launched|released?)\b/.test(text)) return 'latest';
+    if (/\b(?:vs|compare|comparison)\b/.test(text)) return 'comparison';
+    if (/\b(?:worth\s+it|review|reviews|best)\b/.test(text)) return 'reviews';
+    return 'updates';
 }
 
 function createSerperStatusError(status, detail = '') {
