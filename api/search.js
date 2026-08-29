@@ -13,6 +13,7 @@ import { buildCacheKey, getCachedRAGEntry, setCachedRAGEntry } from './_lib/dist
 import { hybridRerank } from './_lib/hybrid-reranker.js';
 import { buildParentChildChunks, expandChildMatchesToParentContext } from './_lib/parent-child-chunker.js';
 import { computeRagTriadEvaluation } from './_lib/rag-triad-evaluator.js';
+import { cleanSnippetText, decodeHtmlEntities } from './_lib/snippet-sanitizer.js';
 
 const SERPER_SEARCH_URL = 'https://google.serper.dev/search';
 const WIKIPEDIA_SEARCH_URL = 'https://en.wikipedia.org/w/api.php';
@@ -539,11 +540,11 @@ function parseGoogleNewsRssXml(xml, query, limit = 8) {
         const descMatch = /<description>([\s\S]*?)<\/description>/i.exec(itemBlock);
         const sourceMatch = /<source\s+url="([^"]*)"[^>]*>([\s\S]*?)<\/source>/i.exec(itemBlock);
 
-        let rawTitle = cleanXmlEntities(titleMatch?.[1] || '');
-        let link = cleanXmlEntities(linkMatch?.[1] || '');
-        const pubDate = cleanXmlEntities(pubDateMatch?.[1] || '');
-        let desc = cleanXmlEntities(descMatch?.[1] || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-        const sourceName = cleanXmlEntities(sourceMatch?.[2] || '');
+        let rawTitle = cleanSnippetText(titleMatch?.[1] || '');
+        let link = decodeHtmlEntities(linkMatch?.[1] || '').trim();
+        const pubDate = cleanSnippetText(pubDateMatch?.[1] || '');
+        let desc = cleanSnippetText(descMatch?.[1] || '');
+        const sourceName = cleanSnippetText(sourceMatch?.[2] || '');
 
         let publisher = sourceName;
         if (rawTitle.includes(' - ')) {
@@ -2600,7 +2601,6 @@ function extractDeterministicLiveFactAnswer(query, evidence = []) {
     if (!Array.isArray(evidence) || !evidence.length) return null;
     const isCurrent = isCurrentStateQuery(query);
     const isRoleQuery = /\b(cm|chief minister|president|prime minister|pm|governor|mayor|leader|head of state|head of government|ceo|captain|skipper|coach)\b/i.test(query);
-    const isDefinitionRegex = /\b(is the head of (?:the )?government|is the leader of the (?:state )?cabinet|is the head of the executive|is the highest-ranking executive|is an elected or appointed official|refers to the office|is a constitutional position|debut franchises|Twenty20 cricket team based in|cricket franchise)\b/i;
 
     const sorted = [...evidence].sort((a, b) => {
         if (isCurrent) {
@@ -2620,6 +2620,7 @@ function extractDeterministicLiveFactAnswer(query, evidence = []) {
             continue; // Do not let historical claim become direct answer for a current-state query
         }
 
+        // Strictly allow early-exit ONLY for structured knowledge graph claims (e.g. Wikidata direct statements)
         if (item.evidenceLevel === 'structured_claim') {
             const derived = buildSourceDerivedAnswer([item], { query });
             return {
@@ -2631,39 +2632,8 @@ function extractDeterministicLiveFactAnswer(query, evidence = []) {
                 reason: `Extracted from structured reference data: ${item.sourceLabel || item.domain}`
             };
         }
-
-        const text = `${item.title}. ${item.description || ''}`.trim();
-        if (text.length > 15) {
-            if (isRoleQuery && isDefinitionRegex.test(text)) {
-                continue; // Skip generic dictionary definitions of the office or franchise
-            }
-            if (/\b(?:makes bold claim|bold claim|predicts?|suggests?|speculates?|opinion|rumor|rumour|will captain|could captain|urges?|dances after|net practice|WATCH)\b/i.test(text)) {
-                continue; // Skip clickbait and opinion speculation
-            }
-
-            if (isRoleQuery) {
-                continue; // Defer unstructured text synthesis to buildGroundedRagAnswer
-            }
-
-            let chosenAnswer = item.description && item.description.length > 25 && !isDefinitionRegex.test(item.description)
-                ? item.description
-                : item.title;
-            if (chosenAnswer.includes(' - ')) {
-                const parts = chosenAnswer.split(' - ');
-                if (parts.length > 1 && parts[parts.length - 1].length < 30) {
-                    chosenAnswer = parts.slice(0, -1).join(' - ').trim();
-                }
-            }
-            return {
-                verified: true,
-                confidence: 0.88,
-                answer: chosenAnswer,
-                evidenceIndexes: [i],
-                modelAssisted: false,
-                reason: `Extracted directly from live web source: ${item.domain || item.sourceLabel}`
-            };
-        }
     }
+    // All unstructured news, articles, and web snippets must be synthesized by LLM in buildGroundedRagAnswer
     return null;
 }
 
