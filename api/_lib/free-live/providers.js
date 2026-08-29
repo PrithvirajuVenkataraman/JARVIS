@@ -1,5 +1,6 @@
 import { FREE_LIVE_SOURCES } from './source-registry.js';
 import { cleanQueryTarget, extractQueryTargetMetadata } from '../query-target-cleanup.js';
+import { cleanSnippetText } from '../snippet-sanitizer.js';
 
 const OPEN_METEO_GEOCODE_URL = 'https://geocoding-api.open-meteo.com/v1/search';
 const OPEN_METEO_FORECAST_URL = 'https://api.open-meteo.com/v1/forecast';
@@ -50,14 +51,14 @@ export async function searchDuckDuckGoHtml(query, options = {}) {
                 } catch (_) {}
             }
             if (rawUrl.startsWith('//')) rawUrl = `https:${rawUrl}`;
-            const title = match[2].replace(/<[^>]+>/g, '').trim();
+            const title = cleanSnippetText(match[2]);
             links.push({ title, url: rawUrl });
         }
 
         const snippets = [];
         let sMatch;
         while ((sMatch = snippetRegex.exec(html)) !== null) {
-            snippets.push(sMatch[1].replace(/<[^>]+>/g, '').trim());
+            snippets.push(cleanSnippetText(sMatch[1]));
         }
 
         for (let i = 0; i < links.length && results.length < limit; i++) {
@@ -92,9 +93,9 @@ export async function searchWikipediaApi(query, options = {}) {
         const data = await res.json();
         const list = data?.query?.search || [];
         return list.map(item => ({
-            title: item.title,
-            description: item.snippet ? item.snippet.replace(/<[^>]+>/g, '').trim() : `Wikipedia overview of ${item.title}`,
-            snippet: item.snippet ? item.snippet.replace(/<[^>]+>/g, '').trim() : `Wikipedia overview of ${item.title}`,
+            title: cleanSnippetText(item.title),
+            description: item.snippet ? cleanSnippetText(item.snippet) : `Wikipedia overview of ${item.title}`,
+            snippet: item.snippet ? cleanSnippetText(item.snippet) : `Wikipedia overview of ${item.title}`,
             url: `https://en.wikipedia.org/wiki/${encodeURIComponent(item.title.replace(/ /g, '_'))}`,
             source: 'Wikipedia',
             sourceType: 'reference_lookup',
