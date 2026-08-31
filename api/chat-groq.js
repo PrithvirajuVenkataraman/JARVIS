@@ -2982,7 +2982,9 @@ Write your thinking as genuine, natural inner thoughts exploring the specific qu
         // Final cleanup: strip any remaining meta-talk prefixes
         body = stripMetaTalkPrefixes(body);
 
-        if (!/\bSources:\s*/i.test(body) && top.length > 0) {
+        const userAsksForSources = /\b(with sources?|source links?|include links?|cite sources?|show sources?)\b/i.test(String(message || ''));
+        const isRawScraperFallback = !cleanExisting;
+        if ((userAsksForSources || isRawScraperFallback) && !/\bSources:\s*/i.test(body) && top.length > 0) {
             const lines = [body, '', 'Sources:'];
             for (const item of top) {
                 const url = String(item.url || '').trim();
