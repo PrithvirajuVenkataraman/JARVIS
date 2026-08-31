@@ -3624,12 +3624,26 @@ export function buildDeterministicSearchQueries(query) {
         const subj = universal.jurisdiction;
         const role = universal.role;
         const roleText = universal.roleText || role;
+        const isCompanyRole = /\b(ceo|cfo|cto|coo|founder|co-founder|managing director|executive)\b/i.test(role);
+
+        if (isCompanyRole) {
+            return Array.from(new Set([
+                `"${subj}" ${roleText}`.trim(),
+                `${subj} ${role}`.trim(),
+                `${subj} current ${role}`.trim(),
+                `${subj} leadership executive team`.trim(),
+                `${subj} CEO founder`.trim(),
+                `who is the ${role} of ${subj}`.trim(),
+                `${subj} management team`.trim()
+            ].map(normalizeSearchQuery).filter(Boolean)));
+        }
+
         return Array.from(new Set([
             `${subj} ${role}`.trim(),
             `${subj} current ${role}`.trim(),
             `who is the ${role} of ${subj}`.trim(),
             `${subj} ${roleText}`.trim(),
-            `${subj} leadership ${role}`.trim()
+            `List of ${role}s of ${subj}`.trim()
         ].map(normalizeSearchQuery).filter(Boolean)));
     }
     const subject = extractSearchSubject(normalized);
