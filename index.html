@@ -8477,82 +8477,9 @@ let showRoutingDebugBadge = false;
             return { thought, answer: cleanAnswer };
         }
 
-        function generateContextualThoughtSteps(userPrompt) {
-            const raw = String(userPrompt || '').trim();
-            if (!raw) return [];
-            const prompt = raw.toLowerCase();
-
-            // Ignore brief pleasantries and ultra-short non-inquiries (< 15 chars)
-            if (/^(hi|hello|hey|thanks|thank you|good morning|good evening|good afternoon|bye|good night|ok|okay|cool|sure|yep|nope)[!.?]*$/i.test(prompt) && raw.length < 15) {
-                return [];
-            }
-
-            // Extract the core subject / question entity
-            let subject = raw.replace(/^[¿¡"'\s]+|[?"'\s]+$/g, '');
-            subject = subject.replace(/^(?:can you|could you|please|kindly|i want to|i need to|help me|tell me|show me|explain to me|give me|write|create|implement|solve|calculate|compute|compare|analyze|describe|discuss|summarize|what is|what was|what are|what were|who is|who was|who are|who were|why is|why was|why does|why did|why do|how to|how do i|how does|how is|how can|where is|when was|when did)\s+/i, '');
-            subject = subject.replace(/\b(?:step by step|in detail|briefly|simply|with code|with examples?|for beginners?|please)\b/gi, '').trim();
-            subject = subject.replace(/[?.!:]+$/g, '').trim();
-            const subjectSnippet = subject ? (subject.length > 55 ? subject.slice(0, 52) + '...' : subject) : 'the inquiry';
-
-            // Detect programming language & code constructs
-            const langMatch = raw.match(/\b(python|javascript|typescript|c\+\+|cpp|c#|rust|golang|go|java|kotlin|swift|ruby|php|sql|scala|haskell|bash|powershell|html|css)\b/i);
-            const lang = langMatch ? (langMatch[0].toLowerCase() === 'cpp' ? 'C++' : langMatch[0]) : null;
-
-            // Detect comparisons
-            const compMatch = raw.match(/(?:difference between|compare|versus|\bvs\.?\b)\s+([A-Za-z0-9_+#.\s-]+?)\s+(?:and|versus|\bvs\.?\b)\s+([A-Za-z0-9_+#.\s-]+)/i);
-            const isComparison = Boolean(compMatch) || /\b(versus|\bvs\b|compare|contrast|trade-?offs?|pros and cons|which is better)\b/i.test(prompt);
-            const entityA = compMatch ? compMatch[1].trim() : null;
-            const entityB = compMatch ? compMatch[2].trim() : null;
-
-            // Domain categorizations
-            const isCode = Boolean(lang) || /\b(code|algorithm|function|class|method|struct|pointer|interface|refactor|debug|bug|async|await|promise|regex|stack|queue|tree|graph|dp|recursion|api|database|query|table|schema|endpoint|implementation|quicksort|binary search|palindrome)\b/i.test(prompt);
-            const isMath = /\b(calculate|compute|solve|derivative|integral|equation|formula|matrix|matrices|eigen|probability|statistics|algebra|geometry|theorem|proof|arithmetic|polynomial|linear equation|\^|\+|\*|\/|=)\b/i.test(prompt);
-            const isScience = /\b(physics|quantum|relativity|gravity|spacetime|black hole|event horizon|thermodynamics|chemistry|molecule|reaction|atom|orbital|biology|cell|dna|rna|gene|crispr|protein|enzyme|evolution|planet|orbit|galaxy|star|supernova|photosynthesis|tectonic|plate)\b/i.test(prompt);
-            const isHistory = /\b(history|historical|war|battle|empire|dynasty|revolution|century|treaty|monarch|king|queen|ancient|medieval|republic|colony|colonial|independence|civilization|collapse|roman empire|french revolution)\b/i.test(prompt);
-            const isGeography = /\b(capital|capitals|country|countries|continent|geography|geographic|border|borders|territory|provinces?|state|states|city|cities|mountains?|ocean|river|latitude|longitude|bengaluru|bangalore|india|paris|london|tokyo)\b/i.test(prompt);
-
-            let s1, s2, s3, s4, s5;
-
-            if (isMath) {
-                s1 = `Parsing the mathematical problem for ${subjectSnippet}. Identifying known variables, domain constraints, and the target value.`;
-                s2 = `Setting up the governing equation and selecting the most direct analytical or numerical method.`;
-                s3 = `Working through the algebraic steps and arithmetic, keeping precision intact at each step.`;
-                s4 = `Checking boundary conditions, integer bounds, and numerical convergence to confirm the result.`;
-                s5 = `Formulating the final exact and approximate solution with clear, step-by-step reasoning.`;
-            } else if (isCode) {
-                s1 = `Analyzing requirements and input/output contracts for ${subjectSnippet}${lang ? ' in ' + lang : ''}.`;
-                s2 = `Selecting appropriate data structures and algorithmic approach for optimal time/space complexity.`;
-                s3 = `Drafting the implementation with clean idiomatic syntax and intuitive variable naming.`;
-                s4 = `Reviewing edge cases: empty collections, off-by-one bounds, null safety, and error handling.`;
-                s5 = `Finalizing the working code solution accompanied by concise usage notes.`;
-            } else if (isComparison) {
-                const target = entityA && entityB ? `${entityA} vs ${entityB}` : subjectSnippet;
-                s1 = `Breaking down the comparative architecture and design philosophies for ${target}.`;
-                s2 = `Evaluating core dimensions: performance, developer ergonomics, ecosystem maturity, and cost.`;
-                s3 = `Analyzing real-world tradeoffs and identifying the sweet spot for each approach.`;
-                s4 = `Checking practical migration caveats, hosting friction, and operational edge cases.`;
-                s5 = `Synthesizing a balanced, actionable recommendation based on typical project requirements.`;
-            } else if (isScience) {
-                s1 = `Examining the physical and scientific principles underlying ${subjectSnippet}.`;
-                s2 = `Connecting fundamental theoretical laws with observable empirical phenomena.`;
-                s3 = `Tracing the mechanistic sequence of events and causal interactions step-by-step.`;
-                s4 = `Verifying against scientific consensus and checking for common misconceptions.`;
-                s5 = `Synthesizing a clear, intuitive explanation grounded in rigorous fundamentals.`;
-            } else if (isGeography || isHistory) {
-                s1 = `Establishing geographical coordinates, regional context, and historical background for ${subjectSnippet}.`;
-                s2 = `Gathering authoritative spatial, geological, or historical records for accuracy.`;
-                s3 = `Analyzing relationships between terrain, tectonic/administrative borders, and regional dynamics.`;
-                s4 = `Cross-verifying specific place names, dates, and classifications across reliable sources.`;
-                s5 = `Structuring a crisp, informative answer that directly addresses the question.`;
-            } else {
-                s1 = `Understanding the core question and intent behind ${subjectSnippet}.`;
-                s2 = `Recalling the most accurate facts, domain context, and foundational concepts.`;
-                s3 = `Evaluating the logical connections and structuring a coherent explanation.`;
-                s4 = `Double-checking clarity, nuances, and factual accuracy of every detail.`;
-                s5 = `Synthesizing a direct, helpful response tailored to what was asked.`;
-            }
-
-            return [s1, s2, s3, s4, s5];
+        function generateContextualThoughtSteps(_userPrompt) {
+            // Real model reasoning only: never generate static synthetic 5-pointer templates
+            return [];
         }
 
         window.toggleThinkingProcessCard = function(card, event) {
@@ -8600,7 +8527,7 @@ let showRoutingDebugBadge = false;
         }
 
         function buildThinkingProcessHtml(thoughtContent, steps = [], elapsedSeconds = 2.1, isStreaming = false, selfHealing = null, modelInfo = null, telemetry = null) {
-            if (!thoughtContent && (!steps || steps.length === 0) && !selfHealing) return '';
+            if (!thoughtContent && (!steps || steps.length === 0) && !selfHealing && !isStreaming) return '';
             const stateClass = isStreaming ? 'is-active is-expanded' : 'is-finished';
             const timerText = isStreaming ? `Thinking... ${elapsedSeconds}s` : `Thought for ${elapsedSeconds}s`;
             const modelTagHtml = modelInfo && modelInfo.label
@@ -8978,9 +8905,15 @@ let showRoutingDebugBadge = false;
             const bubble = row.querySelector('.chat-bubble-assistant');
             let thinkingCard = row.querySelector('.thinking-process-card');
             const priorUserPrompt = String(meta?.userMessage || getAssistantMessageMeta(messageId)?.priorUserPrompt || '').trim();
-            const thoughtSteps = thoughtText ? [] : generateContextualThoughtSteps(priorUserPrompt);
             
-            if (thoughtText || (thoughtSteps.length > 0 && !meta?.systemGreeting)) {
+            const textStr = String(text || '').trimStart();
+            const isThinkingStream = Boolean(
+                (thoughtText && thoughtText.trim().length > 0) ||
+                textStr.startsWith('<think') ||
+                (textStr.startsWith('<') && !textStr.includes('>') && '<think>'.startsWith(textStr.toLowerCase()))
+            );
+            
+            if (isThinkingStream || thinkingCard) {
                 const isStopped = meta?.stopped === true;
                 const isFinished = isStopped || !meta?.streaming || Boolean(cleanAnswer && cleanAnswer.length > 0);
                 const elapsed = meta?.latency 
@@ -8992,7 +8925,7 @@ let showRoutingDebugBadge = false;
                 const modelInfo = typeof formatModelDisplayName === 'function' ? formatModelDisplayName(rawModel, rawProvider, rawFailover) : null;
                 if (!thinkingCard && bubble) {
                     const tempDiv = document.createElement('div');
-                    tempDiv.innerHTML = buildThinkingProcessHtml(thoughtText, thoughtSteps, elapsed, !isFinished, meta?.selfHealing, modelInfo, meta?.telemetry);
+                    tempDiv.innerHTML = buildThinkingProcessHtml(thoughtText, [], elapsed, !isFinished, meta?.selfHealing, modelInfo, meta?.telemetry);
                     if (tempDiv.firstElementChild) {
                         bubble.insertBefore(tempDiv.firstElementChild, bubble.firstChild);
                         thinkingCard = row.querySelector('.thinking-process-card');
