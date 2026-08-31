@@ -2638,15 +2638,18 @@ Write your thinking as genuine, natural inner thoughts exploring the specific qu
         const sources = rankLiveSources(message, allResults).filter(isAnswerEvidenceSource).slice(0, 8);
         if (!sources.length) return { ragText: '', sources: [] };
 
-        // Deep Scrape Top 2-3 unique URLs concurrently for full paragraph synthesis
-        const deepScrapePromises = sources.slice(0, 3).map(async (src) => {
-            const articleText = await extractReadableArticleText(src.url, 2200);
-            if (articleText && articleText.length > 80) {
-                src.extract = articleText;
-                src.pageFetched = true;
-            }
-        });
-        await Promise.allSettled(deepScrapePromises);
+        // Deep Scrape Top 2-3 unique URLs concurrently for full paragraph synthesis (skip for simple leadership queries)
+        const isLeadershipQuery = /\b(ceo|chief executive officer|managing director|cm|chief minister|pm|prime minister|president|governor|mayor)\b/i.test(message);
+        if (!isLeadershipQuery) {
+            const deepScrapePromises = sources.slice(0, 3).map(async (src) => {
+                const articleText = await extractReadableArticleText(src.url, 2200);
+                if (articleText && articleText.length > 80) {
+                    src.extract = articleText;
+                    src.pageFetched = true;
+                }
+            });
+            await Promise.allSettled(deepScrapePromises);
+        }
 
         sources.forEach((item, index) => {
             item.sourceNumber = index + 1;
@@ -2780,13 +2783,27 @@ Write your thinking as genuine, natural inner thoughts exploring the specific qu
                 .join(' ')
             : '';
 
-        const isLeadershipOrTemporal = /\b(cm|chief minister|pm|prime minister|president|governor|mayor|chancellor|ceo|leader|minister|who is|current|present|winner|champion|tenure|holding office)\b/i.test(base);
+        const isLeadershipOrTemporal = /\b(cm|chief minister|pm|prime minister|president|governor|mayor|chancellor|ceo|chief executive officer|managing director|leader|minister|who is|current|present|winner|champion|tenure|holding office)\b/i.test(base);
+
+        const leadershipMatch = base.match(/^(?:who\s+(?:is|was)\s+(?:the\s+)?(?:current\s+|latest\s+)?)?(.+?)\s+(?:of|for|in)\s+(.+?)[?.!]*$/i);
+        if (leadershipMatch && isLeadershipOrTemporal) {
+            const role = leadershipMatch[1].replace(/\b(?:the|who|is|was|current|latest)\b/gi, '').trim();
+            const subject = leadershipMatch[2].replace(/[?.!]+$/, '').trim();
+            if (role && subject) {
+                return [
+                    `${subject} ${role}`,
+                    `${subject} current ${role}`,
+                    `who is the ${role} of ${subject}`,
+                    `${subject} founder ${role}`
+                ];
+            }
+        }
 
         const queries = [
             base,
             isLeadershipOrTemporal ? `who is current ${base} ${currentYear}` : `latest ${base}`,
             isLeadershipOrTemporal ? `${base} incumbent official ${currentYear}` : `${base} official source Reuters AP BBC`,
-            isLeadershipOrTemporal ? `${base} news ${currentYear}` : `current ${base}`
+            isLeadershipOrTemporal ? `who is the leader of ${base} ${currentYear}` : `current ${base}`
         ];
         if (recentContext && recentContext.length < 220) {
             queries.push(`${base} ${recentContext}`);
