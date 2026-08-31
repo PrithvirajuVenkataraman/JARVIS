@@ -2770,6 +2770,21 @@ export function hasObviousRagConflict(evidence = [], query = '') {
     return false;
 }
 
+function cleanExtractedPersonName(raw) {
+    if (!raw) return null;
+    let name = String(raw).trim()
+        .replace(/^(?:and|or|the|a|an|who|which|is|was|are|were|also|now|current|former|co-founder|founder|executive|businessman|businesswoman|driver|engineer|officer|leader)\s+/gi, '')
+        .replace(/['’]s$/g, '')
+        .replace(/[,:;.]$/, '')
+        .trim();
+    if (!name || name.length < 3 || name.length > 50) return null;
+    const words = name.split(/\s+/);
+    if (words.length < 2 || words.length > 4) return null;
+    const invalidWords = new Set(['and', 'or', 'the', 'is', 'who', 'racing', 'driver', 'executive', 'team', 'company', 'security', 'management', 'platform', 'service', 'inc', 'corp', 'limited', 'ltd']);
+    if (words.some(w => invalidWords.has(w.toLowerCase()))) return null;
+    return name;
+}
+
 export function extractVerifiedLeadershipClaim(query, evidence = []) {
     const parsed = parseUniversalEntityQuery(query);
     if (!parsed || !parsed.role || !parsed.subject) return null;
@@ -2788,11 +2803,11 @@ export function extractVerifiedLeadershipClaim(query, evidence = []) {
 
         if (isCurrent && validateClaimTemporalStatus(item) === 'historical') continue;
 
-        // Pattern 1: "Bala Venkatramani is the Co-Founder and CEO at Securden" / "Bala Venkatramani is Chief Executive Officer at Securden"
-        const p1 = text.match(/([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\s+(?:is|serves\s+as|acts\s+as)\s+(?:the\s+)?(?:Co-Founder\s+(?:and|&)\s+)?(?:Chief\s+Executive\s+Officer|CEO|President|Prime\s+Minister|Chief\s+Minister|Managing\s+Director)\s+(?:at|of|for)\s+([A-Za-z0-9\s]+)/i);
-        if (p1 && subjectRegex.test(p1[2])) {
-            const person = p1[1].trim();
-            if (!/^(the|a|an|co-founder|founder|former|current|executive)$/i.test(person)) {
+        // Pattern 0: Bio sentence: "[Name] (born ...) is a ... who is the CEO of [Subject]"
+        const p0 = text.match(/^([A-Z][\wÀ-ž]+(?:\s+[A-Z][\wÀ-ž]+){1,3})[^.]*?\bwho\s+is\s+(?:the\s+)?(?:current\s+)?(?:CEO|Chief\s+Executive\s+Officer)\s+(?:at|of|for)\s+([A-Za-z0-9\s]+)/i);
+        if (p0 && subjectRegex.test(p0[2])) {
+            const person = cleanExtractedPersonName(p0[1]);
+            if (person) {
                 return {
                     person,
                     subject,
@@ -2804,11 +2819,27 @@ export function extractVerifiedLeadershipClaim(query, evidence = []) {
             }
         }
 
-        // Pattern 2: "Balasubramanian Venkatramani - Co-Founder and CEO @ Securden" / "Bala Venkatramani - CEO, Securden"
-        const p2 = text.match(/([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\s*[-–—|]\s*(?:Co-Founder\s+(?:and|&)\s+)?(?:Chief\s+Executive\s+Officer|CEO|President|Prime\s+Minister|Chief\s+Minister)\s*[@|at|,]\s*([A-Za-z0-9\s]+)/i);
+        // Pattern 1: "[Person] is the Co-Founder and CEO at [Subject]" / "[Person] is Chief Executive Officer at [Subject]"
+        const p1 = text.match(/([A-Z][\wÀ-ž]+(?:\s+[A-Z][\wÀ-ž]+){1,3})\s+(?:is|serves\s+as|acts\s+as)\s+(?:the\s+)?(?:Co-Founder\s+(?:and|&)\s+)?(?:Chief\s+Executive\s+Officer|CEO|President|Prime\s+Minister|Chief\s+Minister|Managing\s+Director)\s+(?:at|of|for)\s+([A-Za-z0-9\s]+)/i);
+        if (p1 && subjectRegex.test(p1[2])) {
+            const person = cleanExtractedPersonName(p1[1]);
+            if (person) {
+                return {
+                    person,
+                    subject,
+                    role: roleText.toUpperCase() === 'CEO' ? 'CEO' : roleText,
+                    evidenceIndex: i,
+                    evidenceItem: item,
+                    confidence: 0.96
+                };
+            }
+        }
+
+        // Pattern 2: "[NAME] - [ROLE] @ [ENTITY]"
+        const p2 = text.match(/([A-Z][\wÀ-ž]+(?:\s+[A-Z][\wÀ-ž]+){1,3})\s*[-–—|]\s*(?:Co-Founder\s+(?:and|&)\s+)?(?:Chief\s+Executive\s+Officer|CEO|President|Prime\s+Minister|Chief\s+Minister)\s*[@|at|,]\s*([A-Za-z0-9\s]+)/i);
         if (p2 && subjectRegex.test(p2[2])) {
-            const person = p2[1].trim();
-            if (!/^(the|a|an|co-founder|founder|former|current|executive)$/i.test(person)) {
+            const person = cleanExtractedPersonName(p2[1]);
+            if (person) {
                 return {
                     person,
                     subject,
@@ -2820,11 +2851,11 @@ export function extractVerifiedLeadershipClaim(query, evidence = []) {
             }
         }
 
-        // Pattern 3: "Bala Venkatramani, Securden Inc: Profile and Biography" + "is Chief Executive Officer"
-        const p3 = text.match(/([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3}),\s*([A-Za-z0-9\s]+?)(?:,\s*Inc|\s+Inc|\s+LLC|\s+Ltd)?\s*[:–-].*?(?:is|as)\s+(?:the\s+)?(?:Chief\s+Executive\s+Officer|CEO)/i);
+        // Pattern 3: "[Person], [Subject] Inc: Profile and Biography" + "is Chief Executive Officer"
+        const p3 = text.match(/([A-Z][\wÀ-ž]+(?:\s+[A-Z][\wÀ-ž]+){1,3}),\s*([A-Za-z0-9\s]+?)(?:,\s*Inc|\s+Inc|\s+LLC|\s+Ltd)?\s*[:–-].*?(?:is|as)\s+(?:the\s+)?(?:Chief\s+Executive\s+Officer|CEO)/i);
         if (p3 && subjectRegex.test(p3[2])) {
-            const person = p3[1].trim();
-            if (!/^(the|a|an|co-founder|founder|former|current|executive)$/i.test(person)) {
+            const person = cleanExtractedPersonName(p3[1]);
+            if (person) {
                 return {
                     person,
                     subject,
@@ -2836,11 +2867,11 @@ export function extractVerifiedLeadershipClaim(query, evidence = []) {
             }
         }
 
-        // Pattern 4: "The Securden, Inc management team includes Balasubramanian Venkatramani (Chief Executive Officer)..."
-        const p4 = text.match(/([A-Za-z0-9\s]+?)\s+management\s+team\s+includes\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\s*\((?:Chief\s+Executive\s+Officer|CEO|Co-Founder\s+&\s+CEO)\)/i);
+        // Pattern 4: "The [Subject], Inc management team includes [Person] (Chief Executive Officer)..."
+        const p4 = text.match(/([A-Za-z0-9\s]+?)\s+management\s+team\s+includes\s+([A-Z][\wÀ-ž]+(?:\s+[A-Z][\wÀ-ž]+){1,3})\s*\((?:Chief\s+Executive\s+Officer|CEO|Co-Founder\s+&\s+CEO)\)/i);
         if (p4 && subjectRegex.test(p4[1])) {
-            const person = p4[2].trim();
-            if (!/^(the|a|an|co-founder|founder|former|current|executive)$/i.test(person)) {
+            const person = cleanExtractedPersonName(p4[2]);
+            if (person) {
                 return {
                     person,
                     subject,
