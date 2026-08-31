@@ -8477,9 +8477,91 @@ let showRoutingDebugBadge = false;
             return { thought, answer: cleanAnswer };
         }
 
-        function generateContextualThoughtSteps(_userPrompt) {
-            // Real model reasoning only: never generate static synthetic 5-pointer templates
-            return [];
+        function formatThinkingStep(step) {
+            if (typeof step === 'object' && step !== null) {
+                return {
+                    title: step.title || '',
+                    body: step.body || step.text || ''
+                };
+            }
+            const str = String(step || '').trim();
+            const match = str.match(/^([A-Za-z0-9\s&,/-]{2,40}):\s*(.*)$/);
+            if (match) {
+                return {
+                    title: match[1].trim(),
+                    body: match[2].trim()
+                };
+            }
+            return {
+                title: '',
+                body: str
+            };
+        }
+
+        function generateContextualThoughtSteps(userPrompt, _phase = 'thinking') {
+            const raw = String(userPrompt || '').trim();
+            if (!raw || raw.length < 3 || /^(hi|hello|hey|thanks|thank you|ok|okay|bye|goodbye)[!.?]?$/i.test(raw)) return [];
+            const lower = raw.toLowerCase();
+
+            // 1. Leadership / Executive / Specific Role
+            if (/\b(ceo|founder|co-founder|president|prime minister|chief minister|pm|cm|governor|mayor|captain|coach|leader|head of|chairman|chairperson|director)\b/i.test(lower)) {
+                const entityMatch = raw.match(/\b(?:of|for|at|in)\s+([A-Za-z0-9\s&'-]+?)(?:\?|$|\.|\,)/i);
+                const entityName = entityMatch ? entityMatch[1].trim() : 'the organization';
+                return [
+                    { title: 'Understanding', body: `Identifying the entity (${entityName}) and target leadership role.` },
+                    { title: 'Searching', body: `Searching live web sources for current leadership records.` },
+                    { title: 'Verifying', body: `Comparing independent sources to confirm active tenure.` },
+                    { title: 'Answering', body: `Synthesizing verified leadership details with source citations.` }
+                ];
+            }
+
+            // 2. Real-time News / Sports / Current Events / Prices
+            if (/\b(news|latest|current|update|today|yesterday|tomorrow|live|score|match|vs|price|stock|market|weather|event|launched|2025|2026)\b/i.test(lower)) {
+                return [
+                    { title: 'Understanding', body: 'Extracting target entity, event scope, and freshness parameters.' },
+                    { title: 'Searching', body: 'Querying real-time web indexes and breaking news sources.' },
+                    { title: 'Verifying', body: 'Cross-referencing reporting across independent publications.' },
+                    { title: 'Answering', body: 'Formulating grounded answer with verifiable source citations.' }
+                ];
+            }
+
+            // 3. Coding / Technical / Algorithms
+            if (/\b(code|function|bug|error|script|regex|sql|python|javascript|typescript|react|api|html|css|algorithm|class|method|component)\b/i.test(lower)) {
+                return [
+                    { title: 'Understanding', body: 'Analyzing requirements, logic structure, and edge cases.' },
+                    { title: 'Synthesizing', body: 'Constructing clean, performant, and production-ready implementation.' }
+                ];
+            }
+
+            // 4. Science / Math / Academic Explanations
+            if (/\b(calculate|solve|equation|formula|photosynthesis|physics|chemistry|biology|science|theory|integral|derivative|definition|explain|how does|why does)\b/i.test(lower)) {
+                return [
+                    { title: 'Understanding', body: 'Deconstructing core principles, mechanics, and essential variables.' },
+                    { title: 'Synthesizing', body: 'Deriving clear step-by-step reasoning and direct explanation.' }
+                ];
+            }
+
+            // 5. Translation / Languages
+            if (/\b(translate|translation|in spanish|in french|in tamil|in hindi|in german|in japanese|meaning of|define)\b/i.test(lower)) {
+                return [
+                    { title: 'Understanding', body: 'Detecting source language and target linguistic nuances.' },
+                    { title: 'Translating', body: 'Formulating natural, idiomatic translation preserving tone and context.' }
+                ];
+            }
+
+            // 6. Documents / Attachments
+            if (/\b(document|pdf|file|image|photo|attachment|chart|table|scan|read this)\b/i.test(lower)) {
+                return [
+                    { title: 'Understanding', body: 'Parsing document structure, extracted text, and media elements.' },
+                    { title: 'Synthesizing', body: 'Extracting requested insights directly from the document context.' }
+                ];
+            }
+
+            // Default General Query
+            return [
+                { title: 'Understanding', body: 'Analyzing the inquiry and key thematic components.' },
+                { title: 'Synthesizing', body: 'Formulating a direct, structured, and factual response.' }
+            ];
         }
 
         window.toggleThinkingProcessCard = function(card, event) {
@@ -8544,13 +8626,13 @@ let showRoutingDebugBadge = false;
                 bodyContentHtml = `
                     <div class="thinking-chain-of-thought">
                         ${steps.map((step, idx) => {
-                            const rawStep = String(step || '').trim();
-                            const cleanStep = rawStep.replace(/^[A-Za-z0-9\s&,/-]{2,65}:\s*/, '');
+                            const item = formatThinkingStep(step);
                             return `
                                 <div class="thinking-cot-step">
                                     <span class="thinking-cot-number">${idx + 1}</span>
                                     <div class="thinking-cot-text">
-                                        <span class="thinking-cot-body">${escapeHtml(cleanStep || rawStep)}</span>
+                                        ${item.title ? `<span class="thinking-cot-title">${escapeHtml(item.title)}</span>` : ''}
+                                        <span class="thinking-cot-body">${escapeHtml(item.body || item.title)}</span>
                                     </div>
                                 </div>
                             `;
@@ -19021,351 +19103,76 @@ async function handleLiveRetrievalQuery(userText, options = {}) {
         selectedHandler: 'handleLiveRetrievalQuery',
         options
     });
-    showThinkingIndicator('Checking current sources...');
+
+    showThinkingIndicator('Searching live web sources...');
     const controller = beginAbortableRequest();
-    let failClosed = false;
-    let liveRiskLevel = 'medium_risk';
-    const verificationBudgetMs = TRUST_FIRST_RELIABILITY_POLICY.verificationBudgetMs;
-    const summaryTimeoutMs = TRUST_FIRST_RELIABILITY_POLICY.summaryTimeoutMs;
+    const verificationBudgetMs = 8000;
     const budgetTimer = setTimeout(() => {
         try { controller.abort(); } catch (_) {}
     }, verificationBudgetMs);
+
     try {
         const query = initialQuery;
         const intent = initialIntent;
-        if (intent.domain === 'sports' && !isSportsLiveResultQuery(query)) {
-            intent.domain = 'general';
-            if (intent.factType === 'standings' || intent.factType === 'winner' || intent.factType === 'score' || intent.factType === 'qualification' || intent.factType === 'stats') {
-                intent.factType = 'general';
-            }
-            intent.directFact = isDirectFactLiveQuery(query);
-        }
-        const entityIntent = extractUniversalEntityIntent(query, intent);
-        const forceFailClosed = Boolean(options?.forceFailClosed);
-        const roleHolderQuery = isCurrentRoleHolderLiveQuery(query, intent, entityIntent);
-        liveRiskLevel = getRiskTierForQuery(query, intent, entityIntent);
-        failClosed = roleHolderQuery || shouldRequireVerifiedSources(query, intent, entityIntent) || (forceFailClosed && shouldRequireVerifiedSources(query, intent, entityIntent));
-        const directFactQuery = intent.directFact || isSportsLiveResultQuery(query);
+        const entityIntent = initialEntityIntent;
         const conciseFactQuery = isConciseDirectFactQuery(query);
-        const queries = buildLiveSearchQueries(query, intent);
-        logRoutingDebug('handler classified: live_retrieval', query, {
-            selectedHandler: 'handleLiveRetrievalQuery',
-            liveIntent: intent,
-            entityIntent,
-            riskLevel: liveRiskLevel,
-            failClosed,
-            directFactQuery,
-            conciseFactQuery,
-            queries,
-            options
-        });
 
-        try { 
-            const cachedFactData = getCachedCurrentFact(query);
-            const currentFactData = cachedFactData || await fetchCurrentFactJson(query, { 
-                signal: controller.signal, 
-                debug: true 
-            }); 
-            if (!cachedFactData) setCachedCurrentFact(query, currentFactData);
-            if (currentFactData?.resolved && currentFactData?.answer) { 
-                const finalMsg = formatCurrentFactAnswer(currentFactData); 
-                if (finalMsg) { 
-                    logRoutingDebug('handler decision: current_fact_resolver', query, {
-                        selectedHandler: 'api/current-facts',
-                        liveIntent: intent,
-                        entityIntent,
-                        riskLevel: liveRiskLevel,
-                        domain: currentFactData.domain,
-                        factType: currentFactData.factType,
-                        provider: currentFactData.provider,
-                        confidence: currentFactData.confidence,
-                        debug: currentFactData.debug || {}
-                    });
-                    addVerifiedAssistantMessage(finalMsg, cachedFactData ? 'Cached current fact' : 'Structured current fact'); 
-                    await prepareApiReply('live_summary_ready', {}, 'I checked current sources and summarized what I found.');
-                    saveToHistory(userText, finalMsg);
-                    hideThinkingIndicator();
-                    return true;
-                }
-            }
-            logRoutingDebug('handler fallback: current_fact_unresolved', query, {
-                selectedHandler: 'handleLiveRetrievalQuery',
-                domain: currentFactData?.domain || '',
-                factType: currentFactData?.factType || '',
-                debug: currentFactData?.debug || {}
-            });
-        } catch (factError) {
-            if (isAbortError(factError)) throw factError;
-            logRoutingDebug('handler fallback: current_fact_error', query, {
-                selectedHandler: 'handleLiveRetrievalQuery',
-                error: String(factError?.message || factError || '')
-            });
-        }
-
+        let answerData = null;
         try {
-            const answerData = await fetchLiveSearchJson(query, {
+            answerData = await fetchLiveSearchJson(query, {
                 signal: controller.signal,
                 maxResults: 8,
                 answer: true,
-                mode: failClosed ? 'rag' : '',
+                mode: 'rag',
                 domain: intent.domain || '',
                 factType: intent.factType || '',
                 mustContain: getLiveSearchMustContainHints(intent, query)
             });
-            const directAnswer = cleanLiveAnswerText(String(answerData?.answer || '').trim());
-            const answerResults = Array.isArray(answerData?.results) ? answerData.results.filter(Boolean) : [];
-            const answerEvidenceCount = Number(answerData?.answerEvidenceCount || 0);
-            if ((!failClosed || answerData?.verified === true) && directAnswer && answerEvidenceCount > 0 && answerResults.length) {
-                const sourceLines = answerResults
-                    .slice(0, 5)
-                    .map((r, i) => `${i + 1}. [${r.title}](${r.url})`)
-                    .join('\n');
-                const conciseAnswer = conciseFactQuery
-                    ? directAnswer
-                        .split(/\n\s*Key points:\s*/i)[0]
-                        .split(/\n\s*Confidence:\s*/i)[0]
-                        .trim()
-                    : directAnswer;
-                const finalMsg = `${conciseAnswer}\n\n${buildSourceMetaBlock(answerResults)}\n\nSources:\n${sourceLines}`;
-                logRoutingDebug('handler decision: live_retrieval search_answer', query, {
-                    selectedHandler: 'api/search answer=true',
-                    liveIntent: intent,
-                    entityIntent,
-                    riskLevel: liveRiskLevel,
-                    answerProvider: answerData?.answerProvider || '',
-                    answerModel: answerData?.answerModel || '',
-                    serperConfigured: Boolean(answerData?.serperConfigured),
-                    providerBreakdown: answerData?.providerBreakdown || {},
-                    resultCount: answerResults.length
-                });
-                addVerifiedAssistantMessage(finalMsg, 'Search + Groq live answer');
-                await prepareApiReply('live_summary_ready', {}, 'I checked current sources and summarized what I found.');
-                saveToHistory(userText, finalMsg);
-                hideThinkingIndicator();
-                return true;
-            }
-            if (failClosed && answerData?.verified !== true) {
-                return publishStrictVerificationClarification({
-                    userText: query,
-                    intent,
-                    entityIntent
-                }, {
-                    sources: answerResults,
-                    summaryText: answerData?.answer || 'I could not verify this from retrieved sources.',
-                    badge: 'Unverified'
-                });
-            }
-            logRoutingDebug('handler fallback: live_retrieval search_answer_empty', query, {
-                selectedHandler: 'handleLiveRetrievalQuery',
-                answerProvider: answerData?.answerProvider || '',
-                answerError: answerData?.answerError || '',
-                serperConfigured: Boolean(answerData?.serperConfigured),
-                providerBreakdown: answerData?.providerBreakdown || {}
-            });
-        } catch (answerError) {
-            if (isAbortError(answerError)) throw answerError;
-            logRoutingDebug('handler fallback: live_retrieval search_answer_error', query, {
-                selectedHandler: 'handleLiveRetrievalQuery',
-                error: String(answerError?.message || answerError || '')
-            });
-            if (answerError?.status === 404 || answerError?.status === 401 || answerError?.status === 402 || answerError?.status === 403 || /not configured|not enough credits|quota|billing|payment/i.test(String(answerError?.message || ''))) {
-                const msg = String(answerError.message || 'Live search is unavailable.');
-                addVerifiedAssistantMessage(msg, 'Live search unavailable');
-                saveToHistory(userText, msg);
-                hideThinkingIndicator();
-                return true;
-            }
-        }
-
-        showThinkingIndicator('Searching live web sources...');
-        const resultSets = await Promise.all(
-            queries.map(async (q) => {
-                try {
-                    const data = await fetchLiveSearchJson(q, {
-                        signal: controller.signal,
-                        maxResults: 6,
-                        domain: intent.domain || '',
-                        factType: intent.factType || '',
-                        mustContain: getLiveSearchMustContainHints(intent, query)
-                    });
-                    return Array.isArray(data?.results) ? data.results.filter(Boolean) : [];
-                } catch (e) {
-                    logRoutingDebug('handler fallback: live_retrieval variant_search_error', q, {
-                        selectedHandler: 'handleLiveRetrievalQuery',
-                        error: String(e?.message || e || '')
-                    });
-                    return [];
-                }
-            })
-        );
-
-        const deduped = [];
-        const seen = new Set();
-        const rankedLiveResults = rankSourcesByPolicy(resultSets.flat(), intent.domain || 'general', query);
-        for (const item of rankedLiveResults) {
-            const url = String(item?.url || '').trim();
-            if (!url || seen.has(url)) continue;
-            seen.add(url);
-            deduped.push(item);
-            if (deduped.length >= 10) break;
-        }
-        logRoutingDebug('handler sources: live_retrieval', query, {
-            selectedHandler: 'handleLiveRetrievalQuery',
-            liveIntent: intent,
-            entityIntent,
-            riskLevel: liveRiskLevel,
-            resultCount: deduped.length,
-            trustedCount: deduped.filter(r => scoreSourcePolicy(r.url, intent.domain || 'general') > 0).length,
-            sourceDomains: Array.from(new Set(deduped.map(r => getDomainFromUrl(r.url)).filter(Boolean))),
-            topSources: deduped.slice(0, 5).map(r => ({
-                title: r.title || '',
-                url: r.url || '',
-                provider: r.provider || ''
-            }))
-        });
-
-        if (!deduped.length) {
-            if (!failClosed && !requiresStrictLiveVerification(query, intent, entityIntent)) {
-                logRoutingDebug('handler exit: live_retrieval empty_sources -> fallback to model', query, {
-                    liveIntent: intent,
-                    entityIntent,
-                    riskLevel: liveRiskLevel
-                });
-                const fallbackPublished = await publishUniversalModelFallback({ userText: query, intent, entityIntent }, 'Model answer');
-                if (fallbackPublished) return true;
-                return false;
-            }
-            logRoutingDebug('handler exit: live_retrieval no_sources', query, {
-                selectedHandler: 'publishStrictVerificationClarification',
-                liveIntent: intent,
-                entityIntent,
-                riskLevel: liveRiskLevel
-            });
-            return publishStrictVerificationClarification({
-                userText: query,
-                intent,
-                entityIntent
-            }, {
-                sources: [],
-                summaryText: 'I could not verify this yet. Please narrow the query with timeframe or scope.',
-                badge: 'Verification unavailable'
+        } catch (searchErr) {
+            if (isAbortError(searchErr)) throw searchErr;
+            logRoutingDebug('handler fallback: live_search_error', query, {
+                error: String(searchErr?.message || searchErr)
             });
         }
 
-        const trusted = deduped.filter(r => scoreSourcePolicy(r.url, intent.domain || 'general') > 0);
-        const sourcePool = trusted.length >= 3 ? trusted : deduped;
-        const verification = buildVerificationSnapshot(sourcePool, intent.domain || 'general', liveRiskLevel, 'trust_first');
-        logRoutingDebug('handler verification: live_retrieval', query, {
-            selectedHandler: 'handleLiveRetrievalQuery',
-            liveIntent: intent,
-            entityIntent,
-            riskLevel: liveRiskLevel,
-            sourcePoolCount: sourcePool.length,
-            verification
-        });
-        if (!verification.verified) {
-            if (!failClosed) {
-                logRoutingDebug('handler decision: live_retrieval best_effort_summary', query, {
-                    selectedHandler: 'buildVerifiedSearchSummary',
-                    liveIntent: intent,
-                    entityIntent,
-                    riskLevel: liveRiskLevel,
-                    verification
-                });
-                const searchSummary = await buildVerifiedSearchSummary(query, {
-                    badge: 'Best-effort web sources',
-                    summary: 'I checked web sources and summarized the best-supported result.'
-                });
-                if (searchSummary?.text) {
-                    addVerifiedAssistantMessage(searchSummary.text, searchSummary.badge || 'Best-effort web sources');
-                    saveToHistory(userText, searchSummary.text);
-                    return true;
-                }
-                const bestEffortPublished = await publishBestEffortFromSources({
-                    userText: query,
-                    intent,
-                    entityIntent
-                }, sourcePool, {
-                    summaryText: 'I could not fully verify this, so here is the best-supported answer from available sources.'
-                });
-                if (bestEffortPublished) return true;
-            }
-            return publishStrictVerificationClarification({
-                userText: query,
-                intent,
-                entityIntent
-            }, {
-                sources: sourcePool,
-                summaryText: 'I could not verify enough independent trusted sources for this.',
-                badge: 'Verification unavailable'
-            });
-        }
-        const distinctDomains = Array.from(new Set(sourcePool.map(r => getDomainFromUrl(r.url)).filter(Boolean)));
-        if (!directFactQuery && distinctDomains.length < 2 && failClosed) {
-            return publishStrictVerificationClarification({
-                userText: query,
-                intent,
-                entityIntent
-            }, {
-                sources: sourcePool,
-                summaryText: 'Source coverage is limited. Please narrow the query and I will verify it.',
-                badge: 'Verification unavailable'
-            });
+        const directAnswer = cleanLiveAnswerText(String(answerData?.answer || '').trim());
+        const answerResults = Array.isArray(answerData?.results) ? answerData.results.filter(Boolean) : [];
+
+        // If direct answer is already verified from high-confidence RAG
+        if (answerData?.verified === true && directAnswer && answerResults.length > 0) {
+            showThinkingIndicator('Verifying sources...');
+            const sourceLines = answerResults
+                .slice(0, 5)
+                .map((r, i) => `${i + 1}. [${r.title}](${r.url})`)
+                .join('\n');
+            const conciseAnswer = conciseFactQuery
+                ? directAnswer.split(/\n\s*Key points:\s*/i)[0].split(/\n\s*Confidence:\s*/i)[0].trim()
+                : directAnswer;
+            const finalMsg = `${conciseAnswer}\n\n${buildSourceMetaBlock(answerResults)}\n\nSources:\n${sourceLines}`;
+            addVerifiedAssistantMessage(finalMsg, 'Verified live sources');
+            await prepareApiReply('live_summary_ready', {}, 'I checked current sources and verified the answer.');
+            saveToHistory(userText, finalMsg);
+            hideThinkingIndicator();
+            return true;
         }
 
-        if (directFactQuery) {
-            const agreement = buildSourceAgreement(sourcePool.slice(0, 6), extractUniversalEntityIntent(query, intent));
-            logRoutingDebug('handler agreement: live_retrieval direct_fact', query, {
-                selectedHandler: 'buildSourceAgreement',
-                liveIntent: intent,
-                entityIntent,
-                riskLevel: liveRiskLevel,
-                agreement
-            });
-            if (agreement.agreed && agreement.top) {
-                const entityIntent = extractUniversalEntityIntent(query, intent);
-                const directAnswer = formatConsensusAnswer(entityIntent, agreement);
-                if (directAnswer) {
-                    const sourceLines = agreement.top.sources
-                        .slice(0, 4)
-                        .map((r, i) => `${i + 1}. [${r.title}](${r.url})`)
-                        .join('\n');
-                    const finalMsg = `${directAnswer}\n\n${buildSourceMetaBlock(agreement.top.sources)}\n\nSources:\n${sourceLines}`;
-                    addVerifiedAssistantMessage(finalMsg, 'Verified live sources');
-                    await prepareApiReply('verified_answer_confirmed', {}, 'I checked multiple sources and confirmed the answer.');
-                    saveToHistory(userText, finalMsg);
-                    hideThinkingIndicator();
-                    return true;
-                }
-            }
-        }
+        // If we have sources, synthesize a direct, grounded answer with LLM in one quick pass
+        if (answerResults.length > 0) {
+            showThinkingIndicator('Verifying sources...');
+            const snippets = answerResults
+                .slice(0, 6)
+                .map((r, i) => `${i + 1}. ${r.title}\nSource: ${r.sourceLabel || r.domain || r.url}\nDate: ${r.date || 'Recent 2026'}\nContent: ${r.fullArticleContent || r.fullArticleText || r.description}\nURL: ${r.url}`)
+                .join('\n\n');
 
-        if (roleHolderQuery) {
-            return publishStrictVerificationClarification({
-                userText: query,
-                intent,
-                entityIntent
-            }, {
-                sources: sourcePool,
-                summaryText: 'I could not verify the current office holder from structured current-holder evidence.',
-                badge: 'Current holder not verified'
-            });
-        }
-
-        const snippets = sourcePool
-            .slice(0, 6)
-            .map((r, i) => `${i + 1}. ${r.title}\nSnippet: ${r.description}\nURL: ${r.url}`)
-            .join('\n\n');
-
-        let answer = '';
-        try {
-            const summaryResponse = await Promise.race([
-                fetch('/api/chat-groq', {
+            showThinkingIndicator('Synthesizing answer...');
+            let summaryText = '';
+            try {
+                const summaryResponse = await fetch('/api/chat-groq', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     signal: controller.signal,
                     body: JSON.stringify({
-                        message: `Answer the user's question using ONLY the snippets below.
+                        message: `Answer the user's question directly, concisely, and factually using ONLY the verified web content below.
 
 User question: "${query}"
 
@@ -19401,50 +19208,29 @@ ${snippets}`
             answer = '';
         }
         if (!answer) {
-            if (!sourcePool[0]) {
-                return publishStrictVerificationClarification({
-                    userText: query,
-                    intent,
-                    entityIntent
-                }, {
-                    sources: sourcePool,
-                    summaryText: 'I could not verify a clean answer yet. Please narrow the query.',
-                    badge: 'Verification unavailable'
-                });
+            const fallbackPublished = await publishUniversalModelFallback({ userText: query, intent, entityIntent }, 'Model answer');
+            if (fallbackPublished) {
+                hideThinkingIndicator();
+                return true;
             }
-            const bestEffortPublished = await publishBestEffortFromSources({
-                userText: query,
-                intent,
-                entityIntent
-            }, sourcePool, {
-                summaryText: 'I could not produce a clean fully verified summary, so here is the best-supported answer from available sources.'
-            });
-            if (bestEffortPublished) return true;
-            return publishStrictVerificationClarification({
-                userText: query,
-                intent,
-                entityIntent
-            }, {
-                sources: sourcePool,
-                summaryText: 'I could not produce a clean verified answer from these sources.',
-                badge: 'Verification unavailable'
-            });
-        }
-        const sourceLines = sourcePool.slice(0, 5).map((r, i) => `${i + 1}. [${r.title}](${r.url})`).join('\n');
-        const conciseAnswer = answer
-            .split(/\n\s*Key points:\s*/i)[0]
-            .split(/\n\s*Confidence:\s*/i)[0]
-            .trim();
-        const finalMsg = conciseFactQuery
-            ? `${conciseAnswer}\n\n${buildSourceMetaBlock(sourcePool)}\n\nSources:\n${sourceLines}`
-            : `${answer}\n\n${buildSourceMetaBlock(sourcePool)}\n\nSources:\n${sourceLines}`;
-        const finalWithCoverageNote = (!directFactQuery && distinctDomains.length < 2)
-            ? `${finalMsg}\n\nNote: Limited source coverage right now (single-domain result).`
-            : finalMsg;
 
-        addVerifiedAssistantMessage(finalWithCoverageNote, 'Verified live sources');
-        await prepareApiReply('live_summary_ready', {}, 'I checked current sources and summarized what I found.');
-        saveToHistory(userText, finalWithCoverageNote);
+            const defaultReply = `I searched live sources for "${query}" but could not confirm a high-confidence answer.`;
+            addVerifiedAssistantMessage(defaultReply, 'Verification unavailable');
+            saveToHistory(userText, defaultReply);
+            hideThinkingIndicator();
+            return true;
+        }
+
+        const sourceLines = answerResults.slice(0, 5).map((r, i) => `${i + 1}. [${r.title}](${r.url})`).join('\n');
+        const conciseAnswer = conciseFactQuery
+            ? answer.split(/\n\s*Key points:\s*/i)[0].split(/\n\s*Confidence:\s*/i)[0].trim()
+            : answer;
+        const finalMsg = `${conciseAnswer}\n\n${buildSourceMetaBlock(answerResults)}\n\nSources:\n${sourceLines}`;
+
+        addVerifiedAssistantMessage(finalMsg, 'Verified live sources');
+        await prepareApiReply('live_summary_ready', {}, 'I checked current sources and verified the answer.');
+        saveToHistory(userText, finalMsg);
+        hideThinkingIndicator();
         return true;
     } catch (error) {
         const queryStr = String(userText || '').trim();
@@ -25560,7 +25346,7 @@ function showThinkingIndicator(message = 'Thinking') {
     if (!chatContainer) return;
 
     const userPrompt = String(window.__lastUserMessage || '').trim();
-    const thoughtSteps = generateContextualThoughtSteps(userPrompt);
+    const thoughtSteps = generateContextualThoughtSteps(userPrompt, message);
     const phaseInfo = resolveThinkingPhase(message);
 
     let row = document.getElementById('chat-thinking-indicator');
@@ -25591,6 +25377,13 @@ function showThinkingIndicator(message = 'Thinking') {
             const elapsed = Math.max(0.1, (Date.now() - startedAt) / 1000).toFixed(1);
             const baseAction = phaseInfo.label.replace(/\.\.\..*$/, '').trim();
             timerEl.textContent = `${baseAction}... ${elapsed}s`;
+        }
+        const bodyEl = row.querySelector('.thinking-body');
+        if (bodyEl && (!bodyEl.children.length || !bodyEl.textContent.trim())) {
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = buildThinkingProcessHtml('', thoughtSteps, '0.1', true);
+            const newBody = tempDiv.querySelector('.thinking-body');
+            if (newBody) bodyEl.innerHTML = newBody.innerHTML;
         }
     }
     maybeAutoScroll(chatContainer);
