@@ -2507,32 +2507,32 @@ function buildWebRagQueryPhases(query, plannedQueries = []) {
     const subject = roleIntent?.jurisdiction || rewrite.subject || extractSearchSubject(normalized) || normalized;
     const role = roleIntent?.role || extractSearchIntentTerm(normalized);
 
-    const targeted = roleIntent ? [
-        `${subject} current ${role}`,
-        `${subject} ${role} 2026`,
-        `${subject} ${role}`,
-        `${subject} ${role} official`,
-        `${subject} ${role} Wikipedia`
-    ] : [];
+    const isLeadership = roleIntent && isLeadershipOrRoleTerm(role);
+    const targeted = isLeadership ? [
+        `${subject} ${role}`.trim(),
+        `${subject} current ${role}`.trim()
+    ] : [normalized];
 
-    const broad = Array.from(new Set([
-        normalized,
-        ...targeted,
+    const fallbackReformulation = isLeadership ? [
+        `${subject} leadership ${role}`.trim(),
+        `${subject} Wikipedia`.trim(),
+        `${subject} executive team`.trim()
+    ] : Array.from(new Set([
         ...buildDeterministicSearchQueries(normalized),
         ...plannedQueries.map(item => normalizeSearchQuery(item)).filter(Boolean)
-    ].filter(Boolean))).slice(0, 6);
+    ])).slice(0, 4);
 
     const officialReference = Array.from(new Set([
         `${normalized} official source`,
         `${subject} official`,
         `${normalized} Wikipedia Wikidata`,
         `${subject} current source`
-    ].map(normalizeSearchQuery).filter(Boolean))).slice(0, 5);
+    ].map(normalizeSearchQuery).filter(Boolean))).slice(0, 3);
 
     return [
-        targeted.length ? targeted.slice(0, 4) : [normalized],
-        broad,
-        officialReference
+        targeted.slice(0, 2),
+        fallbackReformulation.slice(0, 3),
+        officialReference.slice(0, 2)
     ].filter(phase => phase.length);
 }
 
