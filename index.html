@@ -9581,6 +9581,11 @@ let showRoutingDebugBadge = false;
                 if (window.speechSynthesis.paused) {
                     window.speechSynthesis.resume();
                 }
+                if (typeof SpeechSynthesisUtterance !== 'undefined') {
+                    const silentProbe = new SpeechSynthesisUtterance(' ');
+                    silentProbe.volume = 0.01;
+                    window.speechSynthesis.speak(silentProbe);
+                }
                 refreshAvailableVoices();
                 return true;
             } catch (error) {
