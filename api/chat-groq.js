@@ -2605,34 +2605,35 @@ Write your thinking as genuine, natural inner thoughts exploring the specific qu
         const seenUrls = new Set();
 
         const { runVerifiedWebSearch } = await getSearchHelpers();
-        for (const candidateQuery of queries) {
-            try {
-                const search = await runVerifiedWebSearch(candidateQuery, { limit: 6 });
-                for (const result of Array.isArray(search?.results) ? search.results : []) {
-                    const url = String(result?.url || '').trim();
-                    const key = url.toLowerCase();
-                    if (!url || seenUrls.has(key)) continue;
-                    seenUrls.add(key);
-                    allResults.push({
-                        title: String(result?.title || '').trim(),
-                        description: String(result?.description || '').trim(),
-                        url,
-                        domain: String(result?.domain || getHost(url)).trim(),
-                        sourceType: String(result?.sourceType || '').trim(),
-                        sourceLabel: String(result?.sourceLabel || result?.source || result?.domain || getHost(url)).trim(),
-                        date: String(result?.date || '').trim(),
-                        freshness: String(result?.freshness || '').trim(),
-                        evidenceLevel: String(result?.evidenceLevel || '').trim(),
-                        pageFetched: Boolean(result?.pageFetched),
-                        qualitySignals: Array.isArray(result?.qualitySignals) ? result.qualitySignals : [],
-                        trusted: Boolean(result?.trusted),
-                        query: candidateQuery
-                    });
-                }
-            } catch (_) {
-                // A failed query should not prevent the model from answering from other results.
+        const searchPromises = queries.slice(0, 3).map(candidateQuery =>
+            runVerifiedWebSearch(candidateQuery, { limit: 6 }).catch(() => null)
+        );
+        const searchSettled = await Promise.allSettled(searchPromises);
+        for (let i = 0; i < searchSettled.length; i++) {
+            const res = searchSettled[i];
+            if (res.status !== 'fulfilled' || !res.value) continue;
+            const candidateQuery = queries[i];
+            for (const result of Array.isArray(res.value?.results) ? res.value.results : []) {
+                const url = String(result?.url || '').trim();
+                const key = url.toLowerCase();
+                if (!url || seenUrls.has(key)) continue;
+                seenUrls.add(key);
+                allResults.push({
+                    title: String(result?.title || '').trim(),
+                    description: String(result?.description || '').trim(),
+                    url,
+                    domain: String(result?.domain || getHost(url)).trim(),
+                    sourceType: String(result?.sourceType || '').trim(),
+                    sourceLabel: String(result?.sourceLabel || result?.source || result?.domain || getHost(url)).trim(),
+                    date: String(result?.date || '').trim(),
+                    freshness: String(result?.freshness || '').trim(),
+                    evidenceLevel: String(result?.evidenceLevel || '').trim(),
+                    pageFetched: Boolean(result?.pageFetched),
+                    qualitySignals: Array.isArray(result?.qualitySignals) ? result.qualitySignals : [],
+                    trusted: Boolean(result?.trusted),
+                    query: candidateQuery
+                });
             }
-            if (allResults.length >= 8) break;
         }
 
         const sources = rankLiveSources(message, allResults).filter(isAnswerEvidenceSource).slice(0, 8);
@@ -3054,11 +3055,20 @@ Write your thinking as genuine, natural inner thoughts exploring the specific qu
             }
 
             if (item?.trusted || item?.sourceType === 'official_source' || item?.sourceType === 'trusted_news') score += 3.5;
+            if (item?.sourceType === 'live_web' || item?.evidenceLevel === 'structured_claim') score += 5.0;
             if (item?.pageFetched) score += 2;
             if (item?.sourceType === 'official_source' && !item?.pageFetched) score -= 1;
             if (/\b(latest|today|update|updates|current|now|recent|incumbent|sworn in|assumed office|took oath)\b/.test(hay)) score += 3.0;
             if (/\b(former|ex-|past|previously|retired|resigned|predecessor|stepped down)\b/.test(hay)) score -= 2.0;
-            if (/\b(reuters|the hindu|indian express|bbc|ap news|times of india|ani|pib)\b/.test(hay)) score += 2.5;
+            if (/\b(reuters|the hindu|indian express|bbc|ap news|times of India|ani|pib)\b/.test(hay)) score += 2.5;
+
+            const isLeadershipQuery = /\b(ceo|chief executive officer|managing director|cm|chief minister|pm|prime minister|president|governor|founder)\b/i.test(q);
+            if (isLeadershipQuery) {
+                const hasRoleInSnippet = /\b(ceo|chief executive officer|managing director|cm|chief minister|pm|prime minister|president|governor|founder|co-founder)\b/i.test(hay);
+                if (hasRoleInSnippet) {
+                    score += 8.0;
+                }
+            }
 
             const yearMatch = hay.match(/\b(20\d{2})\b/);
             if (yearMatch?.[1]) {
