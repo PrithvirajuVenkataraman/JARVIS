@@ -19165,7 +19165,7 @@ async function handleLiveRetrievalQuery(userText, options = {}) {
                 .join('\n\n');
 
             showThinkingIndicator('Synthesizing answer...');
-            let summaryText = '';
+            let answer = '';
             try {
                 const summaryResponse = await fetch('/api/chat-groq', {
                     method: 'POST',
@@ -19177,7 +19177,7 @@ async function handleLiveRetrievalQuery(userText, options = {}) {
 User question: "${query}"
 
 Required format:
-Direct answer: <answer the question in 1-3 sentences first; if the user asked who won/score/stat, say that immediately>
+Direct answer: <answer the question in 1-3 sentences first; if the user asked who won/score/stat/leader, state that immediately>
 Key points:
 - <point 1>
 - <point 2>
@@ -19189,47 +19189,46 @@ Rules:
 - Do not make up numbers, dates, actors, or causes.
 - Only state a fact confidently if it appears in multiple snippets or from a clearly reputable source.
 - If evidence is weak, say so instead of guessing.
-- If the question asks for a winner, score, or player stat, answer that specific fact first before anything else.
-- If the user asks for stats, give the key stats directly instead of a generic summary.
 - Keep it concise and practical.
 
 Snippets:
 ${snippets}`
                     })
-                }),
-                new Promise((_, reject) => setTimeout(() => reject(new Error('live_summary_timeout')), summaryTimeoutMs))
-            ]);
-            if (!summaryResponse || !summaryResponse.ok) {
-                throw new Error('live_summary_failed');
+                });
+                if (summaryResponse && summaryResponse.ok) {
+                    const summaryData = await summaryResponse.json();
+                    answer = cleanLiveAnswerText(String(summaryData?.response || summaryData?.text || '').trim());
+                }
+            } catch (summaryError) {
+                answer = '';
             }
-            const summaryData = await summaryResponse.json();
-            answer = cleanLiveAnswerText(String(summaryData?.response || summaryData?.text || '').trim());
-        } catch (summaryError) {
-            answer = '';
-        }
-        if (!answer) {
-            const fallbackPublished = await publishUniversalModelFallback({ userText: query, intent, entityIntent }, 'Model answer');
-            if (fallbackPublished) {
+
+            if (answer) {
+                const sourceLines = answerResults.slice(0, 5).map((r, i) => `${i + 1}. [${r.title}](${r.url})`).join('\n');
+                const conciseAnswer = conciseFactQuery
+                    ? answer.split(/\n\s*Key points:\s*/i)[0].split(/\n\s*Confidence:\s*/i)[0].trim()
+                    : answer;
+                const finalMsg = `${conciseAnswer}\n\n${buildSourceMetaBlock(answerResults)}\n\nSources:\n${sourceLines}`;
+
+                addVerifiedAssistantMessage(finalMsg, 'Verified live sources');
+                await prepareApiReply('live_summary_ready', {}, 'I checked current sources and verified the answer.');
+                saveToHistory(userText, finalMsg);
                 hideThinkingIndicator();
                 return true;
             }
+        }
 
-            const defaultReply = `I searched live sources for "${query}" but could not confirm a high-confidence answer.`;
-            addVerifiedAssistantMessage(defaultReply, 'Verification unavailable');
-            saveToHistory(userText, defaultReply);
+        // Fast fallback to model answer if live search returned limited or unstructured sources
+        showThinkingIndicator('Synthesizing answer...');
+        const fallbackPublished = await publishUniversalModelFallback({ userText: query, intent, entityIntent }, 'Model answer');
+        if (fallbackPublished) {
             hideThinkingIndicator();
             return true;
         }
 
-        const sourceLines = answerResults.slice(0, 5).map((r, i) => `${i + 1}. [${r.title}](${r.url})`).join('\n');
-        const conciseAnswer = conciseFactQuery
-            ? answer.split(/\n\s*Key points:\s*/i)[0].split(/\n\s*Confidence:\s*/i)[0].trim()
-            : answer;
-        const finalMsg = `${conciseAnswer}\n\n${buildSourceMetaBlock(answerResults)}\n\nSources:\n${sourceLines}`;
-
-        addVerifiedAssistantMessage(finalMsg, 'Verified live sources');
-        await prepareApiReply('live_summary_ready', {}, 'I checked current sources and verified the answer.');
-        saveToHistory(userText, finalMsg);
+        const defaultReply = `I searched live sources for "${query}" but could not confirm a high-confidence answer.`;
+        addVerifiedAssistantMessage(defaultReply, 'Verification unavailable');
+        saveToHistory(userText, defaultReply);
         hideThinkingIndicator();
         return true;
     } catch (error) {
