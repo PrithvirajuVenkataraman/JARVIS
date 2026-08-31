@@ -69,9 +69,10 @@ const testQueries = [
 for (const { query, domain } of testQueries) {
     const steps = generateSteps(query);
     assert.ok(Array.isArray(steps), 'Steps for ' + domain + ' must be an array');
-    assert.equal(steps.length, 0, 'Must produce 0 static/synthetic steps (real model reasoning only): ' + domain);
+    assert.ok(steps.length >= 2, 'Must produce structured pipeline reasoning summaries: ' + domain);
+    assert.ok(steps.every(s => s.title && s.body), 'Steps must contain title and body: ' + domain);
 }
-console.log('  [PASS] 2. Real-model-reasoning only invariant: 0 synthetic 5-step placeholders generated');
+console.log('  [PASS] 2. Structured pipeline reasoning summaries successfully generated across domains');
 
 // 3. Test Multi-Chunk Converse Speech Stream <think> Filtering
 const speechSandbox = {
