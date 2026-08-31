@@ -3449,9 +3449,26 @@ function buildSearchQueryRewrite(query) {
     };
 }
 
+function isLeadershipOrRoleTerm(term = '') {
+    return /\b(ceo|chief executive officer|managing director|chairman|chairperson|president|prime minister|pm|chief minister|cm|governor|mayor|founder|captain|coach|leader|premier|chancellor|minister|head of state|head of government|monarch|director)\b/i.test(term);
+}
+
 function buildDeterministicSearchQueries(query) {
     const normalized = normalizeSearchQuery(query);
     if (!normalized) return [];
+    const universal = parseUniversalEntityQuery(normalized);
+    if (universal?.role && universal?.jurisdiction && isLeadershipOrRoleTerm(universal.role)) {
+        const subj = universal.jurisdiction;
+        const role = universal.role;
+        const roleText = universal.roleText || role;
+        return Array.from(new Set([
+            `${subj} ${role}`.trim(),
+            `${subj} current ${role}`.trim(),
+            `who is the ${role} of ${subj}`.trim(),
+            `${subj} ${roleText}`.trim(),
+            `${subj} leadership ${role}`.trim()
+        ].map(normalizeSearchQuery).filter(Boolean)));
+    }
     const subject = extractSearchSubject(normalized);
     if (!subject) return [];
     const intent = extractSearchIntentTerm(normalized);
@@ -3489,6 +3506,8 @@ function extractSearchSubject(query) {
 
 function extractSearchIntentTerm(query) {
     const text = String(query || '').toLowerCase();
+    const roleMatch = text.match(/\b(ceo|chief executive officer|managing director|chairman|chairperson|president|prime minister|pm|chief minister|cm|governor|mayor|founder|captain|coach|leader)\b/i);
+    if (roleMatch) return roleMatch[1].toLowerCase();
     if (/\b(?:news|update|updates|breaking|developments?|government|policy|election)\b/.test(text)) return 'news';
     if (/\b(?:price|available|availability|launched|released?)\b/.test(text)) return 'latest';
     if (/\b(?:vs|compare|comparison)\b/.test(text)) return 'comparison';
