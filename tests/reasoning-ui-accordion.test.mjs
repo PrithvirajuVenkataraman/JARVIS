@@ -230,6 +230,7 @@ vm.createContext(domSandbox);
 
 // Load helper functions
 vm.runInContext(extractFunctionSource(indexHtml, 'escapeHtml'), domSandbox);
+vm.runInContext(extractFunctionSource(indexHtml, 'formatThinkingStep'), domSandbox);
 vm.runInContext(extractFunctionSource(indexHtml, 'extractThoughtAndAnswer'), domSandbox);
 vm.runInContext(extractFunctionSource(indexHtml, 'generateContextualThoughtSteps'), domSandbox);
 vm.runInContext(extractFunctionSource(indexHtml, 'buildThinkingProcessHtml'), domSandbox);
