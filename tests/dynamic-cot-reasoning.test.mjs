@@ -52,7 +52,7 @@ assert.equal(generateSteps('thanks').length, 0);
 assert.equal(generateSteps('ok').length, 0);
 console.log('  [PASS] 1. Pleasantries and short greetings produce no unnecessary CoT steps');
 
-// 2. Test Dynamic Narrative Structure across Diverse Queries
+// 2. Test Real-Model-Thinking-Only Invariant across Diverse Queries
 const testQueries = [
     { query: 'Write a quicksort algorithm in Python with asymptotic analysis', domain: 'Coding (Python)' },
     { query: 'How to implement a debounce function in TypeScript?', domain: 'Coding (TypeScript)' },
@@ -66,20 +66,12 @@ const testQueries = [
     { query: 'Traditional sourdough bread recipe with hydration percentages', domain: 'Procedural' }
 ];
 
-const generatedResults = [];
 for (const { query, domain } of testQueries) {
     const steps = generateSteps(query);
     assert.ok(Array.isArray(steps), 'Steps for ' + domain + ' must be an array');
-    assert.equal(steps.length, 5, 'Steps for ' + domain + ' must contain 5 multi-stage narratives');
-    for (let i = 0; i < steps.length; i++) {
-        assert.ok(steps[i].length > 15, `Stage ${i + 1} too short for ${domain}: ${steps[i]}`);
-    }
-    generatedResults.push({ domain, query, steps });
+    assert.equal(steps.length, 0, 'Must produce 0 static/synthetic steps (real model reasoning only): ' + domain);
 }
-
-const allStep1s = new Set(generatedResults.map(r => r.steps[0]));
-assert.equal(allStep1s.size, generatedResults.length, 'Every distinct query must produce a unique contextualized Stage 1');
-console.log('  [PASS] 2. Dynamic 5-stage CoT narratives generated with 100% semantic uniqueness');
+console.log('  [PASS] 2. Real-model-reasoning only invariant: 0 synthetic 5-step placeholders generated');
 
 // 3. Test Multi-Chunk Converse Speech Stream <think> Filtering
 const speechSandbox = {
