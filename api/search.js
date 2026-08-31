@@ -1307,16 +1307,15 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
         timing.rerankingMs = timing.rerankMs;
     }
 
-    finalGate = evaluateWebRagEvidence(normalizedQuery, allResults);
-    finalPhase = 1;
-
-    // Stage 3: Early Exit — Deterministic Structured Claim (<1ms)
-    if (finalGate.pass || allResults.some(r => r.evidenceLevel === 'structured_claim')) {
-        const directAnswer = extractDeterministicLiveFactAnswer(normalizedQuery, allResults);
-        if (directAnswer?.verified && directAnswer.answer) {
-            finalAnswer = directAnswer;
-        }
+    // Stage 3: Early Exit — Deterministic Structured Claim / Leadership Extraction (<1ms)
+    const directAnswer = extractDeterministicLiveFactAnswer(normalizedQuery, allResults);
+    if (directAnswer?.verified && directAnswer.answer) {
+        finalAnswer = directAnswer;
+        finalGate = { pass: true, confidence: directAnswer.confidence, evidence: allResults };
+    } else {
+        finalGate = evaluateWebRagEvidence(normalizedQuery, allResults);
     }
+    finalPhase = 1;
 
     // Stage 4: Fast LLM synthesis if deterministic didn't match but evidence passed gate
     if (!finalAnswer?.verified && finalGate.pass) {
@@ -1337,11 +1336,13 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
         finalPhase = 2;
         const fallbackQueries = phases[1] || [];
 
-        // Deep crawl top 2 results for more evidence
-        const crawlStart = performance.now();
-        await enrichSearchResultsWithDeepCrawl(allResults, 2).catch(() => {});
-        timing.crawlMs = Number((performance.now() - crawlStart).toFixed(1));
-        timing.deepCrawlMs = timing.crawlMs;
+        // Deep crawl top 2 results for more evidence (skip for simple leadership queries to maintain sub-second speed)
+        if (!roleIntent || !isLeadershipOrRoleTerm(roleIntent.role)) {
+            const crawlStart = performance.now();
+            await enrichSearchResultsWithDeepCrawl(allResults, 2).catch(() => {});
+            timing.crawlMs = Number((performance.now() - crawlStart).toFixed(1));
+            timing.deepCrawlMs = timing.crawlMs;
+        }
 
         // Parent-child chunk expansion on crawled / full articles
         const expandedChunks = [];
@@ -1403,10 +1404,16 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
         }
 
         finalGate = evaluateWebRagEvidence(normalizedQuery, allResults);
-        if (finalGate.pass) {
+        const fallbackDirectAnswer = extractDeterministicLiveFactAnswer(normalizedQuery, allResults);
+        if (fallbackDirectAnswer?.verified && fallbackDirectAnswer.answer) {
+            finalAnswer = fallbackDirectAnswer;
+        } else if (finalGate.pass) {
             const llmStart = performance.now();
-            finalAnswer = await buildGroundedRagAnswer(normalizedQuery, allResults, finalGate, { skipDeepCrawl: false })
-                .catch(() => null);
+            finalAnswer = await buildGroundedRagAnswer(normalizedQuery, allResults, finalGate, { allowDeepCrawl: false })
+                .catch(error => {
+                    warnings.push(`rag_fallback_answer_failed:${String(error?.code || error?.message || 'unknown')}`);
+                    return null;
+                });
             const extraLlm = Number((performance.now() - llmStart).toFixed(1));
             timing.llmMs = Number((timing.llmMs + extraLlm).toFixed(1));
             timing.finalLlmMs = timing.llmMs;
@@ -1417,6 +1424,9 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
     timing.totalLatencyMs = timing.totalMs;
 
     console.log(`[Search Latency Breakdown] query="${normalizedQuery}" total=${timing.totalMs}ms | intent=${timing.intentMs}ms planning=${timing.planningMs}ms public=${timing.publicSourcesMs}ms structured=${timing.structuredLookupMs}ms embedding=${timing.embeddingMs}ms rerank=${timing.rerankMs}ms crawl=${timing.crawlMs}ms llm=${timing.llmMs}ms phase=${finalPhase}`);
+    if (roleIntent && isLeadershipOrRoleTerm(roleIntent.role)) {
+        console.log(`[Leadership RAG FastPath] query="${normalizedQuery}" subject="${roleIntent.subject}" role="${roleIntent.role}" verified=${Boolean(finalAnswer?.verified)} total=${timing.totalMs}ms`);
+    }
 
     const results = allResults.slice(0, limit);
     const gate = finalGate || evaluateWebRagEvidence(normalizedQuery, results);
@@ -1620,7 +1630,7 @@ function normalizeWikidataItem(item, query, index) {
     };
 }
 
-export function parseUniversalEntityQuery(query) {
+export function parseGovernmentRoleQuery(query) {
     const raw = normalizeSearchQuery(query);
     if (!raw) return null;
     const dateIntent = parseStructuredDateWindow(raw);
@@ -1682,7 +1692,16 @@ export function parseUniversalEntityQuery(query) {
     };
 }
 
-export const parseGovernmentRoleQuery = parseUniversalEntityQuery;
+export function parseUniversalEntityQuery(query) {
+    const res = parseGovernmentRoleQuery(query);
+    if (!res) return null;
+    return {
+        ...res,
+        subject: res.jurisdiction,
+        intent: isLeadershipOrRoleTerm(res.role) ? 'current_role' : 'entity_lookup',
+        temporal: res.dateIntent?.hasDate ? 'historical' : 'current'
+    };
+}
 
 function cleanPredicateText(value) {
     return stripDatePhrasesFromText(value)
@@ -2748,10 +2767,96 @@ export function hasObviousRagConflict(evidence = [], query = '') {
     return false;
 }
 
+export function extractVerifiedLeadershipClaim(query, evidence = []) {
+    const parsed = parseUniversalEntityQuery(query);
+    if (!parsed || !parsed.role || !parsed.subject) return null;
+    const subject = parsed.subject.trim();
+    const role = parsed.role.trim();
+    const roleText = parsed.roleText || role;
+    const isCurrent = parsed.temporal === 'current' || isCurrentStateQuery(query);
+
+    const subjectRegex = new RegExp(`\\b${escapeRegex(subject)}\\b`, 'i');
+    const roleRegex = new RegExp(`\\b(?:co-founder\\s+(?:and|&)\\s+)?(?:${escapeRegex(role)}|chief\\s+executive\\s+officer|ceo|president|prime\\s+minister|pm|chief\\s+minister|cm|managing\\s+director|founder\\s+and\\s+ceo)\\b`, 'i');
+
+    for (let i = 0; i < evidence.length; i++) {
+        const item = evidence[i];
+        const text = `${item.title || ''} . ${item.description || ''} . ${item.extractedText || ''} . ${item.text || ''}`;
+        if (!subjectRegex.test(text) || !roleRegex.test(text)) continue;
+
+        if (isCurrent && validateClaimTemporalStatus(item) === 'historical') continue;
+
+        // Pattern 1: "Bala Venkatramani is the Co-Founder and CEO at Securden" / "Bala Venkatramani is Chief Executive Officer at Securden"
+        const p1 = text.match(/([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\s+(?:is|serves\s+as|acts\s+as)\s+(?:the\s+)?(?:Co-Founder\s+(?:and|&)\s+)?(?:Chief\s+Executive\s+Officer|CEO|President|Prime\s+Minister|Chief\s+Minister|Managing\s+Director)\s+(?:at|of|for)\s+([A-Za-z0-9\s]+)/i);
+        if (p1 && subjectRegex.test(p1[2])) {
+            const person = p1[1].trim();
+            if (!/^(the|a|an|co-founder|founder|former|current|executive)$/i.test(person)) {
+                return {
+                    person,
+                    subject,
+                    role: roleText.toUpperCase() === 'CEO' ? 'CEO' : roleText,
+                    evidenceIndex: i,
+                    evidenceItem: item,
+                    confidence: 0.96
+                };
+            }
+        }
+
+        // Pattern 2: "Balasubramanian Venkatramani - Co-Founder and CEO @ Securden" / "Bala Venkatramani - CEO, Securden"
+        const p2 = text.match(/([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\s*[-–—|]\s*(?:Co-Founder\s+(?:and|&)\s+)?(?:Chief\s+Executive\s+Officer|CEO|President|Prime\s+Minister|Chief\s+Minister)\s*[@|at|,]\s*([A-Za-z0-9\s]+)/i);
+        if (p2 && subjectRegex.test(p2[2])) {
+            const person = p2[1].trim();
+            if (!/^(the|a|an|co-founder|founder|former|current|executive)$/i.test(person)) {
+                return {
+                    person,
+                    subject,
+                    role: roleText.toUpperCase() === 'CEO' ? 'CEO' : roleText,
+                    evidenceIndex: i,
+                    evidenceItem: item,
+                    confidence: 0.95
+                };
+            }
+        }
+
+        // Pattern 3: "Bala Venkatramani, Securden Inc: Profile and Biography" + "is Chief Executive Officer"
+        const p3 = text.match(/([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3}),\s*([A-Za-z0-9\s]+?)(?:,\s*Inc|\s+Inc|\s+LLC|\s+Ltd)?\s*[:–-].*?(?:is|as)\s+(?:the\s+)?(?:Chief\s+Executive\s+Officer|CEO)/i);
+        if (p3 && subjectRegex.test(p3[2])) {
+            const person = p3[1].trim();
+            if (!/^(the|a|an|co-founder|founder|former|current|executive)$/i.test(person)) {
+                return {
+                    person,
+                    subject,
+                    role: roleText.toUpperCase() === 'CEO' ? 'CEO' : roleText,
+                    evidenceIndex: i,
+                    evidenceItem: item,
+                    confidence: 0.94
+                };
+            }
+        }
+
+        // Pattern 4: "The Securden, Inc management team includes Balasubramanian Venkatramani (Chief Executive Officer)..."
+        const p4 = text.match(/([A-Za-z0-9\s]+?)\s+management\s+team\s+includes\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\s*\((?:Chief\s+Executive\s+Officer|CEO|Co-Founder\s+&\s+CEO)\)/i);
+        if (p4 && subjectRegex.test(p4[1])) {
+            const person = p4[2].trim();
+            if (!/^(the|a|an|co-founder|founder|former|current|executive)$/i.test(person)) {
+                return {
+                    person,
+                    subject,
+                    role: roleText.toUpperCase() === 'CEO' ? 'CEO' : roleText,
+                    evidenceIndex: i,
+                    evidenceItem: item,
+                    confidence: 0.95
+                };
+            }
+        }
+    }
+
+    return null;
+}
+
 function extractDeterministicLiveFactAnswer(query, evidence = []) {
     if (!Array.isArray(evidence) || !evidence.length) return null;
     const isCurrent = isCurrentStateQuery(query);
-    const isRoleQuery = /\b(cm|chief minister|president|prime minister|pm|governor|mayor|leader|head of state|head of government|ceo|captain|skipper|coach)\b/i.test(query);
+    const isRoleQuery = /\b(cm|chief minister|president|prime minister|pm|governor|mayor|leader|head of state|head of government|ceo|captain|skipper|coach|managing director)\b/i.test(query);
 
     const sorted = [...evidence].sort((a, b) => {
         if (isCurrent) {
@@ -2764,6 +2869,21 @@ function extractDeterministicLiveFactAnswer(query, evidence = []) {
         }
         return (b?.position || 0) - (a?.position || 0);
     });
+
+    if (isRoleQuery) {
+        const leadershipClaim = extractVerifiedLeadershipClaim(query, sorted);
+        if (leadershipClaim) {
+            const roleName = leadershipClaim.role.toUpperCase() === 'CEO' ? 'CEO' : leadershipClaim.role;
+            return {
+                verified: true,
+                confidence: leadershipClaim.confidence,
+                answer: `${leadershipClaim.person} is the current ${roleName} of ${leadershipClaim.subject}.`,
+                evidenceIndexes: [leadershipClaim.evidenceIndex],
+                modelAssisted: false,
+                reason: `Direct verified relationship: ${leadershipClaim.person} -> ${roleName} of ${leadershipClaim.subject}`
+            };
+        }
+    }
 
     for (let i = 0; i < sorted.length; i++) {
         const item = sorted[i];
@@ -3449,11 +3569,11 @@ function buildSearchQueryRewrite(query) {
     };
 }
 
-function isLeadershipOrRoleTerm(term = '') {
+export function isLeadershipOrRoleTerm(term = '') {
     return /\b(ceo|chief executive officer|managing director|chairman|chairperson|president|prime minister|pm|chief minister|cm|governor|mayor|founder|captain|coach|leader|premier|chancellor|minister|head of state|head of government|monarch|director)\b/i.test(term);
 }
 
-function buildDeterministicSearchQueries(query) {
+export function buildDeterministicSearchQueries(query) {
     const normalized = normalizeSearchQuery(query);
     if (!normalized) return [];
     const universal = parseUniversalEntityQuery(normalized);
