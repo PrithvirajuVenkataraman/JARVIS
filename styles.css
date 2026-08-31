@@ -5441,26 +5441,26 @@ body:not(.dark) .thinking-cot-number {
 }
 
 .thinking-cot-title {
-    display: block;
+    display: inline;
     font-size: 0.82rem;
     font-weight: 600;
-    color: #e2e8f0;
-    margin-bottom: 2px;
+    color: #38bdf8;
+    margin-right: 5px;
 }
 
 body:not(.dark) .thinking-cot-title {
-    color: #0f172a;
+    color: #0284c7;
 }
 
 .thinking-cot-body {
-    display: block;
-    color: #94a3b8;
+    display: inline;
+    color: #cbd5e1;
     line-height: 1.55;
     font-size: 0.80rem;
 }
 
 body:not(.dark) .thinking-cot-body {
-    color: #475569;
+    color: #334155;
 }
 
 .thinking-step {
