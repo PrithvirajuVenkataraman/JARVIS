@@ -64,67 +64,79 @@ export async function postJson(path, payload, options = {}) {
  * @param {boolean} [isVision=false] - If true, use Gemini Vision endpoint (not implemented here).
  * @returns {Promise<{ success: boolean, response?: any, error?: string }>}
  */
+import { validateEnv } from './config.js';
+// Simple console logger (no external dependency)
+const logger = {
+  info:   (...args) => console.info('[INFO]',  ...args),
+  error:  (...args) => console.error('[ERROR]', ...args),
+  warn:   (...args) => console.warn('[WARN]',   ...args),
+  debug:  (...args) => console.debug('[DEBUG]', ...args),
+};
+
+// In‑memory cache for LLM responses
+const llmCache = new Map();
+const getCached = (key) => llmCache.get(key);
+const setCached = (key, value) => llmCache.set(key, value);
+
 export async function callLLM(prompt, isVision = false) {
-    const groqKey = process.env.GROQ_API_KEY;
-    const geminiKey = process.env.GEMINI_API_KEY;
+    // Validate environment variables
+    const { groqKey, geminiKey } = validateEnv();
     if (!groqKey && !geminiKey) {
+        logger.error('Missing LLM API keys');
         return { success: false, error: 'Missing API keys for Groq and Gemini.' };
     }
-    const buildGroqBody = (p) => ({
-        model: 'mixtral-8x7b-32768',
-        messages: [{ role: 'user', content: p }],
-        temperature: 0.7
-    });
-    const buildGeminiBody = (p) => ({
-        model: 'gemini-pro',
-        contents: [{ role: 'user', parts: [{ text: p }] }],
-        temperature: 0.7
-    });
-    // Try Groq first
-    if (groqKey) {
-        try {
-            const groqResponse = await postJson('https://api.groq.com/openai/v1/chat/completions', buildGroqBody(prompt), {
-                headers: { Authorization: `Bearer ${groqKey}` },
-                timeoutMs: 30000
-            });
-            if (groqResponse && groqResponse.choices && groqResponse.choices[0] && groqResponse.choices[0].message) {
-                return { success: true, response: groqResponse.choices[0].message.content };
-            }
-            return { success: false, error: 'Unexpected Groq response format.' };
-        } catch (e) {
-            if (e instanceof ApiError && e.retryable && geminiKey) {
-                // fall through to Gemini fallback
-            } else {
+    // Check cache first
+    const cached = getCached(prompt);
+    if (cached) {
+        logger.info('LLM cache hit');
+        return { success: true, response: cached };
+    }
+    const buildGroqBody = (p) => ({ model: 'mixtral-8x7b-32768', messages: [{ role: 'user', content: p }], temperature: 0.7 });
+    const buildGeminiBody = (p) => ({ model: 'gemini-pro', contents: [{ role: 'user', parts: [{ text: p }] }], temperature: 0.7 });
+    // Helper to perform request with retry/backoff
+    const requestWithRetry = async (url, body, headers) => {
+        const maxRetries = 2;
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+            try {
+                const resp = await postJson(url, body, { headers, timeoutMs: 30000 });
+                return { success: true, data: resp };
+            } catch (e) {
+                if (e instanceof ApiError && e.retryable && attempt < maxRetries) {
+                    const backoff = 200 * Math.pow(2, attempt);
+                    await new Promise(r => setTimeout(r, backoff));
+                    continue;
+                }
                 return { success: false, error: e?.message || String(e) };
             }
         }
+    };
+    // Try Groq first
+    if (groqKey) {
+        const result = await requestWithRetry('https://api.groq.com/openai/v1/chat/completions', buildGroqBody(prompt), { Authorization: `Bearer ${groqKey}` });
+        if (result.success && result.data?.choices?.[0]?.message?.content) {
+            const answer = result.data.choices[0].message.content;
+            setCached(prompt, answer);
+            logger.info('Groq LLM success');
+            return { success: true, response: answer };
+        }
+        if (!geminiKey) return { success: false, error: result.error };
     }
     // Gemini fallback
     if (geminiKey) {
-        try {
-            const geminiResponse = await postJson(
-                'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=' + encodeURIComponent(geminiKey),
-                buildGeminiBody(prompt),
-                { timeoutMs: 30000 }
-            );
-            if (
-                geminiResponse &&
-                geminiResponse.candidates &&
-                geminiResponse.candidates[0] &&
-                geminiResponse.candidates[0].content &&
-                geminiResponse.candidates[0].content.parts
-            ) {
-                const parts = geminiResponse.candidates[0].content.parts;
-                const text = parts.map(p => p.text).join('');
-                return { success: true, response: text };
-            }
-            return { success: false, error: 'Unexpected Gemini response format.' };
-        } catch (e) {
-            return { success: false, error: e?.message || String(e) };
+        const result = await requestWithRetry('https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=' + encodeURIComponent(geminiKey), buildGeminiBody(prompt), {});
+        if (result.success && result.data?.candidates?.[0]?.content?.parts) {
+            const text = result.data.candidates[0].content.parts.map(p => p.text).join('');
+            setCached(prompt, text);
+            logger.info('Gemini LLM success');
+            return { success: true, response: text };
         }
+        return { success: false, error: result.error || 'Gemini response malformed.' };
     }
     return { success: false, error: 'No viable LLM provider available.' };
 }
+
+
+
 
 function formatApiErrorMessage(status, code, message) {
     if (status === 403 && code === 'origin_not_allowed') {
