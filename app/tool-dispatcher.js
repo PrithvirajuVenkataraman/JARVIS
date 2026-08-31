@@ -1,5 +1,5 @@
+import { callLLM } from './api-client.js';
 import { PartitionedIVFIndex, textToEmbeddingVector, vectorCosineSimilarity } from './storage.js';
-
 /**
  * Tool schemas provided to OpenAI/Groq compatible chat completions API.
  */
@@ -275,8 +275,9 @@ export async function dispatchToolCall(name, args = {}, context = {}) {
             return { tool: 'code_interpreter', success: res.success, output: res.success ? res.result : res.error };
         }
         case 'knowledge_lookup': {
-            const res = await executeKnowledgeLookup(parsedArgs?.topic || parsedArgs?.raw || '');
-            return { tool: 'knowledge_lookup', success: res.success, output: res.success ? res.data : res.error };
+            // Use LLM instead of static Wikipedia lookup
+            const llmRes = await callLLM(`Provide a concise answer about ${parsedArgs?.topic || parsedArgs?.raw || ''}`);
+            return { tool: 'knowledge_lookup', success: llmRes.success, output: llmRes.success ? llmRes.response : llmRes.error };
         }
         case 'datetime_context': {
             const res = executeDatetimeContext(parsedArgs?.timezone, parsedArgs?.operation);
