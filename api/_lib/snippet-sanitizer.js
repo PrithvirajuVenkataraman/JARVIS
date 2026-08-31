@@ -52,11 +52,15 @@ export function decodeHtmlEntities(str = '') {
 
 export function cleanSnippetText(rawSnippet = '') {
     if (!rawSnippet) return '';
-    // 1. Strip HTML tags (e.g. <font color="...">, <a>, <b>, <span>)
-    let text = String(rawSnippet).replace(/<[^>]+>/g, ' ');
-    // 2. Decode entities recursively
+    // 1. Decode entities first so that encoded HTML tags like &lt;a href=...&gt; become real tags
+    let text = decodeHtmlEntities(String(rawSnippet));
+    // 2. Strip HTML tags (e.g. <font color="...">, <a>, <b>, <span>)
+    text = text.replace(/<[^>]+>/g, ' ');
+    // 3. Decode entities again in case inner text was multi-encoded
     text = decodeHtmlEntities(text);
-    // 3. Strip trailing publisher attribution domains (e.g. "... cbs8.com", "... - BBC News", "... | Reuters", "... - news.bbc.co.uk")
+    // 4. Ensure any remaining tags are fully stripped
+    text = text.replace(/<[^>]+>/g, ' ');
+    // 5. Strip trailing publisher attribution domains (e.g. "... cbs8.com", "... - BBC News", "... | Reuters", "... - news.bbc.co.uk")
     text = text
         .replace(/\s*(?:[—–|-]|\bvia\b|\bat\b)\s+(?:https?:\/\/)?(?:www\.)?[a-z0-9.-]+\.[a-z]{2,}(?:\/[^\s]*)?\s*$/i, '')
         .replace(/\s+(?:https?:\/\/)?(?:www\.)?[a-z0-9.-]+\.[a-z]{2,}(?:\/[^\s]*)?\s*$/i, '')
