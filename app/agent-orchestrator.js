@@ -3,6 +3,8 @@
  * Coordinates 4 specialized agents: Planner, Researcher, Coder, and Synthesizer.
  * Supports concurrent parallel branch execution via dynamic event-driven wave scheduling.
  */
+import { isAmbiguous } from './ambiguity.js';
+import { computeIntentConfidence, computeEntityConfidence, computeEvidenceConfidence, computeAnswerGroundingConfidence } from './confidence.js';
 
 export function textToEmbeddingVector(text, dim = 512) {
     const v = new Float32Array(dim);
@@ -167,6 +169,16 @@ export function createAgentOrchestrator(options = {}) {
             isAborted = false;
             currentDag = buildAgentWorkflowDag(userGoal, options);
 
+            // Detect ambiguous query before proceeding
+            if (isAmbiguous(userGoal)) {
+                // Notify caller that clarification is needed
+                if (typeof options.onClarification === 'function') {
+                    options.onClarification('Your question appears ambiguous. Please provide more details.');
+                }
+                // Abort workflow early
+                return { dag: currentDag, outputs: {}, completed: false, ambiguous: true };
+            }
+            
             // Initialize ThinkingStatus UI (browser only) and wrap task updates
             let thinkingStatus = null;
             if (typeof window !== 'undefined') {
