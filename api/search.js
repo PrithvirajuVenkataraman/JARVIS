@@ -152,8 +152,9 @@ export default async function handler(req, res) {
                 ...search
             });
         }
+        const classification = await classifyRetrievalDecision(originalQuery || query);
         const route = await resolveRetrievalRoute(originalQuery || query, classifyFreeLiveIntent(originalQuery || query), {
-            useModelClassifier: mode === 'auto'
+            forceDecision: classification
         });
         if (mode === 'classify') {
             return res.status(200).json({
@@ -161,9 +162,13 @@ export default async function handler(req, res) {
                 query,
                 originalQuery: originalQuery === query ? undefined : originalQuery,
                 searchRewrite: rewrite,
+                decision: classification.decision,
+                confidence: classification.confidence,
+                reason: classification.reason,
+                temporal: classification.temporal,
                 route,
-                searchRequired: route.route !== 'llm',
-                searchSkipped: route.route === 'llm',
+                searchRequired: classification.decision === 'needs_live_search',
+                searchSkipped: classification.decision === 'stable_answer',
                 results: [],
                 provider: 'classifier'
             });
@@ -292,33 +297,200 @@ function buildSearchSkippedSummary(query, route) {
     };
 }
 
-async function resolveRetrievalRoute(message, fallbackRoute = {}, options = {}) {
-    const route = normalizeRetrievalRoute(fallbackRoute);
-    if (isSpecializedRetrievalRoute(route) || route.category === 'unsupported_free_live') return route;
-    if (route.category === 'web_search' && route.reasons?.includes('explicit_or_product_search_requires_web_sources')) return route;
-    if (options.useModelClassifier !== true) return route;
-    const modelRoute = await classifyRetrievalIntentWithGemini(message).catch(error => ({
-        warning: `gemini_retrieval_classifier_failed:${String(error?.code || error?.message || 'unknown')}`
-    }));
-    if (!modelRoute?.decision) return route;
-    if (modelRoute.decision === 'stable_answer') {
+export function classifyDeterministicRetrievalIntent(query = '') {
+    const text = String(query || '').toLowerCase().trim();
+    if (!text) {
         return {
-            route: 'llm',
-            category: 'stable_knowledge',
-            confidence: modelRoute.confidence || 0.72,
-            reasons: ['model_retrieval_classifier_stable']
+            decision: 'stable_answer',
+            confidence: 1.0,
+            reason: 'Empty query.',
+            temporal: false
         };
     }
-    if (modelRoute.decision === 'needs_live_search') {
+
+    // 1. Definite stable patterns (definitions, concepts, cultural meanings, math, science, code, history)
+    const isExplicitDefinitionOrConcept = /^(?:what is|what are|define|meaning of|what does .+ mean|explain|tell me about the concept of)\s+/i.test(text);
+    const isForeignCulturalOrConcept = /\b(serbian culture|concept of|meaning in|etymology|cultural meaning)\b/i.test(text);
+    const isScienceOrMathOrCode = /\b(photosynthesis|mitochondria|pythagorean|gravity|calculus|fibonacci|recursion|binary search|sorting algorithm|regex|regular expression|quicksort|new deal|constitution of)\b/i.test(text);
+    const isTimelessGeographyOrFact = /^(?:what is the capital of|where is|who wrote|who painted|who composed|when was .+ (?:born|founded|built|written))\b/i.test(text);
+
+    // If query has clear stable signals and NO temporal/live triggers
+    const hasLiveOrChangingSignal = /\b(current|latest|today|now|recently|this week|present|incumbent|price|stock|crypto|bitcoin|weather|temperature|score|standings|who won the latest|who won the last|breaking news|release date|version)\b/i.test(text);
+
+    if ((isExplicitDefinitionOrConcept || isForeignCulturalOrConcept || isScienceOrMathOrCode || isTimelessGeographyOrFact) && !hasLiveOrChangingSignal) {
+        return {
+            decision: 'stable_answer',
+            confidence: 0.96,
+            reason: 'Stable educational, conceptual, definitional, or timeless knowledge.',
+            temporal: false
+        };
+    }
+
+    // 2. Definite live/changing patterns (current leadership, prices, weather, live sports, tournament winners)
+    const isLeadershipOrOffice = /\b(?:who is|who are|what is|tell me|who's)\s+(?:the\s+)?(?:current\s+|latest\s+|present\s+|incumbent\s+)?(?:cm|pm|prime minister|chief minister|president|governor|mayor|ceo|chairman|captain|coach|leader|head of state|head of government)\b/i.test(text)
+        || /\b(?:current|latest|present|incumbent)\s+(?:cm|pm|prime minister|chief minister|president|governor|mayor|ceo|chairman|captain|coach|leader|head of state|head of government)\b/i.test(text)
+        || /\b(?:current captain of|who is captain of|who is the captain of|captain of csk|csk captain)\b/i.test(text);
+
+    const isLiveMarketOrWeather = /\b(weather|temperature|forecast|exchange rate|conversion rate|live score|match score|game score|standings)\b/i.test(text)
+        || /\b(?:price of\s+[a-z0-9-]+|(?:bitcoin|btc|crypto|eth|ethereum|solana|stock|share|gold|oil|crude)\s+price|crypto price|stock price)\b/i.test(text);
+
+    const isRecentTournamentOrEvent = /\b(?:who won (?:the )?(?:latest|last|recent|2024|2025|2026)?|winner of (?:the )?(?:latest|last|recent|2024|2025|2026)?|latest fifa|fifa world cup winner|ipl winner|super bowl winner|election results?|breaking news|live news)\b/i.test(text);
+
+    const isRecommendationsOrPlaces = /\b(places to visit|attractions in|things to do in|recommendations|reviews of|best restaurants in|hotels in)\b/i.test(text);
+
+    const isExplicitTemporalChanging = /\b(current|latest|today|now|recently|this week|present date|as of now|right now)\b/i.test(text);
+
+    if (isLeadershipOrOffice || isLiveMarketOrWeather || isRecentTournamentOrEvent || isRecommendationsOrPlaces || isExplicitTemporalChanging) {
+        return {
+            decision: 'needs_live_search',
+            confidence: 0.96,
+            reason: 'Factual question whose correct answer depends on the present date or changing status.',
+            temporal: true
+        };
+    }
+
+    return null;
+}
+
+export async function classifyRetrievalDecision(query, options = {}) {
+    const raw = String(query || '').trim();
+    if (!raw) {
+        return {
+            decision: 'stable_answer',
+            confidence: 1.0,
+            reason: 'Empty query.',
+            temporal: false
+        };
+    }
+
+    // 1. Fast deterministic intent pre-pass (<1ms)
+    const normalized = normalizeSearchQuery(raw);
+    const deterministic = classifyDeterministicRetrievalIntent(normalized);
+    if (deterministic && options.forceModel !== true) {
+        return deterministic;
+    }
+
+    // 2. Model-assisted intent reasoning (Gemini / Groq with temperature 0)
+    if (hasGeminiKey() || Boolean(process.env.GROQ_API_KEY)) {
+        try {
+            const todayStr = new Date().toISOString().slice(0, 10);
+            const prompt = `Return strict JSON only.
+Task: Decide whether the user's query needs LIVE WEB SEARCH or can be answered from STABLE MODEL KNOWLEDGE.
+Current Date: ${todayStr} (Year 2026).
+
+CRITICAL CLASSIFICATION PRINCIPLES:
+- DO NOT classify based on whether a topic is niche, foreign, regional, or unfamiliar (e.g. Serbian cultural concept "Inat", obscure geography, foreign language terms, or specialized scientific facts are stable model knowledge).
+- The key rule:
+  * STABLE FACT -> "stable_answer" (handled directly by LLM)
+  * TIME-SENSITIVE / CHANGING FACT -> "needs_live_search" (requires live web retrieval)
+
+ROUTE TO "needs_live_search" (temporal: true) when the correct answer may have changed over time or depends on the present date:
+1. Current / latest / today / now / recently / this week / new releases
+2. Current office holders, leaders, CEOs, chairmen, captains, coaches, CMs, PMs, presidents, governors, mayors
+3. Current prices, stock/crypto prices, exchange rates, weather, schedules, live sports scores, availability
+4. Recent events, breaking news, elections, results, updates, recent tournament winners ("who won the latest...")
+5. Current product/software versions, features, compatibility, pricing
+6. Recommendations or reviews where current/fresh information matters
+
+ROUTE TO "stable_answer" (temporal: false) for stable knowledge:
+1. Definitions, concepts, meanings (e.g. "What is Inat?", "What does Inat mean in Serbian culture?")
+2. Mathematics, logic, programming concepts, syntax, coding explanations
+3. Historical facts, established history (e.g. "Who was the first president of the US?", "Who wrote this poem?")
+4. Established scientific knowledge (e.g. "What is photosynthesis?")
+5. General educational questions, geography facts (e.g. "What is the capital of Serbia?")
+6. Translations, writing, rewriting, summarization, general explanations
+
+User question: ${JSON.stringify(raw)}
+JSON shape: {"decision":"needs_live_search"|"stable_answer","confidence":0.0,"reason":"short explanation","temporal":true|false}`;
+
+            const json = await callGeminiJson(prompt, { maxOutputTokens: 120, temperature: 0 });
+            const decision = String(json?.decision || '').trim();
+            if (['needs_live_search', 'stable_answer'].includes(decision)) {
+                return {
+                    decision,
+                    confidence: Math.max(0.01, Math.min(1.0, Number(json?.confidence) || 0.95)),
+                    reason: String(json?.reason || '').trim() || (decision === 'needs_live_search' ? 'Time-sensitive or changing factual intent.' : 'Stable model knowledge.'),
+                    temporal: Boolean(json?.temporal ?? (decision === 'needs_live_search'))
+                };
+            }
+        } catch (_) {
+            // Fallback to deterministic heuristic
+        }
+    }
+
+    // 3. Fallback evaluation
+    return deterministic || {
+        decision: isCurrentTopicSearchQuery(normalized) || isDatedChangingFactSearchQuery(normalized) ? 'needs_live_search' : 'stable_answer',
+        confidence: 0.85,
+        reason: 'Evaluated via temporal changing fact heuristic.',
+        temporal: isCurrentTopicSearchQuery(normalized) || isDatedChangingFactSearchQuery(normalized)
+    };
+}
+
+export async function resolveRetrievalRoute(message, fallbackRoute = {}, options = {}) {
+    const route = normalizeRetrievalRoute(fallbackRoute);
+
+    if (route.route === 'cached_latest' || route.category === 'latest') {
+        return {
+            route: 'cached_latest',
+            category: 'latest',
+            confidence: 0.95,
+            reasons: ['latest_cache_lookup'],
+            temporal: true,
+            decision: 'needs_live_search'
+        };
+    }
+
+    if (isSpecializedRetrievalRoute(route) && route.route === 'live_required') {
         return {
             route: 'live_required',
-            category: 'web_search',
-            confidence: modelRoute.confidence || 0.78,
-            reasons: ['model_retrieval_classifier_live_search']
+            category: route.category,
+            confidence: route.confidence || 0.95,
+            reasons: route.reasons || ['specialized_live_source_required'],
+            temporal: true,
+            decision: 'needs_live_search'
         };
     }
-    return route;
+
+    const classification = options.forceDecision || await classifyRetrievalDecision(message, options);
+
+    if (classification.decision === 'needs_live_search') {
+        const category = isSpecializedRetrievalRoute(route) ? route.category : (route.category === 'stable_knowledge' ? 'web_search' : route.category);
+        const reasons = [...(route.reasons || [])];
+        if (classification.reason && !reasons.includes(classification.reason)) {
+            reasons.push(classification.reason);
+        }
+        if (isDatedChangingFactSearchQuery(message) && !reasons.includes('dated_changing_fact_requires_public_source')) {
+            reasons.push('dated_changing_fact_requires_public_source');
+        }
+        if (!reasons.length) {
+            reasons.push('time_sensitive_query_requires_live_web_search');
+        }
+        return {
+            route: 'live_required',
+            category,
+            confidence: classification.confidence,
+            reasons,
+            temporal: classification.temporal,
+            decision: classification.decision
+        };
+    }
+
+    const reasons = [...(route.reasons || [])];
+    if (classification.reason && !reasons.includes(classification.reason)) {
+        reasons.push(classification.reason);
+    }
+    return {
+        route: 'llm',
+        category: 'stable_knowledge',
+        confidence: classification.confidence,
+        reasons,
+        temporal: classification.temporal,
+        decision: classification.decision
+    };
 }
+
+export const classifyRetrievalIntentWithGemini = classifyRetrievalDecision;
 
 function normalizeRetrievalRoute(route = {}) {
     return {
@@ -330,28 +502,7 @@ function normalizeRetrievalRoute(route = {}) {
 }
 
 function isSpecializedRetrievalRoute(route = {}) {
-    return ['weather', 'crypto', 'sports', 'disasters', 'government', 'news', 'tourism_food_places'].includes(String(route.category || ''));
-}
-
-async function classifyRetrievalIntentWithGemini(message) {
-    if (!hasGeminiKey()) return null;
-    const prompt = `Return strict JSON only.
-Task: decide if this user message needs external live/public-source retrieval.
-Rules:
-- Choose "needs_live_search" for requests about recent/current information, reviews, prices, availability, comparisons, developing events, or anything likely to change.
-- Choose "stable_answer" for explanations, definitions, stable facts, writing, math, code help, summaries, or evergreen knowledge.
-- Do not rely on brand or product word lists; reason from the user's intent.
-User message: ${JSON.stringify(message)}
-JSON shape: {"decision":"needs_live_search|stable_answer","confidence":0.0,"subject":"...","intent":"..."}`;
-    const json = await callGeminiJson(prompt, { maxOutputTokens: 260, temperature: 0 });
-    const decision = String(json?.decision || '').trim();
-    if (!['needs_live_search', 'stable_answer'].includes(decision)) return null;
-    return {
-        decision,
-        confidence: Math.max(0.01, Math.min(0.99, Number(json?.confidence) || 0.72)),
-        subject: normalizeSearchQuery(json?.subject || ''),
-        intent: normalizeSearchQuery(json?.intent || '')
-    };
+    return ['weather', 'crypto', 'sports', 'disasters', 'government', 'news', 'tourism_food_places', 'cached_latest', 'latest'].includes(String(route.category || route.route || ''));
 }
 
 export async function runCachedLatestSearch(query, options = {}) {
@@ -3508,6 +3659,8 @@ export const __test = {
     extractSearchTargetQuery,
     buildSearchQueryRewrite,
     resolveRetrievalRoute,
+    classifyRetrievalDecision,
+    classifyDeterministicRetrievalIntent,
     classifyRetrievalIntentWithGemini,
     buildDeterministicSearchQueries,
     buildWebRagQueryPhases,
