@@ -4058,23 +4058,20 @@ async function buildSearchFallbackAnswer(userMessage) {
     if (!isFactSearchEnabled()) return null;
 
     const resolvedMessage = String(userMessage || '').trim();
-    const lowSignal = String(resolvedMessage || '').trim();
-    if (!lowSignal) return null;
-    if (/^(hi|hello|hey|yo|sup|hola|vanakkam|namaste|good\s+(morning|afternoon|evening))[.!?]*$/i.test(lowSignal)) {
+    if (!resolvedMessage) return null;
+    if (/^(hi|hello|hey|yo|sup|hola|vanakkam|namaste|good\s+(morning|afternoon|evening))[.!?]*$/i.test(resolvedMessage)) {
         return null;
     }
-    if (isAcknowledgementUtterance(lowSignal)) {
+    if (isAcknowledgementUtterance(resolvedMessage)) {
         return null;
     }
-    const subject = normalizeKnowledgeSubject(extractKnowledgeSubject(resolvedMessage));
-    const query = subject || String(resolvedMessage || '').trim();
-    if (!query) return null;
+    const query = resolvedMessage;
 
     try { 
         const response = await fetch('/api/search', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query, maxResults: 5, answer: true, mode: 'auto' })
+            body: JSON.stringify({ query, maxResults: 6, answer: true, mode: 'auto' })
         });
         if (!response.ok) return null;
         const data = await response.json();
@@ -4090,13 +4087,36 @@ async function buildSearchFallbackAnswer(userMessage) {
                 return `${groundedAnswer}\n\nSources:\n${lines}`;
             }
 
-            const top = results[0];
-            const topSnippet = String(top?.description || '').trim();
-            const lead = topSnippet
-                ? `From web sources: ${topSnippet}`
-                : `I found reliable web sources about ${query}.`;
+            // Synthesize direct answer using LLM
+            const snippets = results
+                .slice(0, 4)
+                .map((r, i) => `${i + 1}. ${r.title}\nContent: ${r.description}`)
+                .join('\n\n');
+            try {
+                const synthRes = await fetch('/api/chat-groq', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        message: `Answer the user's question directly and concisely in 1-2 sentences using ONLY the snippets below.
 
-            return `${lead}\n\nSources:\n${lines}`;
+User question: "${query}"
+
+Snippets:
+${snippets}`
+                    })
+                });
+                if (synthRes.ok) {
+                    const synthData = await synthRes.json();
+                    const synthText = cleanLiveAnswerText(String(synthData?.response || synthData?.text || '').trim());
+                    if (synthText && !isVerificationRefusalText(synthText)) {
+                        return `${synthText}\n\nSources:\n${lines}`;
+                    }
+                }
+            } catch (_) {}
+
+            const top = results[0];
+            const topTitle = String(top?.title || '').trim();
+            return `Based on web records, ${topTitle}.\n\nSources:\n${lines}`;
         }
     } catch (error) {
     }
@@ -9169,9 +9189,11 @@ let showRoutingDebugBadge = false;
             if (!container || container.querySelector('.verification-notice-banner')) return;
             const anchor = String(notice.extractedAnchor || '').trim();
             if (!anchor) return;
-
             const role = String(notice.role || '').trim();
             const jurisdiction = String(notice.jurisdiction || '').trim();
+
+            const isGenericRoleAnchor = /^(ceo|cfo|cto|coo|president|prime minister|chief minister|pm|cm|governor|mayor|leader|head|founder|co-founder|director)$/i.test(anchor);
+            if (isGenericRoleAnchor || (role && anchor.toLowerCase() === role.toLowerCase())) return;
 
             let noticeText = '';
             if (role && jurisdiction) {
@@ -18082,12 +18104,13 @@ function isCurrentRoleHolderLiveQuery(text, liveIntent = null, entityIntent = nu
     const raw = String(text || '').trim();
     if (!raw) return false;
     const lower = raw.toLowerCase();
+    const officeSignal = /\b(president|prime minister|pm|chief minister|cm|governor|mayor|minister|ceo|cfo|cto|coo|co-founder|founder|captain|coach|chairman|chairperson|head of|leader of|secretary general|director|director general|dean|chancellor|principal|administrator)\b/.test(lower);
+    const currentSignal = /\b(who is|what is|current|currently|latest|present|incumbent|as of|today|now|who's|whos)\b/.test(lower);
+    if (officeSignal && currentSignal) return true;
     const intent = liveIntent || extractLiveQueryIntent(raw);
     const entity = entityIntent || extractUniversalEntityIntent(raw, intent);
     const roleFact = String(intent?.factType || '').toLowerCase() === 'role' || entity?.relationType === 'role';
-    const officeSignal = /\b(president|prime minister|pm|chief minister|cm|governor|mayor|minister|ceo|captain|coach|chairman|chairperson|head of|leader of|secretary general|director|director general|dean|chancellor|principal|administrator)\b/.test(lower);
-    const currentSignal = /\b(who is|what is|current|currently|latest|present|incumbent|as of|today|now)\b/.test(lower);
-    return Boolean(roleFact && officeSignal && currentSignal);
+    return Boolean(roleFact && officeSignal);
 }
 
 function isPublicSourceSearchAllowedWhenLiveDisabled(text, liveIntent = null, entityIntent = null) {
