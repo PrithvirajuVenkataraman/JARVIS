@@ -556,19 +556,19 @@ export async function searchPublicSources(query, options = {}) {
         ...deterministicQueries
     ])).slice(0, 7);
 
-    const targetQueries = querySet.slice(0, 2);
+    const targetQueries = querySet.slice(0, 3);
 
     const asyncTasks = [
-        Promise.allSettled(targetQueries.map(candidate => searchGoogleNewsRss(candidate, { limit }))),
-        Promise.allSettled(targetQueries.map(candidate => searchWikipedia(candidate, { limit: 2 }))),
+        Promise.allSettled(targetQueries.slice(0, 2).map(candidate => searchGoogleNewsRss(candidate, { limit }))),
+        Promise.allSettled(targetQueries.slice(0, 2).map(candidate => searchWikipedia(candidate, { limit: 2 }))),
         Promise.allSettled([searchWikidata(targetQueries[0] || normalizedQuery, { limit: 2 })]),
-        Promise.allSettled([searchDuckDuckGoHtml(targetQueries[0] || normalizedQuery, { limit: Math.min(5, limit) })]),
+        Promise.allSettled(targetQueries.slice(0, 2).map(candidate => searchDuckDuckGoHtml(candidate, { limit: Math.min(6, limit) }))),
         options.skipStructuredRoles === true
             ? Promise.resolve([])
             : Promise.allSettled([searchGovernmentRole(normalizedQuery, { limit: Math.min(3, limit) })]),
         options.skipGdelt === true
             ? Promise.resolve([])
-            : Promise.allSettled(targetQueries.map(candidate => searchGdeltNews(candidate, { limit })))
+            : Promise.allSettled(targetQueries.slice(0, 2).map(candidate => searchGdeltNews(candidate, { limit })))
     ];
 
     const settled = await Promise.all(asyncTasks);
@@ -581,13 +581,16 @@ export async function searchPublicSources(query, options = {}) {
     const governmentRoleResults = (Array.isArray(settled[4]) ? settled[4] : []).flatMap(r => r.status === 'fulfilled' ? r.value : []);
     const gdelt = (Array.isArray(settled[5]) ? settled[5] : []).flatMap(r => r.status === 'fulfilled' ? r.value : []);
 
+    const roleIntent = parseGovernmentRoleQuery(normalizedQuery);
+    const isLeadership = roleIntent && isLeadershipOrRoleTerm(roleIntent.role);
+
     const combined = [
-        ...wiki,
-        ...wikidata,
         ...governmentRoleResults,
-        ...liveNews,
-        ...gdelt,
-        ...liveWeb
+        ...wikidata,
+        ...wiki,
+        ...liveWeb,
+        ...(isLeadership ? liveNews.slice(0, 3) : liveNews),
+        ...gdelt
     ].filter(Boolean);
 
     const rankedCandidates = rankSources(normalizedQuery, combined);
@@ -3338,6 +3341,7 @@ function scoreSearchResult(item, terms, query = '') {
     let score = 0;
     if (item?.evidenceLevel === 'structured_claim') score += 45;
     if (item?.sourceType === 'official_source') score += 30;
+    if (item?.sourceType === 'live_web') score += 20;
     if (item?.trusted) score += 12;
     if (item?.sourceType === 'trusted_news') score += 8;
     if (item?.sourceType === 'encyclopedia') score += 4;
@@ -3354,6 +3358,14 @@ function scoreSearchResult(item, terms, query = '') {
 
     if (query) {
         const roleIntent = parseGovernmentRoleQuery(query);
+        if (roleIntent && roleIntent.role && roleIntent.jurisdiction) {
+            const fullText = `${title} ${description}`.toLowerCase();
+            const hasRole = fullText.includes(roleIntent.role.toLowerCase()) || (roleIntent.roleText && fullText.includes(roleIntent.roleText.toLowerCase()));
+            const hasSubject = fullText.includes(roleIntent.jurisdiction.toLowerCase());
+            if (hasRole && hasSubject) {
+                score += 40;
+            }
+        }
         const dateIntent = roleIntent?.dateIntent || parseStructuredDateWindow(query);
         if (dateIntent?.hasDate) {
             if (roleClaimOverlapsWindow(item, dateIntent)) {
