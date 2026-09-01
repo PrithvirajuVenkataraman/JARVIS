@@ -5,7 +5,7 @@ import { applyApiSecurity } from './_lib/security.js';
 import { classifyFreeLiveIntent, routeMessage } from './_lib/latest/router.js';
 import { searchItems } from './_lib/latest/latest-cache.js';
 import { ingestLatestSources } from './_lib/latest/latest-ingest.js';
-import { runFreeLiveSearch, searchDuckDuckGoHtml } from './_lib/free-live/providers.js';
+import { runFreeLiveSearch, searchDuckDuckGoHtml, fetchWikipediaInfobox } from './_lib/free-live/providers.js';
 import { extractWithCrawl4Ai } from './_lib/crawl4ai-client.js';
 import { rankTextsByEmbedding, chunkTextForEmbedding, hasNvidiaEmbeddingKey, rerankTexts, getNvidiaRerankModel } from './_lib/embeddings.js';
 import { cleanQueryTarget, extractQueryTargetMetadata } from './_lib/query-target-cleanup.js';
@@ -27,7 +27,7 @@ const GDELT_DOC_URL = 'https://api.gdeltproject.org/api/v2/doc/doc';
 const EXA_SEARCH_URL = 'https://api.exa.ai/search';
 const GEMINI_GENERATE_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
 const SEARCH_TIMEOUT_MS = 2_000;
-const PUBLIC_SOURCE_TIMEOUT_MS = 2_000;
+const PUBLIC_SOURCE_TIMEOUT_MS = 3_500;
 const GEMINI_SEARCH_TIMEOUT_MS = 2_500;
 const MAX_QUERY_LENGTH = 500;
 const LATEST_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
@@ -629,8 +629,11 @@ export async function searchWikipedia(query, options = {}) {
         hits.slice(0, limit).map(async (hit) => {
             const title = String(hit?.title || '').trim();
             if (!title) return null;
-            const summary = await fetchWikipediaSummary(title).catch(() => null);
-            return normalizeWikipediaItem(summary || hit, query);
+            const [summary, infobox] = await Promise.all([
+                fetchWikipediaSummary(title).catch(() => null),
+                fetchWikipediaInfobox(title).catch(() => null)
+            ]);
+            return normalizeWikipediaItem(summary || hit, query, infobox);
         })
     );
     return summaries.filter(item => item && item.title && item.url);
@@ -1585,11 +1588,14 @@ async function fetchWikipediaSummary(title) {
     return response.json();
 }
 
-function normalizeWikipediaItem(item, query) {
+function normalizeWikipediaItem(item, query, infobox = null) {
     const title = String(item?.title || '').trim();
     const pageUrl = String(item?.content_urls?.desktop?.page || '').trim() ||
         (title ? `https://en.wikipedia.org/wiki/${encodeURIComponent(title.replace(/\s+/g, '_'))}` : '');
-    const description = stripHtml(String(item?.extract || item?.snippet || item?.description || '')).trim();
+    let description = stripHtml(String(item?.extract || item?.snippet || item?.description || '')).trim();
+    if (infobox && infobox.summary) {
+        description = `${description} | Infobox: ${infobox.summary}`;
+    }
     const domain = getDomainFromUrl(pageUrl);
     return {
         title,
@@ -1603,7 +1609,8 @@ function normalizeWikipediaItem(item, query) {
         freshness: 'reference',
         position: Number(item?.index || 1),
         trusted: true,
-        qualitySignals: ['public_reference', 'trusted_source'],
+        qualitySignals: ['public_reference', 'trusted_source', infobox?.summary ? 'infobox_extracted' : ''].filter(Boolean),
+        infobox: infobox?.fields || null,
         query
     };
 }
@@ -2817,7 +2824,7 @@ function cleanExtractedPersonName(raw) {
 function buildStrictRoleRegexPattern(role) {
     const r = String(role || '').toLowerCase().trim();
     if (r === 'ceo' || r === 'chief executive officer') {
-        return '(?:co-founder\\s+(?:and|&)\\s+)?(?:chief\\s+executive\\s+officer|ceo)';
+        return '(?:co-founder\\s+(?:and|&)\\s+)?(?:co-)?(?:chief\\s+executive\\s+officer|ceo)';
     }
     if (r === 'cm' || r === 'chief minister') {
         return '(?:chief\\s+minister|cm)';
@@ -2938,6 +2945,38 @@ export function extractVerifiedLeadershipClaim(query, evidence = []) {
                     evidenceIndex: i,
                     evidenceItem: item,
                     confidence: 0.95
+                };
+            }
+        }
+
+        // Pattern 5: Wikipedia Infobox / Key people / Executive list: "Key people: Jane Doe (CEO), John Smith (President)..."
+        const p5 = text.match(new RegExp(`([A-Z][\\wÀ-ž]+(?:\\s+[A-Z][\\wÀ-ž]+){1,3})\\s*\\((?:${rolePattern})\\)`, 'i'));
+        if (p5) {
+            const person = cleanExtractedPersonName(p5[1]);
+            if (person) {
+                return {
+                    person,
+                    subject,
+                    role: roleTitle,
+                    evidenceIndex: i,
+                    evidenceItem: item,
+                    confidence: 0.98
+                };
+            }
+        }
+
+        // Pattern 6: Structured role field: "CEO: Jane Doe" or "Chief Executive Officer: Jane Doe"
+        const p6 = text.match(new RegExp(`\\b(?:${rolePattern})\\s*[:=]\\s*([A-Z][\\wÀ-ž]+(?:\\s+[A-Z][\\wÀ-ž]+){1,3})`, 'i'));
+        if (p6) {
+            const person = cleanExtractedPersonName(p6[1]);
+            if (person) {
+                return {
+                    person,
+                    subject,
+                    role: roleTitle,
+                    evidenceIndex: i,
+                    evidenceItem: item,
+                    confidence: 0.97
                 };
             }
         }
