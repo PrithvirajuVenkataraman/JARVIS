@@ -1078,7 +1078,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             return 'Return only the final assistant answer as natural text.';
         }
         return `Reasoning instruction: Before your final answer, think through the problem inside <think>...</think> tags.
-Write your thinking as genuine, natural inner thoughts exploring the specific query, calculating or verifying key details step-by-step, checking for nuances or constraints, and developing the solution intuitively before delivering the response. Keep it natural and focused on the actual subject and reasoning steps without robotic meta-templates, artificial checklists, or repetitive boilerplate. Everything after </think> must be ONLY the final, polished answer for the user with zero meta-commentary.`;
+Write your thinking as genuine, natural, conversational inner thoughts exploring the specific query, calculating or verifying key details, checking for nuances or constraints, and developing the solution intuitively before delivering the response. Keep it in natural paragraph prose. Avoid artificial 4-5 numbered bullet checklists, rigid template headers (e.g. "Step 1: Analyze intent"), or repetitive boilerplate. Everything after </think> must be ONLY the final, polished answer for the user with zero meta-commentary.`;
     }
 
     function composeStreamingPrompt(systemPrompt, contextBlock, message, lengthGuidance = '', intent = 'chat') {
@@ -1156,13 +1156,9 @@ Write your thinking as genuine, natural inner thoughts exploring the specific qu
 
         let liveRag = { ragText: '', sources: [] };
         if ((routeDecision.strategy === 'search' || routeDecision.strategy === 'live_first' || routeDecision.webEligible) && !isAttachmentGroundingPayload(grounding, intent)) {
-            writeSse(res, 'delta', { text: '<think>\n🔍 Searching live web sources...\n' });
             liveRag = await buildLiveRagContext(effectiveMessage, null, []);
             if (liveRag.sources && liveRag.sources.length > 0) {
-                writeSse(res, 'delta', { text: `📖 Reading ${liveRag.sources.slice(0, 2).map(s => s.domain || 'web source').join(', ')}...\n✨ Synthesizing ${liveRag.sources.length} sources...\n</think>\n` });
                 writeSse(res, 'sources', { sources: liveRag.sources });
-            } else {
-                writeSse(res, 'delta', { text: '✨ Synthesizing response...\n</think>\n' });
             }
         }
 
