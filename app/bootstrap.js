@@ -21,6 +21,7 @@ import { highlightCode, normalizeLang } from './code-highlighter.js';
 import { renderMathInText, formatLatexExpression } from './math-renderer.js';
 import { renderMarkdown } from './markdown-renderer.js';
 import * as JarvisAgentOrchestrator from './agent-orchestrator.js';
+import * as JarvisLocationSuite from './location-suite.js';
 
 const engine = createConversationEngine({
     maxTurns: 12,
@@ -50,6 +51,7 @@ globalThis.JarvisCodeHighlighter = Object.freeze({ highlightCode, normalizeLang 
 globalThis.JarvisMathRenderer = Object.freeze({ renderMathInText, formatLatexExpression });
 globalThis.JarvisMarkdownRenderer = Object.freeze({ renderMarkdown });
 globalThis.JarvisAgentOrchestrator = Object.freeze({ ...JarvisAgentOrchestrator });
+globalThis.JarvisLocationSuite = Object.freeze({ ...JarvisLocationSuite });
 
 function initializeSpeechInput() {
     if (globalThis.__jarvisSpeechInputInstalled) return;
