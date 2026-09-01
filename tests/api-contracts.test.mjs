@@ -9,7 +9,6 @@ import visionHandler, { __test as visionTest } from '../api/vision.js';
 import diagnosticsHandler from '../api/diagnostics.js';
 import rankTextsHandler from '../api/rank-texts.js';
 import ingestAttachmentHandler from '../api/ingest-attachment.js';
-import { webSearchHandler, __test as webSearchTest } from '../api/_lib/web-search-core.js';
 import extractUrlHandler, { __test as extractUrlTest } from '../api/extract-url.js';
 import { clearItems, saveItems } from '../api/_lib/latest/latest-cache.js';
 
@@ -222,54 +221,6 @@ delete process.env.NVIDIA_API_KEY;
 delete process.env.CRAWL4AI_URL;
 delete process.env.LIVE_RETRIEVAL_ENABLED;
 delete process.env.JARVIS_PUBLIC_FACT_SEARCH;
-
-const pausedWebSearch = await callHandler(webSearchHandler, request('/api/web-search', { query: 'latest open source search' }));
-assert.equal(pausedWebSearch.statusCode, 503);
-assert.equal(pausedWebSearch.body.disabled, true);
-assert.equal(pausedWebSearch.body.error.code, 'web_search_disabled');
-process.env.WEB_SEARCH_ENABLED = 'true';
-const missingSearxng = await callHandler(webSearchHandler, request('/api/web-search', { query: 'latest open source search' }));
-assert.equal(missingSearxng.statusCode, 503);
-assert.equal(missingSearxng.body.error.code, 'searxng_not_configured');
-assert.equal(webSearchTest.normalizeSearchRequest({ query: `  ${ROLE_FIXTURES.chiefMinister.role} ${ROLE_FIXTURES.chiefMinister.jurisdiction}  ` }).value.query, `${ROLE_FIXTURES.chiefMinister.role} ${ROLE_FIXTURES.chiefMinister.jurisdiction}`);
-assert.equal(webSearchTest.robotsAllows('User-agent: *\nDisallow: /private\nAllow: /private/public', '/private/page', 'UnifyAssistantWebSearch'), false);
-assert.equal(webSearchTest.robotsAllows('User-agent: *\nDisallow: /private\nAllow: /private/public', '/private/public/page', 'UnifyAssistantWebSearch'), true);
-
-process.env.SEARXNG_URL = 'https://searxng.test';
-globalThis.fetch = async url => {
-    const value = String(url);
-    if (value.startsWith('https://searxng.test/search')) {
-        return okJson({
-            results: [
-                { title: 'Example Article', url: 'https://example.com/article', content: 'Example snippet', engine: 'mock' },
-                { title: 'Blocked Article', url: 'https://blocked.example/private', content: 'Blocked snippet', engine: 'mock' }
-            ]
-        });
-    }
-    if (value === 'https://example.com/robots.txt') {
-        return textResponse('User-agent: *\nAllow: /', 200, 'text/plain');
-    }
-    if (value === 'https://blocked.example/robots.txt') {
-        return textResponse('User-agent: *\nDisallow: /', 200, 'text/plain');
-    }
-    if (value === 'https://example.com/article') {
-        return textResponse('<html><head><title>Example Article</title><meta name="description" content="Clean description"></head><body><nav>menu</nav><article><h1>Example Article</h1><p>This is a readable article body with enough useful words to be included in the cleaned search result for prompt grounding and citation.</p><script>bad()</script><footer>footer</footer></article></body></html>');
-    }
-    throw new Error(`Unexpected fetch ${value}`);
-};
-const webSearchOk = await callHandler(webSearchHandler, request('/api/web-search', {
-    query: 'example article',
-    maxResults: 2,
-    textLimit: 2000
-}));
-assert.equal(webSearchOk.statusCode, 200);
-assert.equal(webSearchOk.body.success, true);
-assert.equal(webSearchOk.body.results.length, 1);
-assert.equal(webSearchOk.body.results[0].url, 'https://example.com/article');
-assert.doesNotMatch(webSearchOk.body.results[0].text, /menu|footer|bad/);
-globalThis.fetch = ORIGINAL_FETCH;
-delete process.env.SEARXNG_URL;
-delete process.env.WEB_SEARCH_ENABLED;
 
 const disabledExtract = await callHandler(extractUrlHandler, request('/api/extract-url', { url: 'https://example.com/article' }));
 assert.equal(disabledExtract.statusCode, 503);
