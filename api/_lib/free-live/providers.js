@@ -84,6 +84,78 @@ export async function searchDuckDuckGoHtml(query, options = {}) {
     }
 }
 
+export function parseWikipediaInfobox(wikitext) {
+    if (!wikitext || typeof wikitext !== 'string') return null;
+    const cleanValue = (text) => {
+        if (!text) return '';
+        let s = String(text);
+        s = s.replace(/<ref[^>]*>.*?<\/ref>/gis, '');
+        s = s.replace(/<[^>]+>/g, ' ');
+        s = s.replace(/\[\[(?:[^|\]]+\|)?([^\]]+)\]\]/g, (m, g1) => g1);
+        s = s.replace(/\{\{(?:unbulleted\s+list|ubl|flatlist|plainlist|hlist)\s*\|([^{}]+)\}\}/gi, (m, body) => {
+            return body.split('|').map(x => x.trim()).filter(Boolean).join(', ');
+        });
+        s = s.replace(/\{\{(?:start\s+date\s+and\s+age|start\s+date|launch\s+date)\|([^{}]+)\}\}/gi, (m, body) => {
+            return body.split('|').filter(x => /^\d+$/.test(x.trim())).join('-');
+        });
+        s = s.replace(/\{\{[^}]+\}\}/g, ' ');
+        return s.replace(/\s+/g, ' ').trim();
+    };
+
+    const infoboxMatch = wikitext.match(/\{\{Infobox[\s\S]*?\n\}\}/i);
+    const boxContent = infoboxMatch ? infoboxMatch[0] : wikitext;
+
+    const fields = {};
+    const lineRegex = /^\s*\|\s*([a-zA-Z0-9_-]+)\s*=\s*(.+)$/gm;
+    let match;
+    while ((match = lineRegex.exec(boxContent)) !== null) {
+        const key = match[1].toLowerCase().trim();
+        const val = cleanValue(match[2]);
+        if (val && val.length > 1) {
+            fields[key] = val;
+        }
+    }
+
+    const structured = [];
+    if (fields.key_people) structured.push(`Key people: ${fields.key_people}`);
+    if (fields.founders || fields.founder) structured.push(`Founders: ${fields.founders || fields.founder}`);
+    if (fields.ceo) structured.push(`CEO: ${fields.ceo}`);
+    if (fields.president) structured.push(`President: ${fields.president}`);
+    if (fields.cfo) structured.push(`CFO: ${fields.cfo}`);
+    if (fields.coo) structured.push(`COO: ${fields.coo}`);
+    if (fields.cto) structured.push(`CTO: ${fields.cto}`);
+    if (fields.chairperson || fields.chairman) structured.push(`Chairperson: ${fields.chairperson || fields.chairman}`);
+    if (fields.leader_name || fields.leader_name1 || fields.leader_name2) {
+        const leaders = [
+            fields.leader_title ? `${fields.leader_title}: ${fields.leader_name}` : fields.leader_name,
+            fields.leader_title1 ? `${fields.leader_title1}: ${fields.leader_name1}` : fields.leader_name1,
+            fields.leader_title2 ? `${fields.leader_title2}: ${fields.leader_name2}` : fields.leader_name2
+        ].filter(Boolean);
+        if (leaders.length) structured.push(leaders.join(', '));
+    }
+    if (fields.hq_location || fields.headquarters || fields.location) structured.push(`Headquarters: ${fields.hq_location || fields.headquarters || fields.location}`);
+    if (fields.founded || fields.established) structured.push(`Founded: ${fields.founded || fields.established}`);
+
+    return {
+        fields,
+        summary: structured.join(' | ')
+    };
+}
+
+export async function fetchWikipediaInfobox(title) {
+    if (!title) return null;
+    try {
+        const parseUrl = `https://en.wikipedia.org/w/api.php?action=parse&page=${encodeURIComponent(title)}&prop=wikitext&section=0&format=json`;
+        const res = await fetchWithTimeout(parseUrl, { headers: { 'User-Agent': 'JarvisAI/1.0 (free live search)' } }, 2000);
+        if (!res.ok) return null;
+        const data = await res.json();
+        const wikitext = data?.parse?.wikitext?.['*'];
+        return parseWikipediaInfobox(wikitext);
+    } catch (_) {
+        return null;
+    }
+}
+
 export async function searchWikipediaApi(query, options = {}) {
     const limit = options.limit || 3;
     try {
@@ -92,18 +164,33 @@ export async function searchWikipediaApi(query, options = {}) {
         if (!res.ok) return [];
         const data = await res.json();
         const list = data?.query?.search || [];
-        return list.map(item => ({
-            title: cleanSnippetText(item.title),
-            description: item.snippet ? cleanSnippetText(item.snippet) : `Wikipedia overview of ${item.title}`,
-            snippet: item.snippet ? cleanSnippetText(item.snippet) : `Wikipedia overview of ${item.title}`,
-            url: `https://en.wikipedia.org/wiki/${encodeURIComponent(item.title.replace(/ /g, '_'))}`,
-            source: 'Wikipedia',
-            sourceType: 'reference_lookup',
-            trusted: true,
-            freshness: 'current_encyclopedia',
-            qualitySignals: ['open_knowledge_graph', 'wikipedia_api'],
-            query
+        
+        const results = await Promise.all(list.map(async (item) => {
+            const rawTitle = cleanSnippetText(item.title);
+            let description = item.snippet ? cleanSnippetText(item.snippet) : `Wikipedia overview of ${rawTitle}`;
+            
+            // For top relevant Wikipedia hits, fetch and merge structured Infobox data
+            const infobox = await fetchWikipediaInfobox(rawTitle).catch(() => null);
+            if (infobox && infobox.summary) {
+                description = `${description} | Infobox: ${infobox.summary}`;
+            }
+
+            return {
+                title: rawTitle,
+                description,
+                snippet: description,
+                url: `https://en.wikipedia.org/wiki/${encodeURIComponent(item.title.replace(/ /g, '_'))}`,
+                source: 'Wikipedia',
+                sourceType: 'reference_lookup',
+                trusted: true,
+                freshness: 'current_encyclopedia',
+                qualitySignals: ['open_knowledge_graph', 'wikipedia_api', infobox?.summary ? 'infobox_extracted' : ''].filter(Boolean),
+                infobox: infobox?.fields || null,
+                query
+            };
         }));
+
+        return results;
     } catch (_) {
         return [];
     }
