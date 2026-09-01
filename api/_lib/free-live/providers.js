@@ -91,24 +91,42 @@ export function parseWikipediaInfobox(wikitext) {
         let s = String(text);
         s = s.replace(/<ref[^>]*>.*?<\/ref>/gis, '');
         s = s.replace(/<[^>]+>/g, ' ');
-        s = s.replace(/\[\[(?:[^|\]]+\|)?([^\]]+)\]\]/g, (m, g1) => g1);
-        s = s.replace(/\{\{(?:unbulleted\s+list|ubl|flatlist|plainlist|hlist)\s*\|([^{}]+)\}\}/gi, (m, body) => {
-            return body.split('|').map(x => x.trim()).filter(Boolean).join(', ');
+        s = s.replace(/\[\[(?:[^|\]]+\|)?([^\]]+)\]\]/g, '$1');
+        s = s.replace(/\{\{(?:unbulleted\s+list|ubl|flatlist|plainlist|hlist|bulleted\s+list)\s*\|([\s\S]*?)\}\}/gi, (_, body) => {
+            return body.replace(/^\s*\*\s*/gm, ', ').split('|').join(', ');
         });
-        s = s.replace(/\{\{(?:start\s+date\s+and\s+age|start\s+date|launch\s+date)\|([^{}]+)\}\}/gi, (m, body) => {
+        s = s.replace(/\{\{(?:start\s+date\s+and\s+age|start\s+date|launch\s+date)\|([^{}]+)\}\}/gi, (_, body) => {
             return body.split('|').filter(x => /^\d+$/.test(x.trim())).join('-');
         });
-        s = s.replace(/\{\{[^}]+\}\}/g, ' ');
-        return s.replace(/\s+/g, ' ').trim();
+        s = s.replace(/\{\{[a-zA-Z0-9_\s-]+\|([^{}]+)\}\}/gi, '$1');
+        s = s.replace(/\{\{[^}]*\}\}/g, ' ');
+        s = s.replace(/^\s*\*\s*/gm, ', ');
+        return s.replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').replace(/^,\s*/, '').trim();
     };
 
-    const infoboxMatch = wikitext.match(/\{\{Infobox[\s\S]*?\n\}\}/i);
-    const boxContent = infoboxMatch ? infoboxMatch[0] : wikitext;
+    const startIdx = wikitext.search(/\{\{Infobox/i);
+    if (startIdx === -1) return null;
+    let depth = 0;
+    let boxContent = '';
+    for (let i = startIdx; i < wikitext.length; i++) {
+        if (wikitext[i] === '{' && wikitext[i + 1] === '{') {
+            depth++;
+            i++;
+        } else if (wikitext[i] === '}' && wikitext[i + 1] === '}') {
+            depth--;
+            i++;
+            if (depth <= 0) {
+                boxContent = wikitext.slice(startIdx, i + 1);
+                break;
+            }
+        }
+    }
+    if (!boxContent) boxContent = wikitext.slice(startIdx);
 
     const fields = {};
-    const lineRegex = /^\s*\|\s*([a-zA-Z0-9_-]+)\s*=\s*(.+)$/gm;
+    const fieldRegex = /^\s*\|\s*([a-zA-Z0-9_-]+)\s*=\s*([\s\S]*?)(?=^\s*\|\s*[a-zA-Z0-9_-]+\s*=|(?:\n\s*\}\}\s*$)|$)/gm;
     let match;
-    while ((match = lineRegex.exec(boxContent)) !== null) {
+    while ((match = fieldRegex.exec(boxContent)) !== null) {
         const key = match[1].toLowerCase().trim();
         const val = cleanValue(match[2]);
         if (val && val.length > 1) {
@@ -134,7 +152,7 @@ export function parseWikipediaInfobox(wikitext) {
         if (leaders.length) structured.push(leaders.join(', '));
     }
     if (fields.hq_location || fields.headquarters || fields.location) structured.push(`Headquarters: ${fields.hq_location || fields.headquarters || fields.location}`);
-    if (fields.founded || fields.established) structured.push(`Founded: ${fields.founded || fields.established}`);
+    if (fields.founded || fields.established || fields.foundation) structured.push(`Founded: ${fields.founded || fields.established || fields.foundation}`);
 
     return {
         fields,
@@ -146,7 +164,7 @@ export async function fetchWikipediaInfobox(title) {
     if (!title) return null;
     try {
         const parseUrl = `https://en.wikipedia.org/w/api.php?action=parse&page=${encodeURIComponent(title)}&prop=wikitext&section=0&format=json`;
-        const res = await fetchWithTimeout(parseUrl, { headers: { 'User-Agent': 'JarvisAI/1.0 (free live search)' } }, 2000);
+        const res = await fetchWithTimeout(parseUrl, { headers: { 'User-Agent': 'UnifyAssistant/2.0 (https://github.com/unify; contact@unify.ai)' } }, 2500);
         if (!res.ok) return null;
         const data = await res.json();
         const wikitext = data?.parse?.wikitext?.['*'];
