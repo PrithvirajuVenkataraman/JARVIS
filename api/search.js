@@ -1337,7 +1337,7 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
     const elapsed = performance.now() - totalStart;
     if (!finalAnswer?.verified && elapsed < FAST_PATH_BUDGET_MS) {
         finalPhase = 2;
-        const fallbackQueries = phases[1] || [];
+        const fallbackQueries = (phases[1] && phases[1].length) ? phases[1] : [normalizedQuery];
 
         // Deep crawl top 2 results for more evidence (skip for simple leadership queries to maintain sub-second speed)
         if (!roleIntent || !isLeadershipOrRoleTerm(roleIntent.role)) {
@@ -1437,6 +1437,17 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
 
     if (!finalAnswer?.verified || !finalAnswer.answer) {
         const unverifiedText = 'I could not verify this from retrieved sources.';
+        const latencyBreakdown = {
+            classifierMs: timing.intentMs,
+            queryRewriteMs: timing.planningMs,
+            structuredLookupMs: timing.structuredLookupMs,
+            searchProvidersMs: timing.publicSourcesMs,
+            crawlingMs: timing.crawlMs,
+            rankingMs: timing.rerankMs,
+            llmMs: timing.llmMs,
+            totalLatencyMs: timing.totalMs
+        };
+
         const unverifiedPayload = {
             provider: 'web_rag',
             answerProvider: 'web_rag_unverified',
@@ -1461,6 +1472,7 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
             ragPhaseCount: finalPhase,
             triadScores,
             timing,
+            latencyBreakdown,
             warnings: Array.from(new Set([...warnings, gate.reason].filter(Boolean)))
         };
         return unverifiedPayload;
@@ -1468,6 +1480,17 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
 
     const evidencePool = gate.evidence.length ? gate.evidence : results;
     const evidence = selectEvidenceByIndexes(evidencePool, finalAnswer.evidenceIndexes).slice(0, 6);
+    const latencyBreakdown = {
+        classifierMs: timing.intentMs,
+        queryRewriteMs: timing.planningMs,
+        structuredLookupMs: timing.structuredLookupMs,
+        searchProvidersMs: timing.publicSourcesMs,
+        crawlingMs: timing.crawlMs,
+        rankingMs: timing.rerankMs,
+        llmMs: timing.llmMs,
+        totalLatencyMs: timing.totalMs
+    };
+
     const verifiedPayload = {
         provider: 'web_rag',
         answerProvider: 'web_rag_grounded',
@@ -1496,6 +1519,7 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
         ragPhaseCount: finalPhase,
         triadScores,
         timing,
+        latencyBreakdown,
         warnings: Array.from(new Set(warnings.filter(Boolean)))
     };
 
@@ -1802,9 +1826,7 @@ function normalizeGovernmentRoleBinding(binding, intent, jurisdiction, query, in
     const endDate = normalizeWikidataDate(bindingValue(binding?.end));
     const url = holderId ? `https://www.wikidata.org/wiki/${holderId}` : holderUri;
     const description = [
-        holderName && jurisdiction?.label ? `${holderName} is listed by Wikidata as ${officeLabel} for ${jurisdiction.label}.` : '',
-        startDate ? `Start date: ${startDate}.` : '',
-        endDate ? `End date: ${endDate}.` : '',
+        holderName && jurisdiction?.label ? `${holderName} serves as ${officeLabel} for ${jurisdiction.label}.` : '',
         article ? `Wikipedia: ${article}` : ''
     ].filter(Boolean).join(' ');
     return {
@@ -2337,8 +2359,9 @@ function buildSourceDerivedAnswer(results, metadata = {}) {
         const jurisdiction = String(officialRole.jurisdiction || '').trim();
         const sourceLabel = String(officialRole.sourceLabel || officialRole.domain || 'official source').trim();
         if (holder && role && jurisdiction) {
+            const roleTitle = formatRoleDisplayTitle(role);
             return {
-                answer: `${holder} is listed by ${sourceLabel} as current ${role} for ${jurisdiction}.`,
+                answer: `${holder} is the current ${roleTitle} of ${jurisdiction}.`,
                 provider: 'official_crawled_current_holder'
             };
         }
@@ -2383,13 +2406,23 @@ function buildSourceDerivedAnswer(results, metadata = {}) {
     return {};
 }
 
+function formatRoleDisplayTitle(role) {
+    const r = String(role || '').trim();
+    if (!r) return 'Leader';
+    if (r.toUpperCase() === 'CEO') return 'CEO';
+    if (r.toUpperCase() === 'CM') return 'Chief Minister';
+    if (r.toUpperCase() === 'PM') return 'Prime Minister';
+    return r.split(/\s+/).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+}
+
 function buildStructuredRoleAnswer(results, roleIntent = null) {
     const list = (Array.isArray(results) ? results : [])
         .filter(item => item?.holderName && item?.role && item?.jurisdiction && item?.url);
     if (!list.length) return {};
-    const role = String(list[0].role || roleIntent?.role || '').trim();
+    const rawRole = String(list[0].role || roleIntent?.role || '').trim();
     const jurisdiction = String(list[0].jurisdiction || roleIntent?.jurisdiction || '').trim();
-    if (!role || !jurisdiction) return {};
+    if (!rawRole || !jurisdiction) return {};
+    const roleTitle = formatRoleDisplayTitle(rawRole);
     const dateIntent = list[0].dateIntent || roleIntent?.dateIntent || null;
     if (dateIntent?.hasDate) {
         const matching = list.filter(item => roleClaimOverlapsWindow(item, dateIntent));
@@ -2402,10 +2435,9 @@ function buildStructuredRoleAnswer(results, roleIntent = null) {
         }).filter(item => item.holder);
         if (!holdersWithRanges.length) return {};
         if (holdersWithRanges.length === 1) {
-            const { holder, range } = holdersWithRanges[0];
-            const detail = range ? ` Source dates: ${range}.` : '';
+            const { holder } = holdersWithRanges[0];
             return {
-                answer: `${prefix}, the ${role} of ${jurisdiction} was ${holder}.${detail}`,
+                answer: `${prefix}, ${holder} served as ${roleTitle} of ${jurisdiction}.`,
                 provider: 'wikidata_dated_structured_claim'
             };
         }
@@ -2413,7 +2445,7 @@ function buildStructuredRoleAnswer(results, roleIntent = null) {
             .map(item => item.range ? `${item.holder} (${item.range})` : item.holder)
             .join('; ');
         return {
-            answer: `${prefix}, the ${role} of ${jurisdiction} had these matching Wikidata claims: ${values}.`,
+            answer: `${prefix}, the ${roleTitle} of ${jurisdiction} included: ${values}.`,
             provider: 'wikidata_dated_structured_claim'
         };
     }
@@ -2421,11 +2453,8 @@ function buildStructuredRoleAnswer(results, roleIntent = null) {
     const top = currentClaims.length ? currentClaims[0] : list[0];
     const holder = String(top.holderName || '').trim();
     if (!holder) return {};
-    const startDate = String(top.startDate || '').trim();
-    const startText = startDate ? ` Start date: ${startDate}.` : '';
-    const today = new Date().toISOString().slice(0, 10);
     return {
-        answer: `As of ${today}, ${holder} is listed by Wikidata as current ${role} for ${jurisdiction}.${startText}`,
+        answer: `${holder} is the current ${roleTitle} of ${jurisdiction}.`,
         provider: 'wikidata_structured_claim'
     };
 }
@@ -2785,16 +2814,46 @@ function cleanExtractedPersonName(raw) {
     return name;
 }
 
+function buildStrictRoleRegexPattern(role) {
+    const r = String(role || '').toLowerCase().trim();
+    if (r === 'ceo' || r === 'chief executive officer') {
+        return '(?:co-founder\\s+(?:and|&)\\s+)?(?:chief\\s+executive\\s+officer|ceo)';
+    }
+    if (r === 'cm' || r === 'chief minister') {
+        return '(?:chief\\s+minister|cm)';
+    }
+    if (r === 'pm' || r === 'prime minister') {
+        return '(?:prime\\s+minister|pm)';
+    }
+    if (r === 'president' || r === 'head of state') {
+        return '(?:president|head\\s+of\\s+state)';
+    }
+    if (r === 'governor') {
+        return 'governor';
+    }
+    if (r === 'mayor') {
+        return 'mayor';
+    }
+    if (r === 'captain' || r === 'skipper') {
+        return '(?:captain|skipper)';
+    }
+    if (r === 'coach' || r === 'manager') {
+        return '(?:head\\s+coach|coach|manager)';
+    }
+    return escapeRegex(r);
+}
+
 export function extractVerifiedLeadershipClaim(query, evidence = []) {
     const parsed = parseUniversalEntityQuery(query);
     if (!parsed || !parsed.role || !parsed.subject) return null;
     const subject = parsed.subject.trim();
     const role = parsed.role.trim();
-    const roleText = parsed.roleText || role;
+    const roleTitle = formatRoleDisplayTitle(parsed.roleText || role);
     const isCurrent = parsed.temporal === 'current' || isCurrentStateQuery(query);
 
     const subjectRegex = new RegExp(`\\b${escapeRegex(subject)}\\b`, 'i');
-    const roleRegex = new RegExp(`\\b(?:co-founder\\s+(?:and|&)\\s+)?(?:${escapeRegex(role)}|chief\\s+executive\\s+officer|ceo|president|prime\\s+minister|pm|chief\\s+minister|cm|managing\\s+director|founder\\s+and\\s+ceo)\\b`, 'i');
+    const rolePattern = buildStrictRoleRegexPattern(role);
+    const roleRegex = new RegExp(`\\b${rolePattern}\\b`, 'i');
 
     for (let i = 0; i < evidence.length; i++) {
         const item = evidence[i];
@@ -2803,15 +2862,15 @@ export function extractVerifiedLeadershipClaim(query, evidence = []) {
 
         if (isCurrent && validateClaimTemporalStatus(item) === 'historical') continue;
 
-        // Pattern 0: Bio sentence: "[Name] (born ...) is a ... who is the CEO of [Subject]"
-        const p0 = text.match(/^([A-Z][\wÀ-ž]+(?:\s+[A-Z][\wÀ-ž]+){1,3})[^.]*?\bwho\s+is\s+(?:the\s+)?(?:current\s+)?(?:CEO|Chief\s+Executive\s+Officer)\s+(?:at|of|for)\s+([A-Za-z0-9\s]+)/i);
+        // Pattern 0: Bio sentence: "[Name] (born ...) is a ... who is the [Role] of [Subject]"
+        const p0 = text.match(new RegExp(`^([A-Z][\\wÀ-ž]+(?:\\s+[A-Z][\\wÀ-ž]+){1,3})[^.]*?\\bwho\\s+is\\s+(?:the\\s+)?(?:current\\s+)?(?:${rolePattern})\\s+(?:at|of|for)\\s+([A-Za-z0-9\\s]+)`, 'i'));
         if (p0 && subjectRegex.test(p0[2])) {
             const person = cleanExtractedPersonName(p0[1]);
             if (person) {
                 return {
                     person,
                     subject,
-                    role: roleText.toUpperCase() === 'CEO' ? 'CEO' : roleText,
+                    role: roleTitle,
                     evidenceIndex: i,
                     evidenceItem: item,
                     confidence: 0.96
@@ -2819,15 +2878,15 @@ export function extractVerifiedLeadershipClaim(query, evidence = []) {
             }
         }
 
-        // Pattern 1: "[Person] is the Co-Founder and CEO at [Subject]" / "[Person] is Chief Executive Officer at [Subject]"
-        const p1 = text.match(/([A-Z][\wÀ-ž]+(?:\s+[A-Z][\wÀ-ž]+){1,3})\s+(?:is|serves\s+as|acts\s+as)\s+(?:the\s+)?(?:Co-Founder\s+(?:and|&)\s+)?(?:Chief\s+Executive\s+Officer|CEO|President|Prime\s+Minister|Chief\s+Minister|Managing\s+Director)\s+(?:at|of|for)\s+([A-Za-z0-9\s]+)/i);
+        // Pattern 1: "[Person] is the [Role] at [Subject]"
+        const p1 = text.match(new RegExp(`([A-Z][\\wÀ-ž]+(?:\\s+[A-Z][\\wÀ-ž]+){1,3})\\s+(?:is|serves\\s+as|acts\\s+as)\\s+(?:the\\s+)?(?:${rolePattern})\\s+(?:at|of|for)\\s+([A-Za-z0-9\\s]+)`, 'i'));
         if (p1 && subjectRegex.test(p1[2])) {
             const person = cleanExtractedPersonName(p1[1]);
             if (person) {
                 return {
                     person,
                     subject,
-                    role: roleText.toUpperCase() === 'CEO' ? 'CEO' : roleText,
+                    role: roleTitle,
                     evidenceIndex: i,
                     evidenceItem: item,
                     confidence: 0.96
@@ -2836,14 +2895,14 @@ export function extractVerifiedLeadershipClaim(query, evidence = []) {
         }
 
         // Pattern 2: "[NAME] - [ROLE] @ [ENTITY]"
-        const p2 = text.match(/([A-Z][\wÀ-ž]+(?:\s+[A-Z][\wÀ-ž]+){1,3})\s*[-–—|]\s*(?:Co-Founder\s+(?:and|&)\s+)?(?:Chief\s+Executive\s+Officer|CEO|President|Prime\s+Minister|Chief\s+Minister)\s*[@|at|,]\s*([A-Za-z0-9\s]+)/i);
+        const p2 = text.match(new RegExp(`([A-Z][\\wÀ-ž]+(?:\\s+[A-Z][\\wÀ-ž]+){1,3})\\s*[-–—|]\\s*(?:${rolePattern})\\s*[@|at|,:]\\s*([A-Za-z0-9\\s]+)`, 'i'));
         if (p2 && subjectRegex.test(p2[2])) {
             const person = cleanExtractedPersonName(p2[1]);
             if (person) {
                 return {
                     person,
                     subject,
-                    role: roleText.toUpperCase() === 'CEO' ? 'CEO' : roleText,
+                    role: roleTitle,
                     evidenceIndex: i,
                     evidenceItem: item,
                     confidence: 0.95
@@ -2851,15 +2910,15 @@ export function extractVerifiedLeadershipClaim(query, evidence = []) {
             }
         }
 
-        // Pattern 3: "[Person], [Subject] Inc: Profile and Biography" + "is Chief Executive Officer"
-        const p3 = text.match(/([A-Z][\wÀ-ž]+(?:\s+[A-Z][\wÀ-ž]+){1,3}),\s*([A-Za-z0-9\s]+?)(?:,\s*Inc|\s+Inc|\s+LLC|\s+Ltd)?\s*[:–-].*?(?:is|as)\s+(?:the\s+)?(?:Chief\s+Executive\s+Officer|CEO)/i);
+        // Pattern 3: "[Person], [Subject] Inc: Profile and Biography" + "[Role]"
+        const p3 = text.match(new RegExp(`([A-Z][\\wÀ-ž]+(?:\\s+[A-Z][\\wÀ-ž]+){1,3}),\\s*([A-Za-z0-9\\s]+?)(?:,\\s*Inc|\\s+Inc|\\s+LLC|\\s+Ltd)?\\s*[:–-].*?(?:is|as)\\s+(?:the\\s+)?(?:${rolePattern})`, 'i'));
         if (p3 && subjectRegex.test(p3[2])) {
             const person = cleanExtractedPersonName(p3[1]);
             if (person) {
                 return {
                     person,
                     subject,
-                    role: roleText.toUpperCase() === 'CEO' ? 'CEO' : roleText,
+                    role: roleTitle,
                     evidenceIndex: i,
                     evidenceItem: item,
                     confidence: 0.94
@@ -2867,15 +2926,15 @@ export function extractVerifiedLeadershipClaim(query, evidence = []) {
             }
         }
 
-        // Pattern 4: "The [Subject], Inc management team includes [Person] (Chief Executive Officer)..."
-        const p4 = text.match(/([A-Za-z0-9\s]+?)\s+management\s+team\s+includes\s+([A-Z][\wÀ-ž]+(?:\s+[A-Z][\wÀ-ž]+){1,3})\s*\((?:Chief\s+Executive\s+Officer|CEO|Co-Founder\s+&\s+CEO)\)/i);
+        // Pattern 4: "The [Subject], Inc management team includes [Person] ([Role])..."
+        const p4 = text.match(new RegExp(`([A-Za-z0-9\\s]+?)\\s+management\\s+team\\s+includes\\s+([A-Z][\\wÀ-ž]+(?:\\s+[A-Z][\\wÀ-ž]+){1,3})\\s*\\((?:${rolePattern})\\)`, 'i'));
         if (p4 && subjectRegex.test(p4[1])) {
             const person = cleanExtractedPersonName(p4[2]);
             if (person) {
                 return {
                     person,
                     subject,
-                    role: roleText.toUpperCase() === 'CEO' ? 'CEO' : roleText,
+                    role: roleTitle,
                     evidenceIndex: i,
                     evidenceItem: item,
                     confidence: 0.95
@@ -2938,7 +2997,26 @@ function extractDeterministicLiveFactAnswer(query, evidence = []) {
             };
         }
     }
-    // All unstructured news, articles, and web snippets must be synthesized by LLM in buildGroundedRagAnswer
+
+    const isNewsQuery = /\b(latest news|news|headlines|updates?|recent developments?)\b/i.test(query);
+    if (isNewsQuery) {
+        const validNews = sorted.filter(item => item.title && (item.sourceType === 'trusted_news' || item.sourceType === 'public_news' || (item.sourceLabel && item.sourceLabel.includes('News'))));
+        if (validNews.length >= 2) {
+            const headlines = validNews.slice(0, 3).map(n => n.title.replace(/\s*[-–—|]\s*[^-–—|]+$/, '').trim()).filter(Boolean);
+            if (headlines.length) {
+                return {
+                    verified: true,
+                    confidence: 0.9,
+                    answer: `Recent reports highlight the following developments: ${headlines.join('; ')}.`,
+                    evidenceIndexes: [0, 1].slice(0, validNews.length),
+                    modelAssisted: false,
+                    reason: 'Synthesized from top verified news sources.'
+                };
+            }
+        }
+    }
+
+    // All unstructured articles and web snippets without structured facts require LLM synthesis in buildGroundedRagAnswer
     return null;
 }
 
@@ -2985,13 +3063,14 @@ async function buildGroundedRagAnswer(query, results, gate, options = {}) {
 Task: Answer the user's question directly and factually using ONLY the retrieved web evidence below.
 Current Date: ${todayStr} (Year 2026).
 
-STRICT ANTI-HEDGING & DIRECT-NAME GROUNDING RULES:
-1. FIRST SENTENCE MUST DIRECTLY STATE THE PERSON'S SPECIFIC NAME AND OFFICE (e.g., "The current Chief Minister of Tamil Nadu is M. K. Stalin.").
-2. FORBIDDEN: DO NOT write meta-commentary about the search process or snippets (NEVER say "Based on the provided information...", "The verified web content states...", "However, the content does not explicitly name...").
-3. FORBIDDEN: DO NOT output generic civics lessons or definitions explaining what the office of CM/PM means.
-4. FOR CURRENT QUERIES: Base the active leader strictly on 'current' evidence. DO NOT declare future speculative election winners or past office holders as current leaders.
-5. If the provided evidence does not contain the specific answer or is ambiguous, set "verified": false, "confidence": 0.0, "answer": "". Do NOT guess or write an explanatory disclaimer.
-6. Return evidenceIndexes citing which evidence blocks you used.
+STRICT ANTI-HEDGING & DIRECT FACT GROUNDING RULES:
+1. FIRST SENTENCE MUST DIRECTLY AND AUTHORITATIVELY STATE THE SPECIFIC ANSWER (e.g. the specific active person, officeholder, or fact).
+2. STRICT ROLE GROUNDING: If the question asks for a specific corporate or government role (such as CEO or Chief Minister), answer ONLY with the person holding that exact role. NEVER substitute other roles (such as CFO, COO, CTO, or President) as evidence for CEO.
+3. FORBIDDEN: DO NOT write meta-commentary about the search process or snippets (NEVER say "Based on the provided information...", "The verified web content states...", "According to Wikidata...", "is listed by Wikidata as...").
+4. FORBIDDEN: DO NOT output generic civics lessons or definitions explaining what the office or organization means.
+5. FOR CURRENT QUERIES: Base the active leader strictly on 'current' evidence. DO NOT declare future speculative election winners or past office holders as current leaders.
+6. If the provided evidence does not contain the specific answer or is ambiguous, set "verified": false, "confidence": 0.0, "answer": "". Do NOT guess or write an explanatory disclaimer.
+7. Return evidenceIndexes citing which evidence blocks you used.
 
 User question: ${JSON.stringify(query)}
 Evidence JSON:
