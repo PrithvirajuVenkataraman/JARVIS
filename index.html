@@ -22396,63 +22396,68 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
         }
 
         async function completeCurrentLocationRequest(position, originalText = '') {
-            showThinkingIndicator('Checking your current location...');
+            showThinkingIndicator('Analyzing your location, live weather & nearby essential services...');
             try {
                 const lat = position.coords.latitude;
                 const lon = position.coords.longitude;
-                let locationName = 'your current location';
                 let exactAddress = '';
+                let addressData = {};
 
-                try {
-                    const reverseResponse = await fetch(
+                const suite = globalThis.JarvisLocationSuite || {};
+
+                // Parallel fetch: Reverse Geocoding + Live Weather + Nearby Amenities (ATMs, Hospitals, Police, Gas)
+                const [reverseResult, weatherResult, amenitiesResult] = await Promise.allSettled([
+                    fetch(
                         `${(window.APP_CONFIG || APP_CONFIG).externalUrls.nominatimReverse}?lat=${lat}&lon=${lon}&format=json`,
-                        { headers: { 'User-Agent': 'JARVISAssistant/1.0' } }
-                    );
-                    if (reverseResponse.ok) {
-                        const reverseData = await reverseResponse.json();
-                        const addr = reverseData?.address || {};
-                        let cityName = addr.city ||
-                            addr.town ||
-                            addr.municipality ||
-                            addr.county ||
-                            addr.village ||
-                            addr.hamlet ||
-                            addr.suburb ||
-                            addr.neighbourhood ||
-                            addr.state_district ||
-                            null;
+                        { headers: { 'User-Agent': 'JARVISAssistant/1.0' }, signal: AbortSignal.timeout(4000) }
+                    ).then(r => r.ok ? r.json() : null).catch(() => null),
+                    typeof suite.fetchLiveWeatherForCoords === 'function' ? suite.fetchLiveWeatherForCoords(lat, lon) : null,
+                    typeof suite.fetchNearbyAmenities === 'function' ? suite.fetchNearbyAmenities(lat, lon) : null
+                ]);
 
-                        exactAddress = reverseData?.display_name || '';
-                        locationName = exactAddress || cityName || 'your current location';
-                    }
-                } catch (error) {}
+                const reverseData = reverseResult.status === 'fulfilled' ? reverseResult.value : null;
+                const weather = weatherResult.status === 'fulfilled' ? weatherResult.value : null;
+                const amenities = amenitiesResult.status === 'fulfilled' && amenitiesResult.value
+                    ? amenitiesResult.value
+                    : { atms: [], hospitals: [], police: [], gasStations: [] };
+
+                if (reverseData) {
+                    addressData = reverseData.address || {};
+                    exactAddress = reverseData.display_name || '';
+                }
 
                 const latitude = Number(lat.toFixed(6));
                 const longitude = Number(lon.toFixed(6));
-                const mapsUrl = `https://maps.google.com/?q=${latitude},${longitude}`;
 
-                const locationLead = exactAddress
-                    ? `Exact location: ${exactAddress}.`
-                    : (locationName === 'your current location'
-                        ? 'I found your current location.'
-                        : `You're currently in ${locationName}.`);
-                const locationSummary = `${locationLead}\nCoordinates: ${latitude}, ${longitude}.`;
-                addChatMessage(locationSummary, false);
-                saveToHistory(originalText || 'where am i', locationSummary);
+                // Save to window.userLocation for session context
+                window.userLocation = {
+                    latitude,
+                    longitude,
+                    exactAddress,
+                    address: addressData,
+                    weather,
+                    updatedAt: Date.now()
+                };
 
-                const embeddedMap = `
-<div class="map-container" style="margin-top:10px; border-radius:12px; overflow:hidden; box-shadow:0 2px 12px rgba(15,23,42,0.18); border:1px solid rgba(148,163,184,0.3);">
-  <iframe
-    src="https://maps.google.com/maps?q=${latitude},${longitude}&z=16&output=embed"
-    width="100%"
-    height="320"
-    style="border:0; display:block;"
-    loading="lazy"
-    allowfullscreen>
-  </iframe>
-</div>
-<p class="text-xs mt-2 text-slate-600 dark:text-slate-300">Exact location pin: ${escapeHtml(exactAddress || locationName)} (${latitude}, ${longitude}) - <a href="${mapsUrl}" target="_blank" rel="noopener noreferrer" class="underline">Open in Google Maps</a></p>`;
-                addChatMessage(embeddedMap, false, false);
+                let cardHtml = '';
+                if (typeof suite.buildDynamicLocationSuiteHtml === 'function') {
+                    cardHtml = suite.buildDynamicLocationSuiteHtml({
+                        latitude,
+                        longitude,
+                        exactAddress,
+                        address: addressData,
+                        weather,
+                        amenities
+                    });
+                } else {
+                    const mapsUrl = `https://maps.google.com/?q=${latitude},${longitude}`;
+                    const locationLead = exactAddress ? `Exact location: ${exactAddress}.` : `Coordinates: ${latitude}, ${longitude}`;
+                    cardHtml = `<p>${escapeHtml(locationLead)} - <a href="${mapsUrl}" target="_blank" rel="noopener noreferrer">Open in Google Maps</a></p>`;
+                }
+
+                addChatMessage(cardHtml, false, false);
+                const areaLabel = addressData.city || addressData.town || addressData.suburb || exactAddress || 'your area';
+                saveToHistory(originalText || 'where am i', `Current location in ${areaLabel} (${latitude}, ${longitude}).`);
             } finally {
                 hideThinkingIndicator();
             }
