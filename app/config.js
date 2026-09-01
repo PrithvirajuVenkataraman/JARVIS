@@ -74,7 +74,7 @@ export const APP_CONFIG = Object.freeze({
       bookmarkedMessages: 'jarvis_bookmarked_messages',
       userProfile: 'jarvis_user_profile',
       memoryItems: 'jarvis_memory_items',
-      memoryTombstones: 'jarvis_memory_tombstones',
+      memoryTombstones: 'jarvis_memory_tombstones', 
       interactionMetrics: 'jarvis_interaction_metrics'
     })
   }),
