@@ -8643,87 +8643,58 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             if (!raw || raw.length < 3 || /^(hi|hello|hey|thanks|thank you|ok|okay|bye|goodbye)[!.?]?$/i.test(raw)) return [];
             const lower = raw.toLowerCase();
 
-            // 1. Current Company Role / Executive Leadership (e.g. CEO of Securden, CEO of TaskUs)
+            // 1. Current Company Role / Executive Leadership (e.g. CEO of Company X)
             if (/\b(ceo|cfo|cto|coo|founder|co-founder|chairman|chairperson|managing director|president of|executive of)\b/i.test(lower) && !/\b(prime minister|chief minister|president of india|president of the united states|president of us|president of france)\b/i.test(lower)) {
-                const entityMatch = raw.match(/\b(?:of|for|at|in)\s+([A-Za-z0-9\s&'-]+?)(?:\?|$|\.|\,)/i);
-                const entityName = entityMatch ? entityMatch[1].trim() : 'the company';
-                const roleMatch = raw.match(/\b(ceo|cfo|cto|coo|founder|co-founder|chairman|chairperson|managing director)\b/i);
-                const roleName = roleMatch ? roleMatch[1].toUpperCase() : 'CEO';
                 return [
-                    { title: 'Classifier', body: `Identified query type: Current Company Role.` },
-                    { title: 'Entity + Role Extractor', body: `Extracted Entity: ${entityName} | Target Role: ${roleName}.` },
-                    { title: 'Retrieval Strategy Selector', body: `Current company role → Official website & corporate leadership records.` },
-                    { title: 'Targeted Scrapers', body: `Scraping official leadership pages, executive bio registers, and filings.` },
-                    { title: 'Evidence Verification', body: `Comparing independent sources to confirm active tenure and title accuracy.` },
-                    { title: 'Clean Answer', body: `Synthesizing direct grounded answer with verified source citations.` }
+                    { title: 'Searching', body: 'Retrieving official corporate records & executive filings' },
+                    { title: 'Verifying', body: 'Cross-verifying active leadership tenure and exact role' }
                 ];
             }
 
             // 2. Government & Public Officeholder (e.g. CM of Tamil Nadu, PM of India, Mayor of London)
             if (/\b(prime minister|chief minister|pm|cm|governor|mayor|president|minister of|chancellor|secretary general|premier)\b/i.test(lower)) {
-                const entityMatch = raw.match(/\b(?:of|for|at|in)\s+([A-Za-z0-9\s&'-]+?)(?:\?|$|\.|\,)/i);
-                const jurisdiction = entityMatch ? entityMatch[1].trim() : 'the jurisdiction';
                 return [
-                    { title: 'Classifier', body: `Identified query type: Government / Public Officeholder.` },
-                    { title: 'Entity + Role Extractor', body: `Extracted Jurisdiction: ${jurisdiction} | Public Office.` },
-                    { title: 'Retrieval Strategy Selector', body: `Government role → Official government portals & verified knowledge graphs.` },
-                    { title: 'Targeted Scrapers', body: `Querying official gazettes, state portals, and structured Wikidata claims.` },
-                    { title: 'Evidence Verification', body: `Validating active officeholder tenure and excluding historical incumbents.` },
-                    { title: 'Clean Answer', body: `Synthesizing direct officeholder confirmation with source citations.` }
+                    { title: 'Searching', body: 'Querying official gazettes & verified knowledge graphs' },
+                    { title: 'Verifying', body: 'Validating current active officeholder tenure' }
                 ];
             }
 
             // 3. Current News / Live Events / Sports / Market Prices
             if (/\b(news|latest|current|update|today|yesterday|tomorrow|live|score|match|vs|price|stock|market|weather|event|launched|2025|2026)\b/i.test(lower)) {
                 return [
-                    { title: 'Classifier', body: `Identified query type: Real-time News & Current Events.` },
-                    { title: 'Entity + Role Extractor', body: `Extracted event subject, freshness window, and temporal scope.` },
-                    { title: 'Retrieval Strategy Selector', body: `Current news → Multi-source real-time news scrapers.` },
-                    { title: 'Targeted Scrapers', body: `Dispatching Google News, RSS feeds, and verified news publications.` },
-                    { title: 'Evidence Verification', body: `Cross-referencing reporting consensus across independent outlets.` },
-                    { title: 'Clean Answer', body: `Formulating concise, grounded answer with direct source references.` }
+                    { title: 'Searching', body: 'Dispatching real-time multi-source news scrapers' },
+                    { title: 'Synthesizing', body: 'Formulating grounded summary with verified sources' }
                 ];
             }
 
             // 4. Coding / Technical / Algorithms
             if (/\b(code|function|bug|error|script|regex|sql|python|javascript|typescript|react|api|html|css|algorithm|class|method|component)\b/i.test(lower)) {
                 return [
-                    { title: 'Classifier', body: 'Identified query type: Software Engineering & Algorithm Design.' },
-                    { title: 'Entity + Role Extractor', body: 'Extracted language specifications, constraints, and algorithmic complexity.' },
-                    { title: 'Retrieval Strategy Selector', body: 'Direct Code Synthesis → Deterministic pattern analysis and optimization.' },
-                    { title: 'Evidence Verification', body: 'Checking syntax validity, edge cases, and runtime efficiency.' },
-                    { title: 'Clean Answer', body: 'Delivering production-ready code with concise technical explanation.' }
+                    { title: 'Analyzing', body: 'Analyzing technical requirements and algorithmic efficiency' },
+                    { title: 'Synthesizing', body: 'Formulating production-ready implementation' }
                 ];
             }
 
             // 5. Science / Math / Academic Explanations
             if (/\b(calculate|solve|equation|formula|photosynthesis|physics|chemistry|biology|science|theory|integral|derivative|definition|explain|how does|why does)\b/i.test(lower)) {
                 return [
-                    { title: 'Classifier', body: 'Identified query type: Scientific Principle & Conceptual Explanation.' },
-                    { title: 'Entity + Role Extractor', body: 'Extracted core concepts, theoretical mechanisms, and key variables.' },
-                    { title: 'Retrieval Strategy Selector', body: 'First-Principles Deconstruction → Logical step-by-step reasoning.' },
-                    { title: 'Evidence Verification', body: 'Validating theoretical accuracy and scientific consensus.' },
-                    { title: 'Clean Answer', body: 'Formulating clear, intuitive explanation with step-by-step clarity.' }
+                    { title: 'Deconstructing', body: 'Deconstructing first-principles mechanisms' },
+                    { title: 'Explaining', body: 'Structuring clear step-by-step conceptual walkthrough' }
                 ];
             }
 
             // 6. Translation / Languages
             if (/\b(translate|translation|in spanish|in french|in tamil|in hindi|in german|in japanese|meaning of|define)\b/i.test(lower)) {
                 return [
-                    { title: 'Classifier', body: 'Identified query type: Linguistic Translation & Semantics.' },
-                    { title: 'Entity + Role Extractor', body: 'Extracting source terminology, target language, and cultural context.' },
-                    { title: 'Retrieval Strategy Selector', body: 'Cross-Lingual Mapping → Preserving nuance, tone, and idiomatic accuracy.' },
-                    { title: 'Clean Answer', body: 'Delivering accurate, natural translation with contextual pronunciation/usage.' }
+                    { title: 'Analyzing', body: 'Extracting source terminology and idiomatic context' },
+                    { title: 'Translating', body: 'Preserving grammatical precision and natural phrasing' }
                 ];
             }
 
             // Default General Query
             return [
-                { title: 'Classifier', body: 'Identified query type: General Knowledge & Inquiry.' },
-                { title: 'Entity + Role Extractor', body: 'Extracting primary intent, entity context, and response scope.' },
-                { title: 'Retrieval Strategy Selector', body: 'Direct Knowledge Routing → High-precision synthesis.' },
-                { title: 'Evidence Verification', body: 'Validating factual consistency across core knowledge bases.' },
-                { title: 'Clean Answer', body: 'Delivering structured, helpful, and concise answer.' }
+                { title: 'Processing', body: 'Evaluating inquiry context and intent' },
+                { title: 'Preparing', body: 'Synthesizing structured, verified response' }
             ];
         }
 
@@ -8970,6 +8941,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                     ? Array.from(chatContainer.querySelectorAll('[data-message-id]'))
                         .find(row => row.dataset.messageId === replaceMessageId)
                     : null;
+                const existingThinking = !isUser ? document.getElementById('chat-thinking-indicator') : null;
                 if (replaceTarget && activeResponseRenderContext?.isRegeneration) {
                     const oldMeta = getAssistantMessageMeta(replaceMessageId);
                     const oldTurn = getConversationTurn(oldMeta?.turnId);
@@ -8990,6 +8962,8 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                     };
                 } else if (replaceTarget) {
                     replaceTarget.replaceWith(messageDiv);
+                } else if (existingThinking && existingThinking.parentNode === chatContainer) {
+                    existingThinking.replaceWith(messageDiv);
                 } else {
                     chatContainer.appendChild(messageDiv);
                 }
@@ -25626,16 +25600,15 @@ function resolveThinkingPhase(message = '') {
 }
 
 function hideThinkingIndicator() {
-    const row = document.getElementById('chat-thinking-indicator');
     if (thinkingPhaseTimer) {
         clearInterval(thinkingPhaseTimer);
         thinkingPhaseTimer = null;
     }
+    const row = document.getElementById('chat-thinking-indicator');
     if (!row) return;
-    row.classList.add('fade-out');
-    setTimeout(() => {
-        if (row.parentNode) row.parentNode.removeChild(row);
-    }, 180);
+    if (row.parentNode) {
+        row.parentNode.removeChild(row);
+    }
 }
 
 function formatAssistantTextForReadability(rawText) {
