@@ -4616,6 +4616,30 @@ body:not(.dark) .permissions-btn-secondary:hover {
     }
 }
 
+.composer-shell.is-speaking .voice-wave-bar {
+    background: linear-gradient(180deg, #a855f7 0%, #38bdf8 100%);
+    animation: voiceSpeakingWave 0.9s ease-in-out infinite;
+    animation-delay: calc(var(--bar-index, 0) * 0.05s);
+}
+
+@keyframes voiceSpeakingWave {
+    0%, 100% {
+        transform: scaleY(0.2);
+        opacity: 0.5;
+    }
+    50% {
+        transform: scaleY(0.92);
+        opacity: 1;
+    }
+}
+
+.composer-shell.is-interrupted .voice-wave-bar {
+    background: linear-gradient(180deg, #f43f5e 0%, #fb7185 100%);
+    transform: scaleY(0.12);
+    opacity: 0.3;
+    transition: transform 0.05s ease-out;
+}
+
 /* Microphone button active pulse styling */
 .speech-input-btn.is-listening {
     color: #ef4444 !important;
