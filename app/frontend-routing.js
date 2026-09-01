@@ -301,19 +301,6 @@ export function decideFrontendRoute(text, context = {}) {
 
     const entityIntent = classifyUniversalEntityIntent(raw, context);
     if (entityIntent.isLiveRequired) {
-        // Use LLM to fetch live answer based on user query
-        const llmRes = await callLLM(raw);
-        const res = {
-            ...base,
-            route: 'live_required',
-            reason: entityIntent.reason || 'source_or_freshness_required',
-            requiresSources: true,
-            sourcePolicy: 'required',
-            liveAnswer: llmRes.success ? llmRes.response : llmRes.error
-        };
-        FRONTEND_ROUTE_CACHE.set(cacheKey, res);
-        return res;
-    }
         const res = {
             ...base,
             route: 'live_required',
