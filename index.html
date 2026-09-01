@@ -519,8 +519,122 @@
     };
 })();
 
+const APP_CONFIG = Object.freeze({
+    version: "2.0.0",
+    endpoints: Object.freeze({
+        chatGroq: '/api/chat-groq',
+        search: '/api/search',
+        extractUrl: '/api/extract-url',
+        markets: '/api/markets',
+        currentFacts: '/api/current-facts',
+        rankTexts: '/api/rank-texts',
+        vision: '/api/vision',
+        diagnostics: '/api/diagnostics',
+        verify: '/api/verify',
+        serviceWorker: '/sw.js'
+    }),
+    externalUrls: Object.freeze({
+        googleNews: 'https://news.google.com',
+        googleMapsSearch: 'https://www.google.com/maps/search/',
+        googleWebSearch: 'https://www.google.com/search',
+        googleFavicon: 'https://www.google.com/s2/favicons',
+        wikipediaRestSummary: 'https://en.wikipedia.org/api/rest_v1/page/summary/',
+        wikipediaActionQuery: 'https://en.wikipedia.org/w/api.php',
+        nominatimReverse: 'https://nominatim.openstreetmap.org/reverse',
+        nominatimSearch: 'https://nominatim.openstreetmap.org/search',
+        feedbackForm: 'https://forms.gle/h8Wtb3fbwKBnjoYT8',
+        bugReportForm: 'https://forms.gle/bgeSroPoa3dFbP4n6'
+    }),
+    models: Object.freeze([
+        { id: 'auto', label: 'Auto (Best Available)', displayName: null, icon: '⚡', supportsMedia: true },
+        { id: 'gemini-3.7-flash', label: 'Gemini 3.7 Flash (Latest Vision & Coding)', displayName: 'Gemini 3.7 Flash', icon: '✦', supportsMedia: true },
+        { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro (Deep Reasoning & Vision)', displayName: 'Gemini 2.5 Pro', icon: '✦', supportsMedia: true },
+        { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (Fast Multimodal)', displayName: 'Gemini 2.5 Flash', icon: '✦', supportsMedia: true },
+        { id: 'llama-3.2-11b-vision-preview', label: 'Llama 3.2 11B Vision (Groq Vision)', displayName: 'Llama 3.2 Vision', icon: '⚡', supportsMedia: true },
+        { id: 'openai/gpt-oss-120b', label: 'GPT OSS 120B (No media supported)', displayName: 'GPT-OSS 120B', icon: '⚡', supportsMedia: false },
+        { id: 'openai/gpt-oss-20b', label: 'GPT OSS 20B (No media supported)', displayName: 'GPT-OSS 20B', icon: '⚡', supportsMedia: false },
+        { id: 'llama-3.3-70b-versatile', label: 'Llama 3.3 70B (No media supported)', displayName: 'Llama 3.3 70B', icon: '⚡', supportsMedia: false },
+        { id: 'llama-3.1-8b-instant', label: 'Llama 3.1 8B Instant (No media supported)', displayName: 'Llama 3.1 8B', icon: '⚡', supportsMedia: false },
+        { id: 'deepseek-r1-distill-llama-70b', label: 'DeepSeek R1 Distill 70B (No media supported)', displayName: 'DeepSeek R1 70B', icon: '⚡', supportsMedia: false },
+        { id: 'qwen-2.5-coder-32b', label: 'Qwen 2.5 Coder 32B (No media supported)', displayName: 'Qwen 2.5 Coder', icon: '⚡', supportsMedia: false },
+        { id: 'qwen/qwen3.6-27b', label: 'Qwen 3.6 27B (No media supported)', displayName: 'Qwen 3.6 27B', icon: '⚡', supportsMedia: false }
+    ]),
+    timeouts: Object.freeze({
+        diagnosticsMs: 8000,
+        defaultFetchMs: 25000,
+        weakRetryMs: 18000,
+        multimodalMs: 45000,
+        verificationBudgetMs: 8000,
+        verificationSearchMs: 5500,
+        verificationExtractMs: 3000,
+        thinkingCeilingMs: 10000,
+        geolocationMs: 6000,
+        geolocationCacheMs: 300000,
+        visionContextTtlMs: 600000,
+        multimodalContextTtlMs: 1200000,
+        assistantRecoveryMs: 20000,
+        summaryTimeoutMs: 4500,
+        objectUrlRevokeMs: 1500,
+        toastFadeMs: 300,
+        toastDurationMs: 2400,
+        copyResetMs: 1800
+    }),
+    limits: Object.freeze({
+        maxPromptLength: 1200,
+        textExtractLimit: 12000,
+        maxMessagesPerSession: 160,
+        maxSavedSessions: 80,
+        historyLimit: 50,
+        memoryLimit: 3,
+        candidateLimit: 40
+    }),
+    storage: Object.freeze({
+        dbName: 'jarvis_database_v1',
+        dbVersion: 1,
+        objectStores: Object.freeze({
+            kv: 'kv_store',
+            sessions: 'sessions'
+        }),
+        keys: Object.freeze({
+            chatSessions: 'jarvis_chat_sessions_v1',
+            activeDraft: 'jarvis_active_empty_chat_draft_v1',
+            deletedSessionIds: 'jarvis_deleted_chat_session_ids_v1',
+            deletedSessionTitles: 'jarvis_deleted_chat_session_titles_v1',
+            learnedPreferences: 'jarvis_learned_preferences',
+            bookmarkedMessages: 'jarvis_bookmarked_messages',
+            userProfile: 'jarvis_user_profile',
+            legacyUser: 'unify_user_data_default_user',
+            styleLearning: 'jarvis_local_answer_style_learning'
+        })
+    }),
+    defaults: Object.freeze({
+        darkMode: true,
+        persistMemoryToDevice: true,
+        medicalMode: false,
+        visionShowEvidence: true,
+        supportConversationMode: false,
+        showRoutingDebugBadge: false,
+        continuousVision: false
+    }),
+    strings: Object.freeze({
+        liveDisabled: 'Live search is off for now.',
+        assistantThinking: 'Assistant is thinking...',
+        disclaimer: 'AI can make mistakes. Check important info.',
+        feedbackThanks: 'Thanks for the feedback!',
+        feedbackSorry: "Sorry about that. I'll try to do better!",
+        copied: 'Copied to clipboard.',
+        savedMemory: 'Saved to memory.',
+        exportedMarkdown: 'Answer exported as Markdown.',
+        duplicateWarning: 'Another response is already being generated. Please wait a moment.',
+        voiceEnabled: 'Voice replies enabled.',
+        bookmarked: 'Message bookmarked.',
+        genericRetryFallback: 'I hit a temporary issue while processing that. Please try again.'
+    })
+});
+window.APP_CONFIG = APP_CONFIG;
+
 const TRUST_LEVEL = {VERIFIED: 'verified', GENERATED: 'generated'};
-const LIVE_DISABLED_MESSAGE = 'Live search is off for now.';
+const LIVE_DISABLED_MESSAGE = APP_CONFIG.strings.liveDisabled;
 
 function isLiveRetrievalEnabled() {
     if (typeof getWebSearchMode === 'function' && getWebSearchMode() === 'off') return false;
@@ -544,7 +658,7 @@ function isFactSearchEnabled() {
 
 async function syncRetrievalFlagsFromDiagnostics() {
     try {
-        const data = await window.JarvisApi?.postJson?.('/api/diagnostics', {}, { timeoutMs: 8000 });
+        const data = await window.JarvisApi?.postJson?.((window.APP_CONFIG || APP_CONFIG).endpoints.diagnostics, {}, { timeoutMs: 8000 });
         const retrieval = data?.diagnostics?.retrieval || {};
         if (retrieval.liveSearchEnabled === true) {
             globalThis.JARVIS_LIVE_RETRIEVAL_ENABLED = true;
@@ -1044,7 +1158,7 @@ Rules:
 - Do not change the final result.`;
 
     try {
-        const response = await fetch('/api/chat-groq', {
+        const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -1276,7 +1390,7 @@ async function rankSavedMemorySemantically(text, limit = 3) {
         .slice(0, 40);
     if (!items.length) return [];
     try {
-        const response = await fetch('/api/rank-texts', {
+        const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.rankTexts, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -1633,7 +1747,7 @@ Quick recap: ...
 - If term is misspelled, infer the most likely intended term and answer that directly.
 - Do not ask follow-up questions unless ambiguity is high.
 - Teaching depth: ${teachingDepth}. ${depthRule}`;
-        const response = await fetch('/api/chat-groq', {
+        const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -1655,7 +1769,7 @@ Quick recap: ...
         }
         if (formulaNeeded && !hasFormulaLikeExpression(answer)) {
             try {
-                const formulaOnlyRes = await fetch('/api/chat-groq', {
+                const formulaOnlyRes = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -1705,7 +1819,7 @@ async function handleVerifiedPlacesMode(text) {
 async function handleBudgetTripPlanner(text) {
     try {
         showLoading('Building your budget trip plan...');
-        const response = await fetch('/api/markets', {
+        const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.markets, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -2578,7 +2692,7 @@ function parseOneShotTranslationRequest(text) {
 async function translateTextToEnglish(sourceText) {
     showThinkingIndicator('Translating to English...');
     try {
-        const response = await fetch('/api/chat-groq', {
+        const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -2739,7 +2853,7 @@ Format your response EXACTLY like this:
 [${langInfo.name} script translation]
 (Pronunciation: [phonetic guide])`;
 
-        const response = await fetch('/api/chat-groq', {
+        const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -3379,7 +3493,7 @@ async function buildDirectLiveAnswer(question, items, signal) {
         .map((r, i) => `${i + 1}. ${r.title}\nSnippet: ${r.description}\nURL: ${r.url}`)
         .join('\n\n');
 
-    const response = await fetch('/api/chat-groq', {
+    const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal,
@@ -3427,7 +3541,7 @@ async function buildNewsSearchFallback(query, signal) {
     if (!isFactSearchEnabled()) return null;
 
     showThinkingIndicator('Web search in progress...');
-    const response = await fetch('/api/search', {
+    const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.search, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal,
@@ -3472,7 +3586,7 @@ async function fetchAndDisplayNews(query) {
     }, TRUST_FIRST_RELIABILITY_POLICY.verificationBudgetMs);
 
     try {
-        const response = await fetch('/api/markets', {
+        const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.markets, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             signal: controller.signal,
@@ -3590,7 +3704,7 @@ async function handleTamilJokeSearch(queryText) {
 
     showThinkingIndicator('Searching web for a Tamil joke...');
     try {
-        const response = await fetch('/api/search', {
+        const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.search, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -3692,7 +3806,7 @@ Rules:
 async function handleSeriesReferenceJokeRequest(text) {
     showThinkingIndicator('Writing a reference joke...');
     try {
-        const response = await fetch('/api/chat-groq', {
+        const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -3725,7 +3839,7 @@ Rules:
 async function handleGeneralJokeRequest(text) {
     showThinkingIndicator('Writing a joke...');
     try {
-        const response = await fetch('/api/chat-groq', {
+        const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -3764,7 +3878,7 @@ Rules:
 async function generateScreenSuggestions(intent, historyKey) {
     showThinkingIndicator('Finding suggestions...');
     try {
-        const response = await fetch('/api/chat-groq', {
+        const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -3953,7 +4067,7 @@ async function fetchWikipediaSummaryFallback(subject) {
     if (!normalized) return null;
 
     async function fetchSummaryByTitle(title) {
-        const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`;
+        const url = `${(window.APP_CONFIG || APP_CONFIG).externalUrls.wikipediaRestSummary}${encodeURIComponent(title)}`;
         const response = await fetch(url);
         if (!response.ok) return null;
         const data = await response.json();
@@ -3967,7 +4081,7 @@ async function fetchWikipediaSummaryFallback(subject) {
     }
 
     async function searchSummary(query) {
-        const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&srlimit=5&format=json&origin=*`;
+        const searchUrl = `${(window.APP_CONFIG || APP_CONFIG).externalUrls.wikipediaActionQuery}?action=query&list=search&srsearch=${encodeURIComponent(query)}&srlimit=5&format=json&origin=*`;
         const response = await fetch(searchUrl);
         if (!response.ok) return null;
         const data = await response.json();
@@ -4068,7 +4182,7 @@ async function buildSearchFallbackAnswer(userMessage) {
     const query = resolvedMessage;
 
     try { 
-        const response = await fetch('/api/search', {
+        const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.search, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ query, maxResults: 6, answer: true, mode: 'auto' })
@@ -4093,7 +4207,7 @@ async function buildSearchFallbackAnswer(userMessage) {
                 .map((r, i) => `${i + 1}. ${r.title}\nContent: ${r.description}`)
                 .join('\n\n');
             try {
-                const synthRes = await fetch('/api/chat-groq', {
+                const synthRes = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -4134,7 +4248,7 @@ async function buildStrictApiKnowledgeFallback(userMessage) {
     if (!promptTarget) return '';
 
     try {
-        const response = await fetch('/api/chat-groq', {
+        const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -4407,7 +4521,7 @@ Rules:
     ].filter(Boolean).join('\n\n');
 
     try {
-        const response = await fetch('/api/chat-groq', {
+        const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -4494,7 +4608,7 @@ function isUrlGroundedExtractionRequest(text) {
 async function fetchExtractedUrlContext(userText) {
     const url = extractFirstHttpUrl(userText);
     if (!url) return null;
-    const response = await fetch('/api/extract-url', {
+    const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.extractUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -4664,7 +4778,7 @@ async function streamChatCompletion(payload, options = {}) {
     const latencyTrace = options?.latencyTrace || {};
     const userMessage = String(options?.userMessage || payload?.message || '').trim();
     let firstDeltaLogged = false;
-    const response = await fetch('/api/chat-groq', {
+    const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal,
@@ -4922,9 +5036,9 @@ function parseSseClientEvent(rawEvent) {
     return { event, data };
 }
 
-const USER_PROFILE_STORAGE_KEY = 'jarvis_user_profile';
-const LEGACY_DEFAULT_USER_STORAGE_KEY = 'unify_user_data_default_user';
-const LOCAL_STYLE_LEARNING_KEY = 'jarvis_local_answer_style_learning';
+const USER_PROFILE_STORAGE_KEY = APP_CONFIG.storage.keys.userProfile;
+const LEGACY_DEFAULT_USER_STORAGE_KEY = APP_CONFIG.storage.keys.legacyUser;
+const LOCAL_STYLE_LEARNING_KEY = APP_CONFIG.storage.keys.styleLearning;
 
 function loadLocalStyleLearning() {
     try {
@@ -5085,7 +5199,7 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
                 userMessage: requestOptions?.displayUserMessage || normalizedUserMessage,
                 routeDecision: requestOptions?.routeDecision || null
             })
-            : await window.JarvisApi.postJson('/api/chat-groq', requestPayload, {
+            : await window.JarvisApi.postJson((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, requestPayload, {
                 signal: controller.signal,
                 timeoutMs: Number(requestOptions?.timeoutMs) > 0 ? Number(requestOptions.timeoutMs) : 25000
             });
@@ -5123,7 +5237,7 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
                 stream: false
             });
             showThinkingIndicator('Finalizing');
-            const retryData = await window.JarvisApi.postJson('/api/chat-groq', retryPayload, {
+            const retryData = await window.JarvisApi.postJson((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, retryPayload, {
                 signal: controller.signal,
                 timeoutMs: 18000
             });
@@ -5326,12 +5440,12 @@ async function handleNameCorrection(text) {
         let responseFormat = 'paragraph';
         let customSystemPrompt = '';
         let newsVerificationMode = 'normal';
-        let persistMemoryToDevice = true;
-        let medicalMode = false;
+        let persistMemoryToDevice = (window.APP_CONFIG || APP_CONFIG).defaults.persistMemoryToDevice;
+        let medicalMode = (window.APP_CONFIG || APP_CONFIG).defaults.medicalMode;
         let visionDetailLevel = 'balanced';
-        let visionShowEvidence = true;
+        let visionShowEvidence = (window.APP_CONFIG || APP_CONFIG).defaults.visionShowEvidence;
         let recentVisionError = '';
-let supportConversationMode = false;
+        let supportConversationMode = (window.APP_CONFIG || APP_CONFIG).defaults.supportConversationMode;
 
 const supportedLanguages = Object.freeze({
     hindi: { name: 'Hindi', nativeName: 'Hindi' },
@@ -5342,7 +5456,7 @@ const supportedLanguages = Object.freeze({
     spanish: { name: 'Spanish', nativeName: 'Spanish' },
     filipino: { name: 'Filipino', nativeName: 'Filipino' }
 });
-let showRoutingDebugBadge = false;
+let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRoutingDebugBadge;
 
         // UI/settings state
         let selectionHelperState = {
@@ -5534,7 +5648,7 @@ let showRoutingDebugBadge = false;
             try {
                 const states = await checkAppPermissionsState();
                 if (states.geolocation === 'granted') {
-                    getCurrentPositionAsync({ enableHighAccuracy: false, timeout: 6000, maximumAge: 300000 }).catch(() => {});
+                    getCurrentPositionAsync({ enableHighAccuracy: false, timeout: (window.APP_CONFIG || APP_CONFIG).timeouts.geolocationMs, maximumAge: (window.APP_CONFIG || APP_CONFIG).timeouts.geolocationCacheMs }).catch(() => {});
                 }
                 const allGranted = states.geolocation === 'granted' && states.microphone === 'granted';
                 const dismissed = sessionStorage.getItem('jarvis_permissions_dismissed');
@@ -7137,8 +7251,8 @@ let showRoutingDebugBadge = false;
                 detail: recentVisionError || 'None'
             });
             const [chatPing, visionPing] = await Promise.all([
-                pingEndpoint('/api/chat-groq', { message: 'health check' }),
-                pingEndpoint('/api/vision', { task: 'health_check', imageBase64: 'x', mimeType: 'text/plain' }, { allowClientError: true })
+                pingEndpoint((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, { message: 'health check' }),
+                pingEndpoint((window.APP_CONFIG || APP_CONFIG).endpoints.vision, { task: 'health_check', imageBase64: 'x', mimeType: 'text/plain' }, { allowClientError: true })
             ]);
 
             checks.push({ label: 'LLM API (/api/chat-groq)', ok: chatPing.ok, detail: chatPing.detail });
@@ -7166,13 +7280,12 @@ let showRoutingDebugBadge = false;
         }
 
         function openFeatureRequest() {
-            
-            const formUrl = 'https://forms.gle/h8Wtb3fbwKBnjoYT8';
+            const formUrl = (window.APP_CONFIG || APP_CONFIG).externalUrls.feedbackForm;
             window.open(formUrl, '_blank');
         }
 
         function openBugReportModal() {
-            const formUrl = 'https://forms.gle/bgeSroPoa3dFbP4n6';
+            const formUrl = (window.APP_CONFIG || APP_CONFIG).externalUrls.bugReportForm;
             window.open(formUrl, '_blank', 'noopener,noreferrer');
         }
 
@@ -7839,7 +7952,7 @@ let showRoutingDebugBadge = false;
             const controller = beginAbortableRequest();
             showThinkingIndicator('Improving answer...');
             try {
-                const data = await window.JarvisApi.postJson('/api/chat-groq', {
+                const data = await window.JarvisApi.postJson((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
                     message: processingPrompt,
                     context: [],
                     preferences: {
@@ -8079,7 +8192,7 @@ let showRoutingDebugBadge = false;
             const controller = new AbortController();
             const timeout = setTimeout(() => controller.abort(), 3500);
             try {
-                const response = await fetch('/api/extract-url', {
+                const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.extractUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     signal: controller.signal,
@@ -8292,7 +8405,7 @@ let showRoutingDebugBadge = false;
                     'Return only How checked and Sources used. Use only URLs from the retrieved source evidence. If no retrieved source evidence is available, write "Sources used: No retrieved sources were available."'
                 ].join('\n');
                 showThinkingIndicator('Verifying answer...');
-                const response = await window.JarvisApi.postJson('/api/chat-groq', {
+                const response = await window.JarvisApi.postJson((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
                     message: verificationPrompt,
                     context: [],
                     preferences: {
@@ -8523,64 +8636,87 @@ let showRoutingDebugBadge = false;
             if (!raw || raw.length < 3 || /^(hi|hello|hey|thanks|thank you|ok|okay|bye|goodbye)[!.?]?$/i.test(raw)) return [];
             const lower = raw.toLowerCase();
 
-            // 1. Leadership / Executive / Specific Role
-            if (/\b(ceo|founder|co-founder|president|prime minister|chief minister|pm|cm|governor|mayor|captain|coach|leader|head of|chairman|chairperson|director)\b/i.test(lower)) {
+            // 1. Current Company Role / Executive Leadership (e.g. CEO of Securden, CEO of TaskUs)
+            if (/\b(ceo|cfo|cto|coo|founder|co-founder|chairman|chairperson|managing director|president of|executive of)\b/i.test(lower) && !/\b(prime minister|chief minister|president of india|president of the united states|president of us|president of france)\b/i.test(lower)) {
                 const entityMatch = raw.match(/\b(?:of|for|at|in)\s+([A-Za-z0-9\s&'-]+?)(?:\?|$|\.|\,)/i);
-                const entityName = entityMatch ? entityMatch[1].trim() : 'the organization';
+                const entityName = entityMatch ? entityMatch[1].trim() : 'the company';
+                const roleMatch = raw.match(/\b(ceo|cfo|cto|coo|founder|co-founder|chairman|chairperson|managing director)\b/i);
+                const roleName = roleMatch ? roleMatch[1].toUpperCase() : 'CEO';
                 return [
-                    { title: 'Understanding', body: `Identifying the entity (${entityName}) and target leadership role.` },
-                    { title: 'Searching', body: `Searching live web sources for current leadership records.` },
-                    { title: 'Verifying', body: `Comparing independent sources to confirm active tenure.` },
-                    { title: 'Answering', body: `Synthesizing verified leadership details with source citations.` }
+                    { title: 'Classifier', body: `Identified query type: Current Company Role.` },
+                    { title: 'Entity + Role Extractor', body: `Extracted Entity: ${entityName} | Target Role: ${roleName}.` },
+                    { title: 'Retrieval Strategy Selector', body: `Current company role → Official website & corporate leadership records.` },
+                    { title: 'Targeted Scrapers', body: `Scraping official leadership pages, executive bio registers, and filings.` },
+                    { title: 'Evidence Verification', body: `Comparing independent sources to confirm active tenure and title accuracy.` },
+                    { title: 'Clean Answer', body: `Synthesizing direct grounded answer with verified source citations.` }
                 ];
             }
 
-            // 2. Real-time News / Sports / Current Events / Prices
+            // 2. Government & Public Officeholder (e.g. CM of Tamil Nadu, PM of India, Mayor of London)
+            if (/\b(prime minister|chief minister|pm|cm|governor|mayor|president|minister of|chancellor|secretary general|premier)\b/i.test(lower)) {
+                const entityMatch = raw.match(/\b(?:of|for|at|in)\s+([A-Za-z0-9\s&'-]+?)(?:\?|$|\.|\,)/i);
+                const jurisdiction = entityMatch ? entityMatch[1].trim() : 'the jurisdiction';
+                return [
+                    { title: 'Classifier', body: `Identified query type: Government / Public Officeholder.` },
+                    { title: 'Entity + Role Extractor', body: `Extracted Jurisdiction: ${jurisdiction} | Public Office.` },
+                    { title: 'Retrieval Strategy Selector', body: `Government role → Official government portals & verified knowledge graphs.` },
+                    { title: 'Targeted Scrapers', body: `Querying official gazettes, state portals, and structured Wikidata claims.` },
+                    { title: 'Evidence Verification', body: `Validating active officeholder tenure and excluding historical incumbents.` },
+                    { title: 'Clean Answer', body: `Synthesizing direct officeholder confirmation with source citations.` }
+                ];
+            }
+
+            // 3. Current News / Live Events / Sports / Market Prices
             if (/\b(news|latest|current|update|today|yesterday|tomorrow|live|score|match|vs|price|stock|market|weather|event|launched|2025|2026)\b/i.test(lower)) {
                 return [
-                    { title: 'Understanding', body: 'Extracting target entity, event scope, and freshness parameters.' },
-                    { title: 'Searching', body: 'Querying real-time web indexes and breaking news sources.' },
-                    { title: 'Verifying', body: 'Cross-referencing reporting across independent publications.' },
-                    { title: 'Answering', body: 'Formulating grounded answer with verifiable source citations.' }
+                    { title: 'Classifier', body: `Identified query type: Real-time News & Current Events.` },
+                    { title: 'Entity + Role Extractor', body: `Extracted event subject, freshness window, and temporal scope.` },
+                    { title: 'Retrieval Strategy Selector', body: `Current news → Multi-source real-time news scrapers.` },
+                    { title: 'Targeted Scrapers', body: `Dispatching Google News, RSS feeds, and verified news publications.` },
+                    { title: 'Evidence Verification', body: `Cross-referencing reporting consensus across independent outlets.` },
+                    { title: 'Clean Answer', body: `Formulating concise, grounded answer with direct source references.` }
                 ];
             }
 
-            // 3. Coding / Technical / Algorithms
+            // 4. Coding / Technical / Algorithms
             if (/\b(code|function|bug|error|script|regex|sql|python|javascript|typescript|react|api|html|css|algorithm|class|method|component)\b/i.test(lower)) {
                 return [
-                    { title: 'Understanding', body: 'Analyzing requirements, logic structure, and edge cases.' },
-                    { title: 'Synthesizing', body: 'Constructing clean, performant, and production-ready implementation.' }
+                    { title: 'Classifier', body: 'Identified query type: Software Engineering & Algorithm Design.' },
+                    { title: 'Entity + Role Extractor', body: 'Extracted language specifications, constraints, and algorithmic complexity.' },
+                    { title: 'Retrieval Strategy Selector', body: 'Direct Code Synthesis → Deterministic pattern analysis and optimization.' },
+                    { title: 'Evidence Verification', body: 'Checking syntax validity, edge cases, and runtime efficiency.' },
+                    { title: 'Clean Answer', body: 'Delivering production-ready code with concise technical explanation.' }
                 ];
             }
 
-            // 4. Science / Math / Academic Explanations
+            // 5. Science / Math / Academic Explanations
             if (/\b(calculate|solve|equation|formula|photosynthesis|physics|chemistry|biology|science|theory|integral|derivative|definition|explain|how does|why does)\b/i.test(lower)) {
                 return [
-                    { title: 'Understanding', body: 'Deconstructing core principles, mechanics, and essential variables.' },
-                    { title: 'Synthesizing', body: 'Deriving clear step-by-step reasoning and direct explanation.' }
+                    { title: 'Classifier', body: 'Identified query type: Scientific Principle & Conceptual Explanation.' },
+                    { title: 'Entity + Role Extractor', body: 'Extracted core concepts, theoretical mechanisms, and key variables.' },
+                    { title: 'Retrieval Strategy Selector', body: 'First-Principles Deconstruction → Logical step-by-step reasoning.' },
+                    { title: 'Evidence Verification', body: 'Validating theoretical accuracy and scientific consensus.' },
+                    { title: 'Clean Answer', body: 'Formulating clear, intuitive explanation with step-by-step clarity.' }
                 ];
             }
 
-            // 5. Translation / Languages
+            // 6. Translation / Languages
             if (/\b(translate|translation|in spanish|in french|in tamil|in hindi|in german|in japanese|meaning of|define)\b/i.test(lower)) {
                 return [
-                    { title: 'Understanding', body: 'Detecting source language and target linguistic nuances.' },
-                    { title: 'Translating', body: 'Formulating natural, idiomatic translation preserving tone and context.' }
-                ];
-            }
-
-            // 6. Documents / Attachments
-            if (/\b(document|pdf|file|image|photo|attachment|chart|table|scan|read this)\b/i.test(lower)) {
-                return [
-                    { title: 'Understanding', body: 'Parsing document structure, extracted text, and media elements.' },
-                    { title: 'Synthesizing', body: 'Extracting requested insights directly from the document context.' }
+                    { title: 'Classifier', body: 'Identified query type: Linguistic Translation & Semantics.' },
+                    { title: 'Entity + Role Extractor', body: 'Extracting source terminology, target language, and cultural context.' },
+                    { title: 'Retrieval Strategy Selector', body: 'Cross-Lingual Mapping → Preserving nuance, tone, and idiomatic accuracy.' },
+                    { title: 'Clean Answer', body: 'Delivering accurate, natural translation with contextual pronunciation/usage.' }
                 ];
             }
 
             // Default General Query
             return [
-                { title: 'Understanding', body: 'Analyzing the inquiry and key thematic components.' },
-                { title: 'Synthesizing', body: 'Formulating a direct, structured, and factual response.' }
+                { title: 'Classifier', body: 'Identified query type: General Knowledge & Inquiry.' },
+                { title: 'Entity + Role Extractor', body: 'Extracting primary intent, entity context, and response scope.' },
+                { title: 'Retrieval Strategy Selector', body: 'Direct Knowledge Routing → High-precision synthesis.' },
+                { title: 'Evidence Verification', body: 'Validating factual consistency across core knowledge bases.' },
+                { title: 'Clean Answer', body: 'Delivering structured, helpful, and concise answer.' }
             ];
         }
 
@@ -8598,25 +8734,11 @@ let showRoutingDebugBadge = false;
         function formatModelDisplayName(model, provider, failover = false) {
             const raw = String(model || '').trim().toLowerCase();
             const prov = String(provider || '').trim().toLowerCase();
-            let name = '';
-            let icon = '⚡';
+            if (!raw) return null;
 
-            if (raw.includes('gpt-oss-120b')) name = 'GPT-OSS 120B';
-            else if (raw.includes('gpt-oss-20b')) name = 'GPT-OSS 20B';
-            else if (raw.includes('deepseek-r1') || raw.includes('deepseek')) name = 'DeepSeek R1 70B';
-            else if (raw.includes('llama-3.3-70b')) name = 'Llama 3.3 70B';
-            else if (raw.includes('llama-3.1-8b')) name = 'Llama 3.1 8B';
-            else if (raw.includes('llama-3.2-11b') || raw.includes('llama-3.2-90b')) name = 'Llama 3.2 Vision';
-            else if (raw.includes('qwen-2.5-coder')) name = 'Qwen 2.5 Coder';
-            else if (raw.includes('qwen3.6') || raw.includes('qwen-3.6')) name = 'Qwen 3.6 27B';
-            else if (raw.includes('gemini-2.5-pro')) { name = 'Gemini 2.5 Pro'; icon = '✦'; }
-            else if (raw.includes('gemini-2.5-flash-lite')) { name = 'Gemini 2.5 Flash Lite'; icon = '✦'; }
-            else if (raw.includes('gemini-2.5-flash') || raw.includes('gemini-2.0-flash') || raw.includes('gemini-1.5-flash') || raw.includes('gemini')) { name = 'Gemini 2.5 Flash'; icon = '✦'; }
-            else if (raw) {
-                name = raw.split('/').pop().replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-            } else {
-                return null;
-            }
+            const config = (window.APP_CONFIG || APP_CONFIG).models.find(m => m.id !== 'auto' && (raw.includes(m.id.toLowerCase()) || (m.displayName && raw.includes(m.displayName.toLowerCase()))));
+            let name = config?.displayName || (raw.includes('gemini') ? 'Gemini 2.5 Flash' : raw.split('/').pop().replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()));
+            let icon = config?.icon || (raw.includes('gemini') ? '✦' : '⚡');
 
             const isGoogle = prov === 'google' || prov === 'gemini';
             const isFailover = Boolean(failover) || isGoogle;
@@ -8651,7 +8773,7 @@ let showRoutingDebugBadge = false;
                                 <div class="thinking-cot-step">
                                     <span class="thinking-cot-number">${idx + 1}</span>
                                     <div class="thinking-cot-text">
-                                        ${item.title ? `<span class="thinking-cot-title">${escapeHtml(item.title)}</span>` : ''}
+                                        ${item.title ? `<span class="thinking-cot-title">${escapeHtml(item.title)}:</span>` : ''}
                                         <span class="thinking-cot-body">${escapeHtml(item.body || item.title)}</span>
                                     </div>
                                 </div>
@@ -9152,7 +9274,7 @@ let showRoutingDebugBadge = false;
 
             const run = async () => {
                 try {
-                    const res = await fetch('/api/verify', {
+                    const res = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.verify, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ query: userQuery, llmResponse: assistantText })
@@ -10015,7 +10137,8 @@ let showRoutingDebugBadge = false;
 
         function getActiveVisionContext() {
             if (!lastVisionContext) return null;
-            if ((Date.now() - Number(lastVisionContext.savedAt || 0)) > 10 * 60 * 1000) {
+            const ttl = (window.APP_CONFIG || APP_CONFIG).timeouts.visionContextTtlMs || (10 * 60 * 1000);
+            if ((Date.now() - Number(lastVisionContext.savedAt || 0)) > ttl) {
                 lastVisionContext = null;
                 return null;
             }
@@ -10047,7 +10170,8 @@ let showRoutingDebugBadge = false;
 
         function getActiveMultimodalGrounding() {
             if (!lastMultimodalGrounding) return null;
-            if ((Date.now() - Number(lastMultimodalGrounding.savedAt || 0)) > 20 * 60 * 1000) {
+            const ttl = (window.APP_CONFIG || APP_CONFIG).timeouts.multimodalContextTtlMs || (20 * 60 * 1000);
+            if ((Date.now() - Number(lastMultimodalGrounding.savedAt || 0)) > ttl) {
                 lastMultimodalGrounding = null;
                 return null;
             }
@@ -10508,7 +10632,7 @@ let showRoutingDebugBadge = false;
             }
         }
 
-        const BOOKMARKED_MESSAGES_STORAGE_KEY = 'jarvis_bookmarked_messages';
+        const BOOKMARKED_MESSAGES_STORAGE_KEY = (window.APP_CONFIG || APP_CONFIG).storage.keys.bookmarkedMessages;
 
         function getBookmarkedMessages() {
             try {
@@ -11230,7 +11354,7 @@ let showRoutingDebugBadge = false;
             const controller = beginAbortableRequest();
             showThinkingIndicator('Analyzing code...');
             try {
-                const response = await fetch('/api/chat-groq', {
+                const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     signal: controller.signal,
@@ -11296,7 +11420,7 @@ ${code}
             clearTimeout(_prewarmDebounceTimer);
             _prewarmDebounceTimer = setTimeout(() => {
                 _lastPrewarmTimestamp = Date.now();
-                fetch('/api/chat-groq', { method: 'HEAD' }).catch(() => {});
+                fetch((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, { method: 'HEAD' }).catch(() => {});
             }, 350);
         }
 
@@ -11485,7 +11609,7 @@ ${code}
         async function showDeploymentDiagnostics() {
             try {
                 showThinkingIndicator('Checking diagnostics');
-                const data = await window.JarvisApi.postJson('/api/diagnostics', {}, { timeoutMs: 12000 });
+                const data = await window.JarvisApi.postJson((window.APP_CONFIG || APP_CONFIG).endpoints.diagnostics, {}, { timeoutMs: 12000 });
                 const status = data?.diagnostics || {};
                 const lines = [
                     'Deployment diagnostics',
@@ -11853,20 +11977,20 @@ let cachedCurrentLocationLabel = '';
 let cachedCurrentLocationAt = 0;
 
 async function resolveCurrentLocationLabel() {
-    const cacheTtlMs = 5 * 60 * 1000;
+    const cacheTtlMs = (window.APP_CONFIG || APP_CONFIG).timeouts.geolocationCacheMs;
     if (cachedCurrentLocationLabel && (Date.now() - cachedCurrentLocationAt) < cacheTtlMs) {
         return cachedCurrentLocationLabel;
     }
     try {
         const position = await getCurrentPositionAsync({
             enableHighAccuracy: false,
-            timeout: 9000,
-            maximumAge: 300000
+            timeout: (window.APP_CONFIG || APP_CONFIG).timeouts.geolocationMs,
+            maximumAge: (window.APP_CONFIG || APP_CONFIG).timeouts.geolocationCacheMs
         });
         const lat = position.coords.latitude;
         const lon = position.coords.longitude;
         const reverseResponse = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`,
+            `${(window.APP_CONFIG || APP_CONFIG).externalUrls.nominatimReverse}?lat=${lat}&lon=${lon}&format=json`,
             { headers: { 'User-Agent': 'JARVISAssistant/1.0' } }
         );
         if (!reverseResponse.ok) return '';
@@ -11962,7 +12086,7 @@ async function buildVerifiedSearchSummary(query, options = {}) {
             .join('\n\n');
 
         if (!summaryText) try {
-            const summaryResponse = await fetch('/api/chat-groq', {
+            const summaryResponse = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -12048,7 +12172,7 @@ function formatLiveSearchFailureMessage(data = {}, status = 0) {
 }
 
 async function fetchLiveSearchJson(query, options = {}) {
-    const response = await fetch('/api/search', {
+    const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.search, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: options.signal,
@@ -12080,7 +12204,7 @@ async function fetchCurrentFactJson(query, options = {}) {
         throw error;
     }
 
-    const response = await fetch('/api/current-facts', {
+    const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.currentFacts, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: options.signal,
@@ -12170,7 +12294,7 @@ async function handleExchangeRateLookup(text) {
 
     showThinkingIndicator('Checking verified exchange sources...');
     try {
-        const response = await fetch('/api/markets', {
+        const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.markets, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ mode: 'exchange', ...parsed })
@@ -12249,7 +12373,7 @@ async function handleMarketLookup(text) {
             }
         }
 
-        const response = await fetch('/api/markets', {
+        const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.markets, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ query: effectiveQuery })
@@ -12527,7 +12651,7 @@ async function buildTopPlaceSuggestions(type, location, userText = '') {
         hotel: `best hotels in ${loc}`
     };
     const searchQuery = queryMap[kind];
-    const web = await fetch('/api/search', {
+    const web = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.search, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query: searchQuery, maxResults: 8 })
@@ -12619,7 +12743,7 @@ async function geocodeLocationCandidates(query, limit = 5) {
     const q = String(query || '').trim();
     if (!q) return [];
     try {
-        const url = `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=${limit}&q=${encodeURIComponent(q)}`;
+        const url = `${(window.APP_CONFIG || APP_CONFIG).externalUrls.nominatimSearch}?format=json&addressdetails=1&limit=${limit}&q=${encodeURIComponent(q)}`;
         const res = await fetch(url);
         if (!res.ok) return [];
         const data = await res.json();
@@ -13182,7 +13306,7 @@ async function buildMotivationStoryFromWeb(userText) {
 
     const collected = [];
     async function fetchSearchResults(query) {
-        const res = await fetch('/api/search', {
+        const res = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.search, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ query, maxResults: 10 })
@@ -13238,7 +13362,7 @@ Requested financial stats: ${profile.requestedFinancials ? 'yes' : 'no'}
 Snippets:
 ${snippetBlock}`;
 
-    const response = await fetch('/api/chat-groq', {
+    const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -13946,7 +14070,7 @@ async function finishSongMoodGame(triggerText) {
     showThinkingIndicator('[Music] Picking your situation song...');
     try {
         const summary = getSongMoodGameProfileSummary(state);
-        const response = await fetch('/api/chat-groq', {
+        const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -14308,7 +14432,7 @@ Rules:
 - Keep songs in requested language(s)
 - No markdown, no extra keys, valid JSON only`;
 
-    const response = await fetch('/api/chat-groq', {
+    const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -14397,7 +14521,7 @@ User text:
 "${String(text || '').replace(/"/g, '\\"')}"`;
 
     try {
-        const response = await fetch('/api/chat-groq', {
+        const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -14450,7 +14574,7 @@ Rules:
 - No extra keys
 - Keep reasons short`;
 
-    const response = await fetch('/api/chat-groq', {
+    const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -14487,7 +14611,7 @@ async function fetchSongsFromVerifiedSources(artist, requestedCount) {
     const safeArtist = String(artist || '').trim();
     if (!safeArtist) return { items: [], sources: [] };
 
-    const searchResponse = await fetch('/api/search', {
+    const searchResponse = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.search, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -14545,7 +14669,7 @@ Rules:
 Sources:
 ${snippetsBlock}`;
 
-    const verifyResponse = await fetch('/api/chat-groq', {
+    const verifyResponse = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -14719,7 +14843,7 @@ async function handleArtistSongRequest(text) {
 
     showThinkingIndicator(`[Music] Finding songs for ${artist}...`);
     try {
-        const searchResponse = await fetch('/api/search', {
+        const searchResponse = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.search, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -14780,7 +14904,7 @@ Rules:
 Snippets:
 ${snippetsBlock}`;
 
-        const verifyResponse = await fetch('/api/chat-groq', {
+        const verifyResponse = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -14970,7 +15094,7 @@ async function handleComparisonWithReliableSources(userText) {
         const searchResults = await Promise.all(
             queries.map(async (query) => {
                 try {
-                    const response = await fetch('/api/search', {
+                    const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.search, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ query, maxResults: 4 })
@@ -15002,7 +15126,7 @@ async function handleComparisonWithReliableSources(userText) {
             .map((r, i) => `${i + 1}. ${r.title}\nSnippet: ${r.description}\nURL: ${r.url}`)
             .join('\n\n');
 
-        const compareResponse = await fetch('/api/chat-groq', {
+        const compareResponse = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -15424,7 +15548,7 @@ async function handleStrictLatestQuery(userText) {
         const resultSets = await Promise.all(
             strictQueries.map(async (q) => {
                 try {
-                    const response = await fetch('/api/search', {
+                    const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.search, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         signal: controller.signal,
@@ -15555,7 +15679,7 @@ async function handleStrictLatestQuery(userText) {
         let conciseAnswer = '';
         try {
             const summaryResponse = await Promise.race([
-                fetch('/api/chat-groq', {
+                fetch((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     signal: controller.signal,
@@ -18211,7 +18335,7 @@ async function fetchHybridCitationSources(userText, intent, controller) {
     const resultSets = await Promise.all(
         searchQueries.slice(0, 3).map(async (q) => {
             try {
-                const response = await fetch('/api/search', {
+                const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.search, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     signal: controller?.signal,
@@ -18424,7 +18548,7 @@ function isLikelyIncompleteRecipe(text) {
 async function repairIncompleteRecipe(recipeText, originalText, requestedDish, styleHint) {
     const clipped = normalizeRecipeOutputText(recipeText).slice(0, 5000);
     try {
-        const response = await fetch('/api/chat-groq', {
+        const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -18474,7 +18598,7 @@ async function retrieveUniversalEntitySources(pipeline, controller) {
     const resultSets = await Promise.all(
         queries.map(async (q) => {
             try {
-                const response = await fetch('/api/search', {
+                const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.search, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     signal: controller.signal,
@@ -18780,7 +18904,7 @@ async function summarizeUniversalEntitySources(pipeline, results, controller, st
         .map((r, i) => `${i + 1}. ${r.title}\nSnippet: ${r.description}\nURL: ${r.url}`)
         .join('\n\n');
 
-    const summaryResponse = await fetch('/api/chat-groq', {
+    const summaryResponse = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
@@ -19190,7 +19314,7 @@ async function handleLiveRetrievalQuery(userText, options = {}) {
             showThinkingIndicator('Synthesizing answer...');
             let answer = '';
             try {
-                const summaryResponse = await fetch('/api/chat-groq', {
+                const summaryResponse = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     signal: controller.signal,
@@ -20584,7 +20708,7 @@ Quick recap: ...
                 let learningAnswer = learningResponse.response;
                 if (formulaNeededInLearning && !hasFormulaLikeExpression(learningAnswer)) {
                     try {
-                        const formulaOnlyRes = await fetch('/api/chat-groq', {
+                        const formulaOnlyRes = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
@@ -21022,7 +21146,7 @@ Quick recap: ...
                         const searchWithTimeout = (query, timeoutMs = 2800) => Promise.race([
                             (async () => {
                                 try {
-                                    const response = await fetch('/api/search', {
+                                    const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.search, {
                                         method: 'POST',
                                         headers: { 'Content-Type': 'application/json' },
                                         body: JSON.stringify({ query })
@@ -21637,7 +21761,7 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
             showThinkingIndicator('Getting your local weather...');
             try {
                 const reverseResponse = await fetch(
-                    `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`,
+                    `${(window.APP_CONFIG || APP_CONFIG).externalUrls.nominatimReverse}?lat=${lat}&lon=${lon}&format=json`,
                     { headers: { 'User-Agent': 'JARVISAssistant/1.0' } }
                 );
                 const reverseData = await reverseResponse.json();
@@ -21802,7 +21926,7 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
                 
                 
                 const nominatimResponse = await fetch(
-                    `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(searchName)}&format=json&limit=5&addressdetails=1`,
+                    `${(window.APP_CONFIG || APP_CONFIG).externalUrls.nominatimSearch}?q=${encodeURIComponent(searchName)}&format=json&limit=5&addressdetails=1`,
                     { headers: { 'User-Agent': 'JARVISAssistant/1.0' } }
                 );
                 
@@ -22226,8 +22350,8 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
                         return await new Promise((resolve, reject) => {
                             navigator.geolocation.getCurrentPosition(resolve, reject, {
                                 enableHighAccuracy: false,
-                                timeout: 8000,
-                                maximumAge: 300000
+                                timeout: (window.APP_CONFIG || APP_CONFIG).timeouts.geolocationMs,
+                                maximumAge: (window.APP_CONFIG || APP_CONFIG).timeouts.geolocationCacheMs
                             });
                         });
                     } catch (_) {}
@@ -22246,7 +22370,7 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
 
                 try {
                     const reverseResponse = await fetch(
-                        `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`,
+                        `${(window.APP_CONFIG || APP_CONFIG).externalUrls.nominatimReverse}?lat=${lat}&lon=${lon}&format=json`,
                         { headers: { 'User-Agent': 'JARVISAssistant/1.0' } }
                     );
                     if (reverseResponse.ok) {
@@ -22972,23 +23096,25 @@ async function deleteMemoryManagerItem(key) {
 }
 
 const JarvisIndexedDbStorage = {
-    dbName: 'jarvis_database_v1',
-    dbVersion: 1,
+    dbName: (window.APP_CONFIG || APP_CONFIG).storage.dbName || 'jarvis_database_v1',
+    dbVersion: (window.APP_CONFIG || APP_CONFIG).storage.dbVersion || 1,
     _db: null,
 
     async getDb() {
         if (this._db) return this._db;
         if (typeof indexedDB === 'undefined') return null;
+        const kvStore = (window.APP_CONFIG || APP_CONFIG).storage.objectStores?.kv || 'kv_store';
+        const sessionsStore = (window.APP_CONFIG || APP_CONFIG).storage.objectStores?.sessions || 'sessions';
         return new Promise((resolve) => {
             try {
                 const req = indexedDB.open(this.dbName, this.dbVersion);
                 req.onupgradeneeded = (e) => {
                     const db = e.target.result;
-                    if (!db.objectStoreNames.contains('kv_store')) {
-                        db.createObjectStore('kv_store', { keyPath: 'key' });
+                    if (!db.objectStoreNames.contains(kvStore)) {
+                        db.createObjectStore(kvStore, { keyPath: 'key' });
                     }
-                    if (!db.objectStoreNames.contains('sessions')) {
-                        db.createObjectStore('sessions', { keyPath: 'id' });
+                    if (!db.objectStoreNames.contains(sessionsStore)) {
+                        db.createObjectStore(sessionsStore, { keyPath: 'id' });
                     }
                 };
                 req.onsuccess = (e) => {
@@ -23009,8 +23135,9 @@ const JarvisIndexedDbStorage = {
         try {
             const db = await this.getDb();
             if (!db) return;
-            const tx = db.transaction('kv_store', 'readwrite');
-            const store = tx.objectStore('kv_store');
+            const kvStore = (window.APP_CONFIG || APP_CONFIG).storage.objectStores?.kv || 'kv_store';
+            const tx = db.transaction(kvStore, 'readwrite');
+            const store = tx.objectStore(kvStore);
             store.put({ key, value: typeof value === 'string' ? value : JSON.stringify(value), updatedAt: Date.now() });
         } catch (_) {}
     },
@@ -23019,8 +23146,9 @@ const JarvisIndexedDbStorage = {
         try {
             const db = await this.getDb();
             if (db) {
-                const tx = db.transaction('kv_store', 'readonly');
-                const store = tx.objectStore('kv_store');
+                const kvStore = (window.APP_CONFIG || APP_CONFIG).storage.objectStores?.kv || 'kv_store';
+                const tx = db.transaction(kvStore, 'readonly');
+                const store = tx.objectStore(kvStore);
                 const req = store.get(key);
                 const result = await new Promise((resolve) => {
                     req.onsuccess = () => resolve(req.result?.value || null);
@@ -23341,12 +23469,12 @@ let isRestoringChatSession = false;
 let pendingChatRestoreSearchQuery = '';
 let chatTitleGenerationSequence = 0;
 
-const CHAT_SESSIONS_STORAGE_KEY = 'jarvis_chat_sessions_v1';
-const CHAT_ACTIVE_DRAFT_STORAGE_KEY = 'jarvis_active_empty_chat_draft_v1';
+const CHAT_SESSIONS_STORAGE_KEY = (window.APP_CONFIG || APP_CONFIG).storage.keys.chatSessions;
+const CHAT_ACTIVE_DRAFT_STORAGE_KEY = (window.APP_CONFIG || APP_CONFIG).storage.keys.activeDraft;
 const CHAT_LEGACY_MIGRATION_DONE_KEY = 'jarvis_chat_legacy_migration_done_v1';
-const CHAT_DELETED_SESSION_IDS_KEY = 'jarvis_deleted_chat_session_ids_v1';
-const CHAT_DELETED_SESSION_TITLES_KEY = 'jarvis_deleted_chat_session_titles_v1';
-const CHAT_SESSION_MAX_MESSAGES = 160;
+const CHAT_DELETED_SESSION_IDS_KEY = (window.APP_CONFIG || APP_CONFIG).storage.keys.deletedSessionIds;
+const CHAT_DELETED_SESSION_TITLES_KEY = (window.APP_CONFIG || APP_CONFIG).storage.keys.deletedSessionTitles;
+const CHAT_SESSION_MAX_MESSAGES = (window.APP_CONFIG || APP_CONFIG).limits.maxMessagesPerSession;
 
 function createChatSession(title = 'New chat') {
     const now = new Date().toISOString();
@@ -24058,7 +24186,7 @@ async function generateModelChatTitle(session, fallbackTitle = '') {
     if (!titleMessages.length) return fallbackTitle || '';
     const prompt = buildChatTitlePrompt(session?.messages || []);
     try {
-        const result = await window.JarvisApi?.postJson?.('/api/chat-groq', {
+        const result = await window.JarvisApi?.postJson?.((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
             message: prompt,
             intent: 'chat_title',
             context: [],
@@ -26182,7 +26310,7 @@ async function handleContinuousVisionQuery(text) {
         const isWebsiteUiIntent = isWebsiteUiVisionIntent(text);
         const visionTask = resolveContinuousVisionTask(text);
         const visionPrompt = buildContinuousVisionPrompt(text, visionTask);
-        const response = await fetch('/api/vision', {
+        const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.vision, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -26645,7 +26773,7 @@ async function handleMultiAgentDebate(text, rounds = 3) {
                 ? `You are JARVIS Alpha. Take the optimistic, progressive, or PRO stance on the topic: "${text}". Provide 2 highly persuasive sentences.` 
                 : `You are JARVIS Alpha. You are in a debate. Defend the PRO stance and counter this argument from JARVIS Beta: "${previousArgument}". Provide 2 highly persuasive sentences.`;
             
-            const proResponse = await fetch('/api/chat-groq', {
+            const proResponse = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ message: text })
@@ -26662,7 +26790,7 @@ async function handleMultiAgentDebate(text, rounds = 3) {
             showThinkingIndicator(`Round ${i + 1}: Agent Beta is countering...`);
             const betaPrompt = `You are JARVIS Beta. You take the pessimistic, conservative, or CON stance. Fiercely but respectfully counter this argument from JARVIS Alpha: "${previousArgument}". Provide 2 highly persuasive sentences.`;
             
-            const conResponse = await fetch('/api/chat-groq', {
+            const conResponse = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ message: text })
