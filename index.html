@@ -18950,33 +18950,22 @@ async function summarizeUniversalEntitySources(pipeline, results, controller, st
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
         body: JSON.stringify({
-            message: `Answer the entity question using ONLY the snippets below.
+            message: `Answer the entity question concisely and factually using ONLY the snippets below.
 Current Reference Date: ${new Date().toISOString().slice(0, 10)} (Year 2026).
 
 User question: "${pipeline.userText}"
 Detected domain: "${pipeline.entityIntent.domain}"
-Detected entity type: "${pipeline.entityIntent.entityType}"
-Detected relation type: "${pipeline.entityIntent.relationType}"
 Detected subject: "${pipeline.entityIntent.subject}"
 Detected fact type: "${pipeline.intent.factType}"
-Detected year: "${pipeline.intent.year || '2026'}"
 
 Required format:
-Direct answer: <answer the specific fact immediately in 1-2 sentences>
-Key points:
-- <point 1>
-- <point 2>
-- <point 3>
-Confidence: <High/Medium/Low based only on source agreement>
+Direct answer: <answer the specific fact directly and naturally in 1-2 concise sentences>
 
 Rules:
-- Answer the exact fact first.
-- Universal Freshness & Incumbency across ALL fields (Political/Civic leadership, Corporate CEOs/Executives, Sports champions/rankings/winners, Technology & hardware releases, Entertainment/Awards, Economics/Finance, and Scientific records): Always identify and output the current active status/leader/winner/version from the latest retrieved evidence. Never state a predecessor, former holder, retired figure, or obsolete version as current.
-- CRITICAL INCUMBENCY RESOLUTION: If the evidence records a transition, election outcome, new appointment, or succession, the FIRST sentence of "Direct answer:" MUST state the current outcome/leader resulting from the transition, referring to any previous office-holder strictly in past tense (e.g. "...succeeding former office-holder..."). NEVER open by declaring a predecessor as the current leader if the snippets record a subsequent transition!
-- Prefer current membership, party, role, office, title count, stats, standings, rankings, or winners depending on the question.
-- Do not make up numbers, teams, players, parties, offices, dates, or organizations.
-- If snippets show a transition or recent change, prioritize the latest 2026 sources and explicitly state the latest update.
-- Keep it concise.
+- Answer the exact fact directly in the first sentence.
+- Universal Freshness & Incumbency: Always identify and output the current active status/leader/winner from the latest retrieved evidence.
+- Zero database jargon: Do NOT say "is listed by Wikidata as", "According to Wikidata", or raw metadata dates. State the fact naturally.
+- Keep the answer concise and direct without unsolicited bullet lists or generic background explanations.
 
 Snippets:
 ${snippets}`
@@ -18986,7 +18975,7 @@ ${snippets}`
     const summaryData = await summaryResponse.json();
     const answer = cleanLiveAnswerText(String(summaryData?.response || summaryData?.text || '').trim());
     const sourceLines = results.slice(0, 5).map((r, i) => `${i + 1}. [${r.title}](${r.url})`).join('\n');
-    const finalAnswer = answer || cleanLiveAnswerText(`Direct answer: ${results[0].title}${results[0].description ? `\n\nKey points:\n- ${results[0].description}` : ''}`);
+    const finalAnswer = answer || cleanLiveAnswerText(results[0].title + (results[0].description ? ` - ${results[0].description}` : ''));
     if (!answer && strictLiveRequired) {
         const bestEffortPublished = await publishBestEffortFromSources(pipeline, results, {
             summaryText: 'I could not fully verify a clean direct answer, so here is the best-supported answer from available sources.'
