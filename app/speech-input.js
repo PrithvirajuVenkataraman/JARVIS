@@ -1,3 +1,5 @@
+import { evaluateTurnCompleteness, normalizeConverseState } from './converse-state.js';
+
 /**
  * Unified Speech Input & Hands-Free Converse Controller.
  * Primary STT: Native Browser Web Speech API (SpeechRecognition / webkitSpeechRecognition).
@@ -289,6 +291,8 @@ export function createSpeechInputController(options = {}) {
     let fallbackMode = false;
     let processingTimer = null;
     let restartTimer = null;
+    let adaptiveTurnTimer = null;
+    let accumulatedTranscript = '';
     let explicitlyStopped = false;
 
     const whisperRecorder = createWhisperRecorder({
@@ -329,34 +333,82 @@ export function createSpeechInputController(options = {}) {
             r.maxAlternatives = 1;
 
             r.onresult = event => {
-                if (globalThis.speechSynthesis?.speaking || globalThis.isConverseSpeechActive?.() || processing) {
+                const isSpeaking = Boolean(globalThis.speechSynthesis?.speaking || globalThis.isConverseSpeechActive?.());
+                if (isSpeaking || processing) {
                     if (globalThis.speechSynthesis?.speaking) {
                         try { globalThis.speechSynthesis.cancel(); } catch (_) {}
                     }
                     globalThis.stopConverseSpeech?.('barge_in');
                     globalThis.stopActiveGeneration?.('converse_interruption');
+                    accumulatedTranscript = '';
+                    if (adaptiveTurnTimer) {
+                        clearTimeout(adaptiveTurnTimer);
+                        adaptiveTurnTimer = null;
+                    }
+                    return;
                 }
-                let interim = '';
-                let final = '';
+
+                let currentInterim = '';
+                let currentFinal = '';
                 for (let i = event.resultIndex; i < event.results.length; i++) {
                     const res = event.results[i];
                     if (res.isFinal) {
-                        final += res[0].transcript;
+                        currentFinal += res[0].transcript + ' ';
                     } else {
-                        interim += res[0].transcript;
+                        currentInterim += res[0].transcript;
                     }
                 }
-                const cleanedInterim = cleanSpeechFillers(interim);
-                const cleanedFinal = cleanSpeechFillers(final);
 
-                if (cleanedInterim) callbacks.onInterim(cleanedInterim, getState());
-                if (cleanedFinal) {
-                    callbacks.onFinal(cleanedFinal, {
-                        autoSubmit: converseEnabled,
-                        source: converseEnabled ? 'converse' : 'vtt',
-                        transcriptFinal: true,
-                        interrupt: true
-                    });
+                if (currentFinal) {
+                    accumulatedTranscript = (accumulatedTranscript ? (accumulatedTranscript + ' ' + currentFinal) : currentFinal).trim();
+                }
+
+                const liveCandidate = (accumulatedTranscript ? (accumulatedTranscript + ' ' + currentInterim) : currentInterim).trim();
+                const cleanedInterim = cleanSpeechFillers(liveCandidate);
+
+                if (cleanedInterim) {
+                    callbacks.onInterim(cleanedInterim, getState());
+                }
+
+                if (adaptiveTurnTimer) {
+                    clearTimeout(adaptiveTurnTimer);
+                    adaptiveTurnTimer = null;
+                }
+
+                const evalResult = evaluateTurnCompleteness(liveCandidate, {
+                    completeTimeoutMs: options.completeTimeoutMs || 800,
+                    normalTimeoutMs: options.normalTimeoutMs || 1200,
+                    incompleteTimeoutMs: options.incompleteTimeoutMs || 1800
+                });
+
+                if (currentFinal && !converseEnabled && mode === 'dictation' && !options.adaptiveDictation) {
+                    const cleanedFinal = cleanSpeechFillers(accumulatedTranscript || currentFinal);
+                    accumulatedTranscript = '';
+                    if (cleanedFinal) {
+                        callbacks.onFinal(cleanedFinal, {
+                            autoSubmit: false,
+                            source: 'vtt',
+                            transcriptFinal: true,
+                            interrupt: false
+                        });
+                    }
+                    return;
+                }
+
+                if (converseEnabled || mode === 'dictation') {
+                    adaptiveTurnTimer = setTimeout(() => {
+                        const targetText = accumulatedTranscript || liveCandidate;
+                        const cleanedFinal = cleanSpeechFillers(targetText);
+                        accumulatedTranscript = '';
+                        if (cleanedFinal) {
+                            callbacks.onFinal(cleanedFinal, {
+                                autoSubmit: converseEnabled,
+                                source: converseEnabled ? 'converse' : 'vtt',
+                                transcriptFinal: true,
+                                interrupt: false
+                            });
+                        }
+                    }, evalResult.recommendedTimeoutMs);
                 }
             };
 
@@ -501,6 +553,11 @@ export function createSpeechInputController(options = {}) {
     }
 
     function setProcessing(isProc) {
+        if (adaptiveTurnTimer) {
+            clearTimeout(adaptiveTurnTimer);
+            adaptiveTurnTimer = null;
+        }
+        accumulatedTranscript = '';
         if (processingTimer) {
             clearTimeout(processingTimer);
             processingTimer = null;
@@ -542,6 +599,11 @@ export function createSpeechInputController(options = {}) {
     function resumeListening() {
         if (!converseEnabled || explicitlyStopped) return false;
         processing = false;
+        if (adaptiveTurnTimer) {
+            clearTimeout(adaptiveTurnTimer);
+            adaptiveTurnTimer = null;
+        }
+        accumulatedTranscript = '';
         if (processingTimer) {
             clearTimeout(processingTimer);
             processingTimer = null;
@@ -566,6 +628,11 @@ export function createSpeechInputController(options = {}) {
 
     function stop(options = {}) {
         explicitlyStopped = true;
+        if (adaptiveTurnTimer) {
+            clearTimeout(adaptiveTurnTimer);
+            adaptiveTurnTimer = null;
+        }
+        accumulatedTranscript = '';
         if (processingTimer) {
             clearTimeout(processingTimer);
             processingTimer = null;
@@ -946,7 +1013,7 @@ export function installSpeechInputUI(options = {}) {
     };
 
     globalThis.JarvisSpeechInput = controller;
-    globalThis.JarvisSpeechInput.toggleConverse = globalThis.toggleConverseMode; 
+    globalThis.JarvisSpeechInput.toggleConverse = globalThis.toggleConverseMode;
     globalThis.JarvisSpeechInput.resetCommittedText = globalThis.resetSpeechInputCommittedText;
     globalThis.syncVttUiState = () => controller.getState();
     globalThis.setVoiceInputLanguage = language => controller.setLanguage(language);
