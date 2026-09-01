@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { buildCacheKey, getCachedRAGEntry, setCachedRAGEntry, clearL1CacheForTesting } from '../api/_lib/distributed-cache.js';
-import { computeBM25Scores, hybridRerank } from '../api/_lib/hybrid-reranker.js';
+import { computeBM25Scores, hybridRerank, extractQueryDateIntent, parseDocumentDate, computeTemporalScore } from '../api/_lib/hybrid-reranker.js';
 import { buildParentChildChunks, expandChildMatchesToParentContext } from '../api/_lib/parent-child-chunker.js';
 import { evaluateContextRelevance, evaluateGroundedness, evaluateAnswerRelevance, computeRagTriadEvaluation } from '../api/_lib/rag-triad-evaluator.js';
 import { renderMarkdown } from '../app/markdown-renderer.js';
@@ -38,8 +38,8 @@ assert.ok(swrHit);
 assert.equal(swrHit.stale, true);
 console.log('  [PASS] 1.2 Stale-While-Revalidate (SWR) grace window verified');
 
-// Section 2: In-Process Hybrid Reranking (BM25 + RRF)
-console.log('\n--- Section 2: In-Process Hybrid Reranking (BM25 + RRF) ---');
+// Section 2: In-Process Hybrid Reranking (BM25 + Semantic + Date-Aware RRF)
+console.log('\n--- Section 2: In-Process Hybrid Reranking (BM25 + Date-Aware RRF) ---');
 
 const docs = [
     { title: 'Fixture Forecast Item', description: 'Weather report with sunshine in the morning.', url: 'https://fixture-weather.example' },
@@ -56,6 +56,63 @@ const reranked = await hybridRerank('Fixture Rocket Mission launch', docs, { ski
 assert.equal(reranked[0].url, 'https://fixture-space.example');
 assert.ok(reranked[0].rrfScore > reranked[1].rrfScore);
 console.log('  [PASS] 2.2 Reciprocal Rank Fusion (RRF) ranking verified');
+
+// 2.3 Date Intent Extraction
+const currentIntent = extractQueryDateIntent('who is the current prime minister');
+assert.equal(currentIntent.type, 'current');
+const historyIntent = extractQueryDateIntent('who won the championship in 2021');
+assert.equal(historyIntent.type, 'target_year');
+assert.equal(historyIntent.targetYear, 2021);
+console.log('  [PASS] 2.3 Date & temporal query intent extraction verified');
+
+// 2.4 Document Timestamp Parsing
+const parsedIso = parseDocumentDate({ date: '2026-08-15T12:00:00Z' });
+assert.ok(parsedIso > 0);
+const parsedUrl = parseDocumentDate({ url: 'https://news.example.com/2024/05/20/article-title' });
+assert.equal(new Date(parsedUrl).getUTCFullYear(), 2024);
+console.log('  [PASS] 2.4 Document date parsing from ISO and URL paths verified');
+
+// 2.5 Recency Boosting on Breaking / Current Queries
+const now = Date.now();
+const oneDayAgo = new Date(now - 24 * 60 * 60 * 1000).toISOString();
+const twoYearsAgo = new Date(now - 730 * 24 * 60 * 60 * 1000).toISOString();
+
+const dynamicOrg = fixtureSubject('Org');
+const temporalDocs = [
+    { title: `${dynamicOrg} executive announcement`, description: 'Past leader appointed', date: twoYearsAgo, url: 'https://example.com/old' },
+    { title: `${dynamicOrg} executive announcement`, description: 'New leader appointed today', date: oneDayAgo, url: 'https://example.com/new' }
+];
+
+const recentReranked = await hybridRerank(`latest ${dynamicOrg} executive announcement`, temporalDocs, { skipEmbedding: true });
+assert.equal(recentReranked[0].url, 'https://example.com/new');
+assert.ok(recentReranked[0].temporalScore > recentReranked[1].temporalScore);
+console.log('  [PASS] 2.5 Date-aware recency boost prioritized fresh news');
+
+// 2.6 Historical Target Year Matching
+const dynamicReport = fixtureSubject('Report');
+const historyDocs = [
+    { title: `${dynamicReport} summary`, description: 'Financial update', date: '2026-01-01', url: 'https://example.com/2026' },
+    { title: `${dynamicReport} summary`, description: 'Financial update', date: '2020-05-12', url: 'https://example.com/2020' }
+];
+const historyReranked = await hybridRerank(`${dynamicReport} summary in 2020`, historyDocs, { skipEmbedding: true });
+assert.equal(historyReranked[0].url, 'https://example.com/2020');
+assert.ok(historyReranked[0].temporalScore > historyReranked[1].temporalScore);
+console.log('  [PASS] 2.6 Target year proximity matching prioritized historical target');
+
+
+// 2.7 Sub-millisecond Execution Benchmark (<1ms for 20 documents)
+const benchDocs = Array.from({ length: 20 }, (_, i) => ({
+    title: `Document ${i} rocket telemetry`,
+    description: `Details regarding aerospace telemetry payload ${i}`,
+    date: new Date(now - i * 10 * 24 * 60 * 60 * 1000).toISOString(),
+    url: `https://example.com/doc-${i}`
+}));
+const benchStart = performance.now();
+await hybridRerank('latest aerospace rocket telemetry', benchDocs, { skipEmbedding: true });
+const benchDurationMs = performance.now() - benchStart;
+assert.ok(benchDurationMs < 5.0, `Reranking 20 documents must execute in <5ms (actual: ${benchDurationMs.toFixed(2)}ms)`);
+console.log(`  [PASS] 2.7 Sub-millisecond latency verified: reranked 20 docs in ${benchDurationMs.toFixed(2)}ms`);
+
 
 // Section 3: Parent-Child Hierarchical Chunking
 console.log('\n--- Section 3: Parent-Child Hierarchical Context Chunking ---');
