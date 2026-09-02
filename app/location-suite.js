@@ -249,22 +249,30 @@ export function buildDynamicLocationSuiteHtml(data = {}) {
     `;
 
     // 5. Interactive Embedded Map
+    const minLon = (lon - 0.008).toFixed(6);
+    const minLat = (lat - 0.005).toFixed(6);
+    const maxLon = (lon + 0.008).toFixed(6);
+    const maxLat = (lat + 0.005).toFixed(6);
+    const osmEmbedUrl = `https://www.openstreetmap.org/export/embed.html?bbox=${minLon}%2C${minLat}%2C${maxLon}%2C${maxLat}&layer=mapnik&marker=${lat.toFixed(6)}%2C${lon.toFixed(6)}`;
+
     const mapHtml = `
-        <div class="map-container" style="margin-top:16px; border-radius:12px; overflow:hidden; box-shadow:0 4px 20px rgba(0,0,0,0.3); border:1px solid rgba(148,163,184,0.2);">
+        <div class="map-container" style="margin-top:16px; border-radius:12px; overflow:hidden; box-shadow:0 4px 20px rgba(0,0,0,0.3); border:1px solid rgba(148,163,184,0.2); position:relative;">
             <iframe
-                src="https://maps.google.com/maps?q=${lat},${lon}&z=16&output=embed"
+                src="${osmEmbedUrl}"
                 width="100%"
-                height="300"
-                style="border:0; display:block;"
+                height="320"
+                style="border:0; display:block; filter:contrast(1.05) brightness(0.95);"
                 loading="lazy"
+                title="Interactive Location Map"
+                sandbox="allow-scripts allow-same-origin allow-popups"
                 allowfullscreen>
             </iframe>
         </div>
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px; font-size:12px; color:#94a3b8;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px; font-size:12px; color:#94a3b8; flex-wrap:wrap; gap:8px;">
             <span>Exact Pin: <strong>${escapeHtmlText(exactAddress || locationTitle)}</strong></span>
             <div style="display:flex; gap:12px;">
-                <a href="${mapsUrl}" target="_blank" rel="noopener noreferrer" style="color:#38bdf8; text-decoration:underline; font-weight:600;">Open in Google Maps</a>
-                <a href="${directionsBaseUrl}${lat},${lon}" target="_blank" rel="noopener noreferrer" style="color:#38bdf8; text-decoration:underline; font-weight:600;">Get Directions</a>
+                <a href="${mapsUrl}" target="_blank" rel="noopener noreferrer" style="color:#38bdf8; text-decoration:none; font-weight:600; display:flex; align-items:center; gap:4px;">🗺️ Open in Google Maps</a>
+                <a href="${directionsBaseUrl}${lat},${lon}" target="_blank" rel="noopener noreferrer" style="color:#38bdf8; text-decoration:none; font-weight:600; display:flex; align-items:center; gap:4px;">🧭 Get Directions</a>
             </div>
         </div>
     `;
