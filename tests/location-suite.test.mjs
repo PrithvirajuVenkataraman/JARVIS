@@ -122,6 +122,7 @@ assert.ok(htmlCard.includes('24°C · Partly Cloudy'));
 assert.ok(htmlCard.includes('65% Humidity'));
 assert.ok(htmlCard.includes('12 km/h Wind'));
 assert.ok(htmlCard.includes('iframe'));
+assert.ok(htmlCard.includes('openstreetmap.org/export/embed.html'));
 assert.ok(htmlCard.includes('ATMs / Cash'));
 assert.ok(htmlCard.includes('Hospitals &amp; Clinics') || htmlCard.includes('Hospitals & Clinics'));
 assert.ok(htmlCard.includes('Police Stations'));
