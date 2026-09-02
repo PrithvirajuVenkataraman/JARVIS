@@ -8942,6 +8942,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                         .find(row => row.dataset.messageId === replaceMessageId)
                     : null;
                 const existingThinking = !isUser ? document.getElementById('chat-thinking-indicator') : null;
+                const liveSpeechRow = isUser ? document.getElementById('live-speech-transcription-row') : null;
                 if (replaceTarget && activeResponseRenderContext?.isRegeneration) {
                     const oldMeta = getAssistantMessageMeta(replaceMessageId);
                     const oldTurn = getConversationTurn(oldMeta?.turnId);
@@ -8964,6 +8965,8 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                     replaceTarget.replaceWith(messageDiv);
                 } else if (existingThinking && existingThinking.parentNode === chatContainer) {
                     existingThinking.replaceWith(messageDiv);
+                } else if (isUser && liveSpeechRow && liveSpeechRow.parentNode === chatContainer) {
+                    liveSpeechRow.replaceWith(messageDiv);
                 } else {
                     chatContainer.appendChild(messageDiv);
                 }
@@ -9614,8 +9617,8 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
         }
 
         function updateLiveSpeechTranscriptionOnScreen(text = '', isInterim = false, source = 'voice') {
-            const chatMessages = document.getElementById('chat-container') || document.getElementById('chat-messages');
-            if (!chatMessages) return;
+            const chatContainer = document.getElementById('chat-container');
+            if (!chatContainer) return;
 
             const trimmed = String(text || '').trim();
             let liveRow = document.getElementById('live-speech-transcription-row');
@@ -9628,24 +9631,24 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             if (!liveRow) {
                 liveRow = document.createElement('div');
                 liveRow.id = 'live-speech-transcription-row';
-                liveRow.className = 'chat-message-row user-message-row is-live-speech flex justify-end';
-                chatMessages.appendChild(liveRow);
+                liveRow.className = 'chat-row flex justify-end items-start gap-3 fade-in is-live-speech';
+                chatContainer.appendChild(liveRow);
             }
 
-            const modeLabel = source === 'converse' ? 'Converse' : 'Listening';
-            const safeText = typeof escapeHtml === 'function' ? escapeHtml(trimmed) : trimmed;
+            const modeLabel = source === 'converse' ? 'Converse' : 'Voice Input';
+            const safeText = escapeHtml(trimmed);
             liveRow.innerHTML = `
-                <div class="chat-bubble-user text-white relative group is-live-speech-bubble">
-                    <div class="flex items-center gap-1.5 mb-1 opacity-80 text-xs text-sky-300 font-medium">
-                        <span class="live-speech-pulse"></span>
-                        <span>${modeLabel}...</span>
+                <div class="chat-bubble-user text-white relative group" style="border: 1px solid rgba(56, 189, 248, 0.4); box-shadow: 0 4px 20px rgba(14, 165, 233, 0.25);">
+                    <div style="display:flex; align-items:center; gap:6px; margin-bottom:4px; opacity:0.9; font-size:11px; font-weight:600; color:#e0f2fe; text-transform:uppercase; letter-spacing:0.05em;">
+                        <span style="width:7px; height:7px; border-radius:50%; background:#38bdf8; display:inline-block; animation: pulse 1.2s infinite ease-in-out;"></span>
+                        <span>${modeLabel} (Listening...)</span>
                     </div>
-                    <p class="text-sm font-medium leading-relaxed">${safeText}</p>
+                    <p class="text-sm font-medium leading-relaxed" style="margin:0;">${safeText}</p>
                 </div>
             `;
 
             try {
-                chatMessages.scrollTop = chatMessages.scrollHeight;
+                chatContainer.scrollTop = chatContainer.scrollHeight;
             } catch (_) {}
         }
 
@@ -11662,18 +11665,16 @@ async function sendTextInput(submission = {}) {
             const text = String(submission?.text !== undefined ? submission.text : (input?.value || '')).trim();
             const pendingAttachments = window.JarvisAttachments?.getPendingAttachments?.() || [];
             const inputSource = String(submission?.source || input.dataset.inputSource || 'text').trim() || 'text';
-            globalThis.clearLiveSpeechTranscriptionOnScreen?.();
             if (activeRequestController || isAssistantProcessing() || isConverseSpeechActive()) {
-                const canInterruptFromConverse = inputSource === 'converse' &&
-                    (submission?.interrupt === true || isConverseSpeechActive());
-                if (!canInterruptFromConverse || (!text && !pendingAttachments.length)) {
+                if (inputSource === 'converse' && (text || pendingAttachments.length)) {
+                    stopActiveGeneration('converse_interruption');
+                    const queuedSubmissionId = ++converseQueuedSubmissionSequence;
+                    await waitForAssistantIdle();
+                    if (queuedSubmissionId !== converseQueuedSubmissionSequence) return;
+                } else if (!text && !pendingAttachments.length) {
                     stopActiveGeneration();
                     return;
                 }
-                stopActiveGeneration('converse_interruption');
-                const queuedSubmissionId = ++converseQueuedSubmissionSequence;
-                await waitForAssistantIdle();
-                if (queuedSubmissionId !== converseQueuedSubmissionSequence) return;
             }
             if (text || pendingAttachments.length) {
                 if (handleLocalVoiceCommand(text, inputSource)) {
