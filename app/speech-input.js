@@ -340,12 +340,11 @@ export function createSpeechInputController(options = {}) {
                     }
                     globalThis.stopConverseSpeech?.('barge_in');
                     globalThis.stopActiveGeneration?.('converse_interruption');
-                    accumulatedTranscript = '';
+                    processing = false;
                     if (adaptiveTurnTimer) {
                         clearTimeout(adaptiveTurnTimer);
                         adaptiveTurnTimer = null;
                     }
-                    return;
                 }
 
                 let currentInterim = '';
@@ -902,7 +901,6 @@ export function installSpeechInputUI(options = {}) {
         async onFinal(text, event) {
             lastInterimText = '';
             const cleaned = cleanSpeechFillers(text);
-            globalThis.clearLiveSpeechTranscriptionOnScreen?.();
             input.value = '';
             delete input.dataset.inputSource;
 
@@ -917,8 +915,10 @@ export function installSpeechInputUI(options = {}) {
                     text: cleaned,
                     source: isConverse ? 'converse' : 'vtt',
                     preserveTranscript: true,
-                    interrupt: event.interrupt === true
+                    interrupt: isConverse || event.interrupt === true
                 });
+            } else {
+                globalThis.clearLiveSpeechTranscriptionOnScreen?.();
             }
         },
         onState(state) {
