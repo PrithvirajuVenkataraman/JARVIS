@@ -297,8 +297,6 @@ export function buildDynamicLocationSuiteHtml(data = {}) {
             </div>
 
             ${mapHtml}
-
-            ${amenitiesGridHtml}
         </div>
     `;
 }
