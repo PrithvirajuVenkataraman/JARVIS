@@ -218,8 +218,21 @@
         <div class="app-shell max-w-5xl mx-auto relative z-10 p-6">
             <!-- Header - Enhanced -->
             <div class="header-enhanced mb-6">
-                <h1 id="title" class="jarvis-top-title">JARVIS</h1>
-                <p id="subtitle" class="hidden"></p>
+                <div style="display:flex; justify-content:space-between; align-items:center; width:100%;">
+                    <div>
+                        <h1 id="title" class="jarvis-top-title">JARVIS</h1>
+                        <p id="subtitle" class="hidden"></p>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <button id="header-sos-btn" type="button" onclick="handleEmergencySosRequest('emergency sos')" style="background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.4); color:#fca5a5; padding:6px 14px; border-radius:999px; font-weight:700; font-size:12px; cursor:pointer; display:flex; align-items:center; gap:6px; transition:all 0.2s;" title="Satellite Emergency SOS">
+                            <span style="width:8px; height:8px; border-radius:50%; background:#ef4444; animation:pulse 1.2s infinite ease-in-out;"></span>
+                            <span>SOS</span>
+                        </button>
+                        <button id="header-sos-contact-btn" type="button" onclick="openEmergencyContactModal()" style="background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.18); color:#cbd5e1; padding:6px 12px; border-radius:999px; font-weight:600; font-size:12px; cursor:pointer;" title="Configure Emergency Contacts">
+                            <span>⚙️ SOS Contacts</span>
+                        </button>
+                    </div>
+                </div>
             </div>
 
             <!-- Main Content Area -->
@@ -465,14 +478,8 @@
                     <span id="converse-live-status-text">Listening (speak now)...</span>
                 </div>
                 <div class="converse-live-header-actions">
-                    <select id="converse-live-language" class="converse-live-lang-select" onchange="setVoiceInputLanguage(this.value)" aria-label="Select voice language">
-                        <option value="en-US">English (US)</option>
-                        <option value="en-IN">English (India)</option>
-                        <option value="kn-IN">Kannada (ಕನ್ನಡ)</option>
-                        <option value="ta-IN">Tamil (தமிழ்)</option>
-                        <option value="te-IN">Telugu (తెలుగు)</option>
-                        <option value="ml-IN">Malayalam (മലയാളം)</option>
-                        <option value="hi-IN">Hindi (हिन्दी)</option>
+                    <select id="converse-live-language" class="converse-live-lang-select" onchange="setVoiceInputLanguage('en-US')" aria-label="Select voice language">
+                        <option value="en-US" selected>English (en-US)</option>
                     </select>
                     <button type="button" id="converse-live-close-btn" class="converse-live-close-btn" onclick="togglePrimaryConverseMode()" title="Close Converse Mode" aria-label="Close Converse Mode">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
@@ -6349,6 +6356,9 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
         }
 
         async function togglePrimaryConverseMode() {
+            if (!window.JarvisSpeechInput && typeof window.initializeSpeechInput === 'function') {
+                window.initializeSpeechInput();
+            }
             const input = document.getElementById('text-input');
             if (input?.value?.trim()) {
                 void sendTextInput();
@@ -9467,16 +9477,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             return segments.slice(0, 8);
         }
 
-        function detectScriptLanguage(text) {
-            const str = String(text || '');
-            if (!str) return 'en-US';
-            if (/[\u0C80-\u0CFF]/.test(str)) return 'kn-IN'; // Kannada
-            if (/[\u0B80-\u0BFF]/.test(str)) return 'ta-IN'; // Tamil
-            if (/[\u0C00-\u0C7F]/.test(str)) return 'te-IN'; // Telugu
-            if (/[\u0D00-\u0D7F]/.test(str)) return 'ml-IN'; // Malayalam
-            if (/[\u0900-\u097F]/.test(str)) return 'hi-IN'; // Hindi
-            return 'en-US';
-        }
+        function detectScriptLanguage(text) { return 'en-US'; }
 
         function getBestVoiceForLanguage(lang = 'en-US') {
             if (!('speechSynthesis' in window)) return null;
@@ -9506,7 +9507,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
         function createConverseUtterance(spokenText, index, total, turnTelemetry = null) {
             const utterance = new SpeechSynthesisUtterance(spokenText);
             const text = String(spokenText || '').trim();
-            const lang = detectLanguageFromText(text) || 'en-US';
+            const lang = 'en-US';
             utterance.lang = lang;
             const voice = getBestVoiceForLanguage(lang);
             if (voice) {
@@ -20060,6 +20061,11 @@ function isWakeGreetingText(text) {
 
             const isWeatherQuery = isWeatherIntentText(lower);
 
+            if (isEmergencySosIntentText(lower)) {
+                await handleEmergencySosRequest(text);
+                return;
+            }
+
             if (isCurrentLocationIntentText(lower)) {
                 await handleCurrentLocationRequest(text);
                 return;
@@ -22341,33 +22347,53 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
             return location;
         }
         async function getCurrentPositionAsync(options = {}) {
-            if (!navigator.geolocation) {
-                throw new Error('Geolocation is not supported in this browser.');
-            }
-            try {
-                return await new Promise((resolve, reject) => {
-                    navigator.geolocation.getCurrentPosition(resolve, reject, {
-                        enableHighAccuracy: options.enableHighAccuracy !== false,
-                        timeout: options.timeout || 10000,
-                        maximumAge: options.maximumAge || 60000,
-                        ...options
+            // Layer 1: High-accuracy device GPS
+            if (navigator.geolocation) {
+                try {
+                    return await new Promise((resolve, reject) => {
+                        navigator.geolocation.getCurrentPosition(resolve, reject, {
+                            enableHighAccuracy: options.enableHighAccuracy !== false,
+                            timeout: options.timeout || 8000,
+                            maximumAge: options.maximumAge || 60000,
+                            ...options
+                        });
                     });
-                });
-            } catch (err) {
-                // If high-accuracy GPS timed out or failed, auto-fallback to network-based position
-                if (options.enableHighAccuracy !== false && err?.code === 3) {
+                } catch (err) {
+                    // Layer 2: Network-based low-accuracy GPS
                     try {
                         return await new Promise((resolve, reject) => {
                             navigator.geolocation.getCurrentPosition(resolve, reject, {
                                 enableHighAccuracy: false,
-                                timeout: (window.APP_CONFIG || APP_CONFIG).timeouts.geolocationMs,
-                                maximumAge: (window.APP_CONFIG || APP_CONFIG).timeouts.geolocationCacheMs
+                                timeout: 6000,
+                                maximumAge: 120000
                             });
                         });
                     } catch (_) {}
                 }
-                throw err;
             }
+
+            // Layer 3: Secure Online IP Geolocation Fallback
+            try {
+                const ipRes = await fetch('https://ipapi.co/json/', { signal: AbortSignal.timeout(4000) });
+                if (ipRes.ok) {
+                    const data = await ipRes.json();
+                    if (data && Number.isFinite(data.latitude) && Number.isFinite(data.longitude)) {
+                        return {
+                            coords: {
+                                latitude: data.latitude,
+                                longitude: data.longitude,
+                                accuracy: 2500
+                            },
+                            ipFallback: true,
+                            ipCity: data.city || '',
+                            ipRegion: data.region || '',
+                            ipCountry: data.country_name || ''
+                        };
+                    }
+                }
+            } catch (_) {}
+
+            throw new Error('Geolocation unavailable. Please allow location permissions in your browser.');
         }
 
         function calculateHaversineDistance(lat1, lon1, lat2, lon2) {
@@ -22618,7 +22644,6 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
                         </table>
                     </div>
                     ${mapHtml}
-                    ${amenitiesGridHtml}
                 </div>
             `;
         }
@@ -22647,13 +22672,12 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
                 };
 
                 // Parallel fetch: Reverse Geocoding + Live Weather + Nearby Amenities (ATMs, Hospitals, Police, Gas)
-                const [reverseResult, weatherResult, amenitiesResult] = await Promise.allSettled([
+                const [reverseResult, weatherResult] = await Promise.allSettled([
                     fetch(
                         `${(window.APP_CONFIG || APP_CONFIG).externalUrls.nominatimReverse}?lat=${lat}&lon=${lon}&format=json`,
                         { headers: { 'User-Agent': 'JARVISAssistant/1.0' }, signal: AbortSignal.timeout(4000) }
                     ).then(r => r.ok ? r.json() : null).catch(() => null),
-                    typeof suite.fetchLiveWeatherForCoords === 'function' ? suite.fetchLiveWeatherForCoords(lat, lon) : fetchLiveWeatherForCoords(lat, lon),
-                    typeof suite.fetchNearbyAmenities === 'function' ? suite.fetchNearbyAmenities(lat, lon) : fetchNearbyAmenities(lat, lon)
+                    typeof suite.fetchLiveWeatherForCoords === 'function' ? suite.fetchLiveWeatherForCoords(lat, lon) : fetchLiveWeatherForCoords(lat, lon)
                 ]);
 
                 const reverseData = reverseResult.status === 'fulfilled' ? reverseResult.value : null;
@@ -27605,5 +27629,28 @@ async function shareActiveChat() {
     exportActiveChatAsMarkdown();
 }
 </script>
+
+    <!-- Emergency SOS Contact Management Modal -->
+    <div id="sos-contact-modal" class="sos-contact-overlay" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; z-index:999998; align-items:center; justify-content:center; background:rgba(0,0,0,0.7); backdrop-filter:blur(8px);">
+        <div style="background:#0f172a; border:1px solid rgba(239,68,68,0.4); border-radius:18px; padding:24px; max-width:440px; width:90%; color:#f8fafc; font-family:inherit; box-shadow:0 0 40px rgba(0,0,0,0.8);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+                <h3 style="margin:0; font-size:17px; font-weight:800; color:#fca5a5;">🚨 Emergency Contacts (SOS)</h3>
+                <button type="button" onclick="closeEmergencyContactModal()" style="background:none; border:none; color:#94a3b8; font-size:18px; cursor:pointer;">✕</button>
+            </div>
+            <p style="margin:0 0 16px; font-size:12px; color:#94a3b8; line-height:1.4;">
+                When you trigger Satellite SOS, your precision coordinates, battery level, and maps link will be pre-filled to this contact.
+            </p>
+            <div id="sos-contacts-list-container" style="margin-bottom:16px;"></div>
+            <form id="sos-add-contact-form" onsubmit="handleSaveEmergencyContactForm(event)" style="display:flex; flex-direction:column; gap:10px;">
+                <input type="text" id="sos-input-name" placeholder="Contact Name (e.g. Mom, Partner)" required style="background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.18); border-radius:8px; padding:10px 12px; color:#fff; font-size:13px;">
+                <input type="tel" id="sos-input-phone" placeholder="Phone Number (e.g. +91 9876543210)" required style="background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.18); border-radius:8px; padding:10px 12px; color:#fff; font-size:13px;">
+                <input type="text" id="sos-input-relation" placeholder="Relationship (optional, e.g. Sister)" style="background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.18); border-radius:8px; padding:10px 12px; color:#fff; font-size:13px;">
+                <button type="submit" style="background:#dc2626; color:#fff; border:none; border-radius:8px; padding:10px 14px; font-weight:700; font-size:13px; cursor:pointer; margin-top:4px;">
+                    Save Emergency Contact
+                </button>
+            </form>
+        </div>
+    </div>
+
 </body>
 </html>
