@@ -1154,7 +1154,7 @@ export async function runVerifiedWebSearch(query, options = {}) {
 
 export async function runEvidenceFirstWebRag(query, options = {}) {
     const totalStart = performance.now();
-    const FAST_PATH_BUDGET_MS = 8_000;
+    const FAST_PATH_BUDGET_MS = 3_500;
     const timing = {
         intentMs: 0,
         planningMs: 0,
