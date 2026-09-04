@@ -5,7 +5,7 @@
  * universal entity grammar, and zero static exemplar question tables.
  */
 
-import { extractEntityTarget, classifyUniversalEntityIntent as classifyBackendEntityIntent } from '../api/_lib/entity-verifier.js';
+import { extractEntityTarget, classifyUniversalEntityIntent as classifyBackendEntityIntent } from './entity-verifier.js';
 import { callLLM } from './api-client.js';
 
 class FastLRU {
