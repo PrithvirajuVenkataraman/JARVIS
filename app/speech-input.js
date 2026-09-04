@@ -1082,6 +1082,32 @@ export function installSpeechInputUI(options = {}) {
             globalThis.unlockConverseSpeechFromGesture?.();
         }
         const toggled = await rawToggleConverse();
+        // If converse has just been enabled, speak a random greeting
+        if (!wasConverseEnabled && toggled) {
+            // Cancel any ongoing speech synthesis
+            if (globalThis.speechSynthesis?.speaking) {
+                try { globalThis.speechSynthesis.cancel(); } catch (_) {}
+            }
+            const greetings = [
+                "Hey, happy to help!",
+                "Hi there! I'm ready to assist you.",
+                "Hello! How can I help you today?",
+                "Greetings! Let me know what you need.",
+                "Welcome! Ask me anything.",
+                "Hi! I'm here for you.",
+                "Hey! Ready when you are.",
+                "Hello! What can I do for you?",
+                "Hey there! How can I assist?",
+                "Hi! Let’s get started."
+            ];
+            const msg = greetings[Math.floor(Math.random() * greetings.length)];
+            try {
+                const utter = new SpeechSynthesisUtterance(msg);
+                // Preserve the current language if set
+                if (typeof language === 'string') utter.lang = language;
+                globalThis.speechSynthesis?.speak(utter);
+            } catch (_) {}
+        }
         if (wasConverseEnabled) {
             globalThis.stopActiveGeneration?.('converse_stop');
             if (globalThis.speechSynthesis?.speaking) {
