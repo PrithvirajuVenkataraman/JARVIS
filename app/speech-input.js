@@ -607,54 +607,6 @@ export function createSpeechInputController(options = {}) {
             mode = 'dictation';
         }
 
-  // Helper to ensure SpeechSynthesis permission is granted
-function ensureSpeechSynthesisPermission() {
-  return new Promise((resolve, reject) => {
-    if (!globalThis.speechSynthesis) {
-      return reject(new Error('SpeechSynthesis not supported'));
-    }
-    // Permissions API may not be available in all browsers
-    if (navigator.permissions && navigator.permissions.query) {
-      navigator.permissions.query({ name: 'speech-synthesis' }).then(result => {
-        if (result.state === 'granted') {
-          resolve();
-        } else if (result.state === 'prompt') {
-          // Attempt to speak a silent utterance to trigger prompt
-          const temp = new SpeechSynthesisUtterance('');
-          globalThis.speechSynthesis.speak(temp);
-          // Wait for a short time then resolve (user may have granted)
-          setTimeout(() => resolve(), 500);
-        } else {
-          reject(new Error('SpeechSynthesis permission denied'));
-        }
-      }).catch(() => {
-        // If permissions API fails, assume permission is OK (browser will prompt on speak)
-        resolve();
-      });
-    } else {
-      // No permissions API – rely on browser prompt when speaking
-      resolve();
-    }
-  });
-}
-
-// Simple toast implementation for error messages
-function showErrorToast(message) {
-  try {
-    const toast = document.createElement('div');
-    toast.setAttribute('role', 'alert');
-    toast.className = 'error-toast';
-    toast.textContent = message;
-    document.body.appendChild(toast);
-    // Auto remove after configured duration
-    const duration = (config && config.toastDurationMs) || 2400;
-    setTimeout(() => {
-      toast.remove();
-    }, duration);
-  } catch (e) {
-    console.error('Failed to show error toast', e);
-  }
-}
         if (whisperRecorder.isSupported()) {
             fallbackMode = false;
             const started = await whisperRecorder.start(language);
@@ -970,6 +922,63 @@ export function createAudioVisualizer(containerEl) {
 }
 
 /**
+ * Ensures SpeechSynthesis permission is granted before speaking.
+ * Falls back gracefully when the Permissions API is unavailable (e.g. Safari).
+ * @returns {Promise<void>} Resolves when permission is available, rejects on denial.
+ */
+function ensureSpeechSynthesisPermission() {
+    return new Promise((resolve, reject) => {
+        if (!globalThis.speechSynthesis) {
+            return reject(new Error('SpeechSynthesis not supported in this browser.'));
+        }
+        // Permissions API may not be available in all browsers (Safari, older Firefox)
+        if (typeof navigator !== 'undefined' && navigator.permissions && typeof navigator.permissions.query === 'function') {
+            navigator.permissions.query({ name: 'speech-synthesis' }).then(result => {
+                if (result.state === 'granted') {
+                    resolve();
+                } else if (result.state === 'prompt') {
+                    // Trigger the browser permission prompt with a silent utterance
+                    const temp = new SpeechSynthesisUtterance('');
+                    globalThis.speechSynthesis.speak(temp);
+                    setTimeout(() => resolve(), 500);
+                } else {
+                    reject(new Error('SpeechSynthesis permission denied.'));
+                }
+            }).catch(() => {
+                // If the permissions API rejects (e.g. unrecognised name), assume OK
+                console.warn('[Converse] Permissions API query failed; falling back to direct speak.');
+                resolve();
+            });
+        } else {
+            // No Permissions API – rely on the browser prompting on speak()
+            console.warn('[Converse] Permissions API unavailable; skipping pre-check.');
+            resolve();
+        }
+    });
+}
+
+/**
+ * Shows a lightweight error toast message in the UI.
+ * @param {string} message - The error text to display.
+ */
+function showErrorToast(message) {
+    try {
+        const toast = document.createElement('div');
+        toast.setAttribute('role', 'alert');
+        toast.className = 'error-toast';
+        toast.textContent = message;
+        document.body.appendChild(toast);
+        // Auto-remove after configured duration (falls back to 2400 ms)
+        const duration = (typeof config !== 'undefined' && config?.toastDurationMs) || 2400;
+        setTimeout(() => {
+            try { toast.remove(); } catch (_) {}
+        }, duration);
+    } catch (e) {
+        console.error('[Converse] Failed to show error toast:', e);
+    }
+}
+
+/**
  * Attaches the speech input controller to DOM UI elements.
  */
 export function installSpeechInputUI(options = {}) {
@@ -1182,7 +1191,6 @@ export function installSpeechInputUI(options = {}) {
             if (globalThis.speechSynthesis?.speaking) {
                 try { globalThis.speechSynthesis.cancel(); } catch {}
             }
-        }
         }
         return toggled;
     };
