@@ -6786,7 +6786,7 @@ body:not(.dark) .assistant-followup-chip:hover {
     position: fixed;
     bottom: 84px;
     left: 50%;
-    transform: translateX(-50%);
+    transform: translateX(-50%); 
     background: rgba(24, 24, 27, 0.95);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
