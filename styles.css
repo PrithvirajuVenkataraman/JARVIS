@@ -6729,7 +6729,7 @@ body:not(.dark) .assistant-followup-chip:hover {
 .thinking-step.active {
   font-weight: bold;
 }
-.thinking-step.completed {
+.thinking-step.completed { 
   opacity: 0.5;
   text-decoration: line-through;
 }
