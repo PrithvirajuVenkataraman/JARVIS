@@ -1160,7 +1160,7 @@ export function installSpeechInputUI(options = {}) {
                         "Hey! Ready when you are.",
                         "Hello! What can I do for you?",
                         "Hey there! How can I assist?",
-                        "Hi! Let’s get started."
+                        "Hi! Let's get started."
                     ];
                     const msg = greetings[Math.floor(Math.random() * greetings.length)];
                     try {
