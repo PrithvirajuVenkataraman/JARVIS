@@ -1123,7 +1123,7 @@ export function installSpeechInputUI(options = {}) {
     globalThis.syncVttUiState = () => controller.getState();
     globalThis.setVoiceInputLanguage = language => controller.setLanguage(language);
 
-    vttButton.addEventListener('click', globalThis.toggleVoiceToText);
+    vttButton.addEventListener('click', globalThis.toggleConverseMode);
     globalThis.addEventListener?.('jarvis:assistant-processing', event => {
         controller.setProcessing(Boolean(event.detail?.active));
     });
