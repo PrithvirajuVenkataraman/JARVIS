@@ -163,7 +163,7 @@ export function createWhisperRecorder(options = {}) {
 
                 // Barge-in check: if user speaks while assistant is speaking, halt speech
                 if (avgVolume > 14) {
-                    if (globalThis.speechSynthesis?.speaking || globalThis.isConverseSpeechActive?.()) {
+                    if ((globalThis.speechSynthesis?.speaking && !globalThis.__isConverseGreetingSpeaking) || globalThis.isConverseSpeechActive?.()) {
                         try { globalThis.speechSynthesis?.cancel?.(); } catch (_) {}
                         globalThis.stopConverseSpeech?.('barge_in');
                         globalThis.stopActiveGeneration?.('barge_in');
@@ -405,9 +405,12 @@ export function createSpeechInputController(options = {}) {
             r.maxAlternatives = 1;
 
             r.onresult = event => {
-                const isSpeaking = Boolean(globalThis.speechSynthesis?.speaking || globalThis.isConverseSpeechActive?.());
+                const isSpeaking = Boolean(
+                    (globalThis.speechSynthesis?.speaking && !globalThis.__isConverseGreetingSpeaking) ||
+                    globalThis.isConverseSpeechActive?.()
+                );
                 if (isSpeaking || processing) {
-                    if (globalThis.speechSynthesis?.speaking) {
+                    if (globalThis.speechSynthesis?.speaking && !globalThis.__isConverseGreetingSpeaking) {
                         try { globalThis.speechSynthesis.cancel(); } catch (_) {}
                     }
                     globalThis.stopConverseSpeech?.('barge_in');
@@ -607,15 +610,14 @@ export function createSpeechInputController(options = {}) {
             mode = 'dictation';
         }
 
-        if (whisperRecorder.isSupported()) {
+        // Primary STT: Native Browser Web Speech API (low latency, streaming, works locally)
+        // Fallback STT: Serverless MediaRecorder -> /api/stt (Whisper)
+        if (Recognition) {
             fallbackMode = false;
-            const started = await whisperRecorder.start(language);
-            if (!started && Recognition) {
-                fallbackMode = true;
-                startBrowserRecognition();
-            }
-        } else if (Recognition) {
             startBrowserRecognition();
+        } else if (whisperRecorder.isSupported()) {
+            fallbackMode = true;
+            await whisperRecorder.start(language);
         }
         emitState();
         return true;
@@ -922,39 +924,33 @@ export function createAudioVisualizer(containerEl) {
 }
 
 /**
- * Ensures SpeechSynthesis permission is granted before speaking.
- * Falls back gracefully when the Permissions API is unavailable (e.g. Safari).
- * @returns {Promise<void>} Resolves when permission is available, rejects on denial.
+ * Ensures SpeechSynthesis permission/support is verified before speaking.
+ * @returns {Promise<void>} Resolves when speech synthesis is ready.
  */
 function ensureSpeechSynthesisPermission() {
     return new Promise((resolve, reject) => {
         if (!globalThis.speechSynthesis) {
             return reject(new Error('SpeechSynthesis not supported in this browser.'));
         }
-        // Permissions API may not be available in all browsers (Safari, older Firefox)
-        if (typeof navigator !== 'undefined' && navigator.permissions && typeof navigator.permissions.query === 'function') {
-            navigator.permissions.query({ name: 'speech-synthesis' }).then(result => {
-                if (result.state === 'granted') {
-                    resolve();
-                } else if (result.state === 'prompt') {
-                    // Trigger the browser permission prompt with a silent utterance
-                    const temp = new SpeechSynthesisUtterance('');
-                    globalThis.speechSynthesis.speak(temp);
-                    setTimeout(() => resolve(), 500);
-                } else {
-                    reject(new Error('SpeechSynthesis permission denied.'));
-                }
-            }).catch(() => {
-                // If the permissions API rejects (e.g. unrecognised name), assume OK
-                console.warn('[Converse] Permissions API query failed; falling back to direct speak.');
-                resolve();
-            });
-        } else {
-            // No Permissions API – rely on the browser prompting on speak()
-            console.warn('[Converse] Permissions API unavailable; skipping pre-check.');
-            resolve();
-        }
+        resolve();
     });
+}
+
+/**
+ * Checks microphone permission using standard Permissions API when available.
+ * @returns {Promise<boolean>} Resolves to true if access is allowed or unprompted.
+ */
+async function ensureMicrophonePermission() {
+    if (typeof navigator !== 'undefined' && navigator.permissions && typeof navigator.permissions.query === 'function') {
+        try {
+            const status = await navigator.permissions.query({ name: 'microphone' });
+            if (status.state === 'denied') {
+                showErrorToast('Microphone access is denied. Please allow microphone in browser settings.');
+                return false;
+            }
+        } catch (_) {}
+    }
+    return true;
 }
 
 /**
@@ -1134,17 +1130,11 @@ export function installSpeechInputUI(options = {}) {
         input.value = '';
         delete input.dataset.inputSource;
         options.onComposerChanged?.();
-        if (!wasConverseEnabled) {
-            globalThis.unlockConverseSpeechFromGesture?.();
-        }
-        const toggled = await rawToggleConverse();
-        // Update UI ARIA attribute for the VTT button
-        if (typeof vttButton !== 'undefined') {
-            vttButton.setAttribute('aria-pressed', (!wasConverseEnabled && toggled) ? 'true' : 'false');
-        }
+
+        const willEnable = !wasConverseEnabled;
+
         // If converse has just been enabled, speak a random greeting after ensuring permission
-        if (!wasConverseEnabled && toggled) {
-            // Cancel any ongoing speech synthesis
+        if (willEnable) {
             if (globalThis.speechSynthesis?.speaking) {
                 try { globalThis.speechSynthesis.cancel(); } catch (_) {}
             }
@@ -1165,28 +1155,39 @@ export function installSpeechInputUI(options = {}) {
                     const msg = greetings[Math.floor(Math.random() * greetings.length)];
                     try {
                         const utter = new SpeechSynthesisUtterance(msg);
-                        if (typeof language === 'string') utter.lang = language;
+                        const lang = controller.getState().language || 'en-US';
+                        utter.lang = lang;
+                        globalThis.__isConverseGreetingSpeaking = true;
+                        utter.onstart = () => { globalThis.__isConverseGreetingSpeaking = true; };
+                        utter.onend = () => { globalThis.__isConverseGreetingSpeaking = false; };
+                        utter.onerror = () => { globalThis.__isConverseGreetingSpeaking = false; };
                         globalThis.speechSynthesis?.speak(utter);
                     } catch (e) {
+                        globalThis.__isConverseGreetingSpeaking = false;
                         showErrorToast('Failed to speak greeting: ' + e.message);
                     }
                 })
                 .catch(err => {
-                    // Permission denied or other error – show toast
+                    globalThis.__isConverseGreetingSpeaking = false;
                     showErrorToast(err.message);
                 });
         }
-        // Update VTT button visual state for Converse mode
-        if (typeof vttButton !== 'undefined') {
-            vttButton.classList.toggle('is-converse-active', !wasConverseEnabled && toggled);
+
+        const toggled = await rawToggleConverse();
+
+        // Update visual active state on both VTT button and primary Converse button
+        const isNowConverse = Boolean(toggled);
+        if (typeof vttButton !== 'undefined' && vttButton) {
+            vttButton.classList.toggle('is-converse-active', isNowConverse);
+            vttButton.setAttribute('aria-pressed', isNowConverse ? 'true' : 'false');
         }
+        if (typeof sendBtn !== 'undefined' && sendBtn) {
+            sendBtn.classList.toggle('is-converse-active', isNowConverse);
+            sendBtn.setAttribute('aria-pressed', isNowConverse ? 'true' : 'false');
+        }
+
         if (wasConverseEnabled && !toggled) {
-            // Converse just got turned off – ensure class is removed
-            if (typeof vttButton !== 'undefined') {
-                vttButton.classList.toggle('is-converse-active', false);
-            }
-        }
-        if (wasConverseEnabled) {
+            globalThis.__isConverseGreetingSpeaking = false;
             globalThis.stopActiveGeneration?.('converse_stop');
             if (globalThis.speechSynthesis?.speaking) {
                 try { globalThis.speechSynthesis.cancel(); } catch {}
@@ -1201,7 +1202,8 @@ export function installSpeechInputUI(options = {}) {
     globalThis.syncVttUiState = () => controller.getState();
     globalThis.setVoiceInputLanguage = language => controller.setLanguage(language);
 
-    vttButton.addEventListener('click', globalThis.toggleConverseMode);
+    // VTT button toggles dictation (Voice-to-Text)
+    vttButton.addEventListener('click', globalThis.toggleVoiceToText);
     globalThis.addEventListener?.('jarvis:assistant-processing', event => {
         controller.setProcessing(Boolean(event.detail?.active));
     });
