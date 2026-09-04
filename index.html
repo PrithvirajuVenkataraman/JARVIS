@@ -218,21 +218,8 @@
         <div class="app-shell max-w-5xl mx-auto relative z-10 p-6">
             <!-- Header - Enhanced -->
             <div class="header-enhanced mb-6">
-                <div style="display:flex; justify-content:space-between; align-items:center; width:100%;">
-                    <div>
-                        <h1 id="title" class="jarvis-top-title">JARVIS</h1>
-                        <p id="subtitle" class="hidden"></p>
-                    </div>
-                    <div style="display:flex; align-items:center; gap:8px;">
-                        <button id="header-sos-btn" type="button" onclick="handleEmergencySosRequest('emergency sos')" style="background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.4); color:#fca5a5; padding:6px 14px; border-radius:999px; font-weight:700; font-size:12px; cursor:pointer; display:flex; align-items:center; gap:6px; transition:all 0.2s;" title="Satellite Emergency SOS">
-                            <span style="width:8px; height:8px; border-radius:50%; background:#ef4444; animation:pulse 1.2s infinite ease-in-out;"></span>
-                            <span>SOS</span>
-                        </button>
-                        <button id="header-sos-contact-btn" type="button" onclick="openEmergencyContactModal()" style="background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.18); color:#cbd5e1; padding:6px 12px; border-radius:999px; font-weight:600; font-size:12px; cursor:pointer;" title="Configure Emergency Contacts">
-                            <span>⚙️ SOS Contacts</span>
-                        </button>
-                    </div>
-                </div>
+                <h1 id="title" class="jarvis-top-title">JARVIS</h1>
+                <p id="subtitle" class="hidden"></p>
             </div>
 
             <!-- Main Content Area -->
@@ -571,7 +558,7 @@ const APP_CONFIG = Object.freeze({
         defaultFetchMs: 25000,
         weakRetryMs: 18000,
         multimodalMs: 45000,
-        verificationBudgetMs: 8000,
+        verificationBudgetMs: 3500,
         verificationSearchMs: 5500,
         verificationExtractMs: 3000,
         thinkingCeilingMs: 10000,
@@ -580,7 +567,7 @@ const APP_CONFIG = Object.freeze({
         visionContextTtlMs: 600000,
         multimodalContextTtlMs: 1200000,
         assistantRecoveryMs: 20000,
-        summaryTimeoutMs: 4500,
+        summaryTimeoutMs: 3000,
         objectUrlRevokeMs: 1500,
         toastFadeMs: 300,
         toastDurationMs: 2400,
@@ -22347,24 +22334,24 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
             return location;
         }
         async function getCurrentPositionAsync(options = {}) {
-            // Layer 1: High-accuracy device GPS
+            // Layer 1: High-accuracy device GPS with FAST 1.5s timeout
             if (navigator.geolocation) {
                 try {
                     return await new Promise((resolve, reject) => {
                         navigator.geolocation.getCurrentPosition(resolve, reject, {
                             enableHighAccuracy: options.enableHighAccuracy !== false,
-                            timeout: options.timeout || 8000,
+                            timeout: options.timeout || 1500,
                             maximumAge: options.maximumAge || 60000,
                             ...options
                         });
                     });
                 } catch (err) {
-                    // Layer 2: Network-based low-accuracy GPS
+                    // Layer 2: Network-based GPS with fast 1.0s timeout
                     try {
                         return await new Promise((resolve, reject) => {
                             navigator.geolocation.getCurrentPosition(resolve, reject, {
                                 enableHighAccuracy: false,
-                                timeout: 6000,
+                                timeout: 1000,
                                 maximumAge: 120000
                             });
                         });
@@ -22372,9 +22359,9 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
                 }
             }
 
-            // Layer 3: Secure Online IP Geolocation Fallback
+            // Layer 3: Instant Online IP Geolocation Fallback (fast 2.0s timeout)
             try {
-                const ipRes = await fetch('https://ipapi.co/json/', { signal: AbortSignal.timeout(4000) });
+                const ipRes = await fetch('https://ipapi.co/json/', { signal: AbortSignal.timeout(2000) });
                 if (ipRes.ok) {
                     const data = await ipRes.json();
                     if (data && Number.isFinite(data.latitude) && Number.isFinite(data.longitude)) {
@@ -22393,7 +22380,7 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
                 }
             } catch (_) {}
 
-            throw new Error('Geolocation unavailable. Please allow location permissions in your browser.');
+            throw new Error('Geolocation unavailable.');
         }
 
         function calculateHaversineDistance(lat1, lon1, lat2, lon2) {
