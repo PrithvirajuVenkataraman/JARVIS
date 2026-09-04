@@ -1167,11 +1167,22 @@ export function installSpeechInputUI(options = {}) {
                     showErrorToast(err.message);
                 });
         }
+        // Update VTT button visual state for Converse mode
+        if (typeof vttButton !== 'undefined') {
+            vttButton.classList.toggle('is-converse-active', !wasConverseEnabled && toggled);
+        }
+        if (wasConverseEnabled && !toggled) {
+            // Converse just got turned off – ensure class is removed
+            if (typeof vttButton !== 'undefined') {
+                vttButton.classList.toggle('is-converse-active', false);
+            }
+        }
         if (wasConverseEnabled) {
             globalThis.stopActiveGeneration?.('converse_stop');
             if (globalThis.speechSynthesis?.speaking) {
                 try { globalThis.speechSynthesis.cancel(); } catch {}
             }
+        }
         }
         return toggled;
     };
