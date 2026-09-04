@@ -86,35 +86,14 @@ export function cleanSpeechFillers(text = '') {
 }
 
 export function normalizeVoiceInputLanguage(language = '') {
-    const value = String(language || '').trim();
-    const supported = ['en-US', 'en-IN', 'ta-IN', 'te-IN', 'kn-IN', 'hi-IN'];
-    if (supported.includes(value)) return value;
-    const lower = value.toLowerCase();
-    if (lower.startsWith('ta')) return 'ta-IN';
-    if (lower.startsWith('te')) return 'te-IN';
-    if (lower.startsWith('kn')) return 'kn-IN';
-    if (lower.startsWith('hi')) return 'hi-IN';
     return 'en-US';
 }
 
 export function detectSpokenLanguage(text = '') {
-    const s = String(text || '').trim();
-    if (!s) return null;
-    if (/[\u0B80-\u0BFF]/.test(s)) return 'ta-IN';
-    if (/[\u0C00-\u0C7F]/.test(s)) return 'te-IN';
-    if (/[\u0C80-\u0CFF]/.test(s)) return 'kn-IN';
-    if (/[\u0900-\u097F]/.test(s)) return 'hi-IN';
-    return null;
+    return 'en-US';
 }
 
 export function detectLanguageSwitchCommand(text = '') {
-    const s = String(text || '').toLowerCase().trim();
-    if (!s) return null;
-    if (/\b(?:switch|change|set|speak|talk)\s+(?:in|to|(?:the\s+)?language\s+to)\s+tamil\b/i.test(s) || /தமிழில்\s+பேசு|தமிழுக்கு\s+மாற்று/i.test(s)) return 'ta-IN';
-    if (/\b(?:switch|change|set|speak|talk)\s+(?:in|to|(?:the\s+)?language\s+to)\s+telugu\b/i.test(s) || /தெலுங்கில்\s+பேசு|తెలుగులో\s+మాట్లాడు/i.test(s)) return 'te-IN';
-    if (/\b(?:switch|change|set|speak|talk)\s+(?:in|to|(?:the\s+)?language\s+to)\s+kannada\b/i.test(s) || /கன்னடத்தில்\s+பேசு|ಕನ್ನಡದಲ್ಲಿ\s+ಮಾತನಾಡು/i.test(s)) return 'kn-IN';
-    if (/\b(?:switch|change|set|speak|talk)\s+(?:in|to|(?:the\s+)?language\s+to)\s+hindi\b/i.test(s) || /இந்தியில்\s+பேசு|हिंदी\s+में\s+बोलो/i.test(s)) return 'hi-IN';
-    if (/\b(?:switch|change|set|speak|talk)\s+(?:in|to|(?:the\s+)?language\s+to)\s+english\b/i.test(s) || /ஆங்கிலத்தில்\s+பேசு|ஆங்கிலத்திற்கு\s+மாற்று/i.test(s)) return 'en-US';
     return null;
 }
 
@@ -126,12 +105,30 @@ export function createWhisperRecorder(options = {}) {
     let mediaRecorder = null;
     let audioChunks = [];
     let isRecording = false;
+    let audioCtx = null;
+    let analyser = null;
+    let silenceTimer = null;
+    let speechDetected = false;
+    let volumeMonitorInterval = null;
 
     const onTranscribed = options.onTranscribed || (() => {});
     const onError = options.onError || (() => {});
     const onState = options.onState || (() => {});
 
     function releaseStreamTracks() {
+        if (volumeMonitorInterval) {
+            clearInterval(volumeMonitorInterval);
+            volumeMonitorInterval = null;
+        }
+        if (silenceTimer) {
+            clearTimeout(silenceTimer);
+            silenceTimer = null;
+        }
+        if (audioCtx) {
+            try { audioCtx.close(); } catch (_) {}
+            audioCtx = null;
+            analyser = null;
+        }
         if (mediaStream) {
             try {
                 mediaStream.getTracks().forEach(t => t.stop());
@@ -142,6 +139,54 @@ export function createWhisperRecorder(options = {}) {
 
     function isSupported() {
         return Boolean(typeof navigator !== 'undefined' && navigator?.mediaDevices?.getUserMedia && typeof MediaRecorder !== 'undefined');
+    }
+
+    function setupAudioAnalyser(stream) {
+        try {
+            const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+            if (!AudioContextClass) return;
+            audioCtx = new AudioContextClass();
+            analyser = audioCtx.createAnalyser();
+            analyser.fftSize = 256;
+            const source = audioCtx.createMediaStreamSource(stream);
+            source.connect(analyser);
+
+            const buffer = new Uint8Array(analyser.frequencyBinCount);
+            speechDetected = false;
+
+            volumeMonitorInterval = setInterval(() => {
+                if (!isRecording || !analyser) return;
+                analyser.getByteFrequencyData(buffer);
+                let sum = 0;
+                for (let i = 0; i < buffer.length; i++) sum += buffer[i];
+                const avgVolume = sum / buffer.length;
+
+                // Barge-in check: if user speaks while assistant is speaking, halt speech
+                if (avgVolume > 14) {
+                    if (globalThis.speechSynthesis?.speaking || globalThis.isConverseSpeechActive?.()) {
+                        try { globalThis.speechSynthesis?.cancel?.(); } catch (_) {}
+                        globalThis.stopConverseSpeech?.('barge_in');
+                        globalThis.stopActiveGeneration?.('barge_in');
+                    }
+                    speechDetected = true;
+                    if (silenceTimer) {
+                        clearTimeout(silenceTimer);
+                        silenceTimer = null;
+                    }
+                } else if (speechDetected && avgVolume <= 8) {
+                    // Speech was occurring, now silence detected -> natural pause
+                    if (!silenceTimer) {
+                        silenceTimer = setTimeout(() => {
+                            silenceTimer = null;
+                            speechDetected = false;
+                            if (isRecording && mediaRecorder && mediaRecorder.state === 'recording') {
+                                try { mediaRecorder.stop(); } catch (_) {}
+                            }
+                        }, 850);
+                    }
+                }
+            }, 60);
+        } catch (_) {}
     }
 
     async function start(language = 'en-US') {
@@ -166,6 +211,8 @@ export function createWhisperRecorder(options = {}) {
                 });
             }
 
+            setupAudioAnalyser(mediaStream);
+
             const mimeTypes = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus', 'audio/wav'];
             const chosenMime = mimeTypes.find(t => typeof MediaRecorder.isTypeSupported === 'function' && MediaRecorder.isTypeSupported(t)) || '';
 
@@ -179,6 +226,15 @@ export function createWhisperRecorder(options = {}) {
             mediaRecorder.onstop = async () => {
                 isRecording = false;
                 onState({ recording: false, processing: true });
+                if (volumeMonitorInterval) {
+                    clearInterval(volumeMonitorInterval);
+                    volumeMonitorInterval = null;
+                }
+                if (silenceTimer) {
+                    clearTimeout(silenceTimer);
+                    silenceTimer = null;
+                }
+
                 if (audioChunks.length === 0) {
                     onState({ recording: false, processing: false });
                     return;
@@ -237,6 +293,14 @@ export function createWhisperRecorder(options = {}) {
 
     function stop(options = {}) {
         const keepStream = options.keepStream === true;
+        if (volumeMonitorInterval) {
+            clearInterval(volumeMonitorInterval);
+            volumeMonitorInterval = null;
+        }
+        if (silenceTimer) {
+            clearTimeout(silenceTimer);
+            silenceTimer = null;
+        }
         if (mediaRecorder && mediaRecorder.state !== 'inactive') {
             try { mediaRecorder.stop(); } catch {}
         }
@@ -254,6 +318,14 @@ export function createWhisperRecorder(options = {}) {
 
     function cancel() {
         audioChunks = [];
+        if (volumeMonitorInterval) {
+            clearInterval(volumeMonitorInterval);
+            volumeMonitorInterval = null;
+        }
+        if (silenceTimer) {
+            clearTimeout(silenceTimer);
+            silenceTimer = null;
+        }
         if (mediaRecorder && mediaRecorder.state !== 'inactive') {
             try { mediaRecorder.stop(); } catch {}
         }
@@ -458,16 +530,22 @@ export function createSpeechInputController(options = {}) {
     function startBrowserRecognition() {
         if (explicitlyStopped && !converseEnabled && mode !== 'dictation') return;
         if (browserRecognition) {
-            try {
-                browserRecognition.start();
-                return;
-            } catch (err) {
-                browserRecognition = null;
-            }
+            try { browserRecognition.abort(); } catch (_) {}
+            browserRecognition = null;
         }
         browserRecognition = initBrowserRecognition();
         if (browserRecognition) {
-            try { browserRecognition.start(); } catch (_) {}
+            try {
+                browserRecognition.start();
+            } catch (err) {
+                browserRecognition = null;
+                if (whisperRecorder.isSupported() && !fallbackMode) {
+                    fallbackMode = true;
+                    whisperRecorder.start(language);
+                } else {
+                    callbacks.onError('Microphone access is needed for Converse Mode.');
+                }
+            }
         }
     }
 
@@ -529,15 +607,16 @@ export function createSpeechInputController(options = {}) {
             mode = 'dictation';
         }
 
-        if (Recognition) {
+        // Pure Whisper STT Priority: use Whisper backend directly for accurate English speech capture
+        if (whisperRecorder.isSupported()) {
             fallbackMode = false;
-            startBrowserRecognition();
-        } else {
             const started = await whisperRecorder.start(language);
             if (!started && Recognition) {
                 fallbackMode = true;
                 startBrowserRecognition();
             }
+        } else if (Recognition) {
+            startBrowserRecognition();
         }
         emitState();
         return true;
