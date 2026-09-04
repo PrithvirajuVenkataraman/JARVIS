@@ -607,7 +607,54 @@ export function createSpeechInputController(options = {}) {
             mode = 'dictation';
         }
 
-        // Pure Whisper STT Priority: use Whisper backend directly for accurate English speech capture
+  // Helper to ensure SpeechSynthesis permission is granted
+function ensureSpeechSynthesisPermission() {
+  return new Promise((resolve, reject) => {
+    if (!globalThis.speechSynthesis) {
+      return reject(new Error('SpeechSynthesis not supported'));
+    }
+    // Permissions API may not be available in all browsers
+    if (navigator.permissions && navigator.permissions.query) {
+      navigator.permissions.query({ name: 'speech-synthesis' }).then(result => {
+        if (result.state === 'granted') {
+          resolve();
+        } else if (result.state === 'prompt') {
+          // Attempt to speak a silent utterance to trigger prompt
+          const temp = new SpeechSynthesisUtterance('');
+          globalThis.speechSynthesis.speak(temp);
+          // Wait for a short time then resolve (user may have granted)
+          setTimeout(() => resolve(), 500);
+        } else {
+          reject(new Error('SpeechSynthesis permission denied'));
+        }
+      }).catch(() => {
+        // If permissions API fails, assume permission is OK (browser will prompt on speak)
+        resolve();
+      });
+    } else {
+      // No permissions API – rely on browser prompt when speaking
+      resolve();
+    }
+  });
+}
+
+// Simple toast implementation for error messages
+function showErrorToast(message) {
+  try {
+    const toast = document.createElement('div');
+    toast.setAttribute('role', 'alert');
+    toast.className = 'error-toast';
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    // Auto remove after configured duration
+    const duration = (config && config.toastDurationMs) || 2400;
+    setTimeout(() => {
+      toast.remove();
+    }, duration);
+  } catch (e) {
+    console.error('Failed to show error toast', e);
+  }
+}
         if (whisperRecorder.isSupported()) {
             fallbackMode = false;
             const started = await whisperRecorder.start(language);
@@ -1082,31 +1129,43 @@ export function installSpeechInputUI(options = {}) {
             globalThis.unlockConverseSpeechFromGesture?.();
         }
         const toggled = await rawToggleConverse();
-        // If converse has just been enabled, speak a random greeting
+        // Update UI ARIA attribute for the VTT button
+        if (typeof vttButton !== 'undefined') {
+            vttButton.setAttribute('aria-pressed', (!wasConverseEnabled && toggled) ? 'true' : 'false');
+        }
+        // If converse has just been enabled, speak a random greeting after ensuring permission
         if (!wasConverseEnabled && toggled) {
             // Cancel any ongoing speech synthesis
             if (globalThis.speechSynthesis?.speaking) {
                 try { globalThis.speechSynthesis.cancel(); } catch (_) {}
             }
-            const greetings = [
-                "Hey, happy to help!",
-                "Hi there! I'm ready to assist you.",
-                "Hello! How can I help you today?",
-                "Greetings! Let me know what you need.",
-                "Welcome! Ask me anything.",
-                "Hi! I'm here for you.",
-                "Hey! Ready when you are.",
-                "Hello! What can I do for you?",
-                "Hey there! How can I assist?",
-                "Hi! Let’s get started."
-            ];
-            const msg = greetings[Math.floor(Math.random() * greetings.length)];
-            try {
-                const utter = new SpeechSynthesisUtterance(msg);
-                // Preserve the current language if set
-                if (typeof language === 'string') utter.lang = language;
-                globalThis.speechSynthesis?.speak(utter);
-            } catch (_) {}
+            ensureSpeechSynthesisPermission()
+                .then(() => {
+                    const greetings = [
+                        "Hey, happy to help!",
+                        "Hi there! I'm ready to assist you.",
+                        "Hello! How can I help you today?",
+                        "Greetings! Let me know what you need.",
+                        "Welcome! Ask me anything.",
+                        "Hi! I'm here for you.",
+                        "Hey! Ready when you are.",
+                        "Hello! What can I do for you?",
+                        "Hey there! How can I assist?",
+                        "Hi! Let’s get started."
+                    ];
+                    const msg = greetings[Math.floor(Math.random() * greetings.length)];
+                    try {
+                        const utter = new SpeechSynthesisUtterance(msg);
+                        if (typeof language === 'string') utter.lang = language;
+                        globalThis.speechSynthesis?.speak(utter);
+                    } catch (e) {
+                        showErrorToast('Failed to speak greeting: ' + e.message);
+                    }
+                })
+                .catch(err => {
+                    // Permission denied or other error – show toast
+                    showErrorToast(err.message);
+                });
         }
         if (wasConverseEnabled) {
             globalThis.stopActiveGeneration?.('converse_stop');
