@@ -1964,6 +1964,46 @@ button[aria-label^="Back"],
     filter: drop-shadow(0 0 5px rgba(239, 68, 68, 0.55));
 }
 
+/* VTT button active state during Converse mode */
+.speech-input-btn.is-converse-active {
+    color: #0ea5e9 !important;
+    background: rgba(14, 165, 233, 0.14) !important;
+    border: 1px solid rgba(56, 189, 248, 0.45) !important;
+    box-shadow: 0 0 0 1px rgba(14, 165, 233, 0.22), 0 0 14px rgba(14, 165, 233, 0.32) !important;
+    animation: converseBtnPulse 1.8s ease-in-out infinite;
+}
+
+.speech-input-btn.is-converse-active svg {
+    stroke: #38bdf8 !important;
+    filter: drop-shadow(0 0 5px rgba(56, 189, 248, 0.6));
+}
+
+/* Error toast notification */
+.error-toast {
+    position: fixed;
+    bottom: 80px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 99999;
+    max-width: 420px;
+    padding: 10px 20px;
+    border-radius: 10px;
+    background: rgba(239, 68, 68, 0.92);
+    color: #ffffff;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.4;
+    text-align: center;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
+    animation: toastSlideUp 0.3s ease-out;
+    pointer-events: none;
+}
+
+@keyframes toastSlideUp {
+    from { opacity: 0; transform: translateX(-50%) translateY(12px); }
+    to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
 #send-message-btn.is-converse-ready {
     background: #1a1a1a !important;
     border-color: #52525b !important;
