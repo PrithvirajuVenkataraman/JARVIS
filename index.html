@@ -393,7 +393,8 @@
                         class="composer-icon-btn speech-input-btn vtt-shifted-left"
                         title="Transcribe one message"
                         aria-label="Transcribe one message"
-                        aria-pressed="false">
+                        aria-pressed="false"
+                        onclick="window.toggleVoiceToText ? window.toggleVoiceToText() : window.JarvisSpeechInput?.toggleDictation?.()">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                             <rect x="9" y="2" width="6" height="12" rx="3"></rect>
                             <path d="M5 10a7 7 0 0 0 14 0"></path>
@@ -6360,7 +6361,6 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             const willEnable = !currentState.converseEnabled;
             if (willEnable) {
                 triggerJarvisHaptic(18);
-                playJarvisChime('activate');
             }
             if (btn) {
                 btn.classList.toggle('is-converse-active', willEnable);
@@ -9551,7 +9551,8 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             if (vttBtn) {
                 const isDictation = speechState.mode === 'dictation' && speechState.listening;
                 vttBtn.classList.toggle('is-listening', isDictation);
-                vttBtn.setAttribute('aria-pressed', isDictation ? 'true' : 'false');
+                vttBtn.classList.toggle('is-converse-active', isConverseActive);
+                vttBtn.setAttribute('aria-pressed', (isDictation || isConverseActive) ? 'true' : 'false');
             }
             if (sendBtn) {
                 sendBtn.classList.toggle('is-converse-active', isConverseActive);
