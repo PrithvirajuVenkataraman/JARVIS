@@ -22,6 +22,9 @@ import { renderMarkdown } from './markdown-renderer.js?v=2.0.1';
 import * as JarvisAgentOrchestrator from './agent-orchestrator.js?v=2.0.1';
 import * as JarvisLocationSuite from './location-suite.js?v=2.0.1';
 import * as JarvisEmergencySOS from './emergency-sos.js?v=2.0.1';
+import * as JarvisImageConfig from './image-generation-config.js?v=2.0.1';
+import * as JarvisImageStorage from './image-storage.js?v=2.0.1';
+import * as JarvisImageGenerator from './image-generator.js?v=2.0.1';
 
 const engine = createConversationEngine({
     maxTurns: 12,
@@ -52,6 +55,9 @@ globalThis.JarvisMarkdownRenderer = Object.freeze({ renderMarkdown });
 globalThis.JarvisAgentOrchestrator = Object.freeze({ ...JarvisAgentOrchestrator });
 globalThis.JarvisLocationSuite = Object.freeze({ ...JarvisLocationSuite });
 globalThis.JarvisEmergencySOS = Object.freeze({ ...JarvisEmergencySOS });
+globalThis.JarvisImageConfig = Object.freeze({ ...JarvisImageConfig });
+globalThis.JarvisImageStorage = Object.freeze({ ...JarvisImageStorage });
+globalThis.JarvisImageGenerator = Object.freeze({ ...JarvisImageGenerator });
 
 function initializeSpeechInput() {
     if (globalThis.__jarvisSpeechInputInstalled) return;
