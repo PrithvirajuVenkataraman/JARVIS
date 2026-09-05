@@ -72,7 +72,7 @@ self.addEventListener('fetch', (event) => {
                         return new Response('Network error and no cache available', { status: 503 });
                     });
                 })
-        );
+        ); 
         return;
     }
 
