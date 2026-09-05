@@ -111,6 +111,14 @@
                 </svg>
                 <span style="color:#fca5a5;">Emergency SOS</span>
             </button>
+            <button type="button" id="sidebar-image-history-btn" class="chat-sidebar-nav-item" onclick="openImageGalleryModal(); closeChatSidebar();" title="Generated Images Gallery">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" aria-hidden="true">
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                    <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                    <polyline points="21 15 16 10 5 21"></polyline>
+                </svg>
+                <span>Gallery</span>
+            </button>
             <button type="button" class="chat-sidebar-nav-item" onclick="exportCurrentChat('markdown'); closeChatSidebar();">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" aria-hidden="true">
                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
@@ -225,6 +233,39 @@
             <iframe id="canvas-preview-frame" class="canvas-preview-frame" style="display: none;" sandbox="allow-scripts allow-modals"></iframe>
         </div>
     </div>
+
+    <!-- AI Image Lightbox Modal -->
+    <div id="image-lightbox-overlay" class="image-lightbox-overlay" onclick="if (event.target === this) closeImageLightbox()" role="dialog" aria-modal="true" aria-label="Image preview">
+        <div class="image-lightbox-container" onclick="event.stopPropagation()">
+            <button type="button" class="image-lightbox-close-btn" onclick="closeImageLightbox()" aria-label="Close image preview">&times;</button>
+            <img id="image-lightbox-img" class="image-lightbox-img" src="" alt="Full view">
+            <div id="image-lightbox-caption" class="image-lightbox-caption"></div>
+            <div class="image-lightbox-toolbar">
+                <button type="button" class="image-gen-action-btn" onclick="downloadLightboxImage()">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                    <span>Download</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- AI Image History Gallery Modal -->
+    <div id="image-gallery-modal" class="image-gallery-modal" onclick="if (event.target === this) closeImageGalleryModal()" role="dialog" aria-modal="true" aria-label="Generated Images Gallery">
+        <div class="image-gallery-panel" onclick="event.stopPropagation()">
+            <div class="image-gallery-header">
+                <div class="image-gallery-title">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                    <span>Generated Images</span>
+                    <span id="image-gallery-count" class="image-gallery-count">0</span>
+                </div>
+                <button type="button" class="image-gallery-close-btn" onclick="closeImageGalleryModal()" aria-label="Close gallery">&times;</button>
+            </div>
+            <div id="image-gallery-body" class="image-gallery-body">
+                <div id="image-gallery-grid" class="image-gallery-grid"></div>
+            </div>
+        </div>
+    </div>
+
     <div class="page-shell">
         <div class="app-shell max-w-5xl mx-auto relative z-10 p-6">
             <!-- Header - Enhanced -->
@@ -358,6 +399,22 @@
                                         <span>Web Search</span>
                                     </span>
                                     <span class="web-search-mode-badge web-search-mode-label">Auto</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    class="composer-action-item"
+                                    onclick="triggerImageGenerationPrompt()"
+                                    role="menuitem"
+                                    title="Generate image locally or via prompt"
+                                    aria-label="Generate Image">
+                                    <span class="composer-web-search-item-left">
+                                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                                            <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                                            <polyline points="21 15 16 10 5 21"></polyline>
+                                        </svg>
+                                        <span>Generate Image</span>
+                                    </span>
                                 </button>
                             </div>
                             <div class="composer-action-group hidden" data-composer-group="photos">
@@ -3009,6 +3066,11 @@ async function processUserQuery(text, options = {}) {
         webMode: activeWebMode
     });
     logRoutingDebug('processUserQuery route_decision', t, { frontendRoute, activeWebMode });
+    if (frontendRoute.route === 'image_generation') {
+        logRoutingDebug('processUserQuery -> image_generation', t, { selectedHandler: 'handleImageGenerationRequest' });
+        await handleImageGenerationRequest(frontendRoute.prompt || t);
+        return { intent: 'image_generation', prompt: frontendRoute.prompt || t };
+    }
     if (frontendRoute.route === 'fast_simple') {
         return await handleFastSimpleQuery(t, {
             stream: options?.stream === true,
@@ -6025,6 +6087,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
         }
 
         const slashCommandChoices = Object.freeze([
+            { id: 'image', label: 'Image', hint: 'Generate an AI image locally', template: '/image ' },
             { id: 'translate', label: 'Translate', hint: 'Translate a phrase', template: 'translate "..." to Tamil', select: [11, 14] },
             { id: 'verify', label: 'Verify', hint: 'Check a claim or answer', template: 'verify this: ' },
             { id: 'summarize', label: 'Summarize', hint: 'Summarize pasted text', template: 'summarize this: ' },
@@ -10352,6 +10415,364 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 routing: result?.routing || null
             });
             return true;
+        }
+
+        async function handleImageGenerationRequest(promptText, options = {}) {
+            const rawPrompt = String(promptText || '').replace(/^\/(?:image|img|draw|art)\s*/i, '').trim();
+            if (!rawPrompt) {
+                addChatMessage('Please provide a description of what you want to create (e.g. `/image a cosmic nebulae with crystalline asteroids`).', false);
+                return;
+            }
+
+            hideThinkingIndicator();
+            const aspectRatio = options.aspectRatio || '1:1';
+            const cardId = 'img-card-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
+
+            const cardHtml = `
+<div id="${cardId}" class="image-gen-card" data-prompt="${escapeHtml(rawPrompt)}" data-aspect-ratio="${escapeHtml(aspectRatio)}">
+    <div class="image-gen-header">
+        <div class="image-gen-badge-group">
+            <span id="${cardId}-badge-engine" class="image-gen-badge image-gen-badge-engine">Local / WebGPU</span>
+            <span class="image-gen-badge image-gen-badge-ratio">${escapeHtml(aspectRatio)}</span>
+            <span id="${cardId}-badge-time" class="image-gen-badge-time"></span>
+        </div>
+    </div>
+    <div class="image-gen-prompt">"${escapeHtml(rawPrompt)}"</div>
+    <div class="image-gen-viewport" data-ratio="${escapeHtml(aspectRatio)}">
+        <img id="${cardId}-img" class="image-gen-img hidden" alt="${escapeHtml(rawPrompt)}" onclick="window.openImageLightboxFromCard('${cardId}')" />
+        <div id="${cardId}-loader" class="image-gen-loader-overlay">
+            <div class="image-gen-spinner"></div>
+            <div id="${cardId}-status" class="image-gen-status-text">Initializing generator...</div>
+            <div id="${cardId}-substatus" class="image-gen-status-sub">Checking WebGPU acceleration</div>
+            <div class="image-gen-progress-bar-bg">
+                <div id="${cardId}-progress" class="image-gen-progress-bar-fill" style="width: 15%"></div>
+            </div>
+        </div>
+    </div>
+    <div id="${cardId}-actions" class="image-gen-actions-bar hidden">
+        <button type="button" class="image-gen-action-btn is-primary" onclick="window.regenerateImageCard('${cardId}')" title="Regenerate with same prompt">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+            <span>Regenerate</span>
+        </button>
+        <button type="button" class="image-gen-action-btn" onclick="window.downloadImageCard('${cardId}')" title="Download image">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+            <span>Download</span>
+        </button>
+        <button type="button" class="image-gen-action-btn" onclick="window.copyImageCard('${cardId}')" title="Copy image or link">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+            <span>Copy</span>
+        </button>
+        <button type="button" class="image-gen-action-btn" onclick="window.openImageLightboxFromCard('${cardId}')" title="Full preview">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>
+            <span>Zoom</span>
+        </button>
+        <button type="button" class="image-gen-action-btn" onclick="window.editImagePromptFromCard('${cardId}')" title="Modify prompt">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+            <span>Edit</span>
+        </button>
+    </div>
+</div>`;
+
+            addChatMessage(cardHtml, false, null, {
+                sourceType: 'tool',
+                allowEmpty: false
+            });
+
+            const cardElem = document.getElementById(cardId);
+            cardElem?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+
+            const statusEl = document.getElementById(`${cardId}-status`);
+            const substatusEl = document.getElementById(`${cardId}-substatus`);
+            const progressEl = document.getElementById(`${cardId}-progress`);
+            const loaderEl = document.getElementById(`${cardId}-loader`);
+            const imgEl = document.getElementById(`${cardId}-img`);
+            const actionsEl = document.getElementById(`${cardId}-actions`);
+            const engineBadgeEl = document.getElementById(`${cardId}-badge-engine`);
+            const timeBadgeEl = document.getElementById(`${cardId}-badge-time`);
+
+            try {
+                const generator = window.JarvisImageGenerator;
+                if (!generator) {
+                    throw new Error('Image generation engine is initializing. Please try again in a moment.');
+                }
+
+                const result = await generator.generateImage({
+                    prompt: rawPrompt,
+                    aspectRatio,
+                    onProgress: (p) => {
+                        if (!statusEl || !progressEl) return;
+                        if (p.stage === 'worker_init') {
+                            statusEl.textContent = 'Initializing engine...';
+                            if (substatusEl) substatusEl.textContent = 'Allocating Web Worker memory';
+                            progressEl.style.width = '20%';
+                        } else if (p.stage === 'model_load') {
+                            statusEl.textContent = 'Loading local weights...';
+                            if (substatusEl) substatusEl.textContent = 'Cached in browser storage';
+                            progressEl.style.width = '35%';
+                        } else if (p.stage === 'webgpu_diffuse') {
+                            const step = p.step || 1;
+                            const total = p.totalSteps || 4;
+                            statusEl.textContent = `Diffusing image: step ${step}/${total}...`;
+                            if (substatusEl) substatusEl.textContent = 'Accelerated on WebGPU';
+                            progressEl.style.width = `${40 + (step / total) * 45}%`;
+                        } else if (p.stage === 'latent_decode') {
+                            statusEl.textContent = 'Decoding visual latents...';
+                            progressEl.style.width = '90%';
+                        } else if (p.stage === 'fallback_fetch') {
+                            statusEl.textContent = 'Generating visual canvas...';
+                            if (substatusEl) substatusEl.textContent = 'Zero-cost client engine';
+                            progressEl.style.width = '65%';
+                        } else if (p.stage === 'complete') {
+                            statusEl.textContent = 'Finalizing rendering...';
+                            progressEl.style.width = '100%';
+                        }
+                    }
+                });
+
+                if (imgEl && cardElem) {
+                    const src = result.dataUrl || result.url;
+                    imgEl.src = src;
+                    imgEl.classList.remove('hidden');
+                    cardElem.dataset.imageUrl = src;
+                    cardElem.dataset.imageId = result.id || '';
+
+                    if (loaderEl) loaderEl.style.display = 'none';
+                    if (actionsEl) actionsEl.classList.remove('hidden');
+
+                    if (engineBadgeEl) {
+                        if (result.engine === 'webgpu') {
+                            engineBadgeEl.textContent = '⚡ WebGPU (Local)';
+                            engineBadgeEl.classList.add('is-webgpu');
+                        } else {
+                            engineBadgeEl.textContent = '🌐 Zero-Cost Cloud';
+                            engineBadgeEl.classList.remove('is-webgpu');
+                        }
+                    }
+
+                    if (timeBadgeEl && result.durationMs) {
+                        timeBadgeEl.textContent = `${(result.durationMs / 1000).toFixed(1)}s`;
+                    }
+                }
+
+                saveToHistory(rawPrompt, `[Generated Image: "${rawPrompt}"]`, { recordContext: true });
+            } catch (err) {
+                console.error('Image generation error:', err);
+                if (statusEl) statusEl.textContent = 'Generation failed';
+                if (substatusEl) substatusEl.textContent = err.message || 'Error occurred';
+                if (actionsEl) {
+                    actionsEl.classList.remove('hidden');
+                    actionsEl.innerHTML = `
+                        <button type="button" class="image-gen-action-btn is-primary" onclick="window.regenerateImageCard('${cardId}')">
+                            <span>Retry</span>
+                        </button>
+                    `;
+                }
+            }
+        }
+
+        window.handleImageGenerationRequest = handleImageGenerationRequest;
+
+        function triggerImageGenerationPrompt() {
+            const input = document.getElementById('composer-textarea') || document.getElementById('text-input') || document.getElementById('user-input');
+            if (input) {
+                input.value = '/image ';
+                input.focus();
+                autoResizeComposerTextarea?.();
+                toggleSendButton?.();
+            }
+            closeComposerActionsMenu?.();
+        }
+        window.triggerImageGenerationPrompt = triggerImageGenerationPrompt;
+
+        function regenerateImageCard(cardId) {
+            const card = document.getElementById(cardId);
+            if (!card) return;
+            const prompt = card.dataset.prompt;
+            const ratio = card.dataset.aspectRatio || '1:1';
+            handleImageGenerationRequest(prompt, { aspectRatio: ratio });
+        }
+        window.regenerateImageCard = regenerateImageCard;
+
+        function downloadImageCard(cardId) {
+            const card = document.getElementById(cardId);
+            if (!card) return;
+            const url = card.dataset.imageUrl;
+            const prompt = card.dataset.prompt || 'ai-image';
+            if (!url) return;
+            downloadUrlAsFile(url, `${slugifyPrompt(prompt)}.png`);
+        }
+        window.downloadImageCard = downloadImageCard;
+
+        async function copyImageCard(cardId) {
+            const card = document.getElementById(cardId);
+            if (!card) return;
+            const url = card.dataset.imageUrl;
+            if (!url) return;
+            try {
+                if (url.startsWith('data:image/')) {
+                    const res = await fetch(url);
+                    const blob = await res.blob();
+                    await navigator.clipboard.write([
+                        new ClipboardItem({ [blob.type]: blob })
+                    ]);
+                    showTemporaryMessage?.('Image copied to clipboard!');
+                    return;
+                }
+                await navigator.clipboard.writeText(url);
+                showTemporaryMessage?.('Image URL copied to clipboard!');
+            } catch {
+                await navigator.clipboard.writeText(url);
+                showTemporaryMessage?.('Image URL copied to clipboard!');
+            }
+        }
+        window.copyImageCard = copyImageCard;
+
+        function openImageLightboxFromCard(cardId) {
+            const card = document.getElementById(cardId);
+            if (!card) return;
+            const url = card.dataset.imageUrl;
+            const prompt = card.dataset.prompt || '';
+            if (url) openImageLightbox(url, prompt);
+        }
+        window.openImageLightboxFromCard = openImageLightboxFromCard;
+
+        function editImagePromptFromCard(cardId) {
+            const card = document.getElementById(cardId);
+            if (!card) return;
+            const prompt = card.dataset.prompt || '';
+            const input = document.getElementById('composer-textarea') || document.getElementById('text-input') || document.getElementById('user-input');
+            if (input) {
+                input.value = `/image ${prompt}`;
+                input.focus();
+                autoResizeComposerTextarea?.();
+                toggleSendButton?.();
+            }
+        }
+        window.editImagePromptFromCard = editImagePromptFromCard;
+
+        function slugifyPrompt(text) {
+            return String(text || 'image')
+                .toLowerCase()
+                .replace(/[^a-z0-9]+/g, '-')
+                .slice(0, 40)
+                .replace(/^-+|-+$/g, '') || 'generated-image';
+        }
+
+        function downloadUrlAsFile(url, filename) {
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+        }
+
+        function openImageLightbox(src, prompt = '') {
+            const overlay = document.getElementById('image-lightbox-overlay');
+            const img = document.getElementById('image-lightbox-img');
+            const caption = document.getElementById('image-lightbox-caption');
+            if (!overlay || !img) return;
+            img.src = src;
+            if (caption) caption.textContent = prompt ? `"${prompt}"` : '';
+            overlay.classList.add('is-open');
+        }
+        window.openImageLightbox = openImageLightbox;
+
+        function closeImageLightbox() {
+            const overlay = document.getElementById('image-lightbox-overlay');
+            if (overlay) overlay.classList.remove('is-open');
+        }
+        window.closeImageLightbox = closeImageLightbox;
+
+        function downloadLightboxImage() {
+            const img = document.getElementById('image-lightbox-img');
+            const caption = document.getElementById('image-lightbox-caption');
+            if (!img || !img.src) return;
+            downloadUrlAsFile(img.src, `${slugifyPrompt(caption?.textContent || 'image')}.png`);
+        }
+        window.downloadLightboxImage = downloadLightboxImage;
+
+        async function openImageGalleryModal() {
+            const modal = document.getElementById('image-gallery-modal');
+            const grid = document.getElementById('image-gallery-grid');
+            const countBadge = document.getElementById('image-gallery-count');
+            if (!modal || !grid) return;
+
+            modal.classList.add('is-open');
+            grid.innerHTML = '<div class="image-gallery-empty"><div class="image-gen-spinner"></div><div>Loading gallery...</div></div>';
+
+            try {
+                const storage = window.JarvisImageStorage;
+                const images = (await storage?.getAllImages?.(50)) || [];
+                if (countBadge) countBadge.textContent = String(images.length);
+
+                if (!images.length) {
+                    grid.innerHTML = `
+                        <div class="image-gallery-empty" style="grid-column: 1 / -1;">
+                            <div class="image-gallery-empty-icon">🎨</div>
+                            <div style="font-weight: 600; color: #cbd5e1;">No images yet</div>
+                            <div style="font-size: 13px;">Images you generate locally or via prompt will appear here.</div>
+                        </div>
+                    `;
+                    return;
+                }
+
+                grid.innerHTML = images.map(item => `
+                    <div class="image-gallery-item" onclick="openImageLightbox('${escapeHtml(item.dataUrl || item.url || '')}', '${escapeHtml(item.prompt || '')}')">
+                        <img class="image-gallery-thumb" src="${escapeHtml(item.dataUrl || item.url || '')}" alt="${escapeHtml(item.prompt || '')}" loading="lazy" />
+                        <div class="image-gallery-overlay" onclick="event.stopPropagation()">
+                            <div class="image-gallery-item-prompt">${escapeHtml(item.prompt || '')}</div>
+                            <div class="image-gallery-item-actions">
+                                <button type="button" class="image-gallery-mini-btn" onclick="openImageLightbox('${escapeHtml(item.dataUrl || item.url || '')}', '${escapeHtml(item.prompt || '')}')" title="Zoom">🔍</button>
+                                <button type="button" class="image-gallery-mini-btn" onclick="downloadUrlAsFile('${escapeHtml(item.dataUrl || item.url || '')}', '${slugifyPrompt(item.prompt)}.png')" title="Download">⬇️</button>
+                                <button type="button" class="image-gallery-mini-btn" onclick="deleteGalleryImage('${escapeHtml(item.id)}', this)" title="Delete">🗑️</button>
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (err) {
+                console.error('Gallery loading failed:', err);
+                grid.innerHTML = `<div class="image-gallery-empty" style="grid-column: 1 / -1;">Failed to load saved gallery.</div>`;
+            }
+        }
+        window.openImageGalleryModal = openImageGalleryModal;
+
+        function closeImageGalleryModal() {
+            const modal = document.getElementById('image-gallery-modal');
+            if (modal) modal.classList.remove('is-open');
+        }
+        window.closeImageGalleryModal = closeImageGalleryModal;
+
+        async function deleteGalleryImage(id, btnElem) {
+            try {
+                await window.JarvisImageStorage?.deleteImage?.(id);
+                const itemElem = btnElem?.closest?.('.image-gallery-item');
+                itemElem?.remove();
+                const grid = document.getElementById('image-gallery-grid');
+                const remaining = grid?.querySelectorAll?.('.image-gallery-item')?.length || 0;
+                const countBadge = document.getElementById('image-gallery-count');
+                if (countBadge) countBadge.textContent = String(remaining);
+                if (remaining === 0) {
+                    grid.innerHTML = `
+                        <div class="image-gallery-empty" style="grid-column: 1 / -1;">
+                            <div class="image-gallery-empty-icon">🎨</div>
+                            <div style="font-weight: 600; color: #cbd5e1;">No images yet</div>
+                        </div>
+                    `;
+                }
+            } catch (err) {
+                console.error('Failed to delete image:', err);
+            }
+        }
+        window.deleteGalleryImage = deleteGalleryImage;
+
+        if (typeof window !== 'undefined') {
+            window.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    closeImageLightbox();
+                    closeImageGalleryModal();
+                }
+            });
         }
 
         function formatModelSourceBadge(label = 'Model answer') {
@@ -19927,6 +20348,14 @@ function isWakeGreetingText(text) {
             } else if (frontendRoute.route === 'fast_simple' || frontendRoute.minimalThinking) {
                 // Keep the bubble minimal; stream starts immediately.
                 logLatencyTrace('latency_floor_fast', { route: frontendRoute.route });
+            }
+            if (frontendRoute.route === 'image_generation') {
+                logRoutingDebug('processCommand -> image_generation', text, {
+                    selectedHandler: 'handleImageGenerationRequest',
+                    frontendRoute
+                });
+                await handleImageGenerationRequest(frontendRoute.prompt || text);
+                return;
             }
             if (frontendRoute.route === 'fast_simple') {
                 logRoutingDebug('processCommand -> fast_simple', text, {
