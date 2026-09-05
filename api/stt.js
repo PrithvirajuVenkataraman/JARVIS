@@ -27,7 +27,8 @@ export default async function handler(req, res) {
 
     const start = performance.now();
     const body = req.body || {};
-    const audioBase64 = String(body.audioBase64 || body.audio || '').trim();
+    const rawAudio = String(body.audioBase64 || body.audio || '').trim();
+    const audioBase64 = rawAudio.includes(',') ? rawAudio.split(',')[1].trim() : rawAudio;
     const mimeType = String(body.mimeType || 'audio/webm').trim();
     const language = String(body.language || '').trim();
     const prompt = String(body.prompt || '').trim();
