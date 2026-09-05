@@ -6,7 +6,7 @@
  */
 
 export class FeedForwardNeuralNetwork {
-    constructor(inputDim = 512, hiddenDim = 64, outputDim = 4, seed = 42) {
+    constructor(inputDim = 512, hiddenDim = 64, outputDim = 4, seed = 42) { 
         this.inputDim = inputDim;
         this.hiddenDim = hiddenDim;
         this.outputDim = outputDim;
