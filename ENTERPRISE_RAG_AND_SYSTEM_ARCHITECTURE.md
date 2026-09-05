@@ -121,12 +121,13 @@ Beyond RAG, the repository contains a production-grade conversational AI archite
 
 ### 3.3 Dynamic Chain-of-Thought (CoT) Thinking
 - Streams and renders internal reasoning steps in expandable/collapsible `<details class="thinking-accordion">` blocks.
-- Cleans and strips reasoning tokens from TTS voice output to ensure pure human-like spoken speech in Converse mode.
+- **Zero Fake CoT**: Queries without actual reasoning steps (e.g. casual chat, greetings, location) produce `[]` (empty thought steps) and completely omit the thinking accordion rather than rendering an artificial "Thought for X.Xs" placeholder.
 
-### 3.4 Converse Mode & Hands-Free Voice Controller
-- Continuous 5-phase hands-free state machine (Listening $\rightarrow$ Transcribing $\rightarrow$ Thinking $\rightarrow$ Speaking $\rightarrow$ Idle).
-- **Barge-In Interruption**: Halts speech synthesis immediately when the user speaks, preserving uninterrupted thought flow.
-- Multi-lingual resumption phrase recognition.
+### 3.4 Enterprise Voice-to-Text (VTT / Dictation)
+- **Production Dictation**: Replaced legacy hands-free Converse mode with a dedicated, enterprise-grade Voice-to-Text dictation engine.
+- **Spoken Punctuation Parsing**: Real-time conversion of spoken commands (`period`, `comma`, `question mark`, `exclamation mark`, `colon`, `semicolon`, `hyphen`, `new line`, `new paragraph`) directly into clean text punctuation.
+- **Acronym Auto-Capitalization**: Automatically capitalizes common technical, cloud, and corporate acronyms (`AI`, `API`, `SQL`, `AWS`, `GCP`, `CEO`, `CTO`, `GPS`, `PDF`, `LLM`, `VTT`, etc.).
+- **Dual-Engine Fallback**: Instant local Web Speech API with automatic failover to Whisper STT (`/api/stt`).
 
 ### 3.5 Self-Improving Memory & Learning Engine
 - Detects user corrections and stylistic preferences dynamically (e.g. *"Stop using emojis"*, *"Always write TypeScript with strict types"*).
@@ -139,6 +140,20 @@ Beyond RAG, the repository contains a production-grade conversational AI archite
 ### 3.7 Fast Speculative Math & Code Auto-Repair
 - **Speculative Arithmetic Guard**: Intercepts calculations and verifies mathematical results using an in-process AST validator.
 - **Code Delimiter Auto-Repair**: Ensures balanced code fences (` ``` `) and LaTeX math delimiters (`$`, `$$`) on streaming outputs.
+
+### 3.8 Professional Send Button Architecture
+- **Modern Disc Aesthetic**: 32px borderless circular disc (`border-radius: 50%`) with a crisp vertical upward arrow (`↑`), matching ChatGPT and Claude.
+- **Dynamic State Transitions**:
+  - Disabled low-contrast disc when composer is empty.
+  - High-contrast white disc with smooth hover scale (`1.06x`) when text is typed.
+  - Rounded stop square (`■`) while AI streaming generation is in flight to halt responses instantly.
+
+### 3.9 Satellite Emergency SOS & Distress Dispatch System
+- **Sidebar Integration**: Dedicated `#sidebar-emergency-sos-btn` in the sidebar navigation with emergency red styling.
+- **Emergency Contacts Modal (`#sos-contact-modal`)**: View, add, and delete emergency contacts with relationship labels and `PRIMARY` designation.
+- **Precision Distress Telemetry**: Captures high-accuracy GPS coordinates ($\pm X\text{m}$), device battery level ($\text{🔋 } X\%$), and reverse geocoded street address.
+- **Multi-Channel Instant Dispatch**: One-tap action buttons for Cellular SMS, direct WhatsApp, Phone dialer (`tel:112`), and Web Share API / clipboard copy with embedded OpenStreetMap pin.
+- **Autonomous Voice/Text Triggers**: Natural language detection for `"emergency"`, `"sos"`, `"call police"`, `"in danger"`, and `"send help"`.
 
 ---
 
@@ -157,7 +172,8 @@ npm test
 4. `tests/stt-api.test.mjs`: Speech-to-text audio transcoding and transcription.
 5. `tests/vision-api.test.mjs`: Multi-modal image analysis and OCR routing.
 6. `tests/dispatch-resilience-streaming.test.mjs`: Fast failover and stream error recovery.
-7. `tests/speech-input.test.mjs` & `tests/converse-mode-e2e.test.mjs`: Voice converse loop and barge-in interruption.
-8. `tests/context-engine.test.mjs`: Context compaction and rolling conversation memory.
-9. `tests/self-improving-loops.test.mjs`: Learned preference extraction and speculative arithmetic.
-10. `tools/hardcoded-content-scanner.mjs`: Repository hygiene scanner verifying 0 hardcoded answers or country tables across 99 files.
+7. `tests/speech-input.test.mjs`: Enterprise voice dictation and spoken punctuation processing.
+8. `tests/emergency-sos.test.mjs`: Satellite Emergency SOS contacts CRUD, distress telemetry, and dispatch URLs.
+9. `tests/context-engine.test.mjs`: Context compaction and rolling conversation memory.
+10. `tests/self-improving-loops.test.mjs`: Learned preference extraction and speculative arithmetic.
+11. `tools/hardcoded-content-scanner.mjs`: Repository hygiene scanner verifying 0 hardcoded answers or country tables across 106 files.
