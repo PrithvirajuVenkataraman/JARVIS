@@ -401,4 +401,19 @@ console.log('--- Section 10: Code Highlighter, Math & Markdown Renderers ---');
     console.log('  [PASS] Code highlighting, math expressions, markdown, and science formatting verified');
 }
 
+console.log('--- Section 11: Zero-Cost Image Generation Architecture Contracts ---');
+{
+    const imgRoute1 = decideFrontendRoute('/image neon cyberpunk street in rain');
+    assert.equal(imgRoute1.route, 'image_generation');
+    assert.equal(imgRoute1.prompt, 'neon cyberpunk street in rain');
+
+    const imgRoute2 = decideFrontendRoute('generate an image of a majestic lion');
+    assert.equal(imgRoute2.route, 'image_generation');
+    assert.equal(imgRoute2.prompt, 'a majestic lion');
+
+    const notImg = decideFrontendRoute('how to draw a line chart in chart.js');
+    assert.notEqual(notImg.route, 'image_generation');
+    console.log('  [PASS] Zero-cost image generation routing and prompt extraction contracts verified');
+}
+
 console.log('deterministic-checks-ok');
