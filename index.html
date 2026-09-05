@@ -396,8 +396,7 @@
                         id="voice-to-text-btn"
                         type="button"
                         class="composer-icon-btn speech-input-btn vtt-shifted-left"
-                        title="Transcribe one message"
-                        aria-label="Transcribe one message"
+                        title="Voice typing (Dictation)" aria-label="Voice typing (Dictation)"
                         aria-pressed="false">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                             <rect x="9" y="2" width="6" height="12" rx="3"></rect>
@@ -409,17 +408,13 @@
                     <button
                         id="send-message-btn"
                         type="button"
-                        class="composer-send-btn footer-action-btn is-converse-ready"
-                        data-mode="converse"
+                        class="composer-send-btn footer-action-btn"
                         onclick="handlePrimaryActionButtonClick()"
-                        title="Start Converse mode"
-                        aria-label="Start Converse mode">
-                        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" aria-hidden="true">
-                            <path d="M4 12h2"></path>
-                            <path d="M8 7v10"></path>
-                            <path d="M12 4v16"></path>
-                            <path d="M16 8v8"></path>
-                            <path d="M20 12h-2"></path>
+                        title="Send message"
+                        aria-label="Send message">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+                            <line x1="22" y1="2" x2="11" y2="13"></line>
+                            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
                         </svg>
                     </button>
                 </div>
@@ -461,46 +456,7 @@
     </div>
     <canvas id="continuous-vision-canvas" class="hidden"></canvas>
 
-    <div id="converse-live-overlay" class="converse-live-overlay hidden" aria-live="polite" role="dialog" aria-label="Live Converse Mode">
-        <div class="converse-live-backdrop" onclick="togglePrimaryConverseMode()"></div>
-        <div class="converse-live-modal">
-            <div class="converse-live-header">
-                <div class="converse-live-pill">
-                    <span class="converse-live-pulse-dot"></span>
-                    <span id="converse-live-status-text">Listening (speak now)...</span>
-                </div>
-                <div class="converse-live-header-actions">
-                    <select id="converse-live-language" class="converse-live-lang-select" onchange="setVoiceInputLanguage('en-US')" aria-label="Select voice language">
-                        <option value="en-US" selected>English (en-US)</option>
-                    </select>
-                    <button type="button" id="converse-live-close-btn" class="converse-live-close-btn" onclick="togglePrimaryConverseMode()" title="Close Converse Mode" aria-label="Close Converse Mode">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
-                    </button>
-                </div>
-            </div>
-            <div class="converse-live-body">
-                <div id="converse-live-orb" class="converse-live-orb is-listening">
-                    <div class="converse-orb-ring ring-1"></div>
-                    <div class="converse-orb-ring ring-2"></div>
-                    <div class="converse-orb-ring ring-3"></div>
-                    <div class="converse-orb-core">
-                        <svg class="w-8 h-8 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/>
-                            <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-                            <line x1="12" y1="19" x2="12" y2="22"/>
-                        </svg>
-                    </div>
-                </div>
-                <div id="converse-live-transcript" class="converse-live-transcript" placeholder="Say something to JARVIS..."></div>
-            </div>
-            <div class="converse-live-footer">
-                <button type="button" id="converse-live-mic-btn" class="converse-live-action-btn" onclick="toggleConverseMic()" aria-label="Toggle Microphone">
-                    <svg class="w-4 h-4 mic-on-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
-                    <span id="converse-live-mic-label">Mute</span>
-                </button>
-            </div>
-        </div>
-    </div>
+    <!-- Converse live overlay removed (Enterprise VTT mode active) -->
 
 <!-- Inline app logic lives below -->
 <script>
@@ -6286,59 +6242,41 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
         }
 
         function toggleSendButton() {
-            const btn = document.getElementById('send-message-btn');
-            if (!btn) return;
-            autoResizeComposerTextarea?.();
-            const state = window.JarvisSpeechInput?.getState?.() || {};
-            const converseActive = !!state.converseEnabled;
-
-            if (activeRequestController || isAssistantProcessing() || isConverseSpeechActive()) {
-                if (converseActive && !isConverseSpeechActive()) {
-                    setPrimaryActionButtonToConverse();
-                } else {
-                    setPrimaryActionButtonToStop();
-                }
-                return;
-            }
-
             const input = document.getElementById('text-input');
-            const hasInput = !!(input && input.value.trim().length > 0);
-            const hasAttachments = window.JarvisAttachments?.hasPendingAttachments?.() === true;
-            const shouldSend = hasInput || hasAttachments;
-
-            if (converseActive) {
-                if (shouldSend && input?.dataset?.inputSource !== 'converse' && input?.dataset?.inputSource !== 'vtt') {
-                    setPrimaryActionButtonToSend();
-                } else {
-                    setPrimaryActionButtonToConverse();
-                }
+            const sendBtn = document.getElementById('send-message-btn');
+            if (!sendBtn) return;
+            sendBtn.classList.remove('is-converse-ready', 'is-converse-active');
+            if (activeRequestController || isAssistantProcessing()) {
+                sendBtn.classList.add('composer-send-stop');
+                sendBtn.title = 'Stop generating';
+                sendBtn.setAttribute('aria-label', 'Stop generating');
+                sendBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"></rect></svg>`;
                 return;
             }
-
-            if (shouldSend) {
-                setPrimaryActionButtonToSend();
-            } else {
-                setPrimaryActionButtonToConverse();
-            }
+            sendBtn.classList.remove('composer-send-stop');
+            sendBtn.title = 'Send message';
+            sendBtn.setAttribute('aria-label', 'Send message');
+            sendBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>`;
+            const hasText = Boolean(input && input.value.trim().length > 0);
+            const hasAttachments = window.JarvisAttachments?.hasPendingAttachments?.() === true;
+            sendBtn.disabled = !hasText && !hasAttachments;
         }
         const resetPrimaryActionButtonWhenIdle = toggleSendButton;
 
         function handlePrimaryActionButtonClick() {
             const btn = document.getElementById('send-message-btn');
             const input = document.getElementById('text-input');
+            if (btn?.classList.contains('composer-send-stop') || activeRequestController || isAssistantProcessing()) {
+                stopActiveGeneration('manual');
+                return;
+            }
             const hasInput = !!(input && input.value.trim().length > 0);
             const hasAttachments = window.JarvisAttachments?.hasPendingAttachments?.() === true;
-
             if (hasInput || hasAttachments) {
                 void sendTextInput();
-                return;
+            } else {
+                input?.focus?.();
             }
-            if (btn?.classList.contains('composer-send-stop')) {
-                stopActiveGeneration('manual');
-                stopConverseSpeech('manual');
-                return;
-            }
-            void togglePrimaryConverseMode();
         }
 
         async function togglePrimaryConverseMode() {
@@ -9106,9 +9044,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 }
                 };
                 startAssistantRender();
-                if (!meta?.skipRecord) {
-                    speakConverseReply(plainMessageText, sourceTurn);
-                }
+                // Assistant reply is text-first (Converse mode removed)
                 
                 maybeAutoScroll(chatContainer);
                 if (!meta?.skipRecord) {
