@@ -240,7 +240,7 @@ export function decideFrontendRoute(text, context = {}) {
         risk: String(context.risk || 'low_risk'),
         requiresSources: false,
         minimalThinking: false,
-        speakResponse: turnSource === 'converse',
+        speakResponse: false,
         sourcePolicy: 'none'
     };
 
