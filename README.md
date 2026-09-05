@@ -1,12 +1,8 @@
 # JARVIS
-
-JARVIS is a browser-based assistant for chat, writing, planning, translation, weather, live vision, saved chats, local memory, source checking, attachments, and everyday help.
-
-Static frontend + Node/Vercel API routes. No frontend build step.
+JARVIS is a browser-based assistant for chat, writing, planning, translation, weather, attachments, and everyday help.
 
 ## File Map
 
-- `.gitignore` - Ignores local dependencies and generated files.
 - `README.md` - Documents features, setup notes, environment variables, and this file map.
 - `models.md` - Technical specification of all AI models, provider hierarchies, Vision/Voice/RAG cascades, and token speeds.
 - `system_design.md` - System architecture specification, concurrency models, circuit breakers, and RAG pipelines.
@@ -46,6 +42,7 @@ Static frontend + Node/Vercel API routes. No frontend build step.
 - `app/context-copilot-ui.js` - Ambiguous-context clarification UI builders.
 - `app/context-engine.js` - Local conversation context engine for follow-ups, topic switches, and pending clarifications.
 - `app/converse-state.js` - Converse/voice state tracker.
+- `app/emergency-sos.js` - Satellite-style Emergency SOS and distress dispatch system with precision GPS and battery telemetry.
 - `app/failure-policy.js` - Failure classification and recovery-card policy helpers.
 - `app/frontend-routing.js` - Client-side route decisions for fast answers, live search, and sensitive requests.
 - `app/instant-replies.js` - Local instant replies for simple app/about/greeting prompts.
@@ -61,6 +58,7 @@ Static frontend + Node/Vercel API routes. No frontend build step.
 - `tests/check-inline-script.mjs` - Syntax check for the inline script embedded in `index.html`.
 - `tests/context-engine.test.mjs` - Unit tests for local context resolution behavior.
 - `tests/deterministic-checks.mjs` - Deterministic source-contract checks for key app behavior and regressions.
+- `tests/emergency-sos.test.mjs` - Unit tests for emergency contacts CRUD, distress telemetry, and dispatch URL formatting.
 - `tests/hygiene-scanner.test.mjs` - Tests for hardcoded-content hygiene scanning.
 - `tests/speech-input.test.mjs` - Unit tests for speech input behavior.
 - `tools/hardcoded-content-allowlist.mjs` - Allowlist for intentional hardcoded content scanner matches.
@@ -71,7 +69,10 @@ Static frontend + Node/Vercel API routes. No frontend build step.
 
 - Text chat, explanations, summaries, writing help & planning
 - Streaming answers, with JSON fallback for reviewed or structured routes
-- Voice-to-text, Live Vision, and file attachments (PDF, DOCX, PPTX, images, text)
+- Enterprise Voice-to-Text (VTT / Dictation) with spoken punctuation parsing and tech acronym auto-capitalization
+- Modern circular send button (32px disc with vertical upward arrow `↑` and dynamic active/disabled/stop states)
+- Emergency SOS with emergency contacts management, precision GPS & battery telemetry, and multi-channel distress dispatch (SMS, WhatsApp, Phone, Web Share)
+- Live Vision, and file attachments (PDF, DOCX, PPTX, images, text)
 - Saved chats with search, restore, rename, pin, share, and delete
 - Local Memory Manager for explicit saved memory
 - Prompt-based translation and slash command picker
@@ -102,7 +103,7 @@ Examples: `translate "How much does this cost?" to Tamil`, `say this in Hindi: I
 
 ## Sidebar And Options
 
-Left sidebar: New chat, Search chats, Vision Analysis, Voice Conversation, Memory, System Instructions, and saved chats. Long-press or right-click a saved chat to rename, pin, share, or delete it.
+Left sidebar: New chat, Search chats, Vision Analysis, Memory, System Instructions, Emergency SOS, and saved chats. Long-press or right-click a saved chat to rename, pin, share, or delete it.
 
 Help & Options holds custom system instructions only.
 
