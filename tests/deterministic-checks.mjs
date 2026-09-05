@@ -10,7 +10,6 @@ import { clearItems, saveItems } from '../api/_lib/latest/latest-cache.js';
 import { decideFrontendRoute, isCasualConversationQuery as routeCasualQuery } from '../app/frontend-routing.js';
 import { classifyFailure, shouldShowFailureFallbackCard as routeFailureCard } from '../app/failure-policy.js';
 import { scorePlaceEvidence as scoreFrontendPlaceEvidence, isRelevantPlaceResult as isFrontendRelevantPlaceResult } from '../app/place-grounding.js';
-import { createConverseStateTracker, normalizeConverseState } from '../app/converse-state.js';
 import { __test as attachmentIngestTest } from '../api/_lib/attachment-ingest.js';
 import { highlightCode } from '../app/code-highlighter.js';
 import { renderMathInText, formatLatexExpression } from '../app/math-renderer.js';
@@ -245,13 +244,9 @@ const FEATURE_CONTRACTS = Object.freeze({
     },
     interruptionAndFeedback: {
         required: [
-            /let converseQueuedSubmissionSequence = 0/,
-            /const queuedSubmissionId = \+\+converseQueuedSubmissionSequence/,
             /assistant-message-interrupted/,
             /function addFeedbackButtons\(query, response, assistantMessageId = ''\)/,
             /targetMessage\.insertAdjacentElement\('afterend', feedbackDiv\)/,
-            /function speakConverseReply\(text, turn\)/,
-            /new SpeechSynthesisUtterance\(spokenText\)/,
             /return messageId;/
         ]
     }, 
@@ -352,14 +347,14 @@ assert.equal(classifyFreeLiveIntent(LIVE_ROUTE_FIXTURES.places).category, 'touri
 assert.equal(classifyFreeLiveIntent(LIVE_ROUTE_FIXTURES.unsupported).category, 'stable_knowledge');
 assert.equal(routeCasualQuery('No no I am just generally asking how are you doing today'), true);
 assert.deepEqual(
-    decideFrontendRoute('So how are you doing today', { turnSource: 'converse' }),
+    decideFrontendRoute('So how are you doing today', { turnSource: 'vtt' }),
     {
         route: 'fast_simple',
         reason: 'casual_conversation',
         risk: 'low_risk',
         requiresSources: false,
         minimalThinking: true,
-        speakResponse: true,
+        speakResponse: false,
         sourcePolicy: 'none'
     }
 );
@@ -381,9 +376,6 @@ assert.equal(isFrontendRelevantPlaceResult(`museum in ${fixtureSubject('Harbor')
     title: fixtureSubject('Operating System'),
     description: 'A desktop operating system reference page.'
 }, fixtureSubject('Harbor')), false);
-const converseTracker = createConverseStateTracker();
-assert.equal(converseTracker.setState('speaking', 'test').state, 'speaking');
-assert.equal(normalizeConverseState('bad-state'), 'listening');
 const REVIEW_CASE = makeReviewQueryCase();
 const ROLE_CASE = makeRoleQueryCase();
 const ALT_REVIEW_SUBJECT = fixtureSubject('Laptop', '16');
