@@ -8,37 +8,37 @@ This document provides a comprehensive technical overview of the **Enterprise Re
 
 ```mermaid
 flowchart TD
-    User([User Prompt / Query]) --> SecGuard[In-Process Prompt Guard <1ms\napi/_lib/prompt-guard.js]
+    User(["User Prompt / Query"]) --> SecGuard["In-Process Prompt Guard (&lt;1ms)<br/>api/_lib/prompt-guard.js"]
     
-    SecGuard -- Adversarial / Jailbreak --> RejectBlock[Polite Security Block & Explain]
-    SecGuard -- Safe Input --> PIIRedact[Zero-Leakage PII & Secret Redactor\napi/_lib/pii-redactor.js]
+    SecGuard -->|"Adversarial / Jailbreak"| RejectBlock["Polite Security Block & Explain"]
+    SecGuard -->|"Safe Input"| PIIRedact["Zero-Leakage PII & Secret Redactor<br/>api/_lib/pii-redactor.js"]
     
-    PIIRedact --> Router[Intent & Capability Router\napi/_lib/latest/router.js]
+    PIIRedact --> Router["Intent & Capability Router<br/>api/_lib/latest/router.js"]
     
     %% RAG Branch
-    Router -- Live / Factual Query --> CacheCheck{L1 / L2 KV Cache Hit?\napi/_lib/distributed-cache.js}
+    Router -->|"Live / Factual Query"| CacheCheck{"L1 / L2 KV Cache Hit?<br/>api/_lib/distributed-cache.js"}
     
-    CacheCheck -- Hit (0.1ms - 25ms) --> ReturnCached[Return Verified Cached Response]
+    CacheCheck -->|"Hit (0.1ms - 25ms)"| ReturnCached["Return Verified Cached Response"]
     
-    CacheCheck -- Miss --> ScraperRound[Concurrent Free Public Scrapers\n• Google News RSS\n• Wikipedia REST\n• Wikidata SPARQL\n• DuckDuckGo HTML\n• GDELT Doc API]
+    CacheCheck -->|"Miss"| ScraperRound["Concurrent Free Public Scrapers<br/>Google News RSS / Wikipedia / Wikidata / DuckDuckGo / GDELT"]
     
-    ScraperRound --> Chunker[Hierarchical Parent-Child Chunker\n150-char Child -> 650-char Parent\napi/_lib/parent-child-chunker.js]
+    ScraperRound --> Chunker["Hierarchical Parent-Child Chunker<br/>150-char Child to 650-char Parent<br/>api/_lib/parent-child-chunker.js"]
     
-    Chunker --> HybridRerank[In-Process Hybrid Reranker\nBM25 + Semantic + RRF k=60\napi/_lib/hybrid-reranker.js]
+    Chunker --> HybridRerank["In-Process Hybrid Reranker<br/>BM25 + Semantic + RRF (k=60)<br/>api/_lib/hybrid-reranker.js"]
     
-    HybridRerank --> TemporalGate[Temporal & Tenure Overlap Gate]
+    HybridRerank --> TemporalGate["Temporal & Tenure Overlap Gate"]
     
-    TemporalGate --> TriadEval[Automated RAG Triad Evaluator\nContext Rel + Faithfulness + Answer Rel\napi/_lib/rag-triad-evaluator.js]
+    TemporalGate --> TriadEval["Automated RAG Triad Evaluator<br/>Context Rel + Faithfulness + Answer Rel<br/>api/_lib/rag-triad-evaluator.js"]
     
-    TriadEval --> Synthesis[Grounded Synthesis & Inline Citations [^1]\napi/search.js & app/markdown-renderer.js]
+    TriadEval --> Synthesis["Grounded Synthesis & Inline Citations<br/>api/search.js & app/markdown-renderer.js"]
     
-    Synthesis --> WriteCache[Update L1/L2 Cache with SWR]
-    WriteCache --> FinalResponse([Final Verified & Attributed Response])
+    Synthesis --> WriteCache["Update L1/L2 Cache with SWR"]
+    WriteCache --> FinalResponse(["Final Verified & Attributed Response"])
     
     %% Direct LLM Branch
-    Router -- Reasoning / Code / Chat --> GroqCascade[Groq-First Resilient Cascade\nGPT-OSS -> Llama 3.3 -> Qwen -> DeepSeek -> Gemini\napi/chat-groq.js]
+    Router -->|"Reasoning / Code / Chat"| GroqCascade["Groq-First Resilient Cascade<br/>GPT-OSS to Llama 3.3 to Qwen to DeepSeek to Gemini<br/>api/chat-groq.js"]
     
-    GroqCascade --> CoTThinking[Dynamic Chain-of-Thought Engine\napp/markdown-renderer.js]
+    GroqCascade --> CoTThinking["Dynamic Chain-of-Thought Engine<br/>app/markdown-renderer.js"]
     CoTThinking --> FinalResponse
 ```
 
