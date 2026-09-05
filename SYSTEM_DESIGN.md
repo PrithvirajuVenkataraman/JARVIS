@@ -11,8 +11,9 @@ graph TD
     Client["Client Web UI (Vanilla JS, Web Audio, Responsive CSS)"]
     
     subgraph Frontend["Frontend Subsystems"]
-        ChatComposer["Chat Composer & Attachment Ingestion"]
-        ConverseController["Converse Mode Engine (VTT & TTS)"]
+        ChatComposer["Chat Composer & Attachment Ingestion (Circular Send Button)"]
+        VTTController["Enterprise Voice-to-Text (VTT & Dictation)"]
+        EmergencySosSubsystem["Emergency SOS & Satellite Distress Subsystem"]
         OfflineWatchdog["Network Resilience Watchdog"]
         AudioHaptics["Web Audio Chimes & Haptics Engine"]
         VectorEngine["512-Dim Dense Vector Embedding & Semantic Search"]
@@ -34,9 +35,10 @@ graph TD
     end
 
     Client --> ChatComposer
-    Client --> ConverseController
+    Client --> VTTController
+    Client --> EmergencySosSubsystem
     ChatComposer --> SecurityShield
-    ConverseController --> SecurityShield
+    VTTController --> SecurityShield
     SecurityShield --> ContextCompactor
     ContextCompactor --> IntentRouter
     IntentRouter --> CircuitBreaker
@@ -207,19 +209,21 @@ flowchart LR
 
 ---
 
-## 8. Converse Voice & Audio Subsystem
+## 8. Enterprise Voice-to-Text (VTT / Dictation) & Audio Subsystem
 
-JARVIS includes a continuous, hands-free voice conversation engine:
+JARVIS features an enterprise-grade production dictation system matching professional dictation standards (ChatGPT Voice Typing, Apple Dictation, Word Dictation):
 
-1. **Multilingual Speech-to-Text (STT):**
-   - Hybrid Web Speech API with automatic fallback to Whisper STT.
-   - Auto-detection for English, Kannada, Tamil, Telugu, Malayalam, and Hindi.
-2. **Audio Streaming & Dynamic Accordion:**
-   - Real-time Server-Sent Events (SSE) with dynamic `<think>` reasoning accordions.
-   - Reasoning blocks stream into expandable UI accordions while only the finalized answer is piped to speech synthesis.
-3. **Barge-In Interruption:**
-   - User speech immediately pauses TTS playback and captures the new question without echo loopback.
-4. **Sensory Feedback:**
+1. **Complete Removal of Hands-Free Converse Mode**:
+   - The legacy continuous hands-free converse overlay, rotating orb, status modal, and continuous background audio capture loops have been excised.
+   - Zero unsolicited audio: speech output is strictly user-invoked on demand via the message action bar **Speak** button.
+2. **Spoken Punctuation & Formatting Engine (`cleanSpeechFillers`)**:
+   - Parses spoken punctuation commands in real time: `period` / `full stop` $\rightarrow$ `.`, `comma` $\rightarrow$ `,`, `question mark` $\rightarrow$ `?`, `exclamation mark` $\rightarrow$ `!`, `colon` $\rightarrow$ `:`, `semicolon` $\rightarrow$ `;`, `hyphen` / `dash` $\rightarrow$ `-`, `new line` $\rightarrow$ `\n`, `new paragraph` $\rightarrow$ `\n\n`.
+3. **Enterprise Acronym & Proper Noun Capitalization**:
+   - Automatically normalizes casing for technical, corporate, and cloud acronyms: `AI`, `API`, `UI`, `UX`, `URL`, `HTML`, `CSS`, `JSON`, `SQL`, `AWS`, `GCP`, `CEO`, `CTO`, `CFO`, `GPS`, `PDF`, `OS`, `SDK`, `LLM`, `TTS`, `STT`, `VTT`, `REST`, `GraphQL`.
+4. **Dual-Engine STT Architecture (`app/speech-input.js`)**:
+   - Low-latency browser Web Speech API as primary engine.
+   - Automatic fallback to high-accuracy Whisper STT (`/api/stt`) when browser recognition is unsupported or network errors occur.
+5. **Sensory Feedback**:
    - Native Web Audio synthesizer chimes (`playJarvisChime`) on activation.
    - Haptic vibration feedback (`triggerJarvisHaptic`) on mobile devices.
 
@@ -260,10 +264,11 @@ JARVIS maintains **100% automated test coverage across all test suites**:
 | :--- | :--- | :--- |
 | `test:deterministic` | Fast-path deterministic fact verifier | **PASS (0 errors)** |
 | `test:context` | Sliding-window context compaction & vector search | **PASS (0 errors)** |
-| `test:speech-input` | Voice controller, barge-in & multilingual STT | **PASS (0 errors)** |
+| `test:speech-input` | Enterprise VTT, spoken punctuation & audio pipeline | **PASS (0 errors)** |
 | `test:api` | API contracts, streaming SSE & payload validation | **PASS (0 errors)** |
 | `test:verification` | Data integrity monitor, entity verifier, tools & self-improving loops | **PASS (0 errors)** |
-| `test:hygiene` | Security, clean DOM & hardcoded content scanner (91 files) | **PASS (0 errors)** |
+| `emergency-sos.test.mjs`| Emergency SOS contacts CRUD, distress telemetry & dispatch URLs | **PASS (0 errors)** |
+| `test:hygiene` | Security, clean DOM & hardcoded content scanner (106 files) | **PASS (0 errors)** |
 
 ---
 
@@ -356,3 +361,35 @@ To ensure zero hardcoding across the test harness itself, the test suites operat
   - Proves $(\text{count}(\text{delimiter}) \pmod 2) \equiv 0$ for all code fences and LaTeX math delimiters.
 * **Arithmetic Property Invariant**:
   - $\forall a, b, \text{op}: \text{repair}(a \text{ op } b = \text{wrong}) \implies a \text{ op } b = (a \text{ op } b)$.
+
+---
+
+## 17. Professional Send Button & Emergency SOS Subsystems
+
+### 17.1 Professional Send Button Architecture (`#send-message-btn`)
+- **Visual Design**: Replaces amateurish squircle/paper-airplane buttons with a modern 32px borderless circular disc (`border-radius: 50%`) centered with a crisp vertical upward arrow (`↑`), matching industry leaders ChatGPT and Claude.
+- **Dynamic State Engine**:
+  - **Disabled State**: Low-contrast disc (`rgba(255, 255, 255, 0.08)`) and arrow when the composer text area is empty.
+  - **Active / Typing State**: High-contrast white disc (`#ffffff`) with pitch black arrow (`#000000`) and a smooth hover scale transform (`scale(1.06)`).
+  - **Stop Generating State**: High-contrast disc containing a clean rounded stop square (`■`) while AI streaming generation is in flight, allowing instant cancellation.
+  - **Theme Adaptation**: Seamless dynamic CSS variables supporting dark and light mode themes.
+
+### 17.2 Satellite Emergency SOS & Distress Dispatch System (`app/emergency-sos.js`)
+- **Sidebar Integration**: Dedicated quick-action item (`#sidebar-emergency-sos-btn`) in the primary navigation with red emergency styling and high-contrast accent text.
+- **Interactive Emergency Contacts Modal (`#sos-contact-modal`)**:
+  - Dark glass overlay (`backdrop-filter: blur(8px)`) with emergency red boundary accents.
+  - Contact management (Name, Phone number with country code, Relationship) with local persistence via `window.JarvisEmergencySOS`.
+  - Automatic `PRIMARY` designation for primary distress contact.
+  - One-tap direct trigger: **🚨 Trigger Satellite SOS Now** button.
+- **Precision Telemetry Acquisition**:
+  - Coordinates via `getCurrentPositionAsync` with `enableHighAccuracy: true` and accuracy radius ($\pm X\text{m}$).
+  - Battery telemetry percentage via Navigator Battery API ($\text{🔋 } X\%$).
+  - Street-level reverse geocoding via OpenStreetMap Nominatim.
+- **Multi-Channel Instant Dispatch**:
+  - **📱 Cellular SMS**: Direct pre-filled SMS dispatch with coordinates and map links (`sms:NUMBER?body=...`).
+  - **💬 WhatsApp**: Direct pre-filled WhatsApp API link to primary contact.
+  - **📞 Phone Dialer**: Instant `tel:` link to primary contact or default emergency services (`112`).
+  - **📤 Web Share API**: Native device share sheet or clipboard copy fallback.
+  - **🗺️ Live Map**: Embedded OpenStreetMap preview pin focused directly on the acquired coordinates.
+- **Conversational Triggers**:
+  - Autonomous intent detection in `isEmergencySosIntentText` recognizing `"emergency"`, `"sos"`, `"distress"`, `"call police"`, `"in danger"`, and `"send help"`.
