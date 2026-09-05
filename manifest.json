@@ -1,9 +1,9 @@
 {
   "name": "JARVIS AI Assistant",
   "short_name": "JARVIS",
-  "description": "Next-generation multimodal AI assistant with live web search, dynamic reasoning, and real-time voice converse.",
+  "description": "Next-generation multimodal AI assistant with live web search, dynamic reasoning, and enterprise voice dictation.",
   "start_url": "/",
-  "id": "/", 
+  "id": "/",
   "display": "standalone",
   "background_color": "#07090e",
   "theme_color": "#07090e",
