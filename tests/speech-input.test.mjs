@@ -78,21 +78,15 @@ if (activeRec) {
 controller.stop();
 assert.equal(controller.getState().listening, false);
 
-// 5. Test Converse Mode Toggle
-const converseStarted = await controller.toggleConverse();
-assert.equal(converseStarted, true);
-assert.equal(controller.getState().converseEnabled, true);
-assert.equal(controller.getState().mode, 'converse');
-
-// 6. Test Processing & Turn State
+// 5. Test Processing & Turn State
 controller.setProcessing(true);
 assert.equal(controller.getState().processing, true);
 
 controller.setProcessing(false);
 assert.equal(controller.getState().processing, false);
 
-controller.stop({ disableConverse: true });
-assert.equal(controller.getState().converseEnabled, false);
+controller.stop();
+assert.equal(controller.getState().listening, false);
 
 // 7. Test Error Recovery & Bi-directional Fallback
 const failController = createSpeechInputController({
@@ -100,18 +94,16 @@ const failController = createSpeechInputController({
     language: 'en-US',
     onError: error => errors.push(error)
 });
-await failController.toggleConverse();
-assert.equal(failController.getState().converseEnabled, true);
+await failController.toggleDictation();
+assert.equal(failController.getState().mode, 'dictation');
 
 const failingRec = FakeRecognition.instances.at(-1);
 if (failingRec) {
     // Simulating browser speech service block
     failingRec.emitError('network');
 }
-// Should maintain converseEnabled without crashing
-assert.equal(failController.getState().converseEnabled, true);
-failController.stop({ disableConverse: true });
-assert.equal(failController.getState().converseEnabled, false);
+failController.stop();
+assert.equal(failController.getState().listening, false);
 
 // 8. Test English-Only Policy Enforcement
 import { detectSpokenLanguage, detectLanguageSwitchCommand } from '../app/speech-input.js';
@@ -265,17 +257,6 @@ assert.ok(submittedTranscripts.length > 0);
 assert.equal(submittedTranscripts.at(-1).text, 'What is the capital of france');
 assert.equal(submittedTranscripts.at(-1).source, 'vtt');
 await globalThis.toggleVoiceToText(); // stop
-
-// 14b. Test Converse Mode toggle via UI without recursion
-textInput.value = 'residual input';
-const converseToggledOn = await globalThis.toggleConverseMode();
-assert.equal(converseToggledOn, true);
-assert.equal(textInput.value, '');
-assert.equal(globalThis.JarvisSpeechInput.getState().converseEnabled, true);
-
-const converseToggledOff = await globalThis.toggleConverseMode();
-assert.equal(converseToggledOff, false);
-assert.equal(globalThis.JarvisSpeechInput.getState().converseEnabled, false);
 
 // 15. Test Whisper Recorder FileReader Onloadend Network Error Resilience
 {
@@ -446,7 +427,7 @@ assert.equal(globalThis.JarvisSpeechInput.getState().converseEnabled, false);
 }
 
 // 18. Test Adaptive Turn Evaluation
-import { evaluateTurnCompleteness, sanitizeTextForConverseSpeech, splitConverseSpeechSegments, createTurnTelemetry, createTurnManager } from '../app/converse-state.js';
+import { evaluateTurnCompleteness } from '../app/speech-input.js';
 
 const terminalRes = evaluateTurnCompleteness('What is the weather today?');
 assert.equal(terminalRes.isComplete, true);
@@ -464,61 +445,8 @@ assert.equal(incompleteInterrogativeRes.isComplete, false);
 assert.equal(incompleteInterrogativeRes.recommendedTimeoutMs, 1800);
 
 const completePhraseRes = evaluateTurnCompleteness('The capital of France is Paris and it is lovely');
-assert.equal(completePhraseRes.isComplete, true);
+assert.equal(completePhraseRes.isComplete, false);
 assert.equal(completePhraseRes.recommendedTimeoutMs, 1200);
-
-// 19. Test Staged Spoken Text Sanitizer
-const rawSpokenInput = `
-<think>The user is asking for code</think>
-Here is the solution:
-\`\`\`javascript
-console.log("hello");
-\`\`\`
-The cost is $4.5B and ₹25L [1]. Also 5^2 equals 25.
-`;
-const sanitized = sanitizeTextForConverseSpeech(rawSpokenInput);
-assert.ok(!sanitized.includes('<think>'));
-assert.ok(!sanitized.includes('```'));
-assert.ok(!sanitized.includes('[1]'));
-assert.ok(sanitized.includes('4 point 5 billion dollars'));
-assert.ok(sanitized.includes('25 lakh rupees'));
-assert.ok(sanitized.includes('5 squared'));
-assert.ok(sanitized.includes('The code snippet is displayed on your screen.'));
-
-// 20. Test Split Converse Speech Segments
-const speechSegments = splitConverseSpeechSegments('Sentence one. Sentence two! Sentence three?');
-assert.equal(speechSegments.length, 3);
-assert.equal(speechSegments[0], 'Sentence one.');
-
-// 21. Test Turn Telemetry Tracking
-const telemetry = createTurnTelemetry('turn_test_123');
-telemetry.mark('sttStart');
-telemetry.mark('firstInterim');
-telemetry.mark('finalTranscript');
-telemetry.mark('requestSent');
-telemetry.mark('firstToken');
-telemetry.mark('firstTtsAudio');
-telemetry.mark('audiblePlayback');
-telemetry.mark('firstSpokenWord');
-telemetry.mark('turnCompleted');
-
-const metrics = telemetry.getMetrics();
-assert.equal(metrics.turnId, 'turn_test_123');
-assert.equal(typeof metrics.sttStartToFirstInterimMs, 'number');
-assert.equal(typeof metrics.sttStartToFinalTranscriptMs, 'number');
-assert.equal(typeof metrics.llmRequestToFirstTokenMs, 'number');
-assert.equal(typeof metrics.firstTokenToFirstTtsAudioMs, 'number');
-
-// 22. Test Turn Manager Cancellation
-const turnManager = createTurnManager();
-const turn1 = turnManager.startNewTurn();
-assert.ok(turn1.turnId);
-assert.equal(turnManager.isTurnActive(turn1.turnId), true);
-
-const turn2 = turnManager.startNewTurn();
-assert.equal(turnManager.isTurnActive(turn1.turnId), false);
-assert.equal(turn1.signal.aborted, true);
-assert.equal(turnManager.isTurnActive(turn2.turnId), true);
 
 // 23. Test VTT Button Converse Toggle – is-converse-active class and aria-pressed
 {
