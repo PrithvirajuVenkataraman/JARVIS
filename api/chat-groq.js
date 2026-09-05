@@ -1006,7 +1006,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
         ].join('\n');
     }
 
-    function composeFinalPrompt(systemPrompt, ragBlock, contextBlock, message, lengthGuidance = '', intent = 'chat') {
+    function composeFinalPrompt(systemPrompt, ragBlock, contextBlock, message, lengthGuidance = '', intent = 'chat', model = '') {
         return [
             systemPrompt,
             ragBlock ? `Retrieved context (RAG):\n${ragBlock}` : '',
@@ -1014,7 +1014,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             buildIntentPromptHint(intent),
             `User message: ${message}`,
             lengthGuidance ? `Length guidance:\n${lengthGuidance}` : '',
-            buildReasoningInstruction(intent)
+            buildReasoningInstruction(intent, model)
         ].filter(Boolean).join('\n\n');
     }
 
@@ -1072,23 +1072,30 @@ const edgeResponseCache = new EdgeSemanticLruCache();
      * The reasoning should reference the actual system rules being checked.
      * For trivial intents (chat_title, fast_simple), reasoning is suppressed.
      */
-    function buildReasoningInstruction(intent) {
+    function isNativeReasoningModel(modelName = '') {
+        const m = String(modelName || '').toLowerCase();
+        return m.includes('deepseek') || m.includes('r1') || m.includes('reasoner') || m.includes('thinking');
+    }
+
+    function buildReasoningInstruction(intent, model = '') {
         const suppressedIntents = ['chat_title', 'fast_simple', 'internal_summary'];
         if (suppressedIntents.includes(String(intent || ''))) {
             return 'Return only the final assistant answer as natural text.';
         }
-        return `Reasoning instruction: Before your final answer, think through the problem inside <think>...</think> tags.
-Write your thinking as genuine, natural, conversational inner thoughts exploring the specific query, calculating or verifying key details, checking for nuances or constraints, and developing the solution intuitively before delivering the response. Keep it in natural paragraph prose. Avoid artificial 4-5 numbered bullet checklists, rigid template headers (e.g. "Step 1: Analyze intent"), or repetitive boilerplate. Everything after </think> must be ONLY the final, polished answer for the user with zero meta-commentary.`;
+        if (isNativeReasoningModel(model)) {
+            return `Reasoning instruction: Work through the problem within <think>...</think> tags before delivering the final answer. Everything after </think> must be ONLY the final polished answer for the user with zero meta-commentary.`;
+        }
+        return 'Accuracy & formatting rules: Deliver the polished final answer directly with clarity and precision. Do not output artificial <think> tags, synthetic reasoning checklists, or meta-commentary.';
     }
 
-    function composeStreamingPrompt(systemPrompt, contextBlock, message, lengthGuidance = '', intent = 'chat') {
+    function composeStreamingPrompt(systemPrompt, contextBlock, message, lengthGuidance = '', intent = 'chat', model = '') {
         return [
             systemPrompt,
             contextBlock ? `Recent turns:\n${contextBlock}` : '',
             buildIntentPromptHint(intent),
             `User message: ${message}`,
             lengthGuidance ? `Length guidance:\n${lengthGuidance}` : '',
-            buildReasoningInstruction(intent),
+            buildReasoningInstruction(intent, model),
             'Do not wrap the answer in JSON.',
             'Accuracy rules: Prefer being brief and correct. If unsure about a fact, say so in one short clause instead of inventing names, dates, numbers, or sources. Never invent URLs or citations. Resolve pronouns only from the recent turns above.'
         ].filter(Boolean).join('\n\n');
@@ -1165,8 +1172,8 @@ Write your thinking as genuine, natural, conversational inner thoughts exploring
         let streamedText = '';
         try {
             const prompt = liveRag.ragText
-                ? composeFinalPrompt(systemPrompt, liveRag.ragText, contextBlock, effectiveMessage, lengthPolicy?.instruction || '', intent)
-                : composeStreamingPrompt(systemPrompt, contextBlock, effectiveMessage, lengthPolicy?.instruction || '', intent);
+                ? composeFinalPrompt(systemPrompt, liveRag.ragText, contextBlock, effectiveMessage, lengthPolicy?.instruction || '', intent, selectedModel)
+                : composeStreamingPrompt(systemPrompt, contextBlock, effectiveMessage, lengthPolicy?.instruction || '', intent, selectedModel);
             const modelStartedAt = Date.now();
             const streamImages = Array.isArray(images)
                 ? images
