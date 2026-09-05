@@ -358,7 +358,7 @@ export function decideFrontendRoute(text, context = {}) {
         ...base,
         route: 'fast_simple',
         reason: entityIntent.category || 'stable_geography_or_general_fact',
-        risk: 'low_risk', 
+        risk: 'low_risk',
         minimalThinking: true,
         requiresSources: false,
         sourcePolicy: 'none'
