@@ -21083,13 +21083,6 @@ Quick recap: ...
                 return;
             }
 
-            else if (isJarvisTechStackRequest(cleanText)) {
-                const stackReply = buildJarvisTechStackReply();
-                addChatMessage(stackReply, false);
-                saveToHistory(text, stackReply);
-                return;
-            }
-
             // ========== NEWS HANDLING ==========
             else if ((lower.match(/\b(news|headlines?|what'?s happening|current events?)\b/i) ||
                       (lower.match(/\blatest updates?\b/i) && !/\b(react|node|js|javascript|python|sql|code|api|version|dependency|framework|package|model|library)\b/i.test(lower))) &&
@@ -23373,21 +23366,6 @@ function decideFrontendRoute(text, context = {}) {
 async function handleFastSimpleQuery(text, options = {}) {
     const userText = String(text || '').trim();
     if (!userText) return { intent: 'fast_simple' };
-    if (isCasualConversationQuery(userText)) {
-        const reply = buildCasualConversationReply(userText);
-        const messageId = addModelAssistantMessage(reply, 'Model answer', {
-            turnId: options?.turnId,
-            sourceType: 'model',
-            route: options?.routeDecision?.route || 'fast_simple',
-            routeReason: options?.routeDecision?.reason || 'casual_conversation',
-            turnSource: options?.turnSource || activeResponseRenderContext?.source || '',
-            sourcePolicy: options?.routeDecision?.sourcePolicy || 'none',
-            latency: options?.latency || null
-        });
-        saveToHistory(options?.historyKey || userText, reply, { recordContext: false });
-        addFeedbackButtons(userText, reply, messageId);
-        return { response: reply, intent: 'casual_conversation', assistantMessageId: messageId };
-    }
     const ai = await askGeminiAI(userText, {
         intent: 'fast_simple',
         fastExplainer: true,
