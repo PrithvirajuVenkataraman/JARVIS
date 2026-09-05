@@ -69,7 +69,7 @@ graph TD
 
 | Model Name | Provider | Primary Use Case | Supported Languages |
 | :--- | :--- | :--- | :--- |
-| **`whisper-large-v3-turbo`** | Groq | **Ultra-Fast Voice STT**: Live voice input, hands-free Converse Mode. | English, Kannada, Tamil, Telugu, Hindi, Malayalam, Spanish, French, German, Japanese, etc. |
+| **`whisper-large-v3-turbo`** | Groq | **Enterprise Voice-to-Text (VTT / Dictation)**: Real-time spoken dictation, professional punctuation parsing, and technical acronym auto-capitalization. | English, Kannada, Tamil, Telugu, Hindi, Malayalam, Spanish, French, German, Japanese, etc. |
 | **`whisper-large-v3`** | Groq | **High-Accuracy Audio Transcription**: Long audio file processing and noisy background audio. | 99+ spoken languages with automatic punctuation and language detection. |
 
 ---
@@ -87,7 +87,7 @@ graph TD
 
 For live world queries (e.g. current politicians, election winners, breaking news, sports standings):
 
-1. **Pre-Training Knowledge Bypass**: 
+1. **Pre-Training Knowledge Bypass**:
    - The LLM's parametric memory (frozen at 2023–2024 training cutoffs) is explicitly deprecated for real-time questions.
 2. **Parallel Deep Webpage Scraper (<2.5s Timeout)**:
    - Scrapes full HTML article body text (up to 2,500 characters) across top live URLs simultaneously.
