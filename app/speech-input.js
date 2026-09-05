@@ -23,7 +23,13 @@ export function cleanSpeechFillers(text = '') {
     s = s.replace(/\b(?:um+|uh+|er+|ah+|erm+|hmm+|hm+)\b/gi, '');
 
     // 2. Remove filler phrases when surrounded by boundaries or at start/end
-    s = s.replace(/\b(?:you know|i mean|sort of|kind of)\b/gi, '');
+    // 'you know' should not be removed if preceded by 'do/did/does/will/if/as' or followed by question words (what/who/how/etc.)
+    s = s.replace(/(?<!\b(?:do|did|does|dont|don't|will|would|could|should|if|as)\s+)\b(?:you know)\b(?!\s+(?:if|that|what|who|when|where|why|how|which|whether|about|\?))/gi, '');
+
+    // 'sort of' / 'kind of' should NOT be removed if preceded by what/which/this/that/a/an/any
+    s = s.replace(/(?<!\b(?:what|which|this|that|a|an|any|every|some)\s+)\b(?:sort of|kind of)\b/gi, '');
+    s = s.replace(/\b(?:i mean)\b/gi, '');
+
     s = s.replace(/^(?:like|basically|literally)[,\s]+/gi, '');
     s = s.replace(/[,\s]+(?:like|basically|literally)[,\s]+/gi, ' ');
     s = s.replace(/[,\s]+(?:like|basically|literally)$/gi, '');
@@ -73,6 +79,7 @@ export function cleanSpeechFillers(text = '') {
     }
 
     // 5. Clean punctuation spacing (e.g. "word , next" -> "word, next")
+    s = s.replace(/,\s*,+/g, ',');
     s = s.replace(/\s+([,.:;?!])/g, '$1');
     s = s.replace(/([,.:;?!])(?=[^\s\d])/g, '$1 ');
 
@@ -406,14 +413,15 @@ export function createSpeechInputController(options = {}) {
 
             r.onresult = event => {
                 if (globalThis.__isConverseGreetingSpeaking) {
-                    return;
+                    globalThis.__isConverseGreetingSpeaking = false;
+                    try { globalThis.speechSynthesis?.cancel?.(); } catch (_) {}
                 }
                 const isSpeaking = Boolean(
-                    (globalThis.speechSynthesis?.speaking && !globalThis.__isConverseGreetingSpeaking) ||
+                    globalThis.speechSynthesis?.speaking ||
                     globalThis.isConverseSpeechActive?.()
                 );
                 if (isSpeaking || processing) {
-                    if (globalThis.speechSynthesis?.speaking && !globalThis.__isConverseGreetingSpeaking) {
+                    if (globalThis.speechSynthesis?.speaking) {
                         try { globalThis.speechSynthesis.cancel(); } catch (_) {}
                     }
                     globalThis.stopConverseSpeech?.('barge_in');
@@ -453,9 +461,9 @@ export function createSpeechInputController(options = {}) {
                 }
 
                 const evalResult = evaluateTurnCompleteness(liveCandidate, {
-                    completeTimeoutMs: options.completeTimeoutMs || 800,
-                    normalTimeoutMs: options.normalTimeoutMs || 1200,
-                    incompleteTimeoutMs: options.incompleteTimeoutMs || 1800
+                    completeTimeoutMs: options.completeTimeoutMs || (converseEnabled ? 450 : 800),
+                    normalTimeoutMs: options.normalTimeoutMs || (converseEnabled ? 650 : 1200),
+                    incompleteTimeoutMs: options.incompleteTimeoutMs || (converseEnabled ? 1100 : 1800)
                 });
 
                 if (currentFinal && !converseEnabled && mode === 'dictation' && !options.adaptiveDictation) {
@@ -544,6 +552,10 @@ export function createSpeechInputController(options = {}) {
             try {
                 browserRecognition.start();
             } catch (err) {
+                const isAlreadyStarted = String(err?.message || '').toLowerCase().includes('already started');
+                if (isAlreadyStarted) {
+                    return;
+                }
                 browserRecognition = null;
                 if (whisperRecorder.isSupported() && !fallbackMode) {
                     fallbackMode = true;
@@ -785,7 +797,12 @@ export function createAudioVisualizer(containerEl) {
     let animationFrameId = null;
     let barElements = [];
     let smoothedLevels = [];
+    let speechPulseEnergy = 0;
     const NUM_BARS = 14;
+
+    function pulse(energy = 0.8) {
+        speechPulseEnergy = Math.min(1.0, Math.max(speechPulseEnergy, energy));
+    }
 
     function initDom() {
         if (!containerEl || typeof document === 'undefined' || typeof document.createElement !== 'function') return;
@@ -817,13 +834,17 @@ export function createAudioVisualizer(containerEl) {
             let frame = 0;
             function drawLoop() {
                 animationFrameId = requestAnimFrame(drawLoop);
-                frame += 0.06;
+                frame += 0.08;
+                speechPulseEnergy *= 0.92;
+                const dynamicBoost = Math.max(0, speechPulseEnergy);
                 for (let i = 0; i < NUM_BARS; i++) {
                     const dist = Math.abs(i - NUM_BARS / 2) / (NUM_BARS / 2);
-                    const wave = Math.sin(frame + i * 0.45) * 0.16 + 0.26;
-                    const scale = Math.max(0.12, wave * (1 - dist * 0.35));
+                    const baseWave = Math.sin(frame + i * 0.45) * 0.14 + 0.22;
+                    const speechWave = (Math.sin(frame * 1.6 + i * 0.8) * 0.35 + 0.45) * dynamicBoost;
+                    const targetScale = Math.min(1.0, Math.max(0.12, (baseWave + speechWave) * (1 - dist * 0.3)));
+                    smoothedLevels[i] += (targetScale - smoothedLevels[i]) * 0.35;
                     if (barElements[i]) {
-                        barElements[i].style.setProperty?.('--bar-scale', scale.toFixed(3));
+                        barElements[i].style.setProperty?.('--bar-scale', smoothedLevels[i].toFixed(3));
                     }
                 }
             }
@@ -923,6 +944,7 @@ export function createAudioVisualizer(containerEl) {
     return {
         start,
         stop,
+        pulse,
         getBarCount: () => barElements.length
     };
 }
@@ -1033,6 +1055,7 @@ export function installSpeechInputUI(options = {}) {
             if (isConverse) {
                 globalThis.updateLiveConverseOverlay?.(state.processing ? 'thinking' : 'listening', cleaned, true);
             }
+            visualizer?.pulse?.(0.9);
             options.onComposerChanged?.();
             globalThis.handleComposerInput?.();
         },
