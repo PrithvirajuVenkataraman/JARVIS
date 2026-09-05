@@ -398,8 +398,7 @@
                         class="composer-icon-btn speech-input-btn vtt-shifted-left"
                         title="Transcribe one message"
                         aria-label="Transcribe one message"
-                        aria-pressed="false"
-                        onclick="window.toggleVoiceToText ? window.toggleVoiceToText() : window.JarvisSpeechInput?.toggleDictation?.()">
+                        aria-pressed="false">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                             <rect x="9" y="2" width="6" height="12" rx="3"></rect>
                             <path d="M5 10a7 7 0 0 0 14 0"></path>
@@ -9818,7 +9817,9 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
 
             let current = streamingConverseSpeech.rawBuffer;
             let sentenceMatch;
-            const sentenceRegex = /^([\s\S]*?[.?!;\n]+(?:\s+|$))([\s\S]*)$/;
+            const sentenceRegex = (streamingConverseSpeech.enqueuedSegments.length === 0)
+                ? /^([\s\S]*?[.?!;\n,]+(?:\s+|$))([\s\S]*)$/
+                : /^([\s\S]*?[.?!;\n]+(?:\s+|$))([\s\S]*)$/;
             while (current && (sentenceMatch = current.match(sentenceRegex))) {
                 const sentence = sentenceMatch[1].trim();
                 current = sentenceMatch[2];
@@ -9884,7 +9885,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                         if (speechInput?.resumeListening) speechInput.resumeListening();
                         else speechInput?.setProcessing?.(false);
                         toggleSendButton();
-                    }, 150);
+                    }, 60);
                 }
                 return;
             }
