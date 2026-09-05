@@ -6989,11 +6989,8 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
 
         function maybeAutoScroll(chatContainer) {
             if (!chatContainer) return;
-            const nearBottom = isChatNearBottom(chatContainer);
-            if (autoScrollLocked || !nearBottom) {
-                autoScrollLocked = true;
+            if (autoScrollLocked) {
                 chatUnreadWhileScrolledUp = true;
-                lockedScrollTop = chatContainer.scrollTop;
                 updateJumpToLatestButton();
                 return;
             }
@@ -7015,10 +7012,14 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             const btn = document.getElementById('jump-to-latest-btn');
             if (!btn) return;
             const chatContainer = document.getElementById('chat-container');
-            const show = autoScrollLocked || (chatContainer && !isChatNearBottom(chatContainer));
+            const show = autoScrollLocked && chatContainer && !isChatNearBottom(chatContainer);
             btn.classList.toggle('hidden', !show);
             btn.classList.toggle('has-unread', !!chatUnreadWhileScrolledUp);
         }
+
+        window.scrollToBottom = function() {
+            jumpToLatest();
+        };
 
         function initSelectionPromptHelper() {
             if (selectionHelperState.popoverEl) return;
@@ -8648,6 +8649,11 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             if (!raw || raw.length < 3 || /^(hi|hello|hey|thanks|thank you|ok|okay|bye|goodbye)[!.?]?$/i.test(raw)) return [];
             const lower = raw.toLowerCase();
 
+            // 0. Casual, Conversational, Identity, Location & Presence (No fake thinking)
+            if (/\b(where\s+(?:am\s+i|i\s+am|are\s+you)|who\s+are\s+you|what(?:'s|\s+is)\s+your\s+name|how\s+are\s+you|what\s+can\s+you\s+do|can\s+you\s+hear\s+me|tell\s+me\s+about\s+yourself|help(?:\s+me)?|test|testing|what's\s+up|good\s+(?:morning|evening|afternoon|night))\b/i.test(lower)) {
+                return [];
+            }
+
             // 1. Current Company Role / Executive Leadership (e.g. CEO of Company X)
             if (/\b(ceo|cfo|cto|coo|founder|co-founder|chairman|chairperson|managing director|president of|executive of)\b/i.test(lower) && !/\b(prime minister|chief minister|president of india|president of the united states|president of us|president of france)\b/i.test(lower)) {
                 return [
@@ -8665,7 +8671,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             }
 
             // 3. Current News / Live Events / Sports / Market Prices
-            if (/\b(news|latest|current|update|today|yesterday|tomorrow|live|score|match|vs|price|stock|market|weather|event|launched|2025|2026)\b/i.test(lower)) {
+            if (/\b(news|latest|current|update|today|yesterday|tomorrow|live|score|match|vs\s+[a-z]+(?:\s+fc)?|price|stock|market|weather|event|launched|2025|2026)\b/i.test(lower)) {
                 return [
                     { title: 'Searching', body: 'Dispatching real-time multi-source news scrapers' },
                     { title: 'Synthesizing', body: 'Formulating grounded summary with verified sources' }
@@ -8673,22 +8679,78 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             }
 
             // 4. Coding / Technical / Algorithms
-            if (/\b(code|function|bug|error|script|regex|sql|python|javascript|typescript|react|api|html|css|algorithm|class|method|component)\b/i.test(lower)) {
+            if (/\b(code|function|bug|error|script|regex|sql|python|javascript|typescript|react|api|html|css|algorithm|quicksort|debounce|class|method|component|programming)\b/i.test(lower)) {
                 return [
-                    { title: 'Analyzing', body: 'Analyzing technical requirements and algorithmic efficiency' },
-                    { title: 'Synthesizing', body: 'Formulating production-ready implementation' }
+                    { title: 'Deconstructing', body: 'Analyzing algorithmic complexity, interface contract, and edge cases' },
+                    { title: 'Synthesizing', body: 'Formulating idiomatic, production-ready implementation with optimal bounds' }
                 ];
             }
 
-            // 5. Science / Math / Academic Explanations
-            if (/\b(calculate|solve|equation|formula|photosynthesis|physics|chemistry|biology|science|theory|integral|derivative|definition|explain|how does|why does)\b/i.test(lower)) {
+            // 5. Mathematics & Symbolic Calculations
+            if (/\b(calculate|solve|equation|formula|integral|derivative|derivative of|matrix|calculus|algebra|polynomial|arithmetic)\b/i.test(lower)) {
                 return [
-                    { title: 'Deconstructing', body: 'Deconstructing first-principles mechanisms' },
-                    { title: 'Explaining', body: 'Structuring clear step-by-step conceptual walkthrough' }
+                    { title: 'Deconstructing', body: 'Applying mathematical theorems and differentiation or algebraic identities' },
+                    { title: 'Calculating', body: 'Deriving rigorous step-by-step solution with term-by-term verification' }
                 ];
             }
 
-            // 6. Translation / Languages
+            // 6. Physics, Astronomy & Relativity
+            if (/\b(physics|gravitational|black hole|dilation|time dilation|relativity|quantum|thermodynamics|mechanics|optics|entropy)\b/i.test(lower)) {
+                return [
+                    { title: 'Deconstructing', body: 'Evaluating core physical laws, relativistic metrics, and governing principles' },
+                    { title: 'Synthesizing', body: 'Structuring comprehensive conceptual explanation with mathematical fidelity' }
+                ];
+            }
+
+            // 7. Biology, Medicine & Molecular Genetics
+            if (/\b(biology|crispr|crispr-cas9|gene|genetics|dna|rna|molecular|protein|cell|photosynthesis|enzyme|cellular|organism)\b/i.test(lower)) {
+                return [
+                    { title: 'Mechanisms', body: 'Tracing molecular pathways, enzymatic mechanisms, and structural interactions' },
+                    { title: 'Synthesizing', body: 'Formulating rigorous biological synthesis with contemporary scientific evidence' }
+                ];
+            }
+
+            // 8. History & Civilizations
+            if (/\b(history|historical|roman empire|collapse|ancient|dynasty|empire|civilization|revolution|century|archaeological|treaty)\b/i.test(lower)) {
+                return [
+                    { title: 'Contextualizing', body: 'Analyzing socioeconomic decay, military pressures, and institutional factors' },
+                    { title: 'Synthesizing', body: 'Correlating primary accounts with historiographical consensus across key milestones' }
+                ];
+            }
+
+            // 9. Geography & Geopolitics
+            if (/\b(geography|capital of|canberra|country|continent|territory|borders|capital city|latitude|longitude)\b/i.test(lower)) {
+                return [
+                    { title: 'Researching', body: 'Reviewing territorial records, historical compromises, and constitutional acts' },
+                    { title: 'Synthesizing', body: 'Formulating grounded geographical and historical context' }
+                ];
+            }
+
+            // 10. Architectural / Technical Comparison
+            if (/\b(compare|comparison|versus|vs\.?|trade-offs?|pros and cons|postgresql vs|mongodb)\b/i.test(lower)) {
+                return [
+                    { title: 'Evaluating', body: 'Benchmarking architectural trade-offs, concurrency models, and storage semantics' },
+                    { title: 'Synthesizing', body: 'Formulating comparative matrix with workload-specific recommendations' }
+                ];
+            }
+
+            // 11. Economics, Finance & Monetary Policy
+            if (/\b(economics?|economy|inflation|interest rate|central bank|monetary|fiscal|gdp|recession|market dynamics)\b/i.test(lower)) {
+                return [
+                    { title: 'Deconstructing', body: 'Mapping monetary transmission channels, policy rates, and macroeconomic variables' },
+                    { title: 'Synthesizing', body: 'Evaluating market expectations, price stability dynamics, and policy impacts' }
+                ];
+            }
+
+            // 12. Procedural Guides, Recipes & Culinary Chemistry
+            if (/\b(recipe|sourdough|bread|hydration|baking|bake|cook|culinary|step-by-step guide|procedural)\b/i.test(lower)) {
+                return [
+                    { title: 'Formulating', body: 'Calculating baker percentages, hydration ratios, and fermentation timing' },
+                    { title: 'Synthesizing', body: 'Structuring step-by-step procedural technique with proofing and temperature controls' }
+                ];
+            }
+
+            // 13. Translation / Languages
             if (/\b(translate|translation|in spanish|in french|in tamil|in hindi|in german|in japanese|meaning of|define)\b/i.test(lower)) {
                 return [
                     { title: 'Analyzing', body: 'Extracting source terminology and idiomatic context' },
@@ -8696,11 +8758,8 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 ];
             }
 
-            // Default General Query
-            return [
-                { title: 'Processing', body: 'Evaluating inquiry context and intent' },
-                { title: 'Preparing', body: 'Synthesizing structured, verified response' }
-            ];
+            // No fake steps for general / conversational queries
+            return [];
         }
 
         window.toggleThinkingProcessCard = function(card, event) {
@@ -8830,6 +8889,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             if (messageTurnId) messageDiv.dataset.turnId = messageTurnId;
 
             if (isUser) {
+                clearLiveSpeechTranscriptionOnScreen();
                 const formattedText = escapeHtml(displayText).replace(/\n/g, '<br>');
                 const attachmentHtml = buildUserMessageAttachmentsHtml(meta?.attachments);
                 messageDiv.innerHTML = `
@@ -8970,8 +9030,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                     replaceTarget.replaceWith(messageDiv);
                 } else if (existingThinking && existingThinking.parentNode === chatContainer) {
                     existingThinking.replaceWith(messageDiv);
-                } else if (isUser && liveSpeechRow && liveSpeechRow.parentNode === chatContainer) {
-                    liveSpeechRow.replaceWith(messageDiv);
+                
                 } else {
                     chatContainer.appendChild(messageDiv);
                 }
@@ -9059,7 +9118,12 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 return messageId;
             }
             
-            chatContainer.appendChild(messageDiv);
+            const liveSpeechRow = isUser ? document.getElementById('live-speech-transcription-row') : null;
+            if (liveSpeechRow && liveSpeechRow.parentNode === chatContainer) {
+                liveSpeechRow.replaceWith(messageDiv);
+            } else {
+                chatContainer.appendChild(messageDiv);
+            }
             maybeAutoScroll(chatContainer);
             if (!meta?.skipRecord) {
                 chatHistory.push({ text: displayText, isUser });
@@ -11748,6 +11812,9 @@ async function sendTextInput(submission = {}) {
                 setLastVisibleUserMessage(displayOutgoingText);
                 addVisibleInputHistory(displayOutgoingText);
                 inputHistoryIndex = -1;
+                clearLiveSpeechTranscriptionOnScreen();
+                autoScrollLocked = false;
+                chatUnreadWhileScrolledUp = false;
                 addChatMessage(displayOutgoingText, true, null, {
                     turnId: turn.id,
                     attachments: attachmentMeta
