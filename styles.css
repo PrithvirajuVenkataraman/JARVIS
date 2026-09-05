@@ -1236,36 +1236,171 @@ option {
     color: #ffffff !important;
 }
 
-.composer-send-btn {
-    background: #f3f4f6 !important;
-    border: 1px solid #f3f4f6 !important;
-    color: #111827 !important;
+/* --- Enterprise Primary Send Button (ChatGPT/Claude Inspired) --- */
+.composer-send-btn,
+#send-message-btn {
+    width: 32px !important;
+    min-width: 32px !important;
+    height: 32px !important;
+    border-radius: 50% !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 0 !important;
+    border: none !important;
+    outline: none !important;
+    flex: 0 0 32px !important;
+    line-height: 1 !important;
+    position: relative !important;
+    transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    cursor: pointer !important;
+    user-select: none !important;
+    -webkit-tap-highlight-color: transparent !important;
+}
+
+/* Disabled state (empty composer) - sleek muted circular disc */
+.composer-send-btn:disabled,
+#send-message-btn:disabled {
+    background: rgba(255, 255, 255, 0.08) !important;
+    border: 1px solid rgba(255, 255, 255, 0.04) !important;
+    color: rgba(255, 255, 255, 0.3) !important;
     box-shadow: none !important;
+    cursor: not-allowed !important;
+    opacity: 1 !important;
+    transform: none !important;
 }
 
-.composer-send-btn:hover,
-.composer-send-btn:focus-visible {
+.composer-send-btn:disabled svg,
+.composer-send-btn:disabled svg *,
+#send-message-btn:disabled svg,
+#send-message-btn:disabled svg * {
+    color: rgba(255, 255, 255, 0.3) !important;
+    stroke: rgba(255, 255, 255, 0.3) !important;
+}
+
+/* Enabled state (has prompt text or attachments) - high-contrast solid white circle with pitch black arrow */
+.composer-send-btn:not(:disabled),
+#send-message-btn:not(:disabled),
+.composer-send-btn.is-send-ready,
+#send-message-btn.is-send-ready {
     background: #ffffff !important;
-    border-color: #ffffff !important;
+    border: none !important;
     color: #000000 !important;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3), 0 2px 8px rgba(255, 255, 255, 0.15) !important;
+    cursor: pointer !important;
+    opacity: 1 !important;
 }
 
-.composer-send-btn:disabled {
-    opacity: 0.35;
-    cursor: not-allowed;
+.composer-send-btn:not(:disabled) svg,
+.composer-send-btn:not(:disabled) svg *,
+#send-message-btn:not(:disabled) svg,
+#send-message-btn:not(:disabled) svg *,
+.composer-send-btn.is-send-ready svg,
+.composer-send-btn.is-send-ready svg *,
+#send-message-btn.is-send-ready svg,
+#send-message-btn.is-send-ready svg * {
+    color: #000000 !important;
+    stroke: #000000 !important;
 }
 
+.composer-send-btn:not(:disabled):hover,
+#send-message-btn:not(:disabled):hover,
+.composer-send-btn.is-send-ready:hover,
+#send-message-btn.is-send-ready:hover {
+    background: #f0f0f0 !important;
+    transform: scale(1.05) !important;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35), 0 4px 12px rgba(255, 255, 255, 0.22) !important;
+}
+
+.composer-send-btn:not(:disabled):active,
+#send-message-btn:not(:disabled):active,
+.composer-send-btn.is-send-ready:active,
+#send-message-btn.is-send-ready:active {
+    transform: scale(0.94) !important;
+}
+
+/* Stop state (while streaming response is active) */
 .composer-send-btn.composer-send-stop,
 #send-message-btn.composer-send-stop {
     background: #ffffff !important;
-    border-color: #ffffff !important;
+    border: none !important;
     color: #000000 !important;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3), 0 0 10px rgba(255, 255, 255, 0.2) !important;
+    cursor: pointer !important;
+    opacity: 1 !important;
 }
 
 .composer-send-btn.composer-send-stop svg,
-#send-message-btn.composer-send-stop svg {
-    width: 16px !important;
-    height: 16px !important;
+.composer-send-btn.composer-send-stop svg *,
+#send-message-btn.composer-send-stop svg,
+#send-message-btn.composer-send-stop svg * {
+    color: #000000 !important;
+    stroke: #000000 !important;
+    fill: #000000 !important;
+}
+
+.composer-send-btn.composer-send-stop:hover,
+#send-message-btn.composer-send-stop:hover {
+    background: #f0f0f0 !important;
+    transform: scale(1.05) !important;
+}
+
+.composer-send-btn.composer-send-stop:active,
+#send-message-btn.composer-send-stop:active {
+    transform: scale(0.94) !important;
+}
+
+/* Light mode support */
+body:not(.dark) .composer-send-btn:disabled,
+body:not(.dark) #send-message-btn:disabled {
+    background: rgba(0, 0, 0, 0.06) !important;
+    border-color: rgba(0, 0, 0, 0.03) !important;
+    color: rgba(0, 0, 0, 0.25) !important;
+}
+
+body:not(.dark) .composer-send-btn:disabled svg,
+body:not(.dark) .composer-send-btn:disabled svg *,
+body:not(.dark) #send-message-btn:disabled svg,
+body:not(.dark) #send-message-btn:disabled svg * {
+    color: rgba(0, 0, 0, 0.25) !important;
+    stroke: rgba(0, 0, 0, 0.25) !important;
+}
+
+body:not(.dark) .composer-send-btn:not(:disabled),
+body:not(.dark) #send-message-btn:not(:disabled),
+body:not(.dark) .composer-send-btn.is-send-ready,
+body:not(.dark) #send-message-btn.is-send-ready {
+    background: #111827 !important;
+    color: #ffffff !important;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15) !important;
+}
+
+body:not(.dark) .composer-send-btn:not(:disabled) svg,
+body:not(.dark) .composer-send-btn:not(:disabled) svg *,
+body:not(.dark) #send-message-btn:not(:disabled) svg,
+body:not(.dark) #send-message-btn:not(:disabled) svg * {
+    color: #ffffff !important;
+    stroke: #ffffff !important;
+}
+
+body:not(.dark) .composer-send-btn:not(:disabled):hover,
+body:not(.dark) #send-message-btn:not(:disabled):hover {
+    background: #000000 !important;
+}
+
+body:not(.dark) .composer-send-btn.composer-send-stop,
+body:not(.dark) #send-message-btn.composer-send-stop {
+    background: #111827 !important;
+    color: #ffffff !important;
+}
+
+body:not(.dark) .composer-send-btn.composer-send-stop svg,
+body:not(.dark) .composer-send-btn.composer-send-stop svg *,
+body:not(.dark) #send-message-btn.composer-send-stop svg,
+body:not(.dark) #send-message-btn.composer-send-stop svg * {
+    color: #ffffff !important;
+    stroke: #ffffff !important;
+    fill: #ffffff !important;
 }
 
 .composer-disclaimer,
@@ -6820,3 +6955,24 @@ body:not(.dark) .assistant-followup-chip:hover {
     to { opacity: 1; transform: translate(-50%, 0); }
 }
 
+
+/* ==========================================================================
+   Enterprise Voice-to-Text (Dictation) State Styles
+   ========================================================================== */
+.speech-input-btn.is-listening {
+    color: #ef4444 !important;
+    background: rgba(239, 68, 68, 0.14) !important;
+    border-color: rgba(239, 68, 68, 0.45) !important;
+    animation: enterprise-vtt-pulse 1.4s infinite ease-in-out !important;
+}
+
+@keyframes enterprise-vtt-pulse {
+    0%, 100% {
+        transform: scale(1);
+        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
+    }
+    50% {
+        transform: scale(1.06);
+        box-shadow: 0 0 0 6px rgba(239, 68, 68, 0);
+    }
+}
