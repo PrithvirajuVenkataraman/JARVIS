@@ -10,6 +10,12 @@
 const EMERGENCY_STORAGE_KEY = 'jarvis_emergency_contacts';
 let memoryContacts = [];
 
+export function isEmergencySosIntentText(text = '') {
+    const t = String(text || '').toLowerCase().trim();
+    if (!t) return false;
+    return /\b(emergency|distress|sos|satellite\s+sos|call\s+(?:police|ambulance|help)|need\s+(?:immediate\s+)?help|in\s+danger|send\s+help|emergency\s+contact)\b/i.test(t);
+}
+
 export function getEmergencyContacts() {
     try {
         if (typeof localStorage !== 'undefined') {
