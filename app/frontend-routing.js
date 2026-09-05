@@ -95,6 +95,54 @@ export function isStableGeographyOrGeneralFactQuery(text, context = {}) {
     return !intent.isLiveRequired;
 }
 
+export function isImageGenerationIntent(text) {
+    const raw = String(text || '').trim();
+    if (!raw) return false;
+    if (/^\/(?:image|img|draw|art)\b/i.test(raw)) return true;
+
+    const lower = raw.toLowerCase();
+    const generationPrefixRegex = /^(?:please\s+)?(?:generate|create|render|make|draw|paint|sketch|produce)\s+(?:an?\s+)?(?:ai\s+)?(?:image|picture|photo|photograph|drawing|painting|illustration|artwork|wallpaper|portrait|graphic)\s+(?:of|showing|depicting|with|for)\s+/i;
+    if (generationPrefixRegex.test(lower)) return true;
+
+    if (/^(?:please\s+)?(?:draw|paint|sketch)\s+(?:me\s+)?(?:a|an)\s+/i.test(lower)) {
+        if (/\b(?:chart|graph|diagram|table|conclusion|flowchart|comparison|schema)\b/i.test(lower)) {
+            return false;
+        }
+        return true;
+    }
+
+    if (/^(?:an?\s+)?(?:image|picture|photo|drawing|illustration|artwork)\s+of\s+[\w\s]{3,}$/i.test(lower)) {
+        return true;
+    }
+    return false;
+}
+
+export function extractImagePrompt(text) {
+    let raw = String(text || '').trim();
+    if (!raw) return '';
+
+    if (/^\/(?:image|img|draw|art)\s*/i.test(raw)) {
+        return raw.replace(/^\/(?:image|img|draw|art)\s*/i, '').trim();
+    }
+
+    const prefixRegex = /^(?:please\s+)?(?:generate|create|render|make|draw|paint|sketch|produce)\s+(?:me\s+)?(?:an?\s+)?(?:ai\s+)?(?:image|picture|photo|photograph|drawing|painting|illustration|artwork|wallpaper|portrait|graphic)\s+(?:of|showing|depicting|with|for)\s+/i;
+    if (prefixRegex.test(raw)) {
+        return raw.replace(prefixRegex, '').trim();
+    }
+
+    const drawMeRegex = /^(?:please\s+)?(?:draw|paint|sketch)\s+(?:me\s+)?/i;
+    if (drawMeRegex.test(raw)) {
+        return raw.replace(drawMeRegex, '').trim();
+    }
+
+    const photoOfRegex = /^(?:an?\s+)?(?:image|picture|photo|drawing|illustration|artwork)\s+of\s+/i;
+    if (photoOfRegex.test(raw)) {
+        return raw.replace(photoOfRegex, '').trim();
+    }
+
+    return raw;
+}
+
 
 function formatName(str) {
     return String(str || '')
@@ -264,6 +312,22 @@ export function decideFrontendRoute(text, context = {}) {
             reason: String(context.toolReason || 'tool_action_requested'),
             sourcePolicy: 'tool'
         };
+    }
+
+    if (isImageGenerationIntent(raw)) {
+        const prompt = extractImagePrompt(raw);
+        const res = {
+            ...base,
+            route: 'image_generation',
+            reason: 'image_generation_intent',
+            prompt,
+            risk: 'low_risk',
+            requiresSources: false,
+            minimalThinking: true,
+            sourcePolicy: 'none'
+        };
+        FRONTEND_ROUTE_CACHE.set(cacheKey, res);
+        return res;
     }
 
     if (context.safetySensitive || /\b(?:medicine\s+dosage|prescription\s+dosage|medical\s+advice|suicide|self\s+harm)\b/i.test(raw)) {
