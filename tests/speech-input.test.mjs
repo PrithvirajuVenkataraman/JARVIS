@@ -26,9 +26,11 @@ class FakeRecognition {
     }
 
     emitResult(transcript, isFinal = true) {
+        const item = [{ transcript }];
+        item.isFinal = Boolean(isFinal);
         this.onresult?.({
             resultIndex: 0,
-            results: [[{ transcript }]]
+            results: [item]
         });
     }
 
@@ -614,178 +616,62 @@ assert.equal(turnManager.isTurnActive(turn2.turnId), true);
     const ctrl2 = installUI2();
     assert.ok(ctrl2, 'installSpeechInputUI should return controller');
 
-    // --- 23a. Activate Converse via toggle ---
-    spokenTexts = [];
-    synthCancelCalls = 0;
-    const activated = await globalThis.toggleConverseMode();
-    assert.equal(activated, true, 'toggleConverseMode should return true on activation');
+    // --- 23. Enterprise VTT Dictation Toggle & Input Population ---
+    const activated = await globalThis.toggleVoiceToText();
+    assert.equal(activated, true, 'toggleVoiceToText should return true on activation');
 
-    // VTT button should have is-converse-active class
-    assert.equal(vttBtn2.classList.contains('is-converse-active'), true,
-        'VTT button should have is-converse-active class when converse is on');
+    // VTT button should have is-listening class
+    assert.equal(vttBtn2.classList.contains('is-listening'), true,
+        'VTT button should have is-listening class when dictation is on');
 
     // ARIA should be updated
     assert.equal(vttBtn2.attributes['aria-pressed'], 'true',
-        'VTT button aria-pressed should be true when converse is active');
+        'VTT button aria-pressed should be true when dictation is active');
 
-    // Send button should also have is-converse-active
-    assert.equal(sendBtn2.classList.contains('is-converse-active'), true,
-        'Send button should have is-converse-active class');
+    // Send button should NOT have converse classes
+    assert.equal(sendBtn2.classList.contains('is-converse-active'), false,
+        'Send button should not have converse active class');
 
-    // Wait for the async greeting (ensureSpeechSynthesisPermission resolves immediately on fallback path)
-    await new Promise(r => setTimeout(r, 100));
+    // Simulate recognition emitting a finalized transcript with spoken punctuation
+    const activeRecognition = FakeRecognition.instances.at(-1);
+    assert.ok(activeRecognition, 'An active FakeRecognition instance should exist');
+    activeRecognition.emitResult('hello comma this is a test of enterprise voice typing period', true);
 
-    // A greeting should have been spoken
-    assert.ok(spokenTexts.length > 0, 'A greeting should have been spoken via speechSynthesis');
-    const greetings = [
-        "Hey, happy to help!",
-        "Hi there! I'm ready to assist you.",
-        "Hello! How can I help you today?",
-        "Greetings! Let me know what you need.",
-        "Welcome! Ask me anything.",
-        "Hi! I'm here for you.",
-        "Hey! Ready when you are.",
-        "Hello! What can I do for you?",
-        "Hey there! How can I assist?",
-        "Hi! Let's get started."
-    ];
-    assert.ok(greetings.includes(spokenTexts[0]),
-        `Spoken greeting "${spokenTexts[0]}" should be from the hardcoded list`);
+    // Transcription should be populated in textInput
+    assert.ok(textInput2.value.includes('Hello, this is a test of enterprise voice typing.'),
+        'Input field should be populated with formatted dictation text');
 
-    // --- 23b. Deactivate Converse ---
-    spokenTexts = [];
-    const deactivated = await globalThis.toggleConverseMode();
-    assert.equal(deactivated, false, 'toggleConverseMode should return false on deactivation');
+    // Deactivate dictation
+    const deactivated = await globalThis.toggleVoiceToText();
+    assert.equal(deactivated, false, 'toggleVoiceToText should return false on deactivation');
 
     // VTT button class should be removed
-    assert.equal(vttBtn2.classList.contains('is-converse-active'), false,
-        'VTT button should NOT have is-converse-active after deactivation');
-
-    // ARIA should revert
+    assert.equal(vttBtn2.classList.contains('is-listening'), false,
+        'VTT button should NOT have is-listening after deactivation');
     assert.equal(vttBtn2.attributes['aria-pressed'], 'false',
         'VTT button aria-pressed should be false after deactivation');
 
-    // No new greeting on deactivation
-    assert.equal(spokenTexts.length, 0,
-        'No greeting should be spoken on deactivation');
-
-    // --- 23c. Re-activate and verify another greeting is spoken ---
-    spokenTexts = [];
-    const reactivated = await globalThis.toggleConverseMode();
-    assert.equal(reactivated, true);
-    await new Promise(r => setTimeout(r, 100));
-    assert.ok(spokenTexts.length > 0, 'Greeting should be spoken on re-activation');
-    assert.ok(greetings.includes(spokenTexts[0]), 'Re-activation greeting from hardcoded list');
-
-    // Clean up
-    await globalThis.toggleConverseMode(); // deactivate
-
-    console.log('  [PASS] 23. VTT button converse toggle: class, ARIA, greeting, deactivation');
+    console.log('  [PASS] 23. VTT button enterprise dictation toggle, ARIA, and input population');
 }
 
-// 24. Test Error Toast on SpeechSynthesis Failure
+// 24. Test Enterprise Spoken Punctuation, Line Breaks, and Acronym Formatting
 {
-    class MockElement {
-        constructor(id = '') {
-            this.id = id;
-            const classes = new Set();
-            this._classes = classes;
-            this.classList = {
-                add: (c) => classes.add(c),
-                remove: (...cs) => cs.forEach(c => classes.delete(c)),
-                toggle: (c, val) => {
-                    if (val === undefined) {
-                        if (classes.has(c)) classes.delete(c);
-                        else classes.add(c);
-                    } else if (val) classes.add(c);
-                    else classes.delete(c);
-                },
-                contains: (c) => classes.has(c)
-            };
-            this.style = { setProperty: () => {} };
-            this.children = [];
-            this.textContent = '';
-            this.value = '';
-            this.placeholder = '';
-            this.dataset = {};
-            this.listeners = {};
-            this.attributes = {};
-        }
-        get className() { return [...this._classes].join(' '); }
-        set className(val) {
-            this._classes.clear();
-            String(val).split(/\s+/).filter(Boolean).forEach(c => this._classes.add(c));
-        }
-        appendChild(child) { this.children.push(child); return child; }
-        addEventListener(event, fn) {
-            this.listeners[event] = this.listeners[event] || [];
-            this.listeners[event].push(fn);
-        }
-        setAttribute(k, v) { this.attributes[k] = String(v); }
-        getAttribute(k) { return this.attributes[k] || null; }
-        focus() {}
-        remove() { this._removed = true; }
-    }
+    import('../app/speech-input.js').then(({ cleanSpeechFillers }) => {
+        // Spoken punctuation
+        const text1 = cleanSpeechFillers('hello comma this is an API test period new line how does AI work question mark');
+        assert.ok(text1.includes('Hello, this is an API test.'), 'Should convert comma, period and capitalize API');
+        assert.ok(text1.includes('\nHow does AI work?'), 'Should convert new line, question mark and capitalize AI');
 
-    const bodyEl3 = new MockElement('body');
-    const textInput3 = new MockElement('text-input');
-    const vttBtn3 = new MockElement('voice-to-text-btn');
-    const statusEl3 = new MockElement('speech-input-status');
-    const containerEl3 = new MockElement('vtt-waveform-container');
-    const composerShell3 = new MockElement('input-bar-inner');
-    const sendBtn3 = new MockElement('send-message-btn');
+        // Acronyms and contractions
+        const text2 = cleanSpeechFillers('i cant believe our CEO built this with AWS and SQL');
+        assert.equal(text2, "I can't believe our CEO built this with AWS and SQL");
 
-    // Make speechSynthesis.speak throw to trigger error toast
-    globalThis.speechSynthesis = {
-        speaking: false,
-        speak() { throw new Error('Synthesis engine unavailable'); },
-        cancel() {}
-    };
-    globalThis.SpeechSynthesisUtterance = class {
-        constructor(text) { this.text = text; this.lang = ''; }
-    };
+        // Mathematical colon and hyphen
+        const text3 = cleanSpeechFillers('note colon use high hyphen quality audio');
+        assert.equal(text3, 'Note: Use high-quality audio');
 
-    globalThis.document = {
-        body: bodyEl3,
-        getElementById(id) {
-            if (id === 'text-input') return textInput3;
-            if (id === 'voice-to-text-btn') return vttBtn3;
-            if (id === 'speech-input-status') return statusEl3;
-            if (id === 'vtt-waveform-container') return containerEl3;
-            if (id === 'input-bar-inner') return composerShell3;
-            if (id === 'send-message-btn') return sendBtn3;
-            return null;
-        },
-        createElement(tag) { return new MockElement(tag); },
-        addEventListener() {}
-    };
-
-    globalThis.SpeechRecognition = FakeRecognition;
-    globalThis.addEventListener = () => {};
-
-    const { installSpeechInputUI: installUI3 } = await import('../app/speech-input.js');
-    const ctrl3 = installUI3();
-    assert.ok(ctrl3);
-
-    const activated3 = await globalThis.toggleConverseMode();
-    assert.equal(activated3, true);
-
-    // Wait for the async permission + speak attempt
-    await new Promise(r => setTimeout(r, 150));
-
-    // The toast should have been appended to body
-    const toasts = bodyEl3.children.filter(c => c.classList.contains('error-toast'));
-    assert.ok(toasts.length > 0, 'An error toast should appear when speechSynthesis.speak throws');
-    assert.ok(toasts[0].textContent.includes('Synthesis engine unavailable'),
-        'Toast should contain the error message');
-    assert.equal(toasts[0].attributes['role'], 'alert',
-        'Toast should have role="alert" for accessibility');
-
-    // Cleanup
-    await globalThis.toggleConverseMode();
-
-    console.log('  [PASS] 24. Error toast shown when speechSynthesis fails');
+        console.log('  [PASS] 24. Enterprise spoken punctuation, line breaks, and acronym formatting');
+        console.log('speech-input-tests-ok');
+    });
 }
-
-console.log('speech-input-tests-ok');
 
