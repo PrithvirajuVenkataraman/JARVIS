@@ -19,11 +19,22 @@ export function cleanSpeechFillers(text = '') {
     let s = String(text || '').trim();
     if (!s) return '';
 
+    // 0. Spoken Punctuation & Line Breaks (Enterprise Dictation)
+    s = s.replace(/\b(?:new line|newline)\b/gi, '\n');
+    s = s.replace(/\b(?:new paragraph)\b/gi, '\n\n');
+    s = s.replace(/\b(?:full stop|period)\b/gi, '.');
+    s = s.replace(/\b(?:comma)\b/gi, ',');
+    s = s.replace(/\b(?:question mark)\b/gi, '?');
+    s = s.replace(/\b(?:exclamation mark|exclamation point)\b/gi, '!');
+    s = s.replace(/\b(?:colon)\b(?!\s*\d)/gi, ':');
+    s = s.replace(/\b(?:semicolon)\b/gi, ';');
+    s = s.replace(/\b(?:hyphen|dash)\b/gi, '-');
+
     // 1. Remove verbal fillers & hesitations (e.g. "um", "uh", "umm", "uhh", "er", "erm", "ah", "ahh", "hmm", "hm")
     s = s.replace(/\b(?:um+|uh+|er+|ah+|erm+|hmm+|hm+)\b/gi, '');
 
     // 2. Remove filler phrases when surrounded by boundaries or at start/end
-    // 'you know' should not be removed if preceded by 'do/did/does/will/if/as' or followed by question words (what/who/how/etc.)
+    // 'you know' should not be removed if preceded by 'do/did/does/will/if/as' or followed by question words
     s = s.replace(/(?<!\b(?:do|did|does|dont|don't|will|would|could|should|if|as)\s+)\b(?:you know)\b(?!\s+(?:if|that|what|who|when|where|why|how|which|whether|about|\?))/gi, '');
 
     // 'sort of' / 'kind of' should NOT be removed if preceded by what/which/this/that/a/an/any
@@ -78,16 +89,25 @@ export function cleanSpeechFillers(text = '') {
         s = s.replace(pattern, replacement);
     }
 
-    // 5. Clean punctuation spacing (e.g. "word , next" -> "word, next")
+    // 5. Enterprise Acronym Capitalization
+    const acronyms = ['AI', 'API', 'UI', 'UX', 'URL', 'HTML', 'CSS', 'JSON', 'SQL', 'AWS', 'GCP', 'CEO', 'CTO', 'CFO', 'GPS', 'PDF', 'OS', 'SDK', 'LLM', 'TTS', 'STT', 'VTT', 'REST', 'GraphQL'];
+    for (const acr of acronyms) {
+        s = s.replace(new RegExp(`\\b${acr}\\b`, 'gi'), acr);
+    }
+
+    // 6. Clean punctuation spacing (e.g. "word , next" -> "word, next")
     s = s.replace(/,\s*,+/g, ',');
-    s = s.replace(/\s+([,.:;?!])/g, '$1');
-    s = s.replace(/([,.:;?!])(?=[^\s\d])/g, '$1 ');
+    s = s.replace(/[ \t]+([,.:;?!])/g, '$1');
+    s = s.replace(/([,.:;?!])(?=[^\s\d\n])/g, '$1 ');
+    s = s.replace(/\s*-\s*/g, '-');
+    s = s.replace(/[ \t]*\n[ \t]*/g, '\n');
+    s = s.replace(/\n{3,}/g, '\n\n');
 
-    // 6. Sentence capitalization
-    s = s.replace(/(^\s*|[.!?]\s+)([a-z])/g, (_, prefix, letter) => prefix + letter.toUpperCase());
+    // 7. Sentence capitalization (at start of string, or after terminal punctuation / newline / colon)
+    s = s.replace(/(^\s*|[.!?:\n]\s*)([a-z])/g, (_, prefix, letter) => prefix + letter.toUpperCase());
 
-    // 7. Clean excessive whitespace
-    s = s.replace(/\s{2,}/g, ' ').trim();
+    // 8. Clean excessive horizontal whitespace
+    s = s.replace(/[ \t]{2,}/g, ' ').trim();
 
     return s;
 }
@@ -1062,24 +1082,41 @@ export function installSpeechInputUI(options = {}) {
         async onFinal(text, event) {
             lastInterimText = '';
             const cleaned = cleanSpeechFillers(text);
-            input.value = '';
-            delete input.dataset.inputSource;
+            globalThis.clearLiveSpeechTranscriptionOnScreen?.();
 
             if (cleaned) {
-                const isConverse = event.autoSubmit || event.source === 'converse' || controller.getState().converseEnabled;
-                if (isConverse) {
-                    globalThis.updateLiveConverseOverlay?.('thinking', cleaned, false);
+                if (typeof options.onSubmit === 'function') {
+                    input.value = '';
+                    delete input.dataset.inputSource;
+                    options.onComposerChanged?.();
+                    globalThis.handleComposerInput?.();
+                    await options.onSubmit({
+                        text: cleaned,
+                        source: event?.source || 'vtt',
+                        preserveTranscript: true,
+                        interrupt: false
+                    });
+                } else {
+                    // Enterprise Dictation: Commit transcription cleanly to composer
+                    const existing = String(input.value || '').trim();
+                    input.value = existing ? `${existing} ${cleaned}` : cleaned;
+                    delete input.dataset.inputSource;
+                    try {
+                        if (typeof input.dispatchEvent === 'function') {
+                            const ev = typeof Event === 'function' ? new Event('input', { bubbles: true }) : { type: 'input', bubbles: true };
+                            input.dispatchEvent(ev);
+                        }
+                    } catch (_) {}
+                    options.onComposerChanged?.();
+                    globalThis.handleComposerInput?.();
+                    globalThis.toggleSendButton?.();
+                    try {
+                        input.focus();
+                        if (typeof input.setSelectionRange === 'function') {
+                            input.setSelectionRange(input.value.length, input.value.length);
+                        }
+                    } catch (_) {}
                 }
-                options.onComposerChanged?.();
-                globalThis.handleComposerInput?.();
-                await options.onSubmit?.({
-                    text: cleaned,
-                    source: isConverse ? 'converse' : 'vtt',
-                    preserveTranscript: true,
-                    interrupt: isConverse || event.interrupt === true
-                });
-            } else {
-                globalThis.clearLiveSpeechTranscriptionOnScreen?.();
             }
         },
         onState(state) {
@@ -1097,9 +1134,7 @@ export function installSpeechInputUI(options = {}) {
             vttButton.classList.toggle('is-listening', isDictation);
             vttButton.setAttribute('aria-pressed', isDictation ? 'true' : 'false');
 
-            if (sendBtn) {
-                sendBtn.classList.toggle('is-converse-active', isConverse);
-            }
+            if (sendBtn) { sendBtn.classList.remove('is-converse-active', 'is-converse-ready'); }
 
             if (composerShell) {
                 composerShell.classList.toggle('is-voice-active', isListening || isProcessing);
@@ -1155,90 +1190,8 @@ export function installSpeechInputUI(options = {}) {
 
     const rawToggleConverse = typeof controller?.toggleConverse === 'function' ? controller.toggleConverse.bind(controller) : async () => false;
     globalThis.toggleConverseMode = async () => {
-        const wasConverseEnabled = controller.getState().converseEnabled;
-        committedText = '';
-        lastInterimText = '';
         input.value = '';
-        delete input.dataset.inputSource;
-        options.onComposerChanged?.();
-
-        const willEnable = !wasConverseEnabled;
-
-        // If converse has just been enabled, speak a random greeting immediately
-        if (willEnable) {
-            if (globalThis.speechSynthesis?.speaking) {
-                try { globalThis.speechSynthesis.cancel(); } catch (_) {}
-            }
-            if (!globalThis.speechSynthesis) {
-                showErrorToast('SpeechSynthesis not supported in this browser.');
-            } else {
-                const greetings = [
-                    "Hey, happy to help!",
-                    "Hi there! I'm ready to assist you.",
-                    "Hello! How can I help you today?",
-                    "Greetings! Let me know what you need.",
-                    "Welcome! Ask me anything.",
-                    "Hi! I'm here for you.",
-                    "Hey! Ready when you are.",
-                    "Hello! What can I do for you?",
-                    "Hey there! How can I assist?",
-                    "Hi! Let's get started."
-                ];
-                const msg = greetings[Math.floor(Math.random() * greetings.length)];
-                try {
-                    if (globalThis.speechSynthesis.paused) {
-                        try { globalThis.speechSynthesis.resume(); } catch (_) {}
-                    }
-                    const utter = new SpeechSynthesisUtterance(msg);
-                    const lang = controller.getState().language || 'en-US';
-                    utter.lang = lang;
-                    globalThis.__isConverseGreetingSpeaking = true;
-                    let greetingDone = false;
-                    const clearGreeting = () => {
-                        if (!greetingDone) {
-                            greetingDone = true;
-                            globalThis.__isConverseGreetingSpeaking = false;
-                        }
-                    };
-                    const greetingSafetyTimer = setTimeout(clearGreeting, 4000);
-                    utter.onstart = () => { globalThis.__isConverseGreetingSpeaking = true; };
-                    utter.onend = () => {
-                        clearTimeout(greetingSafetyTimer);
-                        clearGreeting();
-                    };
-                    utter.onerror = () => {
-                        clearTimeout(greetingSafetyTimer);
-                        clearGreeting();
-                    };
-                    globalThis.speechSynthesis.speak(utter);
-                } catch (e) {
-                    globalThis.__isConverseGreetingSpeaking = false;
-                    showErrorToast('Failed to speak greeting: ' + e.message);
-                }
-            }
-        }
-
-        const toggled = await rawToggleConverse();
-
-        // Update visual active state on both VTT button and primary Converse button
-        const isNowConverse = Boolean(toggled);
-        if (typeof vttButton !== 'undefined' && vttButton) {
-            vttButton.classList.toggle('is-converse-active', isNowConverse);
-            vttButton.setAttribute('aria-pressed', isNowConverse ? 'true' : 'false');
-        }
-        if (typeof sendBtn !== 'undefined' && sendBtn) {
-            sendBtn.classList.toggle('is-converse-active', isNowConverse);
-            sendBtn.setAttribute('aria-pressed', isNowConverse ? 'true' : 'false');
-        }
-
-        if (wasConverseEnabled && !toggled) {
-            globalThis.__isConverseGreetingSpeaking = false;
-            globalThis.stopActiveGeneration?.('converse_stop');
-            if (globalThis.speechSynthesis?.speaking) {
-                try { globalThis.speechSynthesis.cancel(); } catch {}
-            }
-        }
-        return toggled;
+        return await rawToggleConverse();
     };
 
     globalThis.JarvisSpeechInput = controller;
