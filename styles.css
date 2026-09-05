@@ -1008,25 +1008,36 @@ option {
 
 .chat-scroll-jump {
     position: absolute;
-    right: 16px;
+    right: 20px;
     left: auto;
-    bottom: calc(var(--input-bar-safe-height) + 14px + env(safe-area-inset-bottom));
+    bottom: calc(var(--input-bar-safe-height) + 16px + env(safe-area-inset-bottom));
     transform: none;
-    z-index: 8;
+    z-index: 50;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 0;
-    width: 40px;
-    height: 40px;
+    width: 38px;
+    height: 38px;
     padding: 0;
     border-radius: 999px;
-    border: 1px solid var(--ui-border);
-    background: var(--ui-surface);
-    color: var(--ui-text);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    background: rgba(18, 18, 24, 0.9);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    color: #f4f4f5;
     font-size: 12px;
     font-weight: 800;
-    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.chat-scroll-jump:hover {
+    background: rgba(30, 30, 38, 0.98);
+    transform: translateY(-2px);
+    border-color: rgba(56, 189, 248, 0.5);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
 }
 
 .chat-scroll-jump.hidden {
@@ -6786,7 +6797,7 @@ body:not(.dark) .assistant-followup-chip:hover {
     position: fixed;
     bottom: 84px;
     left: 50%;
-    transform: translateX(-50%); 
+    transform: translateX(-50%);
     background: rgba(24, 24, 27, 0.95);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
