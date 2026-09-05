@@ -179,25 +179,7 @@ export function createAgentOrchestrator(options = {}) {
                 return { dag: currentDag, outputs: {}, completed: false, ambiguous: true };
             }
             
-            // Initialize ThinkingStatus UI (browser only) and wrap task updates
-            let thinkingStatus = null;
-            if (typeof window !== 'undefined') {
-                import('./thinking-status.js').then(({ ThinkingStatus }) => {
-                    thinkingStatus = new ThinkingStatus();
-                });
-            }
-            const originalOnTaskUpdate = options.onTaskUpdate;
-            const wrappedOnTaskUpdate = (task) => {
-                if (typeof originalOnTaskUpdate === 'function') originalOnTaskUpdate(task);
-                if (thinkingStatus) {
-                    const uiTaskId = task.id.replace(/^task_/, ''); // e.g., task_plan -> plan
-                    thinkingStatus.update(uiTaskId, task.status);
-                    if (uiTaskId === 'synthesize' && task.status === TASK_STATUS.COMPLETED) {
-                        setTimeout(() => thinkingStatus.clear(), 500);
-                    }
-                }
-            };
-            options.onTaskUpdate = wrappedOnTaskUpdate;
+            const onTaskUpdate = options.onTaskUpdate;
             if (typeof options.onWorkflowStart === 'function') {
                 options.onWorkflowStart(currentDag);
             }
