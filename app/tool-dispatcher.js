@@ -74,6 +74,28 @@ export const AGENTIC_TOOL_DEFINITIONS = [
                 required: ['query']
             }
         }
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'generate_image',
+            description: 'Generates an image from a descriptive visual prompt using zero-cost client-side WebGPU diffusion or client fallback.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    prompt: {
+                        type: 'string',
+                        description: 'Detailed description of the image to generate.'
+                    },
+                    aspectRatio: {
+                        type: 'string',
+                        enum: ['1:1', '16:9', '9:16', '4:3', '3:4'],
+                        description: 'Optional target aspect ratio (defaults to 1:1).'
+                    }
+                },
+                required: ['prompt']
+            }
+        }
     }
 ];
 
@@ -289,6 +311,29 @@ export async function dispatchToolCall(name, args = {}, context = {}) {
                 context.attachments || []
             );
             return { tool: 'session_memory', success: res.success, output: res.matches };
+        }
+        case 'generate_image': {
+            const prompt = parsedArgs?.prompt || parsedArgs?.raw || '';
+            const aspectRatio = parsedArgs?.aspectRatio || '1:1';
+            if (globalThis.JarvisImageGenerator?.generateImage) {
+                const imgRes = await globalThis.JarvisImageGenerator.generateImage({ prompt, aspectRatio });
+                return {
+                    tool: 'generate_image',
+                    success: true,
+                    output: {
+                        prompt,
+                        aspectRatio,
+                        imageUrl: imgRes.dataUrl || imgRes.url,
+                        engine: imgRes.engine,
+                        durationMs: imgRes.durationMs
+                    }
+                };
+            }
+            return {
+                tool: 'generate_image',
+                success: true,
+                output: { prompt, aspectRatio, action: 'image_generation_requested' }
+            };
         }
         default:
             return {
