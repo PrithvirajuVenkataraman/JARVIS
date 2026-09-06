@@ -5201,6 +5201,7 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
             fastExplainerHint,
             learnedStyleHint,
             learnedPreferenceHint,
+            'Image Generation Capability: You have access to an internal high-speed AI image diffusion engine. When the user asks you to create, generate, draw, paint, visualize, illustrate, sketch, or show an image, picture, photo, or artwork of something, emit the visual action tag: :::image[detailed descriptive visual prompt]::: with a vivid, detailed prompt inside the brackets. You may include a brief conversational line before or after the tag. Never emit this tag for educational, diagram code, or non-visual queries.',
             'Conversational guidelines: Maintain continuity with previous dialogue, resolve pronouns and retrospective references naturally, and avoid repeating information already stated.'
         ].filter(Boolean).join('\n\n');
 
@@ -8962,9 +8963,19 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 // Check if message contains HTML elements (like iframes, divs, p, a, etc.)
                 const hasHtmlContent = /<(iframe|div|img|table|p|a|section|article|svg|button)\b/i.test(displayText) || /<\/(p|div|iframe|table|a|section|article)>/i.test(displayText);
 
-                const sourcePresentation = prepareAssistantSourcePresentation(displayText, meta);
+                const cleanDisplayText = stripStreamedImageTags(displayText);
+                const sourcePresentation = prepareAssistantSourcePresentation(cleanDisplayText, meta);
                 const bodyForRender = sourcePresentation.answerText;
                 const readableText = allowEmptyAssistant ? '' : formatAssistantTextForReadability(bodyForRender);
+
+                if (!allowEmptyAssistant && /:::image\[/i.test(displayText)) {
+                    const imgTag = extractStreamedImageTag(displayText, false);
+                    if (imgTag && imgTag.prompt && imgTag.prompt.length >= 3) {
+                        setTimeout(() => {
+                            window.handleImageGenerationRequest?.(imgTag.prompt);
+                        }, 50);
+                    }
+                }
 
                 // Render markdown-rich assistant text for professional readability.
                 let formattedText;
@@ -9088,6 +9099,10 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 } else {
                     chatContainer.appendChild(messageDiv);
                 }
+
+                if (!cleanDisplayText && /:::image\[/i.test(displayText)) {
+                    messageDiv.style.display = 'none';
+                }
                 
                 
                 const shouldTypewriter = typewriter === null
@@ -9201,6 +9216,28 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 .find(row => row.dataset.messageId === id) || null;
         }
 
+        function stripStreamedImageTags(text) {
+            if (!text || typeof text !== 'string') return '';
+            return text.replace(/:::image\[[\s\S]*?(?:\](?:[ \t]*:::)?|$)/gi, '').trim();
+        }
+
+        function extractStreamedImageTag(text, requireClosed = true) {
+            if (!text || typeof text !== 'string') return null;
+            const closedRegex = /:::image\[([\s\S]*?)\](?:[ \t]*:::)?/i;
+            const closedMatch = text.match(closedRegex);
+            if (closedMatch && closedMatch[1].trim()) {
+                return { prompt: closedMatch[1].trim(), isClosed: true };
+            }
+            if (!requireClosed) {
+                const partialRegex = /:::image\[([\s\S]*?)(?:\]:::|\]|$)/i;
+                const partialMatch = text.match(partialRegex);
+                if (partialMatch && partialMatch[1].trim()) {
+                    return { prompt: partialMatch[1].trim(), isClosed: false };
+                }
+            }
+            return null;
+        }
+
         function renderAssistantTextIntoElement(textElement, text, options = {}) {
             if (!textElement) return;
             const isDarkTheme = document.body.classList.contains('dark');
@@ -9208,10 +9245,17 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 ? 'text-sky-300 hover:text-sky-200 underline font-medium'
                 : 'text-indigo-700 hover:text-indigo-900 underline font-medium';
             const presentation = prepareAssistantSourcePresentation(text, options?.meta || {});
-            const readableText = formatAssistantTextForReadability(normalizeAssistantTextStyle(String(presentation.answerText || '')));
+            const rawAnswer = String(presentation.answerText || '');
+            const cleanTextForDisplay = stripStreamedImageTags(rawAnswer);
+            const readableText = formatAssistantTextForReadability(normalizeAssistantTextStyle(cleanTextForDisplay));
             const formatted = sanitizeAssistantMarkup(renderAssistantMarkdown(readableText, linkClass));
             textElement.classList.toggle('is-streaming', options?.streaming === true);
             textElement.innerHTML = formatted;
+            if (!cleanTextForDisplay && /:::image\[/i.test(rawAnswer)) {
+                textElement.style.display = 'none';
+            } else {
+                textElement.style.display = '';
+            }
             if (options?.streaming !== true) {
                 applyAssistantSourceFooter(textElement.closest('.chat-row') || textElement.parentElement, text, options?.meta || {});
                 applyAssistantActionBarAndFollowups(textElement.closest('.chat-row') || textElement.parentElement, text, options?.meta || {});
@@ -9230,6 +9274,15 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             const parsed = extractThoughtAndAnswer(text);
             const cleanAnswer = parsed.answer;
             const thoughtText = parsed.thought;
+
+            // Trigger Streamed Image Action Tag on the fly (<250ms when closed tag arrives)
+            if (!row.__imageActionTriggered) {
+                const imgTag = extractStreamedImageTag(cleanAnswer || text, true);
+                if (imgTag && imgTag.prompt && imgTag.prompt.length >= 3) {
+                    row.__imageActionTriggered = true;
+                    window.handleImageGenerationRequest?.(imgTag.prompt);
+                }
+            }
             
             const bubble = row.querySelector('.chat-bubble-assistant');
             let thinkingCard = row.querySelector('.thinking-process-card');
@@ -9352,6 +9405,14 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             if (!messageId || !cleanText) return '';
             hideThinkingIndicator();
             updateStreamingAssistantMessage(messageId, cleanText, { ...meta, streaming: false });
+            const row = findAssistantMessageRow(messageId);
+            if (row && !row.__imageActionTriggered) {
+                const imgTag = extractStreamedImageTag(cleanText, false);
+                if (imgTag && imgTag.prompt && imgTag.prompt.length >= 3) {
+                    row.__imageActionTriggered = true;
+                    window.handleImageGenerationRequest?.(imgTag.prompt);
+                }
+            }
             const turnId = String(meta?.turnId || getAssistantMessageMeta(messageId)?.turnId || activeResponseRenderContext?.turnId || '').trim();
             const turn = getConversationTurn(turnId);
             const userPrompt = String(meta?.userMessage || turn?.rawPrompt || '').trim();
@@ -10465,14 +10526,6 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
 
             const cardHtml = `
 <div id="${cardId}" class="image-gen-card" data-prompt="${escapeHtml(rawPrompt)}" data-aspect-ratio="${escapeHtml(aspectRatio)}">
-    <div class="image-gen-header">
-        <div class="image-gen-badge-group">
-            <span id="${cardId}-badge-engine" class="image-gen-badge image-gen-badge-engine">Local / WebGPU</span>
-            <span class="image-gen-badge image-gen-badge-ratio">${escapeHtml(aspectRatio)}</span>
-            <span id="${cardId}-badge-time" class="image-gen-badge-time"></span>
-        </div>
-    </div>
-    <div class="image-gen-prompt">"${escapeHtml(rawPrompt)}"</div>
     <div class="image-gen-viewport" data-ratio="${escapeHtml(aspectRatio)}">
         <img id="${cardId}-img" class="image-gen-img hidden" alt="${escapeHtml(rawPrompt)}" onclick="window.openImageLightboxFromCard('${cardId}')" />
         <div id="${cardId}-loader" class="image-gen-loader-overlay">
