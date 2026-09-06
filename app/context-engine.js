@@ -51,7 +51,7 @@ const SETTINGS_VECTOR = textToEmbeddingVector('set change switch turn enable dis
 const FEATURE_VECTOR = textToEmbeddingVector('weather forecast trip itinerary translate camera ocr scan vision remember export');
 const LIVE_REQUEST_VECTOR = textToEmbeddingVector('weather temperature forecast bitcoin crypto price now live score breaking news');
 const RESUME_VECTOR = textToEmbeddingVector('back to return to resume continue with earlier previous topic again about regarding');
-const CONSTRAINT_PROTOTYPE_VECTOR = textToEmbeddingVector('must be strictly required rules constraints format only concise in typescript python no external dependencies');
+const CONSTRAINT_PROTOTYPE_VECTOR = textToEmbeddingVector('must be strictly required rules constraints format budget limit price preference avoid prefer only maximum minimum deadline under');
 const DECISION_PROTOTYPE_VECTOR = textToEmbeddingVector('we will use selected architecture chosen database framework postgresql prisma redis solution implementation decision');
 
 const STANDALONE_LIVE_REQUEST = /\b(?:weather|temperature|forecast|bitcoin|btc|ethereum|eth|crypto|price now|rate now|score now|live score|ipl|nba|nfl|epl|earthquake|wildfire|flood|cyclone|hurricane|tsunami|latest news|breaking news|government news|stock price)\b/i;
@@ -76,7 +76,8 @@ const ENTITY_PATTERNS = Object.freeze([
 ]);
 
 export function createConversationEngine(options = {}) {
-    const maxTurns = clamp(options.maxTurns, 12, 4, 30);
+    const maxTurns = clamp(options.maxTurns, 12, 4, 60);
+    const maxTurnHistory = clamp(options.maxTurnHistory, 160, 40, 400);
     const maxContextChars = clamp(options.maxContextChars, 9000, 1000, 24000);
     const maxThreads = clamp(options.maxThreads, 8, 2, 20);
     const state = {
@@ -94,14 +95,21 @@ export function createConversationEngine(options = {}) {
 
     return {
         getState: () => snapshotState(state),
-        restoreState: snapshot => restoreState(state, snapshot, { maxTurns, maxThreads }),
+        restoreState: snapshot => restoreState(state, snapshot, { maxTurns, maxTurnHistory, maxThreads }),
         setPending: pending => setPending(state, pending),
         clearPending: reason => clearPending(state, reason),
         reset: () => resetState(state),
         resolve: input => resolveInput(state, input, { maxThreads }),
-        recordTurn: turn => recordTurn(state, turn, { maxTurns }),
+        recordTurn: turn => recordTurn(state, turn, { maxTurns, maxTurnHistory }),
         discardTurn: turnId => discardTurn(state, turnId),
         buildContext: options => buildContext(state, { maxTurns, maxContextChars, ...options }),
+        retrievePastTurns: (query, options) => retrievePastTurns(state.turns, query, options),
+        buildMultiTierContext: options => buildMultiTierContext(state, { maxTurns, maxContextChars, ...options }),
+        resolveFollowUp: message => {
+            const activeThread = state.threads.get(state.activeThreadId);
+            const entity = activeThread?.entity || activeThread?.topic || findRecentEntityFromState(state) || '';
+            return resolveFollowUpText(message, entity, state);
+        },
         setPreferences: preferences => {
             state.preferences = { ...state.preferences, ...sanitizePreferences(preferences) };
             return { ...state.preferences };
@@ -224,7 +232,7 @@ function resolveInput(state, input, limits) {
             resumedThread.updatedAt = Date.now();
             return resolution(
                 originalMessage,
-                resolveFollowUpText(originalMessage, resumedThread.entity || resumedThread.topic),
+                resolveFollowUpText(originalMessage, resumedThread.entity || resumedThread.topic, state),
                 resumedThread,
                 'explicit_thread_resume',
                 0.97,
@@ -264,7 +272,7 @@ function resolveInput(state, input, limits) {
                 : 'new_intent_low_context_confidence';
             return resolution(originalMessage, originalMessage, thread, reason, reason === 'clear_new_intent' ? 0.9 : 0.66, null);
         }
-        const resolved = resolveFollowUpText(originalMessage, activeThread.entity || activeThread.topic); 
+        const resolved = resolveFollowUpText(originalMessage, activeThread.entity || activeThread.topic, state); 
         decisionReason = classification.isCorrection ? 'conversation_repair' : 'contextual_follow_up'; 
         confidence = classification.isFollowUp ? 0.92 : 0.78; 
         return resolution(originalMessage, resolved, activeThread, decisionReason, confidence, null);
@@ -287,9 +295,24 @@ function recordTurn(state, turn, limits) {
     const text = cleanText(turn?.text);
     if (!text || turn?.aborted || turn?.error || turn?.control) return null;
 
-    const threadId = cleanText(turn?.threadId) || state.activeThreadId;
-    if (!threadId || !state.threads.has(threadId)) return null;
+    let threadId = cleanText(turn?.threadId) || state.activeThreadId;
+    if (!threadId) {
+        const topic = deriveTopic(text) || 'general';
+        const created = createThread(state, topic, limits?.maxThreads || 20);
+        threadId = created.id;
+    } else if (!state.threads.has(threadId)) {
+        const thread = {
+            id: threadId,
+            topic: deriveTopic(text) || threadId.slice(0, 80),
+            entity: deriveEntity(text) || '',
+            createdAt: Date.now(),
+            updatedAt: Date.now()
+        };
+        state.threads.set(threadId, thread);
+        state.activeThreadId = threadId;
+    }
     const thread = state.threads.get(threadId);
+    const embedding = turn?.embedding || textToEmbeddingVector(text);
     const record = {
         id: cleanText(turn?.id) || `${role}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
         turnId: cleanText(turn?.turnId),
@@ -297,12 +320,14 @@ function recordTurn(state, turn, limits) {
         text: text.slice(0, 4000),
         source: cleanText(turn?.source) || 'text',
         threadId,
-        createdAt: Number(turn?.createdAt) || Date.now()
+        createdAt: Number(turn?.createdAt) || Date.now(),
+        embedding
     };
     state.turns.push(record);
-    state.turns = state.turns.slice(-limits.maxTurns * 3);
+    const maxHistory = limits?.maxTurnHistory || Math.max(160, (limits?.maxTurns || 12) * 5);
+    state.turns = state.turns.slice(-maxHistory);
     thread.updatedAt = record.createdAt;
-    const isAck = vectorCosineSimilarity(textToEmbeddingVector(text), ACKNOWLEDGEMENT_VECTOR) >= 0.36 || /^(?:yes|yeah|yep|yup|ok|okay|sure|alright|fine|thanks|thank you|got it|makes sense|understood)\b/i.test(text.toLowerCase());
+    const isAck = vectorCosineSimilarity(embedding, ACKNOWLEDGEMENT_VECTOR) >= 0.36 || /^(?:yes|yeah|yep|yup|ok|okay|sure|alright|fine|thanks|thank you|got it|makes sense|understood)\b/i.test(text.toLowerCase());
     if (role === 'user' && !isAck) {
         const entity = deriveEntity(text);
         if (entity) thread.entity = entity;
@@ -448,9 +473,13 @@ function restoreState(state, snapshot, limits) {
             .map(thread => [String(thread.id || ''), { ...thread }])
             .filter(([id]) => id)
     );
+    const maxHistory = limits?.maxTurnHistory || Math.max(160, (limits?.maxTurns || 12) * 5);
     state.turns = (Array.isArray(source.turns) ? source.turns : [])
-        .slice(-limits.maxTurns)
-        .map(turn => ({ ...turn }));
+        .slice(-maxHistory)
+        .map(turn => ({
+            ...turn,
+            embedding: turn.embedding || textToEmbeddingVector(turn.text)
+        }));
     state.pending = source.pending ? { ...source.pending } : null;
     state.preferences = {
         responseLength: 'normal',
@@ -573,9 +602,25 @@ function resolvePronouns(text, entity) {
     );
 }
 
-function resolveFollowUpText(text, entity) {
+function findRecentEntityFromState(state) {
+    if (!state) return '';
+    if (state.activeThreadId && state.threads?.has(state.activeThreadId)) {
+        const t = state.threads.get(state.activeThreadId);
+        if (t.entity) return t.entity;
+        if (t.topic) return t.topic;
+    }
+    const turns = Array.isArray(state.turns) ? state.turns : [];
+    for (let i = turns.length - 1; i >= 0 && i >= turns.length - 8; i--) {
+        const turn = turns[i];
+        const entity = deriveEntity(turn.text);
+        if (entity && !PLACE_RELATIVE_FOLLOWUP.test(entity)) return entity;
+    }
+    return '';
+}
+
+export function resolveFollowUpText(text, entity, state = null) {
     const raw = cleanText(text);
-    const anchor = cleanText(entity);
+    const anchor = cleanText(entity) || findRecentEntityFromState(state);
     if (!anchor) return raw;
     const pronounResolved = resolvePronouns(raw, anchor);
     if (pronounResolved !== raw) return pronounResolved;
@@ -733,7 +778,8 @@ export function extractRollingExecutiveSummary(olderTurns = []) {
         const constraintSim = vectorCosineSimilarity(vec, CONSTRAINT_PROTOTYPE_VECTOR);
         const decisionSim = vectorCosineSimilarity(vec, DECISION_PROTOTYPE_VECTOR);
 
-        if (isUser && constraintSim >= 0.18) {
+        const hasConstraintSignal = /\b(?:must|strictly|budget|prefer|preference|avoid|cannot|can't|only|under|max|maximum|at most|require|required|rule|rules|limit|limited)\b/i.test(text);
+        if (isUser && (constraintSim >= 0.16 || hasConstraintSignal)) {
             const snippet = text.length > 140 ? text.slice(0, 137) + '...' : text;
             if (!constraints.some(c => c.toLowerCase() === snippet.toLowerCase())) {
                 constraints.push(snippet);
@@ -789,3 +835,195 @@ export function buildCompactedContext(turns = [], options = {}) {
         ...recentTurns.map(t => ({ role: t.role, text: t.text }))
     ];
 }
+
+/**
+ * Intelligently retrieves relevant past turns from historical conversation outside the active window.
+ * Groups turns into conversational exchanges (user query + assistant reply).
+ */
+export function retrievePastTurns(turns = [], query = '', options = {}) {
+    const cleanQuery = cleanText(query);
+    if (!cleanQuery || !Array.isArray(turns) || turns.length === 0) return [];
+
+    const excludeTurnIds = new Set(options.excludeTurnIds || []);
+    const maxPairs = clamp(options.maxPairs || options.topK, 2, 1, 6);
+    const queryVec = textToEmbeddingVector(cleanQuery);
+
+    const isRetrospective = /\b(?:earlier|previously|before|prior|remember|you said|i said|what did (?:i|we|you) (?:say|decide|discuss|mention)|as mentioned|what was (?:the|that|my)|last time|earlier on|we talked about)\b/i.test(cleanQuery);
+    const minSimilarity = isRetrospective ? 0.12 : 0.20;
+
+    // Group turns into chronological exchanges (user turn and following assistant turn)
+    const exchanges = [];
+    const stopWords = new Set(['what', 'did', 'say', 'earlier', 'before', 'prior', 'remember', 'the', 'that', 'this', 'was', 'were', 'our', 'you', 'can', 'could', 'would', 'tell', 'remind', 'about', 'with', 'from', 'again', 'when']);
+    const queryKeywords = tokenize(cleanQuery).filter(w => w.length > 2 && !stopWords.has(w.toLowerCase()));
+
+    for (let i = 0; i < turns.length; i++) {
+        const turn = turns[i];
+        if (turn.role === 'user') {
+            const assistantTurn = (i + 1 < turns.length && turns[i + 1].role === 'assistant') ? turns[i + 1] : null;
+            const turnId = turn.id || String(i);
+            const asstId = assistantTurn ? (assistantTurn.id || String(i + 1)) : '';
+
+            if (!excludeTurnIds.has(turnId) && (!asstId || !excludeTurnIds.has(asstId))) {
+                const combinedText = `${turn.text} ${assistantTurn ? assistantTurn.text : ''}`;
+                const combinedVec = textToEmbeddingVector(combinedText);
+                const turnVec = turn.embedding || textToEmbeddingVector(turn.text);
+                let sim = Math.max(
+                    vectorCosineSimilarity(queryVec, combinedVec),
+                    vectorCosineSimilarity(queryVec, turnVec)
+                );
+
+                if (queryKeywords.length > 0) {
+                    const lowerExchange = combinedText.toLowerCase();
+                    let hitCount = 0;
+                    for (const kw of queryKeywords) {
+                        if (lowerExchange.includes(kw.toLowerCase())) {
+                            hitCount += 1;
+                        }
+                    }
+                    if (hitCount > 0) {
+                        sim += 0.15 * Math.min(3, hitCount);
+                    }
+                }
+
+                exchanges.push({
+                    userTurn: turn,
+                    assistantTurn,
+                    similarity: sim,
+                    index: i
+                });
+            }
+        }
+    }
+
+    const matches = exchanges.filter(e => e.similarity >= minSimilarity);
+    matches.sort((a, b) => b.similarity - a.similarity);
+    const topMatches = matches.slice(0, maxPairs);
+    // Restore chronological order
+    topMatches.sort((a, b) => a.index - b.index);
+
+    const retrieved = [];
+    for (const match of topMatches) {
+        retrieved.push({
+            role: 'user',
+            text: match.userTurn.text,
+            id: match.userTurn.id || '',
+            turnId: match.userTurn.turnId || ''
+        });
+        if (match.assistantTurn) {
+            retrieved.push({
+                role: 'assistant',
+                text: match.assistantTurn.text,
+                id: match.assistantTurn.id || '',
+                turnId: match.assistantTurn.turnId || ''
+            });
+        }
+    }
+    return retrieved;
+}
+
+/**
+ * Builds the complete multi-tier context model:
+ * - Tier 1: Recent verbatim dialogue window (last 6-8 turns)
+ * - Tier 2: In-session semantically retrieved past turns (from older turns outside the verbatim window)
+ * - Tier 3: Rolling executive milestone summary (constraints, decisions, topics)
+ * - Structured Messages: OpenAI/Groq/Gemini formatted messages array
+ */
+export function buildMultiTierContext(state, options = {}) {
+    const currentMessage = cleanText(options.message || '');
+    const maxRecentTurns = clamp(options.maxRecentTurns || options.maxVerbatimTurns, 8, 2, 20);
+    const maxContextChars = clamp(options.maxContextChars, 9000, 1000, 24000);
+
+    const allTurns = Array.isArray(state?.turns) ? state.turns : [];
+    const threadId = cleanText(options.threadId) || state?.activeThreadId || '';
+    
+    // Select eligible turns for conversation
+    let sessionTurns = threadId ? allTurns.filter(t => t.threadId === threadId) : allTurns;
+    if (sessionTurns.length === 0 && allTurns.length > 0) {
+        sessionTurns = allTurns;
+    }
+
+    // Tier 1: Active verbatim window (most recent turns)
+    const recentTurnsRaw = sessionTurns.slice(-maxRecentTurns);
+    const recentTurnIds = new Set(recentTurnsRaw.map(t => t.id).filter(Boolean));
+    const recentTurns = recentTurnsRaw.map(t => ({ role: t.role, text: t.text }));
+
+    // Older turns outside the verbatim window
+    const olderTurns = sessionTurns.length > maxRecentTurns
+        ? sessionTurns.slice(0, sessionTurns.length - maxRecentTurns)
+        : [];
+
+    // Tier 2: Semantic Turn Retrieval from older turns
+    const retrievedTurns = olderTurns.length > 0 && currentMessage
+        ? retrievePastTurns(olderTurns, currentMessage, {
+            excludeTurnIds: recentTurnIds,
+            topK: clamp(options.topK || 2, 2, 1, 4)
+        })
+        : [];
+
+    // Tier 3: Rolling Milestone Summary
+    const milestones = options.rollingSummary || (olderTurns.length > 0 ? extractRollingExecutiveSummary(olderTurns) : null);
+    const milestoneParts = [];
+    if (milestones) {
+        if (milestones.constraints?.length) milestoneParts.push(`Established Constraints & Preferences: ${milestones.constraints.join('; ')}`);
+        if (milestones.decisions?.length) milestoneParts.push(`Key Decisions & Concrete Facts: ${milestones.decisions.join('; ')}`);
+        if (milestones.topics?.length) milestoneParts.push(`Topics Explored: ${milestones.topics.join(' -> ')}`);
+    }
+    const summaryText = milestoneParts.join('\n');
+
+    // Compose system background additions (Tier 2 + Tier 3)
+    const backgroundSections = [];
+    if (summaryText) {
+        backgroundSections.push(`[Milestone Summary of earlier conversation (${olderTurns.length} turns prior):\n${summaryText}]`);
+    }
+    if (retrievedTurns.length > 0) {
+        const retrievedFormatted = retrievedTurns
+            .map(t => `${t.role === 'user' ? 'User' : 'Assistant'}: ${t.text}`)
+            .join('\n');
+        backgroundSections.push(`[Retrieved Relevant Context From Earlier in this Conversation:\n${retrievedFormatted}]`);
+    }
+    const backgroundContextBlock = backgroundSections.join('\n\n');
+
+    // Compose Structured Messages array (Native OpenAI / Groq / Gemini format)
+    const structuredMessages = [];
+    const baseSystemPrompt = cleanText(options.systemPrompt || state?.preferences?.customSystemPrompt || '');
+    const combinedSystemPrompt = [
+        baseSystemPrompt,
+        backgroundContextBlock
+    ].filter(Boolean).join('\n\n');
+
+    if (combinedSystemPrompt) {
+        structuredMessages.push({ role: 'system', content: combinedSystemPrompt });
+    }
+
+    // Add verbatim recent dialogue turns
+    for (const t of recentTurns) {
+        structuredMessages.push({
+            role: t.role === 'user' ? 'user' : 'assistant',
+            content: t.text
+        });
+    }
+
+    // Add current user message if supplied
+    if (currentMessage) {
+        structuredMessages.push({
+            role: 'user',
+            content: currentMessage
+        });
+    }
+
+    return {
+        recentTurns,
+        retrievedTurns,
+        olderTurnsCount: olderTurns.length,
+        milestones,
+        summaryText,
+        backgroundContextBlock,
+        structuredMessages,
+        // Legacy flat context compatibility
+        context: [
+            ...(backgroundContextBlock ? [{ role: 'system', text: backgroundContextBlock }] : []),
+            ...recentTurns
+        ]
+    };
+}
+
