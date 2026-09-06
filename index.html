@@ -5145,12 +5145,19 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
         autoIndicatorShown = true;
     }, minimalThinking ? 0 : 80);
     try { 
-        const engineContext = requestOptions?.grounding
+        let engineContext = requestOptions?.grounding
             ? []
             : (window.JarvisConversation?.buildContext({
                 maxTurns: 12,
                 maxContextChars: 9000
             }) || []);
+        if (!engineContext.length && !requestOptions?.grounding && Array.isArray(conversationHistory) && conversationHistory.length) {
+            const recentHistory = conversationHistory.slice(-6);
+            engineContext = recentHistory.flatMap(item => [
+                item.user ? { role: 'user', text: String(item.user).trim() } : null,
+                item.ai ? { role: 'assistant', text: String(item.ai).trim() } : null
+            ]).filter(Boolean);
+        }
         window.__intentContext = { 
           allowHotels: intent.wantsHotels,
           itineraryOnly:
@@ -26382,7 +26389,18 @@ function loadHistory() {
     const historyKey = getHistoryStorageKey();
     const saved = localStorage.getItem(historyKey);
     if (saved) {
-        conversationHistory = JSON.parse(saved);
+        try {
+            conversationHistory = JSON.parse(saved);
+            if (Array.isArray(conversationHistory) && conversationHistory.length && window.JarvisConversation) {
+                const session = {
+                    messages: conversationHistory.flatMap(item => [
+                        item.user ? { role: 'user', text: item.user, turnId: item.turnId || '' } : null,
+                        item.ai ? { role: 'assistant', text: item.ai, turnId: item.turnId || '' } : null
+                    ]).filter(Boolean)
+                };
+                restoreConversationEngineForSession(session);
+            }
+        } catch (_) {}
     }
 }
 
