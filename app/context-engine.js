@@ -114,7 +114,7 @@ export function classifyInput(message, pending = null, activeThread = null) {
     const lower = originalMessage.toLowerCase();
     const tokens = tokenize(originalMessage);
     const vec = textToEmbeddingVector(originalMessage);
-    const hasAnaphoricReference = /\b(?:it|its|this|that|they|them|those|these|same|earlier|previous|above)\b/i.test(lower);
+    const hasAnaphoricReference = /\b(?:it|its|this|that|they|them|their|theirs|there|he|him|his|she|her|hers|those|these|same|earlier|previous|above|the former|the latter)\b/i.test(lower);
 
     const isAcknowledgement = vectorCosineSimilarity(vec, ACKNOWLEDGEMENT_VECTOR) >= 0.36 || /^(?:yes|yeah|yep|yup|ok|okay|sure|alright|fine|thanks|thank you|got it|makes sense|understood)\b/i.test(lower);
     const isCancel = vectorCosineSimilarity(vec, CANCEL_VECTOR) >= 0.38 || /^(?:cancel|stop|reset|nevermind|start over|forget that)\b/i.test(lower);
@@ -135,7 +135,8 @@ export function classifyInput(message, pending = null, activeThread = null) {
         )
     );
     const hasFollowUpLead = /^(?:show examples?|examples?|more|continue|explain further|further|tell me more|what about|how about|then what|what next|pros and cons|difference|differences|compare|cost|price|details)\b/i.test(lower);
-    const isFollowUp = isCorrection || isModification || isPlaceRelativeFollowUp || hasFollowUpLead || (hasAnaphoricReference && (vectorCosineSimilarity(vec, FOLLOWUP_VECTOR) >= 0.28 || tokens.length <= 6)) || vectorCosineSimilarity(vec, FOLLOWUP_VECTOR) >= 0.35;
+    const hasDefiniteAspect = /\b(?:the|its|their)\s+[a-z]{3,}\b/i.test(lower);
+    const isFollowUp = isCorrection || isModification || isPlaceRelativeFollowUp || hasFollowUpLead || (hasAnaphoricReference && (vectorCosineSimilarity(vec, FOLLOWUP_VECTOR) >= 0.28 || tokens.length <= 8)) || (hasDefiniteAspect && Boolean(activeThread) && tokens.length <= 8) || vectorCosineSimilarity(vec, FOLLOWUP_VECTOR) >= 0.35;
     const pendingMatch = pending ? matchesPending(originalMessage, pending) : false;
     const hasSubstantiveIntent = tokens.length >= 1 && !isAcknowledgement;
     const startsClearRequest = /^(?:who|what|when|where|why|how|do|can|are|will|explain|tell|give|show|plan|create|write|compare|calculate|translate|remember|open|start)\b/i.test(originalMessage);
@@ -313,10 +314,21 @@ function recordTurn(state, turn, limits) {
 
 function buildContext(state, options = {}) {
     const threadId = cleanText(options.threadId) || state.activeThreadId;
-    if (!threadId) return [];
     const maxTurns = clamp(options.maxTurns, 12, 2, 30);
     const maxChars = clamp(options.maxContextChars, 9000, 500, 24000);
-    const selected = state.turns.filter(turn => turn.threadId === threadId).slice(-maxTurns);
+    let selected = threadId ? state.turns.filter(turn => turn.threadId === threadId) : [];
+    // If active thread has no turns or very few, fall back to recent turns from state.turns
+    if (selected.length === 0 && state.turns.length > 0) {
+        selected = state.turns.slice(-maxTurns);
+    } else if (selected.length < 4 && state.turns.length > selected.length) {
+        const recentSessionTurns = state.turns.slice(-maxTurns);
+        const map = new Map();
+        for (const t of recentSessionTurns) map.set(t.id, t);
+        for (const t of selected) map.set(t.id, t);
+        selected = [...map.values()].slice(-maxTurns);
+    } else {
+        selected = selected.slice(-maxTurns);
+    }
     const out = [];
     let chars = 0;
     for (let i = selected.length - 1; i >= 0; i -= 1) {
@@ -547,10 +559,17 @@ function deriveEntity(text) {
 }
 
 function resolvePronouns(text, entity) {
-    if (!entity) return text;
+    const anchor = cleanText(entity);
+    if (!anchor) return text;
     return cleanText(text).replace(
-        /\b(?:it|its|this|that|this one|that one|the company|the person|the topic|they|them)\b/gi,
-        entity
+        /\b(?:its|their|theirs|his|her|hers)\b/gi,
+        `${anchor}'s`
+    ).replace(
+        /\b(?:it|this|that|this one|that one|the company|the person|the topic|they|them|he|she|him)\b/gi,
+        anchor
+    ).replace(
+        /\bthere\b/gi,
+        `in ${anchor}`
     );
 }
 
@@ -598,24 +617,30 @@ function shouldResolveAgainstActiveThread(message, classification, activeThread)
     if (!activeThread) return false;
     if (classification?.isCorrection) return true;
     const raw = cleanText(message);
+    const lower = raw.toLowerCase();
     const tokens = Array.isArray(classification?.tokens) ? classification.tokens : tokenize(raw);
     const topicTokens = tokenize(`${activeThread.topic || ''} ${activeThread.entity || ''}`);
     const overlap = countOverlap(tokens, topicTokens);
     const hasEntity = Boolean(cleanText(activeThread.entity));
     const hasTopicAnchor = hasEntity || topicTokens.length > 0;
     const vec = textToEmbeddingVector(raw);
-    const explicitReference = Boolean(classification?.isFollowUp) || vectorCosineSimilarity(vec, FOLLOWUP_VECTOR) >= 0.30 || /\b(?:it|its|this|that|they|them|more|continue|further|compare|latest|examples?|cost|price|pros|cons|differences?)\b/i.test(raw);
+    const hasAnaphoric = /\b(?:it|its|this|that|they|them|their|theirs|there|he|him|his|she|her|hers|those|these|same|earlier|previous|above|the former|the latter)\b/i.test(lower);
+    const hasDefiniteAspect = /\b(?:the|its|their)\s+[a-z]{3,}\b/i.test(lower);
+    const explicitReference = Boolean(classification?.isFollowUp) || hasAnaphoric || hasDefiniteAspect || vectorCosineSimilarity(vec, FOLLOWUP_VECTOR) >= 0.30 || /\b(?:it|its|this|that|they|them|more|continue|further|compare|latest|examples?|cost|price|pros|cons|differences?)\b/i.test(raw);
     const bareShortQuestion = /^(?:who|what|when|where|why|how|which)\b/i.test(raw) && tokens.length <= 3 && overlap === 0 && !explicitReference;
-    const namedLikeNewTopic = /^(?:who|what)\s+is\s+[A-Za-z0-9][A-Za-z0-9 .'-]{2,}\??$/i.test(raw) && overlap === 0;
-    const explicitNewObject = hasExplicitNewObject(raw) && overlap === 0 && !/\b(?:it|its|this|that|they|them)\b/i.test(raw);
+    
+    // Only treat as brand new topic if it explicitly names a new capitalized proper entity without pronouns
+    const hasNewNamedEntity = !hasAnaphoric && /\b[A-Z][a-z]{1,20}\s+[A-Z][a-z]{1,20}\b/.test(raw) && overlap === 0;
+    const namedLikeNewTopic = !hasAnaphoric && !hasDefiniteAspect && /^(?:who|what)\s+is\s+(?!the\s)[A-Za-z0-9 .'-]{2,}\??$/i.test(raw) && overlap === 0;
+    const explicitNewObject = !hasAnaphoric && hasExplicitNewObject(raw) && overlap === 0;
 
     if (classification?.isStandaloneLiveRequest && overlap === 0) return false;
     if (hasExplicitPlaceMention(raw) && overlap === 0) return false;
-    if (namedLikeNewTopic || bareShortQuestion || explicitNewObject) return false;
+    if (hasNewNamedEntity || namedLikeNewTopic || bareShortQuestion || explicitNewObject) return false;
     if (overlap > 0) return true;
-    if (explicitReference && hasTopicAnchor && tokens.length <= 8) return true;
+    if (explicitReference && hasTopicAnchor) return true;
     if (classification?.isPlaceRelativeFollowUp && hasTopicAnchor) return true;
-    return explicitReference && tokens.length <= 3 && hasTopicAnchor;
+    return false;
 }
 
 function hasAmbiguousReferenceAcrossThreads(state, message, activeThread) {
