@@ -420,4 +420,57 @@ assert.ok(topDbResults[0].score > topDbResults[1].score, 'Top-1 score must excee
 const topConstraintResults = semanticSearch('strict typing compiler language rules', documents, 1);
 assert.equal(topConstraintResults[0].doc.id, 2, 'Top search result for compiler rules must be document 2');
 
+// ============================================================================
+// Real-World Conversational Follow-Up & Pronoun Resolution Suite
+// ============================================================================
+const conversationEngine = createConversationEngine({ maxTurns: 12, maxContextChars: 9000 });
+const turn1Result = conversationEngine.resolve({ message: 'What is the capital of France?' });
+assert.equal(turn1Result.decisionReason, 'clear_new_intent');
+const franceThreadId = turn1Result.activeThread.id;
+conversationEngine.recordTurn({ role: 'user', text: 'What is the capital of France?', threadId: franceThreadId });
+conversationEngine.recordTurn({ role: 'assistant', text: 'The capital of France is Paris.', threadId: franceThreadId });
+
+const realWorldFollowUps = [
+    'What about its population?',
+    'Tell me more about it',
+    'What is its population?',
+    'How many people live there?',
+    'Tell me about the culture',
+    'Who is the mayor?',
+    'How old is he?',
+    'What language do they speak?'
+];
+
+for (const followUpText of realWorldFollowUps) {
+    const followUpResult = conversationEngine.resolve({ message: followUpText });
+    assert.equal(
+        followUpResult.decisionReason,
+        'contextual_follow_up',
+        `Query "${followUpText}" must resolve as contextual_follow_up, got ${followUpResult.decisionReason}`
+    );
+    assert.equal(
+        followUpResult.activeThread.id,
+        franceThreadId,
+        `Query "${followUpText}" must remain on the active France thread`
+    );
+    const contextTurns = conversationEngine.buildContext();
+    assert.ok(
+        contextTurns.length >= 2,
+        `Query "${followUpText}" must have access to prior context turns (got ${contextTurns.length})`
+    );
+    assert.ok(
+        contextTurns.some(t => t.text.includes('capital of France') || t.text.includes('Paris')),
+        `Context for "${followUpText}" must contain the prior exchange`
+    );
+}
+
+// Ensure session context is preserved across new thread transitions
+const newTopicResult = conversationEngine.resolve({ message: 'Explain quantum computing' });
+assert.equal(newTopicResult.decisionReason, 'clear_new_intent');
+const contextAfterNewTopic = conversationEngine.buildContext();
+assert.ok(
+    contextAfterNewTopic.length >= 2,
+    `New thread must inherit recent session context turns (got ${contextAfterNewTopic.length})`
+);
+
 console.log('context-engine-tests-ok');
