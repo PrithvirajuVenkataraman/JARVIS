@@ -134,6 +134,57 @@ export function extractImagePrompt(text) {
 }
 
 /**
+ * Automatically enriches and grounds image prompts for maximum accuracy,
+ * resolving abbreviations (e.g. LA -> Los Angeles, California), adding authentic
+ * architectural & environmental details, and avoiding deserted ghost-town renders.
+ * Preserves user-specified artistic styles (anime, oil painting, sketch, etc.).
+ * @param {string} prompt
+ * @returns {string}
+ */
+export function enhanceImagePromptForAccuracy(prompt) {
+    let clean = String(prompt || '').trim();
+    if (!clean) return '';
+
+    // Strip common conversational prompt filler
+    clean = clean.replace(/^(?:a\s+)?(?:pic(?:ture)?|photo(?:graph)?|image)\s+(?:of|for)\s+/i, '').trim();
+
+    // Check if user requested an explicitly non-photorealistic artistic style
+    const isArtistic = /\b(?:anime|manga|oil\s+painting|watercolor|pencil\s+sketch|sketch|drawing|cartoon|illustration|pixel\s+art|cyberpunk|fantasy\s+art|3d\s+render|cgi|surreal)\b/i.test(clean);
+
+    // Entity & Location Expansions
+    const isLA = /^(?:la|l\.a\.|los\s+angeles)$/i.test(clean) || /\b(?:la|l\.a\.)\b/i.test(clean);
+    const isNYC = /^(?:nyc|n\.y\.c\.|new\s+york\s+city)$/i.test(clean) || /\b(?:nyc|n\.y\.c\.)\b/i.test(clean);
+    const isSF = /^(?:sf|s\.f\.|san\s+francisco)$/i.test(clean) || /\b(?:sf|s\.f\.)\b/i.test(clean);
+    const isDC = /^(?:dc|d\.c\.|washington\s+dc)$/i.test(clean) || /\b(?:dc|d\.c\.)\b/i.test(clean);
+    const isChidambaram = /\bchidambaram\b/i.test(clean);
+
+    if (!isArtistic) {
+        if (isLA) {
+            return 'Vibrant photograph of Los Angeles, California showing the downtown skyline, palm tree-lined boulevard, active street with cars, under warm golden hour sunlight, authentic 8k photorealistic architecture';
+        }
+        if (isNYC) {
+            return 'Iconic photograph of New York City, bustling Manhattan street with yellow cabs, historic and modern skyscrapers, clear daylight, crisp authentic architectural detail, 8k photography';
+        }
+        if (isSF) {
+            return 'Cinematic photograph of San Francisco, California, Golden Gate vista and iconic rolling hills with Victorian architecture, authentic natural lighting, 8k photorealistic';
+        }
+        if (isDC) {
+            return 'Distinguished photograph of Washington, D.C., National Mall and Capitol architecture with lush greenery and clear sky, authentic photorealistic detail';
+        }
+        if (isChidambaram) {
+            return 'Authentic aerial view of Chidambaram historic temple town, Tamil Nadu, showcasing the Thillai Nataraja Temple complex with grand Dravidian gopurams and sacred Sivaganga water tank, detailed architecture, golden hour';
+        }
+
+        // For brief prompts (< 50 chars), ground with authentic textures, lighting, and detail
+        if (clean.length < 50 && !/\b(?:photograph|photorealistic|detailed|cinematic|lighting|8k|4k)\b/i.test(clean)) {
+            return `${clean}, authentic natural lighting, high detail, sharp focus, photorealistic 8k`;
+        }
+    }
+
+    return clean;
+}
+
+/**
  * Parses and extracts an image prompt from a streamed or static LLM action tag.
  * Matches :::image[detailed visual description]:::
  * @param {string} text
@@ -285,8 +336,69 @@ export function isSimpleStableQuestion(text, context = {}) {
 
 export function isTransformFastQuery(text) {
     const raw = String(text || '').trim();
-    if (!raw || raw.length > 180) return false;
-    return /^(?:translate|summarize|paraphrase|rewrite|fix\s+grammar)\b/i.test(raw);
+    if (!raw) return false;
+    return /^(?:\/?(?:translate|summarize|paraphrase|rewrite|professional)|(?:fix\s+grammar|make\s+this\s+professional))\b/i.test(raw);
+}
+
+export function isVerifyCommand(text) {
+    const raw = String(text || '').trim();
+    if (!raw) return false;
+    return /^\/verify\b/i.test(raw) || /^verify\s+this\s*:/i.test(raw);
+}
+
+export function isStudyCommand(text) {
+    const raw = String(text || '').trim();
+    if (!raw) return false;
+    return /^\/study\b/i.test(raw) || /^(?:teach\s+me\s+this\s+topic\s*:|study\s+this\s*:)/i.test(raw);
+}
+
+export function normalizeSlashCommand(text) {
+    const raw = String(text || '').trim();
+    if (!raw.startsWith('/')) {
+        return { isSlashCommand: false, command: null, payload: raw, normalizedText: raw };
+    }
+
+    const match = raw.match(/^\/([a-z_-]+)(?:\s+([\s\S]*))?$/i);
+    if (!match) {
+        return { isSlashCommand: false, command: null, payload: raw, normalizedText: raw };
+    }
+
+    const command = match[1].toLowerCase();
+    const payload = (match[2] || '').trim();
+
+    switch (command) {
+        case 'translate': {
+            if (!payload) return { isSlashCommand: true, command, payload: '', normalizedText: 'translate "..." to Tamil' };
+            if (/\bto\s+[a-zA-Z\s]+$/i.test(payload)) {
+                return { isSlashCommand: true, command, payload, normalizedText: `Translate ${payload}` };
+            }
+            return { isSlashCommand: true, command, payload, normalizedText: `Translate the following text accurately: ${payload}` };
+        }
+        case 'summarize': {
+            if (!payload) return { isSlashCommand: true, command, payload: '', normalizedText: 'summarize this: ' };
+            return { isSlashCommand: true, command, payload, normalizedText: `Summarize the following text concisely:\n${payload}` };
+        }
+        case 'verify': {
+            if (!payload) return { isSlashCommand: true, command, payload: '', normalizedText: 'verify this: ' };
+            return { isSlashCommand: true, command, payload, normalizedText: `Verify whether this claim or answer is factual: ${payload}` };
+        }
+        case 'professional': {
+            if (!payload) return { isSlashCommand: true, command, payload: '', normalizedText: 'make this professional: ' };
+            return { isSlashCommand: true, command, payload, normalizedText: `Rewrite the following text to be professional, clear, and polished:\n${payload}` };
+        }
+        case 'study': {
+            if (!payload) return { isSlashCommand: true, command, payload: '', normalizedText: 'teach me this topic: ' };
+            return { isSlashCommand: true, command, payload, normalizedText: `Teach me the key concepts of this topic clearly with examples and a short quiz:\n${payload}` };
+        }
+        case 'image':
+        case 'img':
+        case 'draw':
+        case 'art': {
+            return { isSlashCommand: true, command: 'image', payload, normalizedText: payload };
+        }
+        default:
+            return { isSlashCommand: true, command, payload, normalizedText: payload || raw };
+    }
 }
 
 export function isJokeFastQuery(text) {
@@ -299,6 +411,7 @@ export function isFastSimpleQuery(text, context = {}) {
     return isCasualConversationQuery(text) ||
         isSimpleStableQuestion(text, context) ||
         isTransformFastQuery(text) ||
+        isStudyCommand(text) ||
         isJokeFastQuery(text);
 }
 
@@ -348,6 +461,33 @@ export function decideFrontendRoute(text, context = {}) {
             risk: 'low_risk',
             requiresSources: false,
             minimalThinking: true,
+            sourcePolicy: 'none'
+        };
+        FRONTEND_ROUTE_CACHE.set(cacheKey, res);
+        return res;
+    }
+
+    if (isVerifyCommand(raw)) {
+        const res = {
+            ...base,
+            route: 'live_required',
+            reason: 'verify_command_requires_sources',
+            risk: 'medium_risk',
+            requiresSources: true,
+            sourcePolicy: 'required'
+        };
+        FRONTEND_ROUTE_CACHE.set(cacheKey, res);
+        return res;
+    }
+
+    if (isTransformFastQuery(raw) || isStudyCommand(raw)) {
+        const res = {
+            ...base,
+            route: 'fast_simple',
+            reason: 'command_transformation_fast',
+            risk: 'low_risk',
+            minimalThinking: true,
+            requiresSources: false,
             sourcePolicy: 'none'
         };
         FRONTEND_ROUTE_CACHE.set(cacheKey, res);
