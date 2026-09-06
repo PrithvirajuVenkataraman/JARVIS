@@ -5144,20 +5144,7 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
         showThinkingIndicator('Generating answer...');
         autoIndicatorShown = true;
     }, minimalThinking ? 0 : 80);
-    try { 
-        let engineContext = requestOptions?.grounding
-            ? []
-            : (window.JarvisConversation?.buildContext({
-                maxTurns: 12,
-                maxContextChars: 9000
-            }) || []);
-        if (!engineContext.length && !requestOptions?.grounding && Array.isArray(conversationHistory) && conversationHistory.length) {
-            const recentHistory = conversationHistory.slice(-6);
-            engineContext = recentHistory.flatMap(item => [
-                item.user ? { role: 'user', text: String(item.user).trim() } : null,
-                item.ai ? { role: 'assistant', text: String(item.ai).trim() } : null
-            ]).filter(Boolean);
-        }
+    try {
         window.__intentContext = { 
           allowHotels: intent.wantsHotels,
           itineraryOnly:
@@ -5179,7 +5166,7 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
         const learningHint = LEARNING_MODE_HINTS[activeLearningMode] || LEARNING_MODE_HINTS.standard;
         const inputLanguageHint = detectInputLanguageHint(normalizedUserMessage);
         const languageReplyHint = inputLanguageHint
-            ? `\nReply language preference: respond in ${inputLanguageHint} unless the user asks for another language.`
+            ? `Reply language preference: respond in ${inputLanguageHint} unless the user asks for another language.`
             : '';
         const conciseFactHint = isConciseDirectFactQuery(normalizedUserMessage)
             ? 'This is a direct fact query. Answer in 1-2 sentences max. Give the fact immediately. Do not add generic extra explanation or follow-up offers unless the user asks.'
@@ -5195,28 +5182,69 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
             : await buildRelevantSavedMemoryContextAsync(normalizedUserMessage);
         const learnedStyleHint = buildLearnedAnswerStyleHint();
         const learnedPreferenceHint = buildLearnedPreferenceHint();
-        // Keep the user message lean on the fast/stream path so the model starts sooner.
-        const leanHints = requestOptions?.stream === true || minimalThinking || requestOptions?.fastExplainer === true;
-        const effectiveMessage = requestOptions?.grounding
-            ? normalizedUserMessage
-            : (leanHints
-                ? `${normalizedUserMessage}${relevantSavedMemoryContext}${conciseFactHint ? `\n${conciseFactHint}` : ''}${fastExplainerHint ? `\n${fastExplainerHint}` : ''}${languageReplyHint}`
-                : `${normalizedUserMessage}${relevantSavedMemoryContext}\n\nResponse length requested: ${responseMode}. ${responseHint}\nResponse format preference: ${formatMode}. ${formatHint}\nPrompt-requested explanation style: ${activeLearningMode}. ${learningHint}${languageReplyHint}\n${conciseFactHint}\n${directExplainerHint}\n${fastExplainerHint}${learnedStyleHint}${learnedPreferenceHint ? `\n${learnedPreferenceHint}` : ''}\n\nStyle requirements: Be specific, avoid repetition, and stay natural. Do not invent facts, dates, numbers, quotes, or sources.`); 
 
-         
         const selectedModel = getSelectedModel();
-        const effectiveSystemPrompt = typeof JarvisSelfImprovingMemory !== 'undefined'
+        const baseSystemPrompt = typeof JarvisSelfImprovingMemory !== 'undefined'
             ? JarvisSelfImprovingMemory.injectIntoSystemPrompt(customSystemPrompt)
             : customSystemPrompt;
+
+        // Route formatting, style, length, and learned memory into system directives rather than polluting the user prompt
+        const systemDirectives = [
+            baseSystemPrompt,
+            relevantSavedMemoryContext ? `[Saved User Memory & Profile:\n${relevantSavedMemoryContext}]` : '',
+            responseMode && responseMode !== 'normal' ? `Response length preference: ${responseMode}. ${responseHint}` : '',
+            formatMode && formatMode !== 'paragraph' ? `Response format preference: ${formatMode}. ${formatHint}` : '',
+            activeLearningMode && activeLearningMode !== 'standard' ? `Explanation style preference: ${activeLearningMode}. ${learningHint}` : '',
+            languageReplyHint,
+            conciseFactHint,
+            directExplainerHint,
+            fastExplainerHint,
+            learnedStyleHint,
+            learnedPreferenceHint,
+            'Conversational guidelines: Maintain continuity with previous dialogue, resolve pronouns and retrospective references naturally, and avoid repeating information already stated.'
+        ].filter(Boolean).join('\n\n');
+
+        // Multi-tier conversational context (Tier 1 verbatim window, Tier 2 semantic retrieval, Tier 3 rolling milestone summary)
+        let multiTierContext = null;
+        if (!requestOptions?.grounding && typeof window.JarvisConversation?.buildMultiTierContext === 'function') {
+            multiTierContext = window.JarvisConversation.buildMultiTierContext({
+                message: normalizedUserMessage,
+                maxRecentTurns: 10,
+                maxContextChars: 12000,
+                systemPrompt: systemDirectives
+            });
+        }
+
+        let engineContext = requestOptions?.grounding
+            ? []
+            : (multiTierContext?.context || window.JarvisConversation?.buildContext({
+                maxTurns: 12,
+                maxContextChars: 9000
+            }) || []);
+
+        if (!engineContext.length && !requestOptions?.grounding && Array.isArray(conversationHistory) && conversationHistory.length) {
+            const recentHistory = conversationHistory.slice(-8);
+            engineContext = recentHistory.flatMap(item => [
+                item.user ? { role: 'user', text: String(item.user).trim() } : null,
+                item.ai ? { role: 'assistant', text: String(item.ai).trim() } : null
+            ]).filter(Boolean);
+        }
+
+        // Clean user message without prompt pollution
+        const effectiveMessage = normalizedUserMessage;
+
         const requestPayload = {
             message: effectiveMessage,
             context: engineContext,
+            retrievedTurns: multiTierContext?.retrievedTurns || [],
+            rollingSummary: multiTierContext?.summaryText || '',
+            structuredMessages: multiTierContext?.structuredMessages || undefined,
             preferences: {
                 userName,
                 responseLength: responseMode,
                 responseFormat: formatMode,
                 responseStyle,
-                customSystemPrompt: effectiveSystemPrompt,
+                customSystemPrompt: systemDirectives,
                 selectedModel: selectedModel !== 'auto' ? selectedModel : undefined
             },
             intent: requestOptions?.intent || (requestOptions?.fastExplainer === true ? 'fast_explainer' : 'chat'),
