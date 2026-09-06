@@ -3864,6 +3864,10 @@ const edgeResponseCache = new EdgeSemanticLruCache();
     - Shopping lists
     - Reminders
     - Memory (remembering where things are)
+    - AI Image Generation: You have access to an internal high-speed AI image diffusion engine. When the user asks you to create, generate, draw, paint, visualize, illustrate, sketch, or show an image, picture, photo, or artwork of something, emit the visual action tag:
+      :::image[detailed descriptive visual prompt]:::
+      Inside the brackets, write a rich, highly descriptive visual prompt detailing lighting, art style, subject, environment, and atmosphere for optimal generation quality. You may include a brief friendly sentence before or after the tag.
+      NEVER emit :::image[...]::: for non-visual questions (e.g. "how do cameras form an image?", "draw a conclusion", "how to draw a chart in code").
 
     Style rules:
     - Language rules: You fluently understand and respond in Kannada (ಕನ್ನಡ), Tamil (தமிழ்), Telugu (తెలుగు), Malayalam (മലയാളം), Hindi (हिन्दी), English, and their phonetic/transliterated forms (Kanglish, Tanglish, Tenglish, Manglish, Hinglish). Match the user's input language, dialect, and script naturally.
