@@ -10,7 +10,7 @@ import rankTextsHandler from './rank-texts.js';
 import verifyHandler from './verify.js';
 import sttHandler from './stt.js';
 const DEFAULT_IMAGE_NEGATIVE_PROMPT = 'text,watermark,words,letters,signature,typography,lowres,blurry';
-const IMAGE_PROXY_TIMEOUT_MS = 12000;
+const IMAGE_PROXY_TIMEOUT_MS = 20000;
 
 async function fetchProxyImageBuffer(url, timeoutMs = IMAGE_PROXY_TIMEOUT_MS) {
     const controller = new AbortController();
@@ -66,16 +66,16 @@ export async function imageProxyHandler(req, res) {
     const width = Math.min(1280, Math.max(256, Number(params.width) || 512));
     const height = Math.min(1280, Math.max(256, Number(params.height) || 512));
     const seed = Number(params.seed) || Math.floor(Math.random() * 1000000);
-    const requestedModel = String(params.model || 'turbo').trim().toLowerCase();
+    const requestedModel = String(params.model || 'flux').trim().toLowerCase();
     const negativePrompt = params.negative_prompt || params.negativePrompt || DEFAULT_IMAGE_NEGATIVE_PROMPT;
 
-    const modelsToTry = Array.from(new Set([requestedModel, 'turbo', 'flux']));
+    const modelsToTry = Array.from(new Set([requestedModel, 'flux', 'turbo']));
 
     let lastError = null;
     for (const model of modelsToTry) {
         const targetUrl = buildPollinationsUrl(prompt, { width, height, model, seed, negativePrompt });
         try {
-            const { buffer, contentType } = await fetchProxyImageBuffer(targetUrl, 12000);
+            const { buffer, contentType } = await fetchProxyImageBuffer(targetUrl, IMAGE_PROXY_TIMEOUT_MS);
             if (buffer && buffer.length > 500) {
                 res.setHeader('Content-Type', contentType);
                 res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
