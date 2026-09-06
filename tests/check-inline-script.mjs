@@ -2,13 +2,17 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 
 const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-const match = html.match(/<script>([\s\S]*?)<\/script>/);
-if (!match) {
+const scripts = [...html.matchAll(/<script(?:\s+[^>]*)?>([\s\S]*?)<\/script>/gi)];
+if (!scripts.length) {
     throw new Error('inline script not found');
 }
 
-new vm.Script(match[1], {
-    filename: 'index.inline.js'
-});
+for (let i = 0; i < scripts.length; i++) {
+    const code = scripts[i][1].trim();
+    if (!code) continue;
+    new vm.Script(code, {
+        filename: `index.inline.${i}.js`
+    });
+}
 
 console.log('inline-js-ok');
