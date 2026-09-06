@@ -9,6 +9,7 @@ import ingestAttachmentHandler from './ingest-attachment.js';
 import rankTextsHandler from './rank-texts.js';
 import verifyHandler from './verify.js';
 import sttHandler from './stt.js';
+import imageProxyHandler from './image-proxy.js';
 
 const ROUTES = new Map([
     ['/api/chat-groq', chatGroqHandler],
@@ -21,7 +22,8 @@ const ROUTES = new Map([
     ['/api/ingest-attachment', ingestAttachmentHandler],
     ['/api/rank-texts', rankTextsHandler],
     ['/api/verify', verifyHandler],
-    ['/api/stt', sttHandler]
+    ['/api/stt', sttHandler],
+    ['/api/image-proxy', imageProxyHandler]
 ]);
 
 const RETIRED_ROUTES = new Map([
