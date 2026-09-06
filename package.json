@@ -17,7 +17,7 @@
         "check": "npm run lint && npm run test:inline && npm run test:deterministic && npm run test:context && npm run test:speech-input && npm run test:api && npm run test:verification && npm run test:hygiene"
     },
     "dependencies": {
-        "@vercel/blob": "^2.4.1"
+        "@vercel/blob": "^2.4.1" 
     },
     "vercel": {
         "functions": {
