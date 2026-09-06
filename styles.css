@@ -948,10 +948,12 @@ option {
     display: flex;
     align-items: center;
     justify-content: center;
+    min-height: 46px;
     margin-bottom: 12px !important;
-    padding: 0 0 8px;
+    padding: 2px 52px 10px;
     border-bottom: 1px solid var(--ui-border) !important;
     min-width: 0;
+    position: relative;
 }
 
 #main-card {
@@ -2450,6 +2452,37 @@ button[aria-label^="Back"],
     :root {
         --input-bar-safe-height: 132px;
         --app-gutter-x: 12px;
+    }
+
+    .app-shell {
+        padding-top: calc(8px + env(safe-area-inset-top)) !important;
+        padding-left: var(--app-gutter-x) !important;
+        padding-right: var(--app-gutter-x) !important;
+    }
+
+    .chat-sidebar-toggle {
+        top: calc(8px + env(safe-area-inset-top)) !important;
+        left: max(8px, env(safe-area-inset-left)) !important;
+        width: 38px !important;
+        height: 38px !important;
+    }
+
+    .header-enhanced {
+        min-height: 44px;
+        padding: 0 46px 10px !important;
+        margin-bottom: 10px !important;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: relative;
+        border-bottom: 1px solid var(--ui-border) !important;
+    }
+
+    .jarvis-top-title {
+        font-size: 1.35rem !important;
+        line-height: 1.2 !important;
+        margin: 0 !important;
+        text-align: center !important;
     }
 
     .composer-shell,
