@@ -10615,8 +10615,8 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
 
             const seed = Math.floor(Math.random() * 1000000);
             const negPrompt = encodeURIComponent('text,watermark,words,letters,signature,typography,lowres,blurry');
-            const proxyUrl = `/api/image-proxy?prompt=${encodeURIComponent(cleanPrompt)}&width=${width}&height=${height}&model=flux&seed=${seed}`;
-            const directFallbackUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(cleanPrompt)}?width=${width}&height=${height}&model=turbo&negative_prompt=${negPrompt}&nologo=true&seed=${seed}`;
+            const proxyUrl = `/api/image-proxy?prompt=${encodeURIComponent(cleanPrompt)}&width=${width}&height=${height}&model=turbo&seed=${seed}`;
+            const directFallbackUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(cleanPrompt)}?width=${width}&height=${height}&model=turbo&nologo=true&seed=${seed}`;
             const initialUrl = (typeof window !== 'undefined' && window.location?.origin?.startsWith('http')) ? proxyUrl : directFallbackUrl;
 
             const cardHtml = `
@@ -10706,7 +10706,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 if (!imageRevealed && imgEl) {
                     if (subEl) subEl.textContent = 'Switching to fast backup engine...';
                     const backupSeed = Math.floor(Math.random() * 1000000);
-                    const backupUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(cleanPrompt)}?width=${width}&height=${height}&model=turbo&negative_prompt=${negPrompt}&nologo=true&seed=${backupSeed}`;
+                    const backupUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(cleanPrompt)}?width=${width}&height=${height}&model=turbo&nologo=true&seed=${backupSeed}`;
                     imgEl.src = backupUrl;
                 }
             }, 8500);
@@ -10756,7 +10756,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 imgEl.onerror = () => {
                     // Try direct Pollinations turbo fallback
                     const retrySeed = Math.floor(Math.random() * 1000000);
-                    const retryUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(cleanPrompt)}?width=${width}&height=${height}&model=turbo&negative_prompt=${negPrompt}&nologo=true&seed=${retrySeed}`;
+                    const retryUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(cleanPrompt)}?width=${width}&height=${height}&model=turbo&nologo=true&seed=${retrySeed}`;
                     imgEl.onerror = () => {
                         // Second retry with flux
                         const fluxSeed = Math.floor(Math.random() * 1000000);
@@ -10788,29 +10788,6 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 // Trigger browser image download immediately
                 imgEl.src = initialUrl;
             }
-
-            // In background, orchestrate generator worker for local IndexedDB caching if available
-            try {
-                const generator = window.JarvisImageGenerator;
-                if (generator?.generateImage) {
-                    generator.generateImage(cleanPrompt, {
-                        aspectRatio,
-                        width,
-                        height,
-                        seed
-                    }, (p) => {
-                        if (progressEl && p.percent) {
-                            progressEl.style.width = `${Math.min(95, p.percent)}%`;
-                        }
-                    }).then(result => {
-                        if (result?.dataUrl) {
-                            revealImage(result.dataUrl, result.id);
-                        }
-                    }).catch(err => {
-                        console.warn('[image-generation] Background worker caching notice:', err);
-                    });
-                }
-            } catch (_) {}
         }
 
         window.handleImageGenerationRequest = handleImageGenerationRequest;
