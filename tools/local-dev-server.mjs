@@ -120,6 +120,11 @@ function createApiResponseAdapter(nodeRes) {
             sendJson(nodeRes, this.statusCode, payload);
             return this;
         },
+        send(payload = '') {
+            if (!nodeRes.headersSent) nodeRes.writeHead(this.statusCode);
+            nodeRes.end(payload);
+            return this;
+        },
         end(payload = '') {
             if (!nodeRes.headersSent) nodeRes.writeHead(this.statusCode);
             nodeRes.end(payload);
