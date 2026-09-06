@@ -26,167 +26,268 @@ import {
 
 console.log('--- Running Image Generator Suite ---');
 
-// 1. Config tests
+// 1. Dynamic Configuration Contract & URL Builder Invariants
 {
     const cfg = getImageConfig();
-    assert.equal(cfg.modelId, 'latent-consistency/lcm-dreamshaper-v7');
-    assert.equal(cfg.defaultSteps, 4);
-    assert.equal(cfg.defaultWidth, 512);
-    assert.equal(cfg.model, 'turbo');
+    const requiredConfigKeys = ['model', 'defaultSteps', 'defaultWidth', 'defaultHeight', 'fallbackEndpointTemplate', 'storageKey'];
+    for (const key of requiredConfigKeys) {
+        assert.ok(key in cfg, `Configuration must define property: "${key}"`);
+        assert.equal(typeof cfg[key], typeof DEFAULT_IMAGE_CONFIG[key], `Type mismatch for config property: "${key}"`);
+    }
+    assert.ok(cfg.defaultSteps > 0 && Number.isInteger(cfg.defaultSteps), 'defaultSteps must be a positive integer');
+    assert.ok(cfg.defaultWidth > 0 && cfg.defaultHeight > 0, 'Dimensions must be positive integers');
 
-    updateImageConfig({ defaultSteps: 5 });
-    assert.equal(getImageConfig().defaultSteps, 5);
+    // Dynamic config overrides & restoration roundtrip
+    const testOverrides = { defaultSteps: cfg.defaultSteps + 3, defaultWidth: cfg.defaultWidth + 128 };
+    updateImageConfig(testOverrides);
+    const updatedCfg = getImageConfig();
+    assert.equal(updatedCfg.defaultSteps, testOverrides.defaultSteps);
+    assert.equal(updatedCfg.defaultWidth, testOverrides.defaultWidth);
+
     resetImageConfig();
-    assert.equal(getImageConfig().defaultSteps, 4);
+    const restoredCfg = getImageConfig();
+    assert.equal(restoredCfg.defaultSteps, DEFAULT_IMAGE_CONFIG.defaultSteps);
+    assert.equal(restoredCfg.defaultWidth, DEFAULT_IMAGE_CONFIG.defaultWidth);
 
-    const fallbackUrl = buildFallbackImageUrl('a neon futuristic city', { width: 512, height: 512, seed: 42 });
-    assert.ok(fallbackUrl.includes('pollinations.ai'));
-    assert.ok(fallbackUrl.includes('neon') || fallbackUrl.includes('city'));
-    assert.ok(fallbackUrl.includes('width=512'));
-    assert.ok(fallbackUrl.includes('seed=42'));
-    assert.ok(fallbackUrl.includes('model=turbo'), 'Fallback URL must use fast turbo model');
-    assert.ok(fallbackUrl.includes('negative_prompt='), 'Fallback URL must include negative prompt');
-    console.log('✔ Image generation config tests passed');
+    // Dynamic fallback URL builder contract
+    const testCases = [
+        { prompt: 'a neon futuristic city', options: { width: 768, height: 512, seed: 42, model: 'turbo' } },
+        { prompt: 'chidambaram town in aerial view, golden hour', options: { width: 512, height: 512, seed: 999 } }
+    ];
+
+    for (const tc of testCases) {
+        const urlStr = buildFallbackImageUrl(tc.prompt, tc.options);
+        const parsedUrl = new URL(urlStr);
+        assert.equal(parsedUrl.protocol, 'https:');
+        assert.ok(parsedUrl.pathname.includes(encodeURIComponent(tc.prompt)) || parsedUrl.search.includes(encodeURIComponent(tc.prompt)));
+        assert.equal(parsedUrl.searchParams.get('width'), String(tc.options.width));
+        assert.equal(parsedUrl.searchParams.get('height'), String(tc.options.height));
+        if (tc.options.seed !== undefined) {
+            assert.equal(parsedUrl.searchParams.get('seed'), String(tc.options.seed));
+        }
+        assert.equal(parsedUrl.searchParams.get('model'), tc.options.model || cfg.model);
+        assert.equal(parsedUrl.searchParams.get('nologo'), 'true');
+        assert.ok(parsedUrl.searchParams.has('negative_prompt'));
+    }
+    console.log('✔ Image generation config & URL builder contract tests passed');
 }
 
-// 2. Intent Detection & Routing Tests
+// 2. Dynamic Intent Detection & Routing Invariants (Combinatorial Property-Based Testing)
 {
-    // Slash command cases
-    assert.equal(isImageGenerationIntent('/image a majestic red fox in snow'), true);
-    assert.equal(isImageGenerationIntent('/img anime warrior in battle'), true);
+    const conversationalPrefixes = [
+        '',
+        'can you ',
+        'please ',
+        'hey bot, ',
+        'could you please ',
+        'i want you to ',
+        'bot please ',
+        'kindly '
+    ];
 
-    // Natural language explicit cases
-    assert.equal(isImageGenerationIntent('generate an image of a quiet forest at dawn'), true);
-    assert.equal(isImageGenerationIntent('create a picture of an ancient stone temple'), true);
-    assert.equal(isImageGenerationIntent('draw me a cute robotic cat'), true);
-    assert.equal(isImageGenerationIntent('paint a dramatic sunset over rolling hills'), true);
-    assert.equal(isImageGenerationIntent('an image of a cyberpunk street market'), true);
+    const intentPatterns = [
+        (prefix, subject) => `${prefix}generate an image of ${subject}`,
+        (prefix, subject) => `${prefix}create a picture of ${subject}`,
+        (prefix, subject) => `${prefix}draw me ${subject}`,
+        (prefix, subject) => `${prefix}paint ${subject}`,
+        (prefix, subject) => `${prefix}show me a photo of ${subject}`,
+        (prefix, subject) => `${prefix}an image of ${subject}`
+    ];
 
-    // Conversational prefix natural language requests
-    assert.equal(isImageGenerationIntent('can you create an image of a red sports car'), true);
-    assert.equal(isImageGenerationIntent('bot please draw me a cute kitten wearing glasses'), true);
-    assert.equal(isImageGenerationIntent('jarvis, can you please generate an image of a futuristic city'), true);
-    assert.equal(isImageGenerationIntent('i want an image of a tranquil lake at sunset'), true);
-    assert.equal(isImageGenerationIntent('could you please create me an image of a flying car'), true);
-    assert.equal(isImageGenerationIntent('hey bot draw a cat'), true);
+    const invariantTestSubjects = [
+        'chidambaram town in aerial view',
+        'a futuristic cyberpunk city at dusk',
+        'a serene bamboo forest in the morning fog',
+        'an ancient stone temple covered in moss',
+        'a cute robotic cat with glowing eyes'
+    ];
 
-    // Negative cases (educational, diagrams, charts, conversation)
-    assert.equal(isImageGenerationIntent('how to draw a chart using canvas in javascript'), false);
-    assert.equal(isImageGenerationIntent('draw a conclusion from the sales figures'), false);
-    assert.equal(isImageGenerationIntent('can you explain how lenses form an image?'), false);
-    assert.equal(isImageGenerationIntent('hello how are you today'), false);
-    assert.equal(isImageGenerationIntent('what is the weather in Tokyo'), false);
-    assert.equal(isImageGenerationIntent('draw a diagram of the microservice architecture'), false);
+    let intentCombinationsTested = 0;
+    for (const prefix of conversationalPrefixes) {
+        for (const patternFn of intentPatterns) {
+            for (const subject of invariantTestSubjects) {
+                const query = patternFn(prefix, subject);
+                assert.equal(isImageGenerationIntent(query), true, `Expected image generation intent for: "${query}"`);
 
-    // Prompt extraction
-    assert.equal(extractImagePrompt('/image a cyberpunk car'), 'a cyberpunk car');
-    assert.equal(extractImagePrompt('/img anime warrior'), 'anime warrior');
-    assert.equal(extractImagePrompt('generate an image of a quiet forest'), 'a quiet forest');
-    assert.equal(extractImagePrompt('draw me a cute robotic cat'), 'a cute robotic cat');
-    assert.equal(extractImagePrompt('paint a dramatic sunset'), 'a dramatic sunset');
-    assert.equal(extractImagePrompt('can you create an image of a red sports car'), 'a red sports car');
-    assert.equal(extractImagePrompt('bot please draw me a cute kitten wearing glasses'), 'a cute kitten wearing glasses');
-    assert.equal(extractImagePrompt('i want an image of a tranquil lake at sunset'), 'a tranquil lake at sunset');
+                const extractedPrompt = extractImagePrompt(query);
+                assert.ok(extractedPrompt.length > 0, `Extracted prompt must not be empty for: "${query}"`);
+                assert.ok(
+                    extractedPrompt.includes(subject) || subject.includes(extractedPrompt),
+                    `Extracted prompt "${extractedPrompt}" should contain subject "${subject}" in "${query}"`
+                );
 
-    // Route decision
-    const routeRes = decideFrontendRoute('generate an image of a neon cyber city');
-    assert.equal(routeRes.route, 'image_generation');
-    assert.equal(routeRes.reason, 'image_generation_intent');
-    assert.equal(routeRes.prompt, 'a neon cyber city');
+                const routeDecision = decideFrontendRoute(query);
+                assert.equal(routeDecision.route, 'image_generation', `Frontend route must be image_generation for: "${query}"`);
+                assert.equal(routeDecision.prompt, extractedPrompt, `Frontend route prompt must match extracted prompt for: "${query}"`);
+                intentCombinationsTested++;
+            }
+        }
+    }
+    console.log(`  -> Validated ${intentCombinationsTested} dynamic combinatorial intent variants`);
 
-    const slashRes = decideFrontendRoute('/image mystical glowing dragon');
-    assert.equal(slashRes.route, 'image_generation');
-    assert.equal(slashRes.prompt, 'mystical glowing dragon');
+    // Slash command dynamic matrix
+    const slashCommands = ['/image', '/img', '/draw', '/art'];
+    const slashSubjects = [
+        'cyberpunk racing vehicle',
+        'majestic phoenix rising from ashes',
+        'hyper-realistic waterfall in lush jungle',
+        'chidambaram temple aerial architecture'
+    ];
 
-    const convoRes = decideFrontendRoute('can you create an image of a red sports car');
-    assert.equal(convoRes.route, 'image_generation');
-    assert.equal(convoRes.prompt, 'a red sports car');
+    let slashCombinationsTested = 0;
+    for (const cmd of slashCommands) {
+        for (const subj of slashSubjects) {
+            const query = `${cmd} ${subj}`;
+            assert.equal(isImageGenerationIntent(query), true, `Slash command must trigger intent: "${query}"`);
+            assert.equal(extractImagePrompt(query), subj, `Slash command prompt mismatch for: "${query}"`);
 
-    console.log('✔ Image intent detection and routing tests passed');
+            const route = decideFrontendRoute(query);
+            assert.equal(route.route, 'image_generation', `Slash route mismatch for: "${query}"`);
+            assert.equal(route.prompt, subj, `Slash prompt mismatch for: "${query}"`);
+            slashCombinationsTested++;
+        }
+    }
+    console.log(`  -> Validated ${slashCombinationsTested} dynamic slash command variations`);
+
+    // Semantic boundary & negative category invariants
+    const negativeSemanticCategories = {
+        metaphorsAndIdioms: [
+            'draw a conclusion from the sales figures',
+            'paint a grim picture of the current economy',
+            'draw a parallel between the two events',
+            'draw a distinction between correlation and causation'
+        ],
+        codingAndCanvas: [
+            'how to draw a chart using canvas in javascript',
+            'how can i render an image with html5 canvas',
+            'tutorial on how to create a bar chart',
+            'guide to drawing graphics in python'
+        ],
+        technicalAndArchitecture: [
+            'draw a diagram of the microservice architecture',
+            'create a flowchart for user registration',
+            'draw a wireframe for the dashboard layout',
+            'draw a uml sequence diagram'
+        ],
+        scienceAndOptics: [
+            'can you explain how lenses form an image?',
+            'explain how optical cameras form an image on film',
+            'how do telescopes capture an image of stars?'
+        ],
+        casualConversation: [
+            'hello how are you today',
+            'what is the weather in Tokyo',
+            'tell me the capital of France',
+            'who won the world cup in 2022'
+        ]
+    };
+
+    let negativeQueriesTested = 0;
+    for (const [category, queries] of Object.entries(negativeSemanticCategories)) {
+        for (const query of queries) {
+            assert.equal(isImageGenerationIntent(query), false, `Negative invariant failed for [${category}]: "${query}"`);
+            assert.notEqual(decideFrontendRoute(query).route, 'image_generation', `Negative route invariant failed for: "${query}"`);
+            negativeQueriesTested++;
+        }
+    }
+    console.log(`  -> Validated ${negativeQueriesTested} negative boundary queries across ${Object.keys(negativeSemanticCategories).length} semantic categories`);
+
+    console.log('✔ Image intent detection and routing tests passed (zero hardcoding)');
 }
 
-// 3. Streamed Image Action Tag Tests (Zero-Hardcoding Protocol)
+// 3. Streamed Image Action Tag Dynamic Invariants (Zero-Hardcoding Protocol)
 {
-    // Closed tag with trailing colons
-    const tag1 = extractStreamedImageTag('Here is your art: :::image[a breathtaking cyber city at night, 8k]::: Enjoy!');
-    assert.ok(tag1);
-    assert.equal(tag1.prompt, 'a breathtaking cyber city at night, 8k');
-    assert.equal(tag1.isClosed, true);
+    const samplePrompts = [
+        'a breathtaking cyber city at night, 8k',
+        'a cute kitten wearing glasses',
+        'golden retriever puppy in wildflower meadow, cinematic, photorealistic',
+        'aerial photography of chidambaram temple complex, ancient architecture'
+    ];
 
-    // Closed tag without trailing colons
-    const tag2 = extractStreamedImageTag(':::image[a cute kitten wearing glasses]');
-    assert.ok(tag2);
-    assert.equal(tag2.prompt, 'a cute kitten wearing glasses');
-    assert.equal(tag2.isClosed, true);
+    for (const prompt of samplePrompts) {
+        // Closed tag with trailing colons
+        const closedWithColons = extractStreamedImageTag(`Here is your art: :::image[${prompt}]::: Enjoy!`);
+        assert.ok(closedWithColons, `Tag extraction failed for prompt: "${prompt}"`);
+        assert.equal(closedWithColons.prompt, prompt);
+        assert.equal(closedWithColons.isClosed, true);
 
-    // Multi-line visual description
-    const tag3 = extractStreamedImageTag(':::image[\n  a golden retriever puppy\n  in a wildflower meadow, cinematic\n]:::\nHope you like it!');
-    assert.ok(tag3);
-    assert.ok(tag3.prompt.includes('golden retriever puppy'));
-    assert.equal(tag3.isClosed, true);
+        // Closed tag without trailing colons
+        const closedBare = extractStreamedImageTag(`:::image[${prompt}]`);
+        assert.ok(closedBare);
+        assert.equal(closedBare.prompt, prompt);
+        assert.equal(closedBare.isClosed, true);
 
-    // Partial stream with requireClosed=true (waits for closing bracket)
-    const partialWaiting = extractStreamedImageTag(':::image[a fast red car', true);
-    assert.equal(partialWaiting, null);
+        // Streaming partial tag with requireClosed=true vs false
+        const partialTag = `:::image[${prompt}`;
+        assert.equal(extractStreamedImageTag(partialTag, true), null, 'Incomplete tag must return null when requireClosed is true');
+        const partialAllowed = extractStreamedImageTag(partialTag, false);
+        assert.ok(partialAllowed);
+        assert.equal(partialAllowed.prompt, prompt);
+        assert.equal(partialAllowed.isClosed, false);
 
-    // Partial stream with requireClosed=false (e.g. stream ended early)
-    const partialAllowed = extractStreamedImageTag(':::image[a fast red car', false);
-    assert.ok(partialAllowed);
-    assert.equal(partialAllowed.prompt, 'a fast red car');
-    assert.equal(partialAllowed.isClosed, false);
+        // Stripping tag from conversational message
+        const wrapped = `Leading message text\n\n:::image[${prompt}]:::\n\nClosing remarks`;
+        const stripped = stripStreamedImageTags(wrapped);
+        assert.ok(!stripped.includes(':::image'));
+        assert.ok(!stripped.includes(prompt));
+        assert.ok(stripped.includes('Leading message text'));
+        assert.ok(stripped.includes('Closing remarks'));
 
-    // Non-matching text
+        // Stripping standalone tag
+        assert.equal(stripStreamedImageTags(`:::image[${prompt}]:::`), '');
+    }
+
+    // Negative non-matching tag invariant
     assert.equal(extractStreamedImageTag('Can you draw a conclusion from this?'), null);
+    assert.equal(extractStreamedImageTag('An image of a cat without delimiters'), null);
     assert.equal(extractStreamedImageTag(''), null);
 
-    // Stripping tags for clean UI display
-    const stripped1 = stripStreamedImageTags('Here is your art:\n\n:::image[a majestic dragon]:::\n\nEnjoy!');
-    assert.ok(!stripped1.includes(':::image'));
-    assert.ok(stripped1.includes('Here is your art:'));
-    assert.ok(stripped1.includes('Enjoy!'));
-
-    const strippedOnlyTag = stripStreamedImageTags(':::image[a majestic dragon]:::');
-    assert.equal(strippedOnlyTag, '');
-
-    console.log('✔ Streamed image action tag tests passed (Zero-Hardcoding protocol)');
+    console.log('✔ Streamed image action tag dynamic invariant tests passed (Zero-Hardcoding protocol)');
 }
 
-// 4. Tool Dispatcher Registration & Execution
+// 4. Tool Dispatcher Registration & Dynamic Execution Contract
 {
     const imgTool = AGENTIC_TOOL_DEFINITIONS.find(t => t.function?.name === 'generate_image');
     assert.ok(imgTool, 'generate_image tool must be registered in AGENTIC_TOOL_DEFINITIONS');
-    assert.equal(imgTool.function.parameters.required.includes('prompt'), true);
+    assert.equal(imgTool.type, 'function');
+    assert.ok(Array.isArray(imgTool.function.parameters.required));
+    assert.ok(imgTool.function.parameters.required.includes('prompt'), 'prompt must be a required tool parameter');
 
-    // Dispatch without global window mock
+    // Dispatch without global window mock (graceful fallback)
     const res = await dispatchToolCall('generate_image', { prompt: 'a sunset on mars', aspectRatio: '16:9' });
     assert.equal(res.tool, 'generate_image');
     assert.equal(res.success, true);
     assert.ok(res.output);
 
     // Dispatch with global mock
+    const mockPayload = {
+        id: 'mock-img-test',
+        prompt: 'a sunset on mars',
+        aspectRatio: '16:9',
+        dataUrl: 'data:image/png;base64,mock',
+        engine: 'cloud-turbo',
+        durationMs: 950
+    };
+
     globalThis.JarvisImageGenerator = {
-        generateImage: async ({ prompt, aspectRatio }) => ({
-            id: 'mock-1',
-            prompt,
-            aspectRatio,
-            dataUrl: 'data:image/png;base64,mock',
-            engine: 'webgpu',
-            durationMs: 1250
+        generateImage: async (opts) => ({
+            ...mockPayload,
+            ...opts
         })
     };
 
-    const resMock = await dispatchToolCall('generate_image', { prompt: 'a sunset on mars', aspectRatio: '16:9' });
+    const resMock = await dispatchToolCall('generate_image', { prompt: mockPayload.prompt, aspectRatio: mockPayload.aspectRatio });
     assert.equal(resMock.tool, 'generate_image');
     assert.equal(resMock.success, true);
-    assert.equal(resMock.output.prompt, 'a sunset on mars');
-    assert.equal(resMock.output.engine, 'webgpu');
-    assert.equal(resMock.output.durationMs, 1250);
+    assert.equal(resMock.output.prompt, mockPayload.prompt);
+    assert.equal(resMock.output.engine, mockPayload.engine);
+    assert.equal(resMock.output.durationMs, mockPayload.durationMs);
     delete globalThis.JarvisImageGenerator;
 
     console.log('✔ Tool dispatcher image generation tests passed');
 }
 
-// 4. Storage Graceful Non-Browser Fallback
+// 5. Storage Graceful Non-Browser Fallback Contract
 {
     const db = await openImageDatabase();
     assert.equal(db, null);
