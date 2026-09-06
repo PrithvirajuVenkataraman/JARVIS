@@ -554,12 +554,18 @@ async function getInstantFactHelper() {
     }
 
     function buildCompactedContextBlock(context, options = {}) {
-        if (!Array.isArray(context) || !context.length) return '';
+        const retrievedTurns = Array.isArray(options.retrievedTurns) ? options.retrievedTurns : [];
+        const retrievedBlock = retrievedTurns.length > 0
+            ? `[Relevant Background Context from Earlier in this Conversation:\n${retrievedTurns.map(m => `${m?.role === 'user' ? 'User' : 'Assistant'}: ${String(m?.text || '')}`).join('\n')}]\n\n`
+            : '';
+
+        if (!Array.isArray(context) || !context.length) return retrievedBlock.trim();
         const MAX_VERBATIM_TURNS = 8;
         if (context.length <= MAX_VERBATIM_TURNS) {
-            return context
+            const verbatim = context
                 .map(m => `${m?.role === 'user' ? 'User' : 'Assistant'}: ${String(m?.text || '')}`)
                 .join('\n');
+            return `${retrievedBlock}${verbatim}`;
         }
 
         // Older turns: condense into structured rolling executive summary
@@ -604,7 +610,7 @@ async function getInstantFactHelper() {
             .map(m => `${m?.role === 'user' ? 'User' : 'Assistant'}: ${String(m?.text || '')}`)
             .join('\n');
 
-        const combined = `${digestBlock}${verbatimBlock}`;
+        const combined = `${retrievedBlock}${digestBlock}${verbatimBlock}`;
         return combined.length > 6000 ? combined.slice(-6000) : combined;
     }
 
@@ -714,7 +720,10 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             const sanitizedMessage = piiCheck.text;
 
             const systemPrompt = buildServerSystemPrompt(preferences);
-            const contextBlock = buildCompactedContextBlock(context, { rollingSummary: req.body?.rollingSummary || null });
+            const contextBlock = buildCompactedContextBlock(context, {
+                rollingSummary: req.body?.rollingSummary || null,
+                retrievedTurns: request.value.retrievedTurns || null
+            });
             const effectiveMessage = buildGroundedUserMessage(sanitizedMessage, intent, grounding);
             const isAttachmentGrounding = isAttachmentGroundingPayload(grounding, intent);
             const clientRoutingProbe = String(req.body?.routingMessage || req.body?.displayUserMessage || '').trim();
@@ -770,6 +779,9 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                     timing,
                     systemPrompt,
                     contextBlock,
+                    context,
+                    retrievedTurns: request.value.retrievedTurns || [],
+                    structuredMessages: request.value.structuredMessages || null,
                     effectiveMessage,
                     intent,
                     grounding,
@@ -812,6 +824,21 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 lengthPolicy.instruction,
                 intent
             );
+            const hasStructuredContext = Array.isArray(request.value.structuredMessages) && request.value.structuredMessages.length > 0;
+            const hasConversationTurns = (Array.isArray(context) && context.length > 0) || (Array.isArray(request.value.retrievedTurns) && request.value.retrievedTurns.length > 0) || Boolean(request.value.rollingSummary);
+            const firstStructured = hasStructuredContext
+                ? request.value.structuredMessages
+                : (hasConversationTurns ? composeStructuredChatMessages({
+                    systemPrompt,
+                    ragBlock: preloadedLiveRag.ragText,
+                    context,
+                    retrievedTurns: request.value.retrievedTurns || [],
+                    rollingSummary: request.value.rollingSummary || '',
+                    message: effectiveMessage,
+                    lengthGuidance: lengthPolicy.instruction,
+                    intent,
+                    model: preferences?.selectedModel || ''
+                }) : null);
             const modelStartedAt = Date.now();
             const imagesToPass = Array.isArray(images)
                 ? images
@@ -819,7 +846,8 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             const firstPass = await runModelWithFallback(firstPrompt, lengthPolicy, preferences?.selectedModel || null, imagesToPass, {
                 systemPrompt,
                 userMessage: effectiveMessage,
-                isAttachmentGrounding
+                isAttachmentGrounding,
+                structuredMessages: firstStructured
             });
             timing.modelMs += Date.now() - modelStartedAt;
             if (!firstPass.ok) {
@@ -870,11 +898,25 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                         lengthPolicy.instruction,
                         intent
                     );
+                    const secondStructured = hasStructuredContext || hasConversationTurns
+                        ? composeStructuredChatMessages({
+                            systemPrompt,
+                            ragBlock: liveRag.ragText,
+                            context,
+                            retrievedTurns: request.value.retrievedTurns || [],
+                            rollingSummary: request.value.rollingSummary || '',
+                            message: effectiveMessage,
+                            lengthGuidance: lengthPolicy.instruction,
+                            intent,
+                            model: preferences?.selectedModel || ''
+                        })
+                        : null;
                     const secondStartedAt = Date.now();
                     const secondPass = await runModelWithFallback(secondPrompt, lengthPolicy, preferences?.selectedModel || null, undefined, {
                         systemPrompt,
                         userMessage: effectiveMessage,
-                        isAttachmentGrounding
+                        isAttachmentGrounding,
+                        structuredMessages: secondStructured
                     });
                     timing.modelMs += Date.now() - secondStartedAt;
                     if (secondPass.ok) {
@@ -1101,12 +1143,65 @@ const edgeResponseCache = new EdgeSemanticLruCache();
         ].filter(Boolean).join('\n\n');
     }
 
+    function composeStructuredChatMessages({ systemPrompt, ragBlock = '', contextBlock = '', context = [], retrievedTurns = [], rollingSummary = '', message = '', lengthGuidance = '', intent = 'chat', model = '' }) {
+        const messages = [];
+
+        const systemParts = [
+            systemPrompt,
+            buildIntentPromptHint(intent),
+            lengthGuidance ? `Length guidance:\n${lengthGuidance}` : '',
+            buildReasoningInstruction(intent, model),
+            'Accuracy rules: Prefer being brief and correct. If unsure about a fact, say so directly. Never invent URLs or citations. Maintain conversational continuity across turns without repeating previous statements unnecessarily.'
+        ];
+
+        if (rollingSummary && typeof rollingSummary === 'string' && rollingSummary.trim()) {
+            systemParts.push(`[Key Context & Milestones from earlier in conversation:\n${rollingSummary.trim()}]`);
+        }
+
+        if (Array.isArray(retrievedTurns) && retrievedTurns.length > 0) {
+            const retrievedLines = retrievedTurns
+                .map(t => `${t?.role === 'user' ? 'User' : 'Assistant'}: ${String(t?.text || '')}`)
+                .join('\n');
+            systemParts.push(`[Relevant Background Context from Earlier in this Conversation:\n${retrievedLines}]`);
+        }
+
+        if (ragBlock && typeof ragBlock === 'string' && ragBlock.trim()) {
+            systemParts.push(`Retrieved context (RAG):\n${ragBlock.trim()}`);
+        }
+
+        const fullSystemContent = systemParts.filter(Boolean).join('\n\n');
+        if (fullSystemContent) {
+            messages.push({ role: 'system', content: fullSystemContent });
+        }
+
+        if (Array.isArray(context) && context.length > 0) {
+            for (const turn of context) {
+                const text = String(turn?.text || '').trim();
+                if (text) {
+                    messages.push({
+                        role: turn?.role === 'assistant' ? 'assistant' : 'user',
+                        content: text
+                    });
+                }
+            }
+        }
+
+        if (message) {
+            messages.push({ role: 'user', content: String(message).trim() });
+        }
+
+        return messages;
+    }
+
     async function handleStreamingChatRequest(res, options = {}) {
         const {
             requestId,
             timing,
             systemPrompt,
             contextBlock,
+            context = [],
+            retrievedTurns = [],
+            structuredMessages = null,
             effectiveMessage,
             intent,
             grounding,
@@ -1174,6 +1269,21 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             const prompt = liveRag.ragText
                 ? composeFinalPrompt(systemPrompt, liveRag.ragText, contextBlock, effectiveMessage, lengthPolicy?.instruction || '', intent, selectedModel)
                 : composeStreamingPrompt(systemPrompt, contextBlock, effectiveMessage, lengthPolicy?.instruction || '', intent, selectedModel);
+            const hasStructuredContext = Array.isArray(structuredMessages) && structuredMessages.length > 0;
+            const hasConversationTurns = (Array.isArray(context) && context.length > 0) || (Array.isArray(retrievedTurns) && retrievedTurns.length > 0) || Boolean(options?.rollingSummary);
+            const structuredChat = hasStructuredContext
+                ? structuredMessages
+                : (hasConversationTurns ? composeStructuredChatMessages({
+                    systemPrompt,
+                    ragBlock: liveRag.ragText,
+                    context,
+                    retrievedTurns,
+                    rollingSummary: options?.rollingSummary || '',
+                    message: effectiveMessage,
+                    lengthGuidance: lengthPolicy?.instruction || '',
+                    intent,
+                    model: selectedModel
+                }) : null);
             const modelStartedAt = Date.now();
             const streamImages = Array.isArray(images)
                 ? images
@@ -1182,7 +1292,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 if (!delta) return;
                 streamedText += delta;
                 writeSse(res, 'delta', { text: delta });
-            }, selectedModel, streamImages);
+            }, selectedModel, streamImages, { structuredMessages: structuredChat, systemPrompt });
             timing.modelMs += Date.now() - modelStartedAt;
 
             if (!streamResult.ok) {
@@ -1708,15 +1818,20 @@ const edgeResponseCache = new EdgeSemanticLruCache();
 
             for (const key of keys) {
                 for (const model of groqCandidates) {
-                    let messages = [{ role: 'user', content: finalPrompt }];
+                    let messages = Array.isArray(options?.structuredMessages) && options.structuredMessages.length > 0
+                        ? options.structuredMessages.map(m => ({ ...m }))
+                        : [{ role: 'user', content: finalPrompt }];
                     if (hasImages) {
-                        const content = [{ type: 'text', text: finalPrompt }];
+                        const lastUserIdx = [...messages].reverse().findIndex(m => m.role === 'user');
+                        const targetIdx = lastUserIdx >= 0 ? messages.length - 1 - lastUserIdx : messages.length - 1;
+                        const targetMsg = messages[targetIdx] || { role: 'user', content: finalPrompt };
+                        const content = [{ type: 'text', text: targetMsg.content }];
                         for (const img of images) {
                             if (img?.base64) {
                                 content.push({ type: 'image_url', image_url: { url: `data:${img.mimeType || 'image/jpeg'};base64,${img.base64}` } });
                             }
                         }
-                        messages = [{ role: 'user', content }];
+                        messages[targetIdx] = { ...targetMsg, content };
                     }
                     const requestBody = {
                         model,
@@ -1783,14 +1898,39 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                         }
                     }
                 }
+                let contents = [{ parts }];
+                let systemInstruction = options?.systemPrompt
+                    ? { parts: [{ text: options.systemPrompt }] }
+                    : undefined;
+                const structured = options?.structuredMessages;
+                if (Array.isArray(structured) && structured.length > 1) {
+                    const sysMsg = structured.find(m => m.role === 'system');
+                    if (sysMsg?.content) {
+                        systemInstruction = { parts: [{ text: sysMsg.content }] };
+                    }
+                    const dialogMsgs = structured.filter(m => m.role !== 'system');
+                    if (dialogMsgs.length > 0) {
+                        contents = dialogMsgs.map((m, idx) => {
+                            const isLast = idx === dialogMsgs.length - 1;
+                            const role = m.role === 'assistant' ? 'model' : 'user';
+                            const mParts = [{ text: m.content }];
+                            if (isLast && hasImages) {
+                                for (const img of images) {
+                                    if (img?.base64) {
+                                        mParts.push({ inline_data: { mime_type: img.mimeType || 'image/jpeg', data: img.base64 } });
+                                    }
+                                }
+                            }
+                            return { role, parts: mParts };
+                        });
+                    }
+                }
                 const geminiBody = {
-                    contents: [{ parts }],
+                    contents,
                     generationConfig: { temperature: temp, topK: 40, topP: 0.95, maxOutputTokens: maxTokens }
                 };
-                if (options?.systemPrompt) {
-                    geminiBody.system_instruction = {
-                        parts: [{ text: options.systemPrompt }]
-                    };
+                if (systemInstruction) {
+                    geminiBody.system_instruction = systemInstruction;
                 }
                 try {
                     const response = await fetchWithTimeoutRetry(
@@ -1879,7 +2019,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
         };
     }
 
-    async function streamModelWithFallback(finalPrompt, lengthPolicy = {}, onDelta = () => {}, userSelectedModel = null, images = undefined) {
+    async function streamModelWithFallback(finalPrompt, lengthPolicy = {}, onDelta = () => {}, userSelectedModel = null, images = undefined, options = {}) {
         const temp = Number.isFinite(Number(lengthPolicy?.temperature)) ? Number(lengthPolicy.temperature) : 0.7;
         const maxTokens = clampInt(lengthPolicy?.maxTokens, 8000, 256, 16000) + REASONING_TOKEN_ALLOWANCE;
         const hasImages = Array.isArray(images) && images.length > 0;
@@ -1902,7 +2042,8 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                         temperature: temp,
                         maxTokens,
                         timeoutMs: clampInt(lengthPolicy?.timeoutMs, FAST_FAILOVER_TIMEOUT_MS, 1000, STREAM_MODEL_FETCH_TIMEOUT_MS),
-                        onDelta
+                        onDelta,
+                        options
                     });
                     if (result.ok) {
                         advanceGroqKeyRotation();
@@ -1929,7 +2070,8 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                     temperature: temp,
                     maxTokens,
                     timeoutMs: clampInt(lengthPolicy?.timeoutMs, STREAM_MODEL_FETCH_TIMEOUT_MS, 1000, STREAM_MODEL_FETCH_TIMEOUT_MS),
-                    onDelta
+                    onDelta,
+                    options
                 });
                 if (result.ok) return result;
             }
@@ -1965,19 +2107,24 @@ const edgeResponseCache = new EdgeSemanticLruCache();
         };
     }
 
-    async function streamGroqModel({ apiKey, model, prompt, images = [], temperature, maxTokens, timeoutMs, onDelta }) {
+    async function streamGroqModel({ apiKey, model, prompt, images = [], temperature, maxTokens, timeoutMs, onDelta, options = {} }) {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), timeoutMs);
         try {
-            let messages = [{ role: 'user', content: prompt }];
+            let messages = Array.isArray(options?.structuredMessages) && options.structuredMessages.length > 0
+                ? options.structuredMessages.map(m => ({ ...m }))
+                : [{ role: 'user', content: prompt }];
             if (Array.isArray(images) && images.length) {
-                const content = [{ type: 'text', text: prompt }];
+                const lastUserIdx = [...messages].reverse().findIndex(m => m.role === 'user');
+                const targetIdx = lastUserIdx >= 0 ? messages.length - 1 - lastUserIdx : messages.length - 1;
+                const targetMsg = messages[targetIdx] || { role: 'user', content: prompt };
+                const content = [{ type: 'text', text: targetMsg.content }];
                 for (const img of images) {
                     if (img?.base64) {
                         content.push({ type: 'image_url', image_url: { url: `data:${img.mimeType || 'image/jpeg'};base64,${img.base64}` } });
                     }
                 }
-                messages = [{ role: 'user', content }];
+                messages[targetIdx] = { ...targetMsg, content };
             }
             const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
                 method: 'POST',
@@ -2040,7 +2187,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
         }
     }
 
-    async function streamGeminiModel({ apiKey, model, prompt, images = [], temperature, maxTokens, timeoutMs, onDelta }) {
+    async function streamGeminiModel({ apiKey, model, prompt, images = [], temperature, maxTokens, timeoutMs, onDelta, options = {} }) {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), timeoutMs);
         try {
@@ -2052,21 +2199,52 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                     }
                 }
             }
+            let contents = [{ parts }];
+            let systemInstruction = options?.systemPrompt
+                ? { parts: [{ text: options.systemPrompt }] }
+                : undefined;
+            const structured = options?.structuredMessages;
+            if (Array.isArray(structured) && structured.length > 1) {
+                const sysMsg = structured.find(m => m.role === 'system');
+                if (sysMsg?.content) {
+                    systemInstruction = { parts: [{ text: sysMsg.content }] };
+                }
+                const dialogMsgs = structured.filter(m => m.role !== 'system');
+                if (dialogMsgs.length > 0) {
+                    contents = dialogMsgs.map((m, idx) => {
+                        const isLast = idx === dialogMsgs.length - 1;
+                        const role = m.role === 'assistant' ? 'model' : 'user';
+                        const mParts = [{ text: m.content }];
+                        if (isLast && Array.isArray(images)) {
+                            for (const img of images) {
+                                if (img?.base64) {
+                                    mParts.push({ inline_data: { mime_type: img.mimeType || 'image/jpeg', data: img.base64 } });
+                                }
+                            }
+                        }
+                        return { role, parts: mParts };
+                    });
+                }
+            }
+            const reqBody = {
+                contents,
+                generationConfig: {
+                    temperature,
+                    topK: 40,
+                    topP: 0.95,
+                    maxOutputTokens: maxTokens
+                }
+            };
+            if (systemInstruction) {
+                reqBody.system_instruction = systemInstruction;
+            }
             const response = await fetch(
                 `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${apiKey}`,
                 {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     signal: controller.signal,
-                    body: JSON.stringify({
-                        contents: [{ parts }],
-                        generationConfig: {
-                            temperature,
-                            topK: 40,
-                            topP: 0.95,
-                            maxOutputTokens: maxTokens
-                        }
-                    })
+                    body: JSON.stringify(reqBody)
                 }
             );
             if (!response.ok || !response.body) return { ok: false };
@@ -3763,6 +3941,24 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                     return Boolean(item.text);
                 })
             : [];
+        const retrievedTurns = Array.isArray(body.retrievedTurns)
+            ? body.retrievedTurns
+                .slice(0, 6)
+                .map(item => ({
+                    role: item?.role === 'assistant' ? 'assistant' : 'user',
+                    text: String(item?.text || '').trim().slice(0, 2000)
+                }))
+                .filter(item => Boolean(item.text))
+            : [];
+        const rollingSummary = body.rollingSummary && typeof body.rollingSummary === 'object' ? body.rollingSummary : null;
+        const structuredMessages = Array.isArray(body.structuredMessages)
+            ? body.structuredMessages
+                .map(m => ({
+                    role: ['system', 'assistant', 'user'].includes(m?.role) ? m.role : 'user',
+                    content: String(m?.content || m?.text || '').trim().slice(0, 16000)
+                }))
+                .filter(m => Boolean(m.content))
+            : null;
         const preferences = body.preferences && typeof body.preferences === 'object'
             ? {
                 userName: String(body.preferences.userName || '').trim().slice(0, 80),
@@ -3782,7 +3978,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
         }
         return {
             ok: true,
-            value: { message, context, preferences, intent, grounding, images }
+            value: { message, context, retrievedTurns, rollingSummary, structuredMessages, preferences, intent, grounding, images }
         };
     }
 
