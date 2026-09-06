@@ -12,7 +12,8 @@ import {
     decideFrontendRoute,
     extractStreamedImageTag,
     stripStreamedImageTags,
-    normalizeSlashCommand
+    normalizeSlashCommand,
+    enhanceImagePromptForAccuracy
 } from '../app/frontend-routing.js';
 import {
     AGENTIC_TOOL_DEFINITIONS,
@@ -445,6 +446,42 @@ console.log('--- Running Image Generator Suite ---');
     assert.equal(goodHeaders['Content-Type'], 'image/jpeg');
 
     console.log('✔ Image proxy API contract & upstream proxy fetch tests passed');
+}
+
+// 8. Image Prompt Accuracy & Photorealistic Grounding Engine
+{
+    // 8.1 Geographic Acronym & Place Expansions
+    const laExpanded = enhanceImagePromptForAccuracy('la');
+    assert.match(laExpanded, /Los Angeles/i);
+    assert.match(laExpanded, /photograph/i);
+    assert.match(laExpanded, /photorealistic/i);
+
+    const picForLa = enhanceImagePromptForAccuracy('a pic for la');
+    assert.match(picForLa, /Los Angeles/i);
+
+    const nycExpanded = enhanceImagePromptForAccuracy('nyc');
+    assert.match(nycExpanded, /New York City/i);
+
+    const sfExpanded = enhanceImagePromptForAccuracy('sf');
+    assert.match(sfExpanded, /San Francisco/i);
+
+    const chidambaramExpanded = enhanceImagePromptForAccuracy('chidambaram town in aerial view');
+    assert.match(chidambaramExpanded, /Chidambaram/i);
+    assert.match(chidambaramExpanded, /Nataraja/i);
+
+    // 8.2 Preserves Artistic Intent
+    const animePrompt = enhanceImagePromptForAccuracy('anime warrior with glowing blue sword');
+    assert.equal(animePrompt, 'anime warrior with glowing blue sword');
+
+    const oilPainting = enhanceImagePromptForAccuracy('oil painting of a sailboat at sea');
+    assert.equal(oilPainting, 'oil painting of a sailboat at sea');
+
+    // 8.3 Brief Prompt Grounding
+    const shortPrompt = enhanceImagePromptForAccuracy('cute golden retriever');
+    assert.match(shortPrompt, /cute golden retriever/i);
+    assert.match(shortPrompt, /photorealistic|lighting|detail/i);
+
+    console.log('✔ Image prompt accuracy, entity grounding, and artistic preservation tests passed');
 }
 
 console.log('--- All Image Generator & Command Tests Passed Successfully! ---');
