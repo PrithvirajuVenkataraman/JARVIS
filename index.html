@@ -4734,6 +4734,49 @@ function extractImagePrompt(text) {
     return raw.replace(/[?!.]+$/, '').trim();
 }
 
+function enhanceImagePromptForAccuracy(prompt) {
+    if (globalThis.JarvisFrontendRouting?.enhanceImagePromptForAccuracy) {
+        return globalThis.JarvisFrontendRouting.enhanceImagePromptForAccuracy(prompt);
+    }
+    let clean = String(prompt || '').trim();
+    if (!clean) return '';
+
+    clean = clean.replace(/^(?:a\s+)?(?:pic(?:ture)?|photo(?:graph)?|image)\s+(?:of|for)\s+/i, '').trim();
+
+    const isArtistic = /\b(?:anime|manga|oil\s+painting|watercolor|pencil\s+sketch|sketch|drawing|cartoon|illustration|pixel\s+art|cyberpunk|fantasy\s+art|3d\s+render|cgi|surreal)\b/i.test(clean);
+
+    const isLA = /^(?:la|l\.a\.|los\s+angeles)$/i.test(clean) || /\b(?:la|l\.a\.)\b/i.test(clean);
+    const isNYC = /^(?:nyc|n\.y\.c\.|new\s+york\s+city)$/i.test(clean) || /\b(?:nyc|n\.y\.c\.)\b/i.test(clean);
+    const isSF = /^(?:sf|s\.f\.|san\s+francisco)$/i.test(clean) || /\b(?:sf|s\.f\.)\b/i.test(clean);
+    const isDC = /^(?:dc|d\.c\.|washington\s+dc)$/i.test(clean) || /\b(?:dc|d\.c\.)\b/i.test(clean);
+    const isChidambaram = /\bchidambaram\b/i.test(clean);
+
+    if (!isArtistic) {
+        if (isLA) {
+            return 'Vibrant photograph of Los Angeles, California showing the downtown skyline, palm tree-lined boulevard, active street with cars, under warm golden hour sunlight, authentic 8k photorealistic architecture';
+        }
+        if (isNYC) {
+            return 'Iconic photograph of New York City, bustling Manhattan street with yellow cabs, historic and modern skyscrapers, clear daylight, crisp authentic architectural detail, 8k photography';
+        }
+        if (isSF) {
+            return 'Cinematic photograph of San Francisco, California, Golden Gate vista and iconic rolling hills with Victorian architecture, authentic natural lighting, 8k photorealistic';
+        }
+        if (isDC) {
+            return 'Distinguished photograph of Washington, D.C., National Mall and Capitol architecture with lush greenery and clear sky, authentic photorealistic detail';
+        }
+        if (isChidambaram) {
+            return 'Authentic aerial view of Chidambaram historic temple town, Tamil Nadu, showcasing the Thillai Nataraja Temple complex with grand Dravidian gopurams and sacred Sivaganga water tank, detailed architecture, golden hour';
+        }
+
+        if (clean.length < 50 && !/\b(?:photograph|photorealistic|detailed|cinematic|lighting|8k|4k)\b/i.test(clean)) {
+            return `${clean}, authentic natural lighting, high detail, sharp focus, photorealistic 8k`;
+        }
+    }
+
+    return clean;
+}
+window.enhanceImagePromptForAccuracy = enhanceImagePromptForAccuracy;
+
 function normalizeSlashCommand(text) {
     if (globalThis.JarvisFrontendRouting?.normalizeSlashCommand) {
         return globalThis.JarvisFrontendRouting.normalizeSlashCommand(text);
@@ -10595,12 +10638,15 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
         }
 
         async function handleImageGenerationRequest(promptText, options = {}) {
-            const cleanPrompt = (typeof extractImagePrompt === 'function' ? extractImagePrompt(promptText) : '') ||
+            const rawPrompt = (typeof extractImagePrompt === 'function' ? extractImagePrompt(promptText) : '') ||
                 String(promptText || '').replace(/^\/(?:image|img|draw|art)\s*/i, '').replace(/[?!.]+$/, '').trim();
-            if (!cleanPrompt) {
+            if (!rawPrompt) {
                 addChatMessage('Please provide a description of what you want to create (e.g. `generate an image of a cosmic nebula`).', false);
                 return;
             }
+            const cleanPrompt = (typeof enhanceImagePromptForAccuracy === 'function')
+                ? enhanceImagePromptForAccuracy(rawPrompt)
+                : rawPrompt;
 
             hideThinkingIndicator();
             const aspectRatio = options.aspectRatio || '1:1';
@@ -10615,12 +10661,12 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
 
             const seed = Math.floor(Math.random() * 1000000);
             const negPrompt = encodeURIComponent('text,watermark,words,letters,signature,typography,lowres,blurry');
-            const proxyUrl = `/api/image-proxy?prompt=${encodeURIComponent(cleanPrompt)}&width=${width}&height=${height}&model=turbo&seed=${seed}`;
-            const directFallbackUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(cleanPrompt)}?width=${width}&height=${height}&model=turbo&nologo=true&seed=${seed}`;
+            const proxyUrl = `/api/image-proxy?prompt=${encodeURIComponent(cleanPrompt)}&width=${width}&height=${height}&model=flux&seed=${seed}`;
+            const directFallbackUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(cleanPrompt)}?width=${width}&height=${height}&model=flux&nologo=true&seed=${seed}`;
             const initialUrl = (typeof window !== 'undefined' && window.location?.origin?.startsWith('http')) ? proxyUrl : directFallbackUrl;
 
             const cardHtml = `
-<div id="${cardId}" class="image-gen-card" data-prompt="${escapeHtml(cleanPrompt)}" data-aspect-ratio="${escapeHtml(aspectRatio)}">
+<div id="${cardId}" class="image-gen-card" data-prompt="${escapeHtml(rawPrompt)}" data-enhanced-prompt="${escapeHtml(cleanPrompt)}" data-aspect-ratio="${escapeHtml(aspectRatio)}">
     <div class="image-gen-viewport" data-ratio="${escapeHtml(aspectRatio)}">
         <img id="${cardId}-img" class="image-gen-img hidden" alt="${escapeHtml(cleanPrompt)}" onclick="window.openImageLightboxFromCard('${cardId}')" />
         <div id="${cardId}-loader" class="image-gen-loader-overlay">
