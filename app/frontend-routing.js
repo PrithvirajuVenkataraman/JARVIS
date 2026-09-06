@@ -95,15 +95,17 @@ export function isStableGeographyOrGeneralFactQuery(text, context = {}) {
     return !intent.isLiveRequired;
 }
 
-const IMAGE_NEGATIVE_REGEX = /\b(?:how\s+(?:to|can\s+i|do\s+(?:i|we|cameras|lenses|computers|eyes))\s+(?:draw|create|make|generate|paint|render)|explain\s+how\b|tell\s+me\s+how\b|tutorial\s+on\b|guide\s+to\b|learn\s+how\s+to\b|chart|graph|diagram|table|conclusion|flowchart|comparison|schema|wireframe|architecture|uml|draw\s+a\s+(?:conclusion|parallel|distinction|comparison|boundary|line\s+between)|how\s+(?:cameras|lenses|mirrors|eyes|telescopes)\s+form\s+(?:an?\s+)?image|explain\s+image\s+formation)\b/i;
+const IMAGE_NEGATIVE_REGEX = /\b(?:how\s+(?:to|can\s+i|do\s+(?:i|we|cameras|lenses|computers|eyes))\s+(?:draw|create|make|generate|paint|render)|explain\s+how\b|tell\s+me\s+how\b|tutorial\s+on\b|guide\s+to\b|learn\s+how\s+to\b|chart|graph|diagram|table|conclusion|flowchart|comparison|schema|wireframe|architecture|uml|draw\s+a\s+(?:conclusion|parallel|distinction|comparison|boundary|line\s+between)|(?:paint|paints|painted)\s+a\s+(?:grim|bleak|rosy|clearer)\s+picture|how\s+(?:cameras|lenses|mirrors|eyes|telescopes)\s+form\s+(?:an?\s+)?image|explain\s+image\s+formation)\b/i;
+
+const CONVERSATIONAL_PREFIX = '^(?:(?:hey|hi|hello)\\s+)?(?:(?:bot|jarvis|ai|assistant)\\s*,?\\s+)?(?:can\\s+you\\s+(?:please\\s+)?|could\\s+you\\s+(?:please\\s+)?|would\\s+you\\s+(?:please\\s+)?|please\\s+|i\\s+(?:want|need)\\s+(?:you\\s+to\\s+)?(?:to\\s+)?|help\\s+me\\s+(?:to\\s+)?|kindly\\s+)?';
 
 const IMAGE_POSITIVE_PATTERNS = [
     /^\/(?:image|img|draw|art)\b/i,
-    /^(?:(?:hey|hi|hello)\s+)?(?:(?:bot|jarvis|ai|assistant)\s*,?\s+)?(?:can\s+you\s+(?:please\s+)?|could\s+you\s+(?:please\s+)?|please\s+|i\s+(?:want|need)\s+(?:you\s+to\s+)?(?:to\s+)?|help\s+me\s+)?(?:generate|create|render|make|draw|paint|sketch|produce)\s+(?:me\s+)?(?:an?\s+)?(?:ai\s+)?(?:image|picture|photo|photograph|drawing|painting|illustration|artwork|wallpaper|portrait|graphic|visual)(?:\s+(?:of|showing|depicting|with|for|about|featuring)|\s*[:-])\s*/i,
-    /^(?:(?:hey|hi|hello)\s+)?(?:(?:bot|jarvis|ai|assistant)\s*,?\s+)?(?:can\s+you\s+(?:please\s+)?|could\s+you\s+(?:please\s+)?|please\s+)?(?:show\s+me|display|give\s+me)\s+(?:an?\s+)?(?:image|picture|photo|photograph|drawing|painting|illustration|artwork)\s+(?:of|showing|depicting|with|for|about|featuring)\s+/i,
-    /^(?:(?:hey|hi|hello)\s+)?(?:(?:bot|jarvis|ai|assistant)\s*,?\s+)?(?:can\s+you\s+(?:please\s+)?|could\s+you\s+(?:please\s+)?|please\s+)?(?:draw|paint|sketch)\s+(?:me\s+)?/i,
-    /^(?:(?:hey|hi|hello)\s+)?(?:(?:bot|jarvis|ai|assistant)\s*,?\s+)?(?:can\s+you\s+(?:please\s+)?|could\s+you\s+(?:please\s+)?|please\s+)?(?:an?\s+)?(?:image|picture|photo|drawing|illustration|artwork)\s+(?:of|showing|depicting)\s+/i,
-    /^(?:(?:hey|hi|hello)\s+)?(?:(?:bot|jarvis|ai|assistant)\s*,?\s+)?i\s+(?:want|need)\s+(?:an?\s+)?(?:image|picture|photo|illustration|drawing|artwork)\s+(?:of|showing|depicting|with)\s+/i
+    new RegExp(`${CONVERSATIONAL_PREFIX}(?:generate|create|render|make|draw|paint|sketch|produce)\\s+(?:me\\s+)?(?:an?\\s+)?(?:ai\\s+)?(?:image|picture|photo|photograph|drawing|painting|illustration|artwork|wallpaper|portrait|graphic|visual)(?:\\s+(?:of|showing|depicting|with|for|about|featuring)|\\s*[:-])\\s*`, 'i'),
+    new RegExp(`${CONVERSATIONAL_PREFIX}(?:show\\s+me|display|give\\s+me)\\s+(?:an?\\s+)?(?:image|picture|photo|photograph|drawing|painting|illustration|artwork)\\s+(?:of|showing|depicting|with|for|about|featuring)\\s+`, 'i'),
+    new RegExp(`${CONVERSATIONAL_PREFIX}(?:draw|paint|sketch)\\s+(?:me\\s+)?`, 'i'),
+    new RegExp(`${CONVERSATIONAL_PREFIX}(?:an?\\s+)?(?:image|picture|photo|drawing|illustration|artwork)\\s+(?:of|showing|depicting)\\s+`, 'i'),
+    new RegExp(`^(?:(?:hey|hi|hello)\\s+)?(?:(?:bot|jarvis|ai|assistant)\\s*,?\\s+)?i\\s+(?:want|need)\\s+(?:an?\\s+)?(?:image|picture|photo|illustration|drawing|artwork)\\s+(?:of|showing|depicting|with)\\s+`, 'i')
 ];
 
 export function isImageGenerationIntent(text) {
