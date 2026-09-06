@@ -10578,9 +10578,14 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
         <div id="${cardId}-loader" class="image-gen-loader-overlay">
             <div class="image-gen-spinner"></div>
             <div id="${cardId}-status" class="image-gen-status-text">Generating image...</div>
-            <div class="image-gen-progress-bar-bg">
-                <div id="${cardId}-progress" class="image-gen-progress-bar-fill" style="width: 45%"></div>
+            <div id="${cardId}-timer" class="image-gen-timer-badge">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                <span id="${cardId}-time-text">~3s remaining</span>
             </div>
+            <div class="image-gen-progress-bar-bg">
+                <div id="${cardId}-progress" class="image-gen-progress-bar-fill" style="width: 8%"></div>
+            </div>
+            <div id="${cardId}-sub" class="image-gen-status-sub">Connecting to cloud diffusion... 8%</div>
         </div>
     </div>
     <div id="${cardId}-actions" class="image-gen-actions-bar hidden">
@@ -10616,15 +10621,65 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             cardElem?.scrollIntoView({ behavior: 'smooth', block: 'end' });
 
             const statusEl = document.getElementById(`${cardId}-status`);
+            const timeTextEl = document.getElementById(`${cardId}-time-text`);
+            const subEl = document.getElementById(`${cardId}-sub`);
             const progressEl = document.getElementById(`${cardId}-progress`);
             const loaderEl = document.getElementById(`${cardId}-loader`);
             const imgEl = document.getElementById(`${cardId}-img`);
             const actionsEl = document.getElementById(`${cardId}-actions`);
 
+            const startTime = Date.now();
+            const estimatedTotalSeconds = 3.6;
+
+            const progressTimer = setInterval(() => {
+                if (imageRevealed) {
+                    clearInterval(progressTimer);
+                    return;
+                }
+                const elapsedSec = (Date.now() - startTime) / 1000;
+                const remainingSec = Math.max(0, estimatedTotalSeconds - elapsedSec);
+
+                let percent = 8;
+                if (elapsedSec < estimatedTotalSeconds) {
+                    percent = Math.min(88, Math.round(8 + (elapsedSec / estimatedTotalSeconds) * 80));
+                } else {
+                    const extra = elapsedSec - estimatedTotalSeconds;
+                    percent = Math.min(96, Math.round(88 + (1 - Math.exp(-extra / 3)) * 8));
+                }
+
+                if (progressEl) progressEl.style.width = `${percent}%`;
+
+                if (timeTextEl) {
+                    if (remainingSec >= 0.7) {
+                        timeTextEl.textContent = `~${Math.ceil(remainingSec)}s remaining`;
+                    } else if (elapsedSec < estimatedTotalSeconds + 2.0) {
+                        timeTextEl.textContent = 'Almost ready...';
+                    } else {
+                        timeTextEl.textContent = 'Refining final pixels...';
+                    }
+                }
+
+                if (subEl) {
+                    if (percent < 30) {
+                        subEl.textContent = `Connecting to cloud diffusion... ${percent}%`;
+                    } else if (percent < 60) {
+                        subEl.textContent = `Synthesizing visual latents... ${percent}%`;
+                    } else if (percent < 85) {
+                        subEl.textContent = `Decoding high-res output... ${percent}%`;
+                    } else {
+                        subEl.textContent = `Finalizing image stream... ${percent}%`;
+                    }
+                }
+            }, 100);
+
             let imageRevealed = false;
             function revealImage(src, id) {
                 if (imageRevealed) return;
                 imageRevealed = true;
+                clearInterval(progressTimer);
+                if (progressEl) progressEl.style.width = '100%';
+                if (timeTextEl) timeTextEl.textContent = 'Completed in ' + ((Date.now() - startTime) / 1000).toFixed(1) + 's';
+                if (subEl) subEl.textContent = '100% complete';
                 if (!imgEl || !cardElem) return;
                 imgEl.src = src;
                 imgEl.classList.remove('hidden');
@@ -10637,7 +10692,6 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
 
             if (imgEl) {
                 imgEl.onload = () => {
-                    if (progressEl) progressEl.style.width = '100%';
                     revealImage(imgEl.src);
                 };
                 imgEl.onerror = () => {
@@ -10645,7 +10699,9 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                     const retrySeed = Math.floor(Math.random() * 1000000);
                     const retryUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(cleanPrompt)}?width=${width}&height=${height}&model=turbo&negative_prompt=${negPrompt}&nologo=true&seed=${retrySeed}`;
                     imgEl.onerror = () => {
+                        clearInterval(progressTimer);
                         if (statusEl) statusEl.textContent = 'Generation failed. Click retry.';
+                        if (timeTextEl) timeTextEl.textContent = 'Failed';
                         if (actionsEl) {
                             actionsEl.classList.remove('hidden');
                             actionsEl.innerHTML = `
