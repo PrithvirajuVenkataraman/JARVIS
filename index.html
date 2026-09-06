@@ -4734,6 +4734,52 @@ function extractImagePrompt(text) {
     return raw.replace(/[?!.]+$/, '').trim();
 }
 
+function normalizeSlashCommand(text) {
+    if (globalThis.JarvisFrontendRouting?.normalizeSlashCommand) {
+        return globalThis.JarvisFrontendRouting.normalizeSlashCommand(text);
+    }
+    const raw = String(text || '').trim();
+    if (!raw.startsWith('/')) return { isSlashCommand: false, command: null, payload: raw, normalizedText: raw };
+    const match = raw.match(/^\/([a-z_-]+)(?:\s+([\s\S]*))?$/i);
+    if (!match) return { isSlashCommand: false, command: null, payload: raw, normalizedText: raw };
+    const command = match[1].toLowerCase();
+    const payload = (match[2] || '').trim();
+    if (command === 'translate') {
+        if (/\bto\s+[a-zA-Z\s]+$/i.test(payload)) return { isSlashCommand: true, command, payload, normalizedText: `Translate ${payload}` };
+        return { isSlashCommand: true, command, payload, normalizedText: `Translate the following text accurately: ${payload}` };
+    }
+    if (command === 'summarize') return { isSlashCommand: true, command, payload, normalizedText: `Summarize the following text concisely:\n${payload}` };
+    if (command === 'verify') return { isSlashCommand: true, command, payload, normalizedText: `Verify whether this claim or answer is factual: ${payload}` };
+    if (command === 'professional') return { isSlashCommand: true, command, payload, normalizedText: `Rewrite the following text to be professional, clear, and polished:\n${payload}` };
+    if (command === 'study') return { isSlashCommand: true, command, payload, normalizedText: `Teach me the key concepts of this topic clearly with examples and a short quiz:\n${payload}` };
+    if (['image', 'img', 'draw', 'art'].includes(command)) return { isSlashCommand: true, command: 'image', payload, normalizedText: payload };
+    return { isSlashCommand: true, command, payload, normalizedText: payload || raw };
+}
+
+function isVerifyCommand(text) {
+    if (globalThis.JarvisFrontendRouting?.isVerifyCommand) {
+        return globalThis.JarvisFrontendRouting.isVerifyCommand(text);
+    }
+    const raw = String(text || '').trim();
+    return /^\/verify\b/i.test(raw) || /^verify\s+this\s*:/i.test(raw);
+}
+
+function isStudyCommand(text) {
+    if (globalThis.JarvisFrontendRouting?.isStudyCommand) {
+        return globalThis.JarvisFrontendRouting.isStudyCommand(text);
+    }
+    const raw = String(text || '').trim();
+    return /^\/study\b/i.test(raw) || /^(?:teach\s+me\s+this\s+topic\s*:|study\s+this\s*:)/i.test(raw);
+}
+
+function isTransformFastQuery(text) {
+    if (globalThis.JarvisFrontendRouting?.isTransformFastQuery) {
+        return globalThis.JarvisFrontendRouting.isTransformFastQuery(text);
+    }
+    const raw = String(text || '').trim();
+    return /^(?:\/?(?:translate|summarize|paraphrase|rewrite|professional)|(?:fix\s+grammar|make\s+this\s+professional))\b/i.test(raw);
+}
+
 function isLikelyLocationOrTravelQuery(text) {
     const t = String(text || '').toLowerCase();
     if (!t.trim()) return false;
@@ -10569,7 +10615,9 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
 
             const seed = Math.floor(Math.random() * 1000000);
             const negPrompt = encodeURIComponent('text,watermark,words,letters,signature,typography,lowres,blurry');
-            const directUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(cleanPrompt)}?width=${width}&height=${height}&model=turbo&negative_prompt=${negPrompt}&nologo=true&seed=${seed}`;
+            const proxyUrl = `/api/image-proxy?prompt=${encodeURIComponent(cleanPrompt)}&width=${width}&height=${height}&model=flux&seed=${seed}`;
+            const directFallbackUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(cleanPrompt)}?width=${width}&height=${height}&model=turbo&negative_prompt=${negPrompt}&nologo=true&seed=${seed}`;
+            const initialUrl = (typeof window !== 'undefined' && window.location?.origin?.startsWith('http')) ? proxyUrl : directFallbackUrl;
 
             const cardHtml = `
 <div id="${cardId}" class="image-gen-card" data-prompt="${escapeHtml(cleanPrompt)}" data-aspect-ratio="${escapeHtml(aspectRatio)}">
@@ -10580,12 +10628,12 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             <div id="${cardId}-status" class="image-gen-status-text">Generating image...</div>
             <div id="${cardId}-timer" class="image-gen-timer-badge">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-                <span id="${cardId}-time-text" class="image-gen-time-text">~3s remaining</span>
+                <span id="${cardId}-time-text" class="image-gen-time-text">0.0s elapsed</span>
             </div>
             <div class="image-gen-progress-bar-bg">
-                <div id="${cardId}-progress" class="image-gen-progress-bar-fill" style="width: 8%"></div>
+                <div id="${cardId}-progress" class="image-gen-progress-bar-fill" style="width: 15%"></div>
             </div>
-            <div id="${cardId}-sub" class="image-gen-status-sub">Connecting to cloud diffusion... 8%</div>
+            <div id="${cardId}-sub" class="image-gen-status-sub">Connecting to high-speed diffusion... 15%</div>
         </div>
     </div>
     <div id="${cardId}-actions" class="image-gen-actions-bar hidden">
@@ -10629,43 +10677,24 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             const actionsEl = cardElem?.querySelector('.image-gen-actions-bar') || document.getElementById(`${cardId}-actions`);
 
             const startTime = Date.now();
-            const estimatedTotalSeconds = 3.6;
-
             const progressTimer = setInterval(() => {
                 if (imageRevealed) {
                     clearInterval(progressTimer);
                     return;
                 }
                 const elapsedSec = (Date.now() - startTime) / 1000;
-                const remainingSec = Math.max(0, estimatedTotalSeconds - elapsedSec);
-
-                let percent = 8;
-                if (elapsedSec < estimatedTotalSeconds) {
-                    percent = Math.min(88, Math.round(8 + (elapsedSec / estimatedTotalSeconds) * 80));
-                } else {
-                    const extra = elapsedSec - estimatedTotalSeconds;
-                    percent = Math.min(96, Math.round(88 + (1 - Math.exp(-extra / 3)) * 8));
-                }
+                let percent = Math.min(92, Math.round(15 + (1 - Math.exp(-elapsedSec / 3.0)) * 77));
 
                 if (progressEl) progressEl.style.width = `${percent}%`;
-
-                if (timeTextEl) {
-                    if (remainingSec >= 0.7) {
-                        timeTextEl.textContent = `~${Math.ceil(remainingSec)}s remaining`;
-                    } else if (elapsedSec < estimatedTotalSeconds + 2.0) {
-                        timeTextEl.textContent = 'Almost ready...';
-                    } else {
-                        timeTextEl.textContent = 'Refining final pixels...';
-                    }
-                }
+                if (timeTextEl) timeTextEl.textContent = `${elapsedSec.toFixed(1)}s elapsed`;
 
                 if (subEl) {
-                    if (percent < 30) {
-                        subEl.textContent = `Connecting to cloud diffusion... ${percent}%`;
-                    } else if (percent < 60) {
-                        subEl.textContent = `Synthesizing visual latents... ${percent}%`;
+                    if (percent < 35) {
+                        subEl.textContent = `Connecting to high-speed diffusion... ${percent}%`;
+                    } else if (percent < 65) {
+                        subEl.textContent = `Synthesizing neural latents... ${percent}%`;
                     } else if (percent < 85) {
-                        subEl.textContent = `Decoding high-res output... ${percent}%`;
+                        subEl.textContent = `Rendering high-definition details... ${percent}%`;
                     } else {
                         subEl.textContent = `Finalizing image stream... ${percent}%`;
                     }
@@ -10673,10 +10702,20 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             }, 100);
 
             let imageRevealed = false;
+            const autoFailoverTimeout = setTimeout(() => {
+                if (!imageRevealed && imgEl) {
+                    if (subEl) subEl.textContent = 'Switching to fast backup engine...';
+                    const backupSeed = Math.floor(Math.random() * 1000000);
+                    const backupUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(cleanPrompt)}?width=${width}&height=${height}&model=turbo&negative_prompt=${negPrompt}&nologo=true&seed=${backupSeed}`;
+                    imgEl.src = backupUrl;
+                }
+            }, 8500);
+
             function revealImage(src, id) {
                 if (imageRevealed) return;
                 imageRevealed = true;
                 clearInterval(progressTimer);
+                clearTimeout(autoFailoverTimeout);
 
                 const activeCard = document.getElementById(cardId) || cardElem;
                 const activeImg = activeCard?.querySelector('.image-gen-img') || imgEl;
@@ -10715,32 +10754,39 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                     revealImage(imgEl.src);
                 };
                 imgEl.onerror = () => {
-                    // Retry once with a fresh seed
+                    // Try direct Pollinations turbo fallback
                     const retrySeed = Math.floor(Math.random() * 1000000);
                     const retryUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(cleanPrompt)}?width=${width}&height=${height}&model=turbo&negative_prompt=${negPrompt}&nologo=true&seed=${retrySeed}`;
                     imgEl.onerror = () => {
-                        clearInterval(progressTimer);
-                        const activeCard = document.getElementById(cardId) || cardElem;
-                        const activeStatus = activeCard?.querySelector('.image-gen-status-text') || statusEl;
-                        const activeTime = activeCard?.querySelector('.image-gen-time-text') || timeTextEl;
-                        const activeActions = activeCard?.querySelector('.image-gen-actions-bar') || actionsEl;
-                        if (activeStatus) activeStatus.textContent = 'Generation failed. Click retry.';
-                        if (activeTime) activeTime.textContent = 'Failed';
-                        if (activeActions) {
-                            activeActions.classList.remove('hidden');
-                            activeActions.style.display = 'flex';
-                            activeActions.innerHTML = `
-                                <button type="button" class="image-gen-action-btn is-primary" onclick="window.regenerateImageCard('${cardId}')">
-                                    <span>Retry</span>
-                                </button>
-                            `;
-                        }
+                        // Second retry with flux
+                        const fluxSeed = Math.floor(Math.random() * 1000000);
+                        const fluxUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(cleanPrompt)}?width=${width}&height=${height}&model=flux&negative_prompt=${negPrompt}&nologo=true&seed=${fluxSeed}`;
+                        imgEl.onerror = () => {
+                            clearInterval(progressTimer);
+                            clearTimeout(autoFailoverTimeout);
+                            const activeCard = document.getElementById(cardId) || cardElem;
+                            const activeStatus = activeCard?.querySelector('.image-gen-status-text') || statusEl;
+                            const activeTime = activeCard?.querySelector('.image-gen-time-text') || timeTextEl;
+                            const activeActions = activeCard?.querySelector('.image-gen-actions-bar') || actionsEl;
+                            if (activeStatus) activeStatus.textContent = 'Generation failed. Click retry.';
+                            if (activeTime) activeTime.textContent = 'Failed';
+                            if (activeActions) {
+                                activeActions.classList.remove('hidden');
+                                activeActions.style.display = 'flex';
+                                activeActions.innerHTML = `
+                                    <button type="button" class="image-gen-action-btn is-primary" onclick="window.regenerateImageCard('${cardId}')">
+                                        <span>Retry</span>
+                                    </button>
+                                `;
+                            }
+                        };
+                        imgEl.src = fluxUrl;
                     };
                     imgEl.src = retryUrl;
                 };
 
                 // Trigger browser image download immediately
-                imgEl.src = directUrl;
+                imgEl.src = initialUrl;
             }
 
             // In background, orchestrate generator worker for local IndexedDB caching if available
@@ -20504,7 +20550,19 @@ function isWakeGreetingText(text) {
                 addChatMessage('Context cleared. Start a new topic whenever you are ready.', false);
                 return;
             }
-            if (isImageGenerationIntent(text)) {
+            const slashNorm = normalizeSlashCommand(text);
+            if (slashNorm?.isSlashCommand) {
+                if (slashNorm.command === 'image' || isImageGenerationIntent(text)) {
+                    const imgPrompt = slashNorm.payload || extractImagePrompt(text);
+                    logRoutingDebug('processCommand -> image_generation (slash)', text, { imgPrompt });
+                    await handleImageGenerationRequest(imgPrompt || text);
+                    return;
+                }
+                if (['agent', 'workflow'].includes(slashNorm.command)) {
+                    if (await handleAgentWorkflow(text)) return;
+                }
+                text = slashNorm.normalizedText || text;
+            } else if (isImageGenerationIntent(text)) {
                 const imgPrompt = extractImagePrompt(text);
                 logRoutingDebug('processCommand -> image_generation (direct)', text, { imgPrompt });
                 await handleImageGenerationRequest(imgPrompt || text);
