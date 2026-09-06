@@ -10580,7 +10580,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             <div id="${cardId}-status" class="image-gen-status-text">Generating image...</div>
             <div id="${cardId}-timer" class="image-gen-timer-badge">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-                <span id="${cardId}-time-text">~3s remaining</span>
+                <span id="${cardId}-time-text" class="image-gen-time-text">~3s remaining</span>
             </div>
             <div class="image-gen-progress-bar-bg">
                 <div id="${cardId}-progress" class="image-gen-progress-bar-fill" style="width: 8%"></div>
@@ -10620,13 +10620,13 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             const cardElem = document.getElementById(cardId);
             cardElem?.scrollIntoView({ behavior: 'smooth', block: 'end' });
 
-            const statusEl = document.getElementById(`${cardId}-status`);
-            const timeTextEl = document.getElementById(`${cardId}-time-text`);
-            const subEl = document.getElementById(`${cardId}-sub`);
-            const progressEl = document.getElementById(`${cardId}-progress`);
-            const loaderEl = document.getElementById(`${cardId}-loader`);
-            const imgEl = document.getElementById(`${cardId}-img`);
-            const actionsEl = document.getElementById(`${cardId}-actions`);
+            const statusEl = cardElem?.querySelector('.image-gen-status-text') || document.getElementById(`${cardId}-status`);
+            const timeTextEl = cardElem?.querySelector('.image-gen-time-text') || cardElem?.querySelector('.image-gen-timer-badge span') || document.getElementById(`${cardId}-time-text`);
+            const subEl = cardElem?.querySelector('.image-gen-status-sub') || document.getElementById(`${cardId}-sub`);
+            const progressEl = cardElem?.querySelector('.image-gen-progress-bar-fill') || document.getElementById(`${cardId}-progress`);
+            const loaderEl = cardElem?.querySelector('.image-gen-loader-overlay') || document.getElementById(`${cardId}-loader`);
+            const imgEl = cardElem?.querySelector('.image-gen-img') || document.getElementById(`${cardId}-img`);
+            const actionsEl = cardElem?.querySelector('.image-gen-actions-bar') || document.getElementById(`${cardId}-actions`);
 
             const startTime = Date.now();
             const estimatedTotalSeconds = 3.6;
@@ -10677,16 +10677,36 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 if (imageRevealed) return;
                 imageRevealed = true;
                 clearInterval(progressTimer);
-                if (progressEl) progressEl.style.width = '100%';
-                if (timeTextEl) timeTextEl.textContent = 'Completed in ' + ((Date.now() - startTime) / 1000).toFixed(1) + 's';
-                if (subEl) subEl.textContent = '100% complete';
-                if (!imgEl || !cardElem) return;
-                imgEl.src = src;
-                imgEl.classList.remove('hidden');
-                cardElem.dataset.imageUrl = src;
-                cardElem.dataset.imageId = id || `img_${Date.now()}`;
-                if (loaderEl) loaderEl.style.display = 'none';
-                if (actionsEl) actionsEl.classList.remove('hidden');
+
+                const activeCard = document.getElementById(cardId) || cardElem;
+                const activeImg = activeCard?.querySelector('.image-gen-img') || imgEl;
+                const activeLoader = activeCard?.querySelector('.image-gen-loader-overlay') || loaderEl;
+                const activeActions = activeCard?.querySelector('.image-gen-actions-bar') || actionsEl;
+                const activeProgress = activeCard?.querySelector('.image-gen-progress-bar-fill') || progressEl;
+                const activeTime = activeCard?.querySelector('.image-gen-time-text') || activeCard?.querySelector('.image-gen-timer-badge span') || timeTextEl;
+                const activeSub = activeCard?.querySelector('.image-gen-status-sub') || subEl;
+
+                if (activeProgress) activeProgress.style.width = '100%';
+                if (activeTime) activeTime.textContent = 'Completed in ' + ((Date.now() - startTime) / 1000).toFixed(1) + 's';
+                if (activeSub) activeSub.textContent = '100% complete';
+
+                if (activeImg) {
+                    activeImg.src = src;
+                    activeImg.classList.remove('hidden');
+                    activeImg.style.display = 'block';
+                    activeImg.onclick = () => window.openImageLightboxFromCard?.(cardId);
+                }
+                if (activeCard) {
+                    activeCard.dataset.imageUrl = src;
+                    activeCard.dataset.imageId = id || `img_${Date.now()}`;
+                }
+                if (activeLoader) {
+                    activeLoader.style.display = 'none';
+                }
+                if (activeActions) {
+                    activeActions.classList.remove('hidden');
+                    activeActions.style.display = 'flex';
+                }
                 saveToHistory(cleanPrompt, `[Generated Image: "${cleanPrompt}"]`, { recordContext: true });
             }
 
@@ -10700,11 +10720,16 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                     const retryUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(cleanPrompt)}?width=${width}&height=${height}&model=turbo&negative_prompt=${negPrompt}&nologo=true&seed=${retrySeed}`;
                     imgEl.onerror = () => {
                         clearInterval(progressTimer);
-                        if (statusEl) statusEl.textContent = 'Generation failed. Click retry.';
-                        if (timeTextEl) timeTextEl.textContent = 'Failed';
-                        if (actionsEl) {
-                            actionsEl.classList.remove('hidden');
-                            actionsEl.innerHTML = `
+                        const activeCard = document.getElementById(cardId) || cardElem;
+                        const activeStatus = activeCard?.querySelector('.image-gen-status-text') || statusEl;
+                        const activeTime = activeCard?.querySelector('.image-gen-time-text') || timeTextEl;
+                        const activeActions = activeCard?.querySelector('.image-gen-actions-bar') || actionsEl;
+                        if (activeStatus) activeStatus.textContent = 'Generation failed. Click retry.';
+                        if (activeTime) activeTime.textContent = 'Failed';
+                        if (activeActions) {
+                            activeActions.classList.remove('hidden');
+                            activeActions.style.display = 'flex';
+                            activeActions.innerHTML = `
                                 <button type="button" class="image-gen-action-btn is-primary" onclick="window.regenerateImageCard('${cardId}')">
                                     <span>Retry</span>
                                 </button>
@@ -11388,7 +11413,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             template.innerHTML = String(html || '');
 
             const allowedTags = new Set([
-                'A', 'BLOCKQUOTE', 'BR', 'CODE', 'DIV', 'H1', 'H2', 'H3', 'H4', 'IFRAME', 'IMG', 'LI', 'OL', 'P', 'PRE', 'SPAN', 'STRONG', 'TABLE', 'TBODY', 'TD', 'TH', 'THEAD', 'TR', 'UL',
+                'A', 'BLOCKQUOTE', 'BR', 'BUTTON', 'CODE', 'DIV', 'H1', 'H2', 'H3', 'H4', 'IFRAME', 'IMG', 'LI', 'OL', 'P', 'PRE', 'SPAN', 'STRONG', 'TABLE', 'TBODY', 'TD', 'TH', 'THEAD', 'TR', 'UL',
                 'SUP', 'SUB', 'EM', 'I', 'B', 'SMALL', 'HR', 'S', 'DEL', 'MARK', 'ABBR',
                 'MATH', 'ANNOTATION', 'SEMANTICS', 'MROW', 'MI', 'MN', 'MO', 'MSUP', 'MSUB', 'MSUBSUP', 'MFRAC', 'MSQRT', 'MROOT', 'MTABLE', 'MTR', 'MTD', 'MTEXT', 'MSPACE', 'MOVER', 'MUNDER', 'MUNDEROVER', 'MENCLOSE', 'MPADDED', 'MPHANTOM', 'MERROR',
                 'SVG', 'PATH', 'LINE', 'POLYGON', 'POLYLINE', 'RECT', 'CIRCLE', 'USE', 'G', 'DEFS', 'SYMBOL'
@@ -11396,40 +11421,41 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             const mathAttrs = new Set(['class', 'style', 'mathvariant', 'stretchy', 'fence', 'separator', 'lspace', 'rspace', 'form', 'accent', 'xmlns', 'display', 'encoding']);
             const svgAttrs = new Set(['class', 'style', 'width', 'height', 'viewbox', 'fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin', 'points', 'x', 'y', 'x1', 'y1', 'x2', 'y2', 'r', 'cx', 'cy', 'd', 'xmlns', 'aria-hidden', 'role', 'href', 'xlink:href']);
             const allowedAttrs = {
-                A: new Set(['href', 'target', 'rel', 'class', 'style', 'title']),
-                BLOCKQUOTE: new Set(['class', 'style']),
-                CODE: new Set(['class', 'style']),
+                A: new Set(['href', 'target', 'rel', 'class', 'style', 'title', 'id']),
+                BLOCKQUOTE: new Set(['class', 'style', 'id']),
+                BUTTON: new Set(['class', 'style', 'type', 'onclick', 'title', 'id', 'disabled']),
+                CODE: new Set(['class', 'style', 'id']),
                 DIV: new Set(['class', 'style', 'id']),
-                H1: new Set(['class', 'style']),
-                H2: new Set(['class', 'style']),
-                H3: new Set(['class', 'style']),
-                H4: new Set(['class', 'style']),
-                IFRAME: new Set(['src', 'width', 'height', 'loading', 'allowfullscreen', 'class', 'style', 'referrerpolicy', 'frameborder']),
-                IMG: new Set(['src', 'alt', 'class', 'style']),
-                P: new Set(['class', 'style']),
-                PRE: new Set(['class', 'style']),
-                SPAN: new Set(['class', 'style', 'title']),
-                TABLE: new Set(['class', 'style']),
-                TBODY: new Set(['class', 'style']),
-                TD: new Set(['class', 'style', 'colspan', 'rowspan']),
-                TH: new Set(['class', 'style', 'colspan', 'rowspan']),
-                THEAD: new Set(['class', 'style']),
-                TR: new Set(['class', 'style']),
-                UL: new Set(['class', 'style']),
-                OL: new Set(['class', 'style']),
-                LI: new Set(['class', 'style']),
-                SUP: new Set(['class', 'style', 'title']),
-                SUB: new Set(['class', 'style', 'title']),
-                EM: new Set(['class', 'style']),
-                I: new Set(['class', 'style']),
-                B: new Set(['class', 'style']),
-                SMALL: new Set(['class', 'style']),
-                STRONG: new Set(['class', 'style']),
-                S: new Set(['class', 'style']),
-                DEL: new Set(['class', 'style']),
-                HR: new Set(['class', 'style']),
-                MARK: new Set(['class', 'style']),
-                ABBR: new Set(['class', 'style', 'title']),
+                H1: new Set(['class', 'style', 'id']),
+                H2: new Set(['class', 'style', 'id']),
+                H3: new Set(['class', 'style', 'id']),
+                H4: new Set(['class', 'style', 'id']),
+                IFRAME: new Set(['src', 'width', 'height', 'loading', 'allowfullscreen', 'class', 'style', 'referrerpolicy', 'frameborder', 'id']),
+                IMG: new Set(['src', 'alt', 'class', 'style', 'id', 'onclick', 'loading', 'width', 'height']),
+                P: new Set(['class', 'style', 'id']),
+                PRE: new Set(['class', 'style', 'id']),
+                SPAN: new Set(['class', 'style', 'title', 'id']),
+                TABLE: new Set(['class', 'style', 'id']),
+                TBODY: new Set(['class', 'style', 'id']),
+                TD: new Set(['class', 'style', 'colspan', 'rowspan', 'id']),
+                TH: new Set(['class', 'style', 'colspan', 'rowspan', 'id']),
+                THEAD: new Set(['class', 'style', 'id']),
+                TR: new Set(['class', 'style', 'id']),
+                UL: new Set(['class', 'style', 'id']),
+                OL: new Set(['class', 'style', 'id']),
+                LI: new Set(['class', 'style', 'id']),
+                SUP: new Set(['class', 'style', 'title', 'id']),
+                SUB: new Set(['class', 'style', 'title', 'id']),
+                EM: new Set(['class', 'style', 'id']),
+                I: new Set(['class', 'style', 'id']),
+                B: new Set(['class', 'style', 'id']),
+                SMALL: new Set(['class', 'style', 'id']),
+                STRONG: new Set(['class', 'style', 'id']),
+                S: new Set(['class', 'style', 'id']),
+                DEL: new Set(['class', 'style', 'id']),
+                HR: new Set(['class', 'style', 'id']),
+                MARK: new Set(['class', 'style', 'id']),
+                ABBR: new Set(['class', 'style', 'title', 'id']),
                 MATH: mathAttrs,
                 ANNOTATION: mathAttrs,
                 SEMANTICS: mathAttrs,
@@ -11481,14 +11507,14 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                     const name = attr.name.toLowerCase();
                     const value = attr.value;
                     const tagAllowedAttrs = allowedAttrs[tag] || new Set();
-                    const isAllowedAttr = tagAllowedAttrs.has(attr.name);
-                    const isEventHandler = name.startsWith('on');
+                    const isAllowedAttr = tagAllowedAttrs.has(attr.name) || name.startsWith('data-');
+                    const isEventHandler = name.startsWith('on') && !tagAllowedAttrs.has(attr.name);
                     if (!isAllowedAttr || isEventHandler) {
                         node.removeAttribute(attr.name);
                         continue;
                     }
 
-                    if ((name === 'href' || name === 'src') && /^(?:javascript|data|vbscript):/i.test(value)) {
+                    if ((name === 'href' || name === 'src') && (/^(?:javascript|vbscript):/i.test(value) || (/^data:/i.test(value) && !/^data:image\/(?:png|jpeg|webp|gif|svg\+xml);base64,/i.test(value)))) {
                         node.removeAttribute(attr.name);
                         continue;
                     }
@@ -11507,7 +11533,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                         break;
                     }
 
-                    if (tag === 'IMG' && name === 'src' && !isSafeAssistantUrl(value)) {
+                    if (tag === 'IMG' && name === 'src' && !value.startsWith('data:image/') && !isSafeAssistantUrl(value)) {
                         node.remove();
                         break;
                     }
