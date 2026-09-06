@@ -4695,8 +4695,43 @@ async function handleUrlGroundedExtractionRequest(userText) {
     return true;
 }
 
-function queueApiReply(intent, data = {}, fallbackText = '') {
-    void prepareApiReply(intent, data, fallbackText);
+const IMAGE_GEN_NEGATIVE_REGEX = /\b(?:how\s+(?:to|can\s+i|do\s+(?:i|we|cameras|lenses|computers|eyes))\s+(?:draw|create|make|generate|paint|render)|explain\s+how\b|tell\s+me\s+how\b|tutorial\s+on\b|guide\s+to\b|learn\s+how\s+to\b|chart|graph|diagram|table|conclusion|flowchart|comparison|schema|wireframe|architecture|uml|draw\s+a\s+(?:conclusion|parallel|distinction|comparison|boundary|line\s+between)|how\s+(?:cameras|lenses|mirrors|eyes|telescopes)\s+form\s+(?:an?\s+)?image|explain\s+image\s+formation)\b/i;
+
+const IMAGE_GEN_POSITIVE_PATTERNS = [
+    /^\/(?:image|img|draw|art)\b/i,
+    /^(?:(?:hey|hi|hello)\s+)?(?:(?:bot|jarvis|ai|assistant)\s*,?\s+)?(?:can\s+you\s+(?:please\s+)?|could\s+you\s+(?:please\s+)?|please\s+|i\s+(?:want|need)\s+(?:you\s+to\s+)?(?:to\s+)?|help\s+me\s+)?(?:generate|create|render|make|draw|paint|sketch|produce)\s+(?:me\s+)?(?:an?\s+)?(?:ai\s+)?(?:image|picture|photo|photograph|drawing|painting|illustration|artwork|wallpaper|portrait|graphic|visual)(?:\s+(?:of|showing|depicting|with|for|about|featuring)|\s*[:-])\s*/i,
+    /^(?:(?:hey|hi|hello)\s+)?(?:(?:bot|jarvis|ai|assistant)\s*,?\s+)?(?:can\s+you\s+(?:please\s+)?|could\s+you\s+(?:please\s+)?|please\s+)?(?:show\s+me|display|give\s+me)\s+(?:an?\s+)?(?:image|picture|photo|photograph|drawing|painting|illustration|artwork)\s+(?:of|showing|depicting|with|for|about|featuring)\s+/i,
+    /^(?:(?:hey|hi|hello)\s+)?(?:(?:bot|jarvis|ai|assistant)\s*,?\s+)?(?:can\s+you\s+(?:please\s+)?|could\s+you\s+(?:please\s+)?|please\s+)?(?:draw|paint|sketch)\s+(?:me\s+)?/i,
+    /^(?:(?:hey|hi|hello)\s+)?(?:(?:bot|jarvis|ai|assistant)\s*,?\s+)?(?:can\s+you\s+(?:please\s+)?|could\s+you\s+(?:please\s+)?|please\s+)?(?:an?\s+)?(?:image|picture|photo|drawing|illustration|artwork)\s+(?:of|showing|depicting)\s+/i,
+    /^(?:(?:hey|hi|hello)\s+)?(?:(?:bot|jarvis|ai|assistant)\s*,?\s+)?i\s+(?:want|need)\s+(?:an?\s+)?(?:image|picture|photo|illustration|drawing|artwork)\s+(?:of|showing|depicting|with)\s+/i
+];
+
+function isImageGenerationIntent(text) {
+    if (globalThis.JarvisFrontendRouting?.isImageGenerationIntent) {
+        return globalThis.JarvisFrontendRouting.isImageGenerationIntent(text);
+    }
+    const raw = String(text || '').trim();
+    if (!raw) return false;
+    if (/^\/(?:image|img|draw|art)\b/i.test(raw)) return true;
+    if (IMAGE_GEN_NEGATIVE_REGEX.test(raw)) return false;
+    return IMAGE_GEN_POSITIVE_PATTERNS.some(pat => pat.test(raw));
+}
+
+function extractImagePrompt(text) {
+    if (globalThis.JarvisFrontendRouting?.extractImagePrompt) {
+        return globalThis.JarvisFrontendRouting.extractImagePrompt(text);
+    }
+    let raw = String(text || '').trim();
+    if (!raw) return '';
+    if (/^\/(?:image|img|draw|art)\s*/i.test(raw)) {
+        return raw.replace(/^\/(?:image|img|draw|art)\s*/i, '').replace(/[?!.]+$/, '').trim();
+    }
+    for (const pat of IMAGE_GEN_POSITIVE_PATTERNS.slice(1)) {
+        if (pat.test(raw)) {
+            return raw.replace(pat, '').replace(/[?!.]+$/, '').trim();
+        }
+    }
+    return raw.replace(/[?!.]+$/, '').trim();
 }
 
 function isLikelyLocationOrTravelQuery(text) {
@@ -10514,9 +10549,10 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
         }
 
         async function handleImageGenerationRequest(promptText, options = {}) {
-            const rawPrompt = String(promptText || '').replace(/^\/(?:image|img|draw|art)\s*/i, '').trim();
-            if (!rawPrompt) {
-                addChatMessage('Please provide a description of what you want to create (e.g. `/image a cosmic nebulae with crystalline asteroids`).', false);
+            const cleanPrompt = (typeof extractImagePrompt === 'function' ? extractImagePrompt(promptText) : '') ||
+                String(promptText || '').replace(/^\/(?:image|img|draw|art)\s*/i, '').replace(/[?!.]+$/, '').trim();
+            if (!cleanPrompt) {
+                addChatMessage('Please provide a description of what you want to create (e.g. `generate an image of a cosmic nebula`).', false);
                 return;
             }
 
@@ -10524,16 +10560,26 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             const aspectRatio = options.aspectRatio || '1:1';
             const cardId = 'img-card-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
 
+            let width = 512;
+            let height = 512;
+            if (aspectRatio === '16:9') { width = 768; height = 432; }
+            else if (aspectRatio === '9:16') { width = 432; height = 768; }
+            else if (aspectRatio === '4:3') { width = 640; height = 480; }
+            else if (aspectRatio === '3:4') { width = 480; height = 640; }
+
+            const seed = Math.floor(Math.random() * 1000000);
+            const negPrompt = encodeURIComponent('text,watermark,words,letters,signature,typography,lowres,blurry');
+            const directUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(cleanPrompt)}?width=${width}&height=${height}&model=turbo&negative_prompt=${negPrompt}&nologo=true&seed=${seed}`;
+
             const cardHtml = `
-<div id="${cardId}" class="image-gen-card" data-prompt="${escapeHtml(rawPrompt)}" data-aspect-ratio="${escapeHtml(aspectRatio)}">
+<div id="${cardId}" class="image-gen-card" data-prompt="${escapeHtml(cleanPrompt)}" data-aspect-ratio="${escapeHtml(aspectRatio)}">
     <div class="image-gen-viewport" data-ratio="${escapeHtml(aspectRatio)}">
-        <img id="${cardId}-img" class="image-gen-img hidden" alt="${escapeHtml(rawPrompt)}" onclick="window.openImageLightboxFromCard('${cardId}')" />
+        <img id="${cardId}-img" class="image-gen-img hidden" alt="${escapeHtml(cleanPrompt)}" onclick="window.openImageLightboxFromCard('${cardId}')" />
         <div id="${cardId}-loader" class="image-gen-loader-overlay">
             <div class="image-gen-spinner"></div>
-            <div id="${cardId}-status" class="image-gen-status-text">Initializing generator...</div>
-            <div id="${cardId}-substatus" class="image-gen-status-sub">Checking WebGPU acceleration</div>
+            <div id="${cardId}-status" class="image-gen-status-text">Generating image...</div>
             <div class="image-gen-progress-bar-bg">
-                <div id="${cardId}-progress" class="image-gen-progress-bar-fill" style="width: 15%"></div>
+                <div id="${cardId}-progress" class="image-gen-progress-bar-fill" style="width: 45%"></div>
             </div>
         </div>
     </div>
@@ -10570,89 +10616,74 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             cardElem?.scrollIntoView({ behavior: 'smooth', block: 'end' });
 
             const statusEl = document.getElementById(`${cardId}-status`);
-            const substatusEl = document.getElementById(`${cardId}-substatus`);
             const progressEl = document.getElementById(`${cardId}-progress`);
             const loaderEl = document.getElementById(`${cardId}-loader`);
             const imgEl = document.getElementById(`${cardId}-img`);
             const actionsEl = document.getElementById(`${cardId}-actions`);
-            const engineBadgeEl = document.getElementById(`${cardId}-badge-engine`);
-            const timeBadgeEl = document.getElementById(`${cardId}-badge-time`);
 
+            let imageRevealed = false;
+            function revealImage(src, id) {
+                if (imageRevealed) return;
+                imageRevealed = true;
+                if (!imgEl || !cardElem) return;
+                imgEl.src = src;
+                imgEl.classList.remove('hidden');
+                cardElem.dataset.imageUrl = src;
+                cardElem.dataset.imageId = id || `img_${Date.now()}`;
+                if (loaderEl) loaderEl.style.display = 'none';
+                if (actionsEl) actionsEl.classList.remove('hidden');
+                saveToHistory(cleanPrompt, `[Generated Image: "${cleanPrompt}"]`, { recordContext: true });
+            }
+
+            if (imgEl) {
+                imgEl.onload = () => {
+                    if (progressEl) progressEl.style.width = '100%';
+                    revealImage(imgEl.src);
+                };
+                imgEl.onerror = () => {
+                    // Retry once with a fresh seed
+                    const retrySeed = Math.floor(Math.random() * 1000000);
+                    const retryUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(cleanPrompt)}?width=${width}&height=${height}&model=turbo&negative_prompt=${negPrompt}&nologo=true&seed=${retrySeed}`;
+                    imgEl.onerror = () => {
+                        if (statusEl) statusEl.textContent = 'Generation failed. Click retry.';
+                        if (actionsEl) {
+                            actionsEl.classList.remove('hidden');
+                            actionsEl.innerHTML = `
+                                <button type="button" class="image-gen-action-btn is-primary" onclick="window.regenerateImageCard('${cardId}')">
+                                    <span>Retry</span>
+                                </button>
+                            `;
+                        }
+                    };
+                    imgEl.src = retryUrl;
+                };
+
+                // Trigger browser image download immediately
+                imgEl.src = directUrl;
+            }
+
+            // In background, orchestrate generator worker for local IndexedDB caching if available
             try {
                 const generator = window.JarvisImageGenerator;
-                if (!generator) {
-                    throw new Error('Image generation engine is initializing. Please try again in a moment.');
-                }
-
-                const result = await generator.generateImage(
-                    rawPrompt,
-                    { aspectRatio },
-                    (p) => {
-                        if (!statusEl || !progressEl) return;
-                        if (p.phase === 'init') {
-                            statusEl.textContent = 'Initializing engine...';
-                            if (substatusEl) substatusEl.textContent = 'Allocating Web Worker memory';
-                            progressEl.style.width = '20%';
-                        } else if (p.phase === 'diffusion') {
-                            const step = p.step || 1;
-                            const total = p.totalSteps || 4;
-                            statusEl.textContent = `Diffusing image: step ${step}/${total}...`;
-                            if (substatusEl) substatusEl.textContent = 'Accelerated on WebGPU';
-                            progressEl.style.width = `${40 + (step / total) * 45}%`;
-                        } else if (p.phase === 'decode') {
-                            statusEl.textContent = 'Decoding visual latents...';
-                            progressEl.style.width = '90%';
-                        } else if (p.phase === 'fallback') {
-                            statusEl.textContent = 'Using zero-cost cloud engine...';
-                            if (substatusEl) substatusEl.textContent = 'Zero-cost client engine';
-                            progressEl.style.width = '25%';
-                        } else if (p.phase === 'download') {
-                            statusEl.textContent = 'Rendering AI image...';
-                            if (substatusEl) substatusEl.textContent = 'Downloading from cloud engine';
-                            progressEl.style.width = '65%';
+                if (generator?.generateImage) {
+                    generator.generateImage(cleanPrompt, {
+                        aspectRatio,
+                        width,
+                        height,
+                        seed
+                    }, (p) => {
+                        if (progressEl && p.percent) {
+                            progressEl.style.width = `${Math.min(95, p.percent)}%`;
                         }
-                    }
-                );
-
-                if (imgEl && cardElem) {
-                    const src = result.dataUrl || result.url;
-                    imgEl.src = src;
-                    imgEl.classList.remove('hidden');
-                    cardElem.dataset.imageUrl = src;
-                    cardElem.dataset.imageId = result.id || '';
-
-                    if (loaderEl) loaderEl.style.display = 'none';
-                    if (actionsEl) actionsEl.classList.remove('hidden');
-
-                    if (engineBadgeEl) {
-                        if (result.engine === 'webgpu') {
-                            engineBadgeEl.textContent = '⚡ WebGPU (Local)';
-                            engineBadgeEl.classList.add('is-webgpu');
-                        } else {
-                            engineBadgeEl.textContent = '🌐 Zero-Cost Cloud';
-                            engineBadgeEl.classList.remove('is-webgpu');
+                    }).then(result => {
+                        if (result?.dataUrl) {
+                            revealImage(result.dataUrl, result.id);
                         }
-                    }
-
-                    if (timeBadgeEl && result.durationMs) {
-                        timeBadgeEl.textContent = `${(result.durationMs / 1000).toFixed(1)}s`;
-                    }
+                    }).catch(err => {
+                        console.warn('[image-generation] Background worker caching notice:', err);
+                    });
                 }
-
-                saveToHistory(rawPrompt, `[Generated Image: "${rawPrompt}"]`, { recordContext: true });
-            } catch (err) {
-                console.error('Image generation error:', err);
-                if (statusEl) statusEl.textContent = 'Generation failed';
-                if (substatusEl) substatusEl.textContent = err.message || 'Error occurred';
-                if (actionsEl) {
-                    actionsEl.classList.remove('hidden');
-                    actionsEl.innerHTML = `
-                        <button type="button" class="image-gen-action-btn is-primary" onclick="window.regenerateImageCard('${cardId}')">
-                            <span>Retry</span>
-                        </button>
-                    `;
-                }
-            }
+            } catch (_) {}
         }
 
         window.handleImageGenerationRequest = handleImageGenerationRequest;
@@ -10678,13 +10709,26 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
         }
         window.regenerateImageCard = regenerateImageCard;
 
-        function downloadImageCard(cardId) {
+        async function downloadImageCard(cardId) {
             const card = document.getElementById(cardId);
             if (!card) return;
             const url = card.dataset.imageUrl;
             const prompt = card.dataset.prompt || 'ai-image';
             if (!url) return;
-            downloadUrlAsFile(url, `${slugifyPrompt(prompt)}.png`);
+            const filename = `${slugifyPrompt(prompt)}.jpg`;
+            if (url.startsWith('data:')) {
+                downloadUrlAsFile(url, filename);
+                return;
+            }
+            try {
+                const res = await fetch(url);
+                const blob = await res.blob();
+                const objUrl = URL.createObjectURL(blob);
+                downloadUrlAsFile(objUrl, filename);
+                setTimeout(() => URL.revokeObjectURL(objUrl), 5000);
+            } catch (_) {
+                downloadUrlAsFile(url, filename);
+            }
         }
         window.downloadImageCard = downloadImageCard;
 
@@ -20378,6 +20422,12 @@ function isWakeGreetingText(text) {
                 addChatMessage('Context cleared. Start a new topic whenever you are ready.', false);
                 return;
             }
+            if (isImageGenerationIntent(text)) {
+                const imgPrompt = extractImagePrompt(text);
+                logRoutingDebug('processCommand -> image_generation (direct)', text, { imgPrompt });
+                await handleImageGenerationRequest(imgPrompt || text);
+                return;
+            }
             if (['ambiguous_short_context', 'ambiguous_reference_context'].includes(contextResolution?.decisionReason)) {
                 const clarification = buildAmbiguousShortContextReply(contextResolution);
                 const chips = buildAmbiguousContextClarificationHtml(contextResolution);
@@ -23860,6 +23910,18 @@ function decideFrontendRoute(text, context = {}) {
     };
     if (globalThis.JarvisFrontendRouting?.decideFrontendRoute) {
         return globalThis.JarvisFrontendRouting.decideFrontendRoute(text, routeContext);
+    }
+    if (isImageGenerationIntent(text)) {
+        return {
+            route: 'image_generation',
+            reason: 'image_generation_intent',
+            prompt: extractImagePrompt(text),
+            risk: 'low_risk',
+            requiresSources: false,
+            minimalThinking: true,
+            speakResponse: false,
+            sourcePolicy: 'none'
+        };
     }
     const speakResponse = false;
     if (routeContext.webMode === 'off') {
