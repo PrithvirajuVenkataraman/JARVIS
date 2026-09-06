@@ -10496,38 +10496,35 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                     throw new Error('Image generation engine is initializing. Please try again in a moment.');
                 }
 
-                const result = await generator.generateImage({
-                    prompt: rawPrompt,
-                    aspectRatio,
-                    onProgress: (p) => {
+                const result = await generator.generateImage(
+                    rawPrompt,
+                    { aspectRatio },
+                    (p) => {
                         if (!statusEl || !progressEl) return;
-                        if (p.stage === 'worker_init') {
+                        if (p.phase === 'init') {
                             statusEl.textContent = 'Initializing engine...';
                             if (substatusEl) substatusEl.textContent = 'Allocating Web Worker memory';
                             progressEl.style.width = '20%';
-                        } else if (p.stage === 'model_load') {
-                            statusEl.textContent = 'Loading local weights...';
-                            if (substatusEl) substatusEl.textContent = 'Cached in browser storage';
-                            progressEl.style.width = '35%';
-                        } else if (p.stage === 'webgpu_diffuse') {
+                        } else if (p.phase === 'diffusion') {
                             const step = p.step || 1;
                             const total = p.totalSteps || 4;
                             statusEl.textContent = `Diffusing image: step ${step}/${total}...`;
                             if (substatusEl) substatusEl.textContent = 'Accelerated on WebGPU';
                             progressEl.style.width = `${40 + (step / total) * 45}%`;
-                        } else if (p.stage === 'latent_decode') {
+                        } else if (p.phase === 'decode') {
                             statusEl.textContent = 'Decoding visual latents...';
                             progressEl.style.width = '90%';
-                        } else if (p.stage === 'fallback_fetch') {
-                            statusEl.textContent = 'Generating visual canvas...';
+                        } else if (p.phase === 'fallback') {
+                            statusEl.textContent = 'Using zero-cost cloud engine...';
                             if (substatusEl) substatusEl.textContent = 'Zero-cost client engine';
+                            progressEl.style.width = '25%';
+                        } else if (p.phase === 'download') {
+                            statusEl.textContent = 'Rendering AI image...';
+                            if (substatusEl) substatusEl.textContent = 'Downloading from cloud engine';
                             progressEl.style.width = '65%';
-                        } else if (p.stage === 'complete') {
-                            statusEl.textContent = 'Finalizing rendering...';
-                            progressEl.style.width = '100%';
                         }
                     }
-                });
+                );
 
                 if (imgEl && cardElem) {
                     const src = result.dataUrl || result.url;
