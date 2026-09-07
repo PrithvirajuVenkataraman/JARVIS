@@ -142,9 +142,10 @@ export function classifyInput(message, pending = null, activeThread = null) {
             !/^(?:what|who|how|why|which|define|explain|tell me what)\b/i.test(originalMessage)
         )
     );
-    const hasFollowUpLead = /^(?:show examples?|examples?|more|continue|explain further|further|tell me more|what about|how about|then what|what next|pros and cons|difference|differences|compare|cost|price|details)\b/i.test(lower);
+    const hasFollowUpLead = /^(?:show examples?|examples?|more(?: details| info)?|continue(?: speaking| reading)?|explain (?:further|more|simply|it)|tell (?:me )?more|expand(?: on that)?|elaborate|what about|how about|then what|what next|what else|pros and cons|difference|differences|compare|cost|price|details|break that down|go deeper)\b/i.test(lower);
     const hasDefiniteAspect = /\b(?:the|its|their)\s+[a-z]{3,}\b/i.test(lower);
-    const isFollowUp = isCorrection || isModification || isPlaceRelativeFollowUp || hasFollowUpLead || (hasAnaphoricReference && (vectorCosineSimilarity(vec, FOLLOWUP_VECTOR) >= 0.28 || tokens.length <= 8)) || (hasDefiniteAspect && Boolean(activeThread) && tokens.length <= 8) || vectorCosineSimilarity(vec, FOLLOWUP_VECTOR) >= 0.35;
+    const isUltraShortFollowUp = Boolean(activeThread) && /^(?:why|how|when|where|who|what next|what else|and then)\??$/i.test(lower.trim());
+    const isFollowUp = isCorrection || isModification || isPlaceRelativeFollowUp || hasFollowUpLead || isUltraShortFollowUp || (hasAnaphoricReference && (vectorCosineSimilarity(vec, FOLLOWUP_VECTOR) >= 0.28 || tokens.length <= 8)) || (hasDefiniteAspect && Boolean(activeThread) && tokens.length <= 8) || vectorCosineSimilarity(vec, FOLLOWUP_VECTOR) >= 0.35;
     const pendingMatch = pending ? matchesPending(originalMessage, pending) : false;
     const hasSubstantiveIntent = tokens.length >= 1 && !isAcknowledgement;
     const startsClearRequest = /^(?:who|what|when|where|why|how|do|can|are|will|explain|tell|give|show|plan|create|write|compare|calculate|translate|remember|open|start)\b/i.test(originalMessage);
@@ -154,25 +155,11 @@ export function classifyInput(message, pending = null, activeThread = null) {
         ? countOverlap(tokens, tokenize(`${activeThread.topic || ''} ${activeThread.entity || ''}`))
         : 0;
     const looksLikeNamedTopic = looksLikeStandaloneNamedTopic(originalMessage, tokens);
-    const ambiguousShortContext = Boolean(activeThread) &&
-        !pending &&
-        !isCancel &&
-        !isSetting &&
-        !isFeatureCommand &&
-        !isStandaloneLiveRequest &&
-        !isStandaloneCapabilityQuestion &&
-        !isExplicitSwitch &&
-        !isFollowUp &&
-        !isAcknowledgement &&
-        !startsClearRequest &&
-        !looksLikeNamedTopic &&
-        tokens.length > 0 &&
-        tokens.length <= 3 &&
-        topicOverlap === 0 &&
-        hasAnaphoricReference;
+    const ambiguousShortContext = false;
     const clearNewIntent = !isCancel &&
         !isSetting &&
         hasSubstantiveIntent &&
+        !isUltraShortFollowUp &&
         (
             isExplicitSwitch ||
             isFeatureCommand ||
@@ -526,16 +513,29 @@ function primaryIntentForDecision(decisionReason) {
     }
 }
 
+const NON_PLACE_TARGETS = /^(?:it|its|this|that|these|those|he|him|his|she|her|hers|they|them|their|theirs|me|my|mine|us|our|ours|you|your|yours|what|which|who|whom|where|when|why|how|here|there|now|then|all|both|each|doing|do|know|learn|see|ask|say|work|begin|start|happen|details|example|examples|more|further)$/i;
+
 function hasExplicitPlaceMention(text) {
     const raw = cleanText(text);
     if (!raw) return false;
-    // "nearby beaches in Goa" / "tourist places near Manali" already name a place.
-    if (/\b(?:in|at|near|around|to|for)\s+[A-Za-z][A-Za-z\s.'-]{1,40}$/i.test(raw)) return true;
+    const prepMatch = raw.match(/\b(?:in|at|near|around|to|for)\s+([A-Za-z][A-Za-z\s.'-]{0,40})$/i);
+    if (prepMatch) {
+        const candidate = prepMatch[1].trim();
+        const firstWord = candidate.split(/\s+/)[0].replace(/[?.!,;]+$/g, '');
+        if (NON_PLACE_TARGETS.test(firstWord)) return false;
+        return true;
+    }
     if (/\b(?:in|at|near|around)\s+[A-Za-z][A-Za-z\s.'-]{1,40}\b/i.test(raw) &&
         !/\b(?:near me|nearby|near by|around there|around here)\b/i.test(raw)) {
         // Allow "near me" style relatives; otherwise treat as explicit place.
         const withoutRelative = raw.replace(/\b(?:nearby|near by|around there|around here|close by|near me)\b/gi, ' ');
-        return /\b(?:in|at|near|around|to|for)\s+[A-Za-z][A-Za-z][A-Za-z\s.'-]{0,40}\b/i.test(withoutRelative);
+        const midMatch = withoutRelative.match(/\b(?:in|at|near|around|to|for)\s+([A-Za-z][A-Za-z][A-Za-z\s.'-]{0,40})\b/i);
+        if (midMatch) {
+            const candidate = midMatch[1].trim();
+            const firstWord = candidate.split(/\s+/)[0].replace(/[?.!,;]+$/g, '');
+            if (NON_PLACE_TARGETS.test(firstWord)) return false;
+            return true;
+        }
     }
     return false;
 }
@@ -631,8 +631,11 @@ export function resolveFollowUpText(text, entity, state = null) {
         return `${raw} near ${anchor}`;
     }
     if (!isContextualExpansionCandidate(raw)) return pronounResolved;
+    if (/^(?:why|how|when|where|who)\??$/i.test(raw)) {
+        return `${raw.replace(/\?+$/, '')} regarding ${anchor}?`;
+    }
     // Avoid awkward expansions like "latest on it for SpaceX" when pronouns already resolved.
-    if (/^(?:more|continue|continue from earlier|explain further|tell me more|further|then what|what next)\b/i.test(raw)) {
+    if (/^(?:more|continue|continue from earlier|explain (?:further|more|simply|it)|tell (?:me )?more|further|then what|what next|what else|expand|elaborate)\b/i.test(raw)) {
         return `${raw} about ${anchor}`;
     }
     if (/^(?:latest|price|cost|news|mission|sources?|pros|cons|examples?|difference|differences)\b/i.test(raw)) {
@@ -645,6 +648,7 @@ export function resolveFollowUpText(text, entity, state = null) {
 function isContextualExpansionCandidate(text) {
     const raw = cleanText(text);
     if (!raw) return false;
+    if (/^(?:why|how|when|where|who)\??$/i.test(raw)) return true;
     if (/^(?:who|what|when|where|why|how|which)\s+(?:is|are|was|were)\s+[A-Za-z0-9][A-Za-z0-9 .'-]{2,}\??$/i.test(raw)) {
         return false;
     }
