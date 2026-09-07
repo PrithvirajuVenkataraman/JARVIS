@@ -245,4 +245,49 @@ test('ChatGPT-Grade Context Architecture Suite', async (t) => {
             delete process.env.GROQ_API_KEY;
         }
     });
+
+    await t.test('7. Multi-Turn Follow-Up Context Integration in chatGroq API', async () => {
+        const ORIGINAL_FETCH = globalThis.fetch;
+        process.env.GROQ_API_KEY = 'test-groq-key';
+
+        let receivedMessages = null;
+        globalThis.fetch = async (url, init) => {
+            const href = String(url);
+            if (href.includes('api.groq.com')) {
+                const body = JSON.parse(String(init?.body || '{}'));
+                receivedMessages = body?.messages;
+                return okJson({
+                    choices: [{
+                        message: {
+                            role: 'assistant',
+                            content: 'Superposition allows quantum particles to exist in multiple states simultaneously.'
+                        }
+                    }]
+                });
+            }
+            throw new Error(`unexpected fetch: ${href}`);
+        };
+
+        try {
+            const priorContext = [
+                { role: 'user', text: 'Explain quantum computing' },
+                { role: 'assistant', text: 'Quantum computing harnesses quantum mechanics to solve complex problems.' }
+            ];
+
+            const res = await callHandler(chatHandler, mockRequest('/api/chat-groq', {
+                message: 'How does superposition work in it?',
+                context: priorContext
+            }));
+
+            assert.equal(res.statusCode, 200);
+            assert.ok(Array.isArray(receivedMessages));
+            assert.ok(receivedMessages.some(m => m.content.includes('Explain quantum computing')));
+            assert.ok(receivedMessages.some(m => m.content.includes('Quantum computing harnesses')));
+            assert.equal(receivedMessages[receivedMessages.length - 1].role, 'user');
+            assert.equal(receivedMessages[receivedMessages.length - 1].content, 'How does superposition work in it?');
+        } finally {
+            globalThis.fetch = ORIGINAL_FETCH;
+            delete process.env.GROQ_API_KEY;
+        }
+    });
 });
