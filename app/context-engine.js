@@ -57,7 +57,7 @@ const DECISION_PROTOTYPE_VECTOR = textToEmbeddingVector('we will use selected ar
 const STANDALONE_LIVE_REQUEST = /\b(?:weather|temperature|forecast|bitcoin|btc|ethereum|eth|crypto|price now|rate now|score now|live score|ipl|nba|nfl|epl|earthquake|wildfire|flood|cyclone|hurricane|tsunami|latest news|breaking news|government news|stock price)\b/i;
 const PLACE_RELATIVE_FOLLOWUP = /\b(?:nearby|near by|around (?:there|here)|close by|tourist (?:places?|spots?|attractions?)|sightseeing|things to do|places to (?:visit|see)|what to see|where to go|hotels nearby|restaurants nearby|stay options|day trip|weekend trip)\b/i;
 const PLACE_CATEGORY_FOLLOWUP = /\b(?:hill stations?|beaches?|waterfalls?|temples?|parks?|lakes?|viewpoints?|attractions?)\b/i;
-const STANDALONE_CAPABILITY_QUESTION = /^(?:do|can|are|will)\s+you\b|^do\s+you\s+understand\s+[A-Za-z][A-Za-z\s-]{1,40}\??$/i;
+const STANDALONE_CAPABILITY_QUESTION = /^(?:do|can|are|will)\s+you\s+(?:have|support|speak|understand|know how to|know what|act as|remember)\b|^(?:what|which)\s+(?:features?|capabilities)\s+do\s+you\s+have\b|^do\s+you\s+understand\s+[A-Za-z][A-Za-z\s-]{1,40}\??$/i;
 const PROPER_NOUN_OR_PLACE = /^(?:[A-Z][A-Za-z0-9.'-]{1,}(?:\s+[A-Z][A-Za-z0-9.'-]{1,}){0,4}|[A-Za-z][A-Za-z0-9.'-]{2,}(?:\s+[A-Za-z][A-Za-z0-9.'-]{2,}){0,2})$/;
 const CLEAR_NEW_TOPIC_SHORT = /^(?:[A-Za-z][A-Za-z0-9.'-]{1,}(?:\s+[A-Za-z][A-Za-z0-9.'-]{1,}){0,2})$/;
 
@@ -142,14 +142,19 @@ export function classifyInput(message, pending = null, activeThread = null) {
             !/^(?:what|who|how|why|which|define|explain|tell me what)\b/i.test(originalMessage)
         )
     );
-    const hasFollowUpLead = /^(?:show examples?|examples?|more(?: details| info)?|continue(?: speaking| reading)?|explain (?:further|more|simply|it)|tell (?:me )?more|expand(?: on that)?|elaborate|what about|how about|then what|what next|what else|pros and cons|difference|differences|compare|cost|price|details|break that down|go deeper)\b/i.test(lower);
+    const hasFollowUpLead = /^(?:show examples?|examples?|more(?: details| info)?|continue(?: speaking| reading)?|explain (?:further|more|simply|it)|tell (?:me )?more|expand(?: on that)?|elaborate|what about|how about|then what|what next|what else|pros and cons|difference|differences|compare|cost|price|details|break that down|go deeper|give (?:some |an? )?(?:examples?|use cases?|code|sample)|can you (?:give|show|explain|elaborate))\b/i.test(lower);
     const hasDefiniteAspect = /\b(?:the|its|their)\s+[a-z]{3,}\b/i.test(lower);
     const isUltraShortFollowUp = Boolean(activeThread) && /^(?:why|how|when|where|who|what next|what else|and then)\??$/i.test(lower.trim());
-    const isFollowUp = isCorrection || isModification || isPlaceRelativeFollowUp || hasFollowUpLead || isUltraShortFollowUp || (hasAnaphoricReference && (vectorCosineSimilarity(vec, FOLLOWUP_VECTOR) >= 0.28 || tokens.length <= 8)) || (hasDefiniteAspect && Boolean(activeThread) && tokens.length <= 8) || vectorCosineSimilarity(vec, FOLLOWUP_VECTOR) >= 0.35;
+    const isContinuationOfActiveThread = Boolean(activeThread) && (
+        /\b(?:use cases?|real world|applications?|alternatives?|examples?|pros and cons|tradeoffs?|benefits?|drawbacks?|how to implement|why is that|can you explain|walk me through|in practice|code sample)\b/i.test(lower) ||
+        (hasAnaphoricReference) ||
+        (/^(?:how|why|can|what|where|which|do|does)\b/i.test(lower) && tokens.length <= 10 && !looksLikeStandaloneNamedTopic(originalMessage, tokens) && !isStandaloneLiveRequest)
+    );
+    const isFollowUp = isCorrection || isModification || isPlaceRelativeFollowUp || hasFollowUpLead || isUltraShortFollowUp || isContinuationOfActiveThread || (hasAnaphoricReference && (vectorCosineSimilarity(vec, FOLLOWUP_VECTOR) >= 0.28 || tokens.length <= 8)) || (hasDefiniteAspect && Boolean(activeThread) && tokens.length <= 8) || vectorCosineSimilarity(vec, FOLLOWUP_VECTOR) >= 0.35;
     const pendingMatch = pending ? matchesPending(originalMessage, pending) : false;
     const hasSubstantiveIntent = tokens.length >= 1 && !isAcknowledgement;
     const startsClearRequest = /^(?:who|what|when|where|why|how|do|can|are|will|explain|tell|give|show|plan|create|write|compare|calculate|translate|remember|open|start)\b/i.test(originalMessage);
-    const isStandaloneCapabilityQuestion = STANDALONE_CAPABILITY_QUESTION.test(originalMessage);
+    const isStandaloneCapabilityQuestion = !isFollowUp && STANDALONE_CAPABILITY_QUESTION.test(originalMessage);
     const topic = deriveTopic(originalMessage);
     const topicOverlap = activeThread
         ? countOverlap(tokens, tokenize(`${activeThread.topic || ''} ${activeThread.entity || ''}`))
