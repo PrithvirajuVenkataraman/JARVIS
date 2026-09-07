@@ -464,13 +464,47 @@ for (const followUpText of realWorldFollowUps) {
     );
 }
 
-// Ensure session context is preserved across new thread transitions
-const newTopicResult = conversationEngine.resolve({ message: 'Explain quantum computing' });
-assert.equal(newTopicResult.decisionReason, 'clear_new_intent');
-const contextAfterNewTopic = conversationEngine.buildContext();
-assert.ok(
-    contextAfterNewTopic.length >= 2,
-    `New thread must inherit recent session context turns (got ${contextAfterNewTopic.length})`
-);
+// Comprehensive multi-turn follow-up tests (quantum computing, preposition pronouns, ultra-short)
+const qcEngine = createConversationEngine();
+const qcInit = qcEngine.resolve({ message: 'Explain quantum computing' });
+assert.equal(qcInit.decisionReason, 'clear_new_intent');
+const qcThreadId = qcInit.activeThread.id;
+qcEngine.recordTurn({ role: 'user', text: 'Explain quantum computing', threadId: qcThreadId });
+qcEngine.recordTurn({ role: 'assistant', text: 'Quantum computing is a rapidly-emerging technology that harnesses the laws of quantum mechanics...', threadId: qcThreadId });
+
+// Preposition + pronoun ("in it" should NOT trigger false place mention)
+const qcFollow1 = qcEngine.resolve({ message: 'How does superposition work in it?' });
+assert.equal(qcFollow1.decisionReason, 'contextual_follow_up');
+assert.equal(qcFollow1.activeThread.id, qcThreadId);
+assert.ok(qcFollow1.resolvedMessage.toLowerCase().includes('quantum computing'));
+
+// Short follow-up ("explain more")
+const qcFollow2 = qcEngine.resolve({ message: 'explain more' });
+assert.equal(qcFollow2.decisionReason, 'contextual_follow_up');
+assert.equal(qcFollow2.activeThread.id, qcThreadId);
+assert.ok(qcFollow2.resolvedMessage.toLowerCase().includes('quantum computing'));
+
+// Ultra-short ("why?")
+const qcFollow3 = qcEngine.resolve({ message: 'why?' });
+assert.equal(qcFollow3.decisionReason, 'contextual_follow_up');
+assert.equal(qcFollow3.activeThread.id, qcThreadId);
+assert.ok(qcFollow3.resolvedMessage.toLowerCase().includes('quantum computing'));
+
+// Person entity follow-up test (Albert Einstein -> he / his)
+const personEngine = createConversationEngine();
+const personInit = personEngine.resolve({ message: 'Who was Albert Einstein?' });
+const personThreadId = personInit.activeThread.id;
+personEngine.recordTurn({ role: 'user', text: 'Who was Albert Einstein?', threadId: personThreadId });
+personEngine.recordTurn({ role: 'assistant', text: 'Albert Einstein was a German-born theoretical physicist...', threadId: personThreadId });
+
+const personFollow1 = personEngine.resolve({ message: 'When did he win the Nobel prize?' });
+assert.equal(personFollow1.decisionReason, 'contextual_follow_up');
+assert.equal(personFollow1.activeThread.id, personThreadId);
+assert.ok(personFollow1.resolvedMessage.toLowerCase().includes('albert einstein'));
+
+const personFollow2 = personEngine.resolve({ message: 'What was his biggest mistake?' });
+assert.equal(personFollow2.decisionReason, 'contextual_follow_up');
+assert.equal(personFollow2.activeThread.id, personThreadId);
+assert.ok(personFollow2.resolvedMessage.toLowerCase().includes('albert einstein'));
 
 console.log('context-engine-tests-ok');
