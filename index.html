@@ -21864,7 +21864,9 @@ Quick recap: ...
             
             else if (!isSqlDataQuery && (
                      cleanText.toLowerCase().match(/\b(itinerary|itenarary|itenary|vacation)\b/i) ||
-                     cleanText.toLowerCase().match(/\btrip\b/i) ||
+                     (cleanText.toLowerCase().match(/\b(?:plan(?:ning)?|take|taking|go on|book|organize)\s+(?:a\s+)?(?:trip|vacation|tour)\b/i) ||
+                      cleanText.toLowerCase().match(/\b(?:trip|vacation)\s+(?:to|in|itinerary|plan|advice)\b/i) ||
+                      cleanText.toLowerCase().match(/\b(?:travel|holiday)\s+trip\b/i)) ||
                      (cleanText.toLowerCase().match(/\bvisit\b/i) && cleanText.toLowerCase().match(/\b(to|in|for)\b/) && !/\b(website|site|page|doc|docs|link|url)\b/i.test(cleanText)) ||
                      (cleanText.toLowerCase().match(/\bplan\b/i) && cleanText.toLowerCase().match(/\b(travel|visit)\b/i))
                     )) {
@@ -22031,17 +22033,12 @@ If user asks for 2 days, provide both days with balanced pacing.`;
             
             
             else if (
-                
                 (cleanText.toLowerCase().match(/\b(food|cuisine|dishes?|specialt(y|ies))\s+(in|of|from)\s+\w+/i)) ||
-                
-                (cleanText.toLowerCase().match(/\w+\s+(food|cuisine|dishes?|specialt(y|ies))/i) && cleanText.split(' ').length <= 6) ||
-                
-                (cleanText.toLowerCase().match(/what\s+(to|should|can|do)\s+(eat|try|have)/i)) ||
-                
+                (cleanText.toLowerCase().match(/\w+\s+(food|cuisine|dishes?|specialt(y|ies))/i) && cleanText.split(' ').length <= 6 && !/\b(plant|plants|animal|animals|dog|cat|bird|dinosaurs?|cell|cells|bacteria|chain|web|poison|poisoning|safety|allergy|allergies|science|industry|bank|banks)\b/i.test(cleanText)) ||
+                (cleanText.toLowerCase().match(/what\s+(to|should|can|do)\s+(eat|try|have)\s+(?:in|at|around)\b/i)) ||
                 (cleanText.toLowerCase().match(/\b(famous|special|local|traditional|authentic|signature|must.try|typical)\b/i) && 
-                 cleanText.toLowerCase().match(/\b(food|dish|dishes|cuisine|eat)\b/i)) ||
-                
-                (cleanText.toLowerCase().match(/\b(food|cuisine)\b/i) && !cleanText.toLowerCase().match(/\b(restaurant|hotel|where|best)\b/i))
+                 cleanText.toLowerCase().match(/\b(food|dish|dishes|cuisine)\b/i)) ||
+                (cleanText.toLowerCase().match(/\b(local|regional|traditional|authentic|street)\s+(food|cuisine)\b/i) && !cleanText.toLowerCase().match(/\b(restaurant|hotel|where|best)\b/i))
             ) {
                 
                 
@@ -22093,9 +22090,24 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
                 return; 
             }
             
-            // Hotel/Transport queries - skip for SQL/data queries
-            const isHotelMatch = !isSqlDataQuery && cleanText.toLowerCase().match(/\b(hotel|hotels|stay|staying|accommodation|accommodations|lodge|resort|hostel|place to stay|places to stay|where can i stay|where should i stay)\b/i);
-            const isTransportMatch = !isSqlDataQuery && cleanText.toLowerCase().match(/\b(transport|transportation|bus|train|taxi|uber|ola|auto|rickshaw|metro|subway|getting around|get around|how to reach|how do i get|travel to)\b/i);
+            // Hotel/Transport queries - skip for SQL/data queries and non-travel queries
+            const isNonTravelTechnicalOrGeneralQuery = /\b(model|models|weights?|dataset|datasets|gpu|cpu|ai|neural|fitness|gym|exercise|workout|reload|save|complete|format|formatting|syntax|bug|bugs|error|errors|issue|issues|problem|problems|surfers?|sandwich|focus|focused|calm|awake|safe|healthy|alive|in touch|connected|tuned)\b/i.test(cleanText);
+            const isHotelMatch = !isSqlDataQuery && !isNonTravelTechnicalOrGeneralQuery && (
+                cleanText.toLowerCase().match(/\b(hotel|hotels|accommodation|accommodations|lodge|lodging|resort|hostel|place to stay|places to stay|where can i stay|where should i stay)\b/i) ||
+                cleanText.toLowerCase().match(/\b(?:stay|staying)\s+(?:at|in)\s+(?:a\s+)?(?:hotel|hostel|resort|lodge|airbnb|motel|homestay)\b/i) ||
+                cleanText.toLowerCase().match(/\b(?:book|reserve|find)\s+(?:a\s+)?(?:room|stay)\b/i)
+            );
+            const isTransportMatch = !isSqlDataQuery && !isNonTravelTechnicalOrGeneralQuery && (
+                cleanText.toLowerCase().match(/\b(public transport|public transportation|transit options?|local transport)\b/i) ||
+                cleanText.toLowerCase().match(/\b(taxi|cabs?|uber|ola|auto rickshaw|rickshaw)\b/i) ||
+                cleanText.toLowerCase().match(/\b(?:catch|take|book|board|ride)\s+(?:a\s+)?(?:bus|train|metro|subway|ferry|flight)\b/i) ||
+                cleanText.toLowerCase().match(/\b(?:bus|train|metro|subway)\s+(?:station|stations|ticket|tickets|fare|fares|timing|timings|schedule|schedules|route|routes)\b/i) ||
+                cleanText.toLowerCase().match(/\b(?:bus|train|metro|subway|transit|shuttle)\s+(?:to|towards|from|goes to)\b/i) ||
+                cleanText.toLowerCase().match(/\b(?:is there a|any|which)\s+(?:bus|train|metro|subway|transit|shuttle)\b/i) ||
+                cleanText.toLowerCase().match(/\bhow (?:do i get|to reach|can i get)\s+(?:to|around)\b/i) ||
+                cleanText.toLowerCase().match(/\bgetting around\s+(?:in|at)\s+[A-Za-z]+/i) ||
+                cleanText.toLowerCase().match(/\btransport(?:ation)?\s+(?:options?|in|to|for)\s+[A-Za-z]+/i)
+            );
 
             if (isHotelMatch || isTransportMatch) { 
 
