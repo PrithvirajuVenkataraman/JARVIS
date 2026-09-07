@@ -5269,11 +5269,14 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
         autoIndicatorShown = true;
     }, minimalThinking ? 0 : 80);
     try {
+        const intent = requestOptions?.intent && typeof requestOptions.intent === 'object'
+            ? requestOptions.intent
+            : getUserIntent(normalizedUserMessage);
         window.__intentContext = { 
-          allowHotels: intent.wantsHotels,
+          allowHotels: Boolean(intent?.wantsHotels),
           itineraryOnly:
-            intent.wantsItinerary &&
-            !intent.wantsHotels, 
+            Boolean(intent?.wantsItinerary) &&
+            !Boolean(intent?.wantsHotels), 
           __retried: false 
         };
 
@@ -5331,7 +5334,7 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
 
         // Multi-tier conversational context (Tier 1 verbatim window, Tier 2 semantic retrieval, Tier 3 rolling milestone summary)
         let multiTierContext = null;
-        if (!requestOptions?.grounding && typeof window.JarvisConversation?.buildMultiTierContext === 'function') {
+        if (typeof window.JarvisConversation?.buildMultiTierContext === 'function') {
             multiTierContext = window.JarvisConversation.buildMultiTierContext({
                 message: normalizedUserMessage,
                 maxRecentTurns: 10,
@@ -5340,14 +5343,12 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
             });
         }
 
-        let engineContext = requestOptions?.grounding
-            ? []
-            : (multiTierContext?.context || window.JarvisConversation?.buildContext({
-                maxTurns: 12,
-                maxContextChars: 9000
-            }) || []);
+        let engineContext = multiTierContext?.context || window.JarvisConversation?.buildContext({
+            maxTurns: 12,
+            maxContextChars: 9000
+        }) || [];
 
-        if (!engineContext.length && !requestOptions?.grounding && Array.isArray(conversationHistory) && conversationHistory.length) {
+        if (!engineContext.length && Array.isArray(conversationHistory) && conversationHistory.length) {
             const recentHistory = conversationHistory.slice(-8);
             engineContext = recentHistory.flatMap(item => [
                 item.user ? { role: 'user', text: String(item.user).trim() } : null,
@@ -19701,7 +19702,12 @@ ${snippets}`
 }
 
 async function handleUniversalEntityFactQuery(userText, liveIntent = null) { 
-    const pipeline = buildUniversalFactPipelineContext(userText, liveIntent);
+    const rawInput = String(userText || '').trim();
+    const contextResolution = window.JarvisConversation?.resolve?.({ message: rawInput });
+    const resolvedText = contextResolution?.resolvedMessage && contextResolution.resolvedMessage !== rawInput
+        ? contextResolution.resolvedMessage
+        : rawInput;
+    const pipeline = buildUniversalFactPipelineContext(resolvedText, liveIntent);
     const roleHolderQuery = isCurrentRoleHolderLiveQuery(pipeline.userText, pipeline.intent, pipeline.entityIntent);
     if (!isFactSearchEnabled() && !isPublicSourceSearchAllowedWhenLiveDisabled(pipeline.userText, pipeline.intent, pipeline.entityIntent)) {
         return publishLiveDisabledMessage(userText);
@@ -19951,7 +19957,12 @@ async function handleSportsFactQuery(userText, intent) {
 }
 
 async function handleLiveRetrievalQuery(userText, options = {}) {
-    const initialQuery = String(userText || '').trim();
+    const rawInput = String(userText || '').trim();
+    const contextResolution = window.JarvisConversation?.resolve?.({ message: rawInput });
+    const resolvedQuery = contextResolution?.resolvedMessage && contextResolution.resolvedMessage !== rawInput
+        ? contextResolution.resolvedMessage
+        : rawInput;
+    const initialQuery = resolvedQuery;
     const initialIntent = extractLiveQueryIntent(initialQuery);
     const initialEntityIntent = extractUniversalEntityIntent(initialQuery, initialIntent);
     const publicSourceAllowed = isPublicSourceSearchAllowedWhenLiveDisabled(initialQuery, initialIntent, initialEntityIntent);
@@ -20055,7 +20066,8 @@ Rules:
 - Keep it concise and practical.
 
 Snippets:
-${snippets}`
+${snippets}`,
+                        context: window.JarvisConversation?.buildContext?.({ maxTurns: 6 }) || []
                     })
                 });
                 if (summaryResponse && summaryResponse.ok) {
@@ -20591,7 +20603,7 @@ function isWakeGreetingText(text) {
                 await handleImageGenerationRequest(imgPrompt || text);
                 return;
             }
-            if (['ambiguous_short_context', 'ambiguous_reference_context'].includes(contextResolution?.decisionReason)) {
+            if (['ambiguous_short_context', 'ambiguous_reference_context'].includes(contextResolution?.decisionReason) && !contextResolution?.activeThread) {
                 const clarification = buildAmbiguousShortContextReply(contextResolution);
                 const chips = buildAmbiguousContextClarificationHtml(contextResolution);
                 addChatMessage(`${clarification}${chips}`, false);
@@ -26681,7 +26693,11 @@ function saveToHistory(userMessage, aiResponse, options = {}) {
     });
 
     const engine = window.JarvisConversation;
-    const threadId = engine?.getState?.().activeThreadId || '';
+    let threadId = engine?.getState?.().activeThreadId || '';
+    if (!threadId && engine?.resolve && userMessage) {
+        const initialRes = engine.resolve({ message: userMessage });
+        threadId = initialRes?.activeThread?.id || '';
+    }
     if (threadId && options?.recordContext !== false) {
         engine.recordTurn({ role: 'user', text: userMessage, threadId, turnId });
         engine.recordTurn({ role: 'assistant', text: aiResponse, threadId, turnId });
