@@ -148,17 +148,6 @@ export function renderMarkdown(rawText = '', options = {}) {
             };
         }
         const langLabel = block.lang ? escapeHtml(block.lang.toUpperCase()) : 'CODE';
-        const isExecutable = /^(javascript|js|html|htm|json)$/i.test(block.lang);
-        const runBtnHtml = isExecutable
-            ? `<button type="button" class="code-header-btn run-btn" onclick="runJarvisCodeSandbox('${blockId}')" title="Run code">
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
-                <span>Run</span>
-               </button>`
-            : '';
-        const canvasBtnHtml = `<button type="button" class="code-header-btn canvas-btn" onclick="openInCanvas('${blockId}')" title="Open in Artifact Canvas">
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
-            <span>Canvas</span>
-        </button>`;
         const copyBtnHtml = `<button type="button" class="code-header-btn" onclick="copyCodeBlock(this, '${blockId}')" title="Copy code">
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
             <span>Copy</span>
@@ -171,13 +160,10 @@ export function renderMarkdown(rawText = '', options = {}) {
                 <div class="assistant-md-code-header">
                     <span class="assistant-md-code-lang">${langLabel}</span>
                     <div class="assistant-md-code-actions">
-                        ${runBtnHtml}
-                        ${canvasBtnHtml}
                         ${copyBtnHtml}
                     </div>
                 </div>
                 <pre class="assistant-md-code-block"><code class="lang-${escapeHtml(block.lang || 'text')}">${highlighted}</code></pre>
-                <div id="output_${blockId}" class="code-output-drawer" style="display: none;"></div>
             </div>
         `;
     });
