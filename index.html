@@ -5929,6 +5929,8 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
 
         function ensureStartupGreeting(forceSpeak = false) {
             if (hasAnyRenderedChatMessages()) return false;
+            // When the modern empty state hero is present, it acts as the welcoming interface
+            if (document.getElementById('chat-empty-state') && !forceSpeak) return false;
             const welcomeOptions = [
                 'Hi.',
                 'Hello.',
@@ -6054,8 +6056,11 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             const emptyState = document.getElementById('chat-empty-state');
             if (!emptyState) return;
             const chatContainer = document.getElementById('chat-container');
-            const hasMessages = chatContainer && chatContainer.querySelectorAll('.chat-row').length > 0;
-            emptyState.classList.toggle('hidden', Boolean(hasMessages));
+            if (!chatContainer) return;
+            // The empty state hero stays visible until the user actually sends a message or a real conversation is loaded
+            const userMessages = chatContainer.querySelectorAll('.chat-bubble-user, [data-role="user"]');
+            const hasRealUserTurn = userMessages.length > 0;
+            emptyState.classList.toggle('hidden', hasRealUserTurn);
         }
 
         function initDragAndDropFileUpload() {
@@ -26732,8 +26737,10 @@ function isVisionTranslationIntent(text) {
 loadChatSessions();
 installChatSessionPersistenceGuards();
 initializeActiveChatSessionForStartup();
-ensureStartupGreeting(false);
-setTimeout(() => ensureStartupGreeting(false), 900);
+if (!document.getElementById('chat-empty-state')) {
+    ensureStartupGreeting(false);
+    setTimeout(() => ensureStartupGreeting(false), 900);
+}
 
 globalThis.sendTextInput = sendTextInput;
 globalThis.handleComposerInput = handleComposerInput;
