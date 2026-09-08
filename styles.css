@@ -7785,6 +7785,7 @@ body:not(.dark) .next-step-title {
     -webkit-backdrop-filter: blur(16px);
     border-bottom: 1px solid var(--ui-border);
     transition: border-color 0.2s ease, background 0.2s ease;
+    position: relative;
 }
 
 .header-left,
@@ -7792,14 +7793,28 @@ body:not(.dark) .next-step-title {
     display: flex;
     align-items: center;
     gap: 8px;
+    z-index: 2;
+}
+
+.header-center {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    pointer-events: none;
+    z-index: 1;
 }
 
 .header-brand-title {
-    font-size: 13px;
-    font-weight: 800;
-    letter-spacing: 0.08em;
-    color: var(--ui-text);
-    margin-left: 4px;
+    font-size: 13.5px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    color: #ffffff;
+    pointer-events: auto;
+    user-select: none;
+    margin: 0;
 }
 
 .header-icon-btn {
