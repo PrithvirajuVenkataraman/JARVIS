@@ -1,7 +1,7 @@
 const MAX_ATTACHMENTS = 6;
 const MAX_FILE_BYTES = 12 * 1024 * 1024;
 const MAX_EXTRACT_CHARS = 120000;
-const PDF_VISUAL_PAGE_LIMIT = 4;
+const PDF_VISUAL_PAGE_LIMIT = 10;
 const TEXT_EXTENSIONS = /\.(txt|md|markdown|json|jsonl|csv|tsv|xml|html|htm|css|js|mjs|cjs|ts|tsx|jsx|py|java|cpp|c|h|cs|go|rs|rb|php|sh|yaml|yml|toml|ini|log|sql|rtf)$/i;
 const IMAGE_EXTENSIONS = /\.(jpe?g|png|gif|webp|bmp|tiff?|heic|heif|avif)$/i;
 
@@ -9,6 +9,7 @@ const pendingAttachments = [];
 
 let pdfLoaderPromise = null;
 let jsZipLoaderPromise = null;
+let tesseractLoaderPromise = null;
 
 export function getPendingAttachments() {
     return pendingAttachments.slice();
@@ -84,6 +85,8 @@ export async function ingestAllForMessage(attachments = [], userText = '') {
         }
 
         const result = await ingestAttachmentWithFallback(attachment);
+        attachment.extractedText = String(result.text || '').trim();
+        attachment.ocrMethod = result.method || '';
         methods.push({
             name: attachment.name,
             method: result.method,
@@ -368,23 +371,48 @@ async function ingestOnServer(attachment, localResult = {}) {
 async function ingestViaVision(attachment) {
     const base64 = await resolveAttachmentBase64(attachment);
     const mimeType = normalizeImageMime(attachment.mimeType, attachment.name);
-    const data = await postJson('/api/vision', {
-        task: 'general_vision',
-        prompt: `Analyze and describe this image (${attachment.name}) in complete detail. Describe the subject, scene, objects, people, background, colors, layout, text (if any), and key visual features.`,
-        mimeType,
-        imageBase64: base64
-    }, { timeoutMs: 45000 });
-    const details = data?.details && typeof data.details === 'object' ? data.details : {};
-    const fullText = String(details?.fullText || '').trim();
-    const snippets = Array.isArray(details?.textDetected)
-        ? details.textDetected.map(item => String(item || '').trim()).filter(Boolean).join('\n').trim()
-        : '';
-    const text = fullText || snippets || String(data?.response || '').trim();
+    notifyAttachmentProgress(attachment, `Running cloud OCR on ${attachment.name}...`);
+    try {
+        const data = await postJson('/api/vision', {
+            task: 'text_extract',
+            prompt: `Transcribe all readable text, tables, and details from this image (${attachment.name}) in clean Markdown format. Preserve layout, line breaks, bullet points, and render all tables with markdown syntax (| Col 1 | Col 2 |).`,
+            mimeType,
+            imageBase64: base64
+        }, { timeoutMs: 45000 });
+        const details = data?.details && typeof data.details === 'object' ? data.details : {};
+        const fullText = String(details?.fullText || '').trim();
+        const snippets = Array.isArray(details?.textDetected)
+            ? details.textDetected.map(item => String(item || '').trim()).filter(Boolean).join('\n').trim()
+            : '';
+        const text = fullText || snippets || String(data?.response || '').trim();
+        if (text && text.length >= 10 && !/^no clear readable text/i.test(text)) {
+            return {
+                ok: true,
+                text: clipText(text),
+                method: 'vision_ocr',
+                provider: 'vision'
+            };
+        }
+    } catch (serverErr) {
+        console.warn('Server vision OCR failed, attempting Tesseract fallback:', serverErr);
+    }
+
+    // Client-side Tesseract.js fallback for offline or missing cloud keys
+    if (attachment?.file && typeof window !== 'undefined') {
+        notifyAttachmentProgress(attachment, `Running local OCR fallback (Tesseract)...`);
+        const tess = await extractTextViaTesseract(attachment.file, pct => {
+            notifyAttachmentProgress(attachment, `Local OCR: ${pct}%`);
+        });
+        if (tess.ok) {
+            return tess;
+        }
+    }
+
     return {
-        ok: Boolean(text && text.length >= 10),
-        text: clipText(text),
-        method: 'vision_analysis',
-        provider: 'vision'
+        ok: false,
+        text: '',
+        method: 'vision_ocr',
+        provider: 'none'
     };
 }
 
@@ -603,7 +631,9 @@ export function buildChatAttachmentMeta(attachments = []) {
             mimeType,
             size: Number(item?.size) || 0,
             kind,
-            previewUrl
+            previewUrl,
+            extractedText: String(item?.extractedText || item?.text || '').trim(),
+            ocrMethod: String(item?.ocrMethod || item?.method || '').trim()
         };
     });
 }
@@ -682,18 +712,12 @@ async function extractPdfViaVision(attachment) {
     const doc = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
     const pageCount = Math.min(doc.numPages || 0, PDF_VISUAL_PAGE_LIMIT);
 
-    // Process pages in parallel for speed (max 3 concurrent)
-    const pagePromises = [];
-    for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
-        pagePromises.push(processPdfPageVision(attachment, pdfjs, doc, pageNumber));
-    }
-
-    // Wait for all pages with a shorter overall timeout
-    const results = await Promise.allSettled(pagePromises);
     const parts = [];
-    for (const result of results) {
-        if (result.status === 'fulfilled' && result.value) {
-            parts.push(result.value);
+    for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
+        notifyAttachmentProgress(attachment, `Reading page ${pageNumber} of ${pageCount}...`);
+        const pageText = await processPdfPageVision(attachment, pdfjs, doc, pageNumber, pageCount);
+        if (pageText) {
+            parts.push(pageText);
         }
     }
 
@@ -707,42 +731,55 @@ async function extractPdfViaVision(attachment) {
     };
 }
 
-async function processPdfPageVision(attachment, pdfjs, doc, pageNumber) {
+async function processPdfPageVision(attachment, pdfjs, doc, pageNumber, totalPages = 1) {
     try {
         const page = await doc.getPage(pageNumber);
-        // Use lower scale (1.2 instead of 1.6) for faster rendering
-        const viewport = page.getViewport({ scale: 1.2 });
+        // High-resolution 2.0x DPI scale for crystal-clear character and table recognition
+        const viewport = page.getViewport({ scale: 2.0 });
         const canvas = document.createElement('canvas');
         canvas.width = Math.max(1, Math.floor(viewport.width));
         canvas.height = Math.max(1, Math.floor(viewport.height));
         const context = canvas.getContext('2d', { alpha: false });
         if (!context) return '';
         await page.render({ canvasContext: context, viewport }).promise;
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.75); // Lower quality for speed
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
         const base64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
         if (!base64) return '';
 
-        // Reduced timeout for per-page vision calls
-        const data = await postJson('/api/vision', {
-            task: 'general_vision',
-            prompt: `Analyze page ${pageNumber} of PDF "${attachment.name}" like a multimodal document reader. Extract all readable text, but also describe visible tables, charts, diagrams, screenshots, handwriting, layout, labels, stamps, signatures, and relationships between visual elements. Preserve important names, dates, emails, phone numbers, amounts, headings, and page structure. If a page is mostly visual, describe what is visible instead of saying no text was found.`,
-            mimeType: 'image/jpeg',
-            imageBase64: base64
-        }, { timeoutMs: 15000 }); // Reduced from 45000 to 15000
+        try {
+            const data = await postJson('/api/vision', {
+                task: 'text_extract',
+                prompt: `Transcribe all readable text from page ${pageNumber} of PDF "${attachment.name}". Preserve headings, bullet points, and render all tables in clean Markdown table format (| Col 1 | Col 2 |). For line items, capture labels, dates, and amounts accurately.`,
+                mimeType: 'image/jpeg',
+                imageBase64: base64
+            }, { timeoutMs: 25000 });
 
-        const details = data?.details && typeof data.details === 'object' ? data.details : {};
-        const fullText = String(details?.fullText || '').trim();
-        const snippets = Array.isArray(details?.textDetected)
-            ? details.textDetected.map(item => String(item || '').trim()).filter(Boolean).join('\n').trim()
-            : '';
-        const pageText = [fullText || snippets, String(data?.response || '').trim()]
-            .filter(Boolean)
-            .join('\n\n')
-            .trim();
+            const details = data?.details && typeof data.details === 'object' ? data.details : {};
+            const fullText = String(details?.fullText || '').trim();
+            const snippets = Array.isArray(details?.textDetected)
+                ? details.textDetected.map(item => String(item || '').trim()).filter(Boolean).join('\n').trim()
+                : '';
+            const pageText = [fullText || snippets, String(data?.response || '').trim()]
+                .filter(Boolean)
+                .join('\n\n')
+                .trim();
 
-        if (hasUsefulExtractedText(pageText) || pageText.length >= 40) {
-            return `Page ${pageNumber} visual observations:\n${pageText}`;
+            if (hasUsefulExtractedText(pageText) || pageText.length >= 40) {
+                return `Page ${pageNumber}:\n${pageText}`;
+            }
+        } catch (cloudErr) {
+            console.warn(`Cloud vision OCR failed for page ${pageNumber}, trying Tesseract:`, cloudErr);
         }
+
+        // Local Tesseract.js fallback for this page if offline or cloud keys missing
+        if (typeof window !== 'undefined') {
+            notifyAttachmentProgress(attachment, `Running local OCR on page ${pageNumber} of ${totalPages}...`);
+            const tess = await extractTextViaTesseract(canvas);
+            if (tess.ok) {
+                return `Page ${pageNumber} (Local OCR):\n${tess.text}`;
+            }
+        }
+
         return '';
     } catch (error) {
         console.warn(`PDF page ${pageNumber} vision OCR failed:`, error);
@@ -808,6 +845,70 @@ async function loadJsZip() {
         jsZipLoaderPromise = import('https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm').then(mod => mod.default || mod);
     }
     return jsZipLoaderPromise;
+}
+
+function notifyAttachmentProgress(attachment, message) {
+    if (typeof window !== 'undefined' && window.dispatchEvent) {
+        try {
+            window.dispatchEvent(new CustomEvent('jarvis-attachment-progress', {
+                detail: {
+                    id: attachment?.id || '',
+                    name: attachment?.name || '',
+                    message: String(message || '')
+                }
+            }));
+        } catch (_) {}
+    }
+}
+
+async function loadTesseractJs() {
+    if (!tesseractLoaderPromise) {
+        tesseractLoaderPromise = (async () => {
+            if (typeof globalThis !== 'undefined' && globalThis.Tesseract) {
+                return globalThis.Tesseract;
+            }
+            if (typeof document === 'undefined') {
+                throw new Error('DOM unavailable for Tesseract.js loading');
+            }
+            return new Promise((resolve, reject) => {
+                const script = document.createElement('script');
+                script.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+                script.async = true;
+                script.onload = () => {
+                    if (globalThis.Tesseract) resolve(globalThis.Tesseract);
+                    else reject(new Error('Tesseract global not available after script load'));
+                };
+                script.onerror = () => reject(new Error('Failed to load Tesseract.js from CDN'));
+                document.head.appendChild(script);
+            });
+        })();
+    }
+    return tesseractLoaderPromise;
+}
+
+async function extractTextViaTesseract(imageSource, onProgress) {
+    try {
+        const Tesseract = await loadTesseractJs();
+        const worker = await Tesseract.createWorker('eng', 1, {
+            logger: m => {
+                if (typeof onProgress === 'function' && m.status === 'recognizing text' && typeof m.progress === 'number') {
+                    onProgress(Math.round(m.progress * 100));
+                }
+            }
+        });
+        const ret = await worker.recognize(imageSource);
+        await worker.terminate();
+        const text = String(ret?.data?.text || '').trim();
+        return {
+            ok: Boolean(text && text.length >= 10),
+            text: clipText(text),
+            method: 'tesseract_client_ocr',
+            provider: 'tesseract'
+        };
+    } catch (err) {
+        console.warn('Tesseract client OCR fallback failed:', err);
+        return { ok: false, text: '', method: 'tesseract_client_ocr', error: String(err?.message || err) };
+    }
 }
 
 function decodeXmlEntities(value) {
