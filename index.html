@@ -502,33 +502,7 @@
             <p id="footer-disclaimer" class="composer-disclaimer">AI can make mistakes. Check important info.</p>
         </div>
     </div>
-    <div id="continuous-vision-preview-shell" class="continuous-vision-preview hidden" aria-live="polite">
-        <div class="continuous-vision-preview-header">
-            <span class="continuous-vision-pill">Live Vision</span>
-            <div class="continuous-vision-actions">
-                <button type="button" id="continuous-vision-rotate-btn" class="continuous-vision-minimize" onclick="rotateContinuousVisionPreview()" aria-label="Switch live camera">Switch Cam</button>
-                <button type="button" id="continuous-vision-minimize-btn" class="continuous-vision-minimize" onclick="toggleContinuousVisionMinimize()" aria-label="Minimize live vision preview" aria-pressed="false">Minimize</button>
-                <button type="button" class="continuous-vision-close" onclick="toggleContinuousVision()" aria-label="Close live vision preview">Close</button>
-            </div>
-        </div>
-        <video id="continuous-vision-video" class="continuous-vision-video hidden" autoplay playsinline muted></video>
-        <div id="paper-answer-overlay" class="paper-answer-overlay hidden" aria-live="polite"></div>
-        <div id="paper-answer-overlay-controls" class="paper-answer-overlay-controls hidden" aria-label="Paper answer overlay controls">
-            <button type="button" onclick="clearPaperAnswerOverlay()">Clear overlay</button>
-            <button type="button" onclick="refreshPaperAnswerOverlay()">Refresh answers</button>
-            <button type="button" onclick="copyPaperAnswerOverlay()">Copy answers</button>
-        </div>
-        <div id="continuous-vision-zoom-controls" class="continuous-vision-zoom-controls hidden" aria-label="Live vision zoom controls">
-            <button type="button" class="continuous-vision-zoom-btn" onclick="adjustContinuousVisionZoom(-0.25)" aria-label="Zoom out">-</button>
-            <input id="continuous-vision-zoom-slider" class="continuous-vision-zoom-slider" type="range" min="1" max="3" step="0.1" value="1" oninput="setContinuousVisionZoomFromSlider(this.value)" aria-label="Live vision zoom">
-            <button type="button" class="continuous-vision-zoom-btn" onclick="adjustContinuousVisionZoom(0.25)" aria-label="Zoom in">+</button>
-            <button type="button" class="continuous-vision-zoom-reset" onclick="resetContinuousVisionZoom()" aria-label="Reset live vision zoom">Reset</button>
-        </div>
-        <p id="continuous-vision-status" class="continuous-vision-status" role="status">Camera inactive</p>
-        <div id="continuous-vision-guidance" class="continuous-vision-guidance hidden" aria-hidden="true">Hold steady and point at the main object</div>
-        <p id="continuous-vision-hint" class="continuous-vision-hint">Camera is on. Ask: "What do you see?", "What animal is that?", or "What vehicle is this?"</p>
-    </div>
-    <canvas id="continuous-vision-canvas" class="hidden"></canvas>
+    <!-- Live camera preview removed (dedicated file attachment OCR pipeline active) -->
 
     <!-- Converse live overlay removed (Enterprise VTT mode active) -->
 
@@ -10579,16 +10553,13 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                         selectedText: grounding.selectedText || '',
                         sourceAnswer: grounding.sourceAnswer || grounding.selectedText || ''
                     });
-                } else if (workflow.id === 'fix_from_screen' && isContinuousVisionActive) {
-                    // Vision path will handle camera; fall through with workflow prompt.
+                } else if (workflow.id === 'fix_from_screen') {
+                    addChatMessage(`Attach a screenshot of the error or code first, then run this workflow.${stepLine}`, false);
+                    return true;
                 } else if (workflow.id === 'compare_docs') {
                     addChatMessage(`Attach 2 files first, then ask me to compare them.${stepLine}`, false);
                     return true;
                 }
-            }
-            if (workflow.id === 'fix_from_screen' && isContinuousVisionActive && !grounding) {
-                await handleContinuousVisionQuery(workflow.prompt);
-                return true;
             }
             const result = await askGeminiAI(workflow.prompt, {
                 intent: grounding ? 'selection_custom' : 'chat',
@@ -11591,24 +11562,42 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                     ? escapeHtml(window.JarvisAttachments?.formatBytes?.(item.size) || `${item.size} B`)
                     : '';
                 const kind = String(item?.kind || 'file').toLowerCase();
+                const ocrSnippet = item?.extractedText ? String(item.extractedText).trim() : '';
+                const ocrPreview = ocrSnippet ? `
+                    <details class="attachment-ocr-details">
+                        <summary class="attachment-ocr-summary">
+                            <span class="attachment-ocr-summary-icon" aria-hidden="true">📄</span>
+                            <span>View Extracted OCR Text (${ocrSnippet.length > 1000 ? Math.round(ocrSnippet.length / 1000) + 'k chars' : ocrSnippet.length + ' chars'})</span>
+                        </summary>
+                        <div class="attachment-ocr-body">
+                            <pre class="attachment-ocr-text">${escapeHtml(ocrSnippet)}</pre>
+                        </div>
+                    </details>` : '';
+
                 if (kind === 'image' && item?.previewUrl) {
                     return `
-                        <div class="chat-attachment-card is-image">
-                            <img src="${escapeHtml(item.previewUrl)}" alt="${name}" class="chat-attachment-image">
-                            <div class="chat-attachment-meta">
-                                <span class="chat-attachment-name">${name}</span>
-                                ${size ? `<span class="chat-attachment-size">${size}</span>` : ''}
+                        <div class="chat-attachment-card-wrapper">
+                            <div class="chat-attachment-card is-image">
+                                <img src="${escapeHtml(item.previewUrl)}" alt="${name}" class="chat-attachment-image">
+                                <div class="chat-attachment-meta">
+                                    <span class="chat-attachment-name">${name}</span>
+                                    ${size ? `<span class="chat-attachment-size">${size}</span>` : ''}
+                                </div>
                             </div>
+                            ${ocrPreview}
                         </div>`;
                 }
                 const icon = kind === 'pdf' ? 'PDF' : (kind === 'doc' ? 'DOC' : (kind === 'ppt' ? 'PPT' : 'FILE'));
                 return `
-                    <div class="chat-attachment-card">
-                        <span class="chat-attachment-badge" aria-hidden="true">${icon}</span>
-                        <div class="chat-attachment-meta">
-                            <span class="chat-attachment-name">${name}</span>
-                            ${size ? `<span class="chat-attachment-size">${size}</span>` : ''}
+                    <div class="chat-attachment-card-wrapper">
+                        <div class="chat-attachment-card">
+                            <span class="chat-attachment-badge" aria-hidden="true">${icon}</span>
+                            <div class="chat-attachment-meta">
+                                <span class="chat-attachment-name">${name}</span>
+                                ${size ? `<span class="chat-attachment-size">${size}</span>` : ''}
+                            </div>
                         </div>
+                        ${ocrPreview}
                     </div>`;
             }).join('');
             return `<div class="chat-attachment-list">${cards}</div>`;
@@ -11639,9 +11628,16 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
         function handleComposerAction(action) {
             closeComposerActionsMenu();
             const key = String(action || '').trim().toLowerCase();
-            if (key === 'vision') return toggleContinuousVision();
+            if (key === 'vision' || key === 'file-browse') return triggerComposerFilePicker('file-browse');
             if (key === 'help') return showHelpModal();
         }
+
+        window.addEventListener('jarvis-attachment-progress', event => {
+            const msg = event?.detail?.message;
+            if (msg) {
+                showThinkingIndicator(msg);
+            }
+        });
 
         function initComposerActionsMenu() {
             if (window.__composerActionsMenuInit) return;
@@ -20084,16 +20080,6 @@ function isWakeGreetingText(text) {
                 await handleMathCalculationRequest(compact);
                 return;
             }
-            if (isContinuousVisionQuestion(lower)) {
-                if (!isContinuousVisionActive) {
-                    const msg = 'Vision mode is off. Tap the vision icon first, then ask again.';
-                    addChatMessage(msg, false);
-                    saveToHistory(text, msg);
-                    return;
-                }
-                await handleContinuousVisionQuery(text);
-                return;
-            }
 
             if (isRoutingRegressionCommand(text)) {
                 const report = formatRoutingRegressionReport(runRoutingRegressionSuite());
@@ -26220,616 +26206,7 @@ function showError(message) {
     }, 5000);
 }
 
-// ============ CONTINUOUS VISION (WebRTC) ============
-let continuousVisionStream = null;
-let isContinuousVisionActive = false;
-let continuousVisionTrack = null;
-let isContinuousVisionMinimized = false;
-let continuousVisionRotationDeg = 0;
-let continuousVisionFacingMode = 'environment';
-let continuousVisionZoomState = { value: 1, min: 1, max: 3, step: 0.1, hardware: false };
-let paperAnswerOverlayState = {
-    items: [],
-    summary: '',
-    lastPrompt: '',
-    renderedAt: ''
-};
-
-function updateContinuousVisionStatus(message, state = 'info') {
-    const statusEl = document.getElementById('continuous-vision-status');
-    if (!statusEl) return;
-    statusEl.textContent = String(message || '').trim() || 'Camera inactive';
-    statusEl.dataset.state = String(state || 'info').trim();
-}
-
-function queueVisionRetry(text) {
-    const input = document.getElementById('text-input');
-    if (!input) return;
-    input.value = String(text || 'What do you see?').trim();
-    input.focus();
-    toggleSendButton();
-}
-
-function isPaperAnswerOverlayIntent(text) {
-    const t = String(text || '').toLowerCase();
-    return /\b(write|fill|complete|put|place|show)\b[\s\S]{0,50}\b(paper|worksheet|sheet|form|blank|field|answer|answers)\b/.test(t) ||
-        /\b(write answers here|write on the paper|fill this|fill every field|solve and write it|answer every field|complete this form)\b/.test(t);
-}
-
-function normalizePaperOverlayBox(item) {
-    const source = item?.box || item?.bbox || item?.normalizedBox || item?.placement?.box || null;
-    if (!source || typeof source !== 'object') return null;
-    const x = Number(source.x ?? source.left);
-    const y = Number(source.y ?? source.top);
-    const width = Number(source.width ?? source.w ?? (Number(source.right) - x));
-    const height = Number(source.height ?? source.h ?? (Number(source.bottom) - y));
-    if (![x, y, width, height].every(Number.isFinite)) return null;
-    const normalized = { x, y, width, height };
-    if (normalized.x > 1 || normalized.y > 1 || normalized.width > 1 || normalized.height > 1) {
-        normalized.x /= 100;
-        normalized.y /= 100;
-        normalized.width /= 100;
-        normalized.height /= 100;
-    }
-    if (normalized.width <= 0 || normalized.height <= 0) return null;
-    return {
-        x: Math.max(0.02, Math.min(0.92, normalized.x)),
-        y: Math.max(0.04, Math.min(0.9, normalized.y)),
-        width: Math.max(0.06, Math.min(0.8, normalized.width)),
-        height: Math.max(0.04, Math.min(0.32, normalized.height))
-    };
-}
-
-function normalizePaperAnswerOverlayItems(details = {}) {
-    const rawItems = Array.isArray(details?.overlayItems)
-        ? details.overlayItems
-        : (Array.isArray(details?.answers) ? details.answers : []);
-    return rawItems.map((item, index) => {
-        const label = String(item?.label || item?.field || item?.question || `Field ${index + 1}`).replace(/\s+/g, ' ').trim();
-        const answer = String(item?.answer || item?.value || item?.text || '').replace(/\s+/g, ' ').trim();
-        const confidenceValue = Number(item?.confidence);
-        const confidence = Number.isFinite(confidenceValue) ? confidenceValue : 0.65;
-        const lineNumber = Number(item?.lineNumber || item?.line || item?.order || index + 1);
-        return {
-            label: label || `Field ${index + 1}`,
-            answer: answer || 'Unclear',
-            confidence,
-            lineNumber: Number.isFinite(lineNumber) ? lineNumber : index + 1,
-            box: normalizePaperOverlayBox(item)
-        };
-    }).filter(item => item.answer);
-}
-
-function buildPaperAnswerOverlayText(items = paperAnswerOverlayState.items) {
-    return (items || []).map((item, index) => {
-        const label = String(item?.label || `Field ${index + 1}`).trim();
-        const answer = String(item?.answer || '').trim();
-        return `${index + 1}. ${label}: ${answer}`;
-    }).filter(Boolean).join('\n');
-}
-
-function renderPaperAnswerOverlay(details = {}, responseText = '', promptText = '') {
-    const overlay = document.getElementById('paper-answer-overlay');
-    const controls = document.getElementById('paper-answer-overlay-controls');
-    if (!overlay || !controls) return;
-    const items = normalizePaperAnswerOverlayItems(details);
-    paperAnswerOverlayState = {
-        items,
-        summary: String(details?.summary || responseText || '').trim(),
-        lastPrompt: String(promptText || paperAnswerOverlayState.lastPrompt || '').trim(),
-        renderedAt: new Date().toISOString()
-    };
-    if (!items.length) {
-        overlay.innerHTML = '';
-        overlay.className = 'paper-answer-overlay hidden';
-        controls.classList.add('hidden');
-        return;
-    }
-    const withBoxes = items.filter(item => item.box).length;
-    const useFallback = withBoxes < Math.ceil(items.length / 2);
-    overlay.className = `paper-answer-overlay${useFallback ? ' is-fallback' : ''}`;
-    overlay.innerHTML = items.map((item, index) => {
-        const lowConfidence = Number(item.confidence || 0) < 0.55;
-        const safeLabel = escapeHtml(item.label || `Field ${index + 1}`);
-        const safeAnswer = escapeHtml(item.answer || 'Unclear');
-        const rowTop = 10 + (index * Math.max(10, Math.min(17, 78 / Math.max(1, items.length))));
-        const box = item.box;
-        const left = box ? Math.min(88, Math.max(2, (box.x + box.width + 0.015) * 100)) : 8;
-        const top = box ? Math.min(88, Math.max(4, (box.y + Math.min(box.height, 0.08)) * 100)) : rowTop;
-        const style = useFallback ? '' : ` style="left:${left.toFixed(1)}%; top:${top.toFixed(1)}%;"`;
-        return `<div class="paper-answer-chip${lowConfidence ? ' is-low-confidence' : ''}"${style}><small>${safeLabel}</small>${safeAnswer}</div>`;
-    }).join('');
-    overlay.classList.remove('hidden');
-    controls.classList.remove('hidden');
-}
-
-function clearPaperAnswerOverlay() {
-    paperAnswerOverlayState = { items: [], summary: '', lastPrompt: '', renderedAt: '' };
-    const overlay = document.getElementById('paper-answer-overlay');
-    const controls = document.getElementById('paper-answer-overlay-controls');
-    if (overlay) {
-        overlay.innerHTML = '';
-        overlay.className = 'paper-answer-overlay hidden';
-    }
-    controls?.classList.add('hidden');
-}
-
-function refreshPaperAnswerOverlay() {
-    const prompt = paperAnswerOverlayState.lastPrompt || 'write the answers on the paper';
-    if (!isContinuousVisionActive) {
-        showTemporaryMessage('Turn on Live Vision first.');
-        return;
-    }
-    void handleContinuousVisionQuery(prompt);
-}
-
-function copyPaperAnswerOverlay() {
-    const text = buildPaperAnswerOverlayText();
-    if (!text) {
-        showTemporaryMessage('No overlay answers to copy.');
-        return;
-    }
-    copyToClipboard(text);
-    showTemporaryMessage('Paper answers copied.');
-}
-
-function addVisionRecoveryMessage(message, retryText = 'What do you see?') {
-    const safeMessage = escapeHtml(String(message || 'Vision analysis failed. Please try again.'));
-    const safeRetry = encodeURIComponent(String(retryText || 'What do you see?').trim());
-    addChatMessage(`
-        <div>
-            <p class="assistant-md-p">${safeMessage}</p>
-            <button type="button" class="memory-action-btn mt-2" onclick="queueVisionRetry(decodeURIComponent('${safeRetry}'))">Retry vision</button>
-        </div>
-    `, false, true);
-}
-
-function applyContinuousVisionRotation() {
-    const videoEl = document.getElementById('continuous-vision-video');
-    if (!videoEl) return;
-    const normalized = normalizeCameraRotation(continuousVisionRotationDeg);
-    const zoom = Number(continuousVisionZoomState.value || 1);
-    const transformParts = [];
-    if (normalized) transformParts.push(`rotate(${normalized}deg)`);
-    if (!continuousVisionZoomState.hardware && zoom > 1) transformParts.push(`scale(${zoom})`);
-    videoEl.style.transform = transformParts.length ? transformParts.join(' ') : 'none';
-    videoEl.style.transformOrigin = 'center center';
-}
-
-function syncContinuousVisionZoomSlider() {
-    const slider = document.getElementById('continuous-vision-zoom-slider');
-    if (!slider) return;
-    slider.min = String(continuousVisionZoomState.min);
-    slider.max = String(continuousVisionZoomState.max);
-    slider.step = String(continuousVisionZoomState.step);
-    slider.value = String(continuousVisionZoomState.value);
-}
-
-async function initializeContinuousVisionZoomForTrack(track) {
-    const capabilities = track?.getCapabilities?.() || {};
-    const settings = track?.getSettings?.() || {};
-    const zoomCap = capabilities.zoom;
-    const hasHardwareZoom = !!zoomCap && Number.isFinite(Number(zoomCap.min)) && Number.isFinite(Number(zoomCap.max)) && Number(zoomCap.max) > Number(zoomCap.min);
-    continuousVisionZoomState = {
-        value: 1,
-        min: hasHardwareZoom ? Number(zoomCap.min) : 1,
-        max: hasHardwareZoom ? Math.min(Number(zoomCap.max), 6) : 3,
-        step: hasHardwareZoom ? Number(zoomCap.step || 0.1) : 0.1,
-        hardware: hasHardwareZoom
-    };
-    if (hasHardwareZoom && Number.isFinite(Number(settings.zoom))) {
-        continuousVisionZoomState.value = Math.max(continuousVisionZoomState.min, Math.min(continuousVisionZoomState.max, Number(settings.zoom)));
-    }
-    syncContinuousVisionZoomSlider();
-    await applyContinuousVisionZoom();
-}
-
-async function applyContinuousVisionZoom() {
-    const track = continuousVisionStream?.getVideoTracks?.()[0] || null;
-    if (continuousVisionZoomState.hardware && track?.applyConstraints) {
-        await track.applyConstraints({ advanced: [{ zoom: continuousVisionZoomState.value }] }).catch(() => {
-            continuousVisionZoomState.hardware = false;
-        });
-    }
-    applyContinuousVisionRotation();
-    syncContinuousVisionZoomSlider();
-}
-
-function setContinuousVisionZoomFromSlider(value) {
-    continuousVisionZoomState.value = Math.max(continuousVisionZoomState.min, Math.min(continuousVisionZoomState.max, Number(value) || 1));
-    void applyContinuousVisionZoom();
-}
-
-function adjustContinuousVisionZoom(delta) {
-    setContinuousVisionZoomFromSlider((Number(continuousVisionZoomState.value) || 1) + Number(delta || 0));
-}
-
-function resetContinuousVisionZoom() {
-    setContinuousVisionZoomFromSlider(continuousVisionZoomState.min || 1);
-}
-
-function rotateContinuousVisionPreview() {
-    switchContinuousVisionCamera();
-}
-
-async function switchContinuousVisionCamera() {
-    if (!isContinuousVisionActive || !continuousVisionStream) return;
-    const videoEl = document.getElementById('continuous-vision-video');
-    const currentTrack = continuousVisionStream.getVideoTracks?.()[0] || null;
-    const currentFacing = getTrackFacingMode(currentTrack) || normalizeFacingMode(continuousVisionFacingMode);
-    const nextFacing = currentFacing === 'environment' ? 'user' : 'environment';
-
-    try {
-        const newStream = await requestCameraStreamForFacingMode(nextFacing);
-        const newTrack = newStream.getVideoTracks?.()[0] || null;
-        const actualFacing = getTrackFacingMode(newTrack) || nextFacing;
-        continuousVisionStream.getTracks().forEach(track => track.stop());
-        continuousVisionStream = newStream;
-        continuousVisionTrack = newTrack;
-        continuousVisionFacingMode = normalizeFacingMode(actualFacing);
-        if (videoEl) {
-            videoEl.srcObject = newStream;
-            await videoEl.play().catch(() => {});
-        }
-        continuousVisionRotationDeg = 0;
-        await initializeContinuousVisionZoomForTrack(newTrack);
-    } catch (_) {
-        continuousVisionRotationDeg = normalizeCameraRotation(continuousVisionRotationDeg + 90);
-        applyContinuousVisionRotation();
-    }
-}
-
-function setContinuousVisionMinimized(nextState) {
-    const previewShell = document.getElementById('continuous-vision-preview-shell');
-    const minimizeBtn = document.getElementById('continuous-vision-minimize-btn');
-    isContinuousVisionMinimized = Boolean(nextState);
-    previewShell?.classList.toggle('is-minimized', isContinuousVisionMinimized);
-    if (minimizeBtn) {
-        minimizeBtn.textContent = isContinuousVisionMinimized ? 'Expand' : 'Minimize';
-        minimizeBtn.setAttribute('aria-pressed', isContinuousVisionMinimized ? 'true' : 'false');
-        minimizeBtn.setAttribute('aria-label', isContinuousVisionMinimized ? 'Expand live vision preview' : 'Minimize live vision preview');
-    }
-}
-
-function toggleContinuousVisionMinimize() {
-    if (!isContinuousVisionActive) return;
-    setContinuousVisionMinimized(!isContinuousVisionMinimized);
-}
-
-async function toggleContinuousVision() {
-    const videoEl = document.getElementById('continuous-vision-video');
-    const previewShell = document.getElementById('continuous-vision-preview-shell');
-    const hintEl = document.getElementById('continuous-vision-hint');
-    const btn = document.getElementById('vision-toggle-btn');
-    if (!videoEl) {
-        showError('Vision preview element is missing from the page.');
-        return;
-    }
-    if (isContinuousVisionActive) {
-        if (continuousVisionStream) {
-            continuousVisionStream.getTracks().forEach(t => t.stop());
-        }
-        clearPaperAnswerOverlay();
-        clearVisionContext();
-        continuousVisionTrack = null;
-        videoEl.srcObject = null;
-        continuousVisionRotationDeg = 0;
-        continuousVisionZoomState = { value: 1, min: 1, max: 3, step: 0.1, hardware: false };
-        applyContinuousVisionRotation();
-        syncContinuousVisionZoomSlider();
-        videoEl.classList.add('hidden');
-        document.getElementById('continuous-vision-zoom-controls')?.classList.add('hidden');
-        setContinuousVisionMinimized(false);
-        previewShell?.classList.add('hidden');
-        updateContinuousVisionStatus('Camera inactive', 'info');
-        isContinuousVisionActive = false;
-        btn.classList.remove('bg-blue-100', 'text-blue-600', 'dark:bg-blue-900/30');
-        showTemporaryMessage('Continuous Vision deactivated.');
-    } else {
-        try {
-            updateContinuousVisionStatus('Requesting camera...', 'loading');
-            continuousVisionStream = await requestCameraStreamForFacingMode('environment');
-            videoEl.srcObject = continuousVisionStream;
-            videoEl.muted = true;
-            continuousVisionRotationDeg = 0;
-            applyContinuousVisionRotation();
-            videoEl.classList.remove('hidden');
-            setContinuousVisionMinimized(false);
-            if (hintEl) hintEl.textContent = 'Camera is on. Ask: "What do you see?", "What animal is that?", or "What vehicle is this?"';
-            await videoEl.play().catch(() => {});
-            await waitForContinuousVisionReady(1800);
-            previewShell?.classList.remove('hidden');
-            updateContinuousVisionStatus('Camera ready', 'ready');
-
-            const track = continuousVisionStream.getVideoTracks?.()[0] || null;
-            continuousVisionTrack = track;
-            continuousVisionFacingMode = getTrackFacingMode(track) || 'environment';
-            if (track?.applyConstraints) {
-                // Best-effort camera tuning for sharper OCR/object detection on phones.
-                await track.applyConstraints({
-                    advanced: [
-                        { focusMode: 'continuous' },
-                        { exposureMode: 'continuous' },
-                        { whiteBalanceMode: 'continuous' }
-                    ]
-                }).catch(() => {});
-            }
-            await initializeContinuousVisionZoomForTrack(track);
-            document.getElementById('continuous-vision-zoom-controls')?.classList.remove('hidden');
-
-            isContinuousVisionActive = true;
-            btn.classList.add('bg-blue-100', 'text-blue-600', 'dark:bg-blue-900/30');
-            showTemporaryMessage('Continuous Vision activated! Ask about the scene, an animal, a vehicle, or readable text.');
-        } catch (e) {
-            recentVisionError = String(e?.message || 'Camera access denied or unavailable.').slice(0, 180);
-            updateContinuousVisionStatus('Camera unavailable', 'error');
-            showError('Camera access denied or unavailable.');
-        }
-    }
-}
-
-function captureVisionFrame(options = {}) {
-    if (!isContinuousVisionActive) return null;
-    const videoEl = document.getElementById('continuous-vision-video');
-    const canvas = document.getElementById('continuous-vision-canvas');
-    if (!videoEl || !canvas || (videoEl.readyState || 0) < 2 || !(videoEl.videoWidth > 0) || !(videoEl.videoHeight > 0)) return null;
-    const ctx = canvas.getContext('2d', { alpha: false });
-    const sourceW = videoEl.videoWidth || 1280;
-    const sourceH = videoEl.videoHeight || 720;
-    // Cap resolution for faster upload without losing OCR readability.
-    const maxDim = Number(options.maxDim) > 0 ? Number(options.maxDim) : 1280;
-    const scale = Math.min(1, maxDim / Math.max(sourceW, sourceH));
-    const normalizedRotation = normalizeCameraRotation(continuousVisionRotationDeg);
-    const drawW = Math.max(480, Math.floor(sourceW * scale));
-    const drawH = Math.max(360, Math.floor(sourceH * scale));
-    const swap = normalizedRotation === 90 || normalizedRotation === 270;
-    canvas.width = swap ? drawH : drawW;
-    canvas.height = swap ? drawW : drawH;
-    if (canvas.width === 0 || canvas.height === 0) return null;
-    const captureZoom = continuousVisionZoomState.hardware ? 1 : Number(continuousVisionZoomState.value || 1);
-    drawVideoFrameWithRotation(ctx, videoEl, canvas.width, canvas.height, normalizedRotation, captureZoom);
-    const qualityScore = scoreCanvasFrameQuality(ctx, canvas.width, canvas.height);
-    if (qualityScore < 0.08) return null;
-    const jpegQuality = Number(options.jpegQuality) > 0 ? Number(options.jpegQuality) : 0.82;
-    const dataUrl = canvas.toDataURL('image/jpeg', jpegQuality);
-    return {
-        base64: dataUrl.split(',')[1],
-        qualityScore,
-        width: canvas.width,
-        height: canvas.height
-    };
-}
-
-function captureBestVisionFrame() {
-    const guidance = document.getElementById('continuous-vision-guidance');
-    if (guidance) {
-        guidance.classList.remove('hidden');
-        guidance.setAttribute('aria-hidden', 'false');
-        guidance.textContent = 'Hold steady...';
-    }
-    let best = null;
-    for (let i = 0; i < 3; i += 1) {
-        const frame = captureVisionFrame({
-            maxDim: i === 0 ? 1280 : 1100,
-            jpegQuality: 0.82
-        });
-        if (frame && (!best || frame.qualityScore > best.qualityScore)) {
-            best = frame;
-        }
-    }
-    if (guidance) {
-        guidance.classList.add('hidden');
-        guidance.setAttribute('aria-hidden', 'true');
-    }
-    return best?.base64 || null;
-}
-
-function updateContinuousVisionGuidance(message, visible = false) {
-    const guidance = document.getElementById('continuous-vision-guidance');
-    if (!guidance) return;
-    if (!visible) {
-        guidance.classList.add('hidden');
-        guidance.setAttribute('aria-hidden', 'true');
-        return;
-    }
-    guidance.textContent = String(message || 'Hold steady and point at the main object');
-    guidance.classList.remove('hidden');
-    guidance.setAttribute('aria-hidden', 'false');
-}
-
-async function waitForContinuousVisionReady(timeoutMs = 1600) {
-    const startedAt = Date.now();
-    const videoEl = document.getElementById('continuous-vision-video');
-    while (Date.now() - startedAt < timeoutMs) {
-        if (videoEl && (videoEl.readyState || 0) >= 2 && videoEl.videoWidth > 0 && videoEl.videoHeight > 0) {
-            return true;
-        }
-        await new Promise(resolve => setTimeout(resolve, 80));
-    }
-    return false;
-}
-
-function scoreCanvasFrameQuality(ctx, width, height) {
-    if (!ctx || width <= 0 || height <= 0) return 0;
-    const sampleW = Math.min(48, width);
-    const sampleH = Math.min(48, height);
-    let data;
-    try {
-        data = ctx.getImageData(Math.floor((width - sampleW) / 2), Math.floor((height - sampleH) / 2), sampleW, sampleH).data;
-    } catch (_) {
-        return 0.5;
-    }
-    let total = 0;
-    let variance = 0;
-    const pixels = data.length / 4;
-    const luminances = [];
-    for (let i = 0; i < data.length; i += 4) {
-        const lum = (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114);
-        luminances.push(lum);
-        total += lum;
-    }
-    const average = total / Math.max(1, pixels);
-    for (const lum of luminances) variance += Math.abs(lum - average);
-    const contrast = variance / Math.max(1, pixels);
-    // Reject near-black / near-white / flat frames.
-    if (average < 10 || average > 245) return 0;
-    if (contrast < 4) return Math.max(0, contrast / 40);
-    return Math.min(1, (contrast / 40) * (1 - Math.abs(average - 128) / 180));
-}
-
-
-function resolveContinuousVisionTask(text) {
-    const query = String(text || '');
-    if (isPaperAnswerOverlayIntent(query)) return 'paper_answer_overlay';
-    if (/\b(solve|calculate|evaluate|find x|equation|integral|derivative|differentiate|simplify|factor|algebra|trigonometry|calculus|math problem|word problem|step by step)\b/i.test(query)) {
-        return 'math_ocr_solve';
-    }
-    if (isVisionTranslationIntent(query)) return 'translate_to_english';
-    if (/\b(animal|animals|dog|cat|bird|pet|pets|species|breed|wildlife|horse|cow|elephant|tiger|lion|monkey|fish)\b/i.test(query)
-        || /\bwhat\s+(?:kind of\s+)?(?:animal|pet|species|breed)\b/i.test(query)) {
-        return 'animal_detect';
-    }
-    if (/\b(vehicle|vehicles|car|cars|bike|bicycle|motorcycle|bus|truck|van|scooter|auto rickshaw|autorickshaw)\b/i.test(query)
-        || /\bwhat\s+(?:kind of\s+)?(?:car|vehicle|bike|truck|bus)\b/i.test(query)) {
-        return 'object_detect';
-    }
-    if (/\b(what(?:'s| is)\s+(?:this|that|it|this part|that part)|what am i holding|what is in my hand|what do i have|why(?: is| does)?\s+(?:this|that|it)|why is it like this|why is this like this|what happened here|how did this happen|is this normal|is it safe|what should i do with this|identify this|explain this)\b/i.test(query)) {
-        return 'object_detect';
-    }
-    if (/\b(read|text|ocr|bill|receipt|invoice|sign|label|menu|document|what does it say|written)\b/i.test(query)) {
-        return 'text_extract';
-    }
-    return 'general_vision';
-}
-
-function buildContinuousVisionPrompt(text, visionTask) {
-    const query = String(text || '').trim();
-    const visionContext = isVisionContextFollowup(query) ? getActiveVisionContext() : null;
-    const contextNote = buildVisionContextNote(visionContext);
-    const contextSuffix = contextNote ? `\n\n${contextNote}` : '';
-    if (visionTask === 'paper_answer_overlay') {
-        return `Read the visible paper, worksheet, or form. Solve/fill every readable question or blank field the user is asking about, and return overlay-ready answers. If this appears to be a graded exam or active assessment, provide guidance/hints instead of direct final answers. User query: "${query}".${contextSuffix}`;
-    }
-    if (visionTask === 'math_ocr_solve') {
-        return `Read the math problem from the image and solve it accurately with clear steps. User query: "${query}".${contextSuffix}`;
-    }
-    if (visionTask === 'translate_to_english') {
-        return `Extract all readable text and translate it to English. User query: "${query}".${contextSuffix}`;
-    }
-    if (isWebsiteUiVisionIntent(query)) {
-        return `Identify the website, web app, mobile app, or UI shown in the image using only visible evidence. First use visible branding, logo, page title, header, or app chrome. If branding is unclear, inspect visible URL/address-bar/domain/tab text and extract the likely site or app name. Do not guess or use web search. If no brand or URL is visible, describe the UI normally and say the site name is not visible. User query: "${query}". Respond in 1-2 short sentences.${contextSuffix}`;
-    }
-    if (visionTask === 'animal_detect') {
-        return `Identify the animal(s) in the image. Name species or breed when visible. Focus on the animal, not background signs or printed text unless that text helps identify it. If the user asks why it looks or behaves a certain way, explain only visible condition, posture, environment, or likely species traits, and state uncertainty. User query: "${query}".${contextSuffix}`;
-    }
-    if (visionTask === 'object_detect') {
-        return `Identify the main object, part, product, living thing, device, vehicle, food, plant, or everyday item in the image. Answer broad object explanation questions such as "what is this", "why is it like this", "what is this part", and "what happened here" from visible evidence only. Name type/make/model only when supported by visible logo, text, hardware, shape, or distinctive features. Do not lead with unrelated background text. User query: "${query}".${contextSuffix}`;
-    }
-    if (visionTask === 'text_extract') {
-        return `Extract the readable text from the image accurately. User query: "${query}".${contextSuffix}`;
-    }
-    return `Describe the main scene subject relevant to the user query. Vision detail preference: ${visionDetailLevel}. Evidence display preference: ${visionShowEvidence ? 'include visible evidence when useful' : 'hide evidence unless needed for uncertainty'}. Focus on the most prominent foreground subject first (animal, person, vehicle, product, device, plant, food, or object). For "why is it like this" questions, identify the subject first, then explain the visible condition or likely cause without pretending to know hidden causes. Do not let background signs or small printed text dominate. Only name a brand/model when a logo, readable text, or unmistakable hardware cue is visible; otherwise describe shape/color/parts and say the exact model is not visible. Never invent text that is not readable. User query: "${query}".${contextSuffix}`;
-}
-
-async function handleContinuousVisionQuery(text) {
-    updateContinuousVisionStatus('Preparing frame...', 'loading');
-    updateContinuousVisionGuidance('Hold steady and point at the main object', true);
-    await waitForContinuousVisionReady();
-    let base64 = captureBestVisionFrame();
-    if (!base64) {
-        await waitForContinuousVisionReady(900);
-        updateContinuousVisionGuidance('Try brighter lighting and hold the camera steady', true);
-        base64 = captureBestVisionFrame();
-    }
-    updateContinuousVisionGuidance('', false);
-    if (!base64) {
-        const msg = 'I cannot see anything. Make sure the camera is active, well lit, and held steady.';
-        recentVisionError = msg;
-        updateContinuousVisionStatus('Frame unclear or too dark', 'warning');
-        addVisionRecoveryMessage(msg, text);
-        return;
-    }
-    updateContinuousVisionStatus('Analyzing frame...', 'loading');
-    showThinkingIndicator('Analyzing your view...');
-    try {
-        const isWebsiteUiIntent = isWebsiteUiVisionIntent(text);
-        const visionTask = resolveContinuousVisionTask(text);
-        const visionPrompt = buildContinuousVisionPrompt(text, visionTask);
-        const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.vision, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                task: visionTask,
-                prompt: visionPrompt,
-                mimeType: 'image/jpeg',
-                imageBase64: base64
-            })
-        });
-        const rawBody = await response.text();
-        let data = {};
-        try {
-            data = rawBody ? JSON.parse(rawBody) : {};
-        } catch (_) {
-            data = {};
-        }
-        if (!response.ok || !data?.success) {
-            const rawError = String(data?.error || '').trim();
-            const failMsg = /\bnot found for api version|supported methods|generatecontent|model .* failed with status 404\b/i.test(rawError)
-                ? 'Vision service is temporarily unavailable for the current model. Please retry in a few seconds.'
-                : (rawError || 'Vision analysis failed. Please try again.');
-            recentVisionError = failMsg;
-            updateContinuousVisionStatus('Vision model unavailable', 'error');
-            addVisionRecoveryMessage(failMsg, text);
-            return;
-        }
-        const details = data?.details && typeof data.details === 'object' ? data.details : {};
-        const textDetected = Array.isArray(details?.textDetected)
-            ? details.textDetected.map(v => String(v || '').trim()).filter(Boolean).join('\n').trim()
-            : '';
-        const fullText = String(details?.fullText || '').trim();
-        let answer = String(data.response || details?.summary || '').trim();
-        if (!answer && (fullText || textDetected) && visionTask === 'text_extract') {
-            const textBlock = fullText || textDetected;
-            answer = `Detected text:\n${textBlock}`;
-        }
-        answer = visionTask === 'translate_to_english'
-            ? formatVisionTranslationAnswer(answer, details)
-            : normalizeVisionAnswerForChat(answer, details); 
-        if (isWebsiteUiIntent) {
-            answer = refineWebsiteUiVisionAnswer(answer, details);
-        }
-        answer = visionTask === 'translate_to_english'
-            ? answer
-            : applyVisionReplyPreferences(answer);
-        if (!answer) answer = 'The frame was received, but I could not produce a reliable visual answer.'; 
-        if (visionTask === 'paper_answer_overlay') {
-            renderPaperAnswerOverlay(details, answer, text);
-        }
-        recentVisionError = '';
-        updateContinuousVisionStatus('Camera ready', 'ready');
-        rememberVisionContext({
-            prompt: text,
-            task: visionTask,
-            answer,
-            details
-        });
-        rememberMultimodalGrounding({
-            kind: 'vision',
-            summary: answer,
-            selectedText: [fullText, textDetected, answer].filter(Boolean).join('\n\n').slice(0, 4000),
-            sourceAnswer: answer
-        });
-        addChatMessage(answer, false);
-        saveToHistory(text, answer);
-    } catch(e) {
-        const msg = 'Vision analysis failed. Please try again.';
-        recentVisionError = String(e?.message || msg).slice(0, 180);
-        updateContinuousVisionStatus('Vision analysis failed', 'error');
-        addVisionRecoveryMessage(msg, text);
-    } finally {
-        hideThinkingIndicator();
-    }
-}
+const isContinuousVisionActive = false;
 
 function extractVisionJsonObject(rawText) {
     const raw = String(rawText || '').trim();
@@ -27150,35 +26527,7 @@ function cleanVisionDisplayText(text) {
     return out.slice(0, 1200);
 }
 
-function isContinuousVisionQuestion(text) {
-    const raw = String(text || '').toLowerCase().trim();
-    if (!raw) return false;
-
-    // Normalize common shorthand so "what do u see" routes to vision correctly.
-    const t = raw.replace(/\bu\b/g, 'you');
-
-    if (isContinuousVisionActive && isVisionTranslationIntent(t)) {
-        return true;
-    }
-
-    if (/\b(what (?:do|can) you see|what are you seeing|what am i looking at|what am i seeing|describe (?:what you see|the camera|the image|this image|the screen)|read (?:this image|the image|the text|this text|the screen)|analy[sz]e (?:this image|the image|the camera|the screen)|what(?:'s| is) (?:in front of me|on camera|in the camera|in this image|on the screen))\b/.test(t)) { 
-        return true; 
-    } 
-    if (isWebsiteUiVisionIntent(t)) {
-        return true;
-    }
-
-    // Fallback for short camera-context prompts only while continuous vision is active.
-    if (isContinuousVisionActive && /\b(what is this|what's this|what is it|what's it|read it|solve this|scan this|translate this|what am i holding|what is in my hand|what do i have|why is it like this|why is this like this|what is this part|what happened here|how did this happen|is this normal|is it safe|explain this)\b/.test(t)) {
-        return true;
-    }
-    if (isContinuousVisionActive && getActiveVisionContext() && isVisionContextFollowup(t)) {
-        return true;
-    }
-    if (isContinuousVisionActive && /\b(what|can you|please|tell me)\b/.test(t) && /\b(see|read|look(?:ing)? at|describe|analy[sz]e|front|camera|image|screen|text)\b/.test(t)) {
-        return true;
-    }
-
+function isContinuousVisionQuestion(_text) {
     return false;
 }
 
