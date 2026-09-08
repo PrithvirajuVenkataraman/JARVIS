@@ -7658,148 +7658,193 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
 
 
         function extractCoreTopic(query, answer) {
-            const rawQuery = String(query || '').replace(/\s+/g, ' ').trim();
-            if (!rawQuery) return 'this topic';
+            const rawQuery = String(query || "").replace(/\s+/g, " ").trim();
+            if (!rawQuery) return "this topic";
             let clean = rawQuery
-                .replace(/^(?:can you|could you|please|kindly|tell me|explain|describe|what is|what are|how to|how do|how does|why is|why are)\s+/i, '')
-                .replace(/[?.!,;:]+$/, '')
+                .replace(/^(?:can you|could you|please|kindly|tell me|explain|describe|what is|what are|how to|how do|how does|why is|why are|roast|critique|analyze|compare)\s+/i, "")
+                .replace(/[?.!,;:]+$/, "")
                 .trim();
             if (clean.length > 55) {
-                clean = clean.slice(0, 55).replace(/\s+\S*$/, '') + '...';
+                clean = clean.slice(0, 55).replace(/\s+\S*$/, "") + "...";
             }
-            return clean || 'this topic';
+            return clean || "this topic";
+        }
+
+        function extractContextualEntities(query, answer) {
+            const text = `${query} ${answer}`;
+            const entities = [];
+            const candidates = [
+                "Anthropic", "Claude", "OpenAI", "ChatGPT", "GPT-4", "GPT-4o", "DeepMind", "Gemini",
+                "Groq", "Meta", "Llama", "DeepSeek", "Mistral", "Nvidia", "Apple", "Microsoft", "Google",
+                "Constitutional AI", "RLHF", "Transformer", "RAG", "Vector Database", "Python", "TypeScript",
+                "JavaScript", "React", "Docker", "Kubernetes", "PostgreSQL", "BigQuery", "PyTorch"
+            ];
+            for (const cand of candidates) {
+                if (new RegExp(`\\b${cand}\\b`, "i").test(text) && !entities.includes(cand)) {
+                    entities.push(cand);
+                }
+            }
+            return entities;
         }
 
         function detectNextStepsDomain(query, answer) {
             const combined = `${query} ${answer}`.toLowerCase();
-            if (/\b(architecture|distributed|microservices?|monolith|event-driven|cqrs|system design|kubernetes|k8s|cloud native|scalability|fault tolerance|high availability)\b/i.test(combined)) {
-                return 'architecture';
+            if (/\b(roast|joke|funny|satire|sarcastic|humor|grandma|meme)\b/i.test(combined)) {
+                return "critique_roast";
             }
-            if (/\b(function|api|endpoint|typescript|javascript|python|async|await|database|sql|nosql|schema|git|docker|testing|unit test|refactor|error handling|debugging)\b/i.test(combined) || combined.includes('```')) {
-                return 'engineering';
+            if (/\b(anthropic|claude|openai|chatgpt|gemini|deepmind|groq|llama|deepseek|model|llm|ai lab|startup)\b/i.test(combined)) {
+                return "ai_ecosystem";
             }
-            if (/\b(business|strategy|roi|revenue|cost|pricing|market|startup|stakeholder|roadmap|kpi|metrics|executive|commercial)\b/i.test(combined)) {
-                return 'business';
+            if (/\b(architecture|distributed|microservices?|monolith|event-driven|cqrs|system design|kubernetes|k8s|scalability|fault tolerance)\b/i.test(combined)) {
+                return "architecture";
             }
-            if (/\b(machine learning|deep learning|neural network|dataset|data pipeline|analytics|llm|embeddings?|prompt engineering|vector database)\b/i.test(combined)) {
-                return 'data_ai';
+            if (/\b(function|api|endpoint|typescript|javascript|python|async|await|database|sql|nosql|schema|git|docker|testing|unit test|refactor|error handling)\b/i.test(combined) || combined.includes("```")) {
+                return "engineering";
             }
-            return 'general';
+            if (/\b(business|strategy|roi|revenue|cost|pricing|market|startup|stakeholder|roadmap|kpi|metrics|executive)\b/i.test(combined)) {
+                return "business";
+            }
+            return "general";
         }
 
         function buildNextStepsActionPlan(query, answer) {
-            const q = String(query || '').trim();
-            const a = String(answer || '').trim();
+            const q = String(query || "").trim();
+            const a = String(answer || "").trim();
             if (!q || !a || a.length < 50) return null;
             if (/^(hi|hello|hey|thanks|thank you|good morning|good evening|goodbye|bye)\b/i.test(q)) return null;
-            if (typeof isConciseDirectFactQuery === 'function' && isConciseDirectFactQuery(q) && a.length < 160) return null;
+            if (typeof isConciseDirectFactQuery === "function" && isConciseDirectFactQuery(q) && a.length < 160) return null;
 
             const topic = extractCoreTopic(q, a);
             const domain = detectNextStepsDomain(q, a);
+            const entities = extractContextualEntities(q, a);
+            const primaryEntity = entities[0] || topic;
 
             let plan = [];
-            if (domain === 'architecture') {
+
+            if (domain === "critique_roast" || (domain === "ai_ecosystem" && /\b(anthropic|claude|openai|constitution)\b/i.test(q + " " + a))) {
+                // Highly contextual follow-ups for AI industry critiques and roasts
                 plan = [
                     {
-                        type: 'deepen',
-                        badge: '🔍 Deepen',
-                        title: 'Failure Modes & Fault-Tolerance',
+                        type: "compare",
+                        badge: "⚡ Compare",
+                        title: `Compare ${primaryEntity} vs Top Competitors`,
+                        prompt: `Provide an objective, technical head-to-head comparison between ${primaryEntity} and its top industry rivals, highlighting benchmarks, reasoning abilities, and real-world trade-offs.`
+                    },
+                    {
+                        type: "deepen",
+                        badge: "🔍 Deepen",
+                        title: "Constitutional AI & Safety Alignment",
+                        prompt: `Explain how Anthropic's Constitutional AI and RLAIF methodology works compared to OpenAI's standard RLHF, and whether it impacts raw model performance.`
+                    },
+                    {
+                        type: "evaluate",
+                        badge: "💡 Perspective",
+                        title: "Technical Strengths & Architecture",
+                        prompt: `What are the most legitimate, unassailable technical breakthroughs and architectural strengths of ${primaryEntity}'s latest models (like Claude 3.7)?`
+                    }
+                ];
+            } else if (domain === "ai_ecosystem") {
+                plan = [
+                    {
+                        type: "deepen",
+                        badge: "🔍 Deepen",
+                        title: `Technical Deep Dive into ${primaryEntity}`,
+                        prompt: `Explain the core architecture, training methodologies, and key differentiators of ${primaryEntity}.`
+                    },
+                    {
+                        type: "evaluate",
+                        badge: "⚡ Benchmark",
+                        title: "Performance & Latency Trade-offs",
+                        prompt: `How does ${primaryEntity} compare on standardized reasoning, coding benchmarks, and inference cost?`
+                    },
+                    {
+                        type: "implement",
+                        badge: "🛠️ Implement",
+                        title: "Integration & API Best Practices",
+                        prompt: `Show a clean, production-grade integration example with error handling and streaming for ${primaryEntity}.`
+                    }
+                ];
+            } else if (domain === "architecture") {
+                plan = [
+                    {
+                        type: "deepen",
+                        badge: "🔍 Deepen",
+                        title: `Failure Modes & Fault-Tolerance for ${topic}`,
                         prompt: `Examine failure modes, disaster recovery patterns, and consensus bottlenecks for ${topic}.`
                     },
                     {
-                        type: 'implement',
-                        badge: '🛠️ Implement',
-                        title: 'Phased Deployment & Migration',
+                        type: "implement",
+                        badge: "🛠️ Implement",
+                        title: "Phased Migration & Zero-Downtime Rollout",
                         prompt: `Provide a step-by-step phased migration and zero-downtime deployment plan for ${topic}.`
                     },
                     {
-                        type: 'evaluate',
-                        badge: '⚖️ Evaluate',
-                        title: 'Architectural Trade-offs & Cost',
+                        type: "evaluate",
+                        badge: "⚖️ Trade-offs",
+                        title: "Cost, Scalability & Operational Complexity",
                         prompt: `Evaluate operational complexity, total cost of ownership, and performance trade-offs for ${topic}.`
                     }
                 ];
-            } else if (domain === 'engineering') {
+            } else if (domain === "engineering") {
                 plan = [
                     {
-                        type: 'deepen',
-                        badge: '🔍 Deepen',
-                        title: 'Edge Cases & Security Boundaries',
-                        prompt: `Analyze critical edge cases, input sanitization, and security considerations for ${topic}.`
+                        type: "implement",
+                        badge: "🛠️ Unit Tests",
+                        title: `Production Unit Tests & Edge Cases for ${topic}`,
+                        prompt: `Provide comprehensive unit test coverage, mocking, and edge-case handling for ${topic}.`
                     },
                     {
-                        type: 'implement',
-                        badge: '🛠️ Implement',
-                        title: 'Production Code & Test Suite',
-                        prompt: `Provide production-grade code implementation with unit test coverage and error handling for ${topic}.`
+                        type: "evaluate",
+                        badge: "⚡ Optimize",
+                        title: "Runtime Performance & Memory Tuning",
+                        prompt: `Analyze runtime performance benchmarks, memory overhead, and optimization techniques for ${topic}.`
                     },
                     {
-                        type: 'evaluate',
-                        badge: '⚖️ Evaluate',
-                        title: 'Benchmark & Performance Tuning',
-                        prompt: `Compare runtime performance benchmarks, memory overhead, and optimization techniques for ${topic}.`
+                        type: "deepen",
+                        badge: "🔒 Security",
+                        title: "Security Boundaries & Input Sanitization",
+                        prompt: `Analyze critical edge cases, input sanitization, and security vulnerabilities related to ${topic}.`
                     }
                 ];
-            } else if (domain === 'business') {
+            } else if (domain === "business") {
                 plan = [
                     {
-                        type: 'deepen',
-                        badge: '🔍 Deepen',
-                        title: 'Risk Assessment & Competition',
-                        prompt: `Perform a strategic risk assessment and competitive landscape analysis regarding ${topic}.`
+                        type: "implement",
+                        badge: "📊 Roadmap",
+                        title: `30-60-90 Day Action Plan for ${topic}`,
+                        prompt: `Draft an actionable 30-60-90 day milestone roadmap with resource allocations and deliverables for ${topic}.`
                     },
                     {
-                        type: 'implement',
-                        badge: '🛠️ Implement',
-                        title: '30-60-90 Day Execution Plan',
-                        prompt: `Draft an actionable 30-60-90 day milestone roadmap with resource allocations for ${topic}.`
+                        type: "deepen",
+                        badge: "🎯 Strategy",
+                        title: "Competitive Moat & Market Differentiation",
+                        prompt: `Analyze sustainable competitive advantages, customer retention vectors, and market positioning for ${topic}.`
                     },
                     {
-                        type: 'evaluate',
-                        badge: '⚖️ Evaluate',
-                        title: 'ROI & Success Metrics (KPIs)',
-                        prompt: `Define measurable KPIs, target ROI models, and executive scorecard metrics for ${topic}.`
-                    }
-                ];
-            } else if (domain === 'data_ai') {
-                plan = [
-                    {
-                        type: 'deepen',
-                        badge: '🔍 Deepen',
-                        title: 'Data Quality & Bias Mitigation',
-                        prompt: `Analyze data validation pipelines, drift detection, and mitigation strategies for ${topic}.`
-                    },
-                    {
-                        type: 'implement',
-                        badge: '🛠️ Implement',
-                        title: 'End-to-End Pipeline Workflow',
-                        prompt: `Outline a reproducible pipeline architecture with monitoring and automated ingestion for ${topic}.`
-                    },
-                    {
-                        type: 'evaluate',
-                        badge: '⚖️ Evaluate',
-                        title: 'Latency vs Accuracy Trade-offs',
-                        prompt: `Evaluate inference latency, compute cost, and precision vs recall trade-offs for ${topic}.`
+                        type: "evaluate",
+                        badge: "⚖️ Risk & ROI",
+                        title: "Financial Model, KPIs & Risk Assessment",
+                        prompt: `Define measurable KPIs, target ROI models, and critical business risks regarding ${topic}.`
                     }
                 ];
             } else {
                 plan = [
                     {
-                        type: 'deepen',
-                        badge: '🔍 Deepen',
-                        title: 'Key Nuances & Critical Factors',
+                        type: "deepen",
+                        badge: "🔍 Deepen",
+                        title: `Key Nuances & Critical Factors in ${topic}`,
                         prompt: `Deepen the analysis on non-obvious nuances, underlying mechanics, and key factors of ${topic}.`
                     },
                     {
-                        type: 'implement',
-                        badge: '🛠️ Implement',
-                        title: 'Actionable Execution Checklist',
+                        type: "implement",
+                        badge: "🛠️ Action Plan",
+                        title: "Concrete Execution Checklist",
                         prompt: `Provide a concrete, step-by-step execution checklist and immediate next actions for ${topic}.`
                     },
                     {
-                        type: 'evaluate',
-                        badge: '⚖️ Evaluate',
-                        title: 'Pros, Cons & Alternatives',
+                        type: "evaluate",
+                        badge: "💡 Alternatives",
+                        title: "Pros, Cons & Viable Alternatives",
                         prompt: `Present an objective comparison of advantages, disadvantages, and viable alternatives for ${topic}.`
                     }
                 ];
@@ -7808,8 +7853,8 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
         }
 
         function renderNextStepsCardHtml(plan, messageId) {
-            if (!Array.isArray(plan) || plan.length === 0) return '';
-            const safeMsgId = escapeHtml(String(messageId || ''));
+            if (!Array.isArray(plan) || plan.length === 0) return "";
+            const safeMsgId = escapeHtml(String(messageId || ""));
             
             const itemsHtml = plan.map(step => {
                 const safeBadge = escapeHtml(step.badge);
@@ -7821,18 +7866,18 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                             <span class="next-step-badge">${safeBadge}</span>
                             <span class="next-step-title">${safeTitle}</span>
                         </div>
-                        <button type="button" class="next-step-btn" aria-label="Explore ${safeTitle}">Explore &rarr;</button>
+                        <span class="next-step-arrow" aria-hidden="true">&rarr;</span>
                     </div>
                 `;
-            }).join('');
+            }).join("");
 
             return `
-                <div class="enterprise-next-steps-card" data-message-id="${safeMsgId}">
+                <div class="enterprise-next-steps-card suggested-followups-card" data-message-id="${safeMsgId}">
                     <div class="next-steps-header">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
-                            <polyline points="9 18 15 12 9 6"></polyline>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+                            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
                         </svg>
-                        <span>Next Steps &amp; Action Plan</span>
+                        <span>Suggested Next Steps</span>
                     </div>
                     <div class="next-steps-list">
                         ${itemsHtml}
@@ -7840,8 +7885,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 </div>
             `;
         }
-
-        window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
+window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             const prompt = decodeURIComponent(encodedPrompt || '').trim();
             if (!prompt) return;
             if (regenerationInProgress || activeRequestController || isProcessing || isAssistantProcessing()) {
@@ -12221,6 +12265,16 @@ ${code}
         function handleComposerInput() {
             const input = document.getElementById('text-input');
             if (input) window.JarvisSessionRecovery?.saveComposerDraft?.(input.value);
+            // Guarantee waveform is hidden and text input is visible during typing
+            const vttWave = document.getElementById('vtt-waveform-container');
+            const compShell = document.getElementById('input-bar-inner');
+            if (vttWave && !vttWave.classList.contains('hidden')) {
+                const spState = window.JarvisSpeechInput?.getState?.() || {};
+                if (!spState.listening) {
+                    vttWave.classList.add('hidden');
+                    compShell?.classList.remove('is-voice-active', 'is-processing');
+                }
+            }
             if (input && input.value.trim().length > 2) {
                 triggerPredictiveSocketPrewarm();
             }
@@ -12424,6 +12478,13 @@ ${code}
         }
 
 async function sendTextInput(submission = {}) {
+            const isVoice = submission?.source === 'vtt' || submission?.source === 'converse';
+            if (!isVoice) {
+                const vttWave = document.getElementById('vtt-waveform-container');
+                const compShell = document.getElementById('input-bar-inner');
+                if (vttWave) vttWave.classList.add('hidden');
+                if (compShell) compShell.classList.remove('is-voice-active', 'is-processing');
+            }
             window.JarvisSpeechInput?.stop?.({ releaseStream: true });
             const sendTrace = {
                 requestId: `send_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
