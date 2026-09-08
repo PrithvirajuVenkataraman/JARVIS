@@ -269,8 +269,18 @@
     <div class="page-shell">
         <div class="app-shell max-w-5xl mx-auto relative z-10 p-6">
             <!-- Header - Enhanced -->
-            <div class="header-enhanced mb-6">
-                <h1 id="title" class="jarvis-top-title">JARVIS</h1>
+            <div class="header-enhanced mb-6 flex items-center justify-between">
+                <div class="flex items-center">
+                    <h1 id="title" class="jarvis-top-title">JARVIS</h1>
+                    <div class="enterprise-persona-selector-wrap">
+                        <select id="enterprise-persona-select" class="enterprise-persona-select" aria-label="Select AI Persona" onchange="setEnterprisePersona(this.value)">
+                            <option value="general">Default Assistant</option>
+                            <option value="architect">Senior Architect</option>
+                            <option value="executive">Executive Brief</option>
+                            <option value="analyst">Technical Analyst</option>
+                        </select>
+                    </div>
+                </div>
                 <p id="subtitle" class="hidden"></p>
             </div>
 
@@ -5250,6 +5260,56 @@ function buildLearnedAnswerStyleHint() {
     return hints.length ? `\nLocal answer-style hints: ${hints.join('; ')}. Treat these as soft preferences.` : '';
 }
 
+const ENTERPRISE_PERSONAS = Object.freeze({
+    general: {
+        id: 'general',
+        name: 'Default Assistant',
+        hint: 'Balanced, versatile, adaptive enterprise AI assistant.',
+        directive: ''
+    },
+    architect: {
+        id: 'architect',
+        name: 'Senior Architect',
+        hint: 'Rigorous system design, edge cases, scalability, clean code, trade-off matrices.',
+        directive: 'Enterprise Persona Directive (Senior Architect): Adopt the perspective of a Principal Systems Architect. Focus on robust distributed system design, edge cases, scalability, fault tolerance, API contracts, security boundaries, and architectural trade-off matrices. Provide production-ready, highly maintainable patterns with concrete rationales.'
+    },
+    executive: {
+        id: 'executive',
+        name: 'Executive Brief',
+        hint: 'Bottom-line-up-front (BLUF), high-level summaries, business impact, ROI, structured bullets.',
+        directive: 'Enterprise Persona Directive (Executive Brief): Provide Bottom-Line-Up-Front (BLUF) synthesis. Structure insights into high-level strategic takeaways, commercial/business impact, ROI, resource trade-offs, and critical decision points. Keep explanations crisp, actionable, and executive-ready.'
+    },
+    analyst: {
+        id: 'analyst',
+        name: 'Technical Analyst',
+        hint: 'In-depth analytical breakdowns, data-driven, evidence-focused.',
+        directive: 'Enterprise Persona Directive (Technical Analyst): Provide rigorous analytical breakdowns. Focus on empirical evidence, metric benchmarks, algorithmic complexity, performance bottlenecks, and comparative trade-offs. Back claims with concrete criteria and structured analytical frameworks.'
+    }
+});
+
+function getActivePersona() {
+    try {
+        const saved = localStorage.getItem('jarvis_active_persona');
+        if (saved && ENTERPRISE_PERSONAS[saved]) return saved;
+    } catch (_) {}
+    return 'general';
+}
+
+function setEnterprisePersona(personaKey) {
+    const key = ENTERPRISE_PERSONAS[personaKey] ? personaKey : 'general';
+    try {
+        localStorage.setItem('jarvis_active_persona', key);
+    } catch (_) {}
+    const select = document.getElementById('enterprise-persona-select');
+    if (select && select.value !== key) {
+        select.value = key;
+    }
+    const persona = ENTERPRISE_PERSONAS[key];
+    if (typeof showTemporaryMessage === 'function') {
+        showTemporaryMessage(`Persona switched to: ${persona.name}`);
+    }
+}
+
 async function askGeminiAI(userMessage, requestOptions = {}) {
     const normalizedUserMessage = String(userMessage || '').trim();
     const latencyTrace = {
@@ -5310,6 +5370,10 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
         const learnedStyleHint = buildLearnedAnswerStyleHint();
         const learnedPreferenceHint = buildLearnedPreferenceHint();
 
+        const activePersonaKey = typeof getActivePersona === 'function' ? getActivePersona() : 'general';
+        const activePersonaConfig = ENTERPRISE_PERSONAS[activePersonaKey];
+        const personaDirective = activePersonaConfig?.directive || '';
+
         const selectedModel = getSelectedModel();
         const baseSystemPrompt = typeof JarvisSelfImprovingMemory !== 'undefined'
             ? JarvisSelfImprovingMemory.injectIntoSystemPrompt(customSystemPrompt)
@@ -5318,6 +5382,7 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
         // Route formatting, style, length, and learned memory into system directives rather than polluting the user prompt
         const systemDirectives = [
             baseSystemPrompt,
+            personaDirective,
             relevantSavedMemoryContext ? `[Saved User Memory & Profile:\n${relevantSavedMemoryContext}]` : '',
             responseMode && responseMode !== 'normal' ? `Response length preference: ${responseMode}. ${responseHint}` : '',
             formatMode && formatMode !== 'paragraph' ? `Response format preference: ${formatMode}. ${formatHint}` : '',
@@ -7814,6 +7879,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 verify: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l2 2 4-5"></path><path d="M21 12a9 9 0 1 1-3.4-7"></path><path d="M21 3v6h-6"></path></svg>',
                 edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"></path></svg>',
                 file: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path><path d="M8 13h8"></path><path d="M8 17h5"></path></svg>',
+                speaker: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>',
                 memory: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3v14l-4-2-4 2-4-2-4 2V5z"></path><path d="M8 7h8"></path><path d="M8 11h6"></path></svg>'
             };
             return icons[name] || icons.dots;
@@ -7855,12 +7921,235 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             }).join('');
         }
 
+        function extractCoreTopic(query, answer) {
+            const rawQuery = String(query || '').replace(/\s+/g, ' ').trim();
+            if (!rawQuery) return 'this topic';
+            let clean = rawQuery
+                .replace(/^(?:can you|could you|please|kindly|tell me|explain|describe|what is|what are|how to|how do|how does|why is|why are)\s+/i, '')
+                .replace(/[?.!,;:]+$/, '')
+                .trim();
+            if (clean.length > 55) {
+                clean = clean.slice(0, 55).replace(/\s+\S*$/, '') + '...';
+            }
+            return clean || 'this topic';
+        }
+
+        function detectNextStepsDomain(query, answer) {
+            const combined = `${query} ${answer}`.toLowerCase();
+            if (/\b(architecture|distributed|microservices?|monolith|event-driven|cqrs|system design|kubernetes|k8s|cloud native|scalability|fault tolerance|high availability)\b/i.test(combined)) {
+                return 'architecture';
+            }
+            if (/\b(function|api|endpoint|typescript|javascript|python|async|await|database|sql|nosql|schema|git|docker|testing|unit test|refactor|error handling|debugging)\b/i.test(combined) || combined.includes('```')) {
+                return 'engineering';
+            }
+            if (/\b(business|strategy|roi|revenue|cost|pricing|market|startup|stakeholder|roadmap|kpi|metrics|executive|commercial)\b/i.test(combined)) {
+                return 'business';
+            }
+            if (/\b(machine learning|deep learning|neural network|dataset|data pipeline|analytics|llm|embeddings?|prompt engineering|vector database)\b/i.test(combined)) {
+                return 'data_ai';
+            }
+            return 'general';
+        }
+
+        function buildNextStepsActionPlan(query, answer) {
+            const q = String(query || '').trim();
+            const a = String(answer || '').trim();
+            if (!q || !a || a.length < 50) return null;
+            if (/^(hi|hello|hey|thanks|thank you|good morning|good evening|goodbye|bye)\b/i.test(q)) return null;
+            if (typeof isConciseDirectFactQuery === 'function' && isConciseDirectFactQuery(q) && a.length < 160) return null;
+
+            const topic = extractCoreTopic(q, a);
+            const domain = detectNextStepsDomain(q, a);
+
+            let plan = [];
+            if (domain === 'architecture') {
+                plan = [
+                    {
+                        type: 'deepen',
+                        badge: '🔍 Deepen',
+                        title: 'Failure Modes & Fault-Tolerance',
+                        prompt: `Examine failure modes, disaster recovery patterns, and consensus bottlenecks for ${topic}.`
+                    },
+                    {
+                        type: 'implement',
+                        badge: '🛠️ Implement',
+                        title: 'Phased Deployment & Migration',
+                        prompt: `Provide a step-by-step phased migration and zero-downtime deployment plan for ${topic}.`
+                    },
+                    {
+                        type: 'evaluate',
+                        badge: '⚖️ Evaluate',
+                        title: 'Architectural Trade-offs & Cost',
+                        prompt: `Evaluate operational complexity, total cost of ownership, and performance trade-offs for ${topic}.`
+                    }
+                ];
+            } else if (domain === 'engineering') {
+                plan = [
+                    {
+                        type: 'deepen',
+                        badge: '🔍 Deepen',
+                        title: 'Edge Cases & Security Boundaries',
+                        prompt: `Analyze critical edge cases, input sanitization, and security considerations for ${topic}.`
+                    },
+                    {
+                        type: 'implement',
+                        badge: '🛠️ Implement',
+                        title: 'Production Code & Test Suite',
+                        prompt: `Provide production-grade code implementation with unit test coverage and error handling for ${topic}.`
+                    },
+                    {
+                        type: 'evaluate',
+                        badge: '⚖️ Evaluate',
+                        title: 'Benchmark & Performance Tuning',
+                        prompt: `Compare runtime performance benchmarks, memory overhead, and optimization techniques for ${topic}.`
+                    }
+                ];
+            } else if (domain === 'business') {
+                plan = [
+                    {
+                        type: 'deepen',
+                        badge: '🔍 Deepen',
+                        title: 'Risk Assessment & Competition',
+                        prompt: `Perform a strategic risk assessment and competitive landscape analysis regarding ${topic}.`
+                    },
+                    {
+                        type: 'implement',
+                        badge: '🛠️ Implement',
+                        title: '30-60-90 Day Execution Plan',
+                        prompt: `Draft an actionable 30-60-90 day milestone roadmap with resource allocations for ${topic}.`
+                    },
+                    {
+                        type: 'evaluate',
+                        badge: '⚖️ Evaluate',
+                        title: 'ROI & Success Metrics (KPIs)',
+                        prompt: `Define measurable KPIs, target ROI models, and executive scorecard metrics for ${topic}.`
+                    }
+                ];
+            } else if (domain === 'data_ai') {
+                plan = [
+                    {
+                        type: 'deepen',
+                        badge: '🔍 Deepen',
+                        title: 'Data Quality & Bias Mitigation',
+                        prompt: `Analyze data validation pipelines, drift detection, and mitigation strategies for ${topic}.`
+                    },
+                    {
+                        type: 'implement',
+                        badge: '🛠️ Implement',
+                        title: 'End-to-End Pipeline Workflow',
+                        prompt: `Outline a reproducible pipeline architecture with monitoring and automated ingestion for ${topic}.`
+                    },
+                    {
+                        type: 'evaluate',
+                        badge: '⚖️ Evaluate',
+                        title: 'Latency vs Accuracy Trade-offs',
+                        prompt: `Evaluate inference latency, compute cost, and precision vs recall trade-offs for ${topic}.`
+                    }
+                ];
+            } else {
+                plan = [
+                    {
+                        type: 'deepen',
+                        badge: '🔍 Deepen',
+                        title: 'Key Nuances & Critical Factors',
+                        prompt: `Deepen the analysis on non-obvious nuances, underlying mechanics, and key factors of ${topic}.`
+                    },
+                    {
+                        type: 'implement',
+                        badge: '🛠️ Implement',
+                        title: 'Actionable Execution Checklist',
+                        prompt: `Provide a concrete, step-by-step execution checklist and immediate next actions for ${topic}.`
+                    },
+                    {
+                        type: 'evaluate',
+                        badge: '⚖️ Evaluate',
+                        title: 'Pros, Cons & Alternatives',
+                        prompt: `Present an objective comparison of advantages, disadvantages, and viable alternatives for ${topic}.`
+                    }
+                ];
+            }
+            return plan;
+        }
+
+        function renderNextStepsCardHtml(plan, messageId) {
+            if (!Array.isArray(plan) || plan.length === 0) return '';
+            const safeMsgId = escapeHtml(String(messageId || ''));
+            
+            const itemsHtml = plan.map(step => {
+                const safeBadge = escapeHtml(step.badge);
+                const safeTitle = escapeHtml(step.title);
+                const encodedPrompt = encodeURIComponent(step.prompt);
+                return `
+                    <div class="next-step-item" onclick="executeEnterpriseNextStep('${encodedPrompt}', '${safeMsgId}')" role="button" tabindex="0" title="${safeTitle}">
+                        <div class="next-step-info">
+                            <span class="next-step-badge">${safeBadge}</span>
+                            <span class="next-step-title">${safeTitle}</span>
+                        </div>
+                        <button type="button" class="next-step-btn" aria-label="Explore ${safeTitle}">Explore &rarr;</button>
+                    </div>
+                `;
+            }).join('');
+
+            return `
+                <div class="enterprise-next-steps-card" data-message-id="${safeMsgId}">
+                    <div class="next-steps-header">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+                            <polyline points="9 18 15 12 9 6"></polyline>
+                        </svg>
+                        <span>Next Steps &amp; Action Plan</span>
+                    </div>
+                    <div class="next-steps-list">
+                        ${itemsHtml}
+                    </div>
+                </div>
+            `;
+        }
+
+        window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
+            const prompt = decodeURIComponent(encodedPrompt || '').trim();
+            if (!prompt) return;
+            if (regenerationInProgress || activeRequestController || isProcessing || isAssistantProcessing()) {
+                showTemporaryMessage('Please wait for the current response to finish.');
+                return;
+            }
+            if (messageId) {
+                const card = document.querySelector(`.enterprise-next-steps-card[data-message-id="${CSS.escape(messageId)}"]`);
+                if (card) {
+                    card.style.opacity = '0.55';
+                    card.style.pointerEvents = 'none';
+                }
+            }
+            await submitProgrammaticUserTurn(prompt, prompt, {
+                topicLabel: 'Next step',
+                sourceContext: { action: 'enterprise_next_step' }
+            });
+        };
+
+        function injectEnterpriseNextStepsSlot(messageId, query, answer) {
+            if (!messageId || !query || !answer) return;
+            const slot = document.querySelector(`.assistant-next-steps-slot[data-message-id="${CSS.escape(messageId)}"]`);
+            if (!slot || slot.children.length > 0) return;
+            const plan = buildNextStepsActionPlan(query, answer);
+            if (plan && plan.length > 0) {
+                slot.innerHTML = renderNextStepsCardHtml(plan, messageId);
+                const chatContainer = document.getElementById('chat-container');
+                if (chatContainer) maybeAutoScroll(chatContainer);
+            }
+        }
+
         function buildAssistantActionsHtml(messageId, canRegenerate) {
             const safeId = escapeHtml(messageId);
             const regenAttr = canRegenerate ? '' : 'disabled aria-disabled="true"';
             return `
                 <div class="assistant-action-row" data-message-id="${safeId}">
+                    <div class="assistant-quick-pivots flex items-center gap-1 mr-1">
+                        <button type="button" class="quick-pivot-btn" data-assistant-action="transform_deeper" onclick="return handleAssistantActionInline(event, '${safeId}', 'transform_deeper')" title="Explain in more depth">🔍 Deep Dive</button>
+                        <button type="button" class="quick-pivot-btn" data-assistant-action="transform_shorter" onclick="return handleAssistantActionInline(event, '${safeId}', 'transform_shorter')" title="Executive summary / concise takeaways">⚡ Summary</button>
+                        <button type="button" class="quick-pivot-btn" data-assistant-action="transform_simplify" onclick="return handleAssistantActionInline(event, '${safeId}', 'transform_simplify')" title="Simplify explanation">💡 Simplify</button>
+                    </div>
                     <button type="button" class="assistant-action-icon" data-assistant-action="copy" onclick="return handleAssistantActionInline(event, '${safeId}', 'copy')" title="Copy" aria-label="Copy">${getActionIconSvg('copy')}</button>
+                    <button type="button" class="assistant-action-icon" data-assistant-action="save_memory" onclick="return handleAssistantActionInline(event, '${safeId}', 'save_memory')" title="Save to memory" aria-label="Save to memory">${getActionIconSvg('memory')}</button>
+                    <button type="button" class="assistant-action-icon" data-assistant-action="tts_speak" onclick="return handleAssistantActionInline(event, '${safeId}', 'tts_speak')" title="Read aloud" aria-label="Read aloud">${getActionIconSvg('speaker')}</button>
                     <button type="button" class="assistant-action-icon" data-assistant-action="share" onclick="return handleAssistantActionInline(event, '${safeId}', 'share')" title="Share" aria-label="Share">${getActionIconSvg('share')}</button>
                     <button type="button" class="assistant-action-icon" data-assistant-action="regenerate" onclick="return handleAssistantActionInline(event, '${safeId}', 'regenerate')" title="Regenerate" aria-label="Regenerate" ${regenAttr}>${getActionIconSvg('retry')}</button>
                     <div class="assistant-action-menu-wrap">
@@ -7868,7 +8157,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                         <div id="assistant-action-menu-${safeId}" class="assistant-action-menu hidden" role="menu" data-message-id="${safeId}"> 
                             <button type="button" data-assistant-action="ask" onclick="return handleAssistantActionInline(event, '${safeId}', 'ask')" role="menuitem">${getActionIconSvg('ask')}<span>Ask JARVIS</span></button> 
                             <button type="button" data-assistant-action="verify" onclick="return handleAssistantActionInline(event, '${safeId}', 'verify')" role="menuitem">${getActionIconSvg('verify')}<span>Verify this</span></button> 
-                            <button type="button" data-assistant-action="save_memory" onclick="return handleAssistantActionInline(event, '${safeId}', 'save_memory')" role="menuitem">${getActionIconSvg('memory')}<span>Save to memory</span></button> 
+                            <button type="button" data-assistant-action="export_markdown" onclick="return handleAssistantActionInline(event, '${safeId}', 'export_markdown')" role="menuitem">${getActionIconSvg('file')}<span>Export as Markdown</span></button> 
                         </div> 
                     </div>
                 </div>
@@ -7882,6 +8171,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             ask: askJarvisAboutMessage,
             verify: verifyAssistantMessage,
             save_memory: saveAssistantMessageToMemory,
+            tts_speak: toggleTtsSpeak,
             copy_clean: copyCleanAssistantMessage,
             copy_sources: copyAssistantMessageWithSources,
             export_markdown: exportAssistantMessageMarkdown,
@@ -7930,7 +8220,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             if (isLongRunning && button) button.disabled = true;
             try {
                 closeAssistantActionMenus();
-                await handler(id);
+                await handler(id, button);
             } finally {
                 if (button?.isConnected) button.disabled = false;
             }
@@ -7988,11 +8278,46 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             }
         }
 
-        function copyAssistantMessage(messageId) {
+        function toggleTtsSpeak(messageId) {
+            if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+                showTemporaryMessage('Text-to-speech is not supported in this browser.');
+                return;
+            }
+            if (window.speechSynthesis.speaking) {
+                window.speechSynthesis.cancel();
+                showTemporaryMessage('Speech stopped.');
+                return;
+            }
+            const meta = getAssistantMessageMeta(messageId);
+            const text = stripSourcesFromAssistantText(meta?.text || '');
+            if (!text) return;
+            const cleanSpokenText = text
+                .replace(/```[\s\S]*?```/g, 'Code block omitted.')
+                .replace(/`([^`]+)`/g, '$1')
+                .replace(/[#*_~>]/g, '')
+                .slice(0, 1200);
+            const utterance = new SpeechSynthesisUtterance(cleanSpokenText);
+            utterance.rate = 1.0;
+            utterance.pitch = 1.0;
+            window.speechSynthesis.speak(utterance);
+            showTemporaryMessage('Reading response aloud...');
+        }
+
+        function copyAssistantMessage(messageId, button = null) {
             const meta = getAssistantMessageMeta(messageId);
             if (!meta?.text) return;
             copyToClipboard(meta.text);
             closeAssistantActionMenus();
+            showTemporaryMessage('Copied to clipboard!');
+            if (button) {
+                const prevHtml = button.innerHTML;
+                button.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2.5" style="width:14px;height:14px"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+                setTimeout(() => {
+                    if (button && button.isConnected) {
+                        button.innerHTML = prevHtml;
+                    }
+                }, 1800);
+            }
         }
 
         function buildMemoryKeyFromText(text) {
@@ -9182,6 +9507,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                                 ${sourceFooterHtml}
                             </div> 
                         </div> 
+                        <div class="assistant-next-steps-slot" data-message-id="${messageId}"></div>
                         ${meta?.systemGreeting ? '' : buildAssistantActionsHtml(messageId, !!sourceTurn?.rawPrompt)} 
                         </div> 
                     </div> 
@@ -9254,6 +9580,9 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                         textElement.classList.remove('is-streaming');
                         activeTypewriterRuns.delete(typewriterRun);
                         endAssistantProcessing();
+                        if (priorUserPrompt) {
+                            injectEnterpriseNextStepsSlot(messageId, priorUserPrompt, plainMessageText);
+                        }
                     }
                     
                     function getHumanTypingDelay(ch) {
@@ -9289,6 +9618,9 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                     const textElement = messageDiv.querySelector('.typewriter-text');
                     textElement.classList.toggle('is-streaming', allowEmptyAssistant);
                     textElement.innerHTML = formattedText;
+                    if (!allowEmptyAssistant && priorUserPrompt) {
+                        injectEnterpriseNextStepsSlot(messageId, priorUserPrompt, plainMessageText);
+                    }
                 }
                 if (!isUser) {
                     logLatencyTrace('assistant_first_render', {
@@ -9552,6 +9884,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             }
             if (userPrompt) {
                 scheduleBackgroundResponseVerification(messageId, userPrompt, cleanText);
+                injectEnterpriseNextStepsSlot(messageId, userPrompt, cleanText);
             }
             return messageId;
         }
@@ -28510,6 +28843,59 @@ window.addEventListener('unhandledrejection', (event) => {
 /* ==========================================================================
    Multi-Format Chat Export & Sharing Engine
    ========================================================================== */
+function getActiveConversation() {
+    let session = null;
+    try {
+        if (typeof getActiveChatSession === 'function') {
+            session = getActiveChatSession();
+        }
+    } catch (_) {}
+
+    let messages = [];
+    if (session && Array.isArray(session.messages) && session.messages.length > 0) {
+        messages = session.messages.map(m => ({
+            role: m.role || 'user',
+            text: String(m.text || '').trim(),
+            timestamp: m.timestamp || session.createdAt || new Date().toISOString(),
+            turnId: m.turnId || ''
+        })).filter(m => m.text);
+    } else if (Array.isArray(conversationHistory) && conversationHistory.length > 0) {
+        messages = conversationHistory.map(item => ({
+            role: item.role === 'assistant' || item.ai ? 'assistant' : 'user',
+            text: String(item.text || item.content || item.user || item.ai || '').trim(),
+            timestamp: item.timestamp || new Date().toISOString(),
+            turnId: item.turnId || ''
+        })).filter(m => m.text);
+    } else if (Array.isArray(chatHistory) && chatHistory.length > 0) {
+        messages = chatHistory.map(item => ({
+            role: item.isUser ? 'user' : 'assistant',
+            text: String(item.text || '').trim(),
+            timestamp: new Date().toISOString()
+        })).filter(m => m.text);
+    }
+
+    const title = (session?.title && session.title !== 'New chat')
+        ? session.title
+        : (messages.find(m => m.role === 'user')?.text?.slice(0, 50) || 'JARVIS Conversation');
+
+    const activePersonaKey = typeof getActivePersona === 'function' ? getActivePersona() : 'general';
+    const personaName = (typeof ENTERPRISE_PERSONAS !== 'undefined' && ENTERPRISE_PERSONAS[activePersonaKey]?.name) || 'Default Assistant';
+    const selectedModel = typeof getSelectedModel === 'function' ? getSelectedModel() : 'Auto';
+
+    return {
+        id: session?.id || `chat_${Date.now()}`,
+        title,
+        turns: messages,
+        messages,
+        createdAt: session?.createdAt || new Date().toISOString(),
+        updatedAt: session?.updatedAt || new Date().toISOString(),
+        model: selectedModel,
+        persona: personaName,
+        personaKey: activePersonaKey,
+        totalTurns: messages.length
+    };
+}
+
 function exportActiveChatAsMarkdown() {
     const activeChat = (typeof getActiveConversation === 'function' ? getActiveConversation() : null) || null;
     const turns = activeChat?.turns || activeChat?.messages || [];
@@ -28518,9 +28904,13 @@ function exportActiveChatAsMarkdown() {
         return;
     }
     const title = activeChat?.title || 'JARVIS Conversation';
+    const dateStr = new Date(activeChat?.createdAt || Date.now()).toLocaleString();
+    const personaStr = activeChat?.persona || 'Default Assistant';
+    const modelStr = activeChat?.model || 'Auto';
     const lines = [
         `# ${title}`,
-        `*Exported from JARVIS on ${new Date().toLocaleString()}*`,
+        `**Date**: ${dateStr} | **Persona**: ${personaStr} | **Model**: ${modelStr}`,
+        `**Total Turns**: ${turns.length}`,
         '',
         '---',
         ''
@@ -28549,7 +28939,7 @@ function exportActiveChatAsMarkdown() {
 
 function exportActiveChatAsJson() {
     const activeChat = (typeof getActiveConversation === 'function' ? getActiveConversation() : null) || null;
-    if (!activeChat) {
+    if (!activeChat || !activeChat.turns?.length) {
         showTemporaryMessage('No active conversation to export');
         return;
     }
@@ -28586,6 +28976,15 @@ async function shareActiveChat() {
     }
     exportActiveChatAsMarkdown();
 }
+
+// Initialize Enterprise Persona Selector on Startup
+(function initEnterprisePersonaStartup() {
+    try {
+        const active = getActivePersona();
+        const select = document.getElementById('enterprise-persona-select');
+        if (select) select.value = active;
+    } catch (_) {}
+})();
 </script>
 
     <!-- Emergency SOS Contact Management Modal -->
