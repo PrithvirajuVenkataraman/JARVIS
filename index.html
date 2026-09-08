@@ -12646,7 +12646,10 @@ async function sendTextInput(submission = {}) {
                     if (attachmentsForSend.length) {
                         showThinkingIndicator('Reading attachments...');
                         const tray = document.getElementById('composer-attachment-tray');
-                        window.JarvisAttachments?.setAttachmentTrayReading?.(tray, true);
+                        if (tray) {
+                            tray.innerHTML = '';
+                            tray.classList.add('hidden');
+                        }
                         const attachmentRequest = effectiveOutgoingText || attachmentDefaultPrompt || 'Please analyze the attached file(s).';
                         let attachmentContext = null;
                         try {
@@ -25468,11 +25471,53 @@ function openChatSessionMenu(event, sessionId) {
     activeChatSessionMenuId = session.id;
     const pinButton = menu.querySelector('[data-chat-action="pin"]');
     if (pinButton) pinButton.textContent = session.pinned ? 'Unpin' : 'Pin';
-    const x = Math.min(Number(event?.clientX || 24), window.innerWidth - 170);
-    const y = Math.min(Number(event?.clientY || 80), window.innerHeight - 130);
-    menu.style.left = `${Math.max(8, x)}px`;
-    menu.style.top = `${Math.max(8, y)}px`;
+
+    // Show menu hiddenly to measure true rendered dimensions
     menu.classList.remove('hidden');
+    menu.style.visibility = 'hidden';
+
+    const menuRect = menu.getBoundingClientRect();
+    const menuWidth = menuRect.width || 150;
+    const menuHeight = menuRect.height || 160;
+    const margin = 12;
+
+    const trigger = event?.target?.closest?.('.chat-session-more, .chat-session-row') || event?.target;
+    const triggerRect = trigger && typeof trigger.getBoundingClientRect === 'function'
+        ? trigger.getBoundingClientRect()
+        : null;
+
+    let left = triggerRect ? (triggerRect.right - menuWidth) : (Number(event?.clientX || 24) - menuWidth + 24);
+    let top = triggerRect ? (triggerRect.bottom + 4) : Number(event?.clientY || 80);
+
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+
+    // Flip upwards if overflowing below viewport
+    if (triggerRect) {
+        if (triggerRect.bottom + menuHeight + margin > viewportHeight) {
+            top = triggerRect.top - menuHeight - 4;
+        }
+    } else if (top + menuHeight + margin > viewportHeight) {
+        top = top - menuHeight;
+    }
+
+    // Strict boundary clamps to keep entirely on screen
+    if (left + menuWidth > viewportWidth - margin) {
+        left = viewportWidth - menuWidth - margin;
+    }
+    if (left < margin) {
+        left = margin;
+    }
+    if (top + menuHeight > viewportHeight - margin) {
+        top = Math.max(margin, viewportHeight - menuHeight - margin);
+    }
+    if (top < margin) {
+        top = margin;
+    }
+
+    menu.style.left = `${Math.round(left)}px`;
+    menu.style.top = `${Math.round(top)}px`;
+    menu.style.visibility = 'visible';
     setTimeout(() => document.addEventListener('pointerdown', handleOutsideChatSessionMenu, { once: true }), 0);
 }
 
@@ -25486,7 +25531,11 @@ function handleOutsideChatSessionMenu(event) {
 }
 
 function closeChatSessionMenu() {
-    document.getElementById('chat-session-menu')?.classList.add('hidden');
+    const menu = document.getElementById('chat-session-menu');
+    if (menu) {
+        menu.classList.add('hidden');
+        menu.style.visibility = '';
+    }
     activeChatSessionMenuId = '';
 }
 
