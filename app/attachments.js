@@ -135,7 +135,7 @@ export async function ingestAllForMessage(attachments = [], userText = '') {
 
 async function rankAttachmentTextForQuery(query, text) {
     const source = String(text || '').trim();
-    if (!source || source.length < 900) return source;
+    if (!source || source.length < 35000) return source;
     try {
         const data = await postJson('/api/rank-texts', {
             query: String(query || '').trim(),
@@ -243,51 +243,67 @@ export async function ingestAttachmentWithFallback(attachment) {
 }
 
 async function ingestPdfAttachmentWithVisuals(attachment, localText, attempts) {
-    let server = null;
-    if (!hasUsefulExtractedText(localText?.text) || isMetadataOnlyExtract(localText?.text)) {
-        server = await ingestOnServer(attachment, localResultSafe(localText)).catch(error => ({
-            ok: false,
-            text: '',
-            method: 'server',
-            provider: 'server',
-            message: String(error?.message || error),
-            attempts: [{ stage: 'server', ok: false, method: 'server_error', error: String(error?.message || error) }]
-        }));
-        attempts.push(...(server.attempts || []));
+    // Fast-path: If the PDF already has a readable digital text layer (resumes, documents, reports),
+    // return it in milliseconds without running 60+ seconds of heavy visual OCR.
+    if (hasUsefulExtractedText(localText?.text) && !isMetadataOnlyExtract(localText?.text)) {
+        const text = clipText(String(localText.text || '').trim());
+        return {
+            ok: true,
+            text,
+            partial: false,
+            method: localText.method || 'client_pdf',
+            provider: localText.provider || 'client',
+            message: '',
+            attempts
+        };
     }
 
+    let server = null;
+    server = await ingestOnServer(attachment, localResultSafe(localText)).catch(error => ({
+        ok: false,
+        text: '',
+        method: 'server',
+        provider: 'server',
+        message: String(error?.message || error),
+        attempts: [{ stage: 'server', ok: false, method: 'server_error', error: String(error?.message || error) }]
+    }));
+    attempts.push(...(server.attempts || []));
+
+    if (hasUsefulExtractedText(server?.text) && !isMetadataOnlyExtract(server?.text)) {
+        const text = clipText(String(server.text || '').trim());
+        return {
+            ok: true,
+            text,
+            partial: server?.partial === true,
+            method: server.method || 'server_pdf',
+            provider: server.provider || 'server',
+            message: '',
+            attempts
+        };
+    }
+
+    // Fallback: Image-only or scanned PDF without digital text layer requires vision OCR
     const vision = await extractPdfViaVision(attachment).catch(error => ({
         ok: false,
         text: '',
-        method: 'pdf_visual_analysis',
+        method: 'pdf_vision_ocr',
         provider: 'vision',
         message: String(error?.message || error)
     }));
     attempts.push({
-        stage: vision?.method || 'pdf_visual_analysis',
+        stage: vision?.method || 'pdf_vision_ocr',
         ok: hasUsefulExtractedText(vision?.text) || String(vision?.text || '').trim().length >= 40,
-        method: vision?.method || 'pdf_visual_analysis'
+        method: vision?.method || 'pdf_vision_ocr'
     });
 
-    const sections = [];
-    if (hasUsefulExtractedText(localText?.text)) {
-        sections.push(`PDF text layer (${localText.method || 'client_pdf'}):\n${String(localText.text || '').trim()}`);
-    }
-    if (hasUsefulExtractedText(server?.text) && !isDuplicateText(server.text, localText?.text)) {
-        sections.push(`Server text extraction (${server.method || 'server_pdf'}):\n${String(server.text || '').trim()}`);
-    }
-    if (String(vision?.text || '').trim()) {
-        sections.push(`Rendered page visual analysis (${vision.method || 'pdf_visual_analysis'}):\n${String(vision.text || '').trim()}`);
-    }
-
-    const combined = clipText(dedupeSections(sections).join('\n\n'));
+    const combined = clipText(String(vision?.text || '').trim());
     const ok = hasUsefulExtractedText(combined) || combined.length >= 40;
     return {
         ok,
         text: combined,
-        partial: vision?.partial === true || server?.partial === true,
-        method: sections.length > 1 ? 'pdf_text_plus_visual' : (localText?.method || server?.method || vision?.method || 'pdf'),
-        provider: sections.length > 1 ? 'client+vision' : (localText?.provider || server?.provider || vision?.provider || 'client'),
+        partial: vision?.partial === true,
+        method: vision?.method || 'pdf_vision_ocr',
+        provider: vision?.provider || 'vision',
         message: ok ? '' : (vision?.message || server?.message || localText?.message || `Could not extract readable content from ${attachment?.name || 'PDF'}.`),
         attempts
     };
@@ -752,7 +768,7 @@ async function processPdfPageVision(attachment, pdfjs, doc, pageNumber, totalPag
                 prompt: `Transcribe all readable text from page ${pageNumber} of PDF "${attachment.name}". Preserve headings, bullet points, and render all tables in clean Markdown table format (| Col 1 | Col 2 |). For line items, capture labels, dates, and amounts accurately.`,
                 mimeType: 'image/jpeg',
                 imageBase64: base64
-            }, { timeoutMs: 25000 });
+            }, { timeoutMs: 8000 });
 
             const details = data?.details && typeof data.details === 'object' ? data.details : {};
             const fullText = String(details?.fullText || '').trim();
@@ -772,8 +788,8 @@ async function processPdfPageVision(attachment, pdfjs, doc, pageNumber, totalPag
         }
 
         // Local Tesseract.js fallback for this page if offline or cloud keys missing
-        if (typeof window !== 'undefined') {
-            notifyAttachmentProgress(attachment, `Running local OCR on page ${pageNumber} of ${totalPages}...`);
+        if (typeof window !== 'undefined' && pageNumber <= 2) {
+            notifyAttachmentProgress(attachment, `Running local OCR on page ${pageNumber} of ${Math.min(totalPages, 2)}...`);
             const tess = await extractTextViaTesseract(canvas);
             if (tess.ok) {
                 return `Page ${pageNumber} (Local OCR):\n${tess.text}`;
@@ -944,9 +960,7 @@ export function renderAttachmentTray(container, attachments, onRemove, options =
     container.classList.remove('hidden');
     const reading = Boolean(options?.reading);
     container.classList.toggle('is-reading', reading);
-    const statusHtml = reading
-        ? `<div class="composer-attachment-status" role="status">Reading attachments…</div>`
-        : '';
+    const statusHtml = '';
     const fileIcon = `<span class="composer-attachment-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path></svg></span>`;
     container.innerHTML = statusHtml + items.map(item => {
         const preview = item.previewUrl
@@ -975,11 +989,7 @@ export function renderAttachmentTray(container, attachments, onRemove, options =
 export function setAttachmentTrayReading(container, reading = true) {
     if (!container) return;
     if (reading) {
-        container.classList.remove('hidden');
         container.classList.add('is-reading');
-        if (!container.querySelector('.composer-attachment-status')) {
-            container.insertAdjacentHTML('afterbegin', `<div class="composer-attachment-status" role="status">Reading attachments…</div>`);
-        }
         return;
     }
     container.classList.remove('is-reading');
