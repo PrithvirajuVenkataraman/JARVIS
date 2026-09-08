@@ -348,7 +348,7 @@
                     <h2 class="empty-state-headline">What can I help with today?</h2>
                     <p class="empty-state-sub">Multimodal intelligence with live web search, deep reasoning, and document OCR.</p>
                     <div class="starter-cards-grid">
-                        <button type="button" class="starter-prompt-card" onclick="useStarterPrompt('Extract and calculate all line items and totals from a bill or receipt')">
+                        <button type="button" class="starter-prompt-card" onclick="useStarterPrompt('Extract and calculate all line items, tables, and totals from this document.', 'document_ocr')">
                             <span class="starter-card-icon" aria-hidden="true">📄</span>
                             <div class="starter-card-content">
                                 <div class="starter-card-title">Analyze Document / OCR</div>
@@ -6041,26 +6041,48 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             drawer.classList.toggle('is-open');
         }
 
-        function useStarterPrompt(text) {
+        function useStarterPrompt(text, action = null) {
+            const emptyState = document.getElementById('chat-empty-state');
+            if (emptyState) {
+                emptyState.classList.add('hidden');
+            }
             const input = document.getElementById('text-input');
             if (input) {
                 input.value = text;
                 autoResizeComposerTextarea();
                 toggleSendButton();
             }
-            updateChatEmptyStateVisibility();
+            if (action === 'document_ocr') {
+                if (input) input.focus();
+                if (typeof triggerComposerFilePicker === 'function') {
+                    triggerComposerFilePicker('file-browse');
+                } else {
+                    const fileInput = document.getElementById('composer-file-input');
+                    if (fileInput) {
+                        fileInput.value = '';
+                        fileInput.click();
+                    }
+                }
+                return;
+            }
             void sendTextInput({ text, source: 'starter_card' });
         }
 
-        function updateChatEmptyStateVisibility() {
+        function updateChatEmptyStateVisibility(forceHide = false) {
             const emptyState = document.getElementById('chat-empty-state');
             if (!emptyState) return;
+            if (forceHide === true) {
+                emptyState.classList.add('hidden');
+                return;
+            }
             const chatContainer = document.getElementById('chat-container');
             if (!chatContainer) return;
             // The empty state hero stays visible until the user actually sends a message or a real conversation is loaded
             const userMessages = chatContainer.querySelectorAll('.chat-bubble-user, [data-role="user"]');
             const hasRealUserTurn = userMessages.length > 0;
-            emptyState.classList.toggle('hidden', hasRealUserTurn);
+            const hasAssistantBubble = chatContainer.querySelector('.chat-bubble-assistant, .assistant-bubble, #chat-thinking-indicator');
+            const shouldHide = hasRealUserTurn || !!hasAssistantBubble;
+            emptyState.classList.toggle('hidden', shouldHide);
         }
 
         function initDragAndDropFileUpload() {
@@ -7066,23 +7088,31 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
         }
 
         function maybeAutoScroll(chatContainer) {
-            if (!chatContainer) return;
+            const chatMain = document.getElementById('chat-main');
+            const targetContainer = chatContainer || document.getElementById('chat-container');
+            if (!targetContainer && !chatMain) return;
             if (autoScrollLocked) {
                 chatUnreadWhileScrolledUp = true;
                 updateJumpToLatestButton();
                 return;
             }
-            chatContainer.scrollTop = chatContainer.scrollHeight;
+            if (chatMain) {
+                chatMain.scrollTop = chatMain.scrollHeight;
+            }
+            if (targetContainer) {
+                targetContainer.scrollTop = targetContainer.scrollHeight;
+            }
             chatUnreadWhileScrolledUp = false;
             updateJumpToLatestButton();
         }
 
         function jumpToLatest() {
+            const chatMain = document.getElementById('chat-main');
             const chatContainer = document.getElementById('chat-container');
-            if (!chatContainer) return;
             autoScrollLocked = false;
             chatUnreadWhileScrolledUp = false;
-            chatContainer.scrollTop = chatContainer.scrollHeight;
+            if (chatMain) chatMain.scrollTop = chatMain.scrollHeight;
+            if (chatContainer) chatContainer.scrollTop = chatContainer.scrollHeight;
             updateJumpToLatestButton();
         }
 
@@ -9420,6 +9450,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 // Assistant reply is text-first (Converse mode removed)
                 
                 maybeAutoScroll(chatContainer);
+                updateChatEmptyStateVisibility();
                 if (!meta?.skipRecord) {
                     chatHistory.push({ text: displayText, isUser });
                     recordActiveChatMessage('assistant', displayText, messageTurnId);
@@ -9434,6 +9465,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 chatContainer.appendChild(messageDiv);
             }
             maybeAutoScroll(chatContainer);
+            updateChatEmptyStateVisibility();
             if (!meta?.skipRecord) {
                 chatHistory.push({ text: displayText, isUser });
                 recordActiveChatMessage(isUser ? 'user' : 'assistant', displayText, messageTurnId, {
@@ -24565,6 +24597,7 @@ function startNewChatSession(options = {}) {
             if (chatContainer) chatContainer.innerHTML = '';
             chatHistory = [];
         }
+        updateChatEmptyStateVisibility();
         window.JarvisConversation?.reset?.();
         window.JarvisState?.resetConversationState?.();
         clearVisionContext();
@@ -24582,6 +24615,7 @@ function startNewChatSession(options = {}) {
         if (chatContainer) chatContainer.innerHTML = '';
         chatHistory = [];
     }
+    updateChatEmptyStateVisibility();
     window.JarvisConversation?.reset?.();
     window.JarvisState?.resetConversationState?.();
     clearVisionContext();
@@ -25184,6 +25218,7 @@ function restoreChatSession(sessionId) {
     } finally {
         isRestoringChatSession = false;
     }
+    updateChatEmptyStateVisibility();
     closeChatSidebar();
     renderChatSidebarList();
     persistActiveSessionSnapshot();
@@ -25767,7 +25802,7 @@ function renderCommandPaletteList() {
                     shortcut: '',
                     icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>',
                     action: () => {
-                        if (typeof switchChatSession === 'function') switchChatSession(s.id);
+                        if (typeof restoreChatSession === 'function') restoreChatSession(s.id);
                     }
                 }));
         } catch (_) {}
@@ -26124,6 +26159,7 @@ function showThinkingIndicator(message = 'Thinking') {
     window.__lastThinkingPhaseStartedAt = window.__lastThinkingPhaseStartedAt || Date.now();
     const chatContainer = document.getElementById('chat-container');
     if (!chatContainer) return;
+    updateChatEmptyStateVisibility(true);
 
     const userPrompt = String(window.__lastUserMessage || '').trim();
     const thoughtSteps = generateContextualThoughtSteps(userPrompt, message);
