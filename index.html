@@ -288,6 +288,15 @@
                         </div>
                     </div>
                     <div class="canvas-output-wrapper">
+                        <div id="canvas-empty-preview" class="canvas-empty-preview" style="display: none;">
+                            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="1.5">
+                                <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                                <polyline points="2 17 12 22 22 17"></polyline>
+                                <polyline points="2 12 12 17 22 12"></polyline>
+                            </svg>
+                            <h3>Live Preview Ready</h3>
+                            <p>Write or paste your code on the left to see live output here.</p>
+                        </div>
                         <iframe id="canvas-preview-frame" class="canvas-preview-frame" sandbox="allow-scripts allow-modals allow-forms"></iframe>
                         <div id="canvas-console-panel" class="canvas-console-panel" style="display: none;">
                             <div class="canvas-console-header">Console Output</div>
@@ -26392,6 +26401,7 @@ function executeCanvasCodeNow() {
     const frame = document.getElementById('canvas-preview-frame');
     const consolePanel = document.getElementById('canvas-console-panel');
     const consoleLogs = document.getElementById('canvas-console-logs');
+    const emptyPreview = document.getElementById('canvas-empty-preview');
     const syncStatus = document.getElementById('canvas-sync-status');
     const legacyPane = document.getElementById('canvas-code-pane');
 
@@ -26407,6 +26417,20 @@ function executeCanvasCodeNow() {
         window._jarvisCodeBlocks[activeCanvasBlockId].code = code;
     }
 
+    // Handle empty code cleanly without triggering console errors or white flashes
+    if (!code.trim()) {
+        if (frame) frame.style.display = 'none';
+        if (consolePanel) consolePanel.style.display = 'none';
+        if (emptyPreview) emptyPreview.style.display = 'flex';
+        if (syncStatus) {
+            syncStatus.textContent = 'Empty';
+            syncStatus.style.color = '#cbd5e1';
+        }
+        return;
+    }
+
+    if (emptyPreview) emptyPreview.style.display = 'none';
+
     let detectedLang = 'html';
     if (activeCanvasBlockId && window._jarvisCodeBlocks?.[activeCanvasBlockId]) {
         detectedLang = String(window._jarvisCodeBlocks[activeCanvasBlockId].lang || 'html').toLowerCase();
@@ -26421,15 +26445,22 @@ function executeCanvasCodeNow() {
         }
     }
 
-    const isHtmlOrSvg = /^(html|htm|svg|xml)$/i.test(detectedLang) || code.includes('<html') || code.includes('<svg') || code.includes('<!DOCTYPE') || code.includes('<div');
+    const isHtmlOrSvg = /^(html|htm|svg|xml)$/i.test(detectedLang) || code.includes('<html') || code.includes('<svg') || code.includes('<!DOCTYPE') || code.includes('<div') || code.includes('</');
 
     if (isHtmlOrSvg) {
         if (consolePanel) consolePanel.style.display = 'none';
         if (frame) {
             frame.style.display = 'block';
             try {
+                // Ensure default dark background styling in iframe so user is never blinded by white
+                let htmlToRender = code;
+                if (!htmlToRender.toLowerCase().includes('<body') && !htmlToRender.toLowerCase().includes('background')) {
+                    htmlToRender = `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>:root{color-scheme:dark;}html,body{background:#09090b;color:#f8fafc;font-family:system-ui,-apple-system,sans-serif;margin:0;padding:16px;box-sizing:border-box;}</style></head><body>${htmlToRender}</body></html>`;
+                } else if (!htmlToRender.toLowerCase().includes('background')) {
+                    htmlToRender = htmlToRender.replace(/<body([^>]*)>/i, '<body$1 style="background:#09090b;color:#f8fafc;">');
+                }
                 frame.contentDocument.open();
-                frame.contentDocument.write(code);
+                frame.contentDocument.write(htmlToRender);
                 frame.contentDocument.close();
             } catch (err) {
                 console.error('[Canvas Preview Error]', err);
@@ -26445,9 +26476,9 @@ function executeCanvasCodeNow() {
             if (detectedLang === 'json') {
                 try {
                     const parsed = JSON.parse(code);
-                    consoleLogs.innerHTML = `<span style="color:#10b981;">✓ Valid JSON (${Object.keys(parsed).length} keys)</span>\n${escapeHtml(JSON.stringify(parsed, null, 2))}`;
+                    consoleLogs.innerHTML = `<span style="color:#34d399;font-weight:bold;">✓ Valid JSON (${Object.keys(parsed).length} keys)</span>\n<span style="color:#ffffff;">${escapeHtml(JSON.stringify(parsed, null, 2))}</span>`;
                 } catch (err) {
-                    consoleLogs.innerHTML = `<span style="color:#ef4444;">✗ JSON Syntax Error: ${escapeHtml(err.message)}</span>`;
+                    consoleLogs.innerHTML = `<span style="color:#f87171;font-weight:bold;">✗ JSON Syntax Error:</span>\n<span style="color:#ffffff;">${escapeHtml(err.message)}</span>`;
                 }
             } else {
                 try {
@@ -26463,16 +26494,16 @@ function executeCanvasCodeNow() {
                     const result = runFn(captureConsole);
                     const duration = (performance.now() - start).toFixed(1);
 
-                    let logHtml = `<span style="color:#10b981;">✓ Executed in ${duration}ms</span>\n`;
+                    let logHtml = `<span style="color:#34d399;font-weight:bold;">✓ Executed in ${duration}ms</span>\n`;
                     if (logs.length) {
-                        logHtml += logs.map(l => `<div style="color:${l.type === 'error' ? '#ef4444' : (l.type === 'warn' ? '#f59e0b' : '#38bdf8')}">${escapeHtml(l.text)}</div>`).join('');
+                        logHtml += logs.map(l => `<div style="color:${l.type === 'error' ? '#f87171' : (l.type === 'warn' ? '#fbbf24' : '#ffffff')};margin:2px 0;">${escapeHtml(l.text)}</div>`).join('');
                     }
                     if (result !== undefined) {
-                        logHtml += `\n<span style="color:#94a3b8;">Returned:</span> ${escapeHtml(typeof result === 'object' ? JSON.stringify(result, null, 2) : String(result))}`;
+                        logHtml += `\n<span style="color:#38bdf8;font-weight:bold;">Returned:</span> <span style="color:#ffffff;">${escapeHtml(typeof result === 'object' ? JSON.stringify(result, null, 2) : String(result))}</span>`;
                     }
                     consoleLogs.innerHTML = logHtml;
                 } catch (err) {
-                    consoleLogs.innerHTML = `<span style="color:#ef4444;">✗ Runtime Error: ${escapeHtml(err.message)}</span>`;
+                    consoleLogs.innerHTML = `<span style="color:#f87171;font-weight:bold;">✗ Runtime Error:</span>\n<span style="color:#ffffff;">${escapeHtml(err.message)}</span>`;
                 }
             }
         }
@@ -26480,7 +26511,7 @@ function executeCanvasCodeNow() {
 
     if (syncStatus) {
         syncStatus.textContent = 'Live Synced';
-        syncStatus.style.color = '#10b981';
+        syncStatus.style.color = '#34d399';
     }
 }
 
