@@ -144,7 +144,7 @@ export function classifyInput(message, pending = null, activeThread = null) {
     );
     const hasFollowUpLead = /^(?:show examples?|examples?|more(?: details| info)?|continue(?: speaking| reading)?|explain (?:further|more|simply|it)|tell (?:me )?more|expand(?: on that)?|elaborate|what about|how about|then what|what next|what else|pros and cons|difference|differences|compare|cost|price|details|break that down|go deeper|give (?:some |an? )?(?:examples?|use cases?|code|sample)|can you (?:give|show|explain|elaborate))\b/i.test(lower);
     const hasDefiniteAspect = /\b(?:the|its|their)\s+[a-z]{3,}\b/i.test(lower);
-    const isUltraShortFollowUp = Boolean(activeThread) && /^(?:why|how|when|where|who|what next|what else|and then)\??$/i.test(lower.trim());
+    const isUltraShortFollowUp = /^(?:why|how|when|where|who|what next|what else|and then|how so|what about that|why so)\??$/i.test(lower.trim());
     const isContinuationOfActiveThread = Boolean(activeThread) && (
         /\b(?:use cases?|real world|applications?|alternatives?|examples?|pros and cons|tradeoffs?|benefits?|drawbacks?|how to implement|why is that|can you explain|walk me through|in practice|code sample)\b/i.test(lower) ||
         (hasAnaphoricReference) ||
@@ -487,7 +487,9 @@ function restoreState(state, snapshot, limits) {
 function resolution(originalMessage, resolvedMessage, thread, decisionReason, confidence, cancelledPendingState) {
     return {
         originalMessage,
+        verbatimMessage: originalMessage,
         resolvedMessage,
+        searchQuery: resolvedMessage,
         activeThread: thread ? { ...thread } : null,
         decisionReason,
         primaryIntent: primaryIntentForDecision(decisionReason),
@@ -596,14 +598,11 @@ function resolvePronouns(text, entity) {
     const anchor = cleanText(entity);
     if (!anchor) return text;
     return cleanText(text).replace(
-        /\b(?:its|their|theirs|his|her|hers)\b/gi,
+        /\b(?:its|his|her)\b/gi,
         `${anchor}'s`
     ).replace(
-        /\b(?:it|this|that|this one|that one|the company|the person|the topic|they|them|he|she|him)\b/gi,
+        /\b(?:he|she|him)\b/gi,
         anchor
-    ).replace(
-        /\bthere\b/gi,
-        `in ${anchor}`
     );
 }
 
@@ -857,13 +856,13 @@ export function retrievePastTurns(turns = [], query = '', options = {}) {
     const maxPairs = clamp(options.maxPairs || options.topK, 2, 1, 6);
     const queryVec = textToEmbeddingVector(cleanQuery);
 
-    const isRetrospective = /\b(?:earlier|previously|before|prior|remember|you said|i said|what did (?:i|we|you) (?:say|decide|discuss|mention)|as mentioned|what was (?:the|that|my)|last time|earlier on|we talked about)\b/i.test(cleanQuery);
-    const minSimilarity = isRetrospective ? 0.12 : 0.20;
+    const isRetrospective = /\b(?:earlier|previously|before|prior|remember|you said|i said|what did (?:i|we|you) (?:say|decide|discuss|mention)|as mentioned|what was (?:the|that|my)|last time|earlier on|we talked about|what was our|conclusion)\b/i.test(cleanQuery);
+    const minSimilarity = isRetrospective ? 0.08 : 0.16;
 
     // Group turns into chronological exchanges (user turn and following assistant turn)
     const exchanges = [];
-    const stopWords = new Set(['what', 'did', 'say', 'earlier', 'before', 'prior', 'remember', 'the', 'that', 'this', 'was', 'were', 'our', 'you', 'can', 'could', 'would', 'tell', 'remind', 'about', 'with', 'from', 'again', 'when']);
-    const queryKeywords = tokenize(cleanQuery).filter(w => w.length > 2 && !stopWords.has(w.toLowerCase()));
+    const stopWords = new Set(['what', 'did', 'say', 'earlier', 'before', 'prior', 'remember', 'the', 'that', 'this', 'was', 'were', 'our', 'you', 'can', 'could', 'would', 'tell', 'remind', 'about', 'with', 'from', 'again', 'when', 'how', 'why', 'who']);
+    const queryKeywords = tokenize(cleanQuery).filter(w => w.length >= 2 && !stopWords.has(w.toLowerCase()));
 
     for (let i = 0; i < turns.length; i++) {
         const turn = turns[i];
@@ -881,16 +880,22 @@ export function retrievePastTurns(turns = [], query = '', options = {}) {
                     vectorCosineSimilarity(queryVec, turnVec)
                 );
 
+                let matchedKw = [];
                 if (queryKeywords.length > 0) {
                     const lowerExchange = combinedText.toLowerCase();
                     let hitCount = 0;
                     for (const kw of queryKeywords) {
-                        if (lowerExchange.includes(kw.toLowerCase())) {
+                        const kwLower = kw.toLowerCase();
+                        if (lowerExchange.includes(kwLower)) {
                             hitCount += 1;
+                            matchedKw.push(kw);
+                            if (kw.length >= 3 && kw === kw.toUpperCase()) {
+                                hitCount += 1; // Acronym priority
+                            }
                         }
                     }
                     if (hitCount > 0) {
-                        sim += 0.15 * Math.min(3, hitCount);
+                        sim += 0.20 * Math.min(4, hitCount);
                     }
                 }
 
@@ -898,6 +903,7 @@ export function retrievePastTurns(turns = [], query = '', options = {}) {
                     userTurn: turn,
                     assistantTurn,
                     similarity: sim,
+                    reason: matchedKw.length ? `keyword: ${matchedKw.join(', ')}` : `similarity: ${sim.toFixed(2)}`,
                     index: i
                 });
             }
@@ -916,14 +922,16 @@ export function retrievePastTurns(turns = [], query = '', options = {}) {
             role: 'user',
             text: match.userTurn.text,
             id: match.userTurn.id || '',
-            turnId: match.userTurn.turnId || ''
+            turnId: match.userTurn.turnId || '',
+            retrievalReason: match.reason
         });
         if (match.assistantTurn) {
             retrieved.push({
                 role: 'assistant',
                 text: match.assistantTurn.text,
                 id: match.assistantTurn.id || '',
-                turnId: match.assistantTurn.turnId || ''
+                turnId: match.assistantTurn.turnId || '',
+                retrievalReason: match.reason
             });
         }
     }
@@ -945,21 +953,19 @@ export function buildMultiTierContext(state, options = {}) {
     const allTurns = Array.isArray(state?.turns) ? state.turns : [];
     const threadId = cleanText(options.threadId) || state?.activeThreadId || '';
     
-    // Select eligible turns for conversation
-    let sessionTurns = threadId ? allTurns.filter(t => t.threadId === threadId) : allTurns;
-    if (sessionTurns.length === 0 && allTurns.length > 0) {
-        sessionTurns = allTurns;
+    // Select turns for conversation: prioritize active thread for verbatim window, search all session turns for retrieval
+    let verbatimTurnsSource = (threadId ? allTurns.filter(t => t.threadId === threadId) : allTurns);
+    if (verbatimTurnsSource.length < 4 && allTurns.length >= 4) {
+        verbatimTurnsSource = allTurns;
     }
 
     // Tier 1: Active verbatim window (most recent turns)
-    const recentTurnsRaw = sessionTurns.slice(-maxRecentTurns);
-    const recentTurnIds = new Set(recentTurnsRaw.map(t => t.id).filter(Boolean));
+    const recentTurnsRaw = verbatimTurnsSource.slice(-maxRecentTurns);
+    const recentTurnIds = new Set(recentTurnsRaw.map(t => t.id || t.turnId).filter(Boolean));
     const recentTurns = recentTurnsRaw.map(t => ({ role: t.role, text: t.text }));
 
-    // Older turns outside the verbatim window
-    const olderTurns = sessionTurns.length > maxRecentTurns
-        ? sessionTurns.slice(0, sessionTurns.length - maxRecentTurns)
-        : [];
+    // Older turns outside the verbatim window (searches across all session turns for deep recall)
+    const olderTurns = allTurns.filter(t => !recentTurnIds.has(t.id) && !recentTurnIds.has(t.turnId));
 
     // Tier 2: Semantic Turn Retrieval from older turns
     const retrievedTurns = olderTurns.length > 0 && currentMessage
