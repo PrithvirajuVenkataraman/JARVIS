@@ -4260,26 +4260,21 @@ function isWeakAssistantAnswerForRetry(answerText, userMessage = '') {
     if (!answer) return true;
     const lower = answer.toLowerCase();
     if (answerAsksForMissingAttachment(answer)) return true;
-    if (answer.length < 28 && /\b(sorry|unclear|unsure|not sure|cannot help|can't help)\b/.test(lower)) return true;
-    const weakPatterns = [
-        /\bi'?m not sure\b/,
-        /\bi am not sure\b/,
-        /\bi cannot verify\b/,
-        /\bi can't verify\b/,
-        /\bi do not have enough information\b/,
-        /\bi don't have enough information\b/,
-        /\bcheck (?:online|the internet|latest news|official sources)\b/,
-        /\bconsult (?:a|an|the) (?:professional|expert|official source)\b/,
-        /\bi (?:recommend|suggest) (?:checking|looking)\b/,
-        /\bas an ai\b/,
-        /\bi don'?t have access to\b/,
-        /\bi do not have access to\b/
+
+    // A valid response that asks a question or has substantial length is NEVER a weak failed answer
+    if (answer.endsWith('?') && answer.length >= 15) return false;
+    if (answer.length >= 60) return false;
+
+    // Only flag as weak if it is a pure evasive refusal or empty cop-out with zero helpful content
+    const hardRefusalPatterns = [
+        /\b(?:i am unable to assist|i cannot fulfill this request|system error occurred)\b/,
+        /\b(?:as an ai model, i cannot)\b/,
+        /\b(?:consult (?:a|an|the) (?:professional|expert|official source))\b/
     ];
-    if (weakPatterns.some(pattern => pattern.test(lower))) return true;
+    if (hardRefusalPatterns.some(pattern => pattern.test(lower)) && answer.length < 100) return true;
+    if (answer.length < 24 && /\b(?:cannot help|can't help|system error)\b/.test(lower)) return true;
     if (isLowSignalModelAnswer(answer)) return true;
-    const user = String(userMessage || '').trim().toLowerCase();
-    return /^(what|who|when|where|why|how|explain|define|tell me)\b/.test(user) &&
-        /\b(can you clarify|provide more context)\b/.test(lower);
+    return false;
 }
 
 function buildWeakAnswerRetryMessage(userMessage) {
@@ -4703,10 +4698,8 @@ function postProcessAssistantResponse(rawText, userMessage = '') {
         .replace(/^sure[!.,\s-]*/i, '')
         .trim();
 
-    // Remove generic trailing CTA that wastes tokens.
+    // Remove robotic meta-talk endings while preserving legitimate closing questions and follow-ups.
     text = text
-        .replace(/\s*(would you like to know more about[^?]*\?)\s*$/i, '')
-        .replace(/\s*(is there (?:anything|something) else i can help you with\??)\s*$/i, '')
         .replace(/\s*(?:this is the answer[.!]?\s*)?(?:i(?:'| a)m|i am)\s+(?:going to|gonna|about to)\s+(?:end|stop)\s+(?:it|this|here)(?:\s+here)?[.!]?\s*$/i, '')
         .replace(/\s*i(?:'| wi)ll\s+stop\s+here(?:\s+because[^.?!]*)?[.!]?\s*$/i, '')
         .replace(/\s*(?:so,?\s*)?this is (?:the|my) (?:final )?answer[.!]?\s*$/i, '')
@@ -5306,6 +5299,15 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
         }
 
         const resolvedAnswerText = String(data.response || data.text || '').trim();
+        console.debug('[JARVIS conversation diagnostics]', {
+            recentTurnsCount: multiTierContext?.recentTurns?.length || 0,
+            retrievedTurnsCount: multiTierContext?.retrievedTurns?.length || 0,
+            retrievedTurns: multiTierContext?.retrievedTurns?.map(t => ({ role: t.role, text: t.text ? t.text.slice(0, 60) : '', reason: t.retrievalReason })) || [],
+            hasRollingSummary: Boolean(multiTierContext?.summaryText),
+            contextCharsEstimate: JSON.stringify(requestPayload.context).length,
+            hasFollowUpQuestion: /\?\s*$/.test(resolvedAnswerText),
+            weakRetryTriggered: allowWeakRetry && isWeakAssistantAnswerForRetry(resolvedAnswerText, normalizedUserMessage)
+        });
         // Skip weak-answer retry on the stream path (user already saw tokens) and for fast intents.
         const allowWeakRetry = !requestOptions?.weakRetry &&
             requestOptions?.stream !== true &&
@@ -19913,7 +19915,9 @@ function isWakeGreetingText(text) {
                 await handleImageGenerationRequest(imgPrompt || text);
                 return;
             }
-            if (['ambiguous_short_context', 'ambiguous_reference_context'].includes(contextResolution?.decisionReason) && !contextResolution?.activeThread) {
+            const hasRecentHistory = (Array.isArray(conversationHistory) && conversationHistory.length > 0) ||
+                Boolean(window.JarvisConversation?.getState?.()?.turns?.length);
+            if (!hasRecentHistory && ['ambiguous_short_context', 'ambiguous_reference_context'].includes(contextResolution?.decisionReason) && !contextResolution?.activeThread) {
                 const clarification = buildAmbiguousShortContextReply(contextResolution);
                 const chips = buildAmbiguousContextClarificationHtml(contextResolution);
                 addChatMessage(`${clarification}${chips}`, false);
@@ -19950,7 +19954,7 @@ function isWakeGreetingText(text) {
                 saveToHistory(text, reply);
                 return;
             }
-            text = contextResolution?.resolvedMessage || text;
+            // User message is preserved verbatim for LLM attention; resolved entity is used only for grounding
             const boundPlace = String(contextResolution?.activeThread?.entity || contextResolution?.activeThread?.topic || '').trim();
             if (boundPlace && !isInvalidLocationCandidate(boundPlace)) {
                 setLastResolvedTravelLocation(boundPlace);
