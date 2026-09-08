@@ -2,6 +2,8 @@ const PROVIDER_TIMEOUT_MS = 20_000;
 const GEMINI_API_VERSIONS = ['v1beta', 'v1'];
 const GEMINI_MODEL_FALLBACKS = [
     'gemini-2.5-flash',
+    'gemini-3.7-flash',
+    'gemini-2.5-pro',
     'gemini-2.0-flash',
     'gemini-2.5-flash-lite',
     'gemini-flash-latest'
@@ -18,11 +20,17 @@ export async function extractTextFromImage({ mimeType = 'image/jpeg', imageBase6
         throw new Error('Vision provider is not configured.');
     }
     const systemPrompt = [
-        'You are a document OCR engine.',
+        'You are an enterprise-grade document OCR engine.',
+        'Transcribe all visible text exactly as written. Preserve layout, line breaks, bullet points, headers, and section hierarchies.',
+        'FORMATTING RULES:',
+        '- Render tables, grids, and multi-column data as clean Markdown tables with header separators (| Col 1 | Col 2 |).',
+        '- For receipts, bills, and invoices: preserve store/vendor names, dates, itemized lines, quantities, unit prices, tax lines, and grand totals accurately.',
+        '- For forms and key-value documents: preserve labels and values (e.g. "Name: ...", "Date: ...").',
+        '- For handwritten notes: transcribe clearly and do not guess unreadable characters.',
+        '- Do not invent, assume, or hallucinate text that is not visible.',
         'Return strict JSON only:',
-        '{ "fullText": "all readable text in order", "textDetected": ["line 1", "line 2"], "summary": "short note" }',
-        'Do not invent unreadable text.',
-        String(prompt || 'Extract all readable text from this image.').trim()
+        '{ "fullText": "complete transcription in Markdown format", "textDetected": ["line 1", "line 2"], "summary": "short 1-sentence document overview" }',
+        String(prompt || 'Extract all readable text, tables, and data from this image.').trim()
     ].join('\n');
 
     const rawText = await callVisionText({ providers, systemPrompt, mimeType, imageBase64 });
@@ -37,6 +45,7 @@ export async function extractTextFromImage({ mimeType = 'image/jpeg', imageBase6
     return {
         ok: Boolean(text),
         text,
+        summary: String(parsed?.summary || '').trim(),
         method: 'vision_ocr',
         provider: providers.geminiApiKey ? 'gemini' : 'groq'
     };
@@ -127,7 +136,7 @@ async function callGeminiVision({ apiKey, configuredModel = '', systemPrompt, mi
                             }],
                             generationConfig: {
                                 temperature: 0.1,
-                                maxOutputTokens: 2500
+                                maxOutputTokens: 8192
                             }
                         })
                     }
