@@ -42,14 +42,7 @@
     <div id="offline-banner" class="offline-banner hidden" role="status" aria-live="polite">
         Offline mode: some features may be unavailable
     </div>
-    <button id="chat-sidebar-toggle" class="chat-sidebar-toggle" type="button" onclick="toggleChatSidebar()" aria-label="Open chat history" aria-expanded="false" aria-controls="chat-sidebar-panel">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
-            <rect x="4" y="5" width="16" height="14" rx="2"></rect>
-            <path d="M9 5v14"></path>
-            <path d="M12 9h5"></path>
-            <path d="M12 13h4"></path>
-        </svg>
-    </button>
+
     <div id="chat-sidebar-backdrop" class="chat-sidebar-backdrop hidden" onclick="closeChatSidebar()" aria-hidden="true"></div>
     <aside id="chat-sidebar-panel" class="chat-sidebar-panel" aria-label="Chat history" aria-hidden="true">
         <div class="chat-sidebar-header">
@@ -266,87 +259,212 @@
         </div>
     </div>
 
-    <div class="page-shell">
-        <div class="app-shell max-w-5xl mx-auto relative z-10 p-6">
-            <!-- Header - Enhanced -->
-            <div class="header-enhanced mb-6 flex items-center justify-between">
-                <div class="flex items-center">
-                    <h1 id="title" class="jarvis-top-title">JARVIS</h1>
-                    <div class="enterprise-persona-selector-wrap">
-                        <select id="enterprise-persona-select" class="enterprise-persona-select" aria-label="Select AI Persona" onchange="setEnterprisePersona(this.value)">
-                            <option value="general">Default Assistant</option>
-                            <option value="architect">Senior Architect</option>
-                            <option value="executive">Executive Brief</option>
-                            <option value="analyst">Technical Analyst</option>
-                        </select>
-                    </div>
-                </div>
-                <p id="subtitle" class="hidden"></p>
+        <!-- Full-Height Edge-to-Edge AI Workspace Container -->
+    <div id="app-root" class="app-root flex flex-col min-h-screen">
+        <!-- Sticky Top Navigation Bar -->
+        <header id="app-header" class="app-header">
+            <div class="header-left flex items-center gap-2">
+                <button id="chat-sidebar-toggle" class="header-icon-btn" type="button" onclick="toggleChatSidebar()" aria-label="Open chat history" aria-expanded="false" aria-controls="chat-sidebar-panel" title="Toggle chat history (Ctrl+Shift+S)">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <rect x="4" y="5" width="16" height="14" rx="2"></rect>
+                        <path d="M9 5v14"></path>
+                        <path d="M13 9h4"></path>
+                        <path d="M13 13h3"></path>
+                    </svg>
+                </button>
+                <button id="header-new-chat-btn" class="header-icon-btn" type="button" onclick="startNewChatSession()" aria-label="Start new chat" title="New chat (Ctrl+O)">
+                    <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <path d="M12 20h9"></path>
+                        <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"></path>
+                    </svg>
+                </button>
+                <span class="header-brand-title font-bold tracking-wider text-sm hidden sm:inline-block">JARVIS</span>
             </div>
 
-            <!-- Main Content Area -->
-            <div id="main-card" class="glass-card rounded-3xl p-8 mb-6 card-hover">
-                <!-- Two-column layout: Suggestions left, Chat right -->
-                <div id="chat-layout" class="flex flex-col gap-6">
-                    <!-- Left Column -->
-                    <div id="utility-panel" class="w-full order-2">
-
-                        <!-- Weather Card -->
-                        <div id="weather-card" class="hidden weather-card-enhanced text-white p-6 shadow-lg mt-6">
-                            <div class="flex items-center justify-between mb-3 relative z-10">
-                                <div class="flex items-center gap-3">
-                                    <div class="p-2 bg-white/20 rounded-xl backdrop-blur-sm">
-                                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                            <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path>
-                                        </svg>
-                                    </div>
-                                    <div>
-                                        <h2 class="text-xl font-bold text-white">Weather</h2>
-                                        <p id="location-name" class="text-sm text-white/80">Loading...</p>
-                                    </div>
-                                </div>
-                                <button id="expand-forecast-btn" onclick="toggleForecast()" class="p-2 rounded-full hover:bg-white/20 transition-all" title="Show 5-day forecast">
-                                <svg id="expand-forecast-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="transition-transform">
-                                    <polyline points="6 9 12 15 18 9"></polyline>
-                                </svg>
-                            </button>
+            <div class="header-center">
+                <!-- Model & Persona Selector Pill Dropdown -->
+                <div class="header-model-pill-wrap relative">
+                    <button id="header-model-pill" type="button" class="header-model-pill" onclick="toggleHeaderModelDropdown()" aria-expanded="false" aria-haspopup="listbox" aria-label="Select AI Model and Persona">
+                        <span class="header-model-dot" aria-hidden="true"></span>
+                        <span id="header-model-name" class="header-model-name">Gemini 2.5 Flash</span>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="header-chevron" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
+                    </button>
+                    <div id="header-model-dropdown" class="header-model-dropdown hidden" role="listbox" aria-label="Available models and personas">
+                        <div class="header-dropdown-section-title">Model Architecture</div>
+                        <div class="header-dropdown-item selected" data-model="auto" onclick="selectModelFromHeader('auto')">
+                            <div class="dropdown-item-title">Auto (Recommended)</div>
+                            <div class="dropdown-item-sub">Dynamic Groq-First routing with intelligent failover</div>
                         </div>
-                        <p id="temperature" class="text-5xl font-bold mb-2 text-white relative z-10">--&#176;F / --&#176;C</p>
-                        <p id="weather-advice" class="text-white/90 text-lg relative z-10"></p>
-                        <div id="aqi-section" class="mt-4 pt-4 border-t border-white/20 relative z-10 hidden">
-                                <p class="text-white/90 text-sm font-semibold">Air Quality Index</p>
-                                <div class="flex items-center gap-2 mt-2">
-                                    <!-- AQI details will be injected here -->
-                                </div>
+                        <div class="header-dropdown-item" data-model="gemini-2.5-flash" onclick="selectModelFromHeader('gemini-2.5-flash')">
+                            <div class="dropdown-item-title">Gemini 2.5 Flash</div>
+                            <div class="dropdown-item-sub">Ultra-fast multimodal reasoning & OCR</div>
+                        </div>
+                        <div class="header-dropdown-item" data-model="gemini-3.7-flash" onclick="selectModelFromHeader('gemini-3.7-flash')">
+                            <div class="dropdown-item-title">Gemini 3.7 Flash</div>
+                            <div class="dropdown-item-sub">Advanced multimodal & coding capabilities</div>
+                        </div>
+                        <div class="header-dropdown-item" data-model="gemini-2.5-pro" onclick="selectModelFromHeader('gemini-2.5-pro')">
+                            <div class="dropdown-item-title">Gemini 2.5 Pro</div>
+                            <div class="dropdown-item-sub">Deep reasoning & complex code analysis</div>
+                        </div>
+                        <div class="header-dropdown-item" data-model="llama-3.3-70b-versatile" onclick="selectModelFromHeader('llama-3.3-70b-versatile')">
+                            <div class="dropdown-item-title">Llama 3.3 70B Versatile</div>
+                            <div class="dropdown-item-sub">High-intelligence conversational model (Groq)</div>
+                        </div>
+                        <div class="header-dropdown-divider"></div>
+                        <div class="header-dropdown-section-title">Persona Mode</div>
+                        <div class="header-persona-selector-grid">
+                            <button type="button" class="header-persona-btn active" data-persona="general" onclick="selectPersonaFromHeader('general')">Default</button>
+                            <button type="button" class="header-persona-btn" data-persona="architect" onclick="selectPersonaFromHeader('architect')">Architect</button>
+                            <button type="button" class="header-persona-btn" data-persona="executive" onclick="selectPersonaFromHeader('executive')">Executive</button>
+                            <button type="button" class="header-persona-btn" data-persona="analyst" onclick="selectPersonaFromHeader('analyst')">Analyst</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="header-right flex items-center gap-1.5">
+                <!-- Spotlight Command Palette Trigger -->
+                <button id="header-command-palette-btn" class="header-action-btn hidden md:inline-flex" type="button" onclick="openCommandPalette()" title="Command Palette (Ctrl+K)">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                    </svg>
+                    <span>Search</span>
+                    <kbd class="header-kbd">⌘K</kbd>
+                </button>
+                <!-- Artifact Canvas Trigger -->
+                <button id="header-canvas-btn" class="header-icon-btn" type="button" onclick="toggleJarvisCanvasDrawer()" title="Artifact Canvas" aria-label="Toggle Artifact Canvas">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                        <polyline points="2 17 12 22 22 17"></polyline>
+                        <polyline points="2 12 12 17 22 12"></polyline>
+                    </svg>
+                </button>
+                <!-- Light/Dark Theme Switcher -->
+                <button id="theme-toggle-btn" class="header-icon-btn" type="button" onclick="toggleAppTheme()" title="Toggle dark/light theme" aria-label="Toggle color theme">
+                    <svg id="theme-icon-sun" class="theme-icon hidden" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <circle cx="12" cy="12" r="5"></circle>
+                        <line x1="12" y1="1" x2="12" y2="3"></line>
+                        <line x1="12" y1="21" x2="12" y2="23"></line>
+                        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                        <line x1="1" y1="12" x2="3" y2="12"></line>
+                        <line x1="21" y1="12" x2="23" y2="12"></line>
+                        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                    </svg>
+                    <svg id="theme-icon-moon" class="theme-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                    </svg>
+                </button>
+            </div>
+        </header>
+
+        <!-- Hidden legacy anchors for backwards compatibility -->
+        <div id="legacy-anchors-shell" class="hidden" aria-hidden="true" style="display: none !important;">
+            <h1 id="title" class="jarvis-top-title">JARVIS</h1>
+            <p id="subtitle" class="hidden"></p>
+            <div id="main-card"></div>
+            <div id="chat-layout"></div>
+            <div id="utility-panel"></div>
+            <div id="chat-panel"></div>
+            <div id="weather-card" class="hidden weather-card-enhanced">
+                <p id="location-name"></p>
+                <button id="expand-forecast-btn" onclick="toggleForecast()"><svg id="expand-forecast-icon"></svg></button>
+                <p id="temperature"></p>
+                <p id="weather-advice"></p>
+                <div id="aqi-section" class="hidden"></div>
+                <div id="forecast-container" class="hidden"></div>
+            </div>
+            <select id="enterprise-persona-select" onchange="setEnterprisePersona(this.value)">
+                <option value="general">Default Assistant</option>
+                <option value="architect">Senior Architect</option>
+                <option value="executive">Executive Brief</option>
+                <option value="analyst">Technical Analyst</option>
+            </select>
+        </div>
+
+        <!-- Main Chat Stream Viewport -->
+        <main id="chat-main" class="chat-main flex-1 overflow-y-auto custom-scrollbar">
+            <div id="chat-center-column" class="chat-center-column max-w-3xl mx-auto w-full px-4 sm:px-6 pt-4 pb-36">
+                <!-- Interactive Empty State Hero -->
+                <div id="chat-empty-state" class="chat-empty-state">
+                    <div class="empty-state-emblem-wrap">
+                        <div class="empty-state-emblem-glow" aria-hidden="true"></div>
+                        <svg class="empty-state-emblem" width="60" height="60" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+                            <circle cx="32" cy="32" r="17.2" stroke="#38bdf8" stroke-width="3"></circle>
+                            <circle cx="32" cy="32" r="23" stroke="#0ea5e9" stroke-width="1.2" opacity="0.85"></circle>
+                            <path d="M18.7 23.3a23 23 0 0 1 12.1-5.1" stroke="#38bdf8" stroke-width="2.4" stroke-linecap="round"></path>
+                            <path d="M40.7 18.8a23 23 0 0 1 7.7 5.6" stroke="#38bdf8" stroke-width="2.4" stroke-linecap="round"></path>
+                            <path d="M47.2 39.8a23 23 0 0 1-7.7 5.5" stroke="#38bdf8" stroke-width="2.4" stroke-linecap="round"></path>
+                            <path d="M29 45.8a23 23 0 0 1-11-6" stroke="#38bdf8" stroke-width="2.4" stroke-linecap="round"></path>
+                            <text x="32" y="35.5" text-anchor="middle" fill="#e0f2fe" font-size="8" font-family="system-ui, -apple-system, sans-serif" font-weight="750" letter-spacing="1">JARVIS</text>
+                        </svg>
+                    </div>
+                    <h2 class="empty-state-headline">What can I help with today?</h2>
+                    <p class="empty-state-sub">Multimodal intelligence with live web search, deep reasoning, and document OCR.</p>
+                    <div class="starter-cards-grid">
+                        <button type="button" class="starter-prompt-card" onclick="useStarterPrompt('Extract and calculate all line items and totals from a bill or receipt')">
+                            <span class="starter-card-icon" aria-hidden="true">📄</span>
+                            <div class="starter-card-content">
+                                <div class="starter-card-title">Analyze Document / OCR</div>
+                                <div class="starter-card-desc">Transcribe bills, tables, or scanned PDFs</div>
                             </div>
-                        <div id="forecast-container" class="hidden mt-4 pt-4 border-t border-white/20 relative z-10">
-                            <!-- 5-day forecast will be injected here -->
-                        </div>
-                    </div>
-
-                    </div>
-
-                    <!-- Right Column: Chat -->
-                    <!-- Mobile UI/UX Fix: Ensure chat panel height is responsive -->
-                    <div id="chat-panel" class="w-full order-1 relative flex flex-col">
-                        <!-- Chat History - Claude/ChatGPT style compact view -->
-                        <div id="chat-container" class="bg-gray-50/80 dark:bg-slate-800/50 rounded-2xl p-4 overflow-y-auto space-y-3 custom-scrollbar chat-panel-height">
-                            <!-- Welcome message -->
-                        </div>
-                        <button id="jump-to-latest-btn" class="chat-scroll-jump hidden" onclick="jumpToLatest()" type="button" aria-label="Jump to latest">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
-                                <path d="M6 9l6 6 6-6"></path>
-                            </svg>
-                            <span class="chat-scroll-jump-dot" aria-hidden="true"></span>
+                        </button>
+                        <button type="button" class="starter-prompt-card" onclick="useStarterPrompt('Write a clean, optimized JavaScript utility to debounce asynchronous API calls with cancellation')">
+                            <span class="starter-card-icon" aria-hidden="true">💻</span>
+                            <div class="starter-card-content">
+                                <div class="starter-card-title">Code & Architecture</div>
+                                <div class="starter-card-desc">Debug, refactor, or build clean algorithms</div>
+                            </div>
+                        </button>
+                        <button type="button" class="starter-prompt-card" onclick="useStarterPrompt('Give me a step-by-step product launch strategy for a high-performance developer tool')">
+                            <span class="starter-card-icon" aria-hidden="true">💡</span>
+                            <div class="starter-card-content">
+                                <div class="starter-card-title">Brainstorm & Strategy</div>
+                                <div class="starter-card-desc">Plan workflows, roadmaps, and ideas</div>
+                            </div>
+                        </button>
+                        <button type="button" class="starter-prompt-card" onclick="useStarterPrompt('What are the most significant breakthroughs in quantum computing and AI this year?')">
+                            <span class="starter-card-icon" aria-hidden="true">🌐</span>
+                            <div class="starter-card-content">
+                                <div class="starter-card-title">Live Web Research</div>
+                                <div class="starter-card-desc">Explore verified facts and fresh real-time data</div>
+                            </div>
                         </button>
                     </div>
                 </div>
+
+                <!-- Chat History Feed -->
+                <div id="chat-container" class="chat-container space-y-4"></div>
+
+                <!-- Floating Jump To Latest Pill -->
+                <button id="jump-to-latest-btn" class="chat-scroll-jump hidden" onclick="jumpToLatest()" type="button" aria-label="Jump to latest message">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg>
+                    <span>Jump to latest</span>
+                </button>
             </div>
+        </main>
+    </div>
+
+    <!-- Full-Screen Drag and Drop Overlay -->
+    <div id="drag-drop-overlay" class="drag-drop-overlay hidden" aria-hidden="true">
+        <div class="drag-drop-backdrop"></div>
+        <div class="drag-drop-content">
+            <div class="drag-drop-icon">
+                <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="17 8 12 3 7 8"></polyline>
+                    <line x1="12" y1="3" x2="12" y2="15"></line>
+                </svg>
+            </div>
+            <h3 class="drag-drop-title">Drop files or images here</h3>
+            <p class="drag-drop-desc">Upload documents, PDFs, screenshots, or photos for instant OCR & analysis</p>
         </div>
     </div>
-    
-    <!-- Loading Overlay - Enhanced -->
-    <div id="loading-overlay" class="loading-overlay hidden">
+
+<div id="loading-overlay" class="loading-overlay hidden">
         <div class="glass-card p-8 text-center max-w-sm mx-4">
             <div class="typing-indicator justify-center mb-4">
                 <div class="typing-dot"></div>
@@ -5886,7 +6004,11 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             loadMemoryPersistencePreference();  
             loadUserData();  
             loadAssistantModes(); 
-            enforceDarkMode();
+            initAppTheme();
+            syncHeaderModelDisplay();
+            syncHeaderPersonaDisplay();
+            initDragAndDropFileUpload();
+            updateChatEmptyStateVisibility();
             void syncRetrievalFlagsFromDiagnostics();
             setupInputHistoryNavigation();
             initChatScrollLock();
@@ -5926,41 +6048,176 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
 
         // Jump-to-latest behavior is managed by the unified chat scroll-lock module below.
 
-        function enforceDarkMode() {
-            darkMode = true;
+        function getAppTheme() {
+            try {
+                const stored = localStorage.getItem('jarvis_theme_mode');
+                if (stored === 'light' || stored === 'dark') return stored;
+            } catch (_) {}
+            return 'dark'; // default
+        }
+
+        function setAppTheme(theme) {
+            const isDark = theme === 'dark';
+            darkMode = isDark;
             const body = document.body;
-            const card = document.getElementById('main-card');
-            const title = document.getElementById('title');
-            const subtitle = document.getElementById('subtitle');
-            const chatContainer = document.getElementById('chat-container');
-
-            const inputBarContainer = document.getElementById('input-bar-container');
-            const inputBarInner = document.getElementById('input-bar-inner');
-            const textInput = document.getElementById('text-input');
-            const footerDisclaimer = document.getElementById('footer-disclaimer');
-
-            body.classList.remove('light', 'bg-white', 'text-black');
-            body.classList.add('dark', 'bg-black', 'text-white');
-            if (card) card.className = 'glass-card rounded-3xl p-8 mb-6 card-hover';
-            if (title) title.className = 'jarvis-top-title';
-            if (subtitle) subtitle.className = 'hidden';
-            if (chatContainer) chatContainer.className = 'bg-slate-800/50 rounded-2xl p-4 overflow-y-auto space-y-3 custom-scrollbar chat-panel-height';
-
-            if (inputBarContainer) {
-                inputBarContainer.className = 'fixed bottom-0 left-0 right-0 floating-input-bar z-40';
-            }
-            if (inputBarInner) {
-                inputBarInner.className = 'composer-shell modern-input';
-            }
-            if (textInput) {
-                textInput.className = 'composer-input';
-            }
-            if (footerDisclaimer) {
-                footerDisclaimer.className = 'composer-disclaimer';
+            body.classList.toggle('dark', isDark);
+            body.classList.toggle('light', !isDark);
+            try {
+                localStorage.setItem('jarvis_theme_mode', isDark ? 'dark' : 'light');
+            } catch (_) {}
+            const sunIcon = document.getElementById('theme-icon-sun');
+            const moonIcon = document.getElementById('theme-icon-moon');
+            if (sunIcon && moonIcon) {
+                sunIcon.classList.toggle('hidden', isDark);
+                moonIcon.classList.toggle('hidden', !isDark);
             }
             updateComposerPlaceholder();
             globalThis.syncVttUiState?.();
         }
+
+        function toggleAppTheme() {
+            const isCurrentlyDark = document.body.classList.contains('dark');
+            setAppTheme(isCurrentlyDark ? 'light' : 'dark');
+            if (typeof showTemporaryMessage === 'function') {
+                showTemporaryMessage(isCurrentlyDark ? 'Light mode enabled' : 'Dark mode enabled');
+            }
+        }
+
+        function enforceDarkMode() {
+            setAppTheme('dark');
+        }
+
+        function enforceLightMode() {
+            setAppTheme('light');
+        }
+
+        function initAppTheme() {
+            setAppTheme(getAppTheme());
+        }
+
+        function toggleHeaderModelDropdown() {
+            const dropdown = document.getElementById('header-model-dropdown');
+            const pill = document.getElementById('header-model-pill');
+            if (!dropdown || !pill) return;
+            const isHidden = dropdown.classList.contains('hidden');
+            dropdown.classList.toggle('hidden', !isHidden);
+            pill.setAttribute('aria-expanded', isHidden ? 'true' : 'false');
+        }
+
+        function selectModelFromHeader(modelKey) {
+            setSelectedModel(modelKey);
+            syncHeaderModelDisplay();
+            const dropdown = document.getElementById('header-model-dropdown');
+            if (dropdown) dropdown.classList.add('hidden');
+            const pill = document.getElementById('header-model-pill');
+            if (pill) pill.setAttribute('aria-expanded', 'false');
+        }
+
+        function selectPersonaFromHeader(personaKey) {
+            setEnterprisePersona(personaKey);
+            syncHeaderPersonaDisplay();
+            const dropdown = document.getElementById('header-model-dropdown');
+            if (dropdown) dropdown.classList.add('hidden');
+            const pill = document.getElementById('header-model-pill');
+            if (pill) pill.setAttribute('aria-expanded', 'false');
+        }
+
+        function syncHeaderModelDisplay() {
+            const currentModel = typeof getSelectedModel === 'function' ? getSelectedModel() : 'auto';
+            const nameEl = document.getElementById('header-model-name');
+            const modelLabels = {
+                'auto': 'Auto (Recommended)',
+                'gemini-2.5-flash': 'Gemini 2.5 Flash',
+                'gemini-3.7-flash': 'Gemini 3.7 Flash',
+                'gemini-2.5-pro': 'Gemini 2.5 Pro',
+                'llama-3.3-70b-versatile': 'Llama 3.3 70B'
+            };
+            if (nameEl) {
+                nameEl.textContent = modelLabels[currentModel] || currentModel;
+            }
+            const items = document.querySelectorAll('.header-dropdown-item');
+            items.forEach(item => {
+                item.classList.toggle('selected', item.getAttribute('data-model') === currentModel);
+            });
+        }
+
+        function syncHeaderPersonaDisplay() {
+            const currentPersona = typeof getActivePersonaKey === 'function' ? getActivePersonaKey() : 'general';
+            const btns = document.querySelectorAll('.header-persona-btn');
+            btns.forEach(btn => {
+                btn.classList.toggle('active', btn.getAttribute('data-persona') === currentPersona);
+            });
+        }
+
+        function toggleJarvisCanvasDrawer() {
+            const drawer = document.getElementById('jarvis-canvas-drawer');
+            if (!drawer) return;
+            drawer.classList.toggle('is-open');
+        }
+
+        function useStarterPrompt(text) {
+            const input = document.getElementById('text-input');
+            if (input) {
+                input.value = text;
+                autoResizeComposerTextarea();
+                toggleSendButton();
+            }
+            updateChatEmptyStateVisibility();
+            void sendTextInput({ text, source: 'starter_card' });
+        }
+
+        function updateChatEmptyStateVisibility() {
+            const emptyState = document.getElementById('chat-empty-state');
+            if (!emptyState) return;
+            const chatContainer = document.getElementById('chat-container');
+            const hasMessages = chatContainer && chatContainer.querySelectorAll('.chat-row').length > 0;
+            emptyState.classList.toggle('hidden', Boolean(hasMessages));
+        }
+
+        function initDragAndDropFileUpload() {
+            const overlay = document.getElementById('drag-drop-overlay');
+            if (!overlay) return;
+            let dragCounter = 0;
+
+            window.addEventListener('dragenter', (e) => {
+                if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')) {
+                    dragCounter += 1;
+                    overlay.classList.remove('hidden');
+                }
+            });
+
+            window.addEventListener('dragleave', () => {
+                dragCounter = Math.max(0, dragCounter - 1);
+                if (dragCounter === 0) {
+                    overlay.classList.add('hidden');
+                }
+            });
+
+            window.addEventListener('dragover', (e) => {
+                e.preventDefault();
+            });
+
+            window.addEventListener('drop', (e) => {
+                e.preventDefault();
+                dragCounter = 0;
+                overlay.classList.add('hidden');
+                if (e.dataTransfer?.files?.length) {
+                    void handleComposerAttachmentSelection(e.dataTransfer.files);
+                }
+            });
+        }
+
+        document.addEventListener('click', (e) => {
+            const wrap = e.target.closest('.header-model-pill-wrap');
+            if (!wrap) {
+                const dropdown = document.getElementById('header-model-dropdown');
+                if (dropdown && !dropdown.classList.contains('hidden')) {
+                    dropdown.classList.add('hidden');
+                    const pill = document.getElementById('header-model-pill');
+                    if (pill) pill.setAttribute('aria-expanded', 'false');
+                }
+            }
+        });
 
         function updateComposerPlaceholder() {
             const input = document.getElementById('text-input');
