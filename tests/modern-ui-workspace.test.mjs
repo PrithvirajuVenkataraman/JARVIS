@@ -7,18 +7,18 @@ console.log('--- Testing Modern AI Workspace UI Architecture ---');
 // 1. Verify index.html Layout & Elements
 const indexHtml = fs.readFileSync(path.resolve('index.html'), 'utf8');
 
-// Header elements: streamlined without model dropdown or theme toggle
+// Header elements: streamlined without model dropdown, theme toggle, or sandbox buttons
 assert.ok(indexHtml.includes('id="app-header"'), 'App header element must exist');
 assert.ok(indexHtml.includes('id="chat-sidebar-toggle"'), 'Sidebar toggle button must exist');
 assert.ok(indexHtml.includes('id="header-new-chat-btn"'), 'New chat header button must exist');
 assert.ok(indexHtml.includes('id="header-command-palette-btn"'), 'Command palette search trigger must exist');
-assert.ok(indexHtml.includes('id="header-canvas-btn"'), 'Artifact Canvas button must exist');
 
-// Verified removed from header completely per user directive
+// Verified removed from header completely per user directives
+assert.ok(!indexHtml.includes('id="header-canvas-btn"'), 'Artifact Canvas button must be removed');
 assert.ok(!indexHtml.includes('id="header-model-pill"'), 'Header model selector pill must be removed');
 assert.ok(!indexHtml.includes('id="header-model-dropdown"'), 'Header model dropdown list must be removed');
 assert.ok(!indexHtml.includes('id="theme-toggle-btn"'), 'Theme toggle button must be removed (dark mode is exclusive)');
-console.log('  [PASS] 1. Streamlined top navigation bar verified (header model pill and theme toggle removed)');
+console.log('  [PASS] 1. Streamlined top navigation bar verified (header model pill, theme toggle, and canvas trigger removed)');
 
 // Sidebar model selector preserved
 assert.ok(indexHtml.includes('id="model-selector"'), 'Sidebar model selector must exist');
@@ -71,19 +71,18 @@ assert.ok(stylesCss.includes('.next-step-arrow'), 'Next step arrow CSS rule must
 assert.ok(stylesCss.includes('.enterprise-next-steps-card'), 'Revamped next steps card styling must exist');
 console.log('  [PASS] 6. Permanent dark mode design tokens, Next Steps modern UI CSS verified');
 
-// 3. Verify Artifact Studio Side-by-Side Live Code Editor & Real-Time Output
-assert.ok(indexHtml.includes('id="jarvis-canvas-drawer"'), 'Artifact Canvas drawer must exist');
-assert.ok(indexHtml.includes('id="canvas-code-input"'), 'Interactive code editor textarea must exist');
-assert.ok(indexHtml.includes('id="canvas-line-numbers"'), 'Line numbers gutter must exist');
-assert.ok(indexHtml.includes('id="canvas-preview-frame"'), 'Live preview sandbox iframe must exist');
-assert.ok(indexHtml.includes('id="canvas-tab-split"'), 'Split view tab button must exist');
-assert.ok(indexHtml.includes('function setCanvasViewMode('), 'setCanvasViewMode function must be defined');
-assert.ok(indexHtml.includes('function executeCanvasCodeNow('), 'executeCanvasCodeNow function must be defined');
-assert.ok(indexHtml.includes('function handleCanvasEditorKeydown('), 'handleCanvasEditorKeydown tab handler must be defined');
-assert.ok(stylesCss.includes('.canvas-split-container'), 'Split-pane container CSS must exist');
-assert.ok(stylesCss.includes('.canvas-editor-pane'), 'Editor pane CSS must exist');
-assert.ok(stylesCss.includes('.canvas-preview-pane'), 'Preview pane CSS must exist');
-assert.ok(stylesCss.includes('.canvas-code-textarea'), 'Code textarea styling must exist');
-console.log('  [PASS] 7. Artifact Studio side-by-side interactive code editor and live output preview verified');
+// 3. Verify Complete Removal of Coding Sandbox & Artifact Canvas (Enterprise Standards)
+assert.ok(!indexHtml.includes('id="jarvis-canvas-drawer"'), 'Artifact Canvas drawer must be removed');
+assert.ok(!indexHtml.includes('id="canvas-code-input"'), 'Interactive code editor textarea must be removed');
+assert.ok(!indexHtml.includes('id="canvas-preview-frame"'), 'Live preview sandbox iframe must be removed');
+assert.ok(!indexHtml.includes('function runJarvisCodeSandbox('), 'Client-side runJarvisCodeSandbox must be removed');
+assert.ok(!indexHtml.includes('function openInCanvas('), 'openInCanvas must be removed');
+assert.ok(!indexHtml.includes('class="code-output-drawer"'), 'code-output-drawer markup must be removed');
+assert.ok(!stylesCss.includes('.jarvis-canvas-drawer'), 'Canvas drawer CSS must be removed');
+assert.ok(!stylesCss.includes('.code-output-drawer'), 'Code output drawer CSS must be removed');
+assert.ok(!stylesCss.includes('.code-header-btn.run-btn'), 'Run button styling must be removed');
+assert.ok(!stylesCss.includes('.code-header-btn.canvas-btn'), 'Canvas button styling must be removed');
+assert.ok(indexHtml.includes('function copyCodeBlock('), 'Standard code block copy button must be preserved');
+console.log('  [PASS] 7. Complete removal of coding sandbox & canvas drawer verified (enterprise-grade compliance)');
 
 console.log('=== All Modern AI Workspace UI Architecture Tests PASSED ===');
