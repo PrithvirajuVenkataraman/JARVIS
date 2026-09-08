@@ -281,47 +281,7 @@
                 <span class="header-brand-title font-bold tracking-wider text-sm hidden sm:inline-block">JARVIS</span>
             </div>
 
-            <div class="header-center">
-                <!-- Model & Persona Selector Pill Dropdown -->
-                <div class="header-model-pill-wrap relative">
-                    <button id="header-model-pill" type="button" class="header-model-pill" onclick="toggleHeaderModelDropdown()" aria-expanded="false" aria-haspopup="listbox" aria-label="Select AI Model and Persona">
-                        <span class="header-model-dot" aria-hidden="true"></span>
-                        <span id="header-model-name" class="header-model-name">Gemini 2.5 Flash</span>
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="header-chevron" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
-                    </button>
-                    <div id="header-model-dropdown" class="header-model-dropdown hidden" role="listbox" aria-label="Available models and personas">
-                        <div class="header-dropdown-section-title">Model Architecture</div>
-                        <div class="header-dropdown-item selected" data-model="auto" onclick="selectModelFromHeader('auto')">
-                            <div class="dropdown-item-title">Auto (Recommended)</div>
-                            <div class="dropdown-item-sub">Dynamic Groq-First routing with intelligent failover</div>
-                        </div>
-                        <div class="header-dropdown-item" data-model="gemini-2.5-flash" onclick="selectModelFromHeader('gemini-2.5-flash')">
-                            <div class="dropdown-item-title">Gemini 2.5 Flash</div>
-                            <div class="dropdown-item-sub">Ultra-fast multimodal reasoning & OCR</div>
-                        </div>
-                        <div class="header-dropdown-item" data-model="gemini-3.7-flash" onclick="selectModelFromHeader('gemini-3.7-flash')">
-                            <div class="dropdown-item-title">Gemini 3.7 Flash</div>
-                            <div class="dropdown-item-sub">Advanced multimodal & coding capabilities</div>
-                        </div>
-                        <div class="header-dropdown-item" data-model="gemini-2.5-pro" onclick="selectModelFromHeader('gemini-2.5-pro')">
-                            <div class="dropdown-item-title">Gemini 2.5 Pro</div>
-                            <div class="dropdown-item-sub">Deep reasoning & complex code analysis</div>
-                        </div>
-                        <div class="header-dropdown-item" data-model="llama-3.3-70b-versatile" onclick="selectModelFromHeader('llama-3.3-70b-versatile')">
-                            <div class="dropdown-item-title">Llama 3.3 70B Versatile</div>
-                            <div class="dropdown-item-sub">High-intelligence conversational model (Groq)</div>
-                        </div>
-                        <div class="header-dropdown-divider"></div>
-                        <div class="header-dropdown-section-title">Persona Mode</div>
-                        <div class="header-persona-selector-grid">
-                            <button type="button" class="header-persona-btn active" data-persona="general" onclick="selectPersonaFromHeader('general')">Default</button>
-                            <button type="button" class="header-persona-btn" data-persona="architect" onclick="selectPersonaFromHeader('architect')">Architect</button>
-                            <button type="button" class="header-persona-btn" data-persona="executive" onclick="selectPersonaFromHeader('executive')">Executive</button>
-                            <button type="button" class="header-persona-btn" data-persona="analyst" onclick="selectPersonaFromHeader('analyst')">Analyst</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
+            <div class="header-center flex-1"></div>
 
             <div class="header-right flex items-center gap-1.5">
                 <!-- Spotlight Command Palette Trigger -->
@@ -339,23 +299,6 @@
                         <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
                         <polyline points="2 17 12 22 22 17"></polyline>
                         <polyline points="2 12 12 17 22 12"></polyline>
-                    </svg>
-                </button>
-                <!-- Light/Dark Theme Switcher -->
-                <button id="theme-toggle-btn" class="header-icon-btn" type="button" onclick="toggleAppTheme()" title="Toggle dark/light theme" aria-label="Toggle color theme">
-                    <svg id="theme-icon-sun" class="theme-icon hidden" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                        <circle cx="12" cy="12" r="5"></circle>
-                        <line x1="12" y1="1" x2="12" y2="3"></line>
-                        <line x1="12" y1="21" x2="12" y2="23"></line>
-                        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-                        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
-                        <line x1="1" y1="12" x2="3" y2="12"></line>
-                        <line x1="21" y1="12" x2="23" y2="12"></line>
-                        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
-                        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
-                    </svg>
-                    <svg id="theme-icon-moon" class="theme-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
                     </svg>
                 </button>
             </div>
@@ -6049,38 +5992,23 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
         // Jump-to-latest behavior is managed by the unified chat scroll-lock module below.
 
         function getAppTheme() {
-            try {
-                const stored = localStorage.getItem('jarvis_theme_mode');
-                if (stored === 'light' || stored === 'dark') return stored;
-            } catch (_) {}
-            return 'dark'; // default
+            return 'dark';
         }
 
-        function setAppTheme(theme) {
-            const isDark = theme === 'dark';
-            darkMode = isDark;
+        function setAppTheme(_theme) {
+            darkMode = true;
             const body = document.body;
-            body.classList.toggle('dark', isDark);
-            body.classList.toggle('light', !isDark);
+            body.classList.add('dark');
+            body.classList.remove('light');
             try {
-                localStorage.setItem('jarvis_theme_mode', isDark ? 'dark' : 'light');
+                localStorage.setItem('jarvis_theme_mode', 'dark');
             } catch (_) {}
-            const sunIcon = document.getElementById('theme-icon-sun');
-            const moonIcon = document.getElementById('theme-icon-moon');
-            if (sunIcon && moonIcon) {
-                sunIcon.classList.toggle('hidden', isDark);
-                moonIcon.classList.toggle('hidden', !isDark);
-            }
             updateComposerPlaceholder();
             globalThis.syncVttUiState?.();
         }
 
         function toggleAppTheme() {
-            const isCurrentlyDark = document.body.classList.contains('dark');
-            setAppTheme(isCurrentlyDark ? 'light' : 'dark');
-            if (typeof showTemporaryMessage === 'function') {
-                showTemporaryMessage(isCurrentlyDark ? 'Light mode enabled' : 'Dark mode enabled');
-            }
+            setAppTheme('dark');
         }
 
         function enforceDarkMode() {
@@ -6088,66 +6016,22 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
         }
 
         function enforceLightMode() {
-            setAppTheme('light');
+            setAppTheme('dark');
         }
 
         function initAppTheme() {
-            setAppTheme(getAppTheme());
+            setAppTheme('dark');
         }
 
-        function toggleHeaderModelDropdown() {
-            const dropdown = document.getElementById('header-model-dropdown');
-            const pill = document.getElementById('header-model-pill');
-            if (!dropdown || !pill) return;
-            const isHidden = dropdown.classList.contains('hidden');
-            dropdown.classList.toggle('hidden', !isHidden);
-            pill.setAttribute('aria-expanded', isHidden ? 'true' : 'false');
-        }
-
+        function toggleHeaderModelDropdown() {}
         function selectModelFromHeader(modelKey) {
-            setSelectedModel(modelKey);
-            syncHeaderModelDisplay();
-            const dropdown = document.getElementById('header-model-dropdown');
-            if (dropdown) dropdown.classList.add('hidden');
-            const pill = document.getElementById('header-model-pill');
-            if (pill) pill.setAttribute('aria-expanded', 'false');
+            if (typeof setSelectedModel === 'function') setSelectedModel(modelKey);
         }
-
         function selectPersonaFromHeader(personaKey) {
-            setEnterprisePersona(personaKey);
-            syncHeaderPersonaDisplay();
-            const dropdown = document.getElementById('header-model-dropdown');
-            if (dropdown) dropdown.classList.add('hidden');
-            const pill = document.getElementById('header-model-pill');
-            if (pill) pill.setAttribute('aria-expanded', 'false');
+            if (typeof setEnterprisePersona === 'function') setEnterprisePersona(personaKey);
         }
-
-        function syncHeaderModelDisplay() {
-            const currentModel = typeof getSelectedModel === 'function' ? getSelectedModel() : 'auto';
-            const nameEl = document.getElementById('header-model-name');
-            const modelLabels = {
-                'auto': 'Auto (Recommended)',
-                'gemini-2.5-flash': 'Gemini 2.5 Flash',
-                'gemini-3.7-flash': 'Gemini 3.7 Flash',
-                'gemini-2.5-pro': 'Gemini 2.5 Pro',
-                'llama-3.3-70b-versatile': 'Llama 3.3 70B'
-            };
-            if (nameEl) {
-                nameEl.textContent = modelLabels[currentModel] || currentModel;
-            }
-            const items = document.querySelectorAll('.header-dropdown-item');
-            items.forEach(item => {
-                item.classList.toggle('selected', item.getAttribute('data-model') === currentModel);
-            });
-        }
-
-        function syncHeaderPersonaDisplay() {
-            const currentPersona = typeof getActivePersonaKey === 'function' ? getActivePersonaKey() : 'general';
-            const btns = document.querySelectorAll('.header-persona-btn');
-            btns.forEach(btn => {
-                btn.classList.toggle('active', btn.getAttribute('data-persona') === currentPersona);
-            });
-        }
+        function syncHeaderModelDisplay() {}
+        function syncHeaderPersonaDisplay() {}
 
         function toggleJarvisCanvasDrawer() {
             const drawer = document.getElementById('jarvis-canvas-drawer');
@@ -6206,18 +6090,6 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 }
             });
         }
-
-        document.addEventListener('click', (e) => {
-            const wrap = e.target.closest('.header-model-pill-wrap');
-            if (!wrap) {
-                const dropdown = document.getElementById('header-model-dropdown');
-                if (dropdown && !dropdown.classList.contains('hidden')) {
-                    dropdown.classList.add('hidden');
-                    const pill = document.getElementById('header-model-pill');
-                    if (pill) pill.setAttribute('aria-expanded', 'false');
-                }
-            }
-        });
 
         function updateComposerPlaceholder() {
             const input = document.getElementById('text-input');
