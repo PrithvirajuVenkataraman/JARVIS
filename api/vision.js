@@ -938,7 +938,7 @@ function getTaskRule(task) {
         case 'object_detect':
             return 'Focus on broad object detection with labels and counts, especially vehicles, devices, furniture, and everyday items. Do not answer with OCR/text-only results.';
         case 'text_extract':
-            return 'Focus on OCR text extraction from signs, labels, and printed text.';
+            return 'Focus on comprehensive OCR text extraction from signs, labels, documents, forms, receipts, and printed or handwritten text. Preserve markdown tables, line breaks, headers, and currency amounts exactly.';
         case 'math_ocr_solve':
             return 'Extract and solve difficult math content using planner, critic, and solver stages.';
         case 'translate_to_english':
@@ -1070,7 +1070,7 @@ function formatVisionResponse(data, task, userPrompt = '') {
     const hasStrongSubject = Boolean(pickTopObjectLabel(sceneSubjects));
 
     if (task === 'text_extract') {
-        if (compactText) return `Detected text:\n${compactText.slice(0, 6000)}`;
+        if (compactText) return `Detected text:\n${compactText.slice(0, 20000)}`;
         return 'No clear readable text detected.';
     }
 
