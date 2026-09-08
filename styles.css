@@ -1598,16 +1598,7 @@ body:not(.dark) #send-message-btn.composer-send-stop svg * {
 }
 
 .composer-attachment-status {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-    padding: 0.3rem 0.55rem;
-    border-radius: 999px;
-    border: 1px solid rgba(56, 189, 248, 0.3);
-    background: rgba(8, 47, 73, 0.45);
-    color: #bae6fd;
-    font-size: 0.72rem;
-    font-weight: 650;
+    display: none !important;
 }
 
 .composer-attachment-status::before {
