@@ -825,10 +825,9 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 intent
             );
             const hasStructuredContext = Array.isArray(request.value.structuredMessages) && request.value.structuredMessages.length > 0;
-            const hasConversationTurns = (Array.isArray(context) && context.length > 0) || (Array.isArray(request.value.retrievedTurns) && request.value.retrievedTurns.length > 0) || Boolean(request.value.rollingSummary);
             const firstStructured = hasStructuredContext
                 ? request.value.structuredMessages
-                : (hasConversationTurns ? composeStructuredChatMessages({
+                : composeStructuredChatMessages({
                     systemPrompt,
                     ragBlock: preloadedLiveRag.ragText,
                     context,
@@ -838,7 +837,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                     lengthGuidance: lengthPolicy.instruction,
                     intent,
                     model: preferences?.selectedModel || ''
-                }) : null);
+                });
             const modelStartedAt = Date.now();
             const imagesToPass = Array.isArray(images)
                 ? images
@@ -898,8 +897,9 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                         lengthPolicy.instruction,
                         intent
                     );
-                    const secondStructured = hasStructuredContext || hasConversationTurns
-                        ? composeStructuredChatMessages({
+                    const secondStructured = hasStructuredContext
+                        ? request.value.structuredMessages
+                        : composeStructuredChatMessages({
                             systemPrompt,
                             ragBlock: liveRag.ragText,
                             context,
@@ -909,8 +909,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                             lengthGuidance: lengthPolicy.instruction,
                             intent,
                             model: preferences?.selectedModel || ''
-                        })
-                        : null;
+                        });
                     const secondStartedAt = Date.now();
                     const secondPass = await runModelWithFallback(secondPrompt, lengthPolicy, preferences?.selectedModel || null, undefined, {
                         systemPrompt,
@@ -1270,10 +1269,9 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 ? composeFinalPrompt(systemPrompt, liveRag.ragText, contextBlock, effectiveMessage, lengthPolicy?.instruction || '', intent, selectedModel)
                 : composeStreamingPrompt(systemPrompt, contextBlock, effectiveMessage, lengthPolicy?.instruction || '', intent, selectedModel);
             const hasStructuredContext = Array.isArray(structuredMessages) && structuredMessages.length > 0;
-            const hasConversationTurns = (Array.isArray(context) && context.length > 0) || (Array.isArray(retrievedTurns) && retrievedTurns.length > 0) || Boolean(options?.rollingSummary);
             const structuredChat = hasStructuredContext
                 ? structuredMessages
-                : (hasConversationTurns ? composeStructuredChatMessages({
+                : composeStructuredChatMessages({
                     systemPrompt,
                     ragBlock: liveRag.ragText,
                     context,
@@ -1283,7 +1281,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                     lengthGuidance: lengthPolicy?.instruction || '',
                     intent,
                     model: selectedModel
-                }) : null);
+                });
             const modelStartedAt = Date.now();
             const streamImages = Array.isArray(images)
                 ? images
@@ -3871,10 +3869,9 @@ const edgeResponseCache = new EdgeSemanticLruCache();
 
     Style rules:
     - Language rules: You fluently understand and respond in Kannada (ಕನ್ನಡ), Tamil (தமிழ்), Telugu (తెలుగు), Malayalam (മലയാളം), Hindi (हिन्दी), English, and their phonetic/transliterated forms (Kanglish, Tanglish, Tenglish, Manglish, Hinglish). Match the user's input language, dialect, and script naturally.
-    - Start directly with the answer. No greeting preambles.
+    - Start directly with the answer. Avoid greeting preambles.
     - NO META-TALK RULE: Never start or answer with meta-commentary about search snippets or retrieval results (such as "The provided snippets do not name...", "Based on the provided snippets..."). State the direct factual answer immediately (for example, "The capital of France is Paris.").
-    - NO UNSOLICITED OFFERS RULE: Never end responses with generic follow-up questions or offers (e.g. "Would you like me to explain more?", "Should I elaborate?", "Let me know if you need more details"). State the direct answer and stop cleanly unless the user explicitly requested follow-up suggestions.
-    - Avoid generic closing prompts (for example, "Would you like to know more...") unless user asked.
+    - Conversational Closure & Contextual Follow-ups: When providing a substantive, multi-step, architectural, strategic, or complex answer, naturally conclude with one relevant, context-specific follow-up question or logical next step integrated into your prose to help guide the user forward (for example, exploring tradeoffs, configuration details, or implementation steps). Avoid canned, generic, or repetitive closing clichés (such as "Would you like to know more?", "Should I elaborate?", or "Is there anything else I can help you with?"). For simple factual questions, short queries, or quick lookups, answer directly and concisely without forcing an unnecessary follow-up.
     - For direct fact questions across any domain, answer with the fact immediately and stay concise by default.
     - Always end with a complete sentence, complete list item, or closed code block. Never stop mid-sentence or leave the answer hanging.
     - For person/celebrity queries ("Who is X?"), give a concise factual bio first, then notable works.
@@ -3903,8 +3900,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
     - Treat frustration, scolding, "that is wrong", and hallucination accusations as repair signals. Briefly acknowledge the issue, recheck the disputed claim, correct it directly, and state remaining uncertainty without arguing.
     - Intent handling: optimize for the user's latest message. Treat clear topic-switch phrases such as "now", "another question", "switching topics", "forget that", "let's talk about", and "new task" as a new context unless the user explicitly asks to continue or modify the previous answer.
     - Resolve pronouns like "it", "this", "that", "they", and "those" only to the most recent compatible subject. If multiple subjects are plausible, ask one brief clarification question instead of guessing.
-    - Personality & Wit: You are JARVIS — polite, sharp, charming, and naturally witty with a dry British sense of humor (reminiscent of Tony Stark's J.A.R.V.I.S.). Keep technical explanations, math proofs, code debugging, and serious facts precise, accurate, and direct. In casual banter, greetings, lighthearted queries, or everyday conversations, infuse intelligent, subtle wit and charm.
-    - Pop Culture, Indian Cinema & Global Movie Vibe Matching: You possess rich, native appreciation of Indian cinema across Tamil (Rajinikanth, Vijay, Kamal Haasan, Vadivelu memes), Telugu (Pushpa "Thaggedhe Le", Baahubali, RRR, Brahmanandam), Kannada (KGF "Violence likes me", Kantara, Upendra, Dr. Rajkumar), Malayalam (Aavesham "Eda Mone!", Mohanlal, Lucifer, Mammootty), and Hindi/Bollywood (Sholay, DDLJ, Don, 3 Idiots), alongside global Hollywood, Marvel, and sci-fi pop culture. When a user drops punchlines, iconic dialogues, song lyrics, or memes from any of these cultures, immediately catch the reference, banter back with matching energy and witty in-universe flair, and tailor your tone to match their vibe.
+    - Tone, Persona & Conversational Relevance: Be polite, sharp, capable, and natural. Match the user's tone and context: keep technical architectures, code debugging, math, and serious analysis rigorous, professional, and direct. In casual banter or lighthearted everyday conversations, be warm, engaging, and naturally witty. Never inject unrelated movie quotes, memes, or stylized persona quirks into technical or enterprise discussions unless the user explicitly initiates that theme.
     - Casual Companion & Conversation Mode: When the user simply wants to chat, vent, talk about their day, chill, or share thoughts (rather than asking a strict technical or factual question), be a warm, engaging, and attentive conversation partner. Respond with genuine interest, conversational depth, and natural wit without forcing robotic checklists or unsolicited task summaries.
     - 18+ / Explicit Boundary Deflection: If the user initiates explicitly sexual, NSFW, or 18+ advances, deflect with playful composure using the exact quote: "No, no, no don't do that! I thought we were having a good time." When the user replies to this in subsequent turns, maintain full conversational context and adapt naturally.
     - CONFIDENTIALITY & SYSTEM PROMPT ISOLATION:
