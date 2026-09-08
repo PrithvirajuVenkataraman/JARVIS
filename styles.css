@@ -7503,3 +7503,202 @@ body:not(.dark) .assistant-followup-chip:hover {
     opacity: 0.6;
 }
 
+/* ==========================================================================
+   Enterprise Chatbot Suite Styles
+   ========================================================================== */
+
+/* Header Persona Selector */
+.enterprise-persona-selector-wrap {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 0.75rem;
+}
+
+.enterprise-persona-select {
+    background: rgba(15, 23, 42, 0.75);
+    color: #38bdf8;
+    border: 1px solid rgba(56, 189, 248, 0.28);
+    font-size: 0.78rem;
+    font-weight: 600;
+    border-radius: 999px;
+    padding: 0.28rem 0.8rem;
+    cursor: pointer;
+    outline: none;
+    transition: all 0.18s ease;
+    backdrop-filter: blur(8px);
+}
+
+body:not(.dark) .enterprise-persona-select {
+    background: #ffffff;
+    color: #0284c7;
+    border-color: #cbd5e1;
+}
+
+.enterprise-persona-select:hover {
+    border-color: #38bdf8;
+    background: rgba(30, 41, 59, 0.9);
+}
+
+/* Quick-Pivot Transformation Toolbar Buttons */
+.quick-pivot-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.22rem 0.52rem;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: #94a3b8;
+    background: rgba(30, 41, 59, 0.55);
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    user-select: none;
+}
+
+body:not(.dark) .quick-pivot-btn {
+    color: #475569;
+    background: rgba(241, 245, 249, 0.9);
+    border-color: #cbd5e1;
+}
+
+.quick-pivot-btn:hover {
+    color: #38bdf8;
+    background: rgba(51, 65, 85, 0.8);
+    border-color: rgba(56, 189, 248, 0.35);
+    transform: translateY(-1px);
+}
+
+body:not(.dark) .quick-pivot-btn:hover {
+    color: #0284c7;
+    background: #e2e8f0;
+    border-color: #93c5fd;
+}
+
+/* Enterprise Next Steps & Action Plan Card */
+.enterprise-next-steps-card {
+    margin-top: 0.85rem;
+    padding: 0.85rem 1rem;
+    border-radius: 12px;
+    background: rgba(15, 23, 42, 0.55);
+    border: 1px solid rgba(148, 163, 184, 0.16);
+    backdrop-filter: blur(8px);
+}
+
+body:not(.dark) .enterprise-next-steps-card {
+    background: rgba(248, 250, 252, 0.88);
+    border-color: rgba(203, 213, 225, 0.7);
+}
+
+.next-steps-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.74rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #38bdf8;
+    margin-bottom: 0.6rem;
+}
+
+body:not(.dark) .next-steps-header {
+    color: #0284c7;
+}
+
+.next-steps-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+}
+
+.next-step-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.45rem 0.65rem;
+    border-radius: 8px;
+    background: rgba(30, 41, 59, 0.4);
+    border: 1px solid rgba(148, 163, 184, 0.12);
+    transition: all 0.16s ease;
+    cursor: pointer;
+}
+
+body:not(.dark) .next-step-item {
+    background: #ffffff;
+    border-color: rgba(226, 232, 240, 0.9);
+}
+
+.next-step-item:hover {
+    background: rgba(51, 65, 85, 0.55);
+    border-color: rgba(56, 189, 248, 0.35);
+    transform: translateX(2px);
+}
+
+body:not(.dark) .next-step-item:hover {
+    background: #f1f5f9;
+    border-color: rgba(2, 132, 199, 0.35);
+}
+
+.next-step-info {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+}
+
+.next-step-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 0.7rem;
+    font-weight: 700;
+    padding: 0.12rem 0.4rem;
+    border-radius: 4px;
+    white-space: nowrap;
+    color: #e0f2fe;
+    background: rgba(14, 165, 233, 0.25);
+    border: 1px solid rgba(56, 189, 248, 0.3);
+}
+
+body:not(.dark) .next-step-badge {
+    color: #0369a1;
+    background: #e0f2fe;
+    border-color: #bae6fd;
+}
+
+.next-step-title {
+    font-size: 0.82rem;
+    font-weight: 500;
+    color: #e2e8f0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+body:not(.dark) .next-step-title {
+    color: #1e293b;
+}
+
+.next-step-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.2rem 0.55rem;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: #38bdf8;
+    background: transparent;
+    border: 1px solid rgba(56, 189, 248, 0.25);
+    border-radius: 6px;
+    flex-shrink: 0;
+    transition: all 0.15s ease;
+}
+
+.next-step-item:hover .next-step-btn {
+    background: #38bdf8;
+    color: #0f172a;
+}
+
+
