@@ -1182,14 +1182,16 @@ export function installSpeechInputUI(options = {}) {
             if (sendBtn) { sendBtn.classList.remove('is-converse-active', 'is-converse-ready'); }
 
             if (composerShell) {
-                composerShell.classList.toggle('is-voice-active', isListening || isProcessing);
-                composerShell.classList.toggle('is-processing', isProcessing);
+                // Voice active styling strictly applies ONLY when actively listening to voice
+                composerShell.classList.toggle('is-voice-active', isListening);
+                composerShell.classList.toggle('is-processing', isListening && isProcessing);
             }
 
             if (vttWaveform) {
-                vttWaveform.classList.toggle('hidden', !isListening && !isProcessing);
+                // Waveform visualizer is strictly hidden unless microphone dictation is actively listening
+                vttWaveform.classList.toggle('hidden', !isListening);
                 vttWaveform.classList.toggle('is-active', isListening);
-                vttWaveform.classList.toggle('is-processing', isProcessing);
+                vttWaveform.classList.toggle('is-processing', isListening && isProcessing);
             }
 
             if (isListening) {
@@ -1244,7 +1246,10 @@ export function installSpeechInputUI(options = {}) {
     // VTT button toggles dictation (Voice-to-Text)
     vttButton.addEventListener('click', globalThis.toggleVoiceToText);
     globalThis.addEventListener?.('jarvis:assistant-processing', event => {
-        controller.setProcessing(Boolean(event.detail?.active));
+        const state = controller.getState?.() || {};
+        if (state.listening || state.converseEnabled) {
+            controller.setProcessing(Boolean(event.detail?.active));
+        }
     });
     if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
         document.addEventListener('keydown', event => {
