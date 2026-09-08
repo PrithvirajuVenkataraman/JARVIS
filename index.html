@@ -1403,9 +1403,6 @@ function formatRelevantSavedMemoryContext(relevant) {
     return `\n\nRelevant saved memory:\n${lines.join('\n')}`;
 }
 
-function buildRelevantSavedMemoryContext(text) {
-    return formatRelevantSavedMemoryContext(findRelevantSavedMemory(text, 3));
-}
 
 async function rankSavedMemorySemantically(text, limit = 3) {
     const query = String(text || '').trim();
@@ -1578,33 +1575,7 @@ function isMemoryRecallRequest(text) {
     return /\b(where\s+(?:is|are)\s+(?:my|the)\s+.+|where\s+did\s+i\s+(?:put|leave)\s+(?:my|the)\s+.+|where'?s\s+(?:my|the)\s+.+)\b/.test(t);
 }
 
-function isJarvisTechStackRequest(text) {
-    const t = String(text || '').toLowerCase().trim();
-    if (!t) return false;
-    const aboutThisAssistant = /\b(you|your|this bot|this chatbot|jarvis|assistant|app|site|website)\b/.test(t);
-    const stackIntent = /\b(tech stack|stack|built with|made with|using|libraries?|frameworks?|models?|ai model|backend|frontend|hosting|database|memory|storage|architecture)\b/.test(t);
-    return aboutThisAssistant && stackIntent;
-}
 
-function buildJarvisTechStackReply() {
-    return [
-        'Here is the stack this JARVIS app uses:',
-        '',
-        'Frontend: browser-native HTML, CSS, and JavaScript with Tailwind loaded from its CDN. No React, Vue, or Angular dependency is used.',
-        '',
-        'Backend: Node runtime serverless functions on Vercel handle chat, search, vision, current facts, market-style utilities, and API security.',
-        '',
-        'AI models: Groq is tried first when GROQ_API_KEY is configured, with candidates like openai/gpt-oss-120b, openai/gpt-oss-20b, llama-3.3-70b-versatile, and llama-3.1-8b-instant. Gemini is the fallback when GEMINI_API_KEY or GOOGLE_API_KEY is configured, with candidates like gemini-3.5-flash, gemini-2.5-flash, gemini-2.5-flash-lite, and gemini-2.0-flash.',
-        '',
-        'Live facts: permanent-free public-source routing through Wikipedia, Wikidata, GDELT, RSS/Atom, official-source discovery, Open-Meteo, CoinGecko, NASA EONET, Wikimedia, OpenStreetMap, Britannica lookup, Reddit discussion lookup, and archive.today snapshot lookup where supported. Crawl4AI can be used as an optional page extractor, and Gemini may help planning, ranking, and snippets. No Serper, Brave, Tavily, paid API, or crawler is required.',
-        '',
-        'Memory: device-local memory and chat history are stored in localStorage when memory persistence is enabled. It remembers simple user facts like where you put things, plus local preferences and history. There is no external database.',
-        '',
-        'Voice and vision: voice input uses the browser Web Speech API. Live Vision uses browser camera APIs and server-side image analysis when configured.',
-        '',
-        'Hosting: configured for Vercel with a static browser app plus serverless functions.'
-    ].join('\n');
-}
 
 function isChemistryReactionQuery(text) {
     const t = String(text || '').toLowerCase().trim();
@@ -1918,20 +1889,6 @@ async function handleCalendarSync(text) {
     addChatMessage(msg, false);
 }
 
-function downloadIcsFromBase64(base64, fileName) {
-    const binary = atob(base64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    const blob = new Blob([bytes], { type: 'text/calendar;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = fileName;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1500);
-}
 
 function showLoading(message = 'Processing...') {
     const overlay = document.getElementById('loading-overlay');
@@ -1949,21 +1906,6 @@ function hideLoading() {
     }
 }
 
-function extractCityFromText(text) {
-    
-    const patterns = [
-        /in ([A-Z][a-z]+(?: [A-Z][a-z]+)*)/,
-        /to ([A-Z][a-z]+(?: [A-Z][a-z]+)*)/,
-        /at ([A-Z][a-z]+(?: [A-Z][a-z]+)*)/
-    ];
-    
-    for (const pattern of patterns) {
-        const match = text.match(pattern);
-        if (match) return match[1];
-    }
-    
-    return '';
-}
 
 // Helper function to detect if response is actually a hotel listing
 function isHotelListing(text) {
@@ -2084,12 +2026,6 @@ function copyToClipboard(text) {
     });
 }
 
-function copyAssistantPlan(button) {
-    const raw = button?.dataset?.copyText || '';
-    const text = decodeURIComponent(raw);
-    if (!text) return;
-    copyToClipboard(text);
-}
 
 function isInternalPromptText(text) {
     const value = String(text || '').trim();
@@ -3263,23 +3199,8 @@ async function publishLiveDisabledMessage(userText, options = {}) {
     return true;
 }
 
-function isCurrentInfoQueryLegacy(text) {
-    const t = String(text || '').toLowerCase();
-    return /\b(current|latest|today|now|live|status|update)\b/.test(t);
-}
 
-function hasExplicitFreshnessLanguageLegacy(text) {
-    const t = String(text || '').toLowerCase();
-    return /\b(news|headlines|breaking|recent events|what happened today)\b/.test(t);
-}
 
-function scoreSourcePolicyLegacy(url, type) {
-    if (!url) return 0;
-    const trusted = ['reuters.com', 'apnews.com', 'bbc.com', 'nytimes.com', 'theguardian.com', 'wikipedia.org'];
-    const isTrusted = trusted.some(domain => url.includes(domain));
-    if (type === 'general') return isTrusted ? 10 : 1;
-    return isTrusted ? 5 : 0;
-}
 
 function isHeadlineListQuery(text) {
     const t = String(text || '').toLowerCase().trim();
@@ -3516,12 +3437,6 @@ function cleanLiveAnswerText(text) {
     );
 }
 
-function getNewsVerificationThreshold(mode = 'strict') {
-    if (mode === 'normal') {
-        return getReliabilityThreshold('medium_risk');
-    }
-    return getReliabilityThreshold('high_risk');
-}
 
 function hasEnoughNewsEvidence(items, mode = 'strict') {
     const riskLevel = mode === 'normal' ? 'medium_risk' : 'high_risk';
@@ -4105,70 +4020,8 @@ function normalizeKnowledgeSubject(subject) {
     return raw;
 }
 
-async function fetchWikipediaSummaryFallback(subject) {
-    const normalized = normalizeKnowledgeSubject(subject);
-    if (!normalized) return null;
 
-    async function fetchSummaryByTitle(title) {
-        const url = `${(window.APP_CONFIG || APP_CONFIG).externalUrls.wikipediaRestSummary}${encodeURIComponent(title)}`;
-        const response = await fetch(url);
-        if (!response.ok) return null;
-        const data = await response.json();
-        const extract = String(data?.extract || '').trim();
-        if (!extract) return null;
-        return {
-            title: data?.title || title,
-            extract,
-            sourceUrl: data?.content_urls?.desktop?.page || `https://en.wikipedia.org/wiki/${encodeURIComponent(data?.title || title)}`
-        };
-    }
 
-    async function searchSummary(query) {
-        const searchUrl = `${(window.APP_CONFIG || APP_CONFIG).externalUrls.wikipediaActionQuery}?action=query&list=search&srsearch=${encodeURIComponent(query)}&srlimit=5&format=json&origin=*`;
-        const response = await fetch(searchUrl);
-        if (!response.ok) return null;
-        const data = await response.json();
-        const hits = Array.isArray(data?.query?.search) ? data.query.search : [];
-        for (const hit of hits) {
-            const summary = await fetchSummaryByTitle(hit.title);
-            if (summary?.extract) return summary;
-        }
-        return null;
-    }
-
-    const candidates = [
-        normalized,
-        normalized.replace(/\b\w/g, c => c.toUpperCase())
-    ];
-
-    for (const candidate of candidates) {
-        try {
-            const summary = await fetchSummaryByTitle(candidate);
-            if (summary?.extract) return summary;
-        } catch (e) {}
-    }
-
-    try {
-        return await searchSummary(normalized);
-    } catch (e) {
-        return null;
-    }
-}
-
-function isPronounKnowledgeFollowup(text) {
-    const t = String(text || '').toLowerCase().trim();
-    if (!t) return false;
-    if (/^(it|this|that|this one|that one|this company|that company|the company|this film|that film|this movie|that movie|this song|that song)$/.test(t)) return true;
-    return /\b(tell me more|more about|about it|about this|about that|that company|this company|that film|this film|that movie|this movie|that song|this song|expand on it)\b/.test(t);
-}
-
-function normalizeEntityText(value) {
-    return String(value || '')
-        .replace(/[?.!,;]+$/g, '')
-        .replace(/\b(company|organization|org|inc|ltd|llc)\b/gi, '')
-        .replace(/\s+/g, ' ')
-        .trim();
-}
 
 function isAcknowledgementUtterance(text) {
     const t = String(text || '').toLowerCase().replace(/[.!?]+$/g, '').trim();
@@ -4182,34 +4035,6 @@ function isGenericNonEntity(text) {
     return /^(it|this|that|this one|that one|this film|that film|this movie|that movie|this song|that song|the company|the person|the topic|more|details|explain|tell me more|what about it|about it|about this|about that)$/i.test(t);
 }
 
-function extractEntityCandidate(text) {
-    const raw = String(text || '').trim();
-    if (!raw) return '';
-
-    const direct = extractKnowledgeSubject(raw);
-    if (direct && direct !== raw) return direct;
-
-    const patterns = [
-        /^\s*(?:can|could|would)\s+you\s+(?:tell|explain|share)\s+(?:me\s+)?(?:about\s+)?(.+?)\s*\??$/i,
-        /^\s*(?:i\s+want\s+to\s+know\s+about|i\s+need\s+info\s+on)\s+(.+?)\s*\??$/i,
-        /^\s*(.+?)\s+(?:company|stock|founder|history|overview|details)\s*\??$/i
-    ];
-
-    for (const p of patterns) {
-        const m = raw.match(p);
-        if (m && m[1]) return m[1].trim();
-    }
-
-    const cleaned = raw.replace(/[?.!,;]+$/g, '').trim();
-    if (!cleaned) return '';
-
-    // Keep short, non-generic single topic turns as entity candidates.
-    if (cleaned.split(/\s+/).length <= 5 && !isAcknowledgementUtterance(cleaned) && !isGenericNonEntity(cleaned)) {
-        return cleaned;
-    }
-
-    return '';
-}
 
 async function buildSearchFallbackAnswer(userMessage) {
     if (!isFactSearchEnabled()) return null;
@@ -6168,27 +5993,8 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             input.placeholder = hasChat ? 'Type something' : 'Ask anything...';
         }
 
-        function toggleDarkMode() {
-            enforceDarkMode();
-        }
 
-        function buildVisionDiagnosticsSummary() {
-            return `Vision diagnostics: ${isContinuousVisionActive ? 'camera active' : 'camera inactive'}`;
-        }
 
-        function buildVisionDiagnosticsHtml() {
-            const cameraSupport = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
-            const rows = [
-                { label: 'Browser camera support', ok: cameraSupport, detail: cameraSupport ? 'Available' : 'Unavailable' },
-                { label: 'Live Vision state', ok: isContinuousVisionActive, detail: isContinuousVisionActive ? 'Active' : 'Inactive' },
-                { label: 'Vision route', ok: true, detail: 'Run checks to verify /api/vision' },
-                { label: 'Recent vision error', ok: !recentVisionError, detail: recentVisionError || 'None' }
-            ];
-            return rows.map(row => {
-                const status = row.ok ? 'PASS' : 'INFO';
-                return `<div><span class="font-semibold">${status}</span> - ${escapeHtml(row.label)}: ${escapeHtml(row.detail)}</div>`;
-            }).join('');
-        }
 
         
         
@@ -6506,33 +6312,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             `;
         }
 
-        function setPrimaryActionButtonToSend() {
-            const btn = document.getElementById('send-message-btn');
-            if (!btn) return;
-            btn.dataset.mode = 'send';
-            btn.innerHTML = getSendIconSvg();
-            btn.classList.add('is-send-ready', 'composer-send-btn');
-            btn.classList.remove('is-converse-ready', 'is-converse-active', 'composer-send-stop');
-            btn.disabled = false;
-            btn.setAttribute('aria-label', 'Send message');
-            btn.title = 'Send message';
-        }
 
-        function setPrimaryActionButtonToConverse() {
-            const btn = document.getElementById('send-message-btn');
-            if (!btn) return;
-            const state = window.JarvisSpeechInput?.getState?.() || {};
-            const active = !!state.converseEnabled;
-            btn.dataset.mode = 'converse';
-            btn.innerHTML = getConverseIconSvg();
-            btn.classList.remove('is-send-ready');
-            btn.classList.add('is-converse-ready', 'composer-send-btn');
-            btn.classList.toggle('is-converse-active', active);
-            btn.classList.remove('composer-send-stop');
-            btn.disabled = false;
-            btn.setAttribute('aria-label', active ? 'Stop Converse mode' : 'Start Converse mode');
-            btn.title = active ? 'Stop Converse mode' : 'Start Converse mode';
-        }
 
         function setPrimaryActionButtonToStop() {
             const btn = document.getElementById('send-message-btn');
@@ -6830,24 +6610,6 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             }
         }
 
-        function waitForAssistantIdle(timeoutMs = 1600) {
-            if (!activeRequestController && !isAssistantProcessing()) return Promise.resolve();
-            return new Promise(resolve => {
-                let settled = false;
-                const finish = () => {
-                    if (settled) return;
-                    settled = true;
-                    clearTimeout(timeout);
-                    window.removeEventListener('jarvis:assistant-processing', onState);
-                    resolve();
-                };
-                const onState = event => {
-                    if (!event.detail?.active && !activeRequestController) finish();
-                };
-                const timeout = setTimeout(finish, timeoutMs);
-                window.addEventListener('jarvis:assistant-processing', onState);
-            });
-        }
 
         function stopActiveGeneration(reason = 'manual') {
             const hadRequest = !!activeRequestController;
@@ -7107,46 +6869,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             showTemporaryMessage('Saved memory cleared.');
         }
 
-        async function clearConversationHistoryData() {
-            const ok = await openConfirmActionDialog({
-                title: 'Clear chat',
-                message: 'Clear this chat history?',
-                confirmLabel: 'Yes',
-                cancelLabel: 'No'
-            });
-            if (!ok) return;
-            conversationHistory = [];
-            conversationContext = [];
-            chatSessions = [];
-            localStorage.removeItem(CHAT_SESSIONS_STORAGE_KEY);
-            forgetActiveEmptyChatDraft();
-            startNewChatSession();
-            const historyKey = getHistoryStorageKey();
-            localStorage.removeItem(historyKey);
-            refreshPrivacyDataSummary();
-            showTemporaryMessage('Chat history cleared.');
-        }
 
-        async function clearAllAssistantMemoryData() {
-            const ok = await openConfirmActionDialog({
-                title: 'Clear all',
-                message: 'Clear saved memory and chat history?',
-                confirmLabel: 'Yes',
-                cancelLabel: 'No'
-            });
-            if (!ok) return;
-            memoryStore = {};
-            conversationHistory = [];
-            conversationContext = [];
-            chatSessions = [];
-            localStorage.removeItem(CHAT_SESSIONS_STORAGE_KEY);
-            forgetActiveEmptyChatDraft();
-            startNewChatSession();
-            saveUserData();
-            localStorage.removeItem(getHistoryStorageKey());
-            refreshPrivacyDataSummary();
-            showTemporaryMessage('Memory and history cleared.');
-        }
 
         function initKeyboardShortcuts() {
             if (window.__jarvisKeyboardShortcutsInit) return;
@@ -7465,80 +7188,8 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             }
         }
 
-        async function runSystemDiagnostics() {
-            const summary = document.getElementById('system-check-summary');
-            const list = document.getElementById('system-check-results');
-            const panel = document.getElementById('system-check-panel');
-            if (!summary || !list || !panel) return;
 
-            panel.classList.remove('hidden');
-            summary.textContent = 'Running system checks...';
-            list.innerHTML = '<div class="text-xs text-gray-600 dark:text-gray-300">Please wait a few seconds.</div>';
 
-            const checks = [];
-            checks.push({
-                label: 'Browser online',
-                ok: !!navigator.onLine,
-                detail: navigator.onLine ? 'Connected' : 'Offline'
-            });
-            checks.push({
-                label: 'Live location support',
-                ok: !!navigator.geolocation,
-                detail: navigator.geolocation ? 'Geolocation API available' : 'Geolocation API unavailable'
-            });
-            checks.push({
-                label: 'Live Vision support',
-                ok: !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia),
-                detail: (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) ? 'Camera API available' : 'Camera API unavailable'
-            });
-            checks.push({
-                label: 'Live Vision active',
-                ok: !!isContinuousVisionActive,
-                detail: isContinuousVisionActive ? 'Camera stream active' : 'Camera stream inactive'
-            });
-            checks.push({
-                label: 'Recent vision error',
-                ok: !recentVisionError,
-                detail: recentVisionError || 'None'
-            });
-            const [chatPing, visionPing] = await Promise.all([
-                pingEndpoint((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, { message: 'health check' }),
-                pingEndpoint((window.APP_CONFIG || APP_CONFIG).endpoints.vision, { task: 'health_check', imageBase64: 'x', mimeType: 'text/plain' }, { allowClientError: true })
-            ]);
-
-            checks.push({ label: 'LLM API (/api/chat-groq)', ok: chatPing.ok, detail: chatPing.detail });
-            checks.push({ label: 'Vision API route (/api/vision)', ok: visionPing.ok, detail: visionPing.detail });
-
-            const locationReady = checks.find(c => c.label === 'Live location support')?.ok;
-            checks.push({
-                label: 'Weather readiness',
-                ok: !!locationReady,
-                detail: locationReady ? 'Location support available' : 'Missing location permission/support'
-            });
-            checks.push({
-                label: 'Itinerary + learning readiness',
-                ok: !!chatPing.ok,
-                detail: chatPing.ok ? 'Planner and learning model route available' : 'Planner/model route unavailable'
-            });
-            checks.push({
-                label: 'Follow-up + general Q&A readiness',
-                ok: !!chatPing.ok,
-                detail: chatPing.ok ? 'Conversational model route available' : 'Conversational model route unavailable'
-            });
-
-            renderSystemCheckResults(checks);
-            showTemporaryMessage('System check completed. See results in Help > Settings.');
-        }
-
-        function openFeatureRequest() {
-            const formUrl = (window.APP_CONFIG || APP_CONFIG).externalUrls.feedbackForm;
-            window.open(formUrl, '_blank');
-        }
-
-        function openBugReportModal() {
-            const formUrl = (window.APP_CONFIG || APP_CONFIG).externalUrls.bugReportForm;
-            window.open(formUrl, '_blank', 'noopener,noreferrer');
-        }
 
         function addInitialGreetingMessage(text) {
             addChatMessage(text, false, false, { systemGreeting: true });
@@ -7720,19 +7371,6 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             return html;
         }
 
-        function getAssistantAvatarConfig(sourceType = 'default') {
-            const t = String(sourceType || 'default').toLowerCase();
-            if (t === 'verified') {
-                return { label: '', className: 'assistant-avatar verified', title: 'Verified source reply' };
-            }
-            if (t === 'model') {
-                return { label: '', className: 'assistant-avatar model', title: 'Model reply' };
-            }
-            if (t === 'tool') {
-                return { label: '', className: 'assistant-avatar tool', title: 'Tool-generated reply' };
-            }
-            return { label: '', className: 'assistant-avatar', title: 'Assistant reply' };
-        }
 
         function createAssistantMessageId() {
             assistantMessageCounter += 1;
@@ -7913,13 +7551,6 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             }
         });
 
-        function buildAssistantImproveChipsHtml(messageId) {
-            const safeId = escapeHtml(messageId);
-            return Object.entries(assistantTransformActions).map(([key, action]) => {
-                const safeLabel = escapeHtml(action.label);
-                return `<button type="button" class="assistant-improve-chip" data-assistant-action="transform_${key}" onclick="return handleAssistantActionInline(event, '${safeId}', 'transform_${key}')" title="${safeLabel}">${safeLabel}</button>`;
-            }).join('');
-        }
 
         function extractCoreTopic(query, answer) {
             const rawQuery = String(query || '').replace(/\s+/g, ' ').trim();
@@ -11388,9 +11019,6 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             });
         }
 
-        function formatModelSourceBadge(label = 'Model answer') {
-            return '';
-        }
 
         function addVerifiedAssistantMessage(text, label = 'Verified live sources', meta = {}) {
             const body = String(text || '').trim();
@@ -11401,21 +11029,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             });
         }
 
-        function setVisionDetailLevel(mode, announce = true) {
-            visionDetailLevel = ['concise', 'balanced', 'detailed'].includes(mode) ? mode : 'balanced';
-            window.visionDetailLevel = visionDetailLevel;
-            saveAssistantModes();
-            updateAssistantModeUI();
-            if (announce) showTemporaryMessage(`Vision detail set to ${visionDetailLevel}.`);
-        }
 
-        function setVisionShowEvidence(enabled, announce = true) {
-            visionShowEvidence = !!enabled;
-            window.visionShowEvidence = visionShowEvidence;
-            saveAssistantModes();
-            updateAssistantModeUI();
-            if (announce) showTemporaryMessage(visionShowEvidence ? 'Vision evidence is visible.' : 'Vision evidence is hidden.');
-        }
 
         function normalizeVerifiedLiveMessage(input) {
             const raw = String(input || '').trim();
@@ -11459,18 +11073,6 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             });
         }
 
-        function getRoutingDebugBadgeText(routing) {
-            const strategy = String(routing?.strategy || '').trim();
-            if (!strategy) return '';
-            const reason = String(routing?.reason || '').trim();
-            const mode = String(routing?.mode || '').trim();
-            const sourceCount = Number(routing?.preloadedSources || 0);
-            const parts = [`route: ${strategy}`];
-            if (mode) parts.push(`mode: ${mode}`);
-            if (reason) parts.push(`reason: ${reason}`);
-            if (Number.isFinite(sourceCount) && sourceCount > 0) parts.push(`preloaded: ${sourceCount}`);
-            return parts.join(' | ');
-        }
 
         function buildRoutingDebugBadgeHtml(routing, sourceType = 'default') {
             return '';
@@ -13254,42 +12856,9 @@ async function fetchLiveSearchJson(query, options = {}) {
     return data;
 }
 
-async function fetchCurrentFactJson(query, options = {}) {
-    if (!isFactSearchEnabled() || !isStructuredCurrentFactsEnabled()) {
-        const error = new Error('Structured current-fact resolver is disabled.');
-        error.status = 503;
-        error.data = { success: false, disabled: true, resolved: false, error: 'Structured current-fact resolver is disabled.', answer: '', sources: [] };
-        throw error;
-    }
 
-    const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.currentFacts, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: options.signal,
-        body: JSON.stringify({ query, debug: Boolean(options.debug) })
-    });
-    const data = await parseJsonResponseSafely(response);
-    if (!response.ok || data?.success === false) {
-        const error = new Error(String(data?.error || 'Current fact resolver failed.'));
-        error.status = response.status;
-        error.data = data;
-        throw error;
-    }
-    return data;
-}
 
-function getCurrentFactCacheKey(query) {
-    return `jarvis_current_fact_${String(query || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').slice(0, 120)}`;
-}
 
-function getCachedCurrentFact(query) {
-    // Dynamic facts must always query fresh live sources rather than returning stale localStorage caches
-    return null;
-}
-
-function setCachedCurrentFact(query, data) {
-    // Keep live facts fresh and prevent cross-session staleness
-}
 
 try {
     if (typeof localStorage !== 'undefined') {
@@ -13301,22 +12870,6 @@ try {
     }
 } catch (_) {}
 
-function formatCurrentFactAnswer(data = {}) {
-    const answer = String(data?.answer || '').trim();
-    if (!answer) return '';
-    const sources = Array.isArray(data?.sources) ? data.sources.filter(Boolean) : [];
-    const sourceLines = sources
-        .slice(0, 5)
-        .map((item, i) => `${i + 1}. [${item.title || getDomainFromUrl(item.url || '') || 'Source'}](${item.url})`)
-        .join('\n');
-    const meta = [
-        `As of: ${data?.asOf ? new Date(data.asOf).toLocaleString() : formatAsOfTimestamp()}`,
-        data?.provider ? `Provider: ${data.provider}` : '',
-        data?.confidence ? `Confidence: ${data.confidence}` : '',
-        formatCurrentFactProviderStatus(data)
-    ].filter(Boolean).join('\n');
-    return `${answer}\n\n${meta}${sourceLines ? `\n\nSources:\n${sourceLines}` : ''}`;
-}
 
 function formatCurrentFactProviderStatus(data = {}) {
     const statuses = Array.isArray(data?.debug?.providerStatuses) ? data.debug.providerStatuses : [];
@@ -13504,16 +13057,6 @@ function extractDisplayModeCommand(text) {
     return '';
 }
 
-function processSuggestionFromElement(buttonEl) {
-    if (!buttonEl) return;
-    const encoded = buttonEl.dataset?.query || '';
-    processSuggestion(decodeURIComponent(encoded));
-}function processSuggestion(text) {
-    const input = document.getElementById('text-input');
-    if (!input) return;
-    input.value = String(text || '').trim();
-    sendTextInput();
-}
 
 function sanitizeExtractedLocation(rawLocation) {
     let loc = String(rawLocation || '').trim();
@@ -13738,46 +13281,6 @@ async function buildTopPlaceSuggestions(type, location, userText = '') {
     return lines.join('\n');
 }
 
-function formatSourceLinksWithIcons(urls) {  
-    return (urls || []).map((url) => {  
-        let host = '';  
-        let path = '';  
-        let lowerUrl = String(url || '').toLowerCase();  
-        try {  
-            const parsed = new URL(url);  
-            host = parsed.hostname;  
-            path = parsed.pathname || '';  
-            lowerUrl = parsed.href.toLowerCase();  
-        } catch (e) {  
-            host = '';  
-        }  
- 
-        let displayName = host || url;  
-        let logoDomain = host;  
- 
-        if (/reddit\.com/.test(lowerUrl)) {  
-            displayName = 'Reddit';  
-            logoDomain = 'reddit.com';  
-        } else if ((/google\./.test(host) && /\/maps\//.test(path)) || /maps\.google\./.test(host)) {  
-            displayName = 'Google Maps';  
-            logoDomain = 'maps.google.com';  
-        } else if (/tripadvisor/.test(lowerUrl)) {  
-            displayName = 'TripAdvisor';  
-            logoDomain = 'tripadvisor.com';  
-        } else if (/google\./.test(host) && /\/search/.test(path)) {  
-            displayName = 'Google Search';  
-            logoDomain = 'google.com';  
-        } else if (/openstreetmap|overpass/.test(lowerUrl)) {  
-            displayName = 'OpenStreetMap';  
-            logoDomain = 'openstreetmap.org';  
-        }  
- 
-        const icon = logoDomain  
-            ? `https://www.google.com/s2/favicons?domain=${encodeURIComponent(logoDomain)}&sz=16`  
-            : '';  
-        return `- <a href="${url}" target="_blank" rel="noopener" class="inline-flex items-center gap-2 text-purple-600 dark:text-purple-400 hover:text-purple-800 dark:hover:text-purple-300 underline"><img src="${icon}" alt="" width="16" height="16" style="display:inline-block;border-radius:3px;vertical-align:middle;">${displayName}</a>`;  
-    }).join('\n');  
-}  
 
 function sanitizeHallucinatedTerrain(responseText, userText, resolvedLocationName = '') {
     if (!responseText) return responseText;
@@ -13907,368 +13410,7 @@ function getTransportRideApps(countryCode) {
     return 'Uber / local taxis / regional rideshare apps';
 }
 
-function getKnownTransitNote(cityName, fullLocation, countryCode) {
-    const city = String(cityName || '').toLowerCase();
-    const full = String(fullLocation || '').toLowerCase();
-    const cc = (countryCode || '').toUpperCase();
 
-    if (cc === 'US' && city.includes('long beach')) {
-        return {
-            header: '[Pin] Local precision for Long Beach, CA:',
-            lines: [
-                '- Long Beach Transit (LBT) is the main local bus network.',
-                '- Passport shuttle serves key downtown and waterfront areas.',
-                '- Metro A Line (Downtown Long Beach station) connects toward Los Angeles.'
-            ]
-        };
-    }
-
-    if (cc === 'US' && (city.includes('new york') || full.includes('new york, ny'))) {
-        return {
-            header: '[Pin] Local precision for New York City:',
-            lines: [
-                '- MTA subway + buses are the core city network.',
-                '- LIRR / Metro-North / NJ Transit are useful for regional trips.'
-            ]
-        };
-    }
-
-    if (cc === 'US' && (city.includes('los angeles') || city === 'la')) {
-        return {
-            header: '[Pin] Local precision for Los Angeles, CA:',
-            lines: [
-                '- LA Metro (B/D rail + A/E lines + buses) covers key corridors.',
-                '- Metrolink is useful for longer regional commutes beyond central LA.'
-            ]
-        };
-    }
-
-    if (cc === 'US' && city.includes('san francisco')) {
-        return {
-            header: '[Pin] Local precision for San Francisco, CA:',
-            lines: [
-                '- Muni Metro + buses are core in-city options.',
-                '- BART is best for airport/East Bay regional connections.'
-            ]
-        };
-    }
-
-    if (cc === 'US' && city.includes('chicago')) {
-        return {
-            header: '[Pin] Local precision for Chicago, IL:',
-            lines: [
-                '- CTA L trains + buses are primary city transit.',
-                '- Metra serves suburban/regional commuter routes.'
-            ]
-        };
-    }
-
-    if (cc === 'US' && city.includes('seattle')) {
-        return {
-            header: '[Pin] Local precision for Seattle, WA:',
-            lines: [
-                '- Link light rail + King County Metro buses are the main options.',
-                '- Sounder/express buses help with wider regional travel.'
-            ]
-        };
-    }
-
-    if (cc === 'US' && city.includes('boston')) {
-        return {
-            header: '[Pin] Local precision for Boston, MA:',
-            lines: [
-                '- MBTA subway (the T) + buses cover most neighborhoods.',
-                '- Commuter Rail supports outer-city and regional routes.'
-            ]
-        };
-    }
-
-    if (cc === 'US' && city.includes('washington')) {
-        return {
-            header: '[Pin] Local precision for Washington, DC:',
-            lines: [
-                '- Metro rail + Metrobus are the core network.',
-                '- DC Circulator is convenient for common central routes.'
-            ]
-        };
-    }
-
-    if (cc === 'US' && city.includes('philadelphia')) {
-        return {
-            header: '[Pin] Local precision for Philadelphia, PA:',
-            lines: [
-                '- SEPTA subway/trolley/bus covers most city travel.',
-                '- Regional Rail is useful for suburban connections.'
-            ]
-        };
-    }
-
-    if (cc === 'CA' && city.includes('toronto')) {
-        return {
-            header: '[Pin] Local precision for Toronto, ON:',
-            lines: [
-                '- TTC subway/streetcar/bus is the main city network.',
-                '- GO Transit is best for Greater Toronto regional travel.'
-            ]
-        };
-    }
-
-    if (cc === 'CA' && city.includes('vancouver')) {
-        return {
-            header: '[Pin] Local precision for Vancouver, BC:',
-            lines: [
-                '- TransLink SkyTrain + buses + SeaBus provide broad coverage.',
-                '- Compass Card is the common fare method across modes.'
-            ]
-        };
-    }
-
-    if (cc === 'GB' && city.includes('london')) {
-        return {
-            header: '[Pin] Local precision for London:',
-            lines: [
-                '- TfL Tube + buses cover most areas well.',
-                '- Contactless tap-to-pay is usually the easiest fare option.'
-            ]
-        };
-    }
-
-    if (cc === 'FR' && city.includes('paris')) {
-        return {
-            header: '[Pin] Local precision for Paris:',
-            lines: [
-                '- Metro + RER + buses provide dense coverage.',
-                '- RER is typically best for airports and outer zones.'
-            ]
-        };
-    }
-
-    if (cc === 'JP' && city.includes('tokyo')) {
-        return {
-            header: '[Pin] Local precision for Tokyo:',
-            lines: [
-                '- Tokyo Metro + Toei + JR lines form the core network.',
-                '- IC cards (Suica/PASMO) are the easiest way to pay.'
-            ]
-        };
-    }
-
-    if (cc === 'SG' && city.includes('singapore')) {
-        return {
-            header: '[Pin] Local precision for Singapore:',
-            lines: [
-                '- MRT + bus integration is highly reliable citywide.',
-                '- EZ-Link/SimplyGo tap payments are standard for transit.'
-            ]
-        };
-    }
-
-    if (cc === 'AE' && city.includes('dubai')) {
-        return {
-            header: '[Pin] Local precision for Dubai:',
-            lines: [
-                '- Dubai Metro + feeder buses are the main backbone.',
-                '- Taxis are widely available for first/last-mile travel.'
-            ]
-        };
-    }
-
-    if (cc === 'IN' && city.includes('delhi')) {
-        return {
-            header: '[Pin] Local precision for Delhi:',
-            lines: [
-                '- Delhi Metro is the fastest way across most corridors.',
-                '- Auto-rickshaw + app cabs are useful for short last-mile trips.'
-            ]
-        };
-    }
-
-    if (cc === 'IN' && (city.includes('bangalore') || city.includes('bengaluru'))) {
-        return {
-            header: '[Pin] Local precision for Bengaluru:',
-            lines: [
-                '- Namma Metro + BMTC buses are primary public options.',
-                '- Peak-hour road traffic is heavy; metro is often faster.'
-            ]
-        };
-    }
-
-    if (cc === 'IN' && city.includes('mumbai')) {
-        return {
-            header: '[Pin] Local precision for Mumbai:',
-            lines: [
-                '- Suburban rail + Metro + BEST buses are core transport modes.',
-                '- Local trains are fast but crowded during peak hours.'
-            ]
-        };
-    }
-
-    if (cc === 'IN' && city.includes('chennai')) {
-        return {
-            header: '[Pin] Local precision for Chennai:',
-            lines: [
-                '- Chennai Metro + MTC buses + suburban rail provide broad coverage.',
-                '- Autos and app cabs are common for short connectors.'
-            ]
-        };
-    }
-
-    return null;
-}
-
-function getSmallTownTransportTemplate(locationInfo) {
-    const city = locationInfo?.cityName || 'this town';
-    const country = (locationInfo?.country || '').trim();
-    const state = (locationInfo?.state || '').trim();
-    const cc = (locationInfo?.countryCode || '').toUpperCase();
-
-    if (cc === 'IN') {
-        const southern = /tamil nadu|karnataka|kerala|andhra pradesh|telangana|puducherry/i.test(state);
-        const northern = /uttar pradesh|uttarakhand|punjab|haryana|delhi|himachal|jammu|rajasthan/i.test(state);
-        return {
-            intro: `${city} is likely served best by buses, autos, and local cabs rather than metro rail.`,
-            bullets: [
-                '- Local/state buses: primary low-cost option for town and nearby-city travel',
-                '- Auto-rickshaw and shared autos: usually fastest for short in-town trips',
-                '- App cabs may exist in pockets, but reliability varies by time and area',
-                '- For multi-stop day plans, pre-book a local cab for fixed hours'
-            ],
-            tip: southern
-                ? 'In South Indian towns, bus stands are usually central; ask for last-bus timing before evening travel.'
-                : (northern
-                    ? 'In North Indian towns, confirm both fare and return transport before late evening trips.'
-                    : 'Ask your hotel/host for the nearest bus stand and a trusted local driver contact.')
-        };
-    }
-
-    if (cc === 'US' || cc === 'CA') {
-        return {
-            intro: `${city} may have limited fixed-route transit; local buses and on-demand rides are usually key.`,
-            bullets: [
-                '- County/municipal buses: check reduced evening/weekend schedules',
-                '- Rideshare/taxi: often the most reliable point-to-point option',
-                '- Regional rail may be available only from a nearby larger city',
-                '- Rental car is often most practical for flexible same-day movement'
-            ],
-            tip: 'Verify first/last bus times before planning return trips.'
-        };
-    }
-
-    if (cc === 'GB' || cc === 'IE') {
-        return {
-            intro: `${city} transport is typically bus-led, with rail access depending on proximity to larger hubs.`,
-            bullets: [
-                '- Local bus network: primary option within and around town',
-                '- Regional rail: check nearest station if not directly in town center',
-                '- Taxis/rideshare: useful for low-frequency routes and late returns',
-                '- Rental car: strong option for nearby villages/attractions'
-            ],
-            tip: 'Sunday and late-evening frequencies are usually lower than weekdays.'
-        };
-    }
-
-    if (cc === 'AU' || cc === 'NZ') {
-        return {
-            intro: `${city} usually depends on regional buses and private vehicle options.`,
-            bullets: [
-                '- Regional buses: good for key corridors but often lower frequency',
-                '- Rideshare/taxi: availability can be uneven outside core areas',
-                '- Intercity coach links may be better than local fixed transit',
-                '- Rental car is commonly the most time-efficient choice'
-            ],
-            tip: 'Check evening service cutoffs; many routes end earlier outside major metros.'
-        };
-    }
-
-    if (cc === 'MY' || cc === 'ID' || cc === 'TH' || cc === 'PH' || cc === 'VN') {
-        return {
-            intro: `${city} is usually a mix of local buses, informal local transport, and ride-hailing.`,
-            bullets: [
-                '- Local buses/minibuses: low-cost but frequency can vary by district',
-                '- Ride-hailing apps are often the most consistent point-to-point option',
-                '- Motorcycle taxi options may exist for short urban hops',
-                '- Intercity coach terminals are often better for longer transfers than local rail'
-            ],
-            tip: 'Save your destination in maps and use that pin for pickup/drop-off accuracy.'
-        };
-    }
-
-    if (cc === 'AE' || cc === 'SA' || cc === 'QA' || cc === 'OM' || cc === 'KW' || cc === 'BH') {
-        return {
-            intro: `${city} transport is usually bus + taxi/ride-hailing, with rail limited to larger metros.`,
-            bullets: [
-                '- Local buses: useful on main corridors, lower frequency in outer zones',
-                '- Taxi/Careem/Uber: typically the most reliable for direct trips',
-                '- Intercity coach services are common for city-to-city movement',
-                '- Rental car is often the most practical option for day plans with multiple stops'
-            ],
-            tip: 'For heat-heavy periods, prioritize air-conditioned transfer options and shorter waits.'
-        };
-    }
-
-    if (cc === 'BR' || cc === 'MX' || cc === 'AR' || cc === 'CL' || cc === 'CO' || cc === 'PE') {
-        return {
-            intro: `${city} usually relies on local buses/colectivos plus taxis or app-based rides.`,
-            bullets: [
-                '- City buses/colectivos: main low-cost local option',
-                '- App cabs/taxis: often better for direct routes and late hours',
-                '- Intercity bus terminals are typically key for regional travel',
-                '- Rental car is useful when visiting multiple outskirts in one day'
-            ],
-            tip: 'Use known pickup points (station, plaza, hotel) to reduce pickup confusion.'
-        };
-    }
-
-    if (cc === 'ZA' || cc === 'NG' || cc === 'KE' || cc === 'GH' || cc === 'TZ' || cc === 'UG') {
-        return {
-            intro: `${city} often uses a mix of bus/minibus systems and taxi app options.`,
-            bullets: [
-                '- Municipal or private buses/minibuses: core local coverage',
-                '- Ride-hailing or metered taxis: practical for direct trips',
-                '- Intercity coaches are usually the most reliable long-distance option',
-                '- Rental car/driver hire is useful for multi-stop day routes'
-            ],
-            tip: 'Check service reliability by time of day and plan return transport before late evening.'
-        };
-    }
-
-    if (cc === 'JP' || cc === 'KR' || cc === 'TW') {
-        return {
-            intro: `${city} generally has orderly local buses, with rail strength depending on station access.`,
-            bullets: [
-                '- Local buses: dependable for in-town movement',
-                '- Regional rail: efficient if your area has station connectivity',
-                '- Taxis and ride-hailing: useful for first/last-mile travel',
-                '- Rental car can be efficient for rural attractions and day loops'
-            ],
-            tip: 'Validate final departure times in the evening; services can taper earlier outside big metros.'
-        };
-    }
-
-    if (cc === 'FR' || cc === 'DE' || cc === 'IT' || cc === 'ES' || cc === 'NL' || cc === 'BE') {
-        return {
-            intro: `${city} is often served by regional bus/rail with moderate frequency.`,
-            bullets: [
-                '- Local/regional buses: core in-town and nearby coverage',
-                '- Regional rail: efficient when the town has station access',
-                '- Taxis/rideshare: best for first/last-mile and low-frequency times',
-                '- Rental car: useful for rural attractions and multi-stop routes'
-            ],
-            tip: 'Transit apps usually show real-time delays; validate platform and final service times.'
-        };
-    }
-
-    return {
-        intro: `${city}${country ? `, ${country}` : ''} likely has limited but workable local transport options.`,
-        bullets: [
-            '- Local buses/minibuses for low-cost routes (verify frequency and last service)',
-            '- Taxi/rideshare for direct point-to-point travel and late returns',
-            '- Regional coach/rail (if nearby) for intercity movement',
-            '- Rental car for highest flexibility'
-        ],
-        tip: `In smaller places${country ? ` in ${country}` : ''}, lock return transport early and save station/stand locations offline.`
-    };
-}
 
 async function buildTransportMessage(locationInfo) {
     const city = locationInfo?.cityName || 'this place';
@@ -14499,24 +13641,6 @@ function isMedicalEmergencyIntent(text) {
     return /\b(chest pain|trouble breathing|difficulty breathing|shortness of breath|stroke|face drooping|slurred speech|seizure|passed out|fainted|unconscious|heavy bleeding|severe bleeding|severe burn|poison|overdose|anaphylaxis|allergic reaction.*breath|cannot breathe|can't breathe|heart attack)\b/.test(t);
 }
 
-function buildMedicalGuidancePrompt(text) {
-    return `The user is asking for medical or symptom advice: "${text}".
-
-Respond with these rules:
-1. Clearly state you are not a doctor and this is general guidance only
-2. Do not give a diagnosis or claim certainty
-3. Give safe, practical self-care steps that are commonly appropriate
-4. Mention red-flag symptoms that mean they should seek urgent medical care
-5. If the request is about medicine, dosing, pregnancy, infants, severe symptoms, or multiple conditions, tell them to confirm with a licensed clinician or pharmacist
-6. Keep the tone calm, direct, and concise
-7. Do not invent prescriptions, dosages, or treatment plans
-
-Format:
-- What it might mean: <brief, cautious statement>
-- What you can do now: <2-4 practical steps>
-- Get urgent help if: <red flags>
-- Safer next step: <when to contact a doctor/pharmacist>`;
-}
 
 function isLearningIntent(text) {
     const t = String(text || '').toLowerCase().trim();
@@ -15290,46 +14414,7 @@ function getCuratedClassicSongs(language) {
     return [];
 }
 
-function pickClassicSongsForDiscovery(language, count) {
-    const list = getCuratedClassicSongs(language);
-    if (!list.length) return [];
-    const shuffled = list
-        .map(item => ({ sortKey: Math.random(), item }))
-        .sort((a, b) => a.sortKey - b.sortKey)
-        .map(entry => entry.item);
-    return shuffled.slice(0, Math.max(1, Math.min(count, shuffled.length)));
-}
 
-function formatClassicSongsDiscoveryReply(intent, grouped) {
-    const langTitle = intent.languages.map(lang => lang[0].toUpperCase() + lang.slice(1)).join(' + ');
-    const lines = [`[Music] Classic songs discovery (${langTitle})`, ''];
-
-    if (intent.unsupported.length && !intent.languages.length) {
-        lines.push('For now, classic discovery supports English, Tamil, Hindi, and Telugu.');
-        lines.push('');
-    } else if (intent.unsupported.length) {
-        lines.push(`Note: For now, I support only English, Tamil, Hindi, and Telugu classics. Ignoring: ${intent.unsupported.join(', ')}.`);
-        lines.push('');
-    }
-
-    intent.languages.forEach(language => {
-        const items = grouped[language] || [];
-        if (!items.length) return;
-        lines.push(`${language[0].toUpperCase() + language.slice(1)} classics:`);
-        items.forEach(song => {
-            const title = String(song.song || '').trim();
-            const artist = String(song.artist || '').trim();
-            const work = String(song.work || '').trim();
-            if (!title) return;
-            const detail = [artist, work].filter(Boolean).join(' | ');
-            lines.push(detail ? `- ${title} - ${detail}` : `- ${title}`);
-        });
-        lines.push('');
-    });
-
-    lines.push('Try: "more tamil classic songs", "hindi old classics", or "telugu evergreen playlist".');
-    return lines.join('\n').trim();
-}
 
 async function handleClassicSongDiscoveryRequest(text) {
     const intent = parseClassicSongDiscoveryIntent(text);
@@ -18131,17 +17216,7 @@ function expandKnownQueryAliases(text) {
         .trim();
 }
 
-function rankSportsSources(results) {
-    return rankSourcesByPolicy(results, 'sports', 'sports result score standings winner official');
-}
 
-function normalizeSportsFactKey(value) {
-    return String(value || '')
-        .toLowerCase()
-        .replace(/[^a-z0-9\s]/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-}
 
 function normalizeEntitySearchText(value) {
     return String(value || '')
@@ -18151,9 +17226,6 @@ function normalizeEntitySearchText(value) {
         .trim();
 }
 
-function detectEntityDomain(text, liveIntent = null) {
-    return classifyUniversalEntityIntent(text, liveIntent).domain;
-}
 
 const UNIVERSAL_ENTITY_DOMAIN_PACKS = {
     sports: {
@@ -19250,9 +18322,6 @@ function lookupKnownGlobalFact(intent, userText, entityIntent = null) {
     return null;
 }
 
-function lookupKnownSportsFact(intent, userText, entityIntent = null) {
-    return null;
-}
 
 function formatKnownSportsFactMessage(knownFact, concise = false) {
     if (!knownFact?.answer) return '';
@@ -19875,19 +18944,6 @@ async function publishBestEffortFromSources(pipeline, sources, options = {}) {
     return true;
 }
 
-async function publishSportsRoleKnowledgeFallback(pipeline, options = {}) {
-    const relation = String(pipeline?.entityIntent?.relationType || '').toLowerCase();
-    const domain = String(pipeline?.entityIntent?.domain || '').toLowerCase();
-    if (relation !== 'role' || domain !== 'sports') return false;
-
-    const modelAnswer = String(await buildStrictApiKnowledgeFallback(pipeline?.userText || '') || '').trim();
-    if (!modelAnswer) return false;
-
-    const finalMsg = `[Best effort - verification unavailable]\n${modelAnswer}`;
-    addVerifiedAssistantMessage(finalMsg, options?.badge || 'Best effort');
-    saveToHistory(pipeline?.userText || '', finalMsg);
-    return true;
-}
 
 async function publishSportsRoleBestEffortAnswer(pipeline, candidate) {
     if (!pipeline?.entityIntent || !candidate?.value) return false;
@@ -19908,53 +18964,6 @@ async function publishSportsRoleBestEffortAnswer(pipeline, candidate) {
     return true;
 }
 
-async function publishUniversalMixedEvidence(pipeline, results) {
-    if (pipeline?.entityIntent?.relationType === 'latest_work') {
-        const best = (Array.isArray(results) ? results : [])
-            .map(item => {
-                const candidate = extractFactCandidate(item, pipeline.entityIntent);
-                const published = extractResultPublishedDate(item);
-                return { item, candidate, published };
-            })
-            .filter(entry =>
-                isLikelyLatestWorkTitleCandidate(entry.candidate, pipeline.entityIntent.subject, entry?.item?.title || '') &&
-                hasLatestWorkEvidence(entry.item, pipeline.entityIntent)
-            )
-            .sort((a, b) => {
-                const aTime = a.published?.getTime?.() || 0;
-                const bTime = b.published?.getTime?.() || 0;
-                if (bTime !== aTime) return bTime - aTime;
-                return scoreSourcePolicy(b.item?.url, pipeline.entityIntent.domain) - scoreSourcePolicy(a.item?.url, pipeline.entityIntent.domain);
-            })[0];
-
-        if (best?.candidate) {
-            const medium = detectLatestWorkMedium(pipeline.entityIntent.raw || '');
-            const label = medium === 'song' ? 'latest song' : medium === 'album' ? 'latest album' : medium === 'show' ? 'latest show' : medium === 'project' ? 'upcoming project' : 'latest film';
-            const dateLabel = best.published
-                ? ` (${best.published.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })})`
-                : '';
-            const sourceLines = results
-                .slice(0, 5)
-                .map((r, i) => `${i + 1}. [${r.title}](${r.url})`)
-                .join('\n');
-            const msg = `${pipeline.entityIntent.subject}'s ${label} appears to be ${best.candidate}${dateLabel}.\n\n${buildSourceMetaBlock(results)}\n\nSources:\n${sourceLines}`;
-            addVerifiedAssistantMessage(msg, 'Date-ranked live sources');
-            await prepareApiReply('verified_answer_found', {}, 'I ranked live sources by recency and selected the latest supported result.');
-            saveToHistory(pipeline.userText, msg);
-            return true;
-        }
-    }
-
-    const sourceLines = results
-        .slice(0, 5)
-        .map((r, i) => `${i + 1}. [${r.title}](${r.url})`)
-        .join('\n');
-    const mixedMsg = `I found sources for that, but they do not agree enough for a clean direct answer yet.\n\n${buildSourceMetaBlock(results)}\n\nSources:\n${sourceLines}`;
-    addVerifiedAssistantMessage(mixedMsg, 'Mixed live sources');
-    await prepareApiReply('verified_answer_mixed', {}, 'I found mixed source evidence, so I did not guess.');
-    saveToHistory(pipeline.userText, mixedMsg);
-    return true;
-}
 
 async function summarizeUniversalEntitySources(pipeline, results, controller, strictLiveRequired = false) {
     const snippets = results
@@ -20285,9 +19294,6 @@ async function handleUniversalEntityFactQuery(userText, liveIntent = null) {
     }
 }
 
-async function handleSportsFactQuery(userText, intent) {
-    return handleUniversalEntityFactQuery(userText, intent);
-}
 
 async function handleLiveRetrievalQuery(userText, options = {}) {
     const rawInput = String(userText || '').trim();
@@ -20681,29 +19687,6 @@ function refreshPrivacyDataSummary() {
     if (panel) panel.innerHTML = buildPrivacyDataSummaryHtml();
 }
 
-async function cleanExistingConversationHistory() {
-    const ok = await openConfirmActionDialog({
-        title: 'Clean history',
-        message: 'Clean and rewrite existing chat history entries?',
-        confirmLabel: 'Yes',
-        cancelLabel: 'No'
-    });
-    if (!ok) return;
-    try {
-        const beforeCount = Array.isArray(conversationHistory) ? conversationHistory.length : 0;
-        const cleaned = sanitizeConversationHistoryRecords(conversationHistory);
-        conversationHistory = cleaned;
-        localStorage.setItem(getHistoryStorageKey(), JSON.stringify(cleaned));
-        const removed = Math.max(0, beforeCount - cleaned.length);
-        showTemporaryMessage(
-            removed > 0
-                ? `History cleaned. ${removed} empty/invalid entr${removed === 1 ? 'y' : 'ies'} removed.`
-                : 'History cleaned.'
-        );
-    } catch (_) {
-        showTemporaryMessage('Could not clean history right now.');
-    }
-}
 
         function deleteAllLocalDataNow() {
             try {
@@ -20876,12 +19859,6 @@ function isWakeGreetingText(text) {
                 `Did you mean "${String(contextResolution?.originalMessage || '').trim()}" as a new topic, or as a follow-up?`;
         }
 
-        function buildAcknowledgementReply(text) {
-            const t = String(text || '').toLowerCase().replace(/[.!?]+$/g, '').trim();
-            if (/^(thanks|thank you)\b/.test(t)) return 'You are welcome. Ask anytime.';
-            if (/^(nice|great|perfect|awesome)\b/.test(t)) return 'Glad that helped. What should we do next?';
-            return 'Got it. What would you like to do next?';
-        }
 
         function buildAmbiguousContextClarificationHtml(contextResolution) {
             return window.JarvisContextCopilotUi?.buildContextClarificationHtml?.(contextResolution) || '';
@@ -22697,24 +21674,7 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
             return 'prompt';
         }
 
-        function buildLocationPermissionCardHtml(featureLabel = 'this') {
-            const label = escapeHtml(featureLabel);
-            return `
-<div class="location-permission-card" role="group" aria-label="Location permission">
-  <p class="location-permission-copy">I need your location permission for ${label}. Allow access in the browser prompt, or type a city instead.</p>
-  <div class="location-permission-actions">
-    <button type="button" class="location-permission-btn location-permission-btn-primary" onclick="return allowJarvisLocationAccess()">Allow location</button>
-    <button type="button" class="location-permission-btn" onclick="return declineJarvisLocationAccess()">I will type a city</button>
-  </div>
-</div>`;
-        }
 
-        function setPendingLocationPermissionAction(action) {
-            window.__jarvisPendingLocationAction = action && typeof action === 'object' ? action : null;
-            if (action?.type === 'weather') {
-                waitingForLocation = true;
-            }
-        }
 
         async function continuePendingLocationAction(position) {
             const action = window.__jarvisPendingLocationAction;
@@ -23293,18 +22253,7 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
             });
         }
 
-        function willItRain(weatherCode) {
 
-            return (weatherCode >= 51 && weatherCode <= 67) || 
-                   (weatherCode >= 80 && weatherCode <= 82) || 
-                   (weatherCode >= 95 && weatherCode <= 99);
-        }
-
-        function willItSnow(weatherCode) {
-            
-            return (weatherCode >= 71 && weatherCode <= 77) || 
-                   (weatherCode >= 85 && weatherCode <= 86);
-        }
 
         async function fetchAQI(lat, lon) {
             try {
@@ -24356,19 +23305,6 @@ function isCasualConversationQuery(text) {
     return false;
 }
 
-function buildCasualConversationReply(text) {
-    const t = normalizeCasualConversationText(text);
-    if (/^(?:thanks|thank you|thank u|appreciate it)\b/.test(t)) {
-        return 'You are welcome.';
-    }
-    if (/\b(how are you|how are you doing|how you doing|how is your day|how's your day|what'?s up)\b/.test(t)) {
-        return 'I am doing well, thanks for asking. How can I help?';
-    }
-    if (/\b(are you there|you there)\b/.test(t)) {
-        return 'Yes, I am here.';
-    }
-    return buildWakeGreeting();
-}
 
 function isSimpleStableQuestion(text) {
     if (globalThis.JarvisFrontendRouting?.isSimpleStableQuestion) {
@@ -24888,27 +23824,6 @@ if (typeof window !== 'undefined') {
                 }
             } catch (e) { console.error('Failed to load user data:', e); }
         }
-function showTypingIndicator() {
-    const chatContainer = document.getElementById('chat-container');
-    
-    
-    hideTypingIndicator();
-    
-    const typingDiv = document.createElement('div');
-    typingDiv.id = 'typing-indicator';
-    typingDiv.className = 'flex justify-start items-start gap-2 fade-in';
-    typingDiv.innerHTML = `
-        <div class="bg-gray-200 rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm">
-            <div class="flex gap-1">
-                <div class="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style="animation-delay: 0ms;"></div>
-                <div class="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style="animation-delay: 150ms;"></div>
-                <div class="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style="animation-delay: 300ms;"></div>
-            </div>
-        </div>
-    `;
-    chatContainer.appendChild(typingDiv);
-    maybeAutoScroll(chatContainer);
-}
 
 function hideTypingIndicator() {
     const typingIndicator = document.getElementById('typing-indicator');
@@ -25539,24 +24454,6 @@ function compactChatTitleText(text) {
         .trim();
 }
 
-function toTitleCaseChatTitle(text) {
-    const cleaned = compactChatTitleText(text);
-    if (!cleaned) return '';
-    const words = cleaned.split(/\s+/).filter(Boolean);
-    const lowercaseSet = new Set(['a', 'an', 'the', 'and', 'but', 'or', 'for', 'nor', 'on', 'at', 'to', 'from', 'by', 'of', 'in', 'with']);
-    return words
-        .map((word, index) => {
-            const lower = word.toLowerCase();
-            if (/^(?:AI|API|UI|UX|URL|SQL|CSS|HTML|JS|JSON|GPT|iOS|Q[1-4]|LLM|REST|SDK)$/i.test(word)) {
-                return word.toUpperCase();
-            }
-            if (index > 0 && index < words.length - 1 && lowercaseSet.has(lower)) {
-                return lower;
-            }
-            return word.charAt(0).toUpperCase() + word.slice(1);
-        })
-        .join(' ');
-}
 
 function capitalizeChatTitle(text) {
     const cleaned = compactChatTitleText(text);
@@ -25641,9 +24538,6 @@ function isInvalidOrGenericChatTitle(title) {
     return false;
 }
 
-function isGenericChatTitle(title) {
-    return isInvalidOrGenericChatTitle(title);
-}
 
 function normalizeGeneratedChatTitle(title, fallback = '') {
     let cleaned = String(title || '')
@@ -26537,36 +25431,6 @@ function exportCurrentChat(format = 'markdown') {
     showTemporaryMessage(`Conversation exported as ${fileExtension.toUpperCase()}`);
 }
 
-function playJarvisChime(type = 'activate') {
-    try {
-        const AudioCtx = window.AudioContext || window.webkitAudioContext;
-        if (!AudioCtx) return;
-        const ctx = new AudioCtx();
-        const now = ctx.currentTime;
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-
-        if (type === 'activate') {
-            osc.type = 'sine';
-            osc.frequency.setValueAtTime(440, now);
-            osc.frequency.exponentialRampToValueAtTime(880, now + 0.12);
-            gain.gain.setValueAtTime(0.04, now);
-            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
-            osc.start(now);
-            osc.stop(now + 0.2);
-        } else if (type === 'done') {
-            osc.type = 'triangle';
-            osc.frequency.setValueAtTime(660, now);
-            osc.frequency.exponentialRampToValueAtTime(990, now + 0.08);
-            gain.gain.setValueAtTime(0.03, now);
-            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
-            osc.start(now);
-            osc.stop(now + 0.16);
-        }
-    } catch (_) {}
-}
 
 function triggerJarvisHaptic(pattern = 15) {
     try {
@@ -27809,9 +26673,6 @@ function scoreCanvasFrameQuality(ctx, width, height) {
     return Math.min(1, (contrast / 40) * (1 - Math.abs(average - 128) / 180));
 }
 
-function isCanvasFrameBlank(ctx, width, height) {
-    return scoreCanvasFrameQuality(ctx, width, height) < 0.08;
-}
 
 function resolveContinuousVisionTask(text) {
     const query = String(text || '');
@@ -28124,21 +26985,7 @@ function pickReadableVisionObjectMeta(objects) {
     return candidates[0] || null;
 }
 
-function normalizeReadableVisionConfidence(score, uncertainty = '') {
-    if (uncertainty) return 'medium';
-    const value = Number(score);
-    if (!Number.isFinite(value)) return '';
-    if (value >= 0.82) return 'high';
-    if (value >= 0.55) return 'medium';
-    return 'low';
-}
 
-function withReadableArticle(label) {
-    const clean = String(label || '').trim();
-    if (!clean) return 'an object';
-    if (/^(a|an|the)\s+/i.test(clean)) return clean;
-    return /^[aeiou]/i.test(clean) ? `an ${clean}` : `a ${clean}`;
-}
 
 function compactVisionTextMention(text) { 
     return String(text || '') 
@@ -28337,116 +27184,6 @@ function isVisionTranslationIntent(text) {
     return /\b(translate|translation|convert to english|to english|in english|what does this say|what is written|meaning of this text)\b/.test(t) ||
         /\b(hindi|kannada|malayalam|telugu|tamil|urdu|marathi|bengali|gujarati|punjabi)\b[\s\S]{0,80}\b(english|translate|meaning)\b/.test(t) ||
         /\b(english|translate|meaning)\b[\s\S]{0,80}\b(hindi|kannada|malayalam|telugu|tamil|urdu|marathi|bengali|gujarati|punjabi)\b/.test(t);
-}
-
-// ============ MULTI-AGENT PERSONA DEBATE ============
-async function handleMultiAgentDebate(text, rounds = 3) {
-    addChatMessage(`Starting a ${rounds}-round debate on: "${text}"`, false);
-    let previousArgument = text;
-    let debateHistory = `Debate Topic: ${text}\n`;
-
-    try {
-        for (let i = 0; i < rounds; i++) {
-            // Alpha's Turn
-            showThinkingIndicator(`Round ${i + 1}: Agent Alpha is formulating an argument...`);
-            const alphaPrompt = i === 0 
-                ? `You are JARVIS Alpha. Take the optimistic, progressive, or PRO stance on the topic: "${text}". Provide 2 highly persuasive sentences.` 
-                : `You are JARVIS Alpha. You are in a debate. Defend the PRO stance and counter this argument from JARVIS Beta: "${previousArgument}". Provide 2 highly persuasive sentences.`;
-            
-            const proResponse = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ message: text })
-            });
-            const proText = (await proResponse.json()).response || '';
-            addModelAssistantMessage(proText, 'JARVIS Alpha (Pro)');
-            debateHistory += `\nAlpha: ${proText}\n`;
-            previousArgument = proText;
-
-            // Briefly delay before advancing so the result remains readable.
-            await new Promise(r => setTimeout(r, 5000));
-
-            // Beta's Turn
-            showThinkingIndicator(`Round ${i + 1}: Agent Beta is countering...`);
-            const betaPrompt = `You are JARVIS Beta. You take the pessimistic, conservative, or CON stance. Fiercely but respectfully counter this argument from JARVIS Alpha: "${previousArgument}". Provide 2 highly persuasive sentences.`;
-            
-            const conResponse = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ message: text })
-            });
-            const conText = (await conResponse.json()).response || '';
-            addModelAssistantMessage(conText, 'JARVIS Beta (Con)');
-            debateHistory += `\nBeta: ${conText}\n`;
-            previousArgument = conText;
-
-            if (i < rounds - 1) {
-                await new Promise(r => setTimeout(r, 5000));
-            }
-        }
-        saveToHistory(text, debateHistory);
-        
-        // Final Prompt to User
-        await new Promise(r => setTimeout(r, 3000));
-        const conclusion = "The debate has concluded. What are your thoughts on this?";
-        addChatMessage(conclusion, false);
-    } catch (error) {
-        showError('Debate agents encountered an error.');
-    } finally {
-        hideThinkingIndicator();
-    }
-}
-
-// ============ WebXR (AR) SEMANTIC MEMORY LOCATOR ============
-function startARFindSession(thing, location) {
-    if (!navigator.xr) {
-        showTemporaryMessage('WebXR (AR) is not supported on this browser/device.');
-        return;
-    }
-    navigator.xr.isSessionSupported('immersive-ar').then((supported) => {
-        if (supported) {
-            const overlay = document.getElementById('ar-overlay');
-            overlay.innerHTML = `
-                <div style="position:absolute; top:10%; left:50%; transform:translateX(-50%); width:90%; background:rgba(0,0,0,0.8); color:#fff; padding:20px; border-radius:16px; border:2px solid #8b5cf6; text-align:center; font-family:sans-serif;">
-                    <div style="font-size:24px; margin-bottom:10px;">ðŸ” Locating Item</div>
-                    <div style="font-size:18px; margin-bottom:20px;">Your <b>${thing}</b> is near <b>${location}</b></div>
-                    <div style="font-size:14px; opacity:0.8; margin-bottom:20px;">Look around your physical space.</div>
-                    <button onclick="endARSession()" style="padding:10px 24px; font-size:16px; background:#ef4444; color:white; border:none; border-radius:8px; font-weight:bold;">Close AR Lens</button>
-                </div>
-            `;
-            overlay.classList.remove('hidden');
-
-            navigator.xr.requestSession('immersive-ar', {
-                optionalFeatures: ['dom-overlay'],
-                domOverlay: { root: overlay }
-            }).then((session) => {
-                window.currentXRSession = session;
-                session.addEventListener('end', () => {
-                    overlay.classList.add('hidden');
-                    window.currentXRSession = null;
-                });
-                
-                const canvas = document.createElement('canvas');
-                const gl = canvas.getContext('webgl', { xrCompatible: true });
-                session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
-                session.requestAnimationFrame(function onXRFrame(time, frame) {
-                    if (!window.currentXRSession) return;
-                    session.requestAnimationFrame(onXRFrame);
-                });
-            }).catch(e => {
-                showTemporaryMessage('Failed to start AR Session: ' + e.message);
-                overlay.classList.add('hidden');
-            });
-        } else {
-            showTemporaryMessage('Immersive AR is not available on this device.');
-        }
-    });
-}
-
-function endARSession() {
-    if (window.currentXRSession) {
-        window.currentXRSession.end();
-    }
 }
 
 loadChatSessions();
