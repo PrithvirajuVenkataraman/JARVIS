@@ -59,8 +59,11 @@ console.log('  [PASS] 4. Client-side permanent dark mode, persistent empty state
 // Next Steps & Action Plan Dynamic Engine Verification
 assert.ok(indexHtml.includes('function extractContextualEntities('), 'Contextual entity extractor must exist');
 assert.ok(indexHtml.includes('suggested-followups-card'), 'Suggested followups card class must exist');
-assert.ok(indexHtml.includes('next-step-arrow'), 'Next step arrow indicator must exist');
-console.log('  [PASS] 5. Revamped dynamic Next Steps & Action Plan engine verified in index.html');
+assert.ok(!indexHtml.includes('class="quick-pivot-btn"'), 'Quick pivot buttons must be removed from assistant action row');
+assert.ok(!indexHtml.includes('data-assistant-action="transform_deeper"'), 'Deep Dive button must be removed from assistant action row');
+assert.ok(!indexHtml.includes('data-assistant-action="transform_shorter"'), 'Summary button must be removed from assistant action row');
+assert.ok(!indexHtml.includes('data-assistant-action="transform_simplify"'), 'Simplify button must be removed from assistant action row');
+console.log('  [PASS] 5. Revamped dynamic Next Steps engine and removal of Deep Dive/Summary/Simplify buttons verified in index.html');
 
 // 2. Verify styles.css Design Tokens & Rules
 const stylesCss = fs.readFileSync(path.resolve('styles.css'), 'utf8');
