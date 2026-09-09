@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { __test as chatTest } from '../api/chat-groq.js';
+import { __test as searchTest } from '../api/search.js';
+import { __test as freeLiveTest } from '../api/_lib/free-live/providers.js';
 import { verifyAndRepairMathClaims } from '../api/_lib/code-math-validator.js';
 
 console.log('--- Testing Modern AI Workspace UI Architecture ---');
@@ -137,5 +139,64 @@ assert.equal(repairedPercent.repaired, true, 'Percentage calculation hallucinati
 assert.equal(repairedPercent.text, 'The discount is 15% of 80 = 12 dollars', 'Percentage calculation must be auto-repaired to 12');
 
 console.log('  [PASS] 10. Anti-hallucination & speed optimization invariants verified (GPT-OSS-120B priority, instant 8B tier, compacted prompt, streaming attachments, percentage auto-repair)');
+
+// 7. Verify Scraperless Live Web Search Invariants (Section 11)
+// 11.1 Native Gemini Google Search Grounding response normalizer & payload extraction
+const mockGeminiResponse = {
+    candidates: [{
+        content: { parts: [{ text: 'The capital of France is Paris.' }] },
+        groundingMetadata: {
+            webSearchQueries: ['capital of France'],
+            groundingChunks: [
+                { web: { uri: 'https://en.wikipedia.org/wiki/Paris', title: 'Paris - Wikipedia' } },
+                { web: { uri: 'https://www.britannica.com/place/Paris', title: 'Paris | History, Map, & Facts | Britannica' } }
+            ],
+            groundingSupports: [
+                {
+                    groundingChunkIndices: [0],
+                    segment: { startIndex: 0, endIndex: 32, text: 'The capital of France is Paris.' }
+                }
+            ]
+        }
+    }]
+};
+const parsedGrounding = searchTest.parseGeminiGroundingResponse(mockGeminiResponse, 'capital of France');
+assert.equal(parsedGrounding.results.length, 2, 'Must extract all web chunks as verified results');
+assert.equal(parsedGrounding.results[0].domain, 'en.wikipedia.org', 'Must parse domain correctly from URI');
+assert.equal(parsedGrounding.results[0].sourceType, 'live_web', 'Source type must be live_web');
+assert.ok(parsedGrounding.results[0].qualitySignals.includes('google_search_grounding'), 'Quality signal must declare google_search_grounding');
+assert.equal(parsedGrounding.answer, 'The capital of France is Paris.', 'Must extract grounded answer directly');
+
+// 11.2 SearXNG JSON Meta-Search Engine response normalizer & engine attribution
+const mockSearXNGResponse = {
+    query: 'quantum computing developments',
+    results: [
+        {
+            url: 'https://www.nature.com/articles/d41586-024-00000',
+            title: 'Quantum breakthrough in error correction',
+            content: 'Researchers demonstrate fault-tolerant logical qubits.',
+            engine: 'google',
+            publishedDate: '2026-03-01'
+        },
+        {
+            url: 'https://phys.org/news/2026-03-quantum-processor.html',
+            title: 'New 1,000-qubit processor unveiled',
+            content: 'Next generation superconducting quantum processor.',
+            engine: 'bing'
+        }
+    ]
+};
+const parsedSearXNG = freeLiveTest.parseSearXNGResults(mockSearXNGResponse, 'quantum computing developments');
+assert.equal(parsedSearXNG.length, 2, 'Must parse all SearXNG results');
+assert.equal(parsedSearXNG[0].domain, 'nature.com', 'Domain must be extracted correctly');
+assert.equal(parsedSearXNG[0].source, 'SearXNG (google)', 'Engine attribution must be recorded in source label');
+assert.ok(parsedSearXNG[0].qualitySignals.includes('searxng_json'), 'Quality signals must include searxng_json');
+assert.equal(parsedSearXNG[1].source, 'SearXNG (bing)', 'Secondary engine attribution must be preserved');
+
+// 11.3 Multi-Domain Scraperless Consensus Verification (>= 2 distinct domains)
+const combinedDistinctDomains = Array.from(new Set([...parsedGrounding.results, ...parsedSearXNG].map(r => r.domain).filter(Boolean)));
+assert.ok(combinedDistinctDomains.length >= 2, 'Consensus across >= 2 distinct domains must be achieved without scrapers');
+
+console.log('  [PASS] 11. Scraperless Live Web Search Invariants verified (Native Gemini Grounding, SearXNG JSON meta-search, >= 2 domain consensus)');
 
 console.log('=== All Modern AI Workspace UI Architecture Tests PASSED ===');
