@@ -4284,7 +4284,8 @@ async function publishResolvedModelMessage(userMessage, answerText, options = {}
     const historyText = options?.historyText || null;
     const rawAnswer = String(answerText || '').trim();
     const streamedMessageId = String(options?.existingAssistantMessageId || '').trim();
-    const fastFinalizeStreamed = options?.fastFinalizeStreamed === true &&
+    const isStreamed = Boolean(streamedMessageId && rawAnswer);
+    const fastFinalizeStreamed = (options?.fastFinalizeStreamed === true || isStreamed) &&
         streamedMessageId &&
         rawAnswer &&
         !requiresLiveSourceAnswer(userMessage) &&
@@ -4845,20 +4846,23 @@ async function streamChatCompletion(payload, options = {}) {
             return;
         }
         if (event.event === 'correction') {
-            accumulated = String(event.data?.text || accumulated || '');
-            const id = ensureStreamMessage();
-            updateStreamingAssistantMessage(id, accumulated, {
-                userMessage,
-                streaming: true,
-                modelUsed: streamMeta.modelUsed || streamMeta.model || '',
-                provider: streamMeta.provider || '',
-                failover: streamMeta.failover || false
-            });
+            // Keep streamed text stable once delivered; ignore late post-stream mutations
+            if (!accumulated) {
+                accumulated = String(event.data?.text || '');
+                const id = ensureStreamMessage();
+                updateStreamingAssistantMessage(id, accumulated, {
+                    userMessage,
+                    streaming: true,
+                    modelUsed: streamMeta.modelUsed || streamMeta.model || '',
+                    provider: streamMeta.provider || '',
+                    failover: streamMeta.failover || false
+                });
+            }
             return;
         }
         if (event.event === 'done') {
             donePayload = event.data || {};
-            const doneResponse = String(donePayload.response || accumulated || '').trim();
+            const doneResponse = String(accumulated || donePayload.response || '').trim();
             if (isConverseStream && doneResponse) {
                 finishStreamingConverseSpeech(doneResponse, activeTurnId);
             }
@@ -7898,15 +7902,8 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
         };
 
         function injectEnterpriseNextStepsSlot(messageId, query, answer) {
-            if (!messageId || !query || !answer) return;
-            const slot = document.querySelector(`.assistant-next-steps-slot[data-message-id="${CSS.escape(messageId)}"]`);
-            if (!slot || slot.children.length > 0) return;
-            const plan = buildNextStepsActionPlan(query, answer);
-            if (plan && plan.length > 0) {
-                slot.innerHTML = renderNextStepsCardHtml(plan, messageId);
-                const chatContainer = document.getElementById('chat-container');
-                if (chatContainer) maybeAutoScroll(chatContainer);
-            }
+            // Suggested Next Steps section removed per user request
+            return;
         }
 
         function buildAssistantActionsHtml(messageId, canRegenerate) {
@@ -7914,11 +7911,6 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             const regenAttr = canRegenerate ? '' : 'disabled aria-disabled="true"';
             return `
                 <div class="assistant-action-row" data-message-id="${safeId}">
-                    <div class="assistant-quick-pivots flex items-center gap-1 mr-1">
-                        <button type="button" class="quick-pivot-btn" data-assistant-action="transform_deeper" onclick="return handleAssistantActionInline(event, '${safeId}', 'transform_deeper')" title="Explain in more depth">🔍 Deep Dive</button>
-                        <button type="button" class="quick-pivot-btn" data-assistant-action="transform_shorter" onclick="return handleAssistantActionInline(event, '${safeId}', 'transform_shorter')" title="Executive summary / concise takeaways">⚡ Summary</button>
-                        <button type="button" class="quick-pivot-btn" data-assistant-action="transform_simplify" onclick="return handleAssistantActionInline(event, '${safeId}', 'transform_simplify')" title="Simplify explanation">💡 Simplify</button>
-                    </div>
                     <button type="button" class="assistant-action-icon" data-assistant-action="copy" onclick="return handleAssistantActionInline(event, '${safeId}', 'copy')" title="Copy" aria-label="Copy">${getActionIconSvg('copy')}</button>
                     <button type="button" class="assistant-action-icon" data-assistant-action="save_memory" onclick="return handleAssistantActionInline(event, '${safeId}', 'save_memory')" title="Save to memory" aria-label="Save to memory">${getActionIconSvg('memory')}</button>
                     <button type="button" class="assistant-action-icon" data-assistant-action="tts_speak" onclick="return handleAssistantActionInline(event, '${safeId}', 'tts_speak')" title="Read aloud" aria-label="Read aloud">${getActionIconSvg('speaker')}</button>
@@ -21820,7 +21812,8 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
                 await publishResolvedModelMessage(text, safeResponse, {
                     label: 'Model answer',
                     routing: aiResponse?.routing || null,
-                    existingAssistantMessageId: aiResponse?.assistantMessageId || ''
+                    existingAssistantMessageId: aiResponse?.assistantMessageId || '',
+                    fastFinalizeStreamed: true
                 });
 
                 suggestQuickReplies(safeResponse);
