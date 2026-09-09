@@ -6972,9 +6972,11 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
         }
 
         function initChatScrollLock() {
+            const scrollEl = document.getElementById('chat-main') || document.getElementById('chat-container');
             const chatContainer = document.getElementById('chat-container');
-            if (!chatContainer || chatContainer.dataset.scrollLockBound === '1') return;
-            chatContainer.dataset.scrollLockBound = '1';
+            if (!scrollEl || scrollEl.dataset.scrollLockBound === '1') return;
+            scrollEl.dataset.scrollLockBound = '1';
+            if (chatContainer) chatContainer.dataset.scrollLockBound = '1';
 
             const markUserScrollIntent = () => {
                 userInitiatedScroll = true;
@@ -6982,13 +6984,19 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 userScrollIntentTimer = setTimeout(() => { userInitiatedScroll = false; }, 180);
             };
 
-            chatContainer.addEventListener('wheel', markUserScrollIntent, { passive: true });
-            chatContainer.addEventListener('touchstart', markUserScrollIntent, { passive: true });
-            chatContainer.addEventListener('mousedown', markUserScrollIntent);
-            chatContainer.addEventListener('keydown', markUserScrollIntent);
+            scrollEl.addEventListener('wheel', markUserScrollIntent, { passive: true });
+            scrollEl.addEventListener('touchstart', markUserScrollIntent, { passive: true });
+            scrollEl.addEventListener('mousedown', markUserScrollIntent);
+            scrollEl.addEventListener('keydown', markUserScrollIntent);
+            if (chatContainer && chatContainer !== scrollEl) {
+                chatContainer.addEventListener('wheel', markUserScrollIntent, { passive: true });
+                chatContainer.addEventListener('touchstart', markUserScrollIntent, { passive: true });
+                chatContainer.addEventListener('mousedown', markUserScrollIntent);
+                chatContainer.addEventListener('keydown', markUserScrollIntent);
+            }
 
             let isScrolling = false;
-            chatContainer.addEventListener('scroll', () => {
+            const handleScroll = () => {
                 if (isScrolling) return;
                 isScrolling = true;
                 window.requestAnimationFrame(() => {
@@ -6996,7 +7004,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                         isScrolling = false;
                         return;
                     }
-                    const nearBottom = isChatNearBottom(chatContainer);
+                    const nearBottom = isChatNearBottom(scrollEl);
                     if (nearBottom) {
                         autoScrollLocked = false;
                         chatUnreadWhileScrolledUp = false;
@@ -7006,7 +7014,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                     if (userInitiatedScroll) {
                         autoScrollLocked = !nearBottom;
                         if (autoScrollLocked) {
-                            lockedScrollTop = chatContainer.scrollTop;
+                            lockedScrollTop = scrollEl.scrollTop;
                         }
                         updateJumpToLatestButton();
                         isScrolling = false;
@@ -7015,7 +7023,8 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
 
                     if (autoScrollLocked && nearBottom) {
                         suppressScrollLockHandler = true;
-                        chatContainer.scrollTop = lockedScrollTop;
+                        scrollEl.scrollTop = lockedScrollTop;
+                        if (chatContainer && chatContainer !== scrollEl) chatContainer.scrollTop = lockedScrollTop;
                         suppressScrollLockHandler = false;
                         updateJumpToLatestButton();
                         isScrolling = false;
@@ -7023,19 +7032,25 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                     }
 
                     if (autoScrollLocked) {
-                        lockedScrollTop = chatContainer.scrollTop;
+                        lockedScrollTop = scrollEl.scrollTop;
                         updateJumpToLatestButton();
                     }
                     isScrolling = false;
                 });
-            }, { passive: true });
+            };
+
+            scrollEl.addEventListener('scroll', handleScroll, { passive: true });
+            if (chatContainer && chatContainer !== scrollEl) {
+                chatContainer.addEventListener('scroll', handleScroll, { passive: true });
+            }
 
             updateJumpToLatestButton();
         }
 
         function isChatNearBottom(chatContainer) {
-            if (!chatContainer) return true;
-            const remaining = chatContainer.scrollHeight - chatContainer.scrollTop - chatContainer.clientHeight;
+            const target = chatContainer || document.getElementById('chat-main') || document.getElementById('chat-container');
+            if (!target) return true;
+            const remaining = target.scrollHeight - target.scrollTop - target.clientHeight;
             return remaining <= 120;
         }
 
@@ -7071,8 +7086,8 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
         function updateJumpToLatestButton() {
             const btn = document.getElementById('jump-to-latest-btn');
             if (!btn) return;
-            const chatContainer = document.getElementById('chat-container');
-            const show = autoScrollLocked && chatContainer && !isChatNearBottom(chatContainer);
+            const scrollEl = document.getElementById('chat-main') || document.getElementById('chat-container');
+            const show = autoScrollLocked && scrollEl && !isChatNearBottom(scrollEl);
             btn.classList.toggle('hidden', !show);
             btn.classList.toggle('has-unread', !!chatUnreadWhileScrolledUp);
         }
@@ -10019,6 +10034,8 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
 
             try {
                 chatContainer.scrollTop = chatContainer.scrollHeight;
+                const chatMain = document.getElementById('chat-main');
+                if (chatMain) chatMain.scrollTop = chatMain.scrollHeight;
             } catch (_) {}
         }
 
@@ -26040,19 +26057,25 @@ if (typeof window !== 'undefined') {
    Smart Scroll-To-Bottom Floating Button Controller
    ========================================================================== */
 function initScrollToBottomWatchdog() {
-    const chatContainer = document.getElementById('chat-container');
+    const scrollEl = document.getElementById('chat-main') || document.getElementById('chat-container');
     const scrollBtn = document.getElementById('scroll-to-bottom-btn');
-    if (!chatContainer || !scrollBtn) return;
+    if (!scrollEl || !scrollBtn) return;
 
-    chatContainer.addEventListener('scroll', () => {
+    const onScroll = () => {
         const threshold = 140;
-        const distanceFromBottom = chatContainer.scrollHeight - chatContainer.scrollTop - chatContainer.clientHeight;
+        const distanceFromBottom = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
         if (distanceFromBottom > threshold) {
             scrollBtn.classList.add('is-visible');
         } else {
             scrollBtn.classList.remove('is-visible');
         }
-    }, { passive: true });
+    };
+
+    scrollEl.addEventListener('scroll', onScroll, { passive: true });
+    const chatContainer = document.getElementById('chat-container');
+    if (chatContainer && chatContainer !== scrollEl) {
+        chatContainer.addEventListener('scroll', onScroll, { passive: true });
+    }
 }
 
 if (typeof window !== 'undefined') {
