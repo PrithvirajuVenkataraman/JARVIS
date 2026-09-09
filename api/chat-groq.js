@@ -1414,27 +1414,12 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                     forceReview: false
                 });
             timing.qualityMs = Date.now() - qualityStartedAt;
+            // For streaming completions, tokens were already rendered to the user.
+            // Omit post-stream correction rewrites to keep the user's displayed answer stable.
             if (qualityResult.correctedResponse) {
                 evaluationText = ensureCompleteAssistantResponse(
                     replaceLongDashes(String(qualityResult.correctedResponse || '').trim())
                 );
-                if (lengthPolicy?.wordSpec) {
-                    lengthChecked = await applyTextLengthFinalCheck(evaluationText, lengthPolicy, effectiveMessage, '', {
-                        systemPrompt,
-                        contextBlock
-                    });
-                    evaluationText = lengthChecked.text;
-                }
-                // Reattach <think> reasoning so the client can display it in the accordion.
-                const correctedWithThought = streamThought
-                    ? `<think>\n${streamThought}\n</think>\n${evaluationText}`
-                    : evaluationText;
-                writeSse(res, 'correction', { text: correctedWithThought });
-            } else if (lengthChecked.changed) {
-                const changedWithThought = streamThought
-                    ? `<think>\n${streamThought}\n</think>\n${evaluationText}`
-                    : evaluationText;
-                writeSse(res, 'correction', { text: changedWithThought });
             }
             // Reattach <think> block for the final response payload.
             finalText = streamThought
@@ -3749,26 +3734,9 @@ const edgeResponseCache = new EdgeSemanticLruCache();
     }
 
     function shouldSkipStreamQualityReview(message, answer, intent) {
-        const costControls = getCostControls();
-        if (!costControls.streamQualityReviewEnabled) return true;
-        const normalizedIntent = String(intent || '');
-        if (['fast_explainer', 'fast_simple', 'casual_chat', 'pop_culture_reference'].includes(normalizedIntent)) {
-            return true;
-        }
-        const riskReasons = getQualityRiskReasons(message, answer, intent, {
-            routeDecision: { strategy: 'direct' },
-            webEscalation: { reason: 'stream_fast_path' }
-        });
-        const mustReview = new Set([
-            'always_on_review',
-            'explicit_verification',
-            'challenged_or_uncertain',
-            'high_stakes',
-            'code',
-            'calculation',
-            'source_like_claim_without_source'
-        ]);
-        return !riskReasons.some(reason => mustReview.has(String(reason || '')));
+        // Stream responses are delivered chunk-by-chunk to the user in real time.
+        // Post-stream critics cause 3-4s latency stalls and abrupt answer mutations.
+        return true;
     }
 
     function shouldReviewFastExplainer(riskReasons = []) {
