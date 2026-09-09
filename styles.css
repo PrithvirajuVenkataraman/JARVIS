@@ -21,9 +21,24 @@
     --chat-user-bubble-text: #f4f4f5;
     --chat-user-bubble-border: rgba(255, 255, 255, 0.09);
     --chat-user-bubble-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
-    --composer-bg: rgba(18, 18, 22, 0.88);
-    --composer-border: rgba(255, 255, 255, 0.12);
-    --composer-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+    --composer-bg: rgba(18, 20, 24, 0.85);
+    --composer-border: rgba(255, 255, 255, 0.10);
+    --composer-shadow: 
+        0 2px 4px rgba(0, 0, 0, 0.25),
+        0 10px 24px -4px rgba(0, 0, 0, 0.55),
+        0 20px 48px -10px rgba(0, 0, 0, 0.75),
+        inset 0 1px 1px 0 rgba(255, 255, 255, 0.12);
+    --composer-shadow-hover: 
+        0 4px 8px rgba(0, 0, 0, 0.3),
+        0 14px 32px -4px rgba(0, 0, 0, 0.65),
+        0 28px 56px -10px rgba(0, 0, 0, 0.82),
+        inset 0 1px 1.5px 0 rgba(255, 255, 255, 0.16);
+    --composer-shadow-focus: 
+        0 0 0 1px rgba(56, 189, 248, 0.55),
+        0 0 28px -4px rgba(14, 165, 233, 0.3),
+        0 16px 36px -6px rgba(0, 0, 0, 0.75),
+        0 32px 64px -10px rgba(0, 0, 0, 0.88),
+        inset 0 1px 1.5px 0 rgba(255, 255, 255, 0.20);
 
     --chat-message-font-size: 15px;
     --chat-message-line-height: 1.65;
@@ -56,9 +71,24 @@ body.dark {
     --chat-user-bubble-text: #f4f4f5;
     --chat-user-bubble-border: rgba(255, 255, 255, 0.09);
     --chat-user-bubble-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
-    --composer-bg: rgba(18, 18, 22, 0.88);
-    --composer-border: rgba(255, 255, 255, 0.12);
-    --composer-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+    --composer-bg: rgba(18, 20, 24, 0.85);
+    --composer-border: rgba(255, 255, 255, 0.10);
+    --composer-shadow: 
+        0 2px 4px rgba(0, 0, 0, 0.25),
+        0 10px 24px -4px rgba(0, 0, 0, 0.55),
+        0 20px 48px -10px rgba(0, 0, 0, 0.75),
+        inset 0 1px 1px 0 rgba(255, 255, 255, 0.12);
+    --composer-shadow-hover: 
+        0 4px 8px rgba(0, 0, 0, 0.3),
+        0 14px 32px -4px rgba(0, 0, 0, 0.65),
+        0 28px 56px -10px rgba(0, 0, 0, 0.82),
+        inset 0 1px 1.5px 0 rgba(255, 255, 255, 0.16);
+    --composer-shadow-focus: 
+        0 0 0 1px rgba(56, 189, 248, 0.55),
+        0 0 28px -4px rgba(14, 165, 233, 0.3),
+        0 16px 36px -6px rgba(0, 0, 0, 0.75),
+        0 32px 64px -10px rgba(0, 0, 0, 0.88),
+        inset 0 1px 1.5px 0 rgba(255, 255, 255, 0.20);
 }
 
 *,
@@ -1147,11 +1177,21 @@ option {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 6px 8px 6px 6px;
-    background: #1a1a1a !important;
-    border: 1px solid #333333 !important;
+    padding: 6px 8px 6px 12px;
+    background: var(--composer-bg) !important;
+    border: 1px solid var(--composer-border) !important;
     border-radius: 28px !important;
-    box-shadow: none !important;
+    box-shadow: var(--composer-shadow) !important;
+    backdrop-filter: blur(24px) saturate(180%) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
+    transition: border-color 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1), background 0.2s ease, transform 0.15s ease;
+}
+
+.composer-shell:hover,
+#input-bar-inner:hover,
+.modern-input:hover {
+    border-color: rgba(255, 255, 255, 0.18) !important;
+    box-shadow: var(--composer-shadow-hover) !important;
 }
 
 .composer-leading,
@@ -1191,20 +1231,29 @@ option {
 }
 
 .floating-input-bar {
-    background: linear-gradient(180deg, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.72) 28%, #000000 100%) !important;
+    background: linear-gradient(
+        to top,
+        var(--ui-bg) 0%,
+        rgba(9, 9, 11, 0.98) 32%,
+        rgba(9, 9, 11, 0.82) 55%,
+        rgba(9, 9, 11, 0.42) 76%,
+        rgba(9, 9, 11, 0.10) 90%,
+        transparent 100%
+    ) !important;
     border-top: none !important;
     border-left: none !important;
     border-right: none !important;
     border-bottom: none !important;
     box-shadow: none !important;
-    backdrop-filter: none !important;
-    -webkit-backdrop-filter: none !important;
+    pointer-events: none;
+    z-index: 40;
 }
 
 .modern-input:focus-within,
-.composer-shell:focus-within {
-    border-color: #4b5563 !important;
-    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06) !important;
+.composer-shell:focus-within,
+#input-bar-inner:focus-within {
+    border-color: rgba(56, 189, 248, 0.5) !important;
+    box-shadow: var(--composer-shadow-focus) !important;
 }
 
 .composer-input::placeholder,
@@ -7549,9 +7598,18 @@ body:not(.dark) .next-step-title {
     left: 0;
     right: 0;
     padding: 0 16px max(14px, env(safe-area-inset-bottom));
-    background: linear-gradient(to top, var(--ui-bg) 68%, transparent 100%);
+    background: linear-gradient(
+        to top,
+        var(--ui-bg) 0%,
+        rgba(9, 9, 11, 0.98) 32%,
+        rgba(9, 9, 11, 0.82) 55%,
+        rgba(9, 9, 11, 0.42) 76%,
+        rgba(9, 9, 11, 0.10) 90%,
+        transparent 100%
+    );
     pointer-events: none;
     z-index: 40;
+    transition: left 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .composer-wrap {
@@ -7563,18 +7621,23 @@ body:not(.dark) .next-step-title {
 
 .composer-shell.modern-input {
     background: var(--composer-bg);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
     border: 1px solid var(--composer-border);
-    border-radius: 26px;
+    border-radius: 28px;
     box-shadow: var(--composer-shadow);
-    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    transition: border-color 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1), background 0.2s ease, transform 0.15s ease;
     padding: 4px 6px 4px 12px;
 }
 
+.composer-shell.modern-input:hover {
+    box-shadow: var(--composer-shadow-hover);
+    border-color: rgba(255, 255, 255, 0.18);
+}
+
 .composer-shell.modern-input:focus-within {
-    border-color: var(--ui-primary);
-    box-shadow: var(--jarvis-focus-ring), var(--composer-shadow);
+    border-color: rgba(56, 189, 248, 0.5);
+    box-shadow: var(--composer-shadow-focus);
 }
 
 .composer-disclaimer {
@@ -7667,5 +7730,37 @@ body:not(.dark) .next-step-title {
     }
     body.sidebar-docked .app-root {
         padding-left: 304px;
+    }
+    body.sidebar-docked .floating-input-bar {
+        left: 304px;
+    }
+}
+
+/* Responsive Composer Layout for All Devices */
+@media (max-width: 640px) {
+    .floating-input-bar {
+        padding: 0 10px max(10px, env(safe-area-inset-bottom));
+    }
+    .composer-shell.modern-input,
+    .composer-shell,
+    #input-bar-inner {
+        padding: 3px 6px 3px 10px;
+        border-radius: 24px;
+    }
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .composer-shell.modern-input,
+    .composer-shell,
+    #input-bar-inner {
+        background: #14161a !important;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .composer-shell,
+    .composer-shell.modern-input,
+    .floating-input-bar {
+        transition: none !important;
     }
 }
