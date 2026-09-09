@@ -236,7 +236,7 @@ async function getInstantFactHelper() {
     const MODEL_FETCH_TIMEOUT_MS = 25_000;
     const STREAM_MODEL_FETCH_TIMEOUT_MS = 25_000;
     const FAST_FAILOVER_TIMEOUT_MS = 3_500;
-    const INTERNAL_FETCH_TIMEOUT_MS = 8_000;
+    const INTERNAL_FETCH_TIMEOUT_MS = 4_000;
     const FETCH_RETRIES = 0;
     const REASONING_TOKEN_ALLOWANCE = 1024;
     const CHAT_ROUTER_MODE = String(process.env.CHAT_ROUTER_MODE || 'strict_single_pass').trim().toLowerCase();
@@ -2892,7 +2892,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                     url: item.url,
                     query,
                     textLimit: 5000,
-                    timeoutMs: 6000,
+                    timeoutMs: 2500,
                     respectRobots: true
                 });
                 const text = String(result?.text || result?.markdown || '').replace(/\s+/g, ' ').trim();
