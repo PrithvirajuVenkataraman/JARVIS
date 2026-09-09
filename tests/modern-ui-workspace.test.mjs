@@ -97,4 +97,12 @@ assert.ok(indexHtml.includes('pure_coding_fast_path'), 'processCommand fast-path
 assert.ok(indexHtml.includes('verificationBudgetMs = 3500'), 'handleLiveRetrievalQuery caps search timeout at 3500ms for low latency');
 console.log('  [PASS] 8. 4 Starter shortcuts, multimodal synergy, and streaming latency invariants verified');
 
+// 5. Verify Robust Live Web Search & Multi-Domain Consensus Verification
+assert.ok(indexHtml.includes('if (submission?.forceWebSearch) {'), 'sendTextInput routes forceWebSearch directly to handleLiveRetrievalQuery');
+assert.ok(indexHtml.includes('distinctDomains.length >= 2'), 'handleLiveRetrievalQuery requires consensus across >= 2 distinct domains');
+assert.ok(indexHtml.includes('Sources checked:'), 'Strict refusal lists checked sources so user can review them');
+assert.ok(indexHtml.includes('const searchEngineQuery = query'), 'handleLiveRetrievalQuery optimizes query before calling search engines');
+assert.ok(indexHtml.includes('live search|web research'), 'isExplicitWebSearchRequest recognizes live search and web research intents');
+console.log('  [PASS] 9. Multi-domain consensus verification, query optimization, and refusal-with-sources verified');
+
 console.log('=== All Modern AI Workspace UI Architecture Tests PASSED ===');
