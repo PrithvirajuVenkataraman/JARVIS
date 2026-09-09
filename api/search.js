@@ -5,7 +5,7 @@ import { applyApiSecurity } from './_lib/security.js';
 import { classifyFreeLiveIntent, routeMessage } from './_lib/latest/router.js';
 import { searchItems } from './_lib/latest/latest-cache.js';
 import { ingestLatestSources } from './_lib/latest/latest-ingest.js';
-import { runFreeLiveSearch, searchDuckDuckGoHtml, fetchWikipediaInfobox } from './_lib/free-live/providers.js';
+import { runFreeLiveSearch, searchDuckDuckGoHtml, searchSearXNGJson, fetchWikipediaInfobox } from './_lib/free-live/providers.js';
 import { extractWithCrawl4Ai } from './_lib/crawl4ai-client.js';
 import { rankTextsByEmbedding, chunkTextForEmbedding, hasNvidiaEmbeddingKey, rerankTexts, getNvidiaRerankModel } from './_lib/embeddings.js';
 import { cleanQueryTarget, extractQueryTargetMetadata } from './_lib/query-target-cleanup.js';
@@ -562,13 +562,20 @@ export async function searchPublicSources(query, options = {}) {
         Promise.allSettled(targetQueries.slice(0, 2).map(candidate => searchGoogleNewsRss(candidate, { limit }))),
         Promise.allSettled(targetQueries.slice(0, 2).map(candidate => searchWikipedia(candidate, { limit: 2 }))),
         Promise.allSettled([searchWikidata(targetQueries[0] || normalizedQuery, { limit: 2 })]),
-        Promise.allSettled(targetQueries.slice(0, 2).map(candidate => searchDuckDuckGoHtml(candidate, { limit: Math.min(6, limit) }))),
+        Promise.allSettled(targetQueries.slice(0, 2).map(async (candidate) => {
+            const searxResults = await searchSearXNGJson(candidate, { limit: Math.min(6, limit) }).catch(() => []);
+            if (Array.isArray(searxResults) && searxResults.length) return searxResults;
+            return searchDuckDuckGoHtml(candidate, { limit: Math.min(6, limit) }).catch(() => []);
+        })),
         options.skipStructuredRoles === true
             ? Promise.resolve([])
             : Promise.allSettled([searchGovernmentRole(normalizedQuery, { limit: Math.min(3, limit) })]),
         options.skipGdelt === true
             ? Promise.resolve([])
-            : Promise.allSettled(targetQueries.slice(0, 2).map(candidate => searchGdeltNews(candidate, { limit })))
+            : Promise.allSettled(targetQueries.slice(0, 2).map(candidate => searchGdeltNews(candidate, { limit }))),
+        hasGeminiKey()
+            ? Promise.allSettled([searchGeminiGrounding(targetQueries[0] || normalizedQuery, { limit }).then(r => r.results || [])])
+            : Promise.resolve([])
     ];
 
     const settled = await Promise.all(asyncTasks);
@@ -580,6 +587,7 @@ export async function searchPublicSources(query, options = {}) {
         .filter(item => !isPolitical || (!String(item?.url || '').includes('wikipedia.org') && !String(item?.url || '').includes('wikidata.org')));
     const governmentRoleResults = (Array.isArray(settled[4]) ? settled[4] : []).flatMap(r => r.status === 'fulfilled' ? r.value : []);
     const gdelt = (Array.isArray(settled[5]) ? settled[5] : []).flatMap(r => r.status === 'fulfilled' ? r.value : []);
+    const geminiGroundingResults = (Array.isArray(settled[6]) ? settled[6] : []).flatMap(r => r.status === 'fulfilled' ? r.value : []);
 
     const roleIntent = parseGovernmentRoleQuery(normalizedQuery);
     const isLeadership = roleIntent && isLeadershipOrRoleTerm(roleIntent.role);
@@ -588,6 +596,7 @@ export async function searchPublicSources(query, options = {}) {
         ...governmentRoleResults,
         ...wikidata,
         ...wiki,
+        ...geminiGroundingResults,
         ...liveWeb,
         ...(isLeadership ? liveNews.slice(0, 3) : liveNews),
         ...gdelt
@@ -1101,20 +1110,34 @@ export async function runVerifiedWebSearch(query, options = {}) {
     const normalizedQuery = normalizeSearchQuery(query);
     const deterministicQueries = buildDeterministicSearchQueries(normalizedQuery);
     
-    const planning = hasGeminiKey()
-        ? await buildGeminiSearchPlan(normalizedQuery).catch(error => ({
-            queries: [],
-            warning: `gemini_query_planning_failed:${String(error?.code || error?.message || 'unknown')}`
-        }))
-        : { queries: [], warning: '' };
+    let geminiGroundingAnswer = null;
+    let geminiPlanningWarning = '';
+    const planningQueries = [];
+
+    if (hasGeminiKey()) {
+        const [planRes, groundRes] = await Promise.allSettled([
+            buildGeminiSearchPlan(normalizedQuery).catch(error => ({
+                queries: [],
+                warning: `gemini_query_planning_failed:${String(error?.code || error?.message || 'unknown')}`
+            })),
+            searchGeminiGrounding(normalizedQuery, { limit }).catch(() => null)
+        ]);
+        if (planRes.status === 'fulfilled' && planRes.value) {
+            if (Array.isArray(planRes.value.queries)) planningQueries.push(...planRes.value.queries);
+            if (planRes.value.warning) geminiPlanningWarning = planRes.value.warning;
+        }
+        if (groundRes.status === 'fulfilled' && groundRes.value?.answer) {
+            geminiGroundingAnswer = groundRes.value.answer;
+        }
+    }
 
     const searchQueries = Array.from(new Set([
         normalizedQuery,
         ...deterministicQueries,
-        ...(planning.queries || [])
+        ...planningQueries
     ]));
 
-    // Search using our own scrapers only (no paid APIs)
+    // Search using clean APIs & scraperless engines (Gemini Grounding, SearXNG, Google News RSS, Wikipedia, Wikidata)
     const publicSources = await searchPublicSources(normalizedQuery, {
         limit,
         plannedQueries: searchQueries,
@@ -1124,7 +1147,7 @@ export async function runVerifiedWebSearch(query, options = {}) {
     const publicResults = rankSources(normalizedQuery, dedupeSearchResults(publicSources)
         .filter(item => isValidCitationSource(item, normalizedQuery))).slice(0, limit);
 
-    let warnings = buildSearchWarnings(publicResults, planning.warning ? [planning.warning] : []);
+    let warnings = buildSearchWarnings(publicResults, geminiPlanningWarning ? [geminiPlanningWarning] : []);
     
     let enhancedResults = publicResults;
     let geminiEnhanced = false;
@@ -1143,11 +1166,17 @@ export async function runVerifiedWebSearch(query, options = {}) {
         ].filter(Boolean));
     }
 
+    const hasGrounding = enhancedResults.some(r => r.qualitySignals?.includes('google_search_grounding'));
+    const hasSearx = enhancedResults.some(r => r.qualitySignals?.includes('searxng_json'));
+    const provider = hasGrounding ? 'google_grounded_sources' : (hasSearx ? 'searxng_meta_sources' : 'public_sources');
+
     return buildSearchSummary(enhancedResults, {
         query: normalizedQuery,
-        provider: 'public_sources',
+        provider,
         publicSourceCount: enhancedResults.length,
-        geminiEnhanced,
+        geminiEnhanced: geminiEnhanced || Boolean(geminiGroundingAnswer),
+        answer: geminiGroundingAnswer || undefined,
+        answerProvider: geminiGroundingAnswer ? 'google_search_grounding' : undefined,
         warnings
     });
 }
@@ -3312,6 +3341,99 @@ function extractJsonObject(text) {
     return null;
 }
 
+export function parseGeminiGroundingResponse(data, query = '', limit = 8) {
+    const candidate = data?.candidates?.[0];
+    if (!candidate) return { results: [], answer: null, webSearchQueries: [] };
+
+    const groundingMetadata = candidate?.groundingMetadata;
+    const chunks = Array.isArray(groundingMetadata?.groundingChunks) ? groundingMetadata.groundingChunks : [];
+    const candidateText = String(candidate?.content?.parts?.[0]?.text || '').trim();
+    const webSearchQueries = Array.isArray(groundingMetadata?.webSearchQueries) ? groundingMetadata.webSearchQueries : [];
+
+    const results = [];
+    for (let i = 0; i < chunks.length && results.length < limit; i++) {
+        const chunk = chunks[i];
+        const web = chunk?.web;
+        const uri = String(web?.uri || '').trim();
+        if (!uri || !uri.startsWith('http')) continue;
+        const domain = getDomainFromUrl(uri);
+        const title = cleanSnippetText(web?.title || domain || 'Google Search Result');
+
+        let snippet = '';
+        if (Array.isArray(groundingMetadata?.groundingSupports)) {
+            const support = groundingMetadata.groundingSupports.find(s =>
+                Array.isArray(s?.groundingChunkIndices) && s.groundingChunkIndices.includes(i)
+            );
+            if (support?.segment?.text) {
+                snippet = cleanSnippetText(support.segment.text);
+            }
+        }
+        if (!snippet && candidateText) {
+            snippet = cleanSnippetText(candidateText.slice(0, 280));
+        }
+
+        results.push({
+            title,
+            description: snippet || title,
+            snippet: snippet || title,
+            url: uri,
+            domain,
+            source: 'Google Search Grounding',
+            sourceType: 'live_web',
+            trusted: isTrustedLiveSource(domain),
+            freshness: 'live_web_index',
+            qualitySignals: ['google_search_grounding', 'gemini_grounded'],
+            evidenceLevel: 'grounded_web',
+            query
+        });
+    }
+
+    return {
+        results,
+        answer: candidateText || null,
+        webSearchQueries
+    };
+}
+
+export async function searchGeminiGrounding(query, options = {}) {
+    const apiKey = getGeminiApiKey();
+    if (!apiKey) return { results: [], answer: null, webSearchQueries: [] };
+
+    const normalizedQuery = normalizeSearchQuery(query);
+    if (!normalizedQuery) return { results: [], answer: null, webSearchQueries: [] };
+
+    const limit = clampInt(options.limit, 8, 1, 20);
+    const timeoutMs = options.timeoutMs || GEMINI_SEARCH_TIMEOUT_MS;
+    const model = String(process.env.GEMINI_SEARCH_MODEL || process.env.GEMINI_MODEL || 'gemini-2.5-flash').trim();
+
+    try {
+        const url = `${GEMINI_GENERATE_URL}/${model}:generateContent?key=${apiKey}`;
+        const response = await fetchWithTimeout(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                contents: [{
+                    parts: [{
+                        text: `Answer with fresh, factual evidence using Google Search: ${normalizedQuery}`
+                    }]
+                }],
+                tools: [{
+                    googleSearch: {}
+                }]
+            })
+        }, timeoutMs);
+
+        if (!response.ok) {
+            return { results: [], answer: null, webSearchQueries: [] };
+        }
+
+        const data = await response.json();
+        return parseGeminiGroundingResponse(data, normalizedQuery, limit);
+    } catch (_) {
+        return { results: [], answer: null, webSearchQueries: [] };
+    }
+}
+
 async function discoverOfficialSourceCandidates(query, options = {}) {
     const cleanQuery = normalizeSearchQuery(query);
     if (!cleanQuery) return [];
@@ -3978,7 +4100,7 @@ export const __test = {
     classifyRetrievalIntentWithGemini,
     buildDeterministicSearchQueries,
     buildWebRagQueryPhases,
-    evaluateWebRagEvidence,
+    evaluateWebRagEvidence, 
     isCurrentTopicSearchQuery,
     isRelatedCurrentTopicSource,
     isRelatedToQuery,
@@ -3987,5 +4109,7 @@ export const __test = {
     isTrustedLiveSource,
     routeMessage,
     runCachedLatestSearch,
-    callGeminiJson
+    callGeminiJson,
+    searchGeminiGrounding,
+    parseGeminiGroundingResponse
 };
