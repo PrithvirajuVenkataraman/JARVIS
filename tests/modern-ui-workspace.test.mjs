@@ -85,4 +85,16 @@ assert.ok(!stylesCss.includes('.code-header-btn.canvas-btn'), 'Canvas button sty
 assert.ok(indexHtml.includes('function copyCodeBlock('), 'Standard code block copy button must be preserved');
 console.log('  [PASS] 7. Complete removal of coding sandbox & canvas drawer verified (enterprise-grade compliance)');
 
+// 4. Verify 4 Starter Shortcuts, Multimodal Synergy & Anti-Latency Invariants
+assert.ok(indexHtml.includes("'Extract and audit all line items, tables, and totals from this document.', 'document_ocr'"), 'Document OCR starter card prompt and action verified');
+assert.ok(indexHtml.includes("'Write a clean, optimized JavaScript utility to debounce asynchronous API calls with cancellation'"), 'Code & Architecture starter card prompt verified');
+assert.ok(indexHtml.includes("'Give me a step-by-step product launch strategy for a high-performance developer tool'"), 'Brainstorm & Strategy starter card prompt verified');
+assert.ok(indexHtml.includes("'What are the latest major AI and quantum computing developments?', 'live_search'"), 'Live Web Research starter card prompt and action verified');
+assert.ok(indexHtml.includes("action === 'live_search'"), 'useStarterPrompt handles live_search action');
+assert.ok(indexHtml.includes('forceWebSearch: true'), 'live_search action sets forceWebSearch flag');
+assert.ok(indexHtml.includes('needsLiveVerification'), 'sendTextInput supports multimodal attachment live verification');
+assert.ok(indexHtml.includes('pure_coding_fast_path'), 'processCommand fast-paths coding prompts directly to streaming model');
+assert.ok(indexHtml.includes('verificationBudgetMs = 3500'), 'handleLiveRetrievalQuery caps search timeout at 3500ms for low latency');
+console.log('  [PASS] 8. 4 Starter shortcuts, multimodal synergy, and streaming latency invariants verified');
+
 console.log('=== All Modern AI Workspace UI Architecture Tests PASSED ===');
