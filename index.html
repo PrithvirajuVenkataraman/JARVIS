@@ -314,7 +314,7 @@
                     <h2 class="empty-state-headline">What can I help with today?</h2>
                     <p class="empty-state-sub">Multimodal intelligence with live web search, deep reasoning, and document OCR.</p>
                     <div class="starter-cards-grid">
-                        <button type="button" class="starter-prompt-card" onclick="useStarterPrompt('Extract and calculate all line items, tables, and totals from this document.', 'document_ocr')">
+                        <button type="button" class="starter-prompt-card" onclick="useStarterPrompt('Extract and audit all line items, tables, and totals from this document.', 'document_ocr')">
                             <span class="starter-card-icon" aria-hidden="true">📄</span>
                             <div class="starter-card-content">
                                 <div class="starter-card-title">Analyze Document / OCR</div>
@@ -335,7 +335,7 @@
                                 <div class="starter-card-desc">Plan workflows, roadmaps, and ideas</div>
                             </div>
                         </button>
-                        <button type="button" class="starter-prompt-card" onclick="useStarterPrompt('What are the most significant breakthroughs in quantum computing and AI this year?')">
+                        <button type="button" class="starter-prompt-card" onclick="useStarterPrompt('What are the latest major AI and quantum computing developments?', 'live_search')">
                             <span class="starter-card-icon" aria-hidden="true">🌐</span>
                             <div class="starter-card-content">
                                 <div class="starter-card-title">Live Web Research</div>
@@ -6013,7 +6013,10 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 toggleSendButton();
             }
             if (action === 'document_ocr') {
-                if (input) input.focus();
+                if (input) {
+                    input.focus();
+                    input.placeholder = 'Attach a document, invoice, or PDF to analyze...';
+                }
                 if (typeof triggerComposerFilePicker === 'function') {
                     triggerComposerFilePicker('file-browse');
                 } else {
@@ -6023,6 +6026,10 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                         fileInput.click();
                     }
                 }
+                return;
+            }
+            if (action === 'live_search') {
+                void sendTextInput({ text, source: 'starter_card', forceWebSearch: true });
                 return;
             }
             void sendTextInput({ text, source: 'starter_card' });
@@ -12615,27 +12622,56 @@ async function sendTextInput(submission = {}) {
                             return;
                         }
                         const hasImageAttachments = Array.isArray(attachmentContext?.grounding?.images) && attachmentContext.grounding.images.length > 0;
+                        let webSearchContext = '';
+                        const needsLiveVerification = Boolean(
+                            submission?.forceWebSearch ||
+                            isExplicitWebSearchRequest(attachmentRequest) ||
+                            isStrictLatestQuery(attachmentRequest) ||
+                            /\b(verify|check|current|latest|online|price|market|news|now)\b/i.test(attachmentRequest)
+                        );
+                        if (needsLiveVerification && typeof fetchLiveSearchJson === 'function') {
+                            showThinkingIndicator('Checking live web sources...');
+                            try {
+                                const webController = new AbortController();
+                                const webTimer = setTimeout(() => webController.abort(), 3500);
+                                const searchRes = await fetchLiveSearchJson(attachmentRequest, {
+                                    signal: webController.signal,
+                                    maxResults: 4,
+                                    mode: 'rag'
+                                }).catch(() => null);
+                                clearTimeout(webTimer);
+                                if (Array.isArray(searchRes?.results) && searchRes.results.length) {
+                                    const snippets = searchRes.results.slice(0, 4).map((r, idx) => `[${idx + 1}] ${r.title}: ${r.description || ''} (${r.url})`).join('\n');
+                                    webSearchContext = `\n\nVerified Live Web Sources (use for real-time verification):\n${snippets}\nCite sources with [1], [2] links.`;
+                                }
+                            } catch (_) {}
+                        }
+
                         const attachmentPrompt = hasImageAttachments
                             ? [
                                 attachmentRequest,
                                 '',
                                 'An image is attached to this request. Analyze what is shown in the image based strictly on visible pixels.',
                                 'PEOPLE & PERSONS RULE: Do not attempt facial recognition or guess the names/identities of individuals or groups of people to avoid misidentification. State that you cannot recognize individual people, and provide a clear, respectful description of how the person or people look: visible facial features, hair, expression, attire/clothing, posture/actions, and the surrounding setting. Answer the user prompt directly.',
+                                webSearchContext ? `\nUse both the image content and the verified web sources below to answer accurately with citation links [1], [2] where applicable.\n${webSearchContext}` : '',
                                 '',
                                 String(attachmentContext.combinedText || '').slice(0, 28000)
-                            ].join('\n')
+                            ].filter(Boolean).join('\n')
                             : [
                                 attachmentRequest,
                                 '',
                                 'The attached document text is already provided below. Analyze it now. Do not ask me to share, paste, or upload it again.',
+                                'GROUNDING RULE: Base all extracted data strictly on the provided document text. Do not hallucinate line items, amounts, or facts not present in the text.',
+                                webSearchContext ? `\nVerified external facts to compare/verify against:\n${webSearchContext}\nCite external facts with [1], [2] links.` : '',
                                 '',
                                 String(attachmentContext.combinedText || '').slice(0, 28000)
-                            ].join('\n');
+                            ].filter(Boolean).join('\n');
                         let result = await askGeminiAI(attachmentPrompt, {
                             intent: 'selection_custom',
                             grounding: attachmentContext.grounding,
                             displayUserMessage: displayOutgoingText,
-                            timeoutMs: 45000
+                            timeoutMs: 15000,
+                            stream: true
                         });
                         if (result?.aborted) return;
                         let answer = String(result?.response || result?.text || '').trim();
@@ -15493,15 +15529,15 @@ ${snippets}`
 function isLiveRetrievalQuery(text) {
     const t = String(text || '').toLowerCase().trim();
     if (!t) return false;
-    const explicitLiveContext = /\b(news|headlines?|breaking|live|right now|current events?|today|latest|recent|update|status|who won|winner|score|standings|fixture|schedule|market|price|rate|currency|exchange|war|conflict|election)\b/;
+    const explicitLiveContext = /\b(news|headlines?|breaking|live|right now|current events?|today|latest|recent|update|status|who won|winner|score|standings|fixture|schedule|market|price|rate|currency|exchange|war|conflict|election|breakthroughs?|developments?|advancements?|discoveries|this year)\b/;
     const technicalConceptSignals = /\b(hld|lld|system design|design pattern|architecture|api design|database design|algorithm|data structure|o\(?n\)?|time complexity|space complexity|java|javascript|python|react|node|sql|backend|frontend|microservices?)\b/;
     if (technicalConceptSignals.test(t) && !explicitLiveContext.test(t)) return false;
 
     const liveSignals = [
         /\bwhat(?:'s| is)?(?:\s+\w+){0,2}\s+happening\b/,
         /\bwhat happened\b/,
-        /\b(latest|recent|current|today)\b.*\b(news|events?|updates?|status|happening|result|score|standings|fixture|schedule|price|rate|market|war|conflict|election)\b/,
-        /\b(news|events?|updates?|status|happening|result|score|standings|fixture|schedule|price|rate|market|war|conflict|election)\b.*\b(latest|recent|current|today)\b/,
+        /\b(latest|recent|current|today|this year)\b.*\b(news|events?|updates?|status|happening|result|score|standings|fixture|schedule|price|rate|market|war|conflict|election|developments?|breakthroughs?|advancements?|discoveries)\b/,
+        /\b(news|events?|updates?|status|happening|result|score|standings|fixture|schedule|price|rate|market|war|conflict|election|developments?|breakthroughs?|advancements?|discoveries)\b.*\b(latest|recent|current|today|this year)\b/,
         /\bright now\b/,
         /\bas of now\b/,
         /\bnext\b.*\b(match|game|fixture|film|movie|release|project|holiday|album|song|show|series)\b/,
@@ -15552,7 +15588,7 @@ function normalizeExplicitWebSearchQuery(text) {
 function isStrictLatestQuery(text) {
     const t = String(text || '').toLowerCase().trim();
     if (!t) return false;
-    const freshnessSignals = /\b(latest|current|today|now|live|as of|recent)\b/;
+    const freshnessSignals = /\b(latest|current|today|now|live|as of|recent|this year|breakthroughs?|developments?|advancements?|discoveries)\b/;
     if (!freshnessSignals.test(t)) return false;
 
     const technicalConceptSignals = /\b(hld|lld|system design|design pattern|architecture|api design|database design|algorithm|data structure|time complexity|space complexity|java|javascript|python|react|node|sql|backend|frontend|microservices?)\b/;
@@ -16211,7 +16247,7 @@ function isCurrentInfoQuery(text) {
     const t = String(text || '').toLowerCase().trim();
     if (!t) return false;
     const technicalConceptSignals = /\b(hld|lld|system design|design pattern|architecture|api design|database design|algorithm|data structure|time complexity|space complexity|java|javascript|python|react|node|sql|backend|frontend|microservices?)\b/;
-    const explicitLiveContext = /\b(news|headlines?|breaking|live|right now|current events?|today|latest|recent|update|status|who won|winner|score|standings|fixture|schedule|market|price|rate|currency|exchange|war|conflict|election)\b/;
+    const explicitLiveContext = /\b(news|headlines?|breaking|live|right now|current events?|today|latest|recent|update|status|who won|winner|score|standings|fixture|schedule|market|price|rate|currency|exchange|war|conflict|election|breakthroughs?|developments?|advancements?|discoveries|this year)\b/;
     if (technicalConceptSignals.test(t) && !explicitLiveContext.test(t)) return false;
 
     if (isExchangeRateQuery(t) || isMarketPriceQuery(t) || isLiveRetrievalQuery(t) || isNewsworthyLiveTopic(t) || isSportsLiveResultQuery(t)) {
@@ -16219,8 +16255,8 @@ function isCurrentInfoQuery(text) {
     }
 
     const freshnessTerms = /\b(latest|recent|current|today|right now|as of now|live|just now|this year|upcoming|future|next)\b/;
-    const resultTerms = /\b(who won|winner|won|result|results|score|scores|what happened|what's happening|status|update|updates|headline|headlines|breaking|next match|upcoming fixture|upcoming holiday|next holiday|upcoming project)\b/;
-    const unstableEntityTerms = /\b(president|prime minister|pm|chief minister|cm|ceo|chairman|captain|coach|champion|title holder|world cup|tournament|league|ipl|bcci|icc|cricket|football|nba|nfl|mlb|nhl|final|match|game|fixture|schedule|holiday|festival|war|conflict|ceasefire|attack|election|release|project|album|film|movie|song)\b/;
+    const resultTerms = /\b(who won|winner|won|result|results|score|scores|what happened|what's happening|status|update|updates|headline|headlines|breaking|next match|upcoming fixture|upcoming holiday|next holiday|upcoming project|breakthroughs?|developments?)\b/;
+    const unstableEntityTerms = /\b(president|prime minister|pm|chief minister|cm|ceo|chairman|captain|coach|champion|title holder|world cup|tournament|league|ipl|bcci|icc|cricket|football|nba|nfl|mlb|nhl|final|match|game|fixture|schedule|holiday|festival|war|conflict|ceasefire|attack|election|release|project|album|film|movie|song|quantum|ai|tech|science)\b/;
     const businessEventTerms = /\b(layoff|layoffs|firing|firings|job cuts|cuts|restructuring|reorganization|earnings|results|merger|acquisition|recall|bankruptcy|probe|investigation|antitrust|strike|walkout)\b/;
     const hasYearReference = hasExplicitYearReference(t);
 
@@ -16239,6 +16275,7 @@ function requiresLiveSourceAnswer(text, liveIntent = null, entityIntent = null) 
     const currentSignals = /\b(latest|current|today|now|right now|live|recent|as of|status|update|updates|what happened|what's happening|who won|winner|score|scores|result|results|standings|fixture|fixtures|schedule|price|rate|market|news|headlines?|breaking)\b/;
     const changingDomains = /\b(ipl|cricket|match|game|league|tournament|world cup|icc|bcci|team|club|score|winner|result|news|election|war|conflict|launch|mission|isro|nasa|ceo|president|prime minister|pm|chief minister|cm|captain|coach|stock|crypto|bitcoin|ethereum|gold|silver|currency|exchange|movie|film|song|album|release)\b/;
     if (technicalConceptSignals.test(t) && !currentSignals.test(t)) return false;
+    if (isPureHowToOrCodingConcept(raw) && !currentSignals.test(t)) return false;
     if (isWeatherIntentText(raw) || isRecipeRequest(raw) || isMathCalculationRequest(raw) || isStepByStepMathRequest(raw)) return false;
     if (isExchangeRateQuery(raw) || isMarketPriceQuery(raw) || isSportsLiveResultQuery(raw)) return true;
     const intent = liveIntent || extractLiveQueryIntent(raw);
@@ -16342,10 +16379,12 @@ function isPureHowToOrCodingConcept(text) {
     if (!raw) return false;
     const t = raw.toLowerCase();
 
-    const technicalConceptSignals = /\b(hld|lld|system design|design pattern|architecture|api design|database design|algorithm|data structure|time complexity|space complexity|java|javascript|typescript|python|react|node|sql|backend|frontend|microservices?|docker|kubernetes|devops|refactor|debug|bug fix|unit test|integration test|recursion|oop|object oriented)\b/;
+    const technicalConceptSignals = /\b(hld|lld|system design|design pattern|architecture|api design|database design|algorithm|data structure|time complexity|space complexity|java|javascript|typescript|python|react|node|sql|backend|frontend|microservices?|docker|kubernetes|devops|refactor|debug|bug fix|unit test|integration test|recursion|oop|object oriented|debounce|throttle|promise|async|await|html|css|tailwind|vue|angular|c\+\+|rust|golang)\b/;
+    const codingTaskSignals = /\b(write|create|implement|build|code|develop|generate)\s+(a|an|the|clean|optimized|simple)?\s*(function|utility|script|component|hook|endpoint|api|class|module|method|routine|service|algorithm|parser|decorator|middleware|wrapper)\b/;
     const liveContextSignals = /\b(current|latest|today|now|news|headline|release|version|market|price|rate|winner|score|standings)\b/;
     const howToSignals = /^(how to|how do i|how can i|guide|tutorial|walk me through|show me how to)\b/;
 
+    if (codingTaskSignals.test(t) && !liveContextSignals.test(t)) return true;
     if (technicalConceptSignals.test(t) && !liveContextSignals.test(t)) return true;
     if (howToSignals.test(t) && technicalConceptSignals.test(t)) return true;
     return false;
@@ -16498,6 +16537,7 @@ function decideAnswerPath(classification) {
     if (flags.highRiskMentalHealth) return 'high_risk_mental_health';
     if (flags.medicalEmergency) return 'medical_emergency';
     if (flags.medicalAdvice) return 'medical_advice';
+    if (flags.pureHowToCoding) return 'default_model';
     if (flags.artistSong) return 'artist_song';
     if (flags.explicitWebSearch) return 'web_search';
     if (flags.broadFactualWeb) return 'broad_factual_web';
@@ -19490,7 +19530,7 @@ async function handleLiveRetrievalQuery(userText, options = {}) {
 
     showThinkingIndicator('Searching live web sources...');
     const controller = beginAbortableRequest();
-    const verificationBudgetMs = 8000;
+    const verificationBudgetMs = 3500;
     const budgetTimer = setTimeout(() => {
         try { controller.abort(); } catch (_) {}
     }, verificationBudgetMs);
@@ -19551,15 +19591,7 @@ async function handleLiveRetrievalQuery(userText, options = {}) {
                 .map((r, i) => `${i + 1}. ${r.title}\nSource: ${r.sourceLabel || r.domain || r.url}\nDate: ${r.date || 'Recent 2026'}\nContent: ${r.fullArticleContent || r.fullArticleText || r.description}\nURL: ${r.url}`)
                 .join('\n\n');
 
-            showThinkingIndicator('Synthesizing answer...');
-            let answer = '';
-            try {
-                const summaryResponse = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    signal: controller.signal,
-                    body: JSON.stringify({
-                        message: `Answer the user's question directly, concisely, and factually using ONLY the verified web content below.
+            const synthesisPrompt = `Answer the user's question directly, concisely, and factually using ONLY the verified web content below.
 
 User question: "${query}"
 
@@ -19579,26 +19611,42 @@ Rules:
 - Keep it concise and practical.
 
 Snippets:
-${snippets}`,
-                        context: window.JarvisConversation?.buildContext?.({ maxTurns: 6 }) || []
-                    })
+${snippets}`;
+
+            const sourceLines = answerResults.slice(0, 5).map((r, i) => `${i + 1}. [${r.title}](${r.url})`).join('\n');
+            const metaBlock = buildSourceMetaBlock(answerResults);
+            const sourceAppendix = `\n\n${metaBlock}\n\nSources:\n${sourceLines}`;
+
+            let streamedResponse = null;
+            try {
+                streamedResponse = await askGeminiAI(synthesisPrompt, {
+                    stream: true,
+                    displayUserMessage: userText,
+                    routingMessage: userText,
+                    timeoutMs: 9000
                 });
-                if (summaryResponse && summaryResponse.ok) {
-                    const summaryData = await summaryResponse.json();
-                    answer = cleanLiveAnswerText(String(summaryData?.response || summaryData?.text || '').trim());
-                }
-            } catch (summaryError) {
-                answer = '';
+            } catch (synthErr) {
+                logRoutingDebug('handler fallback: live_synthesis_stream_error', query, {
+                    error: String(synthErr?.message || synthErr)
+                });
             }
 
-            if (answer) {
-                const sourceLines = answerResults.slice(0, 5).map((r, i) => `${i + 1}. [${r.title}](${r.url})`).join('\n');
+            const rawAnswer = cleanLiveAnswerText(String(streamedResponse?.response || streamedResponse?.text || '').trim());
+            if (rawAnswer) {
                 const conciseAnswer = conciseFactQuery
-                    ? answer.split(/\n\s*Key points:\s*/i)[0].split(/\n\s*Confidence:\s*/i)[0].trim()
-                    : answer;
-                const finalMsg = `${conciseAnswer}\n\n${buildSourceMetaBlock(answerResults)}\n\nSources:\n${sourceLines}`;
+                    ? rawAnswer.split(/\n\s*Key points:\s*/i)[0].split(/\n\s*Confidence:\s*/i)[0].trim()
+                    : rawAnswer;
+                const finalMsg = `${conciseAnswer}${sourceAppendix}`;
 
-                addVerifiedAssistantMessage(finalMsg, 'Verified live sources');
+                if (streamedResponse?.assistantMessageId) {
+                    updateStreamingAssistantMessage(streamedResponse.assistantMessageId, finalMsg, {
+                        userMessage: userText,
+                        streaming: false,
+                        sourceType: 'verified'
+                    });
+                } else {
+                    addVerifiedAssistantMessage(finalMsg, 'Verified live sources');
+                }
                 await prepareApiReply('live_summary_ready', {}, 'I checked current sources and verified the answer.');
                 saveToHistory(userText, finalMsg);
                 hideThinkingIndicator();
@@ -20363,6 +20411,28 @@ function isWakeGreetingText(text) {
                 await deliverApiReply('moderation_refusal', {
                     userRequest: cleanText
                 }, { historyKey: text });
+                return;
+            }
+
+            if (classification.flags?.pureHowToCoding) {
+                logRoutingDebug('processCommand -> pure_coding_fast_path', cleanText, {
+                    selectedHandler: 'callAIWithTyping',
+                    answerPath: 'default_model'
+                });
+                const aiResponse = await callAIWithTyping(text, 'Assistant is thinking...', {
+                    directModel: true,
+                    stream: true,
+                    displayUserMessage: text,
+                    routingMessage: text
+                });
+                if (aiResponse?.aborted) return;
+                const finalizedResponse = await resolveFinalAssistantAnswer(text, aiResponse?.response || aiResponse?.text || '');
+                await publishResolvedModelMessage(text, finalizedResponse, {
+                    label: 'Model answer',
+                    routing: aiResponse?.routing || null,
+                    existingAssistantMessageId: aiResponse?.assistantMessageId || '',
+                    fastFinalizeStreamed: true
+                });
                 return;
             }
 
