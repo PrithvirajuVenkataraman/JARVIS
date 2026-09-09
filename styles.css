@@ -1067,7 +1067,8 @@ option {
     min-width: 0 !important;
     min-height: 0 !important;
     height: auto !important;
-    max-height: calc(100dvh - var(--input-bar-safe-height) - 8px) !important;
+    max-height: none !important;
+    overflow: visible !important;
 }
 
 #chat-container {
@@ -1075,15 +1076,13 @@ option {
     border: none !important;
     background: transparent !important;
     box-shadow: none !important;
-    padding: 16px 16px calc(var(--input-bar-safe-height) + 24px + env(safe-area-inset-bottom)) !important;
+    padding: 16px 0 calc(var(--input-bar-safe-height) + 24px + env(safe-area-inset-bottom)) !important;
     scroll-padding-bottom: calc(var(--input-bar-safe-height) + 24px + env(safe-area-inset-bottom));
-    overflow-x: hidden;
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
+    overflow: visible !important;
 }
 
 .chat-scroll-jump {
-    position: absolute;
+    position: fixed;
     right: 20px;
     left: auto;
     bottom: calc(var(--input-bar-safe-height) + 16px + env(safe-area-inset-bottom));
@@ -5986,8 +5985,8 @@ body:not(.dark) .assistant-followup-chip:hover {
    Scroll-To-Bottom Floating Pill
    ========================================================================== */
 .scroll-to-bottom-pill {
-    position: absolute;
-    bottom: 84px;
+    position: fixed;
+    bottom: calc(var(--input-bar-safe-height) + 16px + env(safe-area-inset-bottom));
     left: 50%;
     transform: translateX(-50%) translateY(12px);
     background: rgba(24, 24, 27, 0.92);
@@ -7436,11 +7435,14 @@ body:not(.dark) .next-step-title {
 /* Main Chat Stream Viewport */
 .chat-main {
     flex: 1 1 auto;
+    min-height: 0;
     overflow-y: auto;
     overflow-x: hidden;
     scroll-behavior: smooth;
     display: flex;
     flex-direction: column;
+    -webkit-overflow-scrolling: touch;
+    scroll-padding-bottom: calc(var(--input-bar-safe-height) + 24px + env(safe-area-inset-bottom));
 }
 
 .chat-center-column {
