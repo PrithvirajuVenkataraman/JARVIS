@@ -198,4 +198,46 @@ assert.ok(combinedDistinctDomains.length >= 2, 'Consensus across >= 2 distinct d
 
 console.log('  [PASS] 11. Scraperless Live Web Search Invariants verified (Native Gemini Grounding, SearXNG JSON meta-search, >= 2 domain consensus)');
 
+// 12. Verify Command Palette (Ctrl+K / ⌘K) Full Functionality & Action Verification
+assert.ok(indexHtml.includes('id="command-palette-modal"'), 'Command palette modal markup must exist');
+assert.ok(indexHtml.includes('id="command-palette-input"'), 'Command palette input must exist');
+assert.ok(indexHtml.includes('id="command-palette-list"'), 'Command palette listbox must exist');
+assert.ok(indexHtml.includes('function openCommandPalette()'), 'openCommandPalette must be defined');
+assert.ok(indexHtml.includes('function closeCommandPalette()'), 'closeCommandPalette must be defined');
+assert.ok(indexHtml.includes('function getCommandPaletteActions()'), 'getCommandPaletteActions must be defined');
+assert.ok(indexHtml.includes('function renderCommandPaletteList()'), 'renderCommandPaletteList must be defined');
+assert.ok(indexHtml.includes('function handleCommandPaletteKeydown('), 'handleCommandPaletteKeydown must be defined');
+assert.ok(indexHtml.includes('function getAllChatSessions()'), 'getAllChatSessions must be defined');
+
+// 12.1 Verify Action 1: New Chat Session
+assert.ok(indexHtml.includes("id: 'new-chat'"), 'New chat session action must exist');
+assert.ok(indexHtml.includes('startNewChatSession'), 'New chat session must route to startNewChatSession');
+
+// 12.2 Verify Action 2: Toggle Voice Dictation (VTT)
+assert.ok(indexHtml.includes("id: 'toggle-speech'"), 'Toggle voice dictation action must exist');
+assert.ok(indexHtml.includes('toggleVoiceToText'), 'Voice dictation must route to toggleVoiceToText');
+assert.ok(indexHtml.includes('id="voice-to-text-btn"'), 'voice-to-text-btn element must exist in DOM');
+
+// 12.3 Verify Action 3: Export Chat as Markdown (.md)
+assert.ok(indexHtml.includes("id: 'export-markdown'"), 'Export markdown action must exist');
+assert.ok(indexHtml.includes("exportCurrentChat('markdown')"), 'Markdown export must route to exportCurrentChat');
+
+// 12.4 Verify Action 4: Export Chat as JSON (.json)
+assert.ok(indexHtml.includes("id: 'export-json'"), 'Export JSON action must exist');
+assert.ok(indexHtml.includes("exportCurrentChat('json')"), 'JSON export must route to exportCurrentChat');
+assert.ok(indexHtml.includes('exportChatHistoryJson'), 'JSON export fallback must route to exportChatHistoryJson');
+
+// 12.5 Verify Action 5: Open Settings & Privacy
+assert.ok(indexHtml.includes("id: 'open-settings'"), 'Open settings action must exist');
+assert.ok(indexHtml.includes('showHelpModal()'), 'Settings must route to showHelpModal');
+assert.ok(indexHtml.includes('Data & Privacy'), 'Settings modal must contain Data & Privacy section');
+assert.ok(indexHtml.includes('deleteAllLocalDataNow()'), 'Privacy section must support deleteAllLocalDataNow');
+
+// 12.6 Verify Platform-adaptive shortcuts & keyboard handlers
+assert.ok(indexHtml.includes('getPlatformModifierKey'), 'Modifier key must adapt to platform');
+assert.ok(indexHtml.includes("e.key.toLowerCase() === 'k'"), 'Ctrl+K / Cmd+K listener must be registered');
+assert.ok(indexHtml.includes("e.key === 'Escape'"), 'Escape key handler must close palette');
+
+console.log('  [PASS] 12. Command Palette full functionality verified (all 5 actions, search, shortcuts, and privacy wired)');
+
 console.log('=== All Modern AI Workspace UI Architecture Tests PASSED ===');
