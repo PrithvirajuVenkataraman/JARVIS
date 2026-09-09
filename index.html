@@ -348,10 +348,12 @@
                 <!-- Chat History Feed -->
                 <div id="chat-container" class="chat-container space-y-4"></div>
 
-                <!-- Floating Jump To Latest Pill -->
-                <button id="jump-to-latest-btn" class="chat-scroll-jump hidden" onclick="jumpToLatest()" type="button" aria-label="Jump to latest message">
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg>
-                    <span>Jump to latest</span>
+                <!-- Floating Jump To Latest Button -->
+                <button id="jump-to-latest-btn" class="chat-scroll-jump hidden" onclick="jumpToLatest()" type="button" title="Jump to latest message" aria-label="Jump to latest message">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                        <polyline points="19 12 12 19 5 12"></polyline>
+                    </svg>
                 </button>
             </div>
         </main>
@@ -385,11 +387,11 @@
     </div>
 
     <!-- Scroll-To-Bottom Floating Button -->
-    <button id="scroll-to-bottom-btn" class="scroll-to-bottom-pill" onclick="scrollToBottom()" aria-label="Jump to latest message">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
-            <polyline points="6 9 12 15 18 9"></polyline>
+    <button id="scroll-to-bottom-btn" class="scroll-to-bottom-pill" onclick="scrollToBottom()" type="button" title="Jump to latest message" aria-label="Jump to latest message">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <polyline points="19 12 12 19 5 12"></polyline>
         </svg>
-        <span>Jump to latest</span>
     </button>
 
     <!-- ChatGPT-style Input at Bottom - Enhanced -->
