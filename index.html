@@ -4285,14 +4285,9 @@ async function publishResolvedModelMessage(userMessage, answerText, options = {}
     const rawAnswer = String(answerText || '').trim();
     const streamedMessageId = String(options?.existingAssistantMessageId || '').trim();
     const isStreamed = Boolean(streamedMessageId && rawAnswer);
-    const fastFinalizeStreamed = (options?.fastFinalizeStreamed === true || isStreamed) &&
-        streamedMessageId &&
-        rawAnswer &&
-        !requiresLiveSourceAnswer(userMessage) &&
-        !asksUserToProvideSources(rawAnswer) &&
-        !isLowSignalModelAnswer(rawAnswer);
+    const fastFinalizeStreamed = options?.fastFinalizeStreamed === true || isStreamed;
     const finalized = fastFinalizeStreamed
-        ? (sanitizeWeakModelAnswer(rawAnswer, userMessage) || rawAnswer)
+        ? rawAnswer
         : await resolveFinalAssistantAnswer(userMessage, answerText);
     const safeText = String(finalized || '').trim();
     if (!safeText) {
@@ -5246,7 +5241,8 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
             requestId: latencyTrace.requestId,
             stream: requestOptions?.stream === true
         });
-        const data = requestOptions?.stream === true
+        let data = null;
+        data = requestOptions?.stream === true
             ? await streamChatCompletion(requestPayload, {
                 signal: controller.signal,
                 latencyTrace,
@@ -5266,15 +5262,20 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
             quality: data?.quality || null,
             routing: data?.routing || null
         });
-        if (typeof data.response === 'string') {
-            data.response = postProcessAssistantResponse(data.response, normalizedUserMessage);
-            data.response = sanitizeWeakModelAnswer(data.response, normalizedUserMessage);
-        }
-        if (!data.response && typeof data.text === 'string') {
-            data.text = postProcessAssistantResponse(data.text, normalizedUserMessage);
-            data.text = sanitizeWeakModelAnswer(data.text, normalizedUserMessage);
+        if (requestOptions?.stream !== true) {
+            if (typeof data.response === 'string') {
+                data.response = postProcessAssistantResponse(data.response, normalizedUserMessage);
+                data.response = sanitizeWeakModelAnswer(data.response, normalizedUserMessage);
+            }
+            if (!data.response && typeof data.text === 'string') {
+                data.text = postProcessAssistantResponse(data.text, normalizedUserMessage);
+                data.text = sanitizeWeakModelAnswer(data.text, normalizedUserMessage);
+            }
         }
 
+        const allowWeakRetry = !requestOptions?.weakRetry &&
+            requestOptions?.stream !== true &&
+            !['fast_simple', 'fast_explainer', 'casual_chat'].includes(String(requestOptions?.intent || ''));
         const resolvedAnswerText = String(data.response || data.text || '').trim();
         console.debug('[JARVIS conversation diagnostics]', {
             recentTurnsCount: multiTierContext?.recentTurns?.length || 0,
@@ -5285,10 +5286,6 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
             hasFollowUpQuestion: /\?\s*$/.test(resolvedAnswerText),
             weakRetryTriggered: allowWeakRetry && isWeakAssistantAnswerForRetry(resolvedAnswerText, normalizedUserMessage)
         });
-        // Skip weak-answer retry on the stream path (user already saw tokens) and for fast intents.
-        const allowWeakRetry = !requestOptions?.weakRetry &&
-            requestOptions?.stream !== true &&
-            !['fast_simple', 'fast_explainer', 'casual_chat'].includes(String(requestOptions?.intent || ''));
         if (allowWeakRetry && isWeakAssistantAnswerForRetry(resolvedAnswerText, normalizedUserMessage)) {
             const retryPayload = {
                 ...requestPayload,
@@ -5358,7 +5355,7 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
             }
         }
 
-        if (isLowSignalModelAnswer(data.response || data.text) &&
+        if (requestOptions?.stream !== true && isLowSignalModelAnswer(data.response || data.text) &&
             (isDirectExplainerQuery(normalizedUserMessage) || isConciseDirectFactQuery(normalizedUserMessage))) {
             if (requestOptions?.fastExplainer === true) return data;
             const searchFallback = await buildSearchFallbackAnswer(normalizedUserMessage || userMessage);
@@ -5384,6 +5381,10 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
                 intent: 'aborted',
                 aborted: true
             };
+        }
+        if (data && (data.streamedToChat || data.assistantMessageId) && (data.response || data.text)) {
+            console.warn('[askGeminiAI] Preserving streamed response despite downstream error', error);
+            return data;
         }
         const localFallback = await buildLocalAssistantFallback(normalizedUserMessage || userMessage, error);
         if (localFallback) {
@@ -20435,7 +20436,11 @@ function isWakeGreetingText(text) {
                     routingMessage: text
                 });
                 if (aiResponse?.aborted) return;
-                const finalizedResponse = await resolveFinalAssistantAnswer(text, aiResponse?.response || aiResponse?.text || '');
+                const isStreamed = Boolean(aiResponse?.streamedToChat || aiResponse?.assistantMessageId);
+                const rawStreamed = String(aiResponse?.response || aiResponse?.text || '').trim();
+                const finalizedResponse = isStreamed
+                    ? rawStreamed
+                    : await resolveFinalAssistantAnswer(text, rawStreamed);
                 await publishResolvedModelMessage(text, finalizedResponse, {
                     label: 'Model answer',
                     routing: aiResponse?.routing || null,
@@ -21807,8 +21812,14 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
                 });
                 if (aiResponse?.aborted) return;
                 const inferredLocation = detectPrimaryLocationFromText(text);
-                const finalizedResponse = await resolveFinalAssistantAnswer(text, aiResponse?.response || aiResponse?.text || '');
-                const safeResponse = sanitizeHallucinatedTerrain(finalizedResponse, text, inferredLocation);
+                const isStreamed = Boolean(aiResponse?.streamedToChat || aiResponse?.assistantMessageId);
+                const rawStreamed = String(aiResponse?.response || aiResponse?.text || '').trim();
+                const finalizedResponse = isStreamed
+                    ? rawStreamed
+                    : await resolveFinalAssistantAnswer(text, rawStreamed);
+                const safeResponse = isStreamed
+                    ? finalizedResponse
+                    : sanitizeHallucinatedTerrain(finalizedResponse, text, inferredLocation);
                 await publishResolvedModelMessage(text, safeResponse, {
                     label: 'Model answer',
                     routing: aiResponse?.routing || null,
