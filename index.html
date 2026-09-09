@@ -10636,8 +10636,8 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                         customInstruction: 'Verify the grounded context and recent chat continuity. State what is confirmed vs uncertain.'
                     },
                     minimalThinking: true,
-                    stream: false,
-                    timeoutMs: 45000
+                    stream: true,
+                    timeoutMs: 15000
                 });
                 if (result?.aborted) return true;
                 await publishResolvedModelMessage(userText, result?.response || result?.text, {
@@ -10661,8 +10661,8 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                             : ''
                     ].filter(Boolean).join('\n')
                 },
-                stream: false,
-                timeoutMs: 45000
+                stream: true,
+                timeoutMs: 15000
             });
             if (result?.aborted) return true;
             const answer = String(result?.response || result?.text || '').trim();
@@ -12688,10 +12688,11 @@ async function sendTextInput(submission = {}) {
                                 intent: 'selection_custom',
                                 grounding: {
                                     ...attachmentContext.grounding,
-                                    customInstruction: 'The document text is already present. Produce the analysis immediately. Never ask the user to provide the document.'
+                                    customInstruction: 'The document text is already present. Produce the analysis immediately. Never ask the user to provide the document. Ground all extracted data strictly on the visible text; if text is unreadable or absent, explicitly flag missing items rather than guessing.'
                                 },
                                 displayUserMessage: displayOutgoingText,
-                                timeoutMs: 45000
+                                timeoutMs: 15000,
+                                stream: true
                             });
                             if (result?.aborted) return;
                             answer = String(result?.response || result?.text || '').trim();
