@@ -4516,7 +4516,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
         }
         if (mode === 'min' && minWords > 0 && count < minWords) {
             return out;
-        }
+        } 
         if (mode === 'range') {
             if (maxWords > 0 && count > maxWords) return trimToWordCount(out, maxWords);
             return out;
