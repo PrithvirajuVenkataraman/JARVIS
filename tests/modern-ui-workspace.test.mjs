@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { __test as chatTest } from '../api/chat-groq.js';
+import { verifyAndRepairMathClaims } from '../api/_lib/code-math-validator.js';
 
 console.log('--- Testing Modern AI Workspace UI Architecture ---');
 
@@ -104,5 +106,36 @@ assert.ok(indexHtml.includes('Sources checked:'), 'Strict refusal lists checked 
 assert.ok(indexHtml.includes('const searchEngineQuery = query'), 'handleLiveRetrievalQuery optimizes query before calling search engines');
 assert.ok(indexHtml.includes('live search|web research'), 'isExplicitWebSearchRequest recognizes live search and web research intents');
 console.log('  [PASS] 9. Multi-domain consensus verification, query optimization, and refusal-with-sources verified');
+ 
+// 6. Verify Anti-Hallucination & Speed Optimization Invariants (Section 10)
+// 10.1 Adaptive Model Routing: Deep Tier routes strictly to openai/gpt-oss-120b first
+const deepComplexity = chatTest.classifyQueryComplexity('Give me a distributed microservices system architecture for high-throughput stream processing');
+assert.equal(deepComplexity.tier, 'deep', 'Complex architecture query must classify as deep tier');
+const deepCandidates = chatTest.getPreferredGroqCandidates('', { tier: 'deep' });
+assert.equal(deepCandidates[0], 'openai/gpt-oss-120b', 'Complex queries MUST route to openai/gpt-oss-120b on Groq as strict top priority');
+
+// 10.2 Adaptive Model Routing: Instant Tier routes to llama-3.1-8b-instant first for <200ms TTFT
+const instantComplexity = chatTest.classifyQueryComplexity('What is the capital of Australia?');
+assert.equal(instantComplexity.tier, 'instant', 'Simple factual query must classify as instant tier');
+const instantCandidates = chatTest.getPreferredGroqCandidates('', { tier: 'instant', preferSpeed: true });
+assert.equal(instantCandidates[0], 'llama-3.1-8b-instant', 'Instant queries must prioritize llama-3.1-8b-instant first for speed');
+
+// 10.3 System prompt compaction & high-density epistemic directives
+const compactedPrompt = chatTest.buildServerSystemPrompt();
+assert.ok(compactedPrompt.length < 3800, `Compacted prompt should be under 3800 chars, got ${compactedPrompt.length}`);
+assert.ok(compactedPrompt.includes('ZERO-HALLUCINATION & EPISTEMIC GROUNDING'), 'Compacted prompt must contain Zero-Hallucination section');
+assert.ok(compactedPrompt.includes('Never invent people, dates, prices, statistics'), 'Prompt must strictly prohibit invented facts');
+assert.ok(compactedPrompt.includes("No, no, no don't do that! I thought we were having a good time."), '18+ boundary deflection quote preserved');
+
+// 10.4 Multimodal attachment retry uses stream: true and 15000ms timeout (zero 45s freeze)
+assert.ok(indexHtml.includes('timeoutMs: 15000,\n                                stream: true'), 'Attachment retry uses 15000ms timeout with streaming enabled');
+assert.ok(!indexHtml.includes('timeoutMs: 45000'), '45000ms unstreamed retry freeze must be completely eliminated');
+
+// 10.5 Speculative inline arithmetic repair handles percentage equality
+const repairedPercent = verifyAndRepairMathClaims('The discount is 15% of 80 = 14 dollars');
+assert.equal(repairedPercent.repaired, true, 'Percentage calculation hallucination must be caught');
+assert.equal(repairedPercent.text, 'The discount is 15% of 80 = 12 dollars', 'Percentage calculation must be auto-repaired to 12');
+
+console.log('  [PASS] 10. Anti-hallucination & speed optimization invariants verified (GPT-OSS-120B priority, instant 8B tier, compacted prompt, streaming attachments, percentage auto-repair)');
 
 console.log('=== All Modern AI Workspace UI Architecture Tests PASSED ===');
