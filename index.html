@@ -9074,10 +9074,6 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             const modelTagHtml = modelInfo && modelInfo.label
                 ? `<span class="thinking-model-tag ${modelInfo.isFailover ? 'is-failover' : ''}">${escapeHtml(modelInfo.label)}</span>`
                 : '';
-            const telemetryTagHtml = telemetry && (telemetry.tps || telemetry.ttftMs || telemetry.cacheHit)
-                ? `<span class="thinking-telemetry-tag" title="${telemetry.cacheHit ? 'Sub-10ms Edge Cache Replay' : `TTFT: ${telemetry.ttftMs}ms · Speed: ${telemetry.tps} tok/s`}">${telemetry.cacheHit ? '⚡ Cached' : `⚡ ${telemetry.tps > 0 ? `${telemetry.tps} tok/s` : `${telemetry.ttftMs}ms`}`}</span>`
-                : '';
-            
             let bodyContentHtml = '';
             if (thoughtContent) {
                 bodyContentHtml = `<div class="thinking-raw-content">${escapeHtml(thoughtContent)}</div>`;
@@ -9116,7 +9112,6 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                             <span class="thinking-pulse-dot"></span>
                             <span class="thinking-timer">${timerText}</span>
                             ${modelTagHtml}
-                            ${telemetryTagHtml}
                         </div>
                         <svg class="thinking-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <polyline points="6 9 12 15 18 9"></polyline>
@@ -9551,18 +9546,6 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                         }
                         tagEl.className = `thinking-model-tag ${modelInfo.isFailover ? 'is-failover' : ''}`;
                         tagEl.textContent = modelInfo.label;
-                    }
-                    if (meta?.telemetry) {
-                        let teleEl = thinkingCard.querySelector('.thinking-telemetry-tag');
-                        if (!teleEl) {
-                            teleEl = document.createElement('span');
-                            const leftHeader = thinkingCard.querySelector('.thinking-header-left');
-                            if (leftHeader) leftHeader.appendChild(teleEl);
-                        }
-                        const t = meta.telemetry;
-                        teleEl.className = 'thinking-telemetry-tag';
-                        teleEl.title = t.cacheHit ? 'Sub-10ms Edge Cache Replay' : `TTFT: ${t.ttftMs}ms · Speed: ${t.tps} tok/s`;
-                        teleEl.textContent = t.cacheHit ? '⚡ Cached' : `⚡ ${t.tps > 0 ? `${t.tps} tok/s` : `${t.ttftMs}ms`}`;
                     }
                     if (isFinished) {
                         thinkingCard.className = 'thinking-process-card is-finished';
