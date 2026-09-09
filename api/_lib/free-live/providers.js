@@ -84,6 +84,74 @@ export async function searchDuckDuckGoHtml(query, options = {}) {
     }
 }
 
+export function parseSearXNGResults(data, query = '', limit = 8) {
+    const hits = Array.isArray(data?.results) ? data.results : [];
+    const results = [];
+    for (let i = 0; i < hits.length && results.length < limit; i++) {
+        const item = hits[i];
+        const itemUrl = String(item?.url || '').trim();
+        if (!itemUrl || !itemUrl.startsWith('http')) continue;
+        const domain = getDomainFromUrl(itemUrl);
+        const title = cleanSnippetText(item?.title || domain || 'Web Search Result');
+        const content = cleanSnippetText(item?.content || item?.snippet || item?.description || '');
+        const engine = String(item?.engine || (Array.isArray(item?.engines) ? item.engines[0] : '') || 'searxng').trim();
+
+        results.push({
+            title,
+            description: content || title,
+            snippet: content || title,
+            url: itemUrl,
+            domain,
+            source: engine ? `SearXNG (${engine})` : 'SearXNG Web',
+            sourceType: 'live_web',
+            trusted: true,
+            freshness: item?.publishedDate || 'live_web_index',
+            qualitySignals: ['searxng_json', engine ? `engine_${engine}` : 'meta_engine'],
+            query
+        });
+    }
+    return results;
+}
+
+export async function searchSearXNGJson(query, options = {}) {
+    const rawQ = String(query || '').trim();
+    if (!rawQ) return [];
+    const limit = clampInt(options.limit, 8, 1, 20);
+    const timeoutMs = options.timeoutMs || 2500;
+    const configuredUrl = String(process.env.SEARXNG_URL || process.env.SEARX_URL || '').trim().replace(/\/+$/, '');
+    const endpoints = configuredUrl 
+        ? [configuredUrl.endsWith('/search') ? configuredUrl : `${configuredUrl}/search`]
+        : [
+            'https://searx.be/search',
+            'https://priv.au/search',
+            'https://baresearch.org/search'
+        ];
+
+    for (const baseEndpoint of endpoints) {
+        try {
+            const url = new URL(baseEndpoint);
+            url.searchParams.set('q', rawQ);
+            url.searchParams.set('format', 'json');
+            url.searchParams.set('categories', 'general');
+
+            const response = await fetchWithTimeout(url.toString(), {
+                headers: {
+                    'Accept': 'application/json',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+                }
+            }, timeoutMs);
+
+            if (!response.ok) continue;
+            const data = await response.json();
+            const results = parseSearXNGResults(data, rawQ, limit);
+            if (results.length > 0) {
+                return results;
+            }
+        } catch (_) {}
+    }
+    return [];
+}
+
 export function parseWikipediaInfobox(wikitext) {
     if (!wikitext || typeof wikitext !== 'string') return null;
     const cleanValue = (text) => {
@@ -248,22 +316,30 @@ export async function runFreeLiveSearch(query, route = {}, options = {}) {
     if (category === 'sports') return searchSports(query, { limit });
     if (category === 'tourism_food_places') return searchTourismFoodPlaces(query, { limit });
 
-    // Universal Zero-Key Multi-Engine Parallel Fast-Race
-    const [ddgResults, wikiResults, gdeltResults] = await Promise.allSettled([
-        searchDuckDuckGoHtml(query, { limit }),
+    // Universal Zero-Key Multi-Engine Parallel Fast-Race (Prioritizing SearXNG Clean JSON)
+    const [searxResults, wikiResults, gdeltResults] = await Promise.allSettled([
+        searchSearXNGJson(query, { limit }),
         searchWikipediaApi(query, { limit: 3 }),
         searchGdeltNews(query, { limit: 3 })
     ]);
 
     const results = [];
-    if (ddgResults.status === 'fulfilled' && Array.isArray(ddgResults.value)) {
-        results.push(...ddgResults.value);
+    if (searxResults.status === 'fulfilled' && Array.isArray(searxResults.value) && searxResults.value.length) {
+        results.push(...searxResults.value);
     }
     if (wikiResults.status === 'fulfilled' && Array.isArray(wikiResults.value)) {
         results.push(...wikiResults.value);
     }
     if (gdeltResults.status === 'fulfilled' && Array.isArray(gdeltResults.value)) {
         results.push(...gdeltResults.value);
+    }
+
+    // Only fallback to DDG HTML scraping if SearXNG yielded no web results
+    if (!results.some(r => r.sourceType === 'live_web')) {
+        const ddgResults = await searchDuckDuckGoHtml(query, { limit }).catch(() => []);
+        if (Array.isArray(ddgResults) && ddgResults.length) {
+            results.push(...ddgResults);
+        }
     }
 
     if (results.length > 0) {
@@ -765,5 +841,7 @@ export const __test = {
     extractSportsLeague,
     isRelevantPlaceResult,
     scorePlaceEvidence,
-    normalizeResult
+    normalizeResult,
+    parseSearXNGResults,
+    searchSearXNGJson
 };
