@@ -194,7 +194,7 @@
                     <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
                 </svg>
                 <input id="command-palette-input" class="command-palette-input" type="text" placeholder="Type a command or search chats..." autocomplete="off" oninput="renderCommandPaletteList()" onkeydown="handleCommandPaletteKeydown(event)">
-                <span class="command-palette-kbd">ESC</span>
+                <span class="command-palette-kbd" onclick="closeCommandPalette()" style="cursor:pointer;" title="Close (ESC)" role="button" aria-label="Close command palette">ESC</span>
             </div>
             <div id="command-palette-list" class="command-palette-list" role="listbox"></div>
         </div>
@@ -6091,7 +6091,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                             </svg>
                         </button>
                         <div class="help-modal-title-block">
-                            <h2 id="help-modal-title" class="text-xl font-bold">System Instructions</h2>
+                            <h2 id="help-modal-title" class="text-xl font-bold">Settings & Instructions</h2>
                         </div>
                         <button onclick="applyCustomSystemPromptAndClose()" class="help-modal-ok-btn" aria-label="Save custom instructions">
                             OK
@@ -6115,6 +6115,18 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                                 placeholder="Example: Reply like ChatGPT. Be concise, structured, direct, and avoid unnecessary endings.">${escapeHtml(customSystemPrompt)}</textarea>
                         </section>
 
+                        <section class="help-settings-card" style="margin-top: 14px;">
+                            <div class="help-section-heading">
+                                <div>
+                                    <h3 class="font-bold">Data & Privacy</h3>
+                                    <p class="text-xs">Manage locally cached session memory and history records.</p>
+                                </div>
+                                <button type="button" class="memory-action-btn" style="color: #ef4444;" onclick="if (confirm('Delete all local chat history and saved data?')) deleteAllLocalDataNow()">Clear All Data</button>
+                            </div>
+                            <div id="privacy-data-summary" class="text-xs text-zinc-400 mt-2 space-y-1">
+                                ${typeof buildPrivacyDataSummaryHtml === 'function' ? buildPrivacyDataSummaryHtml() : ''}
+                            </div>
+                        </section>
                     </div>   
                 </div>   
             `;   
@@ -6122,6 +6134,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             document.querySelector('.page-shell')?.setAttribute('aria-hidden', 'true');
             document.body.appendChild(modal); 
             syncHelpModalModeButtons(); 
+            if (typeof refreshPrivacyDataSummary === 'function') refreshPrivacyDataSummary();
             modal.querySelector('.help-modal-back-btn')?.focus(); 
             modal.addEventListener('keydown', trapModalFocus);
         }
@@ -24187,6 +24200,12 @@ function createChatSession(title = 'New chat') {
     };
 }
 
+function getAllChatSessions() {
+    if (!Array.isArray(chatSessions)) return [];
+    return chatSessions.filter(s => s && !s.deleted && (chatSessionHasUserMessage(s) || s.id === activeChatSessionId));
+}
+globalThis.getAllChatSessions = getAllChatSessions;
+
 function normalizeChatSession(raw) {
     if (!raw || typeof raw !== 'object') return null;
     const messages = Array.isArray(raw.messages)
@@ -25751,6 +25770,11 @@ if (typeof window !== 'undefined') {
 let commandPaletteSelectedIndex = 0;
 let commandPaletteItems = [];
 
+function getPlatformModifierKey() {
+    const isMac = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '');
+    return isMac ? '⌘' : 'Ctrl+';
+}
+
 function openCommandPalette() {
     const modal = document.getElementById('command-palette-modal');
     const input = document.getElementById('command-palette-input');
@@ -25771,16 +25795,22 @@ function closeCommandPalette() {
 }
 
 function getCommandPaletteActions() {
+    const mod = getPlatformModifierKey();
     return [
         {
             id: 'new-chat',
             title: 'New Chat Session',
             section: 'Actions',
-            shortcut: '⌘N',
+            shortcut: `${mod}N`,
             icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"></path></svg>',
             action: () => {
-                if (typeof startNewChatSession === 'function') startNewChatSession();
-                else if (typeof clearChatHistory === 'function') clearChatHistory();
+                if (typeof startNewChatSession === 'function') {
+                    startNewChatSession();
+                } else if (typeof clearChatHistory === 'function') {
+                    clearChatHistory();
+                }
+                const input = document.getElementById('text-input');
+                if (input) input.focus();
             }
         },
         {
@@ -25790,39 +25820,56 @@ function getCommandPaletteActions() {
             shortcut: 'Space',
             icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path></svg>',
             action: () => {
-                const btn = document.getElementById('vtt-mic-btn') || document.getElementById('primary-action-btn');
-                if (btn) btn.click();
+                if (typeof toggleVoiceToText === 'function') {
+                    toggleVoiceToText();
+                } else {
+                    const btn = document.getElementById('voice-to-text-btn') || document.getElementById('vtt-mic-btn');
+                    if (btn) btn.click();
+                }
             }
         },
         {
             id: 'export-markdown',
             title: 'Export Chat as Markdown (.md)',
             section: 'Actions',
-            shortcut: '⌘E',
+            shortcut: `${mod}E`,
             icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>',
             action: () => {
-                if (typeof exportChatHistoryMarkdown === 'function') exportChatHistoryMarkdown();
+                if (typeof exportCurrentChat === 'function') {
+                    exportCurrentChat('markdown');
+                } else if (typeof exportChatHistoryMarkdown === 'function') {
+                    exportChatHistoryMarkdown();
+                }
             }
         },
         {
             id: 'export-json',
             title: 'Export Chat as JSON (.json)',
             section: 'Actions',
-            shortcut: '⌘J',
+            shortcut: `${mod}J`,
             icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>',
             action: () => {
-                if (typeof exportChatHistoryJSON === 'function') exportChatHistoryJSON();
+                if (typeof exportCurrentChat === 'function') {
+                    exportCurrentChat('json');
+                } else if (typeof exportChatHistoryJson === 'function') {
+                    exportChatHistoryJson();
+                } else if (typeof exportChatHistoryJSON === 'function') {
+                    exportChatHistoryJSON();
+                }
             }
         },
         {
             id: 'open-settings',
             title: 'Open Settings & Privacy',
             section: 'Actions',
-            shortcut: '⌘,',
+            shortcut: `${mod},`,
             icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>',
             action: () => {
-                const btn = document.getElementById('settings-btn') || document.getElementById('open-settings-btn');
-                if (btn) btn.click();
+                if (typeof showHelpModal === 'function') {
+                    showHelpModal();
+                } else if (typeof openSidebarQuickAction === 'function') {
+                    openSidebarQuickAction('system');
+                }
             }
         }
     ];
@@ -25837,24 +25884,31 @@ function renderCommandPaletteList() {
     const actions = getCommandPaletteActions().filter(a => !query || a.title.toLowerCase().includes(query));
     
     let sessionItems = [];
-    if (typeof getAllChatSessions === 'function') {
-        try {
-            const sessions = getAllChatSessions() || [];
-            sessionItems = sessions
-                .filter(s => !query || (s.title && s.title.toLowerCase().includes(query)))
-                .slice(0, 5)
-                .map(s => ({
-                    id: `session-${s.id}`,
-                    title: s.title || 'Untitled Chat',
-                    section: 'Recent Chats',
-                    shortcut: '',
-                    icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>',
-                    action: () => {
-                        if (typeof restoreChatSession === 'function') restoreChatSession(s.id);
-                    }
-                }));
-        } catch (_) {}
-    }
+    try {
+        const rawSessions = typeof getAllChatSessions === 'function'
+            ? getAllChatSessions()
+            : (Array.isArray(chatSessions) ? chatSessions.filter(s => s && !s.deleted) : []);
+        sessionItems = (rawSessions || [])
+            .filter(s => {
+                if (!query) return true;
+                const titleMatch = s.title && s.title.toLowerCase().includes(query);
+                const textMatch = typeof searchChatSessionText === 'function'
+                    ? searchChatSessionText(s).includes(query)
+                    : false;
+                return titleMatch || textMatch;
+            })
+            .slice(0, 5)
+            .map(s => ({
+                id: `session-${s.id}`,
+                title: s.title || 'Untitled Chat',
+                section: 'Recent Chats',
+                shortcut: '',
+                icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>',
+                action: () => {
+                    if (typeof restoreChatSession === 'function') restoreChatSession(s.id);
+                }
+            }));
+    } catch (_) {}
 
     commandPaletteItems = [...actions, ...sessionItems];
     if (commandPaletteSelectedIndex >= commandPaletteItems.length) {
@@ -25883,6 +25937,11 @@ function renderCommandPaletteList() {
         `;
     });
     listEl.innerHTML = html;
+
+    const selectedEl = listEl.querySelector('.command-palette-item.is-selected');
+    if (selectedEl && typeof selectedEl.scrollIntoView === 'function') {
+        selectedEl.scrollIntoView({ block: 'nearest' });
+    }
 }
 
 function handleCommandPaletteKeydown(e) {
@@ -25913,6 +25972,10 @@ function executeCommandPaletteIndex(idx) {
 
 if (typeof window !== 'undefined') {
     window.addEventListener('keydown', (e) => {
+        const isMac = /Mac|iPod|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '');
+        const cmdOrCtrl = isMac ? e.metaKey : e.ctrlKey;
+
+        // Command Palette toggle: Ctrl+K / ⌘K
         if ((e.ctrlKey || e.metaKey) && e.key && e.key.toLowerCase() === 'k') {
             e.preventDefault();
             const modal = document.getElementById('command-palette-modal');
@@ -25921,10 +25984,53 @@ if (typeof window !== 'undefined') {
             } else {
                 openCommandPalette();
             }
-        } else if (e.altKey && e.key && e.key.toLowerCase() === 'w') {
+            return;
+        }
+
+        // Close command palette on Escape
+        if (e.key === 'Escape') {
+            const modal = document.getElementById('command-palette-modal');
+            if (modal && modal.classList.contains('is-open')) {
+                e.preventDefault();
+                closeCommandPalette();
+                return;
+            }
+        }
+
+        // Web search mode cycle: Alt+W
+        if (e.altKey && e.key && e.key.toLowerCase() === 'w') {
             e.preventDefault();
             if (typeof cycleWebSearchMode === 'function') {
                 cycleWebSearchMode();
+            }
+            return;
+        }
+
+        // Global shortcuts for Command Palette actions
+        if (cmdOrCtrl && !e.shiftKey && !e.altKey && e.key) {
+            const key = e.key.toLowerCase();
+            if (key === 'n') {
+                e.preventDefault();
+                closeCommandPalette();
+                if (typeof startNewChatSession === 'function') startNewChatSession();
+                else if (typeof clearChatHistory === 'function') clearChatHistory();
+                document.getElementById('text-input')?.focus();
+            } else if (key === 'e') {
+                e.preventDefault();
+                closeCommandPalette();
+                if (typeof exportCurrentChat === 'function') exportCurrentChat('markdown');
+                else if (typeof exportChatHistoryMarkdown === 'function') exportChatHistoryMarkdown();
+            } else if (key === 'j') {
+                e.preventDefault();
+                closeCommandPalette();
+                if (typeof exportCurrentChat === 'function') exportCurrentChat('json');
+                else if (typeof exportChatHistoryJson === 'function') exportChatHistoryJson();
+                else if (typeof exportChatHistoryJSON === 'function') exportChatHistoryJSON();
+            } else if (e.key === ',') {
+                e.preventDefault();
+                closeCommandPalette();
+                if (typeof showHelpModal === 'function') showHelpModal();
+                else if (typeof openSidebarQuickAction === 'function') openSidebarQuickAction('system');
             }
         }
     });
