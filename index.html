@@ -7071,6 +7071,8 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             }
             chatUnreadWhileScrolledUp = false;
             updateJumpToLatestButton();
+            const scrollBtn = document.getElementById('scroll-to-bottom-btn');
+            if (scrollBtn) scrollBtn.classList.remove('is-visible');
         }
 
         function jumpToLatest() {
@@ -7081,6 +7083,8 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             if (chatMain) chatMain.scrollTop = chatMain.scrollHeight;
             if (chatContainer) chatContainer.scrollTop = chatContainer.scrollHeight;
             updateJumpToLatestButton();
+            const scrollBtn = document.getElementById('scroll-to-bottom-btn');
+            if (scrollBtn) scrollBtn.classList.remove('is-visible');
         }
 
         function updateJumpToLatestButton() {
@@ -26061,8 +26065,8 @@ function initScrollToBottomWatchdog() {
     const scrollBtn = document.getElementById('scroll-to-bottom-btn');
     if (!scrollEl || !scrollBtn) return;
 
-    const onScroll = () => {
-        const threshold = 140;
+    const updateVisibility = () => {
+        const threshold = 240;
         const distanceFromBottom = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
         if (distanceFromBottom > threshold) {
             scrollBtn.classList.add('is-visible');
@@ -26071,11 +26075,12 @@ function initScrollToBottomWatchdog() {
         }
     };
 
-    scrollEl.addEventListener('scroll', onScroll, { passive: true });
+    scrollEl.addEventListener('scroll', updateVisibility, { passive: true });
     const chatContainer = document.getElementById('chat-container');
     if (chatContainer && chatContainer !== scrollEl) {
-        chatContainer.addEventListener('scroll', onScroll, { passive: true });
+        chatContainer.addEventListener('scroll', updateVisibility, { passive: true });
     }
+    updateVisibility();
 }
 
 if (typeof window !== 'undefined') {
