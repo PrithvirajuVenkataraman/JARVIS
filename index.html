@@ -12755,6 +12755,13 @@ async function sendTextInput(submission = {}) {
                         });
                     } else {
                         sendTrace.routeStartedAt = performance.now();
+                        if (submission?.forceWebSearch) {
+                            const webHandled = await handleLiveRetrievalQuery(normalizedOutgoingText);
+                            if (webHandled) {
+                                sendTrace.routeEndedAt = performance.now();
+                                return;
+                            }
+                        }
                         await processCommand(normalizedOutgoingText);
                         sendTrace.routeEndedAt = performance.now();
                     }
@@ -15569,7 +15576,7 @@ function isLiveRetrievalQuery(text) {
 function isExplicitWebSearchRequest(text) {
     const t = String(text || '').toLowerCase().trim();
     if (!t) return false;
-    return /\b(search (?:the )?(?:web|internet)|web search|browse (?:the )?(?:web|internet)|look ?up (?:on|in)? ?(?:the )?(?:web|internet)|find (?:on|in)? ?(?:the )?(?:web|internet)|google (?:for|about)|check online|online sources?|with sources?)\b/.test(t);
+    return /\b(live search|web research|search (?:the )?(?:web|internet)|web search|search online|search web|browse (?:the )?(?:web|internet)|look ?up (?:on|in)? ?(?:the )?(?:web|internet)|find (?:on|in)? ?(?:the )?(?:web|internet)|google (?:for|about)|check online|online sources?|with sources?)\b/.test(t);
 }
 
 function normalizeExplicitWebSearchQuery(text) {
@@ -19543,9 +19550,16 @@ async function handleLiveRetrievalQuery(userText, options = {}) {
         const roleHolderQuery = isCurrentRoleHolderLiveQuery(query, intent, entityIntent);
         const failClosed = roleHolderQuery || shouldRequireVerifiedSources(query, intent, entityIntent);
 
+        const searchEngineQuery = query
+            .replace(/^(?:please\s+)?(?:can you|could you|would you)?\s*(?:search|find|look ?up|browse|check|tell me|what are|what is)\s+(?:the\s+)?(?:latest|recent|current)?\s*/i, '')
+            .replace(/\b(?:from|using|on)\s+(?:the\s+)?(?:web|internet|online)\b/gi, ' ')
+            .replace(/[?!]+$/g, '')
+            .replace(/\s+/g, ' ')
+            .trim() || query;
+
         let answerData = null;
         try {
-            answerData = await fetchLiveSearchJson(query, {
+            answerData = await fetchLiveSearchJson(searchEngineQuery, {
                 signal: controller.signal,
                 maxResults: 8,
                 answer: true,
@@ -19564,9 +19578,20 @@ async function handleLiveRetrievalQuery(userText, options = {}) {
         const directAnswer = cleanLiveAnswerText(String(answerData?.answer || '').trim());
         const answerResults = Array.isArray(answerData?.results) ? answerData.results.filter(Boolean) : [];
         const answerEvidenceCount = Number(answerData?.answerEvidenceCount || 0);
+        const distinctDomains = Array.from(new Set(
+            answerResults.map(r => {
+                try {
+                    const host = r.domain || (r.url ? new URL(r.url).hostname.replace(/^www\./, '') : '');
+                    return host.toLowerCase().trim();
+                } catch (_) {
+                    return '';
+                }
+            }).filter(Boolean)
+        ));
+        const isRefusalAnswer = /could not verify|cannot verify|sources conflict|no reliable/i.test(directAnswer);
 
-        // If direct answer is already verified from high-confidence RAG
-        if ((!failClosed || answerData?.verified === true) && directAnswer && answerEvidenceCount > 0 && answerResults.length) {
+        // If direct answer is already verified from high-confidence RAG with verified flag and multi-source consensus
+        if (answerData?.verified === true && directAnswer && !isRefusalAnswer && answerEvidenceCount > 0 && answerResults.length) {
             showThinkingIndicator('Verifying sources...');
             const sourceLines = answerResults
                 .slice(0, 5)
@@ -19583,8 +19608,8 @@ async function handleLiveRetrievalQuery(userText, options = {}) {
             return true;
         }
 
-        // If we have sources, synthesize a direct, grounded answer with LLM in one quick pass
-        if (answerResults.length > 0) {
+        // Multi-domain consensus requirement: require at least 2 distinct trusted domains agreeing
+        if (answerResults.length > 0 && distinctDomains.length >= 2) {
             showThinkingIndicator('Verifying sources...');
             const snippets = answerResults
                 .slice(0, 6)
@@ -19601,13 +19626,13 @@ Key points:
 - <point 1>
 - <point 2>
 - <point 3>
-Confidence: <High/Medium/Low based only on source agreement>
+Confidence: High (verified across multiple independent domains: ${distinctDomains.slice(0, 3).join(', ')})
 
 Rules:
 - Focus on what is current or recent.
 - Do not make up numbers, dates, actors, or causes.
 - Only state a fact confidently if it appears in multiple snippets or from a clearly reputable source.
-- If evidence is weak, say so instead of guessing.
+- If evidence is weak or contradictory, say so instead of guessing.
 - Keep it concise and practical.
 
 Snippets:
@@ -19632,7 +19657,7 @@ ${snippets}`;
             }
 
             const rawAnswer = cleanLiveAnswerText(String(streamedResponse?.response || streamedResponse?.text || '').trim());
-            if (rawAnswer) {
+            if (rawAnswer && !/could not verify|cannot verify/i.test(rawAnswer)) {
                 const conciseAnswer = conciseFactQuery
                     ? rawAnswer.split(/\n\s*Key points:\s*/i)[0].split(/\n\s*Confidence:\s*/i)[0].trim()
                     : rawAnswer;
@@ -19650,11 +19675,9 @@ ${snippets}`;
                 await prepareApiReply('live_summary_ready', {}, 'I checked current sources and verified the answer.');
                 saveToHistory(userText, finalMsg);
                 hideThinkingIndicator();
-                return true;
             }
         }
 
-        // Fast fallback to model answer if live search returned limited or unstructured sources
         if (!failClosed && !requiresStrictLiveVerification(query, intent, entityIntent)) {
             showThinkingIndicator('Synthesizing answer...');
             const fallbackPublished = await publishUniversalModelFallback({ userText: query, intent, entityIntent }, 'Model answer');
@@ -19664,7 +19687,11 @@ ${snippets}`;
             }
         }
 
-        const defaultReply = `I searched live sources for "${query}" but could not confirm a high-confidence answer.`;
+        // Strict refusal with checked sources when independent consensus is not reached
+        const sourcesCheckedLines = answerResults.length > 0
+            ? '\n\nSources checked:\n' + answerResults.slice(0, 5).map((r, i) => `${i + 1}. [${r.title}](${r.url})`).join('\n')
+            : '';
+        const defaultReply = `I searched live sources for "${query}", but could not verify this with high confidence across multiple independent sources.${sourcesCheckedLines}`;
         addVerifiedAssistantMessage(defaultReply, 'Verification unavailable');
         saveToHistory(userText, defaultReply);
         hideThinkingIndicator();
