@@ -1113,10 +1113,10 @@ const edgeResponseCache = new EdgeSemanticLruCache();
         if (String(intent || '') !== 'pop_culture_reference') return '';
         return [
             'Pop-culture reference intent:',
-            '- Answer directly when the character, show, movie, or reference is commonly known.',
-            '- Explain references, characters, and sitcom context clearly with rich background, character roles, and cultural significance.',
-            '- Default to a comprehensive, well-structured response detailing key context (show/movie title, creators, background) unless the user explicitly requests brevity.',
-            '- Strict entity and soundtrack attribution: When asked which movie a song is from, or which composer scored a film or track, verify the exact association. Never guess or attribute a song to the wrong movie or composer. If the exact association cannot be verified with certainty, state clearly that the song is known but the specific film attribution requires verification, rather than naming an incorrect film.',
+            '- Answer directly when the character, show, creative work, or reference is commonly known.',
+            '- Explain references, characters, and cultural context clearly with rich background, roles, and significance.',
+            '- Default to a comprehensive, well-structured response detailing key context (title, creators, background) unless the user explicitly requests brevity.',
+            '- Strict entity and soundtrack attribution: When asked which work an entity is from, or which creator authored or scored it, verify the exact association. Never guess or attribute an entity to the wrong source, work, or creator. If the exact association cannot be verified with certainty, state clearly that the entity is known but the specific attribution requires verification, rather than naming an incorrect source.',
             '- Do not invent exact quotes, episode details, scenes, or obscure character facts.',
             '- Say uncertainty clearly when unsure.'
         ].join('\n');
