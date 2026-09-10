@@ -189,44 +189,45 @@ assert.ok(singleGate.confidence >= 0.85, 'Confident single source must have high
 assert.ok(indexHtml.includes('hasConfidentSingleSource'), 'Frontend handleLiveRetrievalQuery must support confident single-source early exit');
 console.log('  [PASS] 8. Confident single-source early exit verified');
 
-// 9. Verify Media Attribution & Entertainment Depth Invariants (Zero Hardcoding)
+// 9. Verify Domain-Agnostic Entity Attribution & Universal Depth (Industry Standard Architecture)
 vm.runInContext(extractFunctionSource(indexHtml, 'isExplicitBrevityRequested'), cotSandbox);
-vm.runInContext(extractFunctionSource(indexHtml, 'isEntertainmentMediaQuery'), cotSandbox);
-vm.runInContext(extractFunctionSource(indexHtml, 'isMediaAttributionQuery'), cotSandbox);
+vm.runInContext(extractFunctionSource(indexHtml, 'isEntityAttributionQuery'), cotSandbox);
 vm.runInContext(extractFunctionSource(indexHtml, 'isStrictYesNoRequest'), cotSandbox);
 vm.runInContext(extractFunctionSource(indexHtml, 'isConciseDirectFactQuery'), cotSandbox);
 
-const { isExplicitBrevityRequested, isEntertainmentMediaQuery, isMediaAttributionQuery, isConciseDirectFactQuery } = cotSandbox;
+const { isExplicitBrevityRequested, isEntityAttributionQuery, isConciseDirectFactQuery } = cotSandbox;
 
-// 9.1 Syntactic media attribution detection
-assert.equal(isMediaAttributionQuery('which movie is the song from?'), true, 'Song to movie query must be detected');
-assert.equal(isMediaAttributionQuery('what film has the song track?'), true, 'Film track query must be detected');
-assert.equal(isMediaAttributionQuery('who composed the soundtrack of the film?'), true, 'Composer of film soundtrack must be detected');
-assert.equal(isMediaAttributionQuery('composer of the track?'), true, 'Composer of track must be detected');
-assert.equal(isMediaAttributionQuery('is the song from film Alpha or film Beta?'), true, 'Song film comparison must be detected');
-assert.equal(isMediaAttributionQuery('who played the role of the character in the sitcom?'), true, 'Character in sitcom must be detected');
-assert.equal(isMediaAttributionQuery('what is the capital of France?'), false, 'Non-media query must not be detected as media attribution');
-assert.equal(isMediaAttributionQuery('how to implement quicksort in Python?'), false, 'Coding query must not be detected as media attribution');
+// 9.1 Domain-agnostic grammatical entity-relationship attribution
+assert.equal(isEntityAttributionQuery('which movie is the song from?'), true, 'Creative work attribution must be detected');
+assert.equal(isEntityAttributionQuery('which novel is the character from?'), true, 'Literature attribution must be detected');
+assert.equal(isEntityAttributionQuery('who composed the soundtrack of the film?'), true, 'Music composition attribution must be detected');
+assert.equal(isEntityAttributionQuery('who invented the telescope?'), true, 'Scientific invention attribution must be detected');
+assert.equal(isEntityAttributionQuery('who discovered penicillin?'), true, 'Scientific discovery attribution must be detected');
+assert.equal(isEntityAttributionQuery('who founded the company?'), true, 'Organizational founder attribution must be detected');
+assert.equal(isEntityAttributionQuery('is the character from novel Alpha or novel Beta?'), true, 'Comparative origin attribution must be detected');
+assert.equal(isEntityAttributionQuery('who played the role of the detective?'), true, 'Role representation attribution must be detected');
+assert.equal(isEntityAttributionQuery('what is the capital of France?'), false, 'General fact query must not be detected as entity attribution');
+assert.equal(isEntityAttributionQuery('how to implement quicksort in Python?'), false, 'Coding query must not be detected as entity attribution');
 
-// 9.2 Entertainment query depth vs concise fact constraints
-assert.equal(isEntertainmentMediaQuery('tell me about the film and its background'), true);
-assert.equal(isEntertainmentMediaQuery('who is the character in the sitcom series'), true);
+// 9.2 Explicit brevity detection
 assert.equal(isExplicitBrevityRequested('in one sentence, who composed the score?'), true);
-assert.equal(isExplicitBrevityRequested('briefly tell me the origin of the song'), true);
-assert.equal(isExplicitBrevityRequested('tell me all about the movie and composer'), false);
+assert.equal(isExplicitBrevityRequested('briefly tell me the origin of the discovery'), true);
+assert.equal(isExplicitBrevityRequested('tldr of the research paper'), true);
+assert.equal(isExplicitBrevityRequested('tell me all about the historical background and founder'), false);
 
-// 9.3 Media queries must not be forced into concise 1-liners unless brevity is explicitly asked
-assert.equal(isConciseDirectFactQuery('who is the composer of the film soundtrack?'), false, 'Media queries must not be constrained to 1-2 sentence one-liners by default');
-assert.equal(isConciseDirectFactQuery('tell me about the sitcom series and character'), false, 'Sitcom query must not be constrained to 1-2 sentence one-liners');
-assert.equal(isConciseDirectFactQuery('in one sentence, who is the composer?'), true, 'Explicit brevity query should be recognized as concise');
-console.log('  [PASS] 9. Media attribution & unconstrained entertainment depth verified');
+// 9.3 Universal depth default: queries are NEVER arbitrarily truncated unless brevity is explicitly requested
+assert.equal(isConciseDirectFactQuery('who is the founder of the organization?'), false, 'General queries must NOT be forced into 1-2 sentence one-liners by default');
+assert.equal(isConciseDirectFactQuery('tell me about the discovery and its impact'), false, 'Exploratory queries must NOT be forced into one-liners');
+assert.equal(isConciseDirectFactQuery('in one sentence, who is the founder?'), true, 'Explicit brevity query must be recognized as concise');
+assert.equal(isConciseDirectFactQuery('is this true? yes or no'), true, 'Strict yes/no binary queries must be recognized as concise');
+console.log('  [PASS] 9. Domain-agnostic entity attribution & universal response depth verified');
 
 // 10. Verify Anti-Hallucination Prompt Invariants in Groq Chat & System Directives
-assert.ok(chatGroqJs.includes('Strict entity and soundtrack attribution'), 'Chat backend must enforce strict soundtrack and entity attribution');
-assert.ok(chatGroqJs.includes('Never guess or attribute a song to the wrong movie or composer'), 'Chat backend must explicitly forbid cross-movie attribution hallucination');
-assert.ok(chatGroqJs.includes('Default to a comprehensive, well-structured response'), 'Chat backend must default to comprehensive responses for pop culture');
-assert.ok(indexHtml.includes('Entertainment & Media Guidance'), 'Frontend system directives must provide entertainment & media guidance');
-assert.ok(indexHtml.includes('Strictly verify media attribution'), 'Frontend system directives must instruct strict media attribution verification');
+assert.ok(chatGroqJs.includes('Strict entity and soundtrack attribution'), 'Chat backend must enforce strict entity and soundtrack attribution');
+assert.ok(chatGroqJs.includes('Never guess or attribute an entity to the wrong source'), 'Chat backend must explicitly forbid attribution hallucination');
+assert.ok(chatGroqJs.includes('Default to a comprehensive, well-structured response'), 'Chat backend must default to comprehensive responses for cultural/creative queries');
+assert.ok(indexHtml.includes('Depth & Quality Guidance'), 'Frontend system directives must provide universal depth & quality guidance');
+assert.ok(indexHtml.includes('strictly verify the exact association'), 'Frontend system directives must instruct strict entity association verification');
 console.log('  [PASS] 10. Strict anti-hallucination attribution prompt directives verified');
 
 // 11. Verify Smooth Thinking Indicator & Transition Animations
