@@ -800,10 +800,53 @@ function isSeriesReferenceJokeRequest(text) {
     return (jokeSignal && screenSignal) || (jokeSignal && referenceSignal);
 }
 
+function isExplicitBrevityRequested(text) {
+    return /\b(in\s+(?:one|1|a\s+single)\s+(?:sentence|line|word)|briefly|in\s+short|short\s+answer|one-liner|short\s+summary|quick\s+summary|concise\s+answer)\b/i.test(String(text || ''));
+}
+
+function isEntertainmentMediaQuery(text) {
+    const t = String(text || '').toLowerCase().trim();
+    if (!t) return false;
+    return /\b(movie|movies|film|films|cinema|song|songs|soundtrack|soundtracks|tracklist|album|albums|sitcom|sitcoms|tv\s*show|tv\s*shows|tv\s*series|web\s*series|episode|episodes|character|characters|composer|composers|music\s*director|lyricist|discography|filmography|actor|actress)\b/i.test(t);
+}
+
+function isMediaAttributionQuery(text) {
+    const raw = String(text || '').trim();
+    const t = raw.toLowerCase();
+    if (!t) return false;
+
+    // Purely syntactic/grammatical patterns for media association & attribution:
+    // 1. "which/what/in which movie/film/album/show/series/sitcom is [X] from" or "from which film"
+    const songToMoviePattern = /\b(?:which|what|in\s+which)\s+(?:movie|film|album|show|series|sitcom|web\s*series)\s+(?:is|was|has|features?)\b/i;
+    const fromMoviePattern = /\b(?:from|in)\s+(?:which|what)\s+(?:movie|film|album|show|series|sitcom)\b/i;
+
+    // 2. "who/which composer composed/directed/sang/scored/wrote the song/soundtrack"
+    const creatorOfMediaPattern = /\b(?:who|which\s+(?:composer|director|singer|artist|musician))\s+(?:composed|directed|sang|sung|scored|wrote|created|made|produced)\s+(?:the\s+)?(?:song|track|soundtrack|music|bgm|score|theme|album|film|movie)\b/i;
+
+    // 3. "composer/music director/singer/tracklist of/for/in [X]"
+    const roleOfMediaPattern = /\b(?:composer|music\s+director|director|singer|lyricist|soundtrack|tracklist|songs?)\s+(?:of|for|in)\b/i;
+
+    // 4. "which movie has the song" or "is [song] from [movie A] or [movie B]"
+    const comparisonAttributionPattern = /\b(?:is|was)\s+.*\s+(?:from|in)\s+.*\s+(?:or)\b/i;
+    const songInMoviePattern = /\b(?:soundtrack|songs?|tracklist)\s+(?:of|for|in)\s+(?:the\s+)?(?:movie|film|album|series|show)\b/i;
+    const whichSongMovie = /\b(?:movie|film|show)\s+(?:is\s+)?(?:the\s+)?(?:song|track|character)\b/i;
+    const actorRolePattern = /\b(?:who\s+(?:played|acts?\s+as|played\s+the\s+role\s+of)|which\s+actor\s+played)\s+.*\s+(?:in|on)\s+(?:the\s+)?(?:movie|film|show|series|sitcom)\b/i;
+
+    return songToMoviePattern.test(t) ||
+        fromMoviePattern.test(t) ||
+        creatorOfMediaPattern.test(t) ||
+        roleOfMediaPattern.test(t) ||
+        comparisonAttributionPattern.test(t) ||
+        songInMoviePattern.test(t) ||
+        whichSongMovie.test(t) ||
+        actorRolePattern.test(t);
+}
+
 function isPopCultureReferenceQuery(text) {
     const raw = String(text || '').trim();
     const t = raw.toLowerCase();
     if (!t) return false;
+    if (isMediaAttributionQuery(raw)) return false;
     if (isSeriesReferenceJokeRequest(raw) || isScreenSuggestionRequest(raw)) return false;
     if (isCurrentInfoQuery(raw) || isStrictLatestQuery(raw) || isExplicitWebSearchRequest(raw)) return false;
     if (/\b(president|prime minister|pm|ceo|cto|cfo|coo|founder|cofounder|co-founder|governor|mayor|minister|senator|chairman|chairperson|captain|coach|manager|leader|head of|director of)\b/.test(t)) {
@@ -3044,6 +3087,20 @@ async function processUserQuery(text, options = {}) {
         if (handled) return { intent: 'strict_latest' };
     }
 
+    if (isFactSearchEnabled() && isMediaAttributionQuery(t)) {
+        logRoutingDebug('processUserQuery -> media_attribution live_retrieval', t, {
+            selectedHandler: 'handleLiveRetrievalQuery',
+            liveIntent,
+            entityIntent,
+            riskLevel
+        });
+        const handled = await handleLiveRetrievalQuery(t, {
+            broadFactualWeb: true,
+            mediaAttribution: true
+        });
+        if (handled) return { intent: 'media_attribution' };
+    }
+
     if (isPopCultureReferenceQuery(t)) {
         logRoutingDebug('processUserQuery -> pop_culture_reference', t, {
             selectedHandler: 'handlePopCultureReferenceModelQuery',
@@ -5151,6 +5208,9 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
         const conciseFactHint = isConciseDirectFactQuery(normalizedUserMessage)
             ? 'This is a direct fact query. Answer in 1-2 sentences max. Give the fact immediately. Do not add generic extra explanation or follow-up offers unless the user asks.'
             : '';
+        const entertainmentHint = (isEntertainmentMediaQuery(normalizedUserMessage) || isMediaAttributionQuery(normalizedUserMessage)) && !isExplicitBrevityRequested(normalizedUserMessage)
+            ? 'Entertainment & Media Guidance: For queries regarding movies, films, songs, soundtracks, composers, sitcoms, or shows, provide a comprehensive, rich, and detailed answer by default. Include essential context such as work title, release year, composer, director, singers/cast, and cultural context. Strictly verify media attribution—never attribute a song or music track to the wrong movie or composer. If uncertain about an exact association, acknowledge the uncertainty honestly rather than confabulating.'
+            : '';
         const directExplainerHint = isDirectExplainerQuery(normalizedUserMessage)
             ? 'This is a direct explainer/identity query. Do not give research steps or suggestions to search online. Answer directly with concise factual content.'
             : '';
@@ -5182,6 +5242,7 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
             activeLearningMode && activeLearningMode !== 'standard' ? `Explanation style preference: ${activeLearningMode}. ${learningHint}` : '',
             languageReplyHint,
             conciseFactHint,
+            entertainmentHint,
             directExplainerHint,
             fastExplainerHint,
             learnedStyleHint,
@@ -16319,7 +16380,10 @@ function isDirectFactLiveQuery(text) {
 function isConciseDirectFactQuery(text) {
     const t = String(text || '').toLowerCase().trim();
     if (!t) return false;
-    const directFactSignals = /\b(how many|who is|who was|who won|who lost|winner|won|lost|what is the current|what is the latest|latest|current|ceo|president|prime minister|pm|chief minister|cm|captain|coach|head of|leader of|director|director general|administrator|dean|chancellor|principal|known for|famous for|price|rate|score|scores|stats?|record|ranking|standings|titles?|cups?|won in total|total titles?|total cups?|qualified|eliminated|result|results|movie|film|song|album|release)\b/;
+    if (isEntertainmentMediaQuery(t) && !isExplicitBrevityRequested(t)) {
+        return false;
+    }
+    const directFactSignals = /\b(how many|who is|who was|who won|who lost|winner|won|lost|what is the current|what is the latest|latest|current|ceo|president|prime minister|pm|chief minister|cm|captain|coach|head of|leader of|director general|administrator|dean|chancellor|principal|known for|famous for|price|rate|score|scores|stats?|record|ranking|standings|titles?|cups?|won in total|total titles?|total cups?|qualified|eliminated|result|results)\b/;
     const strictBinarySignal = isStrictYesNoRequest(t);
     const binaryQuestionStarter = /^(is|are|am|was|were|do|does|did|can|could|should|would|will|has|have|had)\b/.test(t) &&
         !/\b(explain|help|advise|suggest|recommend|walk me through|how to)\b/.test(t);
@@ -16508,6 +16572,8 @@ function classifyUserMessage(text) {
             comparison: isComparisonQuery(raw),
             news: /\b(news|headlines?|current events?|breaking news)\b/i.test(raw) || isNewsworthyLiveTopic(raw),
             liveRetrieval: isLiveRetrievalQuery(raw),
+            mediaAttribution: isMediaAttributionQuery(raw),
+            entertainmentMedia: isEntertainmentMediaQuery(raw),
             popCultureReference: isPopCultureReferenceQuery(raw),
             tamilJoke: isTamilJokeRequest(raw),
             seriesRefJoke: isSeriesReferenceJokeRequest(raw),
@@ -19617,24 +19683,26 @@ async function handleLiveRetrievalQuery(userText, options = {}) {
                 .map((r, i) => `${i + 1}. ${r.title}\nSource: ${r.sourceLabel || r.domain || r.url}\nDate: ${r.date || 'Recent 2026'}\nContent: ${r.fullArticleContent || r.fullArticleText || r.description}\nURL: ${r.url}`)
                 .join('\n\n');
 
-            const synthesisPrompt = `Answer the user's question directly, concisely, and factually using ONLY the verified web content below.
+            const isMedia = options?.mediaAttribution || isEntertainmentMediaQuery(query);
+            const mediaFormatPrompt = isMedia
+                ? `Direct answer: <accurately state the exact movie, soundtrack, composer, release year, and key artists>\nKey context & details:\n- Album/Soundtrack release & context\n- Key creators (composer, director, singers)\n- Background & significance`
+                : `Direct answer: <answer the question in 1-3 sentences first; if the user asked who won/score/stat/leader, state that immediately>\nKey points:\n- <point 1>\n- <point 2>\n- <point 3>`;
+
+            const synthesisPrompt = `Answer the user's question directly, comprehensively, and factually using ONLY the verified web content below.
 
 User question: "${query}"
 
 Required format:
-Direct answer: <answer the question in 1-3 sentences first; if the user asked who won/score/stat/leader, state that immediately>
-Key points:
-- <point 1>
-- <point 2>
-- <point 3>
+${mediaFormatPrompt}
 Confidence: ${distinctDomains.length >= 2 ? `High (verified across multiple independent domains: ${distinctDomains.slice(0, 3).join(', ')})` : `Verified from ${distinctDomains[0] || 'primary source'}`}
 
 Rules:
-- Focus on what is current or recent.
+- Focus on what is current or verified in the snippets.
 - Do not make up numbers, dates, actors, or causes.
+- Strictly verify media attribution: When asked which movie a song is from, or which composer scored a film or track, ground the exact association in the snippets. Never attribute a song to the wrong movie or composer.
 - Only state a fact confidently if it appears in multiple snippets or from a clearly reputable source.
 - If evidence is weak or contradictory, say so instead of guessing.
-- Keep it concise and practical.
+- Provide a comprehensive, detailed answer with full context unless the user explicitly requested a brief one-liner.
 
 Snippets:
 ${snippets}`;
@@ -20654,6 +20722,20 @@ function isWakeGreetingText(text) {
                     classification
                 });
                 const handled = await handleStrictLatestQuery(cleanText);
+                if (handled) return;
+            }
+
+            if (isFactSearchEnabled() && isMediaAttributionQuery(cleanText)) {
+                logRoutingDebug('processCommand -> media_attribution', cleanText, {
+                    selectedHandler: 'handleLiveRetrievalQuery',
+                    answerPath,
+                    hybridMode,
+                    classification
+                });
+                const handled = await handleLiveRetrievalQuery(cleanText, {
+                    broadFactualWeb: true,
+                    mediaAttribution: true
+                });
                 if (handled) return;
             }
 
@@ -26385,6 +26467,10 @@ function showThinkingIndicator(message = 'Thinking') {
     const phaseInfo = resolveThinkingPhase(message);
 
     let row = document.getElementById('chat-thinking-indicator');
+    if (row && row.classList.contains('chat-thinking-indicator-leaving')) {
+        if (row.parentNode) row.parentNode.removeChild(row);
+        row = null;
+    }
     if (!row) {
         row = document.createElement('div');
         row.id = 'chat-thinking-indicator';
@@ -26477,9 +26563,13 @@ function hideThinkingIndicator() {
     }
     const row = document.getElementById('chat-thinking-indicator');
     if (!row) return;
-    if (row.parentNode) {
-        row.parentNode.removeChild(row);
-    }
+    if (row.classList.contains('chat-thinking-indicator-leaving')) return;
+    row.classList.add('chat-thinking-indicator-leaving');
+    setTimeout(() => {
+        if (row && row.parentNode) {
+            row.parentNode.removeChild(row);
+        }
+    }, 200);
 }
 
 function formatAssistantTextForReadability(rawText) {
