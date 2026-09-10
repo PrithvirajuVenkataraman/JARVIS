@@ -162,4 +162,31 @@ assert.ok(clientExtractLeaked.thought.includes('The user asked'));
 
 console.log('  [PASS] 6. System instruction leakage and meta-chatter cleanly tucked into thought');
 
+function fixtureSubject(value) {
+    return String(value || '');
+}
+
+// 7. Verify Clean Chain of Thoughts (historical stat query produces no fake CoT)
+assert.equal(generateSteps("How many 100's did sachin score in International cricket?").length, 0, 'Past sports stat queries must not produce fake CoT steps');
+assert.equal(generateSteps("Who scored the winning goal in 2010?").length, 0, 'Past historical scoring questions must not produce fake CoT steps');
+assert.ok(!indexHtml.includes('Dispatching real-time multi-source news scrapers'), 'Outdated news scrapers string must be permanently removed');
+assert.ok(indexHtml.includes('Querying verified real-time sources'), 'Clean verified sources wording must be used in CoT');
+console.log('  [PASS] 7. Dynamic CoT cleanliness and historical stat queries protected');
+
+// 8. Verify Confident Single-Source Early Exit in Search Pipeline
+const { __test: searchTest } = await import('../api/search.js');
+const confidentSingleSource = [{
+    title: fixtureSubject('Athlete Career Record - Wiki'),
+    domain: 'wikipedia.org',
+    url: 'https://en.wikipedia.org/wiki/Subject',
+    description: fixtureSubject('Subject is an international athlete who recorded 100 centuries across professional matches.'),
+    sourceType: 'encyclopedia',
+    trusted: true
+}];
+const singleGate = searchTest.evaluateWebRagEvidence('How many centuries did the athlete score in career', confidentSingleSource);
+assert.equal(singleGate.pass, true, 'Confident single authoritative source must pass early exit without requiring 2+ domains');
+assert.ok(singleGate.confidence >= 0.85, 'Confident single source must have high confidence score');
+assert.ok(indexHtml.includes('hasConfidentSingleSource'), 'Frontend handleLiveRetrievalQuery must support confident single-source early exit');
+console.log('  [PASS] 8. Confident single-source early exit verified');
+
 console.log('dynamic-cot-reasoning-tests-ok');
