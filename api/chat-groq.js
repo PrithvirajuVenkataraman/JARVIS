@@ -1114,7 +1114,9 @@ const edgeResponseCache = new EdgeSemanticLruCache();
         return [
             'Pop-culture reference intent:',
             '- Answer directly when the character, show, movie, or reference is commonly known.',
-            '- Explain references and sitcom context clearly.',
+            '- Explain references, characters, and sitcom context clearly with rich background, character roles, and cultural significance.',
+            '- Default to a comprehensive, well-structured response detailing key context (show/movie title, creators, background) unless the user explicitly requests brevity.',
+            '- Strict entity and soundtrack attribution: When asked which movie a song is from, or which composer scored a film or track, verify the exact association. Never guess or attribute a song to the wrong movie or composer. If the exact association cannot be verified with certainty, state clearly that the song is known but the specific film attribution requires verification, rather than naming an incorrect film.',
             '- Do not invent exact quotes, episode details, scenes, or obscure character facts.',
             '- Say uncertainty clearly when unsure.'
         ].join('\n');
@@ -4516,7 +4518,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
         }
         if (mode === 'min' && minWords > 0 && count < minWords) {
             return out;
-        } 
+        }
         if (mode === 'range') {
             if (maxWords > 0 && count > maxWords) return trimToWordCount(out, maxWords);
             return out;
