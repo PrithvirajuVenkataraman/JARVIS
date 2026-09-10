@@ -182,6 +182,7 @@ option {
     position: absolute;
     inset: 0;
     width: 100%;
+    height: calc(var(--vh, 1vh) * 100);
     max-width: 100vw !important;
     display: flex;
     flex-direction: column;
@@ -7744,5 +7745,27 @@ body:not(.dark) .next-step-title {
     .composer-shell.modern-input,
     .floating-input-bar {
         transition: none !important;
+    }
+}
+
+/* Responsive Chat Scroll & Dynamic Viewport Height */
+.chat-scroll {
+    overflow-y: auto;
+    max-height: calc(100vh - var(--header-height, 64px) - var(--input-height, 72px) - 16px);
+}
+
+@media (max-width: 1024px) {
+    .chat-scroll {
+        padding-bottom: calc(var(--input-height, 72px) + 20px);
+    }
+    .assistant-bubble,
+    .chat-bubble-assistant {
+        z-index: 10;
+    }
+    .chat-input,
+    .floating-input-bar {
+        position: sticky;
+        bottom: 0;
+        z-index: 20;
     }
 }
