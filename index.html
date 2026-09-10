@@ -8944,9 +8944,9 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             }
 
             // 3. Current News / Live Events / Sports / Market Prices
-            if (/\b(news|latest|current|update|today|yesterday|tomorrow|live|score|match|vs\s+[a-z]+(?:\s+fc)?|price|stock|market|weather|event|launched|2025|2026)\b/i.test(lower)) {
+            if (/\b(news|latest|current|update|today|yesterday|tomorrow|live(?:\s+stream|\s+score|\s+match)?|match score|live score|vs\s+[a-z]+(?:\s+fc)?|stock price|stock market|cryptocurrency price|crypto price|weather|event|launched|2025|2026)\b/i.test(lower) && !/\b(did\s+[a-z]+\s+score|who\s+scored|how\s+many\s+(?:goals|runs|centuries|100'?s|points)\s+did)\b/i.test(lower)) {
                 return [
-                    { title: 'Searching', body: 'Dispatching real-time multi-source news scrapers' },
+                    { title: 'Searching', body: 'Querying verified real-time sources' },
                     { title: 'Synthesizing', body: 'Formulating grounded summary with verified sources' }
                 ];
             }
@@ -9239,7 +9239,12 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 messageDiv.dataset.messageId = messageId;
 
                 const thoughtContent = parsedThought.thought || meta?.thought || '';
-                const thoughtSteps = thoughtContent ? [] : generateContextualThoughtSteps(priorUserPrompt);
+                const isThinkingStreaming = allowEmptyAssistant || Boolean(meta?.streaming);
+                const thoughtSteps = thoughtContent
+                    ? []
+                    : (isThinkingStreaming
+                        ? (meta?.thoughtSteps || generateContextualThoughtSteps(priorUserPrompt))
+                        : (meta?.thoughtSteps || []));
                 const selfHealing = meta?.selfHealing || meta?.routing?.selfHealing || null;
                 const actualElapsed = (typeof window !== 'undefined' && window.__lastThinkingPhaseStartedAt) ? Math.max(0.1, (Date.now() - window.__lastThinkingPhaseStartedAt) / 1000) : 0;
                 const rawElapsed = meta?.latency ? (meta.latency / 1000) : (actualElapsed > 0 ? actualElapsed : 1.2);
@@ -9248,7 +9253,6 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 const rawProvider = meta?.provider || meta?.routing?.provider || '';
                 const rawFailover = meta?.failover || meta?.routing?.failover || false;
                 const modelInfo = typeof formatModelDisplayName === 'function' ? formatModelDisplayName(rawModel, rawProvider, rawFailover) : null;
-                const isThinkingStreaming = allowEmptyAssistant || Boolean(meta?.streaming);
                 const thinkingHtml = ((thoughtContent || thoughtSteps.length > 0 || selfHealing) && !meta?.systemGreeting)
                     ? buildThinkingProcessHtml(thoughtContent, thoughtSteps, elapsedSeconds, isThinkingStreaming, selfHealing, modelInfo)
                     : '';
@@ -19598,9 +19602,16 @@ async function handleLiveRetrievalQuery(userText, options = {}) {
             return true;
         }
 
-        // Multi-domain consensus requirement: require at least 2 distinct trusted domains agreeing
-        if (answerResults.length > 0 && distinctDomains.length >= 2) {
-            showThinkingIndicator('Verifying sources...');
+        // Single-source early exit if confident, or multi-domain consensus requirement: require at least 2 distinct trusted domains agreeing
+        const hasConfidentSingleSource = answerResults.length >= 1 && (
+            answerData?.verified === true ||
+            Boolean(answerResults[0].qualitySignals?.includes('google_search_grounding')) ||
+            Boolean(answerResults[0].qualitySignals?.includes('wikipedia_summary')) ||
+            answerResults[0].evidenceLevel === 'structured_claim' ||
+            (answerResults[0].description && answerResults[0].description.length >= 40)
+        );
+        if (answerResults.length > 0 && (hasConfidentSingleSource || distinctDomains.length >= 2)) {
+            showThinkingIndicator('Synthesizing answer...');
             const snippets = answerResults
                 .slice(0, 6)
                 .map((r, i) => `${i + 1}. ${r.title}\nSource: ${r.sourceLabel || r.domain || r.url}\nDate: ${r.date || 'Recent 2026'}\nContent: ${r.fullArticleContent || r.fullArticleText || r.description}\nURL: ${r.url}`)
@@ -19616,7 +19627,7 @@ Key points:
 - <point 1>
 - <point 2>
 - <point 3>
-Confidence: High (verified across multiple independent domains: ${distinctDomains.slice(0, 3).join(', ')})
+Confidence: ${distinctDomains.length >= 2 ? `High (verified across multiple independent domains: ${distinctDomains.slice(0, 3).join(', ')})` : `Verified from ${distinctDomains[0] || 'primary source'}`}
 
 Rules:
 - Focus on what is current or recent.
