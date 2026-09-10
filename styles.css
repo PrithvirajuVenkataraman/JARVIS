@@ -5109,6 +5109,40 @@ body:not(.dark) .agent-dag-pill.is-completed {
     0%, 100% { opacity: 1; transform: scale(1); }
     50% { opacity: 0.85; transform: scale(1.02); }
 }
+
+/* ==========================================================================
+   Smooth Thinking Indicator Transitions (Anti-Jitter & Zero Layout Snap)
+   ========================================================================== */
+#chat-thinking-indicator {
+    transition: opacity 0.22s cubic-bezier(0.4, 0, 0.2, 1), transform 0.22s cubic-bezier(0.4, 0, 0.2, 1), max-height 0.22s cubic-bezier(0.4, 0, 0.2, 1), margin 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+    will-change: opacity, transform;
+}
+
+#chat-thinking-indicator.chat-thinking-indicator-leaving {
+    opacity: 0 !important;
+    transform: translateY(-6px) scale(0.98);
+    pointer-events: none;
+    max-height: 0;
+    margin-top: 0;
+    margin-bottom: 0;
+    overflow: hidden;
+}
+
+@keyframes assistantBubbleEnter {
+    from {
+        opacity: 0;
+        transform: translateY(6px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.chat-bubble-assistant {
+    animation: assistantBubbleEnter 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
 /* ==========================================================================
    Human-Like Thinking & Reasoning Process UI Styles (Milestone 4 Enhanced)
    ========================================================================== */
