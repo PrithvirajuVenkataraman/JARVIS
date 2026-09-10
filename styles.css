@@ -6706,12 +6706,6 @@ body:not(.dark) .assistant-followup-chip:hover {
 }
 
 
-    50% {
-        box-shadow: 0 0 18px rgba(16, 185, 129, 0.55);
-        transform: scale(1.04);
-    }
-}
-
 .speech-input-btn.is-listening {
     color: #ef4444 !important;
     border-color: rgba(239, 68, 68, 0.6) !important;
