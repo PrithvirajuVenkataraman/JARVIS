@@ -6424,8 +6424,8 @@ body:not(.dark) .assistant-followup-chip:hover {
     color: #38bdf8;
 }
 
-@media (max-width: 768px), (pointer: coarse) {
-    .chat-session-pin-btn {
+@media (max-width: 640px) {
+    .chat-session-pin-btn:not(.is-pinned) {
         display: none !important;
     }
 }
@@ -8000,10 +8000,180 @@ body:not(.dark) .next-step-title {
     .chat-bubble-assistant {
         z-index: 10;
     }
-    .chat-input,
+    /* CRITICAL FIX: Floating input bar must remain fixed to viewport bottom on tablets and mobile */
     .floating-input-bar {
-        position: sticky;
-        bottom: 0;
-        z-index: 20;
+        position: fixed !important;
+        bottom: 0 !important;
+        left: 0;
+        right: 0;
+        z-index: 40 !important;
     }
+}
+
+/* ==========================================================================
+   Comprehensive Tablet & iPad Optimization System (Apple HIG & Fluid Layout)
+   Covers iPad Mini (768px), iPad 10.2" (810px), iPad Air (820px),
+   iPad Pro 11" (834px), iPad Pro 12.9" (1024px) & Android Tablets
+   ========================================================================== */
+
+@media (min-width: 641px) and (max-width: 1024px) {
+    :root {
+        --app-gutter-x: 20px;
+        --input-bar-safe-height: 128px;
+    }
+
+    /* Tablet Chat Center Column: Fluid, readable reading line with safe area insets */
+    .chat-center-column {
+        max-width: min(840px, calc(100% - 36px)) !important;
+        padding-left: max(20px, env(safe-area-inset-left)) !important;
+        padding-right: max(20px, env(safe-area-inset-right)) !important;
+        padding-bottom: calc(var(--input-bar-safe-height) + 32px + env(safe-area-inset-bottom)) !important;
+    }
+
+    /* Tablet App Header with comfortable touch heights */
+    .app-header {
+        height: 56px;
+        min-height: 56px;
+        padding-left: max(18px, env(safe-area-inset-left));
+        padding-right: max(18px, env(safe-area-inset-right));
+        padding-top: env(safe-area-inset-top);
+    }
+
+    .header-icon-btn {
+        width: 42px;
+        height: 42px;
+    }
+
+    .header-action-btn {
+        height: 38px;
+        padding: 7px 14px;
+        font-size: 13px;
+    }
+
+    /* Tablet Composer Layout */
+    .composer-wrap {
+        max-width: min(840px, 100%) !important;
+        margin: 0 auto;
+        padding: 0 4px;
+    }
+
+    .floating-input-bar {
+        padding-left: max(16px, env(safe-area-inset-left));
+        padding-right: max(16px, env(safe-area-inset-right));
+        padding-bottom: max(14px, env(safe-area-inset-bottom));
+    }
+
+    .composer-shell.modern-input,
+    .composer-shell,
+    #input-bar-inner {
+        padding: 6px 10px 6px 14px;
+        border-radius: 26px;
+    }
+
+    /* Tablet Chat Bubbles */
+    .chat-bubble-user {
+        max-width: min(80%, 640px) !important;
+        padding: 12px 18px !important;
+        font-size: 15px !important;
+    }
+
+    .chat-bubble-assistant {
+        font-size: 15.5px !important;
+        line-height: 1.68 !important;
+    }
+
+    /* Tablet Sidebar Drawer */
+    .chat-sidebar-panel {
+        width: min(320px, calc(100vw - 32px));
+        padding-left: max(12px, env(safe-area-inset-left));
+        padding-top: calc(16px + env(safe-area-inset-top));
+        padding-bottom: calc(16px + env(safe-area-inset-bottom));
+    }
+
+    /* Tablet Modals & Dialogs */
+    .command-palette-backdrop {
+        padding-top: clamp(24px, 8vh, 64px);
+        padding-left: max(16px, env(safe-area-inset-left));
+        padding-right: max(16px, env(safe-area-inset-right));
+    }
+
+    .command-palette-container {
+        width: min(640px, calc(100vw - 36px));
+        max-height: min(82vh, 640px);
+    }
+
+    .memory-manager-panel {
+        width: min(720px, calc(100vw - 32px));
+        max-height: min(84vh, 720px);
+    }
+
+    .help-modal-enhanced {
+        width: min(720px, calc(100vw - 32px)) !important;
+        max-height: min(84vh, 720px) !important;
+    }
+
+    .sos-modal-card {
+        width: min(520px, calc(100vw - 32px));
+        max-height: min(85vh, 680px);
+    }
+}
+
+/* Touch Device Ergonomics (Apple HIG 44px Tap Targets & Smooth Touch) */
+@media (pointer: coarse) {
+    /* Touch target minimum 44px per Apple Human Interface Guidelines */
+    .header-icon-btn,
+    .chat-sidebar-close,
+    .chat-scroll-jump,
+    .scroll-to-bottom-pill,
+    .composer-plus-btn,
+    .sos-modal-close-btn {
+        min-width: 44px;
+        min-height: 44px;
+    }
+
+    /* Always accessible user message actions on touch */
+    .user-message-actions {
+        opacity: 0.88 !important;
+        pointer-events: auto !important;
+    }
+
+    /* Accessible chat session action controls on touch */
+    .chat-session-pin-btn {
+        opacity: 0.75;
+        width: 34px;
+        height: 34px;
+    }
+
+    .chat-session-pin-btn.is-pinned {
+        opacity: 1;
+        color: #38bdf8;
+    }
+
+    /* Assistant action buttons: easy-to-tap touch areas */
+    .assistant-action-btn {
+        min-height: 34px;
+        padding: 6px 10px !important;
+        font-size: 12.5px !important;
+    }
+
+    /* Native momentum touch scrolling */
+    .chat-main,
+    .chat-sidebar-panel,
+    .help-modal-body,
+    .memory-manager-panel,
+    .sos-modal-card {
+        -webkit-overflow-scrolling: touch;
+    }
+}
+
+/* Code Blocks & Tables: Clean horizontal scroll on tablets without layout breaks */
+.assistant-bubble pre,
+.chat-bubble-assistant pre,
+.code-block-container,
+.code-block-wrapper,
+.table-wrapper,
+table {
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
 }
