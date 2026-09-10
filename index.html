@@ -20211,7 +20211,7 @@ function isWakeGreetingText(text) {
                 await handleImageGenerationRequest(frontendRoute.prompt || text);
                 return;
             }
-            if (frontendRoute.route === 'fast_simple') {
+            if (frontendRoute.route === 'fast_simple' && !frontendRoute.requiresSources) {
                 logRoutingDebug('processCommand -> fast_simple', text, {
                     selectedHandler: 'handleFastSimpleQuery',
                     frontendRoute
