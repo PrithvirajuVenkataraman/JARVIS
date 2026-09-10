@@ -147,6 +147,10 @@
             </div>
         </div>
         <div id="chat-sidebar-section-title" class="chat-sidebar-section-title">Recents</div>
+        <div class="sidebar-view-tabs" role="tablist" aria-label="Sidebar view options">
+            <button id="sidebar-tab-chats" type="button" class="sidebar-view-tab is-active" role="tab" aria-selected="true" onclick="setSidebarViewTab('chats')">Chats</button>
+            <button id="sidebar-tab-bookmarks" type="button" class="sidebar-view-tab" role="tab" aria-selected="false" onclick="setSidebarViewTab('bookmarks')">Bookmarks</button>
+        </div>
         <div id="chat-sidebar-list" class="chat-sidebar-list" role="list"></div>
     </aside>
     <div id="chat-session-menu" class="chat-session-menu hidden" role="menu" aria-label="Chat actions">
@@ -20546,11 +20550,13 @@ function isWakeGreetingText(text) {
                 return;
             }
 
-            // Mark as visited (for analytics) but don't hide suggestions
-            if (!localStorage.getItem('jarvis_has_visited')) {
-                localStorage.setItem('jarvis_has_visited', 'true');
-                localStorage.removeItem('unify_has_visited');
-            }
+            // Mark as visited (for analytics) safely
+            try {
+                if (!localStorage.getItem('jarvis_has_visited')) {
+                    localStorage.setItem('jarvis_has_visited', 'true');
+                    localStorage.removeItem('unify_has_visited');
+                }
+            } catch (_) {}
 
             const isWeatherQuery = isWeatherIntentText(lower);
 
