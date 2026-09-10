@@ -584,7 +584,7 @@ export function decideFrontendRoute(text, context = {}) {
 
     const res = {
         ...base,
-        route: 'fast_simple',
+        route: 'live_required',
         reason: entityIntent.category || 'stable_geography_or_general_fact',
         risk: 'low_risk',
         minimalThinking: true,
