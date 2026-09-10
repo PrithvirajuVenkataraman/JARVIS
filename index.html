@@ -521,6 +521,9 @@
     };
 })();
 
+const ENABLE_DUPLICATE_BAR = false;
+window.ENABLE_DUPLICATE_BAR = false;
+
 const APP_CONFIG = Object.freeze({
     version: "2.0.0",
     endpoints: Object.freeze({
@@ -11332,36 +11335,40 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 return;
             }
 
-            let interactiveFooter = bubble.querySelector('.assistant-interactive-footer');
-            if (!interactiveFooter) {
-                interactiveFooter = document.createElement('div');
-                interactiveFooter.className = 'assistant-interactive-footer';
-                bubble.appendChild(interactiveFooter);
+            if (window.ENABLE_DUPLICATE_BAR) {
+                let interactiveFooter = bubble.querySelector('.assistant-interactive-footer');
+                if (!interactiveFooter) {
+                    interactiveFooter = document.createElement('div');
+                    interactiveFooter.className = 'assistant-interactive-footer';
+                    bubble.appendChild(interactiveFooter);
+                }
+
+                const hasThought = Boolean(thoughtText);
+
+                interactiveFooter.innerHTML = `
+                    <div class="assistant-action-bar">
+                        <button type="button" class="assistant-action-btn" title="Copy answer" onclick="copyAssistantMessageText(this)">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"/></svg>
+                            <span>Copy</span>
+                        </button>
+                        ${hasThought ? `
+                        <button type="button" class="assistant-action-btn" title="Copy thought process" onclick="copyAssistantThoughtText(this)">
+                            <svg class="w-3.5 h-3.5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+                            <span>Thought</span>
+                        </button>` : ''}
+                        <button type="button" class="assistant-action-btn" title="Bookmark message" onclick="toggleBookmarkAssistantMessage(this)">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/></svg>
+                            <span>Bookmark</span>
+                        </button>
+                        <button type="button" class="assistant-action-btn" title="Read answer aloud" onclick="toggleSpeakAssistantMessage(this)">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/></svg>
+                            <span>Speak</span>
+                        </button>
+                    </div>
+                `;
+            } else {
+                bubble.querySelector('.assistant-interactive-footer')?.remove();
             }
-
-            const hasThought = Boolean(thoughtText);
-
-            interactiveFooter.innerHTML = `
-                <div class="assistant-action-bar">
-                    <button type="button" class="assistant-action-btn" title="Copy answer" onclick="copyAssistantMessageText(this)">
-                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"/></svg>
-                        <span>Copy</span>
-                    </button>
-                    ${hasThought ? `
-                    <button type="button" class="assistant-action-btn" title="Copy thought process" onclick="copyAssistantThoughtText(this)">
-                        <svg class="w-3.5 h-3.5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
-                        <span>Thought</span>
-                    </button>` : ''}
-                    <button type="button" class="assistant-action-btn" title="Bookmark message" onclick="toggleBookmarkAssistantMessage(this)">
-                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/></svg>
-                        <span>Bookmark</span>
-                    </button>
-                    <button type="button" class="assistant-action-btn" title="Read answer aloud" onclick="toggleSpeakAssistantMessage(this)">
-                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/></svg>
-                        <span>Speak</span>
-                    </button>
-                </div>
-            `;
         }
 
         function getAssistantMessageTextFromButton(button) {
@@ -20193,7 +20200,8 @@ function isWakeGreetingText(text) {
                 return;
             }
             const frontendRoute = decideFrontendRoute(text, {
-                turnSource: activeResponseRenderContext?.source || 'text'
+                turnSource: activeResponseRenderContext?.source || 'text',
+                contextResolution
             });
             logRoutingDebug('processCommand route_decision', text, { frontendRoute, contextResolution });
             if (frontendRoute.route === 'live_required' || frontendRoute.requiresSources) {
@@ -27367,6 +27375,21 @@ async function shareActiveChat() {
         if (select) select.value = active;
     } catch (_) {}
 })();
+
+// Mobile Layout & Dynamic Viewport Height Handler
+const setVH = () => {
+    const vh = window.innerHeight * 0.01;
+    document.documentElement.style.setProperty('--vh', `${vh}px`);
+    const headerEl = document.querySelector('.header') || document.querySelector('.app-header');
+    const inputEl = document.querySelector('.chat-input') || document.querySelector('.floating-input-bar');
+    const headerH = headerEl ? headerEl.offsetHeight : 64;
+    const inputH = inputEl ? inputEl.offsetHeight : 72;
+    document.documentElement.style.setProperty('--header-height', `${headerH}px`);
+    document.documentElement.style.setProperty('--input-height', `${inputH}px`);
+};
+window.addEventListener('DOMContentLoaded', setVH);
+window.addEventListener('resize', setVH);
+setVH();
 </script>
 
     <!-- Emergency SOS Contact Management Modal -->
