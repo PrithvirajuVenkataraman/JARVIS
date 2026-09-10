@@ -46,8 +46,15 @@ export default async function handler(req, res) {
     });
     if (security.handled) return;
 
-    return res.status(200).json({
-        ok: true,
-        diagnostics: buildDiagnosticsStatus()
-    });
+    try {
+        return res.status(200).json({
+            ok: true,
+            diagnostics: buildDiagnosticsStatus()
+        });
+    } catch (err) {
+        return res.status(500).json({
+            ok: false,
+            error: { code: 'diagnostics_error', message: err?.message || 'Failed to inspect diagnostics.' }
+        });
+    }
 }
