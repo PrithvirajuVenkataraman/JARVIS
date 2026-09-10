@@ -139,7 +139,7 @@ export function renderMarkdown(rawText = '', options = {}) {
     html = html.replace(/__CODE_BLOCK_(\d+)__/g, (_, idx) => {
         const block = codeBlocks[Number(idx)];
         if (!block) return '';
-        const blockId = `code_block_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+        const blockId = `code_block_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
         if (typeof window !== 'undefined') {
             window._jarvisCodeBlocks = window._jarvisCodeBlocks || {};
             window._jarvisCodeBlocks[blockId] = {
