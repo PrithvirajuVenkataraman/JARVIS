@@ -11884,13 +11884,15 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             wireInput('composer-photo-camera-input');
             wireInput('composer-file-input');
 
-            document.addEventListener('mousedown', (event) => {
+            const handleOutsideComposerMenu = (event) => {
                 const menuEl = document.getElementById('composer-actions-menu');
                 const trigger = document.getElementById('composer-plus-btn');
                 if (!menuEl || menuEl.classList.contains('hidden')) return;
                 if (menuEl.contains(event.target) || trigger?.contains(event.target)) return;
                 closeComposerActionsMenu();
-            });
+            };
+            document.addEventListener('pointerdown', handleOutsideComposerMenu);
+            document.addEventListener('mousedown', handleOutsideComposerMenu);
             document.addEventListener('keydown', (event) => {
                 if (event.key !== 'Escape') return;
                 closeComposerActionsMenu();
@@ -22869,6 +22871,20 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
             }
             return location;
         }
+        function createTimeoutSignal(ms) {
+            if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+                try {
+                    return AbortSignal.timeout(ms);
+                } catch (_) {}
+            }
+            if (typeof AbortController !== 'undefined') {
+                const controller = new AbortController();
+                setTimeout(() => controller.abort(), ms);
+                return controller.signal;
+            }
+            return undefined;
+        }
+
         async function getCurrentPositionAsync(options = {}) {
             // Layer 1: High-accuracy device GPS with FAST 1.5s timeout
             if (navigator.geolocation) {
@@ -22897,7 +22913,7 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
 
             // Layer 3: Instant Online IP Geolocation Fallback (fast 2.0s timeout)
             try {
-                const ipRes = await fetch('https://ipapi.co/json/', { signal: AbortSignal.timeout(2000) });
+                const ipRes = await fetch('https://ipapi.co/json/', { signal: createTimeoutSignal(2000) });
                 if (ipRes.ok) {
                     const data = await ipRes.json();
                     if (data && Number.isFinite(data.latitude) && Number.isFinite(data.longitude)) {
@@ -22956,7 +22972,7 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
             if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
             try {
                 const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(4)}&longitude=${lon.toFixed(4)}&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m`;
-                const res = await fetchFn(url, { signal: AbortSignal.timeout(3500) });
+                const res = await fetchFn(url, { signal: createTimeoutSignal(3500) });
                 if (!res.ok) return null;
                 const data = await res.json();
                 const current = data?.current || {};
@@ -22981,7 +22997,7 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
             try {
                 const query = `[out:json][timeout:4];(node["amenity"~"atm|bank|hospital|clinic|police|fuel"](around:${radiusMeters},${lat},${lon}););out 30;`;
                 const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
-                const res = await fetchFn(url, { signal: AbortSignal.timeout(4000) });
+                const res = await fetchFn(url, { signal: createTimeoutSignal(4000) });
                 if (res.ok) {
                     const data = await res.json();
                     const elements = Array.isArray(data?.elements) ? data.elements : [];
@@ -23198,7 +23214,7 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
                 const [reverseResult, weatherResult] = await Promise.allSettled([
                     fetch(
                         `${(window.APP_CONFIG || APP_CONFIG).externalUrls.nominatimReverse}?lat=${lat}&lon=${lon}&format=json`,
-                        { headers: { 'User-Agent': 'JARVISAssistant/1.0' }, signal: AbortSignal.timeout(4000) }
+                        { headers: { 'User-Agent': 'JARVISAssistant/1.0' }, signal: createTimeoutSignal(4000) }
                     ).then(r => r.ok ? r.json() : null).catch(() => null),
                     typeof suite.fetchLiveWeatherForCoords === 'function' ? suite.fetchLiveWeatherForCoords(lat, lon) : fetchLiveWeatherForCoords(lat, lon)
                 ]);
@@ -23305,7 +23321,7 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
                     try {
                         const revRes = await fetch(
                             `${(window.APP_CONFIG || APP_CONFIG).externalUrls.nominatimReverse}?lat=${lat}&lon=${lon}&format=json`,
-                            { headers: { 'User-Agent': 'JARVISAssistant/1.0' }, signal: AbortSignal.timeout(3500) }
+                            { headers: { 'User-Agent': 'JARVISAssistant/1.0' }, signal: createTimeoutSignal(3500) }
                         );
                         if (revRes.ok) {
                             const data = await revRes.json();
@@ -23347,11 +23363,18 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
             }
         }
 
+        function handleSosModalKeydown(event) {
+            if (event.key === 'Escape') {
+                closeEmergencyContactModal();
+            }
+        }
+
         function openEmergencyContactModal() {
             const modal = document.getElementById('sos-contact-modal');
             if (modal) {
                 modal.style.display = 'flex';
                 renderEmergencyContactsList();
+                document.addEventListener('keydown', handleSosModalKeydown);
             }
         }
 
@@ -23359,6 +23382,7 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
             const modal = document.getElementById('sos-contact-modal');
             if (modal) {
                 modal.style.display = 'none';
+                document.removeEventListener('keydown', handleSosModalKeydown);
             }
         }
 
@@ -26342,17 +26366,45 @@ if (typeof window !== 'undefined') {
 function copyCodeBlock(btn, blockId) {
     const data = window._jarvisCodeBlocks?.[blockId];
     if (!data || !data.code) return;
-    try {
-        navigator.clipboard.writeText(data.code).then(() => {
-            const span = btn.querySelector('span');
-            if (span) {
-                const prev = span.innerText;
-                span.innerText = 'Copied!';
-                setTimeout(() => { span.innerText = prev; }, 1600);
-            }
-            triggerJarvisHaptic(10);
-        });
-    } catch (_) {}
+    const updateBtn = () => {
+        const span = btn?.querySelector('span');
+        if (span) {
+            const prev = span.innerText;
+            span.innerText = 'Copied!';
+            setTimeout(() => { span.innerText = prev; }, 1600);
+        }
+        triggerJarvisHaptic(10);
+    };
+
+    if (navigator?.clipboard?.writeText) {
+        navigator.clipboard.writeText(data.code)
+            .then(updateBtn)
+            .catch(() => {
+                try {
+                    const ta = document.createElement('textarea');
+                    ta.value = data.code;
+                    ta.style.position = 'fixed';
+                    ta.style.opacity = '0';
+                    document.body.appendChild(ta);
+                    ta.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(ta);
+                    updateBtn();
+                } catch (_) {}
+            });
+    } else {
+        try {
+            const ta = document.createElement('textarea');
+            ta.value = data.code;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+            updateBtn();
+        } catch (_) {}
+    }
 }
 
 function getHistoryStorageKey() {
@@ -27650,7 +27702,7 @@ setVH();
 </script>
 
     <!-- Emergency SOS Contact Management Modal -->
-    <div id="sos-contact-modal" class="sos-modal-overlay" style="display:none;">
+    <div id="sos-contact-modal" class="sos-modal-overlay" style="display:none;" onclick="if (event.target === this) closeEmergencyContactModal()">
         <div class="sos-modal-card">
             <div class="sos-modal-header">
                 <h3 class="sos-modal-title">🚨 Emergency Contacts (SOS)</h3>
