@@ -6129,7 +6129,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                                     <h3 class="font-bold">Data & Privacy</h3>
                                     <p class="text-xs">Manage locally cached session memory and history records.</p>
                                 </div>
-                                <button type="button" class="memory-action-btn" style="color: #ef4444;" onclick="if (confirm('Delete all local chat history and saved data?')) deleteAllLocalDataNow()">Clear All Data</button>
+                                <button type="button" class="memory-action-btn" style="color: #ef4444;" onclick="promptClearAllDataConfirmation() /* deleteAllLocalDataNow() */">Clear All Data</button>
                             </div>
                             <div id="privacy-data-summary" class="text-xs text-zinc-400 mt-2 space-y-1">
                                 ${typeof buildPrivacyDataSummaryHtml === 'function' ? buildPrivacyDataSummaryHtml() : ''}
@@ -19926,6 +19926,147 @@ function refreshPrivacyDataSummary() {
     if (panel) panel.innerHTML = buildPrivacyDataSummaryHtml();
 }
 
+function closeCustomConfirmDialog() {
+    const modal = document.getElementById('custom-confirm-modal');
+    if (!modal) return;
+    const returnFocusEl = modal.__returnFocusEl;
+    modal.classList.add('closing');
+    setTimeout(() => {
+        modal.remove();
+        if (returnFocusEl && typeof returnFocusEl.focus === 'function') {
+            try { returnFocusEl.focus(); } catch (_) {}
+        }
+    }, 160);
+}
+
+function showCustomConfirmDialog(options = {}) {
+    closeCustomConfirmDialog();
+
+    const {
+        title = 'Are you sure?',
+        message = 'This action cannot be undone.',
+        confirmText = 'Confirm',
+        cancelText = 'Cancel',
+        isDestructive = true,
+        stats = [],
+        onConfirm = () => {},
+        onCancel = () => {}
+    } = options;
+
+    const returnFocusEl = document.activeElement;
+    const modal = document.createElement('div');
+    modal.id = 'custom-confirm-modal';
+    modal.className = 'custom-confirm-backdrop';
+    modal.setAttribute('role', 'alertdialog');
+    modal.setAttribute('aria-modal', 'true');
+    modal.setAttribute('aria-labelledby', 'confirm-dialog-title');
+    modal.setAttribute('aria-describedby', 'confirm-dialog-desc');
+    modal.__returnFocusEl = returnFocusEl;
+
+    const statsHtml = Array.isArray(stats) && stats.length > 0
+        ? `<div class="custom-confirm-stats">
+            ${stats.map(s => `
+                <div class="custom-confirm-stat-item">
+                    <span class="stat-label">${escapeHtml(s.label || '')}:</span>
+                    <span class="stat-value">${escapeHtml(String(s.count || s.value || ''))}</span>
+                </div>
+            `).join('')}
+           </div>`
+        : '';
+
+    modal.innerHTML = `
+        <div class="custom-confirm-card" role="document">
+            <div class="custom-confirm-icon-wrapper ${isDestructive ? 'danger' : ''}">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M3 6h18"></path>
+                    <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
+                    <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path>
+                    <line x1="10" y1="11" x2="10" y2="17"></line>
+                    <line x1="14" y1="11" x2="14" y2="17"></line>
+                </svg>
+            </div>
+            <div class="custom-confirm-content">
+                <h3 id="confirm-dialog-title" class="custom-confirm-title">${escapeHtml(title)}</h3>
+                <p id="confirm-dialog-desc" class="custom-confirm-message">${escapeHtml(message)}</p>
+                ${statsHtml}
+            </div>
+            <div class="custom-confirm-actions">
+                <button type="button" class="custom-confirm-cancel-btn" id="confirm-dialog-cancel">${escapeHtml(cancelText)}</button>
+                <button type="button" class="custom-confirm-proceed-btn ${isDestructive ? 'danger' : ''}" id="confirm-dialog-confirm">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M3 6h18"></path>
+                        <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
+                    </svg>
+                    ${escapeHtml(confirmText)}
+                </button>
+            </div>
+        </div>
+    `;
+
+    const cancelBtn = modal.querySelector('#confirm-dialog-cancel');
+    const confirmBtn = modal.querySelector('#confirm-dialog-confirm');
+
+    cancelBtn.addEventListener('click', () => {
+        closeCustomConfirmDialog();
+        if (typeof onCancel === 'function') onCancel();
+    });
+
+    confirmBtn.addEventListener('click', () => {
+        closeCustomConfirmDialog();
+        if (typeof onConfirm === 'function') onConfirm();
+    });
+
+    modal.addEventListener('mousedown', (e) => {
+        if (e.target === modal) {
+            closeCustomConfirmDialog();
+            if (typeof onCancel === 'function') onCancel();
+        }
+    });
+
+    modal.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            e.stopPropagation();
+            closeCustomConfirmDialog();
+            if (typeof onCancel === 'function') onCancel();
+            return;
+        }
+        if (e.key === 'Tab') {
+            if (e.shiftKey && document.activeElement === cancelBtn) {
+                e.preventDefault();
+                confirmBtn.focus();
+            } else if (!e.shiftKey && document.activeElement === confirmBtn) {
+                e.preventDefault();
+                cancelBtn.focus();
+            }
+        }
+    });
+
+    document.body.appendChild(modal);
+
+    requestAnimationFrame(() => {
+        cancelBtn.focus();
+    });
+}
+
+function promptClearAllDataConfirmation() {
+    const memoryCount = Object.keys(memoryStore || {}).filter(key => key !== 'name').length;
+    const historyCount = Array.isArray(conversationHistory) ? conversationHistory.length : 0;
+    showCustomConfirmDialog({
+        title: 'Delete all local chat history and saved data?',
+        message: 'This will permanently remove your stored conversations, learned memory items, and locally cached sessions from this browser. This action cannot be undone.',
+        confirmText: 'Delete All Data',
+        cancelText: 'Cancel',
+        isDestructive: true,
+        stats: [
+            { label: 'Chat history', count: `${historyCount} record${historyCount === 1 ? '' : 's'}` },
+            { label: 'Session memory', count: `${memoryCount} item${memoryCount === 1 ? '' : 's'}` }
+        ],
+        onConfirm: () => {
+            deleteAllLocalDataNow();
+        }
+    });
+}
 
         function deleteAllLocalDataNow() {
             try {
