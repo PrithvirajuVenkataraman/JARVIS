@@ -2665,10 +2665,20 @@ function evaluateWebRagEvidence(query, results = []) {
     const strong = effectiveEvidence.filter(isStrongRagEvidenceSource);
     const dated = effectiveEvidence.filter(item => String(item.date || item.startDate || item.endDate || '').trim());
     const conflict = hasObviousRagConflict(effectiveEvidence, query);
-    const confidence = Math.min(0.99, (strong.length ? 0.74 : 0.6) + (domains.length >= 2 ? 0.2 : 0.1) + (dated.length ? 0.05 : 0));
+    const hasSingleAuthoritative = strong.length >= 1 && evidence.length >= 1;
+    const hasConfidentSingleSource = evidence.length >= 1 && (
+        hasSingleAuthoritative ||
+        evidence[0].evidenceLevel === 'structured_claim' ||
+        Boolean(evidence[0].trusted) ||
+        Boolean(evidence[0].qualitySignals?.includes('google_search_grounding')) ||
+        Boolean(evidence[0].qualitySignals?.includes('wikipedia_summary')) ||
+        (evidence[0].description && evidence[0].description.length >= 60)
+    );
+    const confidence = Math.min(0.99, (hasConfidentSingleSource ? 0.82 : 0.6) + (domains.length >= 2 ? 0.15 : 0.05) + (dated.length ? 0.05 : 0));
     
     const pass = !conflict && (
         (explicitEvidence.length >= 1) ||
+        hasConfidentSingleSource ||
         (evidence.length >= 2) ||
         (strong.length >= 1 && evidence.length >= 1)
     );
@@ -4100,7 +4110,7 @@ export const __test = {
     classifyRetrievalIntentWithGemini,
     buildDeterministicSearchQueries,
     buildWebRagQueryPhases,
-    evaluateWebRagEvidence, 
+    evaluateWebRagEvidence,
     isCurrentTopicSearchQuery,
     isRelatedCurrentTopicSource,
     isRelatedToQuery,
