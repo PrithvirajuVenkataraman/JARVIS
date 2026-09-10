@@ -299,6 +299,11 @@ console.log('--- Section 7: Dynamic Vector Frontend Routing (app/frontend-routin
     assert.equal(liveRoute.route, 'live_required');
     assert.equal(liveRoute.requiresSources, true);
 
+    const heuristicLiveRoute = decideFrontendRoute('What was the price of Bitcoin on 2023-03-15?');
+    assert.equal(heuristicLiveRoute.route, 'live_required');
+    assert.ok(heuristicLiveRoute.requiresSources);
+    assert.equal(heuristicLiveRoute.reason, 'heuristic_live_required');
+
     const safetyRoute = decideFrontendRoute('how much medicine dosage should I take');
     assert.equal(safetyRoute.route, 'safety_sensitive');
     console.log('  [PASS] Frontend routing accurately classifies vectors, casual queries, facts, and live search');
