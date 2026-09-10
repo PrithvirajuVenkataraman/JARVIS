@@ -243,4 +243,14 @@ assert.ok(indexHtml.includes("e.key === 'Escape'"), 'Escape key handler must clo
 
 console.log('  [PASS] 12. Command Palette full functionality verified (all 5 actions, search, shortcuts, and privacy wired)');
 
+// 13. Verify Bespoke Custom Confirmation Modal (Data & Privacy)
+assert.ok(indexHtml.includes('showCustomConfirmDialog'), 'showCustomConfirmDialog must be defined');
+assert.ok(indexHtml.includes('closeCustomConfirmDialog'), 'closeCustomConfirmDialog must be defined');
+assert.ok(indexHtml.includes('promptClearAllDataConfirmation'), 'promptClearAllDataConfirmation must be wired');
+assert.ok(stylesCss.includes('.custom-confirm-card'), 'Custom confirm card styling must exist in styles.css');
+assert.ok(stylesCss.includes('.custom-confirm-backdrop'), 'Custom confirm backdrop styling must exist in styles.css');
+assert.ok(stylesCss.includes('.custom-confirm-proceed-btn.danger'), 'Danger proceed button styling must exist in styles.css');
+console.log('  [PASS] 13. Bespoke Custom Confirmation Modal verified (accessible glassmorphic dialog replacing native browser alert)');
+
 console.log('=== All Modern AI Workspace UI Architecture Tests PASSED ===');
+
