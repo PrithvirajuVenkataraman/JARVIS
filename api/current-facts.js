@@ -36,32 +36,41 @@ export default async function handler(req, res) {
     });
     if (guard.handled) return;
 
-    const query = normalizeQuery(req.body?.query || req.body?.q || req.body?.message || '');
-    if (!query) {
-        return res.status(400).json({
+    try {
+        const query = normalizeQuery(req.body?.query || req.body?.q || req.body?.message || '');
+        if (!query) {
+            return res.status(400).json({
+                success: false,
+                resolved: false,
+                error: { code: 'invalid_request', message: 'Query is required.' },
+                sources: []
+            });
+        }
+
+        const sources = rankCurrentFactItems(query, searchItems(query, { limit: 8 }));
+        if (!sources.length) {
+            return res.status(200).json({
+                ...CACHE_EMPTY_RESPONSE,
+                query
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            disabled: false,
+            resolved: true,
+            query,
+            answer: buildCachedAnswer(query, sources),
+            sources
+        });
+    } catch (err) {
+        return res.status(500).json({
             success: false,
             resolved: false,
-            error: { code: 'invalid_request', message: 'Query is required.' },
+            error: { code: 'internal_error', message: err?.message || 'Internal server error.' },
             sources: []
         });
     }
-
-    const sources = rankCurrentFactItems(query, searchItems(query, { limit: 8 }));
-    if (!sources.length) {
-        return res.status(200).json({
-            ...CACHE_EMPTY_RESPONSE,
-            query
-        });
-    }
-
-    return res.status(200).json({
-        success: true,
-        disabled: false,
-        resolved: true,
-        query,
-        answer: buildCachedAnswer(query, sources),
-        sources
-    });
 }
 
 export function rankCurrentFactItems(query, items = []) {
