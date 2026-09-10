@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
     <meta name="theme-color" content="#07090e">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -25642,7 +25642,8 @@ function toggleChatSidebar() {
     const panel = document.getElementById('chat-sidebar-panel');
     const backdrop = document.getElementById('chat-sidebar-backdrop');
     const toggle = document.getElementById('chat-sidebar-toggle');
-    const isOpen = panel?.classList.contains('is-open');
+    const isDocked = document.body.classList.contains('sidebar-docked');
+    const isOpen = panel?.classList.contains('is-open') || isDocked;
     if (isOpen) {
         closeChatSidebar();
         return;
@@ -25651,8 +25652,13 @@ function toggleChatSidebar() {
     initModelSelector();
     panel?.classList.add('is-open');
     panel?.setAttribute('aria-hidden', 'false');
-    backdrop?.classList.remove('hidden');
     toggle?.setAttribute('aria-expanded', 'true');
+    if (window.innerWidth >= 1024) {
+        document.body.classList.add('sidebar-docked');
+        backdrop?.classList.add('hidden');
+    } else {
+        backdrop?.classList.remove('hidden');
+    }
 }
 
 function closeChatSidebar() {
@@ -25662,6 +25668,7 @@ function closeChatSidebar() {
     }
     panel?.classList.remove('is-open');
     panel?.setAttribute('aria-hidden', 'true');
+    document.body.classList.remove('sidebar-docked');
     document.getElementById('chat-sidebar-backdrop')?.classList.add('hidden');
     document.getElementById('chat-sidebar-toggle')?.setAttribute('aria-expanded', 'false');
     closeChatSessionMenu();
@@ -27604,19 +27611,35 @@ async function shareActiveChat() {
     } catch (_) {}
 })();
 
-// Mobile Layout & Dynamic Viewport Height Handler
+// Dynamic Viewport Height & Tablet/Mobile Layout Handler
 const setVH = () => {
-    const vh = window.innerHeight * 0.01;
+    const vv = window.visualViewport;
+    const height = vv ? vv.height : window.innerHeight;
+    const vh = height * 0.01;
     document.documentElement.style.setProperty('--vh', `${vh}px`);
     const headerEl = document.querySelector('.header') || document.querySelector('.app-header');
     const inputEl = document.querySelector('.chat-input') || document.querySelector('.floating-input-bar');
-    const headerH = headerEl ? headerEl.offsetHeight : 64;
+    const headerH = headerEl ? headerEl.offsetHeight : 54;
     const inputH = inputEl ? inputEl.offsetHeight : 72;
     document.documentElement.style.setProperty('--header-height', `${headerH}px`);
     document.documentElement.style.setProperty('--input-height', `${inputH}px`);
+    // Undock sidebar if viewport drops below 1024px (e.g. tablet rotated to portrait)
+    if (window.innerWidth < 1024 && document.body.classList.contains('sidebar-docked')) {
+        document.body.classList.remove('sidebar-docked');
+        const backdrop = document.getElementById('chat-sidebar-backdrop');
+        const panel = document.getElementById('chat-sidebar-panel');
+        if (panel?.classList.contains('is-open')) {
+            backdrop?.classList.remove('hidden');
+        }
+    }
 };
 window.addEventListener('DOMContentLoaded', setVH);
 window.addEventListener('resize', setVH);
+window.addEventListener('orientationchange', setVH);
+if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', setVH);
+    window.visualViewport.addEventListener('scroll', setVH);
+}
 setVH();
 </script>
 
