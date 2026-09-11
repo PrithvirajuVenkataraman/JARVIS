@@ -5272,6 +5272,40 @@ body:not(.dark) .thinking-model-tag.is-failover {
     color: #b45309;
 }
 
+.assistant-model-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 0.70rem;
+    padding: 0.12rem 0.5rem;
+    border-radius: 9999px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: #94a3b8;
+    font-weight: 500;
+    margin-right: 0.35rem;
+    white-space: nowrap;
+    user-select: none;
+}
+
+body:not(.dark) .assistant-model-badge {
+    background: rgba(0, 0, 0, 0.04);
+    border-color: rgba(0, 0, 0, 0.08);
+    color: #64748b;
+}
+
+.assistant-model-badge.is-failover {
+    background: rgba(245, 158, 11, 0.12);
+    border-color: rgba(245, 158, 11, 0.3);
+    color: #fbbf24;
+}
+
+body:not(.dark) .assistant-model-badge.is-failover {
+    background: rgba(217, 119, 6, 0.08);
+    border-color: rgba(217, 119, 6, 0.2);
+    color: #b45309;
+}
+
 .thinking-telemetry-tag {
     display: none !important;
 }
