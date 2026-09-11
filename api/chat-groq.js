@@ -2105,7 +2105,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                         images,
                         temperature: temp,
                         maxTokens,
-                        timeoutMs: clampInt(lengthPolicy?.timeoutMs, FAST_FAILOVER_TIMEOUT_MS, 1000, STREAM_MODEL_FETCH_TIMEOUT_MS),
+                        timeoutMs: clampInt(lengthPolicy?.timeoutMs, STREAM_MODEL_FETCH_TIMEOUT_MS, 1000, STREAM_MODEL_FETCH_TIMEOUT_MS),
                         onDelta,
                         options
                     });
@@ -2173,7 +2173,26 @@ const edgeResponseCache = new EdgeSemanticLruCache();
 
     async function streamGroqModel({ apiKey, model, prompt, images = [], temperature, maxTokens, timeoutMs, onDelta, options = {} }) {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), timeoutMs);
+        const effectiveTimeoutMs = Math.max(Number(timeoutMs) || 0, STREAM_MODEL_FETCH_TIMEOUT_MS);
+        const maxStreamDurationMs = 58_000;
+        const idleChunkTimeoutMs = 15_000;
+
+        let idleTimer = null;
+        const resetIdleTimer = () => {
+            if (idleTimer) clearTimeout(idleTimer);
+            idleTimer = setTimeout(() => {
+                controller.abort();
+            }, idleChunkTimeoutMs);
+        };
+
+        let initialTimer = setTimeout(() => {
+            controller.abort();
+        }, effectiveTimeoutMs);
+
+        const ceilingTimer = setTimeout(() => {
+            controller.abort();
+        }, maxStreamDurationMs);
+
         try {
             let messages = Array.isArray(options?.structuredMessages) && options.structuredMessages.length > 0
                 ? options.structuredMessages.map(m => ({ ...m }))
@@ -2212,6 +2231,12 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             let text = '';
             let inReasoning = false;
             await readSseStream(response.body, payload => {
+                if (initialTimer) {
+                    clearTimeout(initialTimer);
+                    initialTimer = null;
+                }
+                resetIdleTimer();
+
                 const deltaObj = payload?.choices?.[0]?.delta;
                 const reasoning = String(deltaObj?.reasoning || '');
                 const content = String(deltaObj?.content || '');
@@ -2247,13 +2272,34 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             recordKeyFailure(apiKey, false);
             return { ok: false };
         } finally {
-            clearTimeout(timeout);
+            if (initialTimer) clearTimeout(initialTimer);
+            if (idleTimer) clearTimeout(idleTimer);
+            clearTimeout(ceilingTimer);
         }
     }
 
     async function streamGeminiModel({ apiKey, model, prompt, images = [], temperature, maxTokens, timeoutMs, onDelta, options = {} }) {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), timeoutMs);
+        const effectiveTimeoutMs = Math.max(Number(timeoutMs) || 0, STREAM_MODEL_FETCH_TIMEOUT_MS);
+        const maxStreamDurationMs = 58_000;
+        const idleChunkTimeoutMs = 15_000;
+
+        let idleTimer = null;
+        const resetIdleTimer = () => {
+            if (idleTimer) clearTimeout(idleTimer);
+            idleTimer = setTimeout(() => {
+                controller.abort();
+            }, idleChunkTimeoutMs);
+        };
+
+        let initialTimer = setTimeout(() => {
+            controller.abort();
+        }, effectiveTimeoutMs);
+
+        const ceilingTimer = setTimeout(() => {
+            controller.abort();
+        }, maxStreamDurationMs);
+
         try {
             const parts = [{ text: prompt }];
             if (Array.isArray(images) && images.length) {
@@ -2315,6 +2361,12 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             let text = '';
             let inReasoning = false;
             await readSseStream(response.body, payload => {
+                if (initialTimer) {
+                    clearTimeout(initialTimer);
+                    initialTimer = null;
+                }
+                resetIdleTimer();
+
                 const parts = Array.isArray(payload?.candidates?.[0]?.content?.parts)
                     ? payload.candidates[0].content.parts
                     : [];
@@ -2354,7 +2406,9 @@ const edgeResponseCache = new EdgeSemanticLruCache();
         } catch (_) {
             return { ok: false };
         } finally {
-            clearTimeout(timeout);
+            if (initialTimer) clearTimeout(initialTimer);
+            if (idleTimer) clearTimeout(idleTimer);
+            clearTimeout(ceilingTimer);
         }
     }
 
