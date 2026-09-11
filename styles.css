@@ -7998,9 +7998,17 @@ body:not(.dark) .next-step-title {
     }
 
     /* Remove outer circle from plus button on mobile — keep only the icon */
-    .composer-plus-btn {
-        border: none !important;
+    /* border-width:0 is immune to the global *{border-color:!important} override */
+    #composer-plus-btn,
+    #composer-plus-btn:hover,
+    #composer-plus-btn:focus,
+    #composer-plus-btn:active,
+    #composer-plus-btn.is-open {
+        border-width: 0 !important;
+        border-style: none !important;
+        outline: none !important;
         background: transparent !important;
+        background-color: transparent !important;
         box-shadow: none !important;
         border-radius: 0 !important;
     }
@@ -8193,7 +8201,7 @@ body:not(.dark) .next-step-title {
     }
 
     /* Native momentum touch scrolling */
-    .chat-main, 
+    .chat-main,
     .chat-sidebar-panel,
     .help-modal-body,
     .memory-manager-panel,
