@@ -465,9 +465,9 @@ async function getInstantFactHelper() {
             : (String(userSelectedModel || '').startsWith('gemini-') ? String(userSelectedModel) : '');
         const visionModels = [
             'gemini-3.7-flash',
+            'gemini-2.0-flash',
             'gemini-2.5-pro',
             'gemini-2.5-flash',
-            'gemini-2.0-flash',
             'gemini-1.5-flash',
             'gemini-2.5-flash-lite'
         ];
@@ -2351,6 +2351,11 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                     maxOutputTokens: maxTokens
                 }
             };
+            if (model.includes('3.7') && Array.isArray(images) && images.length > 0) {
+                reqBody.generationConfig.thinkingConfig = {
+                    thinkingBudget: 2048
+                };
+            }
             if (systemInstruction) {
                 reqBody.system_instruction = systemInstruction;
             }
@@ -2406,11 +2411,22 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 text += '\n</think>\n';
                 onDelta('\n</think>\n');
             }
-            const cleanContent = text
+            let cleanContent = text
                 .replace(/<think>[\s\S]*?<\/think>/gi, '')
                 .replace(/^<think>[\s\S]*$/gi, '')
                 .replace(/<\/?think>/gi, '')
                 .trim();
+
+            if (!cleanContent && text.includes('<think>')) {
+                const thoughtMatch = text.match(/<think>([\s\S]*?)<\/think>/i);
+                const thoughtText = (thoughtMatch ? thoughtMatch[1] : text.replace(/<\/?think>/gi, '')).trim();
+                if (thoughtText.length > 15) {
+                    cleanContent = thoughtText;
+                    text = `${text}\n\n${thoughtText}`;
+                    onDelta(`\n\n${thoughtText}`);
+                }
+            }
+
             return cleanContent.length > 0
                 ? { ok: true, provider: 'gemini', modelUsed: model, text }
                 : { ok: false };
