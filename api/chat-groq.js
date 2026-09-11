@@ -238,7 +238,7 @@ async function getInstantFactHelper() {
     const FAST_FAILOVER_TIMEOUT_MS = 3_500;
     const INTERNAL_FETCH_TIMEOUT_MS = 4_000;
     const FETCH_RETRIES = 0;
-    const REASONING_TOKEN_ALLOWANCE = 1024;
+    const REASONING_TOKEN_ALLOWANCE = 4096;
     const CHAT_ROUTER_MODE = String(process.env.CHAT_ROUTER_MODE || 'strict_single_pass').trim().toLowerCase();
     const USER_SELECTABLE_MODELS = new Set([
         'openai/gpt-oss-120b',
@@ -371,11 +371,11 @@ async function getInstantFactHelper() {
                 'openai/gpt-oss-120b',
                 configured,
                 'llama-3.3-70b-versatile',
-                'deepseek-r1-distill-llama-70b',
-                'qwen-2.5-coder-32b',
                 'qwen/qwen3.6-27b',
+                'qwen-2.5-coder-32b',
                 'openai/gpt-oss-20b',
-                'llama-3.1-8b-instant'
+                'llama-3.1-8b-instant',
+                'deepseek-r1-distill-llama-70b'
             ];
         } else if (preferSpeed || tier === 'instant') {
             // Instant Tier: Sub-200ms TTFT and >200 tokens/sec
@@ -2263,10 +2263,17 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 text += '\n</think>\n';
                 onDelta('\n</think>\n');
             }
-            if (text.trim()) {
+            const cleanContent = text
+                .replace(/<think>[\s\S]*?<\/think>/gi, '')
+                .replace(/^<think>[\s\S]*$/gi, '')
+                .replace(/<\/?think>/gi, '')
+                .trim();
+            if (cleanContent.length > 0) {
                 recordKeySuccess(apiKey);
                 return { ok: true, provider: 'groq', modelUsed: model, text };
             }
+            // If the model solely emitted reasoning thoughts without generating an answer, cascade to next model
+            recordKeyFailure(apiKey, false);
             return { ok: false };
         } catch (_) {
             recordKeyFailure(apiKey, false);
@@ -2400,7 +2407,12 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 text += '\n</think>\n';
                 onDelta('\n</think>\n');
             }
-            return text.trim()
+            const cleanContent = text
+                .replace(/<think>[\s\S]*?<\/think>/gi, '')
+                .replace(/^<think>[\s\S]*$/gi, '')
+                .replace(/<\/?think>/gi, '')
+                .trim();
+            return cleanContent.length > 0
                 ? { ok: true, provider: 'gemini', modelUsed: model, text }
                 : { ok: false };
         } catch (_) {
