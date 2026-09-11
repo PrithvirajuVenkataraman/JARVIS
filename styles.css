@@ -8193,7 +8193,7 @@ body:not(.dark) .next-step-title {
     }
 
     /* Native momentum touch scrolling */
-    .chat-main,
+    .chat-main, 
     .chat-sidebar-panel,
     .help-modal-body,
     .memory-manager-panel,
