@@ -69,7 +69,8 @@ export async function ingestAllForMessage(attachments = [], userText = '') {
     let anyReadable = false;
 
     for (const attachment of items) {
-        if (isImageAttachment(attachment)) {
+        const isImg = isImageAttachment(attachment);
+        if (isImg) {
             const base64 = await resolveAttachmentBase64(attachment).catch(() => '');
             if (base64) {
                 anyReadable = true;
@@ -78,25 +79,25 @@ export async function ingestAllForMessage(attachments = [], userText = '') {
                     mimeType: normalizeImageMime(attachment.mimeType, attachment.name),
                     base64
                 });
-                methods.push({ name: attachment.name, method: 'single_pass_native_image', provider: 'native', ok: true });
-                sections.push(`[Attached Image: ${attachment.name}]`);
-                continue;
             }
         }
 
         const result = await ingestAttachmentWithFallback(attachment);
         attachment.extractedText = String(result.text || '').trim();
-        attachment.ocrMethod = result.method || '';
+        attachment.ocrMethod = result.method || (isImg ? 'vision_ocr' : '');
         methods.push({
             name: attachment.name,
-            method: result.method,
-            provider: result.provider,
-            ok: result.ok
+            method: result.method || (isImg ? 'single_pass_native_image' : 'none'),
+            provider: result.provider || (isImg ? 'native' : 'none'),
+            ok: Boolean(result.ok || (isImg && imagePayloads.length))
         });
         const header = `### ${attachment.name} (${attachment.mimeType || 'unknown'})`;
         if (result.text && hasUsefulExtractedText(result.text)) {
             anyReadable = true;
             sections.push(`${header}\nExtraction: ${result.method}\n\n${clipText(result.text)}`);
+        } else if (isImg && imagePayloads.length) {
+            anyReadable = true;
+            sections.push(`[Attached Image: ${attachment.name}]`);
         } else {
             sections.push(`${header}\nExtraction failed or returned too little readable text. ${result.message || 'No readable text found.'}`);
         }
