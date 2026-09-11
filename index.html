@@ -576,7 +576,7 @@ const APP_CONFIG = Object.freeze({
         verificationBudgetMs: 3500,
         verificationSearchMs: 5500,
         verificationExtractMs: 3000,
-        thinkingCeilingMs: 10000,
+        thinkingCeilingMs: 55000,
         geolocationMs: 6000,
         geolocationCacheMs: 300000,
         visionContextTtlMs: 600000,
@@ -2108,10 +2108,11 @@ function addVisibleInputHistory(text) {
     }
 }
 
-function retryLastRequest() { 
+function retryLastRequest(explicitMessage) { 
     document.getElementById('response-recovery-card')?.remove();
-    // 1. Resolve the prompt to retry, with comprehensive fallbacks
-    let last = getLastVisibleUserMessage();
+    document.querySelectorAll('.stream-interrupted-banner').forEach(el => el.remove());
+    // 1. Resolve the prompt to retry, prioritizing explicitMessage with comprehensive fallbacks
+    let last = (typeof explicitMessage === 'string' && explicitMessage.trim()) ? explicitMessage.trim() : getLastVisibleUserMessage();
     if (!last && Array.isArray(conversationHistory) && conversationHistory.length) {
         const lastTurn = [...conversationHistory].reverse().find(item => item?.user && !isInternalPromptText(item.user));
         if (lastTurn?.user) last = String(lastTurn.user).trim();
@@ -2129,10 +2130,13 @@ function retryLastRequest() {
         return;
     }
 
-    // 2. Clear any stuck processing state or aborted controller
-    if (activeRequestController?.signal?.aborted) {
+    // 2. Clear any stuck processing state or in-flight controller so retry is never blocked
+    if (activeRequestController) {
+        try { activeRequestController.abort('retry'); } catch (_) {}
         clearActiveRequest(activeRequestController);
     }
+    regenerationInProgress = false;
+    isProcessing = false;
     resetAssistantProcessingState();
 
     // 3. Bypass duplicate-submit debounce window (so fast clicks on Retry are never blocked)
@@ -4901,8 +4905,9 @@ async function streamChatCompletion(payload, options = {}) {
                 firstTokenAt = performance.now();
             }
             tokenChunkCount += Math.max(1, Math.round(delta.length / 4));
-            // 10-second thinking ceiling: if the model is still outputting thoughts after 10s, auto-close thinking
-            if (!thinkingCapped && (performance.now() - streamStartedAt) >= 10000) {
+            // Dynamic thinking ceiling: allow models to reason up to full stream duration ceiling
+            const thinkingCeiling = Number((window.APP_CONFIG || APP_CONFIG)?.timeouts?.thinkingCeilingMs) || 55000;
+            if (!thinkingCapped && (performance.now() - streamStartedAt) >= thinkingCeiling) {
                 if (accumulated.includes('<think>') && !accumulated.includes('</think>')) {
                     thinkingCapped = true;
                     accumulated += '\n</think>\n';
@@ -8003,11 +8008,15 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             return;
         }
 
-        function buildAssistantActionsHtml(messageId, canRegenerate) {
+        function buildAssistantActionsHtml(messageId, canRegenerate, modelInfo = null) {
             const safeId = escapeHtml(messageId);
             const regenAttr = canRegenerate ? '' : 'disabled aria-disabled="true"';
+            const badgeHtml = modelInfo && modelInfo.label
+                ? `<span class="assistant-model-badge ${modelInfo.isFailover ? 'is-failover' : ''}" title="${escapeHtml(modelInfo.label)}">${escapeHtml(modelInfo.label)}</span>`
+                : '';
             return `
                 <div class="assistant-action-row" data-message-id="${safeId}">
+                    ${badgeHtml}
                     <button type="button" class="assistant-action-icon" data-assistant-action="copy" onclick="return handleAssistantActionInline(event, '${safeId}', 'copy')" title="Copy" aria-label="Copy">${getActionIconSvg('copy')}</button>
                     <button type="button" class="assistant-action-icon" data-assistant-action="save_memory" onclick="return handleAssistantActionInline(event, '${safeId}', 'save_memory')" title="Save to memory" aria-label="Save to memory">${getActionIconSvg('memory')}</button>
                     <button type="button" class="assistant-action-icon" data-assistant-action="tts_speak" onclick="return handleAssistantActionInline(event, '${safeId}', 'tts_speak')" title="Read aloud" aria-label="Read aloud">${getActionIconSvg('speaker')}</button>
@@ -8466,19 +8475,14 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 return;
             }
 
-            // Clear any stale/already aborted controller
-            if (activeRequestController?.signal?.aborted) {
+            // Clear any stale or in-flight controller so regenerate is never blocked
+            if (activeRequestController) {
+                try { activeRequestController.abort('regenerate'); } catch (_) {}
                 clearActiveRequest(activeRequestController);
             }
-            // Auto-heal stuck processing flag if no request is actively in flight
-            if (!activeRequestController && isAssistantProcessing()) {
-                resetAssistantProcessingState();
-            }
-
-            if (regenerationInProgress || activeRequestController || isProcessing || isAssistantProcessing()) {
-                showTemporaryMessage('Another response is already being generated. Please wait a moment.');
-                return;
-            }
+            regenerationInProgress = false;
+            isProcessing = false;
+            resetAssistantProcessingState();
 
             if (!turn) {
                 turn = {
@@ -9195,18 +9199,21 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
         function formatModelDisplayName(model, provider, failover = false) {
             const raw = String(model || '').trim().toLowerCase();
             const prov = String(provider || '').trim().toLowerCase();
-            if (!raw) return null;
+            if (!raw || raw === 'none' || raw === 'auto') return null;
 
             const config = (window.APP_CONFIG || APP_CONFIG).models.find(m => m.id !== 'auto' && (raw.includes(m.id.toLowerCase()) || (m.displayName && raw.includes(m.displayName.toLowerCase()))));
-            let name = config?.displayName || (raw.includes('gemini') ? 'Gemini 2.5 Flash' : raw.split('/').pop().replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()));
+            let name = config?.displayName || (raw.includes('3.7') ? 'Gemini 3.7 Flash' : raw.includes('gemini') ? 'Gemini' : raw.split('/').pop().replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()));
             let icon = config?.icon || (raw.includes('gemini') ? '✦' : '⚡');
 
-            const isGoogle = prov === 'google' || prov === 'gemini';
-            const isFailover = Boolean(failover) || isGoogle;
+            const isGoogle = prov === 'google' || prov === 'gemini' || raw.includes('gemini');
+            const isFailover = Boolean(failover);
             const providerLabel = isGoogle ? 'Google AI' : 'Groq';
             const failoverTag = isFailover ? ' (Failover)' : ` (${providerLabel})`;
             return {
                 label: `${icon} ${name}${failoverTag}`,
+                name,
+                icon,
+                providerLabel,
                 isFailover
             };
         }
@@ -9422,7 +9429,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                             </div> 
                         </div> 
                         <div class="assistant-next-steps-slot" data-message-id="${messageId}"></div>
-                        ${meta?.systemGreeting ? '' : buildAssistantActionsHtml(messageId, !!sourceTurn?.rawPrompt)} 
+                        ${meta?.systemGreeting ? '' : buildAssistantActionsHtml(messageId, !!sourceTurn?.rawPrompt, modelInfo)} 
                         </div> 
                     </div> 
                 `;
@@ -9700,6 +9707,10 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                         tagEl.textContent = modelInfo.label;
                     }
                     if (isFinished) {
+                        if (row.__thinkingTimerInterval) {
+                            clearInterval(row.__thinkingTimerInterval);
+                            row.__thinkingTimerInterval = null;
+                        }
                         const rawContent = thinkingCard.querySelector('.thinking-raw-content')?.textContent?.trim();
                         const cotSteps = thinkingCard.querySelectorAll('.thinking-cot-step, .thinking-step');
                         const hasActualThoughts = Boolean((thoughtText && thoughtText.trim().length > 0) || rawContent || cotSteps.length > 0 || meta?.selfHealing);
@@ -9722,6 +9733,23 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                             }
                         }
                     } else {
+                        if (!row.__thinkingTimerInterval) {
+                            row.__thinkingTimerInterval = setInterval(() => {
+                                const card = row.querySelector('.thinking-process-card');
+                                if (!card || card.classList.contains('is-finished')) {
+                                    if (row.__thinkingTimerInterval) {
+                                        clearInterval(row.__thinkingTimerInterval);
+                                        row.__thinkingTimerInterval = null;
+                                    }
+                                    return;
+                                }
+                                const timer = card.querySelector('.thinking-timer');
+                                if (timer && !timer.textContent.startsWith('Thought for')) {
+                                    const liveElapsed = ((performance.now() - (row.__thinkingStartedAt || performance.now())) / 1000).toFixed(1);
+                                    timer.textContent = `Thinking... ${liveElapsed}s`;
+                                }
+                            }, 100);
+                        }
                         thinkingCard.className = 'thinking-process-card is-active is-expanded';
                         const timerEl = thinkingCard.querySelector('.thinking-timer');
                         if (timerEl) {
@@ -9747,6 +9775,18 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             const textElement = row.querySelector('.assistant-message-text');
             const textToRender = cleanAnswer || (thoughtText ? '' : text);
             renderAssistantTextIntoElement(textElement, textToRender, { streaming: meta?.streaming === true, meta });
+
+            const actionRow = row.querySelector('.assistant-action-row');
+            if (actionRow && modelInfo && modelInfo.label) {
+                let badge = actionRow.querySelector('.assistant-model-badge');
+                if (!badge) {
+                    badge = document.createElement('span');
+                    actionRow.insertBefore(badge, actionRow.firstChild);
+                }
+                badge.className = `assistant-model-badge ${modelInfo.isFailover ? 'is-failover' : ''}`;
+                badge.textContent = modelInfo.label;
+                badge.title = modelInfo.label;
+            }
             const cleanText = String(cleanAnswer || text || '').trim();
             const existing = getAssistantMessageMeta(messageId) || {};
             const turnId = String(existing.turnId || meta?.turnId || activeResponseRenderContext?.turnId || '').trim();
@@ -12680,11 +12720,14 @@ async function sendTextInput(submission = {}) {
             if (!input && submission?.text === undefined) return;
             const text = String(submission?.text !== undefined ? submission.text : (input?.value || '')).trim();
             const pendingAttachments = window.JarvisAttachments?.getPendingAttachments?.() || [];
-            const inputSource = String(submission?.source || input.dataset.inputSource || 'text').trim() || 'text';
-            if (activeRequestController?.signal?.aborted) {
+            if (submission?.isRetry === true && activeRequestController) {
+                try { activeRequestController.abort('retry'); } catch (_) {}
+                clearActiveRequest(activeRequestController);
+                resetAssistantProcessingState();
+            } else if (activeRequestController?.signal?.aborted) {
                 clearActiveRequest(activeRequestController);
             }
-            if (activeRequestController || isAssistantProcessing()) {
+            if (submission?.isRetry !== true && (activeRequestController || isAssistantProcessing())) {
                 if (!text && !pendingAttachments.length) {
                     stopActiveGeneration();
                     return;
