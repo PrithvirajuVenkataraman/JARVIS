@@ -99,6 +99,7 @@ assert.ok(!indexHtml.includes('class="starter-prompt-card"'), 'Starter prompt ca
 assert.ok(indexHtml.includes("action === 'live_search'"), 'useStarterPrompt handles live_search action');
 assert.ok(indexHtml.includes('forceWebSearch: true'), 'live_search action sets forceWebSearch flag');
 assert.ok(indexHtml.includes('needsLiveVerification'), 'sendTextInput supports multimodal attachment live verification');
+assert.ok(indexHtml.includes('const inputSource = String(submission?.source'), 'sendTextInput declares inputSource to prevent ReferenceError on send');
 assert.ok(indexHtml.includes('pure_coding_fast_path'), 'processCommand fast-paths coding prompts directly to streaming model');
 assert.ok(indexHtml.includes('verificationBudgetMs = 3500'), 'handleLiveRetrievalQuery caps search timeout at 3500ms for low latency');
 console.log('  [PASS] 8. Starter shortcuts removed for zero-latency, multimodal synergy and streaming latency invariants verified');
