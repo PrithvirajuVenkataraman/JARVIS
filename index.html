@@ -12755,7 +12755,7 @@ async function sendTextInput(submission = {}) {
                     submission?.isRetry !== true &&
                     fingerprint &&
                     fingerprint === lastSubmissionFingerprint &&
-                    (now - lastSubmissionTimestamp) < 1800
+                    (now - lastSubmissionTimestamp) < 800
                 ) {
                     // Ignore rapid duplicate submit (double Enter/click).
                     input.value = '';
