@@ -2109,13 +2109,42 @@ function addVisibleInputHistory(text) {
 }
 
 function retryLastRequest() { 
-    const last = getLastVisibleUserMessage();
-    if (!last) return;
+    document.getElementById('response-recovery-card')?.remove();
+    // 1. Resolve the prompt to retry, with comprehensive fallbacks
+    let last = getLastVisibleUserMessage();
+    if (!last && Array.isArray(conversationHistory) && conversationHistory.length) {
+        const lastTurn = [...conversationHistory].reverse().find(item => item?.user && !isInternalPromptText(item.user));
+        if (lastTurn?.user) last = String(lastTurn.user).trim();
+    }
+    if (!last && Array.isArray(chatHistory) && chatHistory.length) {
+        const lastChat = [...chatHistory].reverse().find(item => item?.isUser && item.text && !isInternalPromptText(item.text));
+        if (lastChat?.text) last = String(lastChat.text).trim();
+    }
+    if (!last) {
+        const lastUserBubble = Array.from(document.querySelectorAll('.chat-row[data-role="user"] p')).pop();
+        if (lastUserBubble?.textContent) last = lastUserBubble.textContent.trim();
+    }
+    if (!last) {
+        showTemporaryMessage('No previous query found to retry.');
+        return;
+    }
+
+    // 2. Clear any stuck processing state or aborted controller
+    if (activeRequestController?.signal?.aborted) {
+        clearActiveRequest(activeRequestController);
+    }
+    resetAssistantProcessingState();
+
+    // 3. Bypass duplicate-submit debounce window (so fast clicks on Retry are never blocked)
+    lastSubmissionTimestamp = 0;
+    lastSubmissionFingerprint = '';
+
     const input = document.getElementById('text-input');
-    if (!input) return;
-    input.value = last;
-    toggleSendButton();
-    sendTextInput(); 
+    if (input) {
+        input.value = last;
+        toggleSendButton();
+    }
+    sendTextInput({ text: last, isRetry: true }); 
 } 
 
 function showResponseRecoveryCard(userMessage = '') {
@@ -2171,7 +2200,10 @@ function showFailureFallbackCard(userMessage, options = {}) {
     if (!chatContainer) return;
 
     document.getElementById('response-recovery-card')?.remove();
-    const safeMessage = String(message || '')
+    const fallbackMsg = globalThis.JarvisFailurePolicy?.buildUserFacingErrorMessage
+        ? globalThis.JarvisFailurePolicy.buildUserFacingErrorMessage(failure)
+        : 'I encountered an issue processing that. Please try again.';
+    const safeMessage = String(options?.message || failure?.message || fallbackMsg || '')
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
@@ -5001,8 +5033,12 @@ async function streamChatCompletion(payload, options = {}) {
                 userMessage,
                 route: options?.routeDecision?.route || '',
                 routeReason: options?.routeDecision?.reason || '',
-                failureCode: window.JarvisFailurePolicy?.classifyFailure?.(error)?.code || 'stream_error'
+                failureCode: window.JarvisFailurePolicy?.classifyFailure?.(error)?.code || 'stream_error',
+                interrupted: true
             });
+            if (typeof showStreamInterruptedNotice === 'function') {
+                showStreamInterruptedNotice(assistantMessageId, userMessage);
+            }
             return {
                 ...(donePayload || {}),
                 response: accumulated.trim(),
@@ -8385,22 +8421,75 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
 
         async function regenerateAssistantMessage(messageId) {
             const meta = getAssistantMessageMeta(messageId);
-            const turn = getConversationTurn(meta?.turnId);
-            const rawPrompt = String(turn?.rawPrompt || '').trim();
-            const processingPrompt = String(turn?.processingPrompt || rawPrompt).trim();
+            let turn = getConversationTurn(meta?.turnId);
+            let rawPrompt = String(turn?.rawPrompt || '').trim();
+            let processingPrompt = String(turn?.processingPrompt || rawPrompt).trim();
+
+            const sourceRow = Array.from(document.querySelectorAll('.assistant-action-row'))
+                .find(row => row.dataset.messageId === String(messageId || ''));
+            const replaceTarget = sourceRow?.closest?.('[data-role="assistant"]') || document.querySelector(`[data-role="assistant"][data-message-id="${CSS.escape(String(messageId || ''))}"]`);
+
+            // Fallback 1: meta.priorUserPrompt
+            if (!rawPrompt && meta?.priorUserPrompt) {
+                rawPrompt = String(meta.priorUserPrompt).trim();
+                processingPrompt = rawPrompt;
+            }
+
+            // Fallback 2: Look up prior user bubble in DOM
+            if (!rawPrompt && replaceTarget) {
+                let prevEl = replaceTarget.previousElementSibling;
+                while (prevEl) {
+                    if (prevEl.dataset?.role === 'user' || prevEl.querySelector?.('.chat-bubble-user')) {
+                        const userP = prevEl.querySelector('.chat-bubble-user p') || prevEl.querySelector('p');
+                        if (userP?.textContent) {
+                            rawPrompt = userP.textContent.trim();
+                            processingPrompt = rawPrompt;
+                            break;
+                        }
+                    }
+                    prevEl = prevEl.previousElementSibling;
+                }
+            }
+
+            // Fallback 3: Last visible user message or chatHistory
+            if (!rawPrompt) {
+                rawPrompt = getLastVisibleUserMessage();
+                if (!rawPrompt && Array.isArray(chatHistory) && chatHistory.length) {
+                    const lastChat = [...chatHistory].reverse().find(item => item?.isUser && item.text);
+                    if (lastChat?.text) rawPrompt = String(lastChat.text).trim();
+                }
+                processingPrompt = rawPrompt;
+            }
+
             if (!rawPrompt || !processingPrompt) {
                 showTemporaryMessage('This answer cannot be regenerated because its source turn is unavailable.');
                 return;
             }
+
+            // Clear any stale/already aborted controller
+            if (activeRequestController?.signal?.aborted) {
+                clearActiveRequest(activeRequestController);
+            }
+            // Auto-heal stuck processing flag if no request is actively in flight
+            if (!activeRequestController && isAssistantProcessing()) {
+                resetAssistantProcessingState();
+            }
+
             if (regenerationInProgress || activeRequestController || isProcessing || isAssistantProcessing()) {
                 showTemporaryMessage('Another response is already being generated. Please wait a moment.');
                 return;
             }
+
+            if (!turn) {
+                turn = {
+                    id: meta?.turnId || `turn_${Date.now().toString(36)}`,
+                    rawPrompt,
+                    processingPrompt,
+                    assistantMessageIds: [messageId]
+                };
+            }
             regenerationInProgress = true;
             closeAssistantActionMenus();
-            const sourceRow = Array.from(document.querySelectorAll('.assistant-action-row'))
-                .find(row => row.dataset.messageId === String(messageId || ''));
-            const replaceTarget = sourceRow?.closest?.('[data-role="assistant"]') || document.querySelector(`[data-role="assistant"][data-message-id="${CSS.escape(String(messageId || ''))}"]`);
             if (!sourceRow || !replaceTarget) {
                 regenerationInProgress = false;
                 showTemporaryMessage('I cannot regenerate that answer because its message is no longer available.');
@@ -9123,7 +9212,8 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
         }
 
         function buildThinkingProcessHtml(thoughtContent, steps = [], elapsedSeconds = 2.1, isStreaming = false, selfHealing = null, modelInfo = null, telemetry = null) {
-            if (!thoughtContent && (!steps || steps.length === 0) && !selfHealing && !isStreaming) return '';
+            const hasThoughts = Boolean((thoughtContent && String(thoughtContent).trim().length > 0) || (steps && steps.length > 0) || (selfHealing && selfHealing.thought));
+            if (!hasThoughts) return '';
             const stateClass = isStreaming ? 'is-active is-expanded' : 'is-finished';
             const timerText = isStreaming ? `Thinking... ${elapsedSeconds}s` : `Thought for ${elapsedSeconds}s`;
             const modelTagHtml = modelInfo && modelInfo.label
@@ -9589,11 +9679,14 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 const rawFailover = meta?.failover || meta?.routing?.failover || false;
                 const modelInfo = typeof formatModelDisplayName === 'function' ? formatModelDisplayName(rawModel, rawProvider, rawFailover) : null;
                 if (!thinkingCard && bubble) {
-                    const tempDiv = document.createElement('div');
-                    tempDiv.innerHTML = buildThinkingProcessHtml(thoughtText, [], elapsed, !isFinished, meta?.selfHealing, modelInfo, meta?.telemetry);
-                    if (tempDiv.firstElementChild) {
-                        bubble.insertBefore(tempDiv.firstElementChild, bubble.firstChild);
-                        thinkingCard = row.querySelector('.thinking-process-card');
+                    const hasThoughtsToRender = Boolean((thoughtText && thoughtText.trim().length > 0) || meta?.selfHealing || (meta?.thoughtSteps && meta.thoughtSteps.length > 0));
+                    if (hasThoughtsToRender) {
+                        const tempDiv = document.createElement('div');
+                        tempDiv.innerHTML = buildThinkingProcessHtml(thoughtText, meta?.thoughtSteps || [], elapsed, !isFinished, meta?.selfHealing, modelInfo, meta?.telemetry);
+                        if (tempDiv.firstElementChild) {
+                            bubble.insertBefore(tempDiv.firstElementChild, bubble.firstChild);
+                            thinkingCard = row.querySelector('.thinking-process-card');
+                        }
                     }
                 } else if (thinkingCard) {
                     if (modelInfo && modelInfo.label) {
@@ -9607,18 +9700,26 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                         tagEl.textContent = modelInfo.label;
                     }
                     if (isFinished) {
-                        thinkingCard.className = 'thinking-process-card is-finished';
-                        const timerEl = thinkingCard.querySelector('.thinking-timer');
-                        if (timerEl) {
-                            if (isStopped) {
-                                timerEl.textContent = `Thought for ${elapsed}s (Stopped)`;
-                            } else if (!timerEl.textContent.startsWith('Thought for')) {
-                                timerEl.textContent = `Thought for ${elapsed}s`;
+                        const rawContent = thinkingCard.querySelector('.thinking-raw-content')?.textContent?.trim();
+                        const cotSteps = thinkingCard.querySelectorAll('.thinking-cot-step, .thinking-step');
+                        const hasActualThoughts = Boolean((thoughtText && thoughtText.trim().length > 0) || rawContent || cotSteps.length > 0 || meta?.selfHealing);
+                        if (!hasActualThoughts) {
+                            thinkingCard.remove();
+                            thinkingCard = null;
+                        } else {
+                            thinkingCard.className = 'thinking-process-card is-finished';
+                            const timerEl = thinkingCard.querySelector('.thinking-timer');
+                            if (timerEl) {
+                                if (isStopped) {
+                                    timerEl.textContent = `Thought for ${elapsed}s (Stopped)`;
+                                } else if (!timerEl.textContent.startsWith('Thought for')) {
+                                    timerEl.textContent = `Thought for ${elapsed}s`;
+                                }
                             }
-                        }
-                        const header = thinkingCard.querySelector('.thinking-header');
-                        if (header && typeof header.setAttribute === 'function') {
-                            header.setAttribute('aria-expanded', 'false');
+                            const header = thinkingCard.querySelector('.thinking-header');
+                            if (header && typeof header.setAttribute === 'function') {
+                                header.setAttribute('aria-expanded', 'false');
+                            }
                         }
                     } else {
                         thinkingCard.className = 'thinking-process-card is-active is-expanded';
@@ -9631,7 +9732,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                             header.setAttribute('aria-expanded', 'true');
                         }
                     }
-                    if (thoughtText) {
+                    if (thinkingCard && thoughtText) {
                         const rawContent = thinkingCard.querySelector('.thinking-raw-content');
                         if (rawContent) {
                             rawContent.textContent = thoughtText;
@@ -9677,11 +9778,21 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             hideThinkingIndicator();
             updateStreamingAssistantMessage(messageId, cleanText, { ...meta, streaming: false });
             const row = findAssistantMessageRow(messageId);
-            if (row && !row.__imageActionTriggered) {
-                const imgTag = extractStreamedImageTag(cleanText, false);
-                if (imgTag && imgTag.prompt && imgTag.prompt.length >= 3) {
-                    row.__imageActionTriggered = true;
-                    window.handleImageGenerationRequest?.(imgTag.prompt);
+            if (row) {
+                const leftoverCard = row.querySelector('.thinking-process-card');
+                if (leftoverCard) {
+                    const rawContent = leftoverCard.querySelector('.thinking-raw-content')?.textContent?.trim();
+                    const cotSteps = leftoverCard.querySelectorAll('.thinking-cot-step, .thinking-step');
+                    if (!rawContent && cotSteps.length === 0 && !meta?.selfHealing) {
+                        leftoverCard.remove();
+                    }
+                }
+                if (!row.__imageActionTriggered) {
+                    const imgTag = extractStreamedImageTag(cleanText, false);
+                    if (imgTag && imgTag.prompt && imgTag.prompt.length >= 3) {
+                        row.__imageActionTriggered = true;
+                        window.handleImageGenerationRequest?.(imgTag.prompt);
+                    }
                 }
             }
             const turnId = String(meta?.turnId || getAssistantMessageMeta(messageId)?.turnId || activeResponseRenderContext?.turnId || '').trim();
@@ -9775,6 +9886,33 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             `;
             container.appendChild(banner);
         }
+
+        function showStreamInterruptedNotice(assistantMessageId, userMessage) {
+            const row = findAssistantMessageRow(assistantMessageId);
+            if (!row) return;
+            const container = row.querySelector('.chat-bubble-assistant') || row;
+            if (!container || container.querySelector('.stream-interrupted-banner')) return;
+            const banner = document.createElement('div');
+            banner.className = 'stream-interrupted-banner flex items-center justify-between gap-3 mt-3 pt-2 text-xs border-t border-amber-500/25 text-amber-600 dark:text-amber-400';
+            const safeUserMsg = String(userMessage || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+            banner.innerHTML = `
+                <span class="flex items-center gap-1.5 font-medium">
+                    <svg class="w-3.5 h-3.5 flex-shrink-0 text-amber-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <line x1="12" y1="8" x2="12" y2="12"></line>
+                        <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                    </svg>
+                    Generation was interrupted
+                </span>
+                <button type="button" class="px-2.5 py-1 text-xs font-semibold rounded-md bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 transition-colors cursor-pointer" onclick="retryLastRequest('${safeUserMsg}')">
+                    Retry
+                </button>
+            `;
+            container.appendChild(banner);
+            const chatContainer = document.getElementById('chat-container');
+            if (chatContainer) maybeAutoScroll(chatContainer);
+        }
+        window.showStreamInterruptedNotice = showStreamInterruptedNotice;
 
         function discardStreamingAssistantMessage(messageId) {
             const id = String(messageId || '').trim();
@@ -12543,6 +12681,9 @@ async function sendTextInput(submission = {}) {
             const text = String(submission?.text !== undefined ? submission.text : (input?.value || '')).trim();
             const pendingAttachments = window.JarvisAttachments?.getPendingAttachments?.() || [];
             const inputSource = String(submission?.source || input.dataset.inputSource || 'text').trim() || 'text';
+            if (activeRequestController?.signal?.aborted) {
+                clearActiveRequest(activeRequestController);
+            }
             if (activeRequestController || isAssistantProcessing()) {
                 if (!text && !pendingAttachments.length) {
                     stopActiveGeneration();
@@ -12568,6 +12709,7 @@ async function sendTextInput(submission = {}) {
                 ].filter(Boolean).join('::');
                 const now = Date.now();
                 if (
+                    submission?.isRetry !== true &&
                     fingerprint &&
                     fingerprint === lastSubmissionFingerprint &&
                     (now - lastSubmissionTimestamp) < 1800
