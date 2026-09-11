@@ -147,10 +147,7 @@
             </div>
         </div>
         <div id="chat-sidebar-section-title" class="chat-sidebar-section-title">Recents</div>
-        <div class="sidebar-view-tabs" role="tablist" aria-label="Sidebar view options">
-            <button id="sidebar-tab-chats" type="button" class="sidebar-view-tab is-active" role="tab" aria-selected="true" onclick="setSidebarViewTab('chats')">Chats</button>
-            <button id="sidebar-tab-bookmarks" type="button" class="sidebar-view-tab" role="tab" aria-selected="false" onclick="setSidebarViewTab('bookmarks')">Bookmarks</button>
-        </div>
+
         <div id="chat-sidebar-list" class="chat-sidebar-list" role="list"></div>
     </aside>
     <div id="chat-session-menu" class="chat-session-menu hidden" role="menu" aria-label="Chat actions">
@@ -5327,7 +5324,9 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
                 responseFormat: formatMode,
                 responseStyle,
                 customSystemPrompt: systemDirectives,
-                selectedModel: selectedModel !== 'auto' ? selectedModel : undefined
+                selectedModel: ((Array.isArray(requestOptions?.images) && requestOptions.images.length > 0) || (Array.isArray(requestOptions?.grounding?.images) && requestOptions.grounding.images.length > 0)) && (window.APP_CONFIG || APP_CONFIG)?.models?.find(m => m.id === selectedModel)?.supportsMedia === false
+                    ? 'gemini-3.7-flash'
+                    : (requestOptions?.selectedModel || (selectedModel !== 'auto' ? selectedModel : undefined))
             },
             intent: requestOptions?.intent || (requestOptions?.fastExplainer === true ? 'fast_explainer' : 'chat'),
             grounding: requestOptions?.grounding || null,
