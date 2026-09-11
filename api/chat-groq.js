@@ -21,9 +21,9 @@ function getCostControls() {
     return {
         qualityCriticEnabled: readCostBool('JARVIS_QUALITY_CRITIC_ENABLED', true),
         streamQualityReviewEnabled: readCostBool('JARVIS_STREAM_QUALITY_REVIEW', false),
-        defaultMaxTokens: clampCostInt(process.env.JARVIS_DEFAULT_MAX_TOKENS, 10000, 256, 16000),
-        fastMaxTokens: clampCostInt(process.env.JARVIS_FAST_MAX_TOKENS, 2500, 256, 8000),
-        streamMaxTokens: clampCostInt(process.env.JARVIS_STREAM_MAX_TOKENS, 10000, 256, 16000)
+        defaultMaxTokens: clampCostInt(process.env.JARVIS_DEFAULT_MAX_TOKENS, 16000, 256, 16000),
+        fastMaxTokens: clampCostInt(process.env.JARVIS_FAST_MAX_TOKENS, 8000, 256, 8000),
+        streamMaxTokens: clampCostInt(process.env.JARVIS_STREAM_MAX_TOKENS, 16000, 256, 16000)
     };
 }
 
@@ -342,13 +342,12 @@ async function getInstantFactHelper() {
             return { tier: 'deep', preferSpeed: false, reason: 'long_detailed_prompt' };
         }
 
-        // 2. Instant / Fast Tier Signals -> Ultra-fast sub-200ms TTFT
+        // 2. Instant / Fast Tier Signals -> Ultra-fast sub-200ms TTFT strictly for trivial greetings, basic calculator math, or ultra-short lookups
         const isGreeting = /^(?:hi|hello|hey|yo|greetings|good\s+(?:morning|afternoon|evening|night)|how\s+are\s+you|who\s+are\s+you)\b/i.test(lower);
         const isSimpleFact = /^(?:what\s+is|what's|where\s+is|who\s+is|capital\s+of|currency\s+of|meaning\s+of|define)\s+[\w\s.'-]{2,40}\??$/i.test(lower);
         const isSimpleMath = /^\s*[\d\s+\-*/^().=%xXyYzZ]+\s*$/.test(query) || /^(?:what\s+is|calculate|compute)\s+[\d\s+\-*/^().=%]+(?:\?)?$/i.test(lower);
-        const isFastChat = options?.intent === 'casual_chat' || options?.intent === 'fast_simple' || options?.intent === 'fast_explainer';
 
-        if (isGreeting || (isSimpleFact && wordCount < 15) || isSimpleMath || (isFastChat && wordCount < 35)) {
+        if (isGreeting || (isSimpleFact && wordCount < 15) || isSimpleMath) {
             return { tier: 'instant', preferSpeed: true, reason: 'instant_fast_path' };
         }
 
@@ -441,7 +440,7 @@ async function getInstantFactHelper() {
         if (tier === 'deep') {
             geminiList = [mappedGemini, configured, 'gemini-2.5-pro', 'gemini-3.7-flash', 'gemini-2.5-flash'];
         } else if (preferSpeed || tier === 'instant') {
-            geminiList = [mappedGemini, configured, 'gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-3.7-flash', 'gemini-2.5-pro'];
+            geminiList = [mappedGemini, configured, 'gemini-3.7-flash', 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-pro'];
         } else {
             geminiList = [mappedGemini, configured, 'gemini-3.7-flash', 'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'];
         }
