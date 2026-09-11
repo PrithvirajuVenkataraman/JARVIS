@@ -12834,7 +12834,12 @@ async function sendTextInput(submission = {}) {
                 showThinkingIndicator(attachmentsForSend.length ? 'Reading attachments...' : 'Thinking');
                 try {
                     if (attachmentsForSend.length) {
-                        showThinkingIndicator('Reading attachments...');
+                        // Detect image-only uploads immediately so we can show the right indicator
+                        const hasImageFiles = attachmentsForSend.some(a =>
+                            /^image\//i.test(a.mimeType || '') ||
+                            /\.(jpe?g|png|gif|webp|bmp|tiff?|heic|heif|avif)$/i.test(a.name || '')
+                        );
+                        showThinkingIndicator(hasImageFiles ? 'Analyzing image...' : 'Reading attachments...');
                         const tray = document.getElementById('composer-attachment-tray');
                         if (tray) {
                             tray.innerHTML = '';
@@ -12851,14 +12856,51 @@ async function sendTextInput(submission = {}) {
                             window.JarvisAttachments?.setAttachmentTrayReading?.(tray, false);
                             refreshComposerAttachmentTray();
                         }
+
+                        // If OCR couldn't extract text but we have raw image base64, build an
+                        // image-only grounding so Gemini can still perform visual recognition.
+                        if ((!attachmentContext?.anyReadable || !attachmentContext?.grounding) && hasImageFiles) {
+                            const rawImagePayloads = await Promise.all(
+                                attachmentsForSend
+                                    .filter(a => /^image\//i.test(a.mimeType || '') || /\.(jpe?g|png|gif|webp|bmp|tiff?|heic|heif|avif)$/i.test(a.name || ''))
+                                    .map(async a => {
+                                        const base64 = a.base64 || (a.file ? await new Promise(res => {
+                                            const r = new FileReader();
+                                            r.onload = () => res(String(r.result || '').split(',')[1] || '');
+                                            r.onerror = () => res('');
+                                            r.readAsDataURL(a.file);
+                                        }) : '');
+                                        return base64 ? { name: a.name, mimeType: a.mimeType || 'image/jpeg', base64 } : null;
+                                    })
+                            ).then(list => list.filter(Boolean));
+
+                            if (rawImagePayloads.length > 0) {
+                                showThinkingIndicator('Analyzing image...');
+                                attachmentContext = {
+                                    anyReadable: true,
+                                    grounding: {
+                                        kind: 'attachment',
+                                        selectedText: '',
+                                        images: rawImagePayloads,
+                                        sourceAnswer: '',
+                                        originalRequest: attachmentRequest,
+                                        customInstruction: 'An image is attached. Describe exactly what you see: objects, people (describe appearance only, do not identify individuals), text, scenes, diagrams, colours. Answer the user\'s question directly based on visual content.'
+                                    },
+                                    combinedText: '',
+                                    methods: []
+                                };
+                            }
+                        }
+
                         if (!attachmentContext?.anyReadable || !attachmentContext?.grounding) {
                             addChatMessage(
-                                'I could not extract readable text from that file. If it is a scanned PDF, try a clearer photo of the pages, or upload a DOCX/TXT version.',
+                                'I could not read that file. For images, try a clearer photo or JPG/PNG. For documents, try a DOCX or TXT version.',
                                 false
                             );
                             return;
                         }
                         const hasImageAttachments = Array.isArray(attachmentContext?.grounding?.images) && attachmentContext.grounding.images.length > 0;
+
                         let webSearchContext = '';
                         const needsLiveVerification = Boolean(
                             submission?.forceWebSearch ||
@@ -12903,11 +12945,12 @@ async function sendTextInput(submission = {}) {
                                 '',
                                 String(attachmentContext.combinedText || '').slice(0, 28000)
                             ].filter(Boolean).join('\n');
+                        if (hasImageAttachments) showThinkingIndicator('Analyzing image...');
                         let result = await askGeminiAI(attachmentPrompt, {
                             intent: 'selection_custom',
                             grounding: attachmentContext.grounding,
                             displayUserMessage: displayOutgoingText,
-                            timeoutMs: 15000,
+                            timeoutMs: hasImageAttachments ? 35000 : 20000,
                             stream: true
                         });
                         if (result?.aborted) return;
@@ -26781,7 +26824,8 @@ function resolveThinkingPhase(message = '') {
         return { key: 'searching', label: 'Searching live sources...' };
     }
     if (/\b(attachment|reading|image|document|pdf|file|view)\b/.test(lower)) {
-        return { key: 'reading', label: 'Analyzing attached document...' };
+        const isImage = /\bimage\b/.test(lower);
+        return { key: 'reading', label: isImage ? 'Analyzing image...' : 'Analyzing attached document...' };
     }
     if (/\b(translat|language)\b/.test(lower)) {
         return { key: 'translating', label: 'Translating text...' };
