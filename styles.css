@@ -7996,6 +7996,14 @@ body:not(.dark) .next-step-title {
         padding: 3px 6px 3px 10px;
         border-radius: 24px;
     }
+
+    /* Remove outer circle from plus button on mobile — keep only the icon */
+    .composer-plus-btn {
+        border: none !important;
+        background: transparent !important;
+        box-shadow: none !important;
+        border-radius: 0 !important;
+    }
 }
 
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
