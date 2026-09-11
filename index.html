@@ -12718,6 +12718,7 @@ async function sendTextInput(submission = {}) {
             closeSlashCommandPicker();
             const input = document.getElementById('text-input');
             if (!input && submission?.text === undefined) return;
+            const inputSource = String(submission?.source || input?.dataset?.inputSource || 'text');
             const text = String(submission?.text !== undefined ? submission.text : (input?.value || '')).trim();
             const pendingAttachments = window.JarvisAttachments?.getPendingAttachments?.() || [];
             if (submission?.isRetry === true && activeRequestController) {
