@@ -1210,7 +1210,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             return 'Return only the final assistant answer as natural text.';
         }
         if (isNativeReasoningModel(model)) {
-            return `Reasoning instruction: Work through the problem within <think>...</think> tags before delivering the final answer. Everything after </think> must be ONLY the final polished answer for the user with zero meta-commentary.`;
+            return 'Reasoning instruction: Work through the problem within <think>...</think> tags before delivering the final answer. Keep internal reasoning concise, focused, and minimal (1-3 short sentences max without rambling guesswork). Everything after </think> must be ONLY the final polished answer for the user with zero meta-commentary.';
         }
         return 'Accuracy & formatting rules: Deliver the polished final answer directly with clarity and precision. Do not output artificial <think> tags, synthetic reasoning checklists, or meta-commentary.';
     }
@@ -1224,7 +1224,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             lengthGuidance ? `Length guidance:\n${lengthGuidance}` : '',
             buildReasoningInstruction(intent, model),
             'Do not wrap the answer in JSON.',
-            'Accuracy rules: Prefer being brief and correct. If unsure about a fact, say so in one short clause instead of inventing names, dates, numbers, or sources. Never invent URLs or citations. Resolve pronouns only from the recent turns above.'
+            'Accuracy rules: Prefer being brief and correct. Keep internal reasoning concise and focused without producing lengthy speculative guesswork. If unsure about a fact, say so in one short clause instead of inventing names, dates, numbers, or sources. Never invent URLs or citations. Resolve pronouns only from the recent turns above.'
         ].filter(Boolean).join('\n\n');
     }
 
