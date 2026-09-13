@@ -4902,14 +4902,6 @@ async function streamChatCompletion(payload, options = {}) {
                 firstTokenAt = performance.now();
             }
             tokenChunkCount += Math.max(1, Math.round(delta.length / 4));
-            // Dynamic thinking ceiling: allow models to reason up to full stream duration ceiling
-            const thinkingCeiling = Number((window.APP_CONFIG || APP_CONFIG)?.timeouts?.thinkingCeilingMs) || 55000;
-            if (!thinkingCapped && (performance.now() - streamStartedAt) >= thinkingCeiling) {
-                if (accumulated.includes('<think>') && !accumulated.includes('</think>')) {
-                    thinkingCapped = true;
-                    accumulated += '\n</think>\n';
-                }
-            }
             if (isConverseStream) {
                 feedStreamingConverseDelta(delta, activeTurnId);
             }
@@ -4950,7 +4942,7 @@ async function streamChatCompletion(payload, options = {}) {
         }
         if (event.event === 'done') {
             donePayload = event.data || {};
-            const doneResponse = String(accumulated || donePayload.response || '').trim();
+            const doneResponse = String(donePayload.response || accumulated || '').trim();
             if (isConverseStream && doneResponse) {
                 finishStreamingConverseSpeech(doneResponse, activeTurnId);
             }
@@ -5061,6 +5053,29 @@ async function streamChatCompletion(payload, options = {}) {
 
     const finalResponse = String(donePayload?.response || accumulated || '').trim();
     if (!finalResponse) throw new Error('The streamed answer was empty.');
+    if (!donePayload && assistantMessageId) {
+        let finalDisplay = finalResponse;
+        if (finalDisplay.includes('<think>') && !finalDisplay.includes('</think>')) {
+            finalDisplay += '\n</think>\n';
+        }
+        const parsed = extractThoughtAndAnswer(finalDisplay);
+        if (!parsed.answer && parsed.thought) {
+            const thoughtLines = parsed.thought.split(/\n+/).map(l => l.trim()).filter(Boolean);
+            const summary = thoughtLines.slice(-3).join(' ') || parsed.thought;
+            finalDisplay = `${finalDisplay}\n\n${summary}`;
+        }
+        updateStreamingAssistantMessage(assistantMessageId, finalDisplay, {
+            userMessage,
+            streaming: false,
+            modelUsed: streamMeta.modelUsed || streamMeta.model || '',
+            provider: streamMeta.provider || '',
+            failover: streamMeta.failover || false,
+            route: options?.routeDecision?.route || '',
+            routeReason: options?.routeDecision?.reason || '',
+            turnSource: activeResponseRenderContext?.source || '',
+            sourcePolicy: options?.routeDecision?.sourcePolicy || ''
+        });
+    }
     logLatencyTrace('chat_stream_complete', {
         requestId: latencyTrace.requestId || donePayload?.requestId || '',
         chars: finalResponse.length,
