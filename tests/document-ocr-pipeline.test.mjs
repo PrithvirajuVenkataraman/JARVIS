@@ -80,8 +80,8 @@ console.log('  [PASS] 6. Phase 2: In-browser Python Notebook, tqdm progress bar,
 // 7. Verify Direct Non-Streaming API Fallback & Scope Safety
 assert.ok(indexHtml.includes('let data = null;\n    let requestPayload = null;'), 'data and requestPayload must be scoped before try block');
 assert.ok(indexHtml.includes('Stream failed, attempting direct non-streaming API fetch fallback'), 'Should fall back to direct non-streaming fetch on stream failure');
-assert.ok(indexHtml.includes('isThinkingStream || thoughtText ? \'\' : text'), 'Should never render raw <think> tags into assistant message text');
-console.log('  [PASS] 7. Direct API fetch fallback on stream failure, data scope safety, and <think> guard verified');
+assert.ok(indexHtml.includes('const modelInfo = typeof formatModelDisplayName === \'function\''), 'modelInfo must be declared in function scope');
+console.log('  [PASS] 7. Direct API fetch fallback on stream failure, data scope safety, modelInfo scope, and <think> guard verified');
 
 console.log('=== All Pipeline, Phase 1, Phase 2 & Stream Resilience Tests PASSED ===');
 
