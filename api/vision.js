@@ -2,7 +2,19 @@ export const config = { maxDuration: 60 };
 import { applyApiSecurity } from './_lib/security.js';
 import { classifyImageLocally } from './_lib/local-vision-classifier.js';
 
-const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+const ALLOWED_IMAGE_TYPES = new Set([
+    'image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif',
+    'image/heic', 'image/heif', 'image/avif', 'image/bmp', 'image/tiff',
+    'image/tiff-fx', 'image/x-bmp', 'image/x-ms-bmp'
+]);
+// AI providers (Gemini, Groq) only accept jpeg/png/webp/gif — normalize everything else to jpeg
+function normalizeVisionMimeType(raw) {
+    const m = String(raw || '').trim().toLowerCase();
+    if (['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif'].includes(m)) {
+        return m === 'image/jpg' ? 'image/jpeg' : m;
+    }
+    return 'image/jpeg'; // HEIC, HEIF, AVIF, BMP, TIFF → jpeg (client already re-encoded via canvas)
+}
 const MAX_IMAGE_BASE64_CHARS = 8 * 1024 * 1024;
 const PROVIDER_TIMEOUT_MS = 20_000;
 
@@ -37,10 +49,12 @@ export default async function handler(req, res) {
     if (!imageBase64 || typeof imageBase64 !== 'string') {
         return sendVisionError(res, 400, 'invalid_request', 'imageBase64 is required.');
     }
-    const normalizedMimeType = String(mimeType || '').trim().toLowerCase();
-    if (!ALLOWED_IMAGE_TYPES.has(normalizedMimeType)) {
-        return sendVisionError(res, 415, 'unsupported_media_type', 'Supported image types are JPEG, PNG, WebP, and GIF.');
+    const rawMimeType = String(mimeType || '').trim().toLowerCase();
+    // Accept all common image types; unknown types are treated as jpeg
+    if (rawMimeType && !ALLOWED_IMAGE_TYPES.has(rawMimeType) && !rawMimeType.startsWith('image/')) {
+        return sendVisionError(res, 415, 'unsupported_media_type', 'Only image files are supported.');
     }
+    const normalizedMimeType = normalizeVisionMimeType(rawMimeType);
     if (imageBase64.length > MAX_IMAGE_BASE64_CHARS || !/^[A-Za-z0-9+/]+={0,2}$/.test(imageBase64)) {
         return sendVisionError(res, 413, 'invalid_image', 'Image data is malformed or too large.');
     }
