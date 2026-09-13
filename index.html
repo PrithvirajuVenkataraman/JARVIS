@@ -12870,7 +12870,10 @@ async function sendTextInput(submission = {}) {
                                             r.onerror = () => res('');
                                             r.readAsDataURL(a.file);
                                         }) : '');
-                                        return base64 ? { name: a.name, mimeType: a.mimeType || 'image/jpeg', base64 } : null;
+                                        const rawMime = a.mimeType || 'image/jpeg';
+                                        // Normalize to only what Gemini/Groq accept
+                                        const safeMime = /^image\/(png|webp|gif)$/i.test(rawMime) ? rawMime : 'image/jpeg';
+                                        return base64 ? { name: a.name, mimeType: safeMime, base64 } : null;
                                     })
                             ).then(list => list.filter(Boolean));
 
