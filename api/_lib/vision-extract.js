@@ -1,11 +1,12 @@
 const PROVIDER_TIMEOUT_MS = 20_000;
 const GEMINI_API_VERSIONS = ['v1beta', 'v1'];
 const GEMINI_MODEL_FALLBACKS = [
-    'gemini-2.5-flash',
-    'gemini-3.7-flash',
-    'gemini-2.5-pro',
     'gemini-2.0-flash',
-    'gemini-2.5-flash-lite',
+    'gemini-3.7-flash',
+    'gemini-2.5-flash',
+    'gemini-2.5-pro',
+    'gemini-2.0-flash-lite',
+    'gemini-1.5-flash',
     'gemini-flash-latest'
 ];
 const GROQ_VISION_MODEL_FALLBACKS = [
@@ -13,6 +14,14 @@ const GROQ_VISION_MODEL_FALLBACKS = [
     'meta-llama/llama-3.2-11b-vision-instruct',
     'llama-3.2-90b-vision-preview'
 ];
+
+// Normalize any image mime type to one accepted by Gemini/Groq (jpeg/png/webp/gif)
+function normalizeMimeForProvider(mimeType) {
+    const m = String(mimeType || '').trim().toLowerCase();
+    if (['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(m)) return m;
+    if (m === 'image/jpg') return 'image/jpeg';
+    return 'image/jpeg'; // HEIC, HEIF, AVIF, BMP, TIFF → jpeg (client re-encodes via canvas)
+}
 
 export async function extractTextFromImage({ mimeType = 'image/jpeg', imageBase64 = '', prompt = '' }) {
     const providers = getVisionProviders();
@@ -33,7 +42,7 @@ export async function extractTextFromImage({ mimeType = 'image/jpeg', imageBase6
         String(prompt || 'Extract all readable text, tables, and data from this image.').trim()
     ].join('\n');
 
-    const rawText = await callVisionText({ providers, systemPrompt, mimeType, imageBase64 });
+    const rawText = await callVisionText({ providers, systemPrompt, mimeType: normalizeMimeForProvider(mimeType), imageBase64 });
     if (!rawText) return { ok: false, text: '', method: 'vision_ocr', provider: 'vision' };
 
     const parsed = safeParseJson(rawText) || extractJsonFromText(rawText) || {};
