@@ -77,5 +77,12 @@ assert.ok(stylesCss.includes('.notebook-tqdm'), 'Should style top-right tqdm pro
 assert.ok(stylesCss.includes('.nb-code-block'), 'Should style animated python code block');
 console.log('  [PASS] 6. Phase 2: In-browser Python Notebook, tqdm progress bar, and data analysis routing verified');
 
-console.log('=== All Document OCR Pipeline, Phase 1 & Phase 2 Notebook Tests PASSED ===');
+// 7. Verify Direct Non-Streaming API Fallback & Scope Safety
+assert.ok(indexHtml.includes('let data = null;\n    let requestPayload = null;'), 'data and requestPayload must be scoped before try block');
+assert.ok(indexHtml.includes('Stream failed, attempting direct non-streaming API fetch fallback'), 'Should fall back to direct non-streaming fetch on stream failure');
+assert.ok(indexHtml.includes('isThinkingStream || thoughtText ? \'\' : text'), 'Should never render raw <think> tags into assistant message text');
+console.log('  [PASS] 7. Direct API fetch fallback on stream failure, data scope safety, and <think> guard verified');
+
+console.log('=== All Pipeline, Phase 1, Phase 2 & Stream Resilience Tests PASSED ===');
+
 
