@@ -64,4 +64,18 @@ assert.ok(stylesCss.includes('.attachment-ocr-summary'), 'Should style attachmen
 assert.ok(stylesCss.includes('.attachment-ocr-text'), 'Should style attachment-ocr-text');
 console.log('  [PASS] 5. Styles.css dead camera CSS removal and OCR details styles verified');
 
-console.log('=== All Document OCR Pipeline & Camera Retirement Tests PASSED ===');
+// 6. Verify Phase 2: In-Browser Python Notebook Engine & tqdm Progress
+assert.ok(indexHtml.includes('loadPyodideRuntime'), 'Should contain Pyodide WebAssembly lazy loader');
+assert.ok(indexHtml.includes('NotebookProgress'), 'Should contain tqdm-style progress tracker with ETA');
+assert.ok(indexHtml.includes('makeTqdmBar'), 'Should generate visual ASCII/unicode progress bar');
+assert.ok(indexHtml.includes('transitionToNotebookButton'), 'Should transition analyzing state to Notebook label/button');
+assert.ok(indexHtml.includes('runInPyodide'), 'Should execute Python in Pyodide sandbox with stdout/chart capture');
+assert.ok(indexHtml.includes('isDataAnalysisFile'), 'Should detect CSV/TSV/XLSX/JSON data files for automatic notebook routing');
+assert.ok(stylesCss.includes('.notebook-trigger-btn'), 'Should style notebook trigger button');
+assert.ok(stylesCss.includes('.notebook-panel'), 'Should style notebook panel');
+assert.ok(stylesCss.includes('.notebook-tqdm'), 'Should style top-right tqdm progress bar');
+assert.ok(stylesCss.includes('.nb-code-block'), 'Should style animated python code block');
+console.log('  [PASS] 6. Phase 2: In-browser Python Notebook, tqdm progress bar, and data analysis routing verified');
+
+console.log('=== All Document OCR Pipeline, Phase 1 & Phase 2 Notebook Tests PASSED ===');
+
