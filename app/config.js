@@ -37,7 +37,7 @@ export const APP_CONFIG = Object.freeze({
     searchMs: 15000,
     diagnosticsMs: 12000,
     thinkingFloorMs: 500,
-    thinkingCeilingMs: 10000,
+    thinkingCeilingMs: 60000,
     geolocationMs: 6000,
     geolocationCacheMs: 300000,
     visionContextTtlMs: 600000,
