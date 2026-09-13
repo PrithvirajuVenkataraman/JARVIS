@@ -5050,6 +5050,12 @@ async function streamChatCompletion(payload, options = {}) {
                 intent: 'partial_stream_recovery'
             };
         }
+        if (assistantMessageId) {
+            const hasActualText = Boolean(accumulated && accumulated.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/<\/?think>/gi, '').trim());
+            if (!hasActualText) {
+                discardStreamingAssistantMessage(assistantMessageId);
+            }
+        }
         throw error;
     }
 
@@ -5207,6 +5213,8 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
     const hadExistingThinkingIndicator = Boolean(document.getElementById('chat-thinking-indicator'));
     let autoIndicatorShown = false;
     let requestSettled = false;
+    let data = null;
+    let requestPayload = null;
     const minimalThinking = requestOptions?.minimalThinking === true || shouldUseMinimalThinking(normalizedUserMessage, requestOptions?.intent || '');
     const autoIndicatorTimer = setTimeout(() => {
         if (requestSettled) return;
@@ -5312,7 +5320,7 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
         // Clean user message without prompt pollution
         const effectiveMessage = normalizedUserMessage;
 
-        const requestPayload = {
+        requestPayload = {
             message: effectiveMessage,
             context: engineContext,
             retrievedTurns: multiTierContext?.retrievedTurns || [],
@@ -5341,7 +5349,6 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
             requestId: latencyTrace.requestId,
             stream: requestOptions?.stream === true
         });
-        let data = null;
         data = requestOptions?.stream === true
             ? await streamChatCompletion(requestPayload, {
                 signal: controller.signal,
@@ -5486,6 +5493,34 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
             console.warn('[askGeminiAI] Preserving streamed response despite downstream error', error);
             return data;
         }
+
+        // Direct API Fallback: If streaming dropped or stalled, immediately hit the API directly
+        if (requestOptions?.stream === true && requestPayload && !isAbortError(error)) {
+            try {
+                console.warn('[askGeminiAI] Stream failed, attempting direct non-streaming API fetch fallback:', error?.message || error);
+                const directRes = await window.JarvisApi.postJson(
+                    (window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq,
+                    { ...requestPayload, stream: false },
+                    {
+                        signal: controller.signal,
+                        timeoutMs: 20000
+                    }
+                );
+                const directText = String(directRes?.response || directRes?.text || '').trim();
+                const cleanDirect = directText.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/^<think>[\s\S]*$/gi, '').replace(/<\/?think>/gi, '').trim();
+                if (cleanDirect) {
+                    return {
+                        ...directRes,
+                        response: cleanDirect,
+                        text: cleanDirect,
+                        intent: directRes?.intent || requestOptions?.intent || 'chat'
+                    };
+                }
+            } catch (directErr) {
+                console.warn('[askGeminiAI] Direct non-streaming API fallback also failed:', directErr?.message || directErr);
+            }
+        }
+
         const localFallback = await buildLocalAssistantFallback(normalizedUserMessage || userMessage, error);
         if (localFallback) {
             return {
@@ -9772,7 +9807,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             }
 
             const textElement = row.querySelector('.assistant-message-text');
-            const textToRender = cleanAnswer || (thoughtText ? '' : text);
+            const textToRender = cleanAnswer || (isThinkingStream || thoughtText ? '' : text);
             renderAssistantTextIntoElement(textElement, textToRender, { streaming: meta?.streaming === true, meta });
 
             const actionRow = row.querySelector('.assistant-action-row');
