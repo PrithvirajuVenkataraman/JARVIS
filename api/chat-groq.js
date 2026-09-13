@@ -2274,11 +2274,20 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 text += '\n</think>\n';
                 onDelta('\n</think>\n');
             }
-            const cleanContent = text
+            let cleanContent = text
                 .replace(/<think>[\s\S]*?<\/think>/gi, '')
                 .replace(/^<think>[\s\S]*$/gi, '')
                 .replace(/<\/?think>/gi, '')
                 .trim();
+            if (!cleanContent && (text.includes('<think>') || inReasoning)) {
+                const { thought: extractedThought } = extractThoughtAndResponse(text);
+                const thoughtText = (extractedThought || text.replace(/<\/?think>/gi, '')).trim();
+                if (thoughtText.length > 15) {
+                    cleanContent = thoughtText;
+                    text = `${text}\n\n${thoughtText}`;
+                    onDelta(`\n\n${thoughtText}`);
+                }
+            }
             if (cleanContent.length > 0) {
                 recordKeySuccess(apiKey);
                 return { ok: true, provider: 'groq', modelUsed: model, text };
@@ -2363,11 +2372,6 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                     maxOutputTokens: maxTokens
                 }
             };
-            if (model.includes('3.7') && Array.isArray(images) && images.length > 0) {
-                reqBody.generationConfig.thinkingConfig = {
-                    thinkingBudget: 2048
-                };
-            }
             if (systemInstruction) {
                 reqBody.system_instruction = systemInstruction;
             }
