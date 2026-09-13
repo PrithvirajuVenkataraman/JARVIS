@@ -4,6 +4,18 @@ import { validateAndRepairCodeAndMath } from './_lib/code-math-validator.js';
 import { inspectPromptSecurity } from './_lib/prompt-guard.js';
 import { redactSensitiveData } from './_lib/pii-redactor.js';
 
+/* ── Image MIME normalizer ────────────────────────────────── */
+// Gemini and Groq only accept jpeg/png/webp/gif.
+// The client re-encodes HEIC/HEIF/AVIF/BMP via canvas → JPEG, but the mimeType
+// property on the attachment object still holds the original type. Normalize here.
+function normalizeImageMimeType(mimeType) {
+    const m = String(mimeType || '').trim().toLowerCase();
+    if (m === 'image/png') return 'image/png';
+    if (m === 'image/webp') return 'image/webp';
+    if (m === 'image/gif') return 'image/gif';
+    return 'image/jpeg'; // jpeg, jpg, heic, heif, avif, bmp, tiff → jpeg
+}
+
 /* ── Cost Controls (Inlined for 0-dep cold boot) ────────── */
 function readCostBool(name, fallback = false) {
     const raw = String(process.env[name] || '').trim().toLowerCase();
@@ -1888,7 +1900,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                         const content = [{ type: 'text', text: targetMsg.content }];
                         for (const img of images) {
                             if (img?.base64) {
-                                content.push({ type: 'image_url', image_url: { url: `data:${img.mimeType || 'image/jpeg'};base64,${img.base64}` } });
+                                content.push({ type: 'image_url', image_url: { url: `data:${normalizeImageMimeType(img.mimeType)};base64,${img.base64}` } });
                             }
                         }
                         messages[targetIdx] = { ...targetMsg, content };
@@ -1954,7 +1966,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 if (hasImages) {
                     for (const img of images) {
                         if (img?.base64) {
-                            parts.push({ inline_data: { mime_type: img.mimeType || 'image/jpeg', data: img.base64 } });
+                            parts.push({ inline_data: { mime_type: normalizeImageMimeType(img.mimeType), data: img.base64 } });
                         }
                     }
                 }
@@ -1977,7 +1989,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                             if (isLast && hasImages) {
                                 for (const img of images) {
                                     if (img?.base64) {
-                                        mParts.push({ inline_data: { mime_type: img.mimeType || 'image/jpeg', data: img.base64 } });
+                                        mParts.push({ inline_data: { mime_type: normalizeImageMimeType(img.mimeType), data: img.base64 } });
                                     }
                                 }
                             }
@@ -2203,7 +2215,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 const content = [{ type: 'text', text: targetMsg.content }];
                 for (const img of images) {
                     if (img?.base64) {
-                        content.push({ type: 'image_url', image_url: { url: `data:${img.mimeType || 'image/jpeg'};base64,${img.base64}` } });
+                        content.push({ type: 'image_url', image_url: { url: `data:${normalizeImageMimeType(img.mimeType)};base64,${img.base64}` } });
                     }
                 }
                 messages[targetIdx] = { ...targetMsg, content };
@@ -2311,7 +2323,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             if (Array.isArray(images) && images.length) {
                 for (const img of images) {
                     if (img?.base64) {
-                        parts.push({ inline_data: { mime_type: img.mimeType || 'image/jpeg', data: img.base64 } });
+                        parts.push({ inline_data: { mime_type: normalizeImageMimeType(img.mimeType), data: img.base64 } });
                     }
                 }
             }
@@ -2334,7 +2346,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                         if (isLast && Array.isArray(images)) {
                             for (const img of images) {
                                 if (img?.base64) {
-                                    mParts.push({ inline_data: { mime_type: img.mimeType || 'image/jpeg', data: img.base64 } });
+                                    mParts.push({ inline_data: { mime_type: normalizeImageMimeType(img.mimeType), data: img.base64 } });
                                 }
                             }
                         }
