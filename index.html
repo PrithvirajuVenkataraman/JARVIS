@@ -12839,6 +12839,45 @@ async function sendTextInput(submission = {}) {
                             /^image\//i.test(a.mimeType || '') ||
                             /\.(jpe?g|png|gif|webp|bmp|tiff?|heic|heif|avif)$/i.test(a.name || '')
                         );
+                        // ── Data-file path: Python Notebook analysis ────────────────
+                        const hasDataFiles = attachmentsForSend.some(isDataAnalysisFile);
+                        if (hasDataFiles) {
+                            const tray = document.getElementById('composer-attachment-tray');
+                            if (tray) {
+                                tray.innerHTML = '';
+                                tray.classList.add('hidden');
+                            }
+                            const notebookResult = await runPythonNotebook(
+                                attachmentsForSend,
+                                effectiveOutgoingText
+                            );
+                            if (notebookResult) {
+                                // Phase 4: stream final answer from AI using Python output as context
+                                const answerResult = await askGeminiAI(notebookResult.answerContextPrompt, {
+                                    intent: 'general_chat',
+                                    timeoutMs: 30000,
+                                    stream: true
+                                });
+                                if (answerResult?.aborted) return;
+                                let finalAnswer = String(answerResult?.response || answerResult?.text || '').trim();
+                                if (notebookResult.chartB64) {
+                                    finalAnswer += notebookResult.chartHtml;
+                                }
+                                if (finalAnswer) {
+                                    await publishResolvedModelMessage(displayOutgoingText, finalAnswer, {
+                                        label: 'Data Analysis',
+                                        existingAssistantMessageId: answerResult?.assistantMessageId || '',
+                                        routing: answerResult?.routing || null
+                                    });
+                                } else {
+                                    addChatMessage('Analysis complete. ' + (notebookResult.output || 'See the Notebook for results.'), false, null, { turnId: turn.id });
+                                }
+                                return;
+                            }
+                            // Fallback to normal attachment path if notebook failed
+                        }
+                        // ── End data-file path ──────────────────────────────────────
+
                         showThinkingIndicator(hasImageFiles ? 'Analyzing image...' : 'Reading attachments...');
                         const tray = document.getElementById('composer-attachment-tray');
                         if (tray) {
@@ -26735,6 +26774,476 @@ function loadHistory() {
                 restoreConversationEngineForSession(session);
             }
         } catch (_) {}
+    }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   PYTHON NOTEBOOK — Phase 2 Data Analysis Engine
+   ═══════════════════════════════════════════════════════════════ */
+
+// ── Data file detection ────────────────────────────────────────
+function isDataAnalysisFile(attachment) {
+    const name = String(attachment?.name || '').toLowerCase();
+    const mime = String(attachment?.mimeType || '').toLowerCase();
+    return /\.(csv|tsv|xlsx|xls|ods|json|jsonl)$/i.test(name) ||
+        mime === 'text/csv' || mime === 'text/tsv' ||
+        mime.includes('spreadsheet') || mime.includes('excel');
+}
+
+// ── Pyodide lazy loader (loads WASM once, cached forever) ──────
+let _pyodidePromise = null;
+async function loadPyodideRuntime(onProgress) {
+    if (_pyodidePromise) return _pyodidePromise;
+    _pyodidePromise = (async () => {
+        onProgress?.(0.05, 'Loading Python runtime...');
+        // Inject pyodide script if not already present
+        if (!window.loadPyodide) {
+            await new Promise((resolve, reject) => {
+                const s = document.createElement('script');
+                s.src = 'https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js';
+                s.onload = resolve;
+                s.onerror = reject;
+                document.head.appendChild(s);
+            });
+        }
+        onProgress?.(0.30, 'Initializing Python...');
+        const py = await window.loadPyodide({
+            indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.26.2/full/'
+        });
+        onProgress?.(0.55, 'Loading NumPy, Pandas & Matplotlib...');
+        try {
+            await py.loadPackage(['numpy', 'pandas', 'matplotlib']);
+        } catch (_) {
+            await py.loadPackagesFromImports('import numpy, pandas, matplotlib');
+        }
+        try { await py.loadPackage('openpyxl'); } catch (_) {}
+        onProgress?.(1.0, 'Python ready');
+        return py;
+    })();
+    return _pyodidePromise;
+}
+
+// ── tqdm-style progress tracker ────────────────────────────────
+// Phases: LOAD(20%) → CODEGEN(30%) → EXECUTE(20%) → ANSWER(30%)
+const NB_PHASES = [
+    { key: 'load',    label: 'Loading Python',  share: 0.20, budgetMs: 14000 },
+    { key: 'codegen', label: 'Writing code',     share: 0.30, budgetMs: 7000  },
+    { key: 'execute', label: 'Executing',        share: 0.20, budgetMs: 4000  },
+    { key: 'answer',  label: 'Synthesizing',     share: 0.30, budgetMs: 9000  },
+];
+
+function makeTqdmBar(pct) {
+    const TOTAL = 12;
+    const filled = Math.round(pct * TOTAL);
+    const empty  = TOTAL - filled;
+    return '█'.repeat(filled) + '░'.repeat(empty);
+}
+
+function formatEta(ms) {
+    if (ms <= 0) return '~0s';
+    if (ms < 1000) return '<1s';
+    return `~${(ms / 1000).toFixed(1)}s`;
+}
+
+class NotebookProgress {
+    constructor(tqdmEl) {
+        this.tqdmEl = tqdmEl;
+        this.phaseIndex = 0;
+        this.phaseStart = Date.now();
+        this.overallPct = 0;
+    }
+
+    // Call when moving to next phase
+    nextPhase() {
+        this.phaseIndex = Math.min(this.phaseIndex + 1, NB_PHASES.length - 1);
+        this.phaseStart = Date.now();
+        this._render();
+    }
+
+    // Call with fractional progress within current phase (0.0 → 1.0)
+    update(phaseProgress) {
+        const phase = NB_PHASES[this.phaseIndex];
+        if (!phase) return;
+        const phaseOffset = NB_PHASES.slice(0, this.phaseIndex).reduce((s, p) => s + p.share, 0);
+        this.overallPct = Math.min(0.99, phaseOffset + phase.share * Math.min(1, phaseProgress));
+
+        // ETA = remaining time in this phase + remaining phases
+        const elapsed = Date.now() - this.phaseStart;
+        const estTotal = phase.budgetMs;
+        const phaseEta = Math.max(0, estTotal - elapsed);
+        const remainingPhases = NB_PHASES.slice(this.phaseIndex + 1).reduce((s, p) => s + p.budgetMs, 0);
+        const totalEta = phaseEta + remainingPhases * (1 - phaseProgress);
+
+        this._render(totalEta);
+    }
+
+    done() {
+        this.overallPct = 1.0;
+        if (this.tqdmEl) {
+            this.tqdmEl.innerHTML =
+                `<span class="tqdm-chars">${makeTqdmBar(1)}</span>` +
+                `<span class="tqdm-pct"> 100%</span>` +
+                `<span class="tqdm-eta"> ✓ Done</span>`;
+            this.tqdmEl.classList.add('done');
+        }
+    }
+
+    _render(etaMs) {
+        if (!this.tqdmEl) return;
+        const phase = NB_PHASES[this.phaseIndex];
+        const pct = Math.round(this.overallPct * 100);
+        const bar = makeTqdmBar(this.overallPct);
+        const eta = etaMs != null ? formatEta(etaMs) : '';
+        this.tqdmEl.innerHTML =
+            `<span class="tqdm-phase-label">${phase?.label || ''}</span>` +
+            `<span class="tqdm-chars">${bar}</span>` +
+            `<span class="tqdm-pct"> ${pct}%</span>` +
+            (eta ? `<span class="tqdm-eta"> | ${eta}</span>` : '');
+    }
+}
+
+// ── Build Notebook DOM (thinking-indicator slot) ───────────────
+function buildNotebookAnalyzingPanel() {
+    // Remove existing thinking indicator
+    const old = document.getElementById('chat-thinking-indicator');
+    if (old) old.remove();
+
+    const chatContainer = document.getElementById('chat-container');
+    if (!chatContainer) return null;
+
+    updateChatEmptyStateVisibility?.(true);
+
+    const row = document.createElement('div');
+    row.id = 'chat-thinking-indicator';
+    row.className = 'chat-row flex justify-start items-start gap-3 fade-in';
+    row.dataset.role = 'assistant';
+
+    row.innerHTML = `
+        <div class="chat-avatar assistant-avatar" aria-hidden="true">
+            <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" width="28" height="28">
+                <circle cx="16" cy="16" r="16" fill="url(#avatarGrad)"/>
+                <defs><linearGradient id="avatarGrad" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+                    <stop stop-color="#6366f1"/><stop offset="1" stop-color="#8b5cf6"/>
+                </linearGradient></defs>
+                <text x="10" y="21" font-size="14" fill="white">✦</text>
+            </svg>
+        </div>
+        <div class="chat-bubble assistant-bubble" style="max-width:min(680px,90vw);width:100%">
+            <div class="notebook-panel" id="nb-panel">
+                <div class="notebook-header">
+                    <div class="notebook-header-title">
+                        <span>⚡</span><span>Analyzing</span>
+                    </div>
+                    <div class="notebook-tqdm" id="nb-tqdm">
+                        <span class="tqdm-phase-label">Loading Python</span>
+                        <span class="tqdm-chars">${makeTqdmBar(0)}</span>
+                        <span class="tqdm-pct"> 0%</span>
+                        <span class="tqdm-eta"> | ~${formatEta(NB_PHASES.reduce((s,p)=>s+p.budgetMs,0))}</span>
+                    </div>
+                </div>
+                <details class="nb-analyzing-details" id="nb-details" open>
+                    <summary>📝 Writing analysis code...</summary>
+                    <pre class="nb-code-block" id="nb-code"><span class="nb-cursor"></span></pre>
+                </details>
+            </div>
+        </div>`;
+
+    chatContainer.appendChild(row);
+    row.scrollIntoView({ behavior: 'smooth', block: 'end' });
+
+    const tqdmEl = row.querySelector('#nb-tqdm');
+    const progress = new NotebookProgress(tqdmEl);
+    return { row, progress };
+}
+
+// ── Transition panel → Notebook button ────────────────────────
+function transitionToNotebookButton(row, code, output, progress) {
+    if (!row) return;
+    progress.done();
+
+    // Detach from thinking indicator ID so it becomes a permanent chat item
+    if (row.id === 'chat-thinking-indicator') {
+        row.removeAttribute('id');
+        row.dataset.notebookMessage = 'true';
+    }
+
+    const panel = row.querySelector('#nb-panel');
+    if (!panel) return;
+
+    // Replace panel with compact Notebook button
+    const btn = document.createElement('button');
+    btn.className = 'notebook-trigger-btn';
+    btn.type = 'button';
+    btn.dataset.nbOpen = 'false';
+    btn.innerHTML = `<span class="nb-icon">📓</span><span>Notebook</span>`;
+
+    const fullPanel = document.createElement('div');
+    fullPanel.className = 'notebook-panel';
+    fullPanel.style.display = 'none';
+
+    const safeCode = String(code || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const safeOut  = String(output || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    fullPanel.innerHTML = `
+        <div class="notebook-header">
+            <div class="notebook-header-title"><span>📓</span><span>Notebook</span></div>
+            <div class="notebook-tqdm done" id="nb-tqdm-done">
+                <span class="tqdm-chars">${makeTqdmBar(1)}</span>
+                <span class="tqdm-pct"> 100%</span>
+                <span class="tqdm-eta"> ✓ Done</span>
+            </div>
+        </div>
+        <details class="nb-analyzing-details" open>
+            <summary>🐍 Python code</summary>
+            <pre class="nb-code-block" style="max-height:320px">${safeCode}</pre>
+        </details>
+        ${safeOut ? `
+        <div class="nb-output-section">
+            <div class="nb-output-label">Output</div>
+            <pre class="nb-output-content">${safeOut}</pre>
+        </div>` : ''}`;
+
+    const bubble = row.querySelector('.chat-bubble');
+    if (bubble) {
+        bubble.innerHTML = '';
+        bubble.appendChild(btn);
+        bubble.appendChild(fullPanel);
+    }
+
+    btn.addEventListener('click', () => {
+        const isOpen = btn.dataset.nbOpen === 'true';
+        btn.dataset.nbOpen = isOpen ? 'false' : 'true';
+        fullPanel.style.display = isOpen ? 'none' : 'block';
+        if (!isOpen) fullPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
+}
+
+// ── Type code into the dropdown character-by-character ─────────
+async function typeCodeIntoNotebook(code, detailsEl, codeEl, progress) {
+    const cursor = codeEl.querySelector('.nb-cursor');
+    codeEl.textContent = '';
+    if (cursor) codeEl.appendChild(cursor);
+
+    const chars = [...code];
+    const CHARS_PER_TICK = Math.max(3, Math.ceil(chars.length / 120));
+    const TICK_MS = 16;
+    let i = 0;
+    while (i < chars.length) {
+        const chunk = chars.slice(i, i + CHARS_PER_TICK).join('');
+        i += CHARS_PER_TICK;
+        const textNode = document.createTextNode(chunk);
+        if (cursor) codeEl.insertBefore(textNode, cursor);
+        else codeEl.appendChild(textNode);
+        // Scroll code block to bottom as it types
+        codeEl.scrollTop = codeEl.scrollHeight;
+        // Update progress within codegen phase
+        progress.update(i / chars.length);
+        await new Promise(r => setTimeout(r, TICK_MS));
+    }
+    // Remove cursor
+    if (cursor) cursor.remove();
+    // Brief pause to view finished code before auto-collapsing
+    await new Promise(r => setTimeout(r, 300));
+    if (detailsEl) detailsEl.removeAttribute('open');
+}
+
+// ── Run Python code in Pyodide ─────────────────────────────────
+async function runInPyodide(py, code, fileBytes, fileName) {
+    const uint8 = new Uint8Array(fileBytes);
+    const safeName = (fileName || 'data.csv').replace(/[\/\\]/g, '_');
+
+    // Write file to Pyodide's virtual filesystem (MEMFS)
+    try {
+        if (py.FS && typeof py.FS.writeFile === 'function') {
+            py.FS.writeFile(safeName, uint8);
+            py.FS.writeFile('data.csv', uint8);
+        }
+    } catch (_) {}
+
+    // Inject into Pyodide namespace
+    py.globals.set('_file_bytes', uint8);
+    py.globals.set('_file_name', safeName);
+
+    // Wrap code to capture stdout and matplotlib output
+    const wrappedCode = `
+import sys, io as _io, json as _json
+import builtins
+
+# Pre-convert _file_bytes to Python bytes
+try:
+    if hasattr(_file_bytes, 'to_py'):
+        _file_bytes = bytes(_file_bytes.to_py())
+    else:
+        _file_bytes = bytes(_file_bytes)
+except Exception:
+    pass
+
+_output_buf = _io.StringIO()
+_orig_stdout = sys.stdout
+sys.stdout = _output_buf
+
+try:
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    _has_mpl = True
+except Exception:
+    _has_mpl = False
+
+_chart_b64 = None
+
+# ── User code ──────────────────────────────────────────────────
+${code}
+# ── End user code ──────────────────────────────────────────────
+
+if _has_mpl:
+    fig = plt.gcf()
+    if fig.get_axes():
+        import base64
+        _buf = _io.BytesIO()
+        fig.savefig(_buf, format='png', dpi=110, bbox_inches='tight', facecolor='#0d1117')
+        _chart_b64 = base64.b64encode(_buf.getvalue()).decode()
+        plt.close('all')
+
+sys.stdout = _orig_stdout
+_stdout_text = _output_buf.getvalue()
+`;
+
+    py.runPython(wrappedCode);
+    const stdout = py.globals.get('_stdout_text') || '';
+    const chartB64 = py.globals.get('_chart_b64') || null;
+    return { stdout: String(stdout).trim(), chartB64 };
+}
+
+// ── Master orchestrator ────────────────────────────────────────
+async function runPythonNotebook(attachmentsForSend, userQuery) {
+    const dataFile = attachmentsForSend.find(isDataAnalysisFile);
+    if (!dataFile) return null;
+
+    // Build the notebook panel
+    const { row, progress } = buildNotebookAnalyzingPanel() || {};
+    if (!row) return null;
+
+    const detailsEl = row.querySelector('#nb-details');
+    const codeEl    = row.querySelector('#nb-code');
+
+    let pyodide = null;
+    let generatedCode = '';
+    let executionOutput = '';
+
+    try {
+        // ── Phase 1: Load Pyodide ──────────────────────────────
+        progress.update(0);
+        const pyLoadStart = Date.now();
+        pyodide = await loadPyodideRuntime((frac, label) => {
+            progress.update(frac);
+        });
+        progress.nextPhase(); // → codegen
+
+        // ── Phase 2: Generate Python code via AI ───────────────
+        const fileExt = (dataFile.name || '').split('.').pop().toLowerCase();
+        const codePrompt = [
+            `The user has uploaded a ${fileExt.toUpperCase()} file named "${dataFile.name}".`,
+            `User question: ${userQuery}`,
+            '',
+            'Write a Python script to answer this question using pandas (and numpy/matplotlib if needed).',
+            'The file bytes are available as: _file_bytes (bytes) and _file_name (string).',
+            'Load the file like this:',
+            fileExt === 'csv' || fileExt === 'tsv'
+                ? `  import pandas as pd, io\n  df = pd.read_csv(io.BytesIO(bytes(_file_bytes)))`
+                : `  import pandas as pd, io\n  df = pd.read_excel(io.BytesIO(bytes(_file_bytes)))`,
+            '',
+            'Rules:',
+            '- Print the answer clearly using print()',
+            '- For tables, use print(df.to_markdown(index=False)) or print(df.to_string())',
+            '- For charts, use matplotlib — it will be captured automatically',
+            '- Keep code clean, well-commented, under 60 lines',
+            '- Return ONLY the Python code inside a ```python block, nothing else',
+        ].join('\n');
+
+        let rawCode = '';
+        try {
+            const codeResult = await askGeminiAI(codePrompt, {
+                intent: 'general_chat',
+                minimalThinking: true,
+                timeoutMs: 20000,
+                stream: false
+            });
+            rawCode = String(codeResult?.response || codeResult?.text || '').trim();
+        } catch (_) {}
+
+        // Extract code from ```python ... ``` block
+        const codeMatch = rawCode.match(/```python\n?([\s\S]*?)```/) ||
+                          rawCode.match(/```\n?([\s\S]*?)```/);
+        generatedCode = codeMatch ? codeMatch[1].trim() : rawCode.replace(/^```\w*\n?/, '').replace(/\n?```$/, '').trim();
+        if (!generatedCode) {
+            generatedCode = `import pandas as pd, io\ndf = pd.read_csv(io.BytesIO(bytes(_file_bytes)))\nprint(df.describe().to_markdown())`;
+        }
+
+        progress.update(0.8);
+
+        // ── Animate code typing ────────────────────────────────
+        await typeCodeIntoNotebook(generatedCode, detailsEl, codeEl, progress);
+        progress.nextPhase(); // → execute
+
+        // ── Phase 3: Execute in Pyodide ────────────────────────
+        progress.update(0.1);
+        const fileBytes = dataFile.file
+            ? await dataFile.file.arrayBuffer()
+            : (dataFile.base64 ? Uint8Array.from(atob(dataFile.base64), c => c.charCodeAt(0)).buffer : new ArrayBuffer(0));
+
+        let stdout = '';
+        let chartB64 = null;
+        try {
+            const runResult = await runInPyodide(pyodide, generatedCode, fileBytes, dataFile.name);
+            stdout = runResult.stdout;
+            chartB64 = runResult.chartB64;
+        } catch (pyErr) {
+            stdout = `Error: ${String(pyErr?.message || pyErr)}`;
+        }
+
+        executionOutput = stdout;
+        progress.update(1.0);
+        progress.nextPhase(); // → answer
+
+        // ── Transition to Notebook button: analyzing card disappears, Notebook label appears ──
+        transitionToNotebookButton(row, generatedCode, stdout + (chartB64 ? '\n[Chart generated]' : ''), progress);
+
+        // Wait 1 second before returning so the Notebook button displays clearly before answer synthesis begins
+        await new Promise(r => setTimeout(r, 1000));
+
+        // Build chart HTML if available
+        const chartHtml = chartB64
+            ? `\n\n![Chart](data:image/png;base64,${chartB64})`
+            : '';
+
+        // Return context for answer generation
+        return {
+            code: generatedCode,
+            output: stdout,
+            chartB64,
+            chartHtml,
+            answerContextPrompt: [
+                `User question: ${userQuery}`,
+                '',
+                'I ran Python analysis on the uploaded data file and got this output:',
+                '```',
+                stdout.slice(0, 6000) || '(no output)',
+                '```',
+                chartB64 ? '(A chart was also generated and is shown below the answer.)' : '',
+                '',
+                'Now answer the user\'s question in plain, clear language based on this output.',
+                'Format numbers and tables nicely. Be concise and direct.',
+            ].filter(Boolean).join('\n')
+        };
+    } catch (err) {
+        console.error('Notebook error:', err);
+        if (row) {
+            const tqdm = row.querySelector('#nb-tqdm');
+            if (tqdm) {
+                tqdm.innerHTML = '<span style="color:#f87171">⚠ Analysis failed</span>';
+            }
+        }
+        return null;
     }
 }
 
