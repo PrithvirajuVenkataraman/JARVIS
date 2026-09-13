@@ -9811,16 +9811,21 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             const textToRender = cleanAnswer || (isThinkingStream || thoughtText ? '' : text);
             renderAssistantTextIntoElement(textElement, textToRender, { streaming: meta?.streaming === true, meta });
 
-            const actionRow = row.querySelector('.assistant-action-row');
-            if (actionRow && modelInfo && modelInfo.label) {
-                let badge = actionRow.querySelector('.assistant-model-badge');
-                if (!badge) {
-                    badge = document.createElement('span');
-                    actionRow.insertBefore(badge, actionRow.firstChild);
+            try {
+                const actionRow = row.querySelector('.assistant-action-row');
+                const safeModelInfo = typeof modelInfo !== 'undefined' ? modelInfo : null;
+                if (actionRow && safeModelInfo && safeModelInfo.label) {
+                    let badge = actionRow.querySelector('.assistant-model-badge');
+                    if (!badge) {
+                        badge = document.createElement('span');
+                        actionRow.insertBefore(badge, actionRow.firstChild);
+                    }
+                    badge.className = `assistant-model-badge ${safeModelInfo.isFailover ? 'is-failover' : ''}`;
+                    badge.textContent = safeModelInfo.label;
+                    badge.title = safeModelInfo.label;
                 }
-                badge.className = `assistant-model-badge ${modelInfo.isFailover ? 'is-failover' : ''}`;
-                badge.textContent = modelInfo.label;
-                badge.title = modelInfo.label;
+            } catch (_) {
+                // Non-critical badge decoration should never crash text streaming
             }
             const cleanText = String(cleanAnswer || text || '').trim();
             const existing = getAssistantMessageMeta(messageId) || {};
