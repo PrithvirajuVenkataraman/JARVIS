@@ -1,14 +1,18 @@
-const MAX_ATTACHMENTS = 6;
-const MAX_FILE_BYTES = 12 * 1024 * 1024;
+const MAX_ATTACHMENTS = 12;
+const MAX_FILE_BYTES = 25 * 1024 * 1024;
 const MAX_EXTRACT_CHARS = 120000;
 const PDF_VISUAL_PAGE_LIMIT = 10;
-const TEXT_EXTENSIONS = /\.(txt|md|markdown|json|jsonl|csv|tsv|xml|html|htm|css|js|mjs|cjs|ts|tsx|jsx|py|java|cpp|c|h|cs|go|rs|rb|php|sh|yaml|yml|toml|ini|log|sql|rtf)$/i;
+const TEXT_EXTENSIONS = /\.(txt|md|markdown|json|jsonl|csv|tsv|xml|html|htm|css|js|mjs|cjs|ts|tsx|jsx|py|java|cpp|c|h|cs|go|rs|rb|php|sh|yaml|yml|toml|ini|log|sql|rtf|eml|msg)$/i;
 const IMAGE_EXTENSIONS = /\.(jpe?g|png|gif|webp|bmp|tiff?|heic|heif|avif)$/i;
+const XLSX_EXTENSIONS = /\.(xlsx|xls|ods)$/i;
+const ZIP_EXTENSIONS = /\.(zip|cbz)$/i;
+const EPUB_EXTENSIONS = /\.epub$/i;
 
 const pendingAttachments = [];
 
 let pdfLoaderPromise = null;
 let jsZipLoaderPromise = null;
+let sheetJsLoaderPromise = null;
 let tesseractLoaderPromise = null;
 
 export function getPendingAttachments() {
@@ -63,39 +67,69 @@ export async function ingestAllForMessage(attachments = [], userText = '') {
     const items = Array.isArray(attachments) ? attachments : [];
     if (!items.length) return null;
 
+    // Process all attachments in parallel, max 4 concurrent to avoid saturating network
+    const CONCURRENCY = 4;
+    const semaphore = { count: 0 };
+    const acquire = () => new Promise(resolve => {
+        const tryAcquire = () => {
+            if (semaphore.count < CONCURRENCY) { semaphore.count++; resolve(); }
+            else setTimeout(tryAcquire, 30);
+        };
+        tryAcquire();
+    });
+    const release = () => { semaphore.count--; };
+
+    const processOne = async (attachment) => {
+        await acquire();
+        try {
+            const isImg = isImageAttachment(attachment);
+            let imagePayload = null;
+            if (isImg) {
+                const base64 = await resolveAttachmentBase64(attachment).catch(() => '');
+                if (base64) {
+                    imagePayload = {
+                        name: attachment.name,
+                        mimeType: normalizeImageMime(attachment.mimeType, attachment.name),
+                        base64
+                    };
+                }
+            }
+            const result = await ingestAttachmentWithFallback(attachment);
+            attachment.extractedText = String(result.text || '').trim();
+            attachment.ocrMethod = result.method || (isImg ? 'vision_ocr' : '');
+            return { attachment, isImg, imagePayload, result };
+        } finally {
+            release();
+        }
+    };
+
+    const settled = await Promise.allSettled(items.map(processOne));
+
     const sections = [];
     const methods = [];
     const imagePayloads = [];
     let anyReadable = false;
 
-    for (const attachment of items) {
-        const isImg = isImageAttachment(attachment);
-        if (isImg) {
-            const base64 = await resolveAttachmentBase64(attachment).catch(() => '');
-            if (base64) {
-                anyReadable = true;
-                imagePayloads.push({
-                    name: attachment.name,
-                    mimeType: normalizeImageMime(attachment.mimeType, attachment.name),
-                    base64
-                });
-            }
+    for (const outcome of settled) {
+        if (outcome.status === 'rejected') continue;
+        const { attachment, isImg, imagePayload, result } = outcome.value;
+
+        if (imagePayload) {
+            anyReadable = true;
+            imagePayloads.push(imagePayload);
         }
 
-        const result = await ingestAttachmentWithFallback(attachment);
-        attachment.extractedText = String(result.text || '').trim();
-        attachment.ocrMethod = result.method || (isImg ? 'vision_ocr' : '');
         methods.push({
             name: attachment.name,
             method: result.method || (isImg ? 'single_pass_native_image' : 'none'),
             provider: result.provider || (isImg ? 'native' : 'none'),
-            ok: Boolean(result.ok || (isImg && imagePayloads.length))
+            ok: Boolean(result.ok || (isImg && imagePayload))
         });
         const header = `### ${attachment.name} (${attachment.mimeType || 'unknown'})`;
         if (result.text && hasUsefulExtractedText(result.text)) {
             anyReadable = true;
             sections.push(`${header}\nExtraction: ${result.method}\n\n${clipText(result.text)}`);
-        } else if (isImg && imagePayloads.length) {
+        } else if (isImg && imagePayload) {
             anyReadable = true;
             sections.push(`[Attached Image: ${attachment.name}]`);
         } else {
@@ -357,8 +391,36 @@ async function extractLocally(attachment) {
         }
     }
 
+    if (isXlsxFile(file)) {
+        const xlsxText = await extractXlsxTextClient(file).catch(() => '');
+        const useful = hasUsefulExtractedText(xlsxText);
+        attempts.push({ stage: 'client_xlsx', ok: useful, method: 'client_xlsx' });
+        if (useful) {
+            return { ok: true, text: xlsxText, method: 'client_xlsx', provider: 'client', attempts };
+        }
+    }
+
+    if (isZipFile(file)) {
+        const zipText = await extractZipTextClient(file).catch(() => '');
+        const useful = hasUsefulExtractedText(zipText) || String(zipText || '').length > 20;
+        attempts.push({ stage: 'client_zip', ok: useful, method: 'client_zip' });
+        if (useful) {
+            return { ok: true, text: zipText, method: 'client_zip', provider: 'client', attempts };
+        }
+    }
+
+    if (isEpubFile(file)) {
+        const epubText = await extractEpubTextClient(file).catch(() => '');
+        const useful = hasUsefulExtractedText(epubText);
+        attempts.push({ stage: 'client_epub', ok: useful, method: 'client_epub' });
+        if (useful) {
+            return { ok: true, text: epubText, method: 'client_epub', provider: 'client', attempts };
+        }
+    }
+
     return { ok: false, text: '', method: 'client', provider: 'client', attempts };
 }
+
 
 async function ingestOnServer(attachment, localResult = {}) {
     const clientText = hasUsefulExtractedText(localResult?.text) ? String(localResult.text || '') : '';
@@ -590,8 +652,32 @@ function isDocxFile(file) {
 }
 
 function isPptxFile(file) {
-    return file.type === 'application/vnd.openxmlformats-officedocument.presentationml.presentation' || /\.pptx$/i.test(file.name);
+    return file.type === 'application/vnd.openxmlformats-officedocument.presentationml.presentation' || /\\.pptx$/i.test(file.name);
 }
+
+function isXlsxFile(file) {
+    const t = file.type || '';
+    return XLSX_EXTENSIONS.test(file.name) ||
+        t === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+        t === 'application/vnd.ms-excel' ||
+        t === 'application/x-vnd.ms-excel';
+}
+
+function isZipFile(file) {
+    const t = file.type || '';
+    return ZIP_EXTENSIONS.test(file.name) ||
+        t === 'application/zip' ||
+        t === 'application/x-zip-compressed' ||
+        t === 'application/x-zip';
+}
+
+function isEpubFile(file) {
+    const t = file.type || '';
+    return EPUB_EXTENSIONS.test(file.name) ||
+        t === 'application/epub+zip' ||
+        t === 'application/epub';
+}
+
 
 function isImageAttachment(attachment) {
     const mimeType = attachment?.mimeType || '';
@@ -863,6 +949,119 @@ async function loadJsZip() {
     }
     return jsZipLoaderPromise;
 }
+
+async function loadSheetJs() {
+    if (!sheetJsLoaderPromise) {
+        sheetJsLoaderPromise = import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm').then(mod => mod.default || mod);
+    }
+    return sheetJsLoaderPromise;
+}
+
+// ── XLSX / XLS / ODS extractor ────────────────────────────────────────────────
+async function extractXlsxTextClient(file) {
+    const XLSX = await loadSheetJs();
+    const buffer = await file.arrayBuffer();
+    const wb = XLSX.read(buffer, { type: 'array', cellText: true, cellDates: true });
+    const parts = [];
+    for (const sheetName of wb.SheetNames.slice(0, 20)) {
+        const ws = wb.Sheets[sheetName];
+        if (!ws) continue;
+        // Convert sheet to array-of-arrays then render as Markdown table
+        const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+        if (!aoa.length) continue;
+        const rows = aoa.filter(row => Array.isArray(row) && row.some(cell => String(cell || '').trim()));
+        if (!rows.length) continue;
+        const header = rows[0].map(c => String(c || '').trim());
+        const separator = header.map(() => '---');
+        const body = rows.slice(1).map(row =>
+            header.map((_, i) => String(row[i] ?? '').replace(/\|/g, '\\|').trim())
+        );
+        const mdTable = [header, separator, ...body]
+            .map(r => '| ' + r.join(' | ') + ' |')
+            .join('\n');
+        parts.push(`### Sheet: ${sheetName}\n\n${mdTable}`);
+    }
+    return clipText(parts.join('\n\n---\n\n'));
+}
+
+// ── ZIP extractor ─────────────────────────────────────────────────────────────
+// Lists contents + extracts readable text files (txt, csv, json, md, code) inside
+async function extractZipTextClient(file) {
+    const JSZip = await loadJsZip();
+    const zip = await JSZip.loadAsync(await file.arrayBuffer());
+    const READABLE = /\.(txt|md|markdown|csv|tsv|json|jsonl|xml|html|htm|yaml|yml|toml|ini|log|sql|py|js|ts|jsx|tsx|java|cpp|c|h|cs|go|rb|php|sh|rs)$/i;
+    const IMAGE_OR_BIN = /\.(jpe?g|png|gif|webp|bmp|exe|dll|so|class|pyc|zip|gz|tar|rar|7z)$/i;
+    const entries = Object.entries(zip.files)
+        .filter(([, f]) => !f.dir)
+        .sort(([a], [b]) => a.localeCompare(b));
+
+    // Build manifest
+    const manifest = entries.map(([name, f]) => `- ${name} (${formatBytes(f._data?.uncompressedSize || 0)})`).join('\n');
+    const parts = [`## ZIP Contents: ${file.name}\n\n${manifest}`];
+
+    // Extract readable text files (max 10 files, 20KB each)
+    let extracted = 0;
+    for (const [name, entry] of entries) {
+        if (extracted >= 10) break;
+        if (IMAGE_OR_BIN.test(name)) continue;
+        if (!READABLE.test(name)) continue;
+        try {
+            const text = await entry.async('text');
+            const clipped = text.slice(0, 20000).trim();
+            if (clipped.length >= 20) {
+                parts.push(`### ${name}\n\`\`\`\n${clipped}\n\`\`\``);
+                extracted++;
+            }
+        } catch (_) {}
+    }
+    return clipText(parts.join('\n\n---\n\n'));
+}
+
+// ── EPUB extractor ────────────────────────────────────────────────────────────
+// EPUBs are ZIP archives with HTML content chapters
+async function extractEpubTextClient(file) {
+    const JSZip = await loadJsZip();
+    const zip = await JSZip.loadAsync(await file.arrayBuffer());
+
+    // Find spine order from content.opf
+    let chapterPaths = [];
+    const opfEntry = Object.keys(zip.files).find(n => /\.opf$/i.test(n));
+    if (opfEntry) {
+        try {
+            const opfXml = await zip.files[opfEntry].async('text');
+            const idrefs = Array.from(opfXml.matchAll(/<itemref[^>]+idref="([^"]+)"/g)).map(m => m[1]);
+            const hrefMap = {};
+            for (const m of opfXml.matchAll(/<item[^>]+id="([^"]+)"[^>]+href="([^"]+)"/g)) {
+                hrefMap[m[1]] = m[2];
+            }
+            const base = opfEntry.includes('/') ? opfEntry.slice(0, opfEntry.lastIndexOf('/') + 1) : '';
+            chapterPaths = idrefs.map(id => hrefMap[id]).filter(Boolean).map(href => base + href);
+        } catch (_) {}
+    }
+    if (!chapterPaths.length) {
+        // Fallback: all HTML/xhtml files
+        chapterPaths = Object.keys(zip.files).filter(n => /\.(html|xhtml|htm)$/i.test(n)).sort().slice(0, 30);
+    }
+
+    const parts = [];
+    for (const path of chapterPaths.slice(0, 20)) {
+        const entry = zip.files[path] || zip.files[path.replace(/^.*\//, '')];
+        if (!entry) continue;
+        try {
+            const html = await entry.async('text');
+            // Strip tags, decode entities, collapse whitespace
+            const text = html
+                .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+                .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+                .replace(/<[^>]+>/g, ' ')
+                .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ').replace(/&#\d+;/g, '')
+                .replace(/\s+/g, ' ').trim();
+            if (text.length >= 30) parts.push(text);
+        } catch (_) {}
+    }
+    return clipText(parts.join('\n\n'));
+}
+
 
 function notifyAttachmentProgress(attachment, message) {
     if (typeof window !== 'undefined' && window.dispatchEvent) {
