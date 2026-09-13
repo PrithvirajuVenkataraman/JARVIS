@@ -9709,16 +9709,17 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 (textStr.startsWith('<') && !textStr.includes('>') && '<think>'.startsWith(textStr.toLowerCase()))
             );
             
+            const rawModel = meta?.modelUsed || meta?.model || meta?.routing?.model || '';
+            const rawProvider = meta?.provider || meta?.routing?.provider || '';
+            const rawFailover = meta?.failover || meta?.routing?.failover || false;
+            const modelInfo = typeof formatModelDisplayName === 'function' ? formatModelDisplayName(rawModel, rawProvider, rawFailover) : null;
+
             if (isThinkingStream || thinkingCard) {
                 const isStopped = meta?.stopped === true;
                 const isFinished = isStopped || !meta?.streaming || Boolean(cleanAnswer && cleanAnswer.length > 0);
                 const elapsed = meta?.latency 
                     ? (meta.latency / 1000).toFixed(1) 
                     : (row.__thinkingStartedAt ? ((performance.now() - row.__thinkingStartedAt) / 1000).toFixed(1) : '1.8');
-                const rawModel = meta?.modelUsed || meta?.model || meta?.routing?.model || '';
-                const rawProvider = meta?.provider || meta?.routing?.provider || '';
-                const rawFailover = meta?.failover || meta?.routing?.failover || false;
-                const modelInfo = typeof formatModelDisplayName === 'function' ? formatModelDisplayName(rawModel, rawProvider, rawFailover) : null;
                 if (!thinkingCard && bubble) {
                     const hasThoughtsToRender = Boolean((thoughtText && thoughtText.trim().length > 0) || meta?.selfHealing || (meta?.thoughtSteps && meta.thoughtSteps.length > 0));
                     if (hasThoughtsToRender) {
@@ -24170,7 +24171,7 @@ function buildFrontendRouteContext(text, options = {}) {
         strictLatest: !isWebOff && isStrictLatestQuery(value),
         currentInfo: !isWebOff && isCurrentInfoQuery(value),
         liveRetrieval: !isWebOff && isLiveRetrievalQuery(value),
-        requiresSources: !isWebOff && (isExplicitWebSearchRequest(value) || isStrictLatestQuery(value) || isCurrentInfoQuery(value)),
+        requiresSources: !isWebOff && (isExplicitWebSearchRequest(value) || isStrictLatestQuery(value) || isCurrentInfoQuery(value) || isEntityAttributionQuery(value) || requiresLiveSourceAnswer(value, liveIntent, entityIntent)),
         safetySensitive: isMedicalAdviceIntent(value) || isMedicalEmergencyIntent(value),
         placeGrounded: !isWebOff && (isLikelyLocationOrTravelQuery(value) || /\b(museum|museums|landmark|attraction|restaurant|hotel|nearby|near me|open now|places to visit)\b/i.test(value)),
         toolAction: !!options?.toolAction,
