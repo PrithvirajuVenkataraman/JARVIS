@@ -34,7 +34,7 @@ function getCostControls() {
         qualityCriticEnabled: readCostBool('JARVIS_QUALITY_CRITIC_ENABLED', true),
         streamQualityReviewEnabled: readCostBool('JARVIS_STREAM_QUALITY_REVIEW', false),
         defaultMaxTokens: clampCostInt(process.env.JARVIS_DEFAULT_MAX_TOKENS, 16000, 256, 16000),
-        fastMaxTokens: clampCostInt(process.env.JARVIS_FAST_MAX_TOKENS, 8000, 256, 8000),
+        fastMaxTokens: clampCostInt(process.env.JARVIS_FAST_MAX_TOKENS, 8000, 256, 16000),
         streamMaxTokens: clampCostInt(process.env.JARVIS_STREAM_MAX_TOKENS, 16000, 256, 16000)
     };
 }
@@ -1224,7 +1224,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
      */
     function isNativeReasoningModel(modelName = '') {
         const m = String(modelName || '').toLowerCase();
-        return m.includes('deepseek') || m.includes('r1') || m.includes('reasoner') || m.includes('thinking');
+        return m.includes('deepseek') || m.includes('r1') || m.includes('reasoner') || m.includes('thinking') || m.includes('gpt-oss') || m.includes('qwen');
     }
 
     function buildReasoningInstruction(intent, model = '') {
@@ -1942,7 +1942,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                     };
                     if (['openai/gpt-oss-120b', 'openai/gpt-oss-20b'].includes(model) && isSqlQueryGenerationRequest(finalPrompt)) {
                         requestBody.response_format = SQL_QUERY_GENERATION_SCHEMA;
-                    } else if (['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'openai/gpt-oss-safeguard-20b'].includes(model)) {
+                    } else if (['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'openai/gpt-oss-safeguard-20b'].includes(model) && (hasStructuredOutputConstraint(options?.systemPrompt || '', finalPrompt) || options?.response_format)) {
                         requestBody.response_format = { type: 'json_object' };
                     }
                     if (isNativeReasoningModel(model)) {
@@ -2129,7 +2129,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
 
     async function streamModelWithFallback(finalPrompt, lengthPolicy = {}, onDelta = () => {}, userSelectedModel = null, images = undefined, options = {}) {
         const temp = Number.isFinite(Number(lengthPolicy?.temperature)) ? Number(lengthPolicy.temperature) : 0.7;
-        const maxTokens = clampInt(lengthPolicy?.maxTokens, 8000, 256, 16000) + REASONING_TOKEN_ALLOWANCE;
+        const maxTokens = Math.max(8000, clampInt(lengthPolicy?.maxTokens, 8000, 256, 16000)) + REASONING_TOKEN_ALLOWANCE;
         const hasImages = Array.isArray(images) && images.length > 0;
         const queryComplexity = classifyQueryComplexity(options?.effectiveMessage || options?.message || finalPrompt, { intent: options?.intent });
         const routingTier = options?.tier || queryComplexity.tier;
@@ -2287,11 +2287,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             }
             let text = '';
             let inReasoning = false;
-            let reasoningTokenCount = 0;
-            const maxReasoningTokens = shouldSuppressReasoning ? 80 : 400;
-            const reasoningStartedAt = Date.now();
-            const maxReasoningDurationMs = shouldSuppressReasoning ? 3_500 : 14_000;
-            let reasoningForceClosed = false;
+            let finishReason = null;
 
             await readSseStream(response.body, payload => {
                 if (initialTimer) {
@@ -2300,22 +2296,17 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 }
                 resetIdleTimer();
 
-                const deltaObj = payload?.choices?.[0]?.delta;
+                const choice = payload?.choices?.[0];
+                if (choice?.finish_reason) {
+                    finishReason = choice.finish_reason;
+                }
+                const deltaObj = choice?.delta;
                 const reasoning = String(deltaObj?.reasoning || '');
                 const content = String(deltaObj?.content || '');
                 
-                if (reasoning && !reasoningForceClosed) {
-                    reasoningTokenCount += Math.max(1, Math.round(reasoning.length / 4));
-                    const reasoningElapsed = Date.now() - reasoningStartedAt;
-                    if (reasoningElapsed > maxReasoningDurationMs || reasoningTokenCount > maxReasoningTokens) {
-                        reasoningForceClosed = true;
-                        if (inReasoning) {
-                            inReasoning = false;
-                            text += '\n</think>\n';
-                            if (!shouldSuppressReasoning) onDelta('\n</think>\n');
-                        }
-                    } else if (shouldSuppressReasoning) {
-                        // Silent absorption: retain CoT state internally but never emit to client
+                if (reasoning) {
+                    if (shouldSuppressReasoning) {
+                        // Silent absorption: retain CoT state internally in case needed, but never emit to client
                         if (!inReasoning) {
                             inReasoning = true;
                             text += '<think>\n';
@@ -2357,6 +2348,11 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                     text = `${text}\n\n${thoughtText}`;
                     onDelta(`\n\n${thoughtText}`);
                 }
+            }
+            // If the model was abruptly cut off due to token length limit before generating a substantive answer, cascade
+            if (finishReason === 'length' && cleanContent.length < 35) {
+                recordKeyFailure(apiKey, false);
+                return { ok: false };
             }
             if (cleanContent.length > 0) {
                 recordKeySuccess(apiKey);
@@ -4472,10 +4468,10 @@ const edgeResponseCache = new EdgeSemanticLruCache();
         if (intent === 'fast_explainer') {
             return {
                 instruction: 'Fast explainer mode: answer directly in 3-6 concise sentences. Avoid filler, source requests, and generic next steps.',
-                maxTokens: 2000,
+                maxTokens: 4000,
                 temperature: resolveResponseTemperature({ message, intent, responseStyle, detail: 'short' }),
                 wordSpec: null,
-                timeoutMs: 9000,
+                timeoutMs: 15000,
                 retries: 0
             };
         }
@@ -4512,7 +4508,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
         if (detail === 'short') {
             return {
                 instruction: 'Keep the response brief and direct.',
-                maxTokens: 2000,
+                maxTokens: 4000,
                 temperature,
                 wordSpec: null
             };
