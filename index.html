@@ -4944,7 +4944,10 @@ async function streamChatCompletion(payload, options = {}) {
         }
         if (event.event === 'done') {
             donePayload = event.data || {};
-            const doneResponse = String(donePayload.response || accumulated || '').trim();
+            const rawDone = String(donePayload.response || '').trim();
+            const doneResponse = (rawDone && rawDone.length >= accumulated.trim().length)
+                ? rawDone
+                : (accumulated.trim() || rawDone);
             if (isConverseStream && doneResponse) {
                 finishStreamingConverseSpeech(doneResponse, activeTurnId);
             }
@@ -4990,7 +4993,7 @@ async function streamChatCompletion(payload, options = {}) {
             const { value, done } = await reader.read();
             if (done) break;
             buffer += decoder.decode(value, { stream: true });
-            const parts = buffer.split(/\n\n/);
+            const parts = buffer.split(/\r?\n\r?\n/);
             buffer = parts.pop() || '';
             for (const part of parts) {
                 handleEvent(parseSseClientEvent(part));
