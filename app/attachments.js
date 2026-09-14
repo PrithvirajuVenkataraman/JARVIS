@@ -3,7 +3,7 @@ const MAX_FILE_BYTES = 25 * 1024 * 1024;
 const MAX_EXTRACT_CHARS = 120000;
 const PDF_VISUAL_PAGE_LIMIT = 10;
 const TEXT_EXTENSIONS = /\.(txt|md|markdown|json|jsonl|csv|tsv|xml|html|htm|css|js|mjs|cjs|ts|tsx|jsx|py|java|cpp|c|h|cs|go|rs|rb|php|sh|yaml|yml|toml|ini|log|sql|rtf|eml|msg)$/i;
-const IMAGE_EXTENSIONS = /\.(jpe?g|png|gif|webp|bmp|tiff?|heic|heif|avif)$/i;
+const IMAGE_EXTENSIONS = /\.(jpe?g|pjpeg|png|gif|webp|bmp|dib|tiff?|heic|heif|heics|heifs|avif|avifs|dng|raw|cr[23]|nef|nrw|arw|srf|sr2|raf|rw2|orf|pef|jp2|j2k|jpf|jpx|jpm|pict?|pct|pic|psd|ico|cur|svgz?)$/i;
 const XLSX_EXTENSIONS = /\.(xlsx|xls|ods)$/i;
 const ZIP_EXTENSIONS = /\.(zip|cbz)$/i;
 const EPUB_EXTENSIONS = /\.epub$/i;
@@ -756,12 +756,20 @@ function guessMimeFromName(filename) {
     if (lower.endsWith('.pdf')) return 'application/pdf';
     if (lower.endsWith('.docx')) return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
     if (lower.endsWith('.pptx')) return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
-    if (/\.(jpe?g)$/.test(lower)) return 'image/jpeg';
+    if (/\.(jpe?g|pjpeg)$/.test(lower)) return 'image/jpeg';
     if (lower.endsWith('.png')) return 'image/png';
     if (lower.endsWith('.webp')) return 'image/webp';
     if (lower.endsWith('.gif')) return 'image/gif';
-    if (lower.endsWith('.heic') || lower.endsWith('.heif')) return 'image/heic';
-    if (lower.endsWith('.avif')) return 'image/avif';
+    if (/\.(heic|heif|heics|heifs)$/.test(lower)) return 'image/heic';
+    if (/\.(avif|avifs)$/.test(lower)) return 'image/avif';
+    if (/\.(dng|raw|cr[23]|nef|nrw|arw|srf|sr2|raf|rw2|orf|pef)$/.test(lower)) return 'image/dng';
+    if (/\.(jp2|j2k|jpf|jpx|jpm)$/.test(lower)) return 'image/jp2';
+    if (/\.(tiff?)$/.test(lower)) return 'image/tiff';
+    if (/\.(bmp|dib)$/.test(lower)) return 'image/bmp';
+    if (/\.(pict?|pct|pic)$/.test(lower)) return 'image/pict';
+    if (lower.endsWith('.psd')) return 'image/vnd.adobe.photoshop';
+    if (/\.(ico|cur)$/.test(lower)) return 'image/x-icon';
+    if (/\.svgz?$/.test(lower)) return 'image/svg+xml';
     return 'application/octet-stream';
 }
 
