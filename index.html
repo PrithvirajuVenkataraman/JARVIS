@@ -4861,7 +4861,8 @@ async function streamChatCompletion(payload, options = {}) {
             route: options?.routeDecision?.route || '',
             routeReason: options?.routeDecision?.reason || '',
             turnSource: activeResponseRenderContext?.source || '',
-            sourcePolicy: options?.routeDecision?.sourcePolicy || ''
+            sourcePolicy: options?.routeDecision?.sourcePolicy || '',
+            minimalThinking: options?.routeDecision?.minimalThinking === true || options?.routeDecision?.route === 'fast_simple'
         });
         return assistantMessageId;
     };
@@ -4889,7 +4890,9 @@ async function streamChatCompletion(payload, options = {}) {
                     streaming: true,
                     modelUsed: streamMeta.modelUsed || streamMeta.model || '',
                     provider: streamMeta.provider || '',
-                    failover: streamMeta.failover || false
+                    failover: streamMeta.failover || false,
+                    route: options?.routeDecision?.route || '',
+                    minimalThinking: options?.routeDecision?.minimalThinking === true || options?.routeDecision?.route === 'fast_simple'
                 });
             }
             return;
@@ -4921,7 +4924,9 @@ async function streamChatCompletion(payload, options = {}) {
                 streaming: true,
                 modelUsed: streamMeta.modelUsed || streamMeta.model || '',
                 provider: streamMeta.provider || '',
-                failover: streamMeta.failover || false
+                failover: streamMeta.failover || false,
+                route: options?.routeDecision?.route || '',
+                minimalThinking: options?.routeDecision?.minimalThinking === true || options?.routeDecision?.route === 'fast_simple'
             });
             return;
         }
@@ -9718,7 +9723,21 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             const priorUserPrompt = String(meta?.userMessage || getAssistantMessageMeta(messageId)?.priorUserPrompt || '').trim();
             
             const textStr = String(text || '').trimStart();
-            const isThinkingStream = Boolean(
+            const isMinimalThinking = Boolean(
+                meta?.minimalThinking === true ||
+                meta?.route === 'fast_simple' ||
+                meta?.routeDecision?.route === 'fast_simple' ||
+                meta?.routing?.route === 'fast_simple'
+            );
+            if (isMinimalThinking && thinkingCard) {
+                if (row.__thinkingTimerInterval) {
+                    clearInterval(row.__thinkingTimerInterval);
+                    row.__thinkingTimerInterval = null;
+                }
+                thinkingCard.remove();
+                thinkingCard = null;
+            }
+            const isThinkingStream = !isMinimalThinking && Boolean(
                 (thoughtText && thoughtText.trim().length > 0) ||
                 textStr.startsWith('<think') ||
                 (textStr.startsWith('<') && !textStr.includes('>') && '<think>'.startsWith(textStr.toLowerCase()))
@@ -9823,7 +9842,10 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             }
 
             const textElement = row.querySelector('.assistant-message-text');
-            const textToRender = cleanAnswer || (isThinkingStream || thoughtText ? '' : text);
+            const strippedMinimal = isMinimalThinking
+                ? String(text || '').replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/^<think>[\s\S]*$/gi, '').replace(/<\/?think>/gi, '').trim()
+                : '';
+            const textToRender = cleanAnswer || (isMinimalThinking ? strippedMinimal : (isThinkingStream || thoughtText ? '' : text));
             renderAssistantTextIntoElement(textElement, textToRender, { streaming: meta?.streaming === true, meta });
 
             try {
