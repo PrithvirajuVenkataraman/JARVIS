@@ -9727,7 +9727,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 meta?.routeDecision?.route === 'fast_simple' ||
                 meta?.routing?.route === 'fast_simple'
             );
-            if (isMinimalThinking && thinkingCard) {
+            if (isMinimalThinking && thinkingCard && (cleanAnswer || !meta?.streaming)) {
                 if (row.__thinkingTimerInterval) {
                     clearInterval(row.__thinkingTimerInterval);
                     row.__thinkingTimerInterval = null;
@@ -9735,7 +9735,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 thinkingCard.remove();
                 thinkingCard = null;
             }
-            const isThinkingStream = !isMinimalThinking && Boolean(
+            const isThinkingStream = Boolean(
                 (thoughtText && thoughtText.trim().length > 0) ||
                 textStr.startsWith('<think') ||
                 (textStr.startsWith('<') && !textStr.includes('>') && '<think>'.startsWith(textStr.toLowerCase()))
