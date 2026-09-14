@@ -2244,7 +2244,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 messages[targetIdx] = { ...targetMsg, content };
             }
             const shouldSuppressReasoning = options?.minimalThinking === true ||
-                ['fast_simple', 'casual_chat', 'chat_title', 'internal_summary'].includes(String(options?.intent || ''));
+                ['fast_simple', 'casual_chat', 'chat_title', 'internal_summary', 'fast_explainer'].includes(String(options?.intent || ''));
             const groqPayload = {
                 model,
                 temperature,
@@ -2277,7 +2277,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             let reasoningTokenCount = 0;
             const maxReasoningTokens = shouldSuppressReasoning ? 80 : 400;
             const reasoningStartedAt = Date.now();
-            const maxReasoningDurationMs = shouldSuppressReasoning ? 4_000 : 14_000;
+            const maxReasoningDurationMs = shouldSuppressReasoning ? 3_500 : 14_000;
             let reasoningForceClosed = false;
 
             await readSseStream(response.body, payload => {
@@ -2299,8 +2299,15 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                         if (inReasoning) {
                             inReasoning = false;
                             text += '\n</think>\n';
-                            onDelta('\n</think>\n');
+                            if (!shouldSuppressReasoning) onDelta('\n</think>\n');
                         }
+                    } else if (shouldSuppressReasoning) {
+                        // Silent absorption: retain CoT state internally but never emit to client
+                        if (!inReasoning) {
+                            inReasoning = true;
+                            text += '<think>\n';
+                        }
+                        text += reasoning;
                     } else {
                         if (!inReasoning) {
                             inReasoning = true;
@@ -2314,7 +2321,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                     if (inReasoning) {
                         inReasoning = false;
                         text += '\n</think>\n';
-                        onDelta('\n</think>\n');
+                        if (!shouldSuppressReasoning) onDelta('\n</think>\n');
                     }
                     text += content;
                     onDelta(content);
@@ -2322,7 +2329,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             });
             if (inReasoning) {
                 text += '\n</think>\n';
-                onDelta('\n</think>\n');
+                if (!shouldSuppressReasoning) onDelta('\n</think>\n');
             }
             let cleanContent = text
                 .replace(/<think>[\s\S]*?<\/think>/gi, '')
