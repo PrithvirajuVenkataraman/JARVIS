@@ -119,11 +119,11 @@ assert.equal(deepComplexity.tier, 'deep', 'Complex architecture query must class
 const deepCandidates = chatTest.getPreferredGroqCandidates('', { tier: 'deep' });
 assert.equal(deepCandidates[0], 'openai/gpt-oss-120b', 'Complex queries MUST route to openai/gpt-oss-120b on Groq as strict top priority');
 
-// 10.2 Adaptive Model Routing: Instant Tier routes to llama-3.1-8b-instant first for <200ms TTFT
+// 10.2 Adaptive Model Routing: Instant Tier routes to openai/gpt-oss-20b first for <200ms TTFT
 const instantComplexity = chatTest.classifyQueryComplexity('What is the capital of Australia?');
 assert.equal(instantComplexity.tier, 'instant', 'Simple factual query must classify as instant tier');
 const instantCandidates = chatTest.getPreferredGroqCandidates('', { tier: 'instant', preferSpeed: true });
-assert.equal(instantCandidates[0], 'llama-3.1-8b-instant', 'Instant queries must prioritize llama-3.1-8b-instant first for speed');
+assert.equal(instantCandidates[0], 'openai/gpt-oss-20b', 'Instant queries must prioritize openai/gpt-oss-20b first for speed');
 
 // 10.3 System prompt compaction & high-density epistemic directives
 const compactedPrompt = chatTest.buildServerSystemPrompt();
