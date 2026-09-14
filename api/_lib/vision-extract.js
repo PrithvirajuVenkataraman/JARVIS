@@ -10,6 +10,8 @@ const GEMINI_MODEL_FALLBACKS = [
     'gemini-flash-latest'
 ];
 const GROQ_VISION_MODEL_FALLBACKS = [
+    'qwen/qwen3.6-27b',
+    'qwen/qwen3.8-27b',
     'llama-3.2-11b-vision-preview',
     'meta-llama/llama-3.2-11b-vision-instruct',
     'llama-3.2-90b-vision-preview'
