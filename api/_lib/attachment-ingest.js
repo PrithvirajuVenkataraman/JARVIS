@@ -2,7 +2,17 @@ import { extractTextFromImage } from './vision-extract.js';
 
 const MAX_EXTRACT_CHARS = 120000;
 const TEXT_EXTENSIONS = /\.(txt|md|markdown|json|jsonl|csv|tsv|xml|html|htm|css|js|mjs|cjs|ts|tsx|jsx|py|java|cpp|c|h|cs|go|rs|rb|php|sh|yaml|yml|toml|ini|log|sql|rtf)$/i;
-const IMAGE_MIMES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/bmp', 'image/tiff']);
+const IMAGE_MIMES = new Set([
+    'image/jpeg', 'image/jpg', 'image/pjpeg', 'image/png', 'image/x-png', 'image/x-apple-ios-png',
+    'image/webp', 'image/gif',
+    'image/heic', 'image/heif', 'image/heic-sequence', 'image/heif-sequence', 'image/x-heic', 'image/x-heif',
+    'image/avif', 'image/x-avif', 'image/avif-sequence',
+    'image/bmp', 'image/x-bmp', 'image/x-ms-bmp',
+    'image/tiff', 'image/tiff-fx', 'image/x-tiff',
+    'image/dng', 'image/x-adobe-dng', 'image/x-raw', 'image/raw',
+    'image/jp2', 'image/jpx', 'image/jpm', 'image/jpeg2000', 'image/x-jpeg2000-image',
+    'image/pict', 'image/x-pict', 'image/vnd.adobe.photoshop', 'image/x-icon', 'image/vnd.microsoft.icon', 'image/svg+xml'
+]);
 
 export async function ingestAttachmentPayload(payload = {}) {
     const filename = String(payload.filename || 'attachment').trim() || 'attachment';
@@ -225,12 +235,12 @@ function isPptx(mimeType, filename) {
 
 function isImage(mimeType, filename) {
     if (IMAGE_MIMES.has(mimeType) || /^image\//i.test(mimeType)) return true;
-    return /\.(jpe?g|png|gif|webp|bmp|tiff?)$/i.test(filename);
+    return /\.(jpe?g|pjpeg|png|gif|webp|bmp|dib|tiff?|heic|heif|heics|heifs|avif|avifs|dng|raw|cr[23]|nef|nrw|arw|srf|sr2|raf|rw2|orf|pef|jp2|j2k|jpf|jpx|jpm|pict?|pct|pic|psd|ico|cur|svgz?)$/i.test(filename);
 }
 
 function normalizeImageMime(mimeType, filename) {
     if (IMAGE_MIMES.has(mimeType)) return mimeType;
-    if (/\.jpe?g$/i.test(filename)) return 'image/jpeg';
+    if (/\.(jpe?g)$/i.test(filename)) return 'image/jpeg';
     if (/\.png$/i.test(filename)) return 'image/png';
     if (/\.webp$/i.test(filename)) return 'image/webp';
     if (/\.gif$/i.test(filename)) return 'image/gif';
@@ -243,10 +253,20 @@ function guessMimeFromName(filename) {
     if (lower.endsWith('.docx')) return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
     if (lower.endsWith('.pptx')) return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
     if (lower.endsWith('.json')) return 'application/json';
-    if (/\.(jpe?g)$/.test(lower)) return 'image/jpeg';
+    if (/\.(jpe?g|pjpeg)$/.test(lower)) return 'image/jpeg';
     if (lower.endsWith('.png')) return 'image/png';
     if (lower.endsWith('.webp')) return 'image/webp';
     if (lower.endsWith('.gif')) return 'image/gif';
+    if (/\.(heic|heif|heics|heifs)$/.test(lower)) return 'image/heic';
+    if (/\.(avif|avifs)$/.test(lower)) return 'image/avif';
+    if (/\.(dng|raw|cr[23]|nef|nrw|arw|srf|sr2|raf|rw2|orf|pef)$/.test(lower)) return 'image/dng';
+    if (/\.(jp2|j2k|jpf|jpx|jpm)$/.test(lower)) return 'image/jp2';
+    if (/\.(tiff?)$/.test(lower)) return 'image/tiff';
+    if (/\.(bmp|dib)$/.test(lower)) return 'image/bmp';
+    if (/\.(pict?|pct|pic)$/.test(lower)) return 'image/pict';
+    if (lower.endsWith('.psd')) return 'image/vnd.adobe.photoshop';
+    if (/\.(ico|cur)$/.test(lower)) return 'image/x-icon';
+    if (/\.svgz?$/.test(lower)) return 'image/svg+xml';
     if (/\.(txt|md|csv|xml|html|js|ts|py)$/.test(lower)) return 'text/plain';
     return 'application/octet-stream';
 }
