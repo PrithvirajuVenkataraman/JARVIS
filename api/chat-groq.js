@@ -329,6 +329,10 @@ async function getInstantFactHelper() {
     }
 
     function classifyQueryComplexity(rawQuery = '', options = {}) {
+        const intent = String(options?.intent || '');
+        if (['fast_simple', 'casual_chat', 'chat_title', 'fast_explainer', 'internal_summary'].includes(intent) || options?.minimalThinking === true) {
+            return { tier: 'instant', preferSpeed: true, reason: 'fast_intent_policy' };
+        }
         const query = String(rawQuery || '').trim();
         const words = query.split(/\s+/).filter(Boolean);
         const wordCount = words.length;
@@ -929,6 +933,9 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             const firstPass = await runModelWithFallback(firstPrompt, lengthPolicy, preferences?.selectedModel || null, imagesToPass, {
                 systemPrompt,
                 userMessage: effectiveMessage,
+                effectiveMessage,
+                intent,
+                minimalThinking: req.body?.minimalThinking === true || preferences?.minimalThinking === true || ['fast_simple', 'casual_chat', 'chat_title'].includes(String(intent || '')),
                 isAttachmentGrounding,
                 structuredMessages: firstStructured
             });
@@ -998,6 +1005,9 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                     const secondPass = await runModelWithFallback(secondPrompt, lengthPolicy, preferences?.selectedModel || null, undefined, {
                         systemPrompt,
                         userMessage: effectiveMessage,
+                        effectiveMessage,
+                        intent,
+                        minimalThinking: req.body?.minimalThinking === true || preferences?.minimalThinking === true || ['fast_simple', 'casual_chat', 'chat_title'].includes(String(intent || '')),
                         isAttachmentGrounding,
                         structuredMessages: secondStructured
                     });
@@ -1376,7 +1386,13 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 if (!delta) return;
                 streamedText += delta;
                 writeSse(res, 'delta', { text: delta });
-            }, selectedModel, streamImages, { structuredMessages: structuredChat, systemPrompt });
+            }, selectedModel, streamImages, {
+                structuredMessages: structuredChat,
+                systemPrompt,
+                intent,
+                effectiveMessage,
+                minimalThinking: options?.minimalThinking === true || ['fast_simple', 'casual_chat', 'chat_title'].includes(String(intent || ''))
+            });
             timing.modelMs += Date.now() - modelStartedAt;
 
             if (!streamResult.ok) {
@@ -1916,6 +1932,13 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                     } else if (['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'openai/gpt-oss-safeguard-20b'].includes(model)) {
                         requestBody.response_format = { type: 'json_object' };
                     }
+                    if (isNativeReasoningModel(model)) {
+                        const shouldSuppress = options?.minimalThinking === true ||
+                            ['fast_simple', 'casual_chat', 'chat_title', 'internal_summary'].includes(String(options?.intent || ''));
+                        if (shouldSuppress) {
+                            requestBody.reasoning_format = 'hidden';
+                        }
+                    }
 
                     try {
                         const response = await fetchWithTimeoutRetry('https://api.groq.com/openai/v1/chat/completions', {
@@ -2220,6 +2243,22 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 }
                 messages[targetIdx] = { ...targetMsg, content };
             }
+            const shouldSuppressReasoning = options?.minimalThinking === true ||
+                ['fast_simple', 'casual_chat', 'chat_title', 'internal_summary'].includes(String(options?.intent || ''));
+            const groqPayload = {
+                model,
+                temperature,
+                max_tokens: maxTokens,
+                stream: true,
+                messages
+            };
+            if (isNativeReasoningModel(model)) {
+                if (shouldSuppressReasoning) {
+                    groqPayload.reasoning_format = 'hidden';
+                } else {
+                    groqPayload.reasoning_format = 'parsed';
+                }
+            }
             const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
                 method: 'POST',
                 headers: {
@@ -2227,13 +2266,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                     Authorization: `Bearer ${apiKey}`
                 },
                 signal: controller.signal,
-                body: JSON.stringify({
-                    model,
-                    temperature,
-                    max_tokens: maxTokens,
-                    stream: true,
-                    messages
-                })
+                body: JSON.stringify(groqPayload)
             });
             if (!response.ok || !response.body) {
                 recordKeyFailure(apiKey, response?.status === 429 || response?.status >= 500);
@@ -2241,6 +2274,12 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             }
             let text = '';
             let inReasoning = false;
+            let reasoningTokenCount = 0;
+            const maxReasoningTokens = shouldSuppressReasoning ? 80 : 400;
+            const reasoningStartedAt = Date.now();
+            const maxReasoningDurationMs = shouldSuppressReasoning ? 4_000 : 14_000;
+            let reasoningForceClosed = false;
+
             await readSseStream(response.body, payload => {
                 if (initialTimer) {
                     clearTimeout(initialTimer);
@@ -2252,14 +2291,25 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 const reasoning = String(deltaObj?.reasoning || '');
                 const content = String(deltaObj?.content || '');
                 
-                if (reasoning) {
-                    if (!inReasoning) {
-                        inReasoning = true;
-                        text += '<think>\n';
-                        onDelta('<think>\n');
+                if (reasoning && !reasoningForceClosed) {
+                    reasoningTokenCount += Math.max(1, Math.round(reasoning.length / 4));
+                    const reasoningElapsed = Date.now() - reasoningStartedAt;
+                    if (reasoningElapsed > maxReasoningDurationMs || reasoningTokenCount > maxReasoningTokens) {
+                        reasoningForceClosed = true;
+                        if (inReasoning) {
+                            inReasoning = false;
+                            text += '\n</think>\n';
+                            onDelta('\n</think>\n');
+                        }
+                    } else {
+                        if (!inReasoning) {
+                            inReasoning = true;
+                            text += '<think>\n';
+                            onDelta('<think>\n');
+                        }
+                        text += reasoning;
+                        onDelta(reasoning);
                     }
-                    text += reasoning;
-                    onDelta(reasoning);
                 } else if (content) {
                     if (inReasoning) {
                         inReasoning = false;
