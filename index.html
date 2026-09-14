@@ -24261,7 +24261,7 @@ async function handleFastSimpleQuery(text, options = {}) {
     if (!userText) return { intent: 'fast_simple' };
     const ai = await askGeminiAI(userText, {
         intent: 'fast_simple',
-        fastExplainer: true,
+        fastExplainer: false,
         stream: options?.stream === true,
         displayUserMessage: options?.displayUserMessage || options?.historyKey || userText,
         minimalThinking: true,
@@ -24274,7 +24274,7 @@ async function handleFastSimpleQuery(text, options = {}) {
         label: 'Model answer',
         routing: ai?.routing || null,
         existingAssistantMessageId: ai?.assistantMessageId || '',
-        fastFinalizeStreamed: options?.stream === true,
+        fastFinalizeStreamed: true,
         turnId: options?.turnId || activeResponseRenderContext?.turnId || ''
     });
     return ai;
