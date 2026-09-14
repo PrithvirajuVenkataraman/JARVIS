@@ -3,17 +3,46 @@ import { applyApiSecurity } from './_lib/security.js';
 import { classifyImageLocally } from './_lib/local-vision-classifier.js';
 
 const ALLOWED_IMAGE_TYPES = new Set([
-    'image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif',
-    'image/heic', 'image/heif', 'image/avif', 'image/bmp', 'image/tiff',
-    'image/tiff-fx', 'image/x-bmp', 'image/x-ms-bmp'
+    'image/jpeg', 'image/jpg', 'image/pjpeg', 'image/png', 'image/x-png', 'image/x-apple-ios-png',
+    'image/webp', 'image/gif',
+    'image/heic', 'image/heif', 'image/heic-sequence', 'image/heif-sequence', 'image/x-heic', 'image/x-heif',
+    'image/avif', 'image/x-avif', 'image/avif-sequence',
+    'image/bmp', 'image/x-bmp', 'image/x-ms-bmp',
+    'image/tiff', 'image/tiff-fx', 'image/x-tiff',
+    'image/dng', 'image/x-adobe-dng', 'image/x-raw', 'image/raw',
+    'image/jp2', 'image/jpx', 'image/jpm', 'image/jpeg2000', 'image/x-jpeg2000-image',
+    'image/pict', 'image/x-pict', 'image/vnd.adobe.photoshop', 'image/x-icon', 'image/vnd.microsoft.icon', 'image/svg+xml'
 ]);
+
+// Detect MIME from base64 magic bytes (crucial for iOS Safari file pickers that pass empty or application/octet-stream)
+function detectImageMimeFromBase64(base64 = '') {
+    if (!base64 || typeof base64 !== 'string') return null;
+    const prefix = base64.slice(0, 32);
+    if (prefix.startsWith('/9j/')) return 'image/jpeg';
+    if (prefix.startsWith('iVBORw0KGgo')) return 'image/png';
+    if (prefix.startsWith('R0lGOD')) return 'image/gif';
+    if (prefix.startsWith('UklGR')) return 'image/webp';
+    if (prefix.startsWith('Qk')) return 'image/bmp';
+    if (prefix.startsWith('SUkq') || prefix.startsWith('TU0A')) return 'image/tiff'; // TIFF / DNG
+    // ISO base media file format (HEIC/HEIF/AVIF) typically starts with ftyp box
+    try {
+        const buf = Buffer.from(prefix.slice(0, 24), 'base64');
+        if (buf.length >= 12 && buf.toString('ascii', 4, 8) === 'ftyp') {
+            const brand = buf.toString('ascii', 8, 12).toLowerCase();
+            if (['heic', 'heix', 'hevc', 'hevx', 'mif1', 'msf1'].includes(brand)) return 'image/heic';
+            if (['avif', 'avis'].includes(brand)) return 'image/avif';
+        }
+    } catch (_) {}
+    return null;
+}
+
 // AI providers (Gemini, Groq) only accept jpeg/png/webp/gif — normalize everything else to jpeg
 function normalizeVisionMimeType(raw) {
     const m = String(raw || '').trim().toLowerCase();
     if (['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif'].includes(m)) {
         return m === 'image/jpg' ? 'image/jpeg' : m;
     }
-    return 'image/jpeg'; // HEIC, HEIF, AVIF, BMP, TIFF → jpeg (client already re-encoded via canvas)
+    return 'image/jpeg'; // HEIC, HEIF, ProRAW DNG, AVIF, BMP, TIFF, JP2 → jpeg
 }
 const MAX_IMAGE_BASE64_CHARS = 8 * 1024 * 1024;
 const PROVIDER_TIMEOUT_MS = 20_000;
@@ -49,7 +78,11 @@ export default async function handler(req, res) {
     if (!imageBase64 || typeof imageBase64 !== 'string') {
         return sendVisionError(res, 400, 'invalid_request', 'imageBase64 is required.');
     }
-    const rawMimeType = String(mimeType || '').trim().toLowerCase();
+    let rawMimeType = String(mimeType || '').trim().toLowerCase();
+    if (!rawMimeType || rawMimeType === 'application/octet-stream') {
+        const detected = detectImageMimeFromBase64(imageBase64);
+        if (detected) rawMimeType = detected;
+    }
     // Accept all common image types; unknown types are treated as jpeg
     if (rawMimeType && !ALLOWED_IMAGE_TYPES.has(rawMimeType) && !rawMimeType.startsWith('image/')) {
         return sendVisionError(res, 415, 'unsupported_media_type', 'Only image files are supported.');
@@ -195,11 +228,15 @@ const GEMINI_MODEL_FALLBACKS = [
     'gemini-flash-latest'
 ];
 const GROQ_VISION_MODEL_FALLBACKS = [
+    'qwen/qwen3.6-27b',
+    'qwen/qwen3.8-27b',
     'llama-3.2-11b-vision-preview',
     'meta-llama/llama-3.2-11b-vision-instruct',
     'llama-3.2-90b-vision-preview'
 ];
 const GROQ_TEXT_MODEL_FALLBACKS = [
+    'openai/gpt-oss-120b',
+    'openai/gpt-oss-20b',
     'llama-3.3-70b-versatile',
     'llama-3.1-8b-instant'
 ];
@@ -759,12 +796,9 @@ async function runMathOcrSolvePipeline({ providers, mimeType, imageBase64, userP
 }
 
 async function runTranslateToEnglishPipeline({ providers, mimeType, imageBase64, userPrompt }) {
-    const expectedLanguage = inferExpectedTranslationLanguage(userPrompt);
     const extractionPrompt = [
         'Extract text from this image with high fidelity.',
-        expectedLanguage
-            ? `Expected source language/script: ${expectedLanguage}. Pay special attention to that script.`
-            : 'The source language may be Hindi, Kannada, Malayalam, Telugu, Tamil, or another language.',
+        'The source language may be in any natural language, script, or multilingual text.',
         'Return strict JSON only:',
         '{',
         '  "summary": "short useful summary",',
@@ -793,7 +827,7 @@ async function runTranslateToEnglishPipeline({ providers, mimeType, imageBase64,
     const translatorSystemPrompt = [
         'You are a precise translation engine.',
         'Translate all provided text to natural English.',
-        expectedLanguage ? `The expected source language is ${expectedLanguage}.` : 'The source may be Hindi, Kannada, Malayalam, Telugu, Tamil, or mixed text.',
+        'The source may be in any natural language, script, or multilingual text.',
         'Keep numbers, units, names, and technical terms intact unless translation is obvious.',
         'Return strict JSON only:',
         '{',
@@ -834,16 +868,6 @@ async function runTranslateToEnglishPipeline({ providers, mimeType, imageBase64,
     };
 }
 
-function inferExpectedTranslationLanguage(userPrompt = '') {
-    const t = String(userPrompt || '').toLowerCase();
-    if (/\bhindi\b/.test(t)) return 'Hindi';
-    if (/\bkannada\b/.test(t)) return 'Kannada';
-    if (/\bmalayalam\b/.test(t)) return 'Malayalam';
-    if (/\btelugu\b/.test(t)) return 'Telugu';
-    if (/\btamil\b/.test(t)) return 'Tamil';
-    return '';
-}
-
 function buildVisionPrompt(userPrompt, task) {
     const isTextTask = task === 'text_extract' || task === 'bill_summary' || task === 'shopping_extract';
     const isSceneTask = task === 'animal_detect' || task === 'object_detect' || task === 'general_vision' || task === 'people_count';
@@ -870,14 +894,14 @@ function buildVisionPrompt(userPrompt, task) {
         '     * What they are doing (action, posture, pose, gestures, activity).',
         '     * The setting/environment they are in (indoor/outdoor, background, lighting, objects around them).',
         '- If a clear product or object is prominent, name it in answer and summary using only visible evidence.',
-        '- For phones, tablets, laptops, earbuds, watches, and other consumer electronics: only fill brand/model when a logo, printed text, or unmistakable hardware cue is visible.',
+        '- For manufactured goods, electronics, devices, appliances, or vehicles: only fill brand/model when a logo, printed text, or unmistakable visual cue is visible.',
         '- If brand/model is not clearly supported by visible evidence, leave brand and model as empty strings and describe the object instead. Prefer "not visible" over guessing.',
         '- Never invent SKUs, generation names, release years, or prices.',
         '- For "why is this like this", "what happened here", "is this normal", or similar questions, identify the visible subject first, then explain only visible condition, posture, damage, environment, growth stage, UI state, or other observable clues.',
         '- If the cause cannot be known from the image alone, put the best visible explanation in likelyReason and qualify it in uncertainty.',
         'If text appears, preserve character accuracy, punctuation, and line order.',
         'Detect visible objects including products, people, animals, food, devices, vehicles, and common items.',
-        'Put animals in animals[]. Put vehicles/cars/bikes/buses/trucks in objects[] with clear labels like "car", "motorcycle", "bus".',
+        'Put animals in animals[]. Put vehicles and other objects in objects[] with clear descriptive labels.',
         'If user asks "what is this", "what animal", "what vehicle", "who is this", or "what do you see", answer the main subject first in plain language.',
         'If text appears in image, include extracted snippets in textDetected and fullText, but do not let text override the main subject for scene tasks.',
         `Requested task: ${task}.`,
@@ -998,20 +1022,8 @@ function safeParseJson(text) {
     }
 }
 
-function wantsDetailedVisionResponse(task, userPrompt) {
-    const text = String(userPrompt || '').toLowerCase();
-    if (/\b(tell me everything|everything|all details|full details|detailed|in detail|explain fully|complete breakdown|show all|what is this|what's this|identify|which model|what model|what phone|which phone|brand|product)\b/.test(text)) {
-        return true;
-    }
-    // OCR-focused tasks should remain detailed by default.
-    if (task === 'text_extract' || task === 'bill_summary' || task === 'shopping_extract' || task === 'fridge_items') {
-        return true;
-    }
-    return false;
-}
-
 function isTextFocusedVisionQuery(userPrompt = '') {
-    return /\b(read|text|ocr|bill|receipt|invoice|sign|label|menu|document|what does it say|written)\b/i.test(String(userPrompt || ''));
+    return /\b(?:read|transcribe|text|ocr|extract|receipt|invoice|bill|sign|label|menu|document)\b/i.test(String(userPrompt || ''));
 }
 
 function isSceneVisionTask(task) {
@@ -1124,11 +1136,8 @@ function formatVisionResponse(data, task, userPrompt = '') {
         return cleanVisionDisplayText(`Visible animals: ${animalLine}`);
     }
 
-    const explainIntent = isObjectExplanationIntent(userPrompt);
-    const detailedIntent = wantsDetailedVisionResponse(task, userPrompt);
     const includeText = hasReadableText && (
         textFocused
-        || (!isSceneVisionTask(task) && detailedIntent)
         || (!hasStrongSubject && !animals.length)
     );
     const objectFirstAnswer = buildObjectFirstVisionAnswer({
@@ -1146,8 +1155,6 @@ function formatVisionResponse(data, task, userPrompt = '') {
         distinctiveFeatures,
         uncertainty,
         compactText,
-        explainIntent,
-        detailedIntent,
         includeText
     });
     if (objectFirstAnswer) {
@@ -1157,7 +1164,7 @@ function formatVisionResponse(data, task, userPrompt = '') {
     return conciseVisionFallback(directAnswer, summary, sceneSubjects);
 }
 
-function buildObjectFirstVisionAnswer({ directAnswer, summary, objects, mainSubject, subjectType, conditionOrState, likelyReason, careOrSafetyNote, brand, model, modelEvidence, distinctiveFeatures, uncertainty, compactText, explainIntent, detailedIntent, includeText }) {
+function buildObjectFirstVisionAnswer({ directAnswer, summary, objects, mainSubject, subjectType, conditionOrState, likelyReason, careOrSafetyNote, brand, model, modelEvidence, distinctiveFeatures, uncertainty, compactText, includeText }) {
     const topObject = pickTopObjectLabel(objects);
     const topObjectMeta = pickTopObjectMeta(objects);
     const answer = removeDetectedTextLead(compactSingleLine(directAnswer || summary));
@@ -1177,28 +1184,28 @@ function buildObjectFirstVisionAnswer({ directAnswer, summary, objects, mainSubj
         const subjectLabel = type && !new RegExp(`\\b${escapeRegExp(type)}\\b`, 'i').test(subject)
             ? `${subject} (${type})`
             : subject;
-        parts.push(detailedIntent || explainIntent ? `Likely item: ${subjectLabel}.` : `Visible item: ${subjectLabel}.`);
+        parts.push(`Visible item: ${subjectLabel}.`);
     } else if (answer) {
         parts.push(answer);
     }
 
-    if ((explainIntent || detailedIntent) && answer && (!identity || !answer.toLowerCase().includes(identity.toLowerCase()))) {
+    if (answer && (!identity || !answer.toLowerCase().includes(identity.toLowerCase()))) {
         parts.push(answer);
     }
 
-    if (detailedIntent && evidenceBacked && modelEvidence?.length) {
+    if (evidenceBacked && modelEvidence?.length) {
         parts.push(`Evidence: ${modelEvidence.slice(0, 3).join('; ')}.`);
     }
 
-    if (detailedIntent && distinctiveFeatures?.length) {
+    if (distinctiveFeatures?.length) {
         parts.push(`Visible details: ${distinctiveFeatures.slice(0, 4).join('; ')}.`);
     }
 
-    if ((explainIntent || conditionOrState) && conditionOrState) {
+    if (conditionOrState) {
         parts.push(`Visible condition: ${compactSingleLine(conditionOrState)}.`);
     }
 
-    if ((explainIntent || likelyReason) && likelyReason) {
+    if (likelyReason) {
         parts.push(`Likely reason: ${compactSingleLine(likelyReason)}.`);
     }
 
@@ -1308,10 +1315,6 @@ function conciseVisionFallback(directAnswer, summary, objects) {
     return 'I can see the image, but there is not enough clear detail to answer confidently.';
 }
 
-function isObjectExplanationIntent(userPrompt) {
-    const text = String(userPrompt || '').toLowerCase();
-    return /\b(what is this|what's this|what is that|what is it|what's it|identify|explain|about this|about that|why is it like this|why is this like this|why does it look|what happened here|how did this happen|is this normal|is it safe|product|part|component|use|used for|purpose|how it works|what phone|which phone|what model|which model|brand)\b/.test(text);
-}
 
 function normalizeDetected(list) {
     if (!Array.isArray(list)) return [];
