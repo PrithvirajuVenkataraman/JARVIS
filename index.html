@@ -9444,11 +9444,17 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 }); 
                 messageDiv.dataset.messageId = messageId;
 
+                const isExplicitReasoning = Boolean(
+                    meta?.isReasoningQuery ||
+                    meta?.thoughtSteps?.length > 0 ||
+                    (meta?.userSelectedModel && String(meta.userSelectedModel).toLowerCase().includes('r1')) ||
+                    (meta?.model && String(meta.model).toLowerCase().includes('r1'))
+                );
                 const thoughtContent = parsedThought.thought || meta?.thought || '';
                 const isThinkingStreaming = allowEmptyAssistant || Boolean(meta?.streaming);
                 const thoughtSteps = thoughtContent
                     ? []
-                    : (isThinkingStreaming
+                    : (isThinkingStreaming && isExplicitReasoning
                         ? (meta?.thoughtSteps || generateContextualThoughtSteps(priorUserPrompt))
                         : (meta?.thoughtSteps || []));
                 const selfHealing = meta?.selfHealing || meta?.routing?.selfHealing || null;
