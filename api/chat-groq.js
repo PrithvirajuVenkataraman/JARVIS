@@ -382,17 +382,19 @@ async function getInstantFactHelper() {
 
         const isUserChosenR1 = String(userSelected || '').toLowerCase().includes('r1');
         const includeR1 = isUserChosenR1 || isReasoningQuery;
+        const safeConfigured = (!includeR1 && isNativeReasoningModel(configured)) ? '' : configured;
+        const safeMappedGroq = (!includeR1 && isNativeReasoningModel(mappedGroq)) ? '' : mappedGroq;
 
         let orderedList = [];
         if (tier === 'deep') {
             // Strict User Requirement: Complex queries MUST route strictly to Groq GPT-OSS-120B first
             orderedList = [
-                mappedGroq,
+                safeMappedGroq,
                 'openai/gpt-oss-120b',
                 'qwen/qwen3.6-27b',
                 'qwen/qwen3.8-27b',
                 'openai/gpt-oss-20b',
-                configured,
+                safeConfigured,
                 'llama-3.3-70b-versatile',
                 'qwen-2.5-coder-32b',
                 'llama-3.1-8b-instant',
@@ -405,23 +407,23 @@ async function getInstantFactHelper() {
                 nonReasoningMapped,
                 'openai/gpt-oss-20b',
                 'openai/gpt-oss-120b',
-                'qwen/qwen3.6-27b',
-                'qwen/qwen3.8-27b',
-                configured,
                 'llama-3.1-8b-instant',
-                'llama-3.3-70b-versatile'
-            ];
-        } else {
-            orderedList = [
-                mappedGroq,
-                'openai/gpt-oss-120b',
-                'openai/gpt-oss-20b',
                 'llama-3.3-70b-versatile',
                 'qwen/qwen3.6-27b',
                 'qwen/qwen3.8-27b',
-                configured,
-                'qwen-3.6-27b',
+                safeConfigured
+            ];
+        } else {
+            orderedList = [
+                safeMappedGroq,
+                'openai/gpt-oss-120b',
+                'openai/gpt-oss-20b',
+                'llama-3.3-70b-versatile',
                 'llama-3.1-8b-instant',
+                'qwen/qwen3.6-27b',
+                'qwen/qwen3.8-27b',
+                safeConfigured,
+                'qwen-3.6-27b',
                 'qwen-2.5-coder-32b',
                 ...(includeR1 ? ['deepseek-r1-distill-llama-70b'] : [])
             ];
@@ -1477,7 +1479,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             timing.qualityMs = Date.now() - qualityStartedAt;
             // For streaming completions, tokens were already rendered to the user.
             // Omit post-stream correction rewrites to keep the user's displayed answer stable.
-            if (qualityResult.correctedResponse) {
+            if (qualityResult.correctedResponse && !streamedText) {
                 evaluationText = ensureCompleteAssistantResponse(
                     replaceLongDashes(String(qualityResult.correctedResponse || '').trim())
                 );
@@ -2293,7 +2295,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             const isReasoning = isExplicitReasoningIntent(options?.intent, prompt) || isUserChosenR1;
             const shouldSuppressReasoning = !isReasoning || options?.minimalThinking === true ||
                 ['fast_simple', 'casual_chat', 'chat_title', 'internal_summary', 'fast_explainer', 'pop_culture_reference', 'chat'].includes(String(options?.intent || ''));
-            const modelMaxTokens = supportsGroqReasoningFormat(model) ? 4096 : 8192;
+            const modelMaxTokens = supportsGroqReasoningFormat(model) ? 8192 : 8192;
             const groqPayload = {
                 model,
                 temperature,
@@ -2360,7 +2362,8 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                         text += reasoning;
                         onDelta(reasoning);
                     }
-                } else if (content) {
+                }
+                if (content) {
                     if (inReasoning) {
                         inReasoning = false;
                         text += '\n</think>\n';
@@ -2388,13 +2391,14 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                     onDelta(`\n\n${thoughtText}`);
                 }
             }
-            // If the model generated substantive content, treat as success (even if finishReason was length,
-            // since partial tokens were already emitted to client via onDelta)
-            if (cleanContent.length > 0) {
+            // If the model hit a length cutoff on an incomplete header/section or truncated short, do not treat as success
+            const isIncompleteHeaderOrList = /(?:^|\n)\s*(?:\d+\.|\*|-|#{1,4})\s+[^\n]{0,60}$/.test(cleanContent) && finishReason === 'length';
+            const isTruncatedShort = finishReason === 'length' && cleanContent.length < 200;
+            if (cleanContent.length > 0 && !isIncompleteHeaderOrList && !isTruncatedShort) {
                 recordKeySuccess(apiKey);
                 return { ok: true, provider: 'groq', modelUsed: model, text };
             }
-            // If the model solely emitted reasoning thoughts without generating an answer, cascade to next model
+            // If the model solely emitted reasoning thoughts or truncated mid-header, cascade to next model
             recordKeyFailure(apiKey, false);
             return { ok: false };
         } catch (_) {
@@ -2580,7 +2584,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             const { value, done } = await reader.read();
             if (done) break;
             buffer += decoder.decode(value, { stream: true });
-            const events = buffer.split(/\n\n/);
+            const events = buffer.split(/\r?\n\r?\n/);
             buffer = events.pop() || '';
             for (const eventText of events) {
                 const dataLines = eventText
