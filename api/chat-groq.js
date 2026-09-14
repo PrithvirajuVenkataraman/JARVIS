@@ -1227,6 +1227,11 @@ const edgeResponseCache = new EdgeSemanticLruCache();
         return m.includes('deepseek') || m.includes('r1') || m.includes('reasoner') || m.includes('thinking') || m.includes('gpt-oss') || m.includes('qwen');
     }
 
+    function supportsGroqReasoningFormat(modelName = '') {
+        const m = String(modelName || '').toLowerCase();
+        return m.includes('deepseek') || m.includes('r1');
+    }
+
     function buildReasoningInstruction(intent, model = '') {
         const suppressedIntents = ['chat_title', 'fast_simple', 'internal_summary'];
         if (suppressedIntents.includes(String(intent || ''))) {
@@ -1945,7 +1950,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                     } else if (['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'openai/gpt-oss-safeguard-20b'].includes(model) && (hasStructuredOutputConstraint(options?.systemPrompt || '', finalPrompt) || options?.response_format)) {
                         requestBody.response_format = { type: 'json_object' };
                     }
-                    if (isNativeReasoningModel(model)) {
+                    if (supportsGroqReasoningFormat(model)) {
                         const shouldSuppress = options?.minimalThinking === true ||
                             ['fast_simple', 'casual_chat', 'chat_title', 'internal_summary'].includes(String(options?.intent || ''));
                         if (shouldSuppress) {
@@ -2033,9 +2038,18 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                         });
                     }
                 }
+                const shouldSuppressGeminiReasoning = options?.minimalThinking === true ||
+                    options?.preferSpeed === true ||
+                    options?.tier === 'instant' ||
+                    ['fast_simple', 'casual_chat', 'chat_title', 'internal_summary', 'fast_explainer'].includes(String(options?.intent || ''));
+                const geminiGenConfig = { temperature: temp, topK: 40, topP: 0.95, maxOutputTokens: maxTokens };
+                if (shouldSuppressGeminiReasoning) {
+                    geminiGenConfig.thinkingConfig = { thinkingBudget: 0 };
+                    geminiGenConfig.thinking_config = { thinking_budget: 0 };
+                }
                 const geminiBody = {
                     contents,
-                    generationConfig: { temperature: temp, topK: 40, topP: 0.95, maxOutputTokens: maxTokens }
+                    generationConfig: geminiGenConfig
                 };
                 if (systemInstruction) {
                     geminiBody.system_instruction = systemInstruction;
@@ -2265,7 +2279,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 stream: true,
                 messages
             };
-            if (isNativeReasoningModel(model)) {
+            if (supportsGroqReasoningFormat(model)) {
                 if (shouldSuppressReasoning) {
                     groqPayload.reasoning_format = 'hidden';
                 } else {
@@ -2282,7 +2296,10 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 body: JSON.stringify(groqPayload)
             });
             if (!response.ok || !response.body) {
-                recordKeyFailure(apiKey, response?.status === 429 || response?.status >= 500);
+                const status = response?.status;
+                if (status === 401 || status === 429 || (status >= 500 && status < 600)) {
+                    recordKeyFailure(apiKey, status === 429 || status >= 500);
+                }
                 return { ok: false };
             }
             let text = '';
@@ -2429,14 +2446,23 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                     });
                 }
             }
+            const shouldSuppressReasoning = options?.minimalThinking === true ||
+                options?.preferSpeed === true ||
+                options?.tier === 'instant' ||
+                ['fast_simple', 'casual_chat', 'chat_title', 'internal_summary', 'fast_explainer'].includes(String(options?.intent || ''));
+            const generationConfig = {
+                temperature,
+                topK: 40,
+                topP: 0.95,
+                maxOutputTokens: maxTokens
+            };
+            if (shouldSuppressReasoning) {
+                generationConfig.thinkingConfig = { thinkingBudget: 0 };
+                generationConfig.thinking_config = { thinking_budget: 0 };
+            }
             const reqBody = {
                 contents,
-                generationConfig: {
-                    temperature,
-                    topK: 40,
-                    topP: 0.95,
-                    maxOutputTokens: maxTokens
-                }
+                generationConfig
             };
             if (systemInstruction) {
                 reqBody.system_instruction = systemInstruction;
@@ -2471,18 +2497,22 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                     const contentText = !isThought ? String(part?.text || '') : '';
 
                     if (thoughtText) {
-                        if (!inReasoning) {
-                            inReasoning = true;
-                            text += '<think>\n';
-                            onDelta('<think>\n');
+                        if (!shouldSuppressReasoning) {
+                            if (!inReasoning) {
+                                inReasoning = true;
+                                text += '<think>\n';
+                                onDelta('<think>\n');
+                            }
+                            text += thoughtText;
+                            onDelta(thoughtText);
+                        } else {
+                            text += thoughtText;
                         }
-                        text += thoughtText;
-                        onDelta(thoughtText);
                     } else if (contentText) {
                         if (inReasoning) {
                             inReasoning = false;
                             text += '\n</think>\n';
-                            onDelta('\n</think>\n');
+                            if (!shouldSuppressReasoning) onDelta('\n</think>\n');
                         }
                         text += contentText;
                         onDelta(contentText);
@@ -2491,7 +2521,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             });
             if (inReasoning) {
                 text += '\n</think>\n';
-                onDelta('\n</think>\n');
+                if (!shouldSuppressReasoning) onDelta('\n</think>\n');
             }
             let cleanContent = text
                 .replace(/<think>[\s\S]*?<\/think>/gi, '')
