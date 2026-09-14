@@ -255,12 +255,14 @@ async function getInstantFactHelper() {
     const USER_SELECTABLE_MODELS = new Set([
         'openai/gpt-oss-120b',
         'openai/gpt-oss-20b',
+        'qwen/qwen3.6-27b',
+        'qwen-3.6-27b',
+        'qwen/qwen3.8-27b',
+        'qwen-3.8-27b',
         'llama-3.1-8b-instant',
         'llama-3.3-70b-versatile',
         'deepseek-r1-distill-llama-70b',
         'qwen-2.5-coder-32b',
-        'qwen/qwen3.6-27b',
-        'qwen-3.6-27b',
         'gemini-3.7-flash',
         'gemini-2.5-pro',
         'gemini-2.5-flash',
@@ -384,32 +386,37 @@ async function getInstantFactHelper() {
             orderedList = [
                 mappedGroq,
                 'openai/gpt-oss-120b',
+                'qwen/qwen3.6-27b',
+                'qwen/qwen3.8-27b',
+                'openai/gpt-oss-20b',
                 configured,
                 'llama-3.3-70b-versatile',
-                'qwen/qwen3.6-27b',
                 'qwen-2.5-coder-32b',
-                'openai/gpt-oss-20b',
                 'llama-3.1-8b-instant',
                 'deepseek-r1-distill-llama-70b'
             ];
         } else if (preferSpeed || tier === 'instant') {
             // Instant Tier: Sub-200ms TTFT and >200 tokens/sec
+            const nonReasoningMapped = isNativeReasoningModel(mappedGroq) ? '' : mappedGroq;
             orderedList = [
-                mappedGroq,
-                'llama-3.1-8b-instant',
+                nonReasoningMapped,
                 'openai/gpt-oss-20b',
+                'openai/gpt-oss-120b',
+                'qwen/qwen3.6-27b',
+                'qwen/qwen3.8-27b',
                 configured,
-                'llama-3.3-70b-versatile',
-                'openai/gpt-oss-120b'
+                'llama-3.1-8b-instant',
+                'llama-3.3-70b-versatile'
             ];
         } else {
             orderedList = [
                 mappedGroq,
-                configured,
                 'openai/gpt-oss-120b',
                 'openai/gpt-oss-20b',
-                'llama-3.3-70b-versatile',
                 'qwen/qwen3.6-27b',
+                'qwen/qwen3.8-27b',
+                configured,
+                'llama-3.3-70b-versatile',
                 'qwen-3.6-27b',
                 'llama-3.1-8b-instant',
                 'qwen-2.5-coder-32b',
@@ -420,6 +427,10 @@ async function getInstantFactHelper() {
     }
 
     const KNOWN_GROQ_VISION_MODELS = new Set([
+        'qwen/qwen3.6-27b',
+        'qwen/qwen3.8-27b',
+        'qwen-3.6-27b',
+        'qwen-3.8-27b',
         'llama-3.2-11b-vision-preview',
         'meta-llama/llama-3.2-11b-vision-instruct',
         'llama-3.2-90b-vision-preview'
@@ -433,6 +444,8 @@ async function getInstantFactHelper() {
             ? String(userSelectedModel || '').trim()
             : '';
         const visionModels = [
+            'qwen/qwen3.6-27b',
+            'qwen/qwen3.8-27b',
             'llama-3.2-11b-vision-preview',
             'meta-llama/llama-3.2-11b-vision-instruct',
             'llama-3.2-90b-vision-preview'
@@ -2336,7 +2349,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 .replace(/^<think>[\s\S]*$/gi, '')
                 .replace(/<\/?think>/gi, '')
                 .trim();
-            if (!cleanContent && (text.includes('<think>') || inReasoning)) {
+            if (!cleanContent && !shouldSuppressReasoning && (text.includes('<think>') || inReasoning)) {
                 const { thought: extractedThought } = extractThoughtAndResponse(text);
                 const thoughtText = (extractedThought || text.replace(/<\/?think>/gi, '')).trim();
                 if (thoughtText.length > 15) {
