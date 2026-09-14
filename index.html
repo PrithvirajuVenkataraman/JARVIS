@@ -492,8 +492,8 @@
             <div class="speech-input-meta">
                 <span id="speech-input-status" role="status" aria-live="polite"></span>
             </div>
-            <input type="file" id="composer-photo-library-input" class="hidden" accept="image/*" multiple>
-            <input type="file" id="composer-photo-camera-input" class="hidden" accept="image/*" capture="environment">
+            <input type="file" id="composer-photo-library-input" class="hidden" accept="image/*,.heic,.heif,.heics,.heifs,.avif,.dng,.raw,.cr2,.cr3,.nef,.nrw,.arw,.raf,.rw2,.orf,.pef,.jp2,.j2k,.jpf,.jpx,.jpm,.pict,.pct,.psd,.jpeg,.jpg,.png,.webp,.gif,.bmp,.tiff,.tif" multiple>
+            <input type="file" id="composer-photo-camera-input" class="hidden" accept="image/*,.heic,.heif,.dng,.jpeg,.jpg,.png" capture="environment">
             <input type="file" id="composer-file-input" class="hidden" accept="*/*" multiple>
             <p id="footer-disclaimer" class="composer-disclaimer">AI can make mistakes. Check important info.</p>
         </div>
@@ -12913,7 +12913,7 @@ async function sendTextInput(submission = {}) {
                         // Detect image-only uploads immediately so we can show the right indicator
                         const hasImageFiles = attachmentsForSend.some(a =>
                             /^image\//i.test(a.mimeType || '') ||
-                            /\.(jpe?g|png|gif|webp|bmp|tiff?|heic|heif|avif)$/i.test(a.name || '')
+                            /\.(jpe?g|pjpeg|png|gif|webp|bmp|dib|tiff?|heic|heif|heics|heifs|avif|avifs|dng|raw|cr[23]|nef|nrw|arw|srf|sr2|raf|rw2|orf|pef|jp2|j2k|jpf|jpx|jpm|pict?|pct|pic|psd|ico|cur|svgz?)$/i.test(a.name || '')
                         );
                         // ── Data-file path: Python Notebook analysis ────────────────
                         const hasDataFiles = attachmentsForSend.some(isDataAnalysisFile);
@@ -12977,7 +12977,7 @@ async function sendTextInput(submission = {}) {
                         if ((!attachmentContext?.anyReadable || !attachmentContext?.grounding) && hasImageFiles) {
                             const rawImagePayloads = await Promise.all(
                                 attachmentsForSend
-                                    .filter(a => /^image\//i.test(a.mimeType || '') || /\.(jpe?g|png|gif|webp|bmp|tiff?|heic|heif|avif)$/i.test(a.name || ''))
+                                    .filter(a => /^image\//i.test(a.mimeType || '') || /\.(jpe?g|pjpeg|png|gif|webp|bmp|dib|tiff?|heic|heif|heics|heifs|avif|avifs|dng|raw|cr[23]|nef|nrw|arw|srf|sr2|raf|rw2|orf|pef|jp2|j2k|jpf|jpx|jpm|pict?|pct|pic|psd|ico|cur|svgz?)$/i.test(a.name || ''))
                                     .map(async a => {
                                         const base64 = a.base64 || (a.file ? await new Promise(res => {
                                             const r = new FileReader();
