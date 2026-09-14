@@ -372,13 +372,16 @@ async function getInstantFactHelper() {
         return { tier: 'standard', preferSpeed: false, reason: 'standard_balanced' };
     }
 
-    function getPreferredGroqCandidates(configuredModel = '', { preferSpeed = false, tier = 'standard', userSelectedModel = null } = {}) {
+    function getPreferredGroqCandidates(configuredModel = '', { preferSpeed = false, tier = 'standard', userSelectedModel = null, isReasoningQuery = false } = {}) {
         const configured = String(configuredModel || '').trim();
         const userSelected = String(userSelectedModel || '').trim();
         let mappedGroq = '';
         if (USER_SELECTABLE_MODELS.has(userSelected)) {
             mappedGroq = userSelected;
         }
+
+        const isUserChosenR1 = String(userSelected || '').toLowerCase().includes('r1');
+        const includeR1 = isUserChosenR1 || isReasoningQuery;
 
         let orderedList = [];
         if (tier === 'deep') {
@@ -393,7 +396,7 @@ async function getInstantFactHelper() {
                 'llama-3.3-70b-versatile',
                 'qwen-2.5-coder-32b',
                 'llama-3.1-8b-instant',
-                'deepseek-r1-distill-llama-70b'
+                ...(includeR1 ? ['deepseek-r1-distill-llama-70b'] : [])
             ];
         } else if (preferSpeed || tier === 'instant') {
             // Instant Tier: Sub-200ms TTFT and >200 tokens/sec
@@ -420,7 +423,7 @@ async function getInstantFactHelper() {
                 'qwen-3.6-27b',
                 'llama-3.1-8b-instant',
                 'qwen-2.5-coder-32b',
-                'deepseek-r1-distill-llama-70b'
+                ...(includeR1 ? ['deepseek-r1-distill-llama-70b'] : [])
             ];
         }
         return [...new Set(orderedList.filter(Boolean))];
@@ -1156,7 +1159,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
         ].join('\n');
     }
 
-    function composeFinalPrompt(systemPrompt, ragBlock, contextBlock, message, lengthGuidance = '', intent = 'chat', model = '') {
+    function composeFinalPrompt(systemPrompt, ragBlock, contextBlock, message, lengthGuidance = '', intent = 'chat', model = '', userSelectedModel = null) {
         return [
             systemPrompt,
             ragBlock ? `Retrieved context (RAG):\n${ragBlock}` : '',
@@ -1164,7 +1167,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             buildIntentPromptHint(intent),
             `User message: ${message}`,
             lengthGuidance ? `Length guidance:\n${lengthGuidance}` : '',
-            buildReasoningInstruction(intent, model)
+            buildReasoningInstruction(intent, model, userSelectedModel, message)
         ].filter(Boolean).join('\n\n');
     }
 
@@ -1232,38 +1235,47 @@ const edgeResponseCache = new EdgeSemanticLruCache();
         return m.includes('deepseek') || m.includes('r1');
     }
 
-    function buildReasoningInstruction(intent, model = '') {
-        const suppressedIntents = ['chat_title', 'fast_simple', 'internal_summary'];
+    function isExplicitReasoningIntent(intent = '', message = '') {
+        const i = String(intent || '').toLowerCase();
+        if (['math_proof', 'complex_reasoning', 'logic_puzzle', 'algebraic_derivation', 'math'].includes(i)) return true;
+        const msg = String(message || '').toLowerCase();
+        return /\b(prove|mathematical proof|formal proof|step-by-step logic|deductive proof|solve the riddle|logic puzzle|derive the formula|calculate|hypotenuse|pythagorean|theorem)\b/i.test(msg);
+    }
+
+    function buildReasoningInstruction(intent, model = '', userSelectedModel = null, message = '') {
+        const suppressedIntents = ['chat_title', 'fast_simple', 'internal_summary', 'pop_culture_reference', 'casual_chat'];
         if (suppressedIntents.includes(String(intent || ''))) {
             return 'Return only the final assistant answer as natural text.';
         }
-        if (isNativeReasoningModel(model)) {
+        const isUserChosenR1 = String(userSelectedModel || '').toLowerCase().includes('r1');
+        const needsReasoning = isNativeReasoningModel(model) && (isExplicitReasoningIntent(intent, message) || isUserChosenR1);
+        if (needsReasoning) {
             return 'Reasoning instruction: Work through the problem within <think>...</think> tags before delivering the final answer. Keep internal reasoning concise, focused, and minimal (1-3 short sentences max without rambling guesswork). Everything after </think> must be ONLY the final polished answer for the user with zero meta-commentary.';
         }
         return 'Accuracy & formatting rules: Deliver the polished final answer directly with clarity and precision. Do not output artificial <think> tags, synthetic reasoning checklists, or meta-commentary.';
     }
 
-    function composeStreamingPrompt(systemPrompt, contextBlock, message, lengthGuidance = '', intent = 'chat', model = '') {
+    function composeStreamingPrompt(systemPrompt, contextBlock, message, lengthGuidance = '', intent = 'chat', model = '', userSelectedModel = null) {
         return [
             systemPrompt,
             contextBlock ? `Recent turns:\n${contextBlock}` : '',
             buildIntentPromptHint(intent),
             `User message: ${message}`,
             lengthGuidance ? `Length guidance:\n${lengthGuidance}` : '',
-            buildReasoningInstruction(intent, model),
+            buildReasoningInstruction(intent, model, userSelectedModel, message),
             'Do not wrap the answer in JSON.',
             'Accuracy rules: Prefer being brief and correct. Keep internal reasoning concise and focused without producing lengthy speculative guesswork. If unsure about a fact, say so in one short clause instead of inventing names, dates, numbers, or sources. Never invent URLs or citations. Resolve pronouns only from the recent turns above.'
         ].filter(Boolean).join('\n\n');
     }
 
-    function composeStructuredChatMessages({ systemPrompt, ragBlock = '', contextBlock = '', context = [], retrievedTurns = [], rollingSummary = '', message = '', lengthGuidance = '', intent = 'chat', model = '' }) {
+    function composeStructuredChatMessages({ systemPrompt, ragBlock = '', contextBlock = '', context = [], retrievedTurns = [], rollingSummary = '', message = '', lengthGuidance = '', intent = 'chat', model = '', userSelectedModel = null }) {
         const messages = [];
 
         const systemParts = [
             systemPrompt,
             buildIntentPromptHint(intent),
             lengthGuidance ? `Length guidance:\n${lengthGuidance}` : '',
-            buildReasoningInstruction(intent, model),
+            buildReasoningInstruction(intent, model, userSelectedModel, message),
             'Accuracy rules: Prefer being brief and correct. If unsure about a fact, say so directly. Never invent URLs or citations. Maintain conversational continuity across turns without repeating previous statements unnecessarily.'
         ];
 
@@ -1380,8 +1392,8 @@ const edgeResponseCache = new EdgeSemanticLruCache();
         let streamedText = '';
         try {
             const prompt = liveRag.ragText
-                ? composeFinalPrompt(systemPrompt, liveRag.ragText, contextBlock, effectiveMessage, lengthPolicy?.instruction || '', intent, selectedModel)
-                : composeStreamingPrompt(systemPrompt, contextBlock, effectiveMessage, lengthPolicy?.instruction || '', intent, selectedModel);
+                ? composeFinalPrompt(systemPrompt, liveRag.ragText, contextBlock, effectiveMessage, lengthPolicy?.instruction || '', intent, selectedModel, selectedModel)
+                : composeStreamingPrompt(systemPrompt, contextBlock, effectiveMessage, lengthPolicy?.instruction || '', intent, selectedModel, selectedModel);
             const hasStructuredContext = Array.isArray(structuredMessages) && structuredMessages.length > 0;
             const structuredChat = hasStructuredContext
                 ? structuredMessages
@@ -1394,7 +1406,8 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                     message: effectiveMessage,
                     lengthGuidance: lengthPolicy?.instruction || '',
                     intent,
-                    model: selectedModel
+                    model: selectedModel,
+                    userSelectedModel: selectedModel
                 });
             const modelStartedAt = Date.now();
             const streamImages = Array.isArray(images)
@@ -1409,7 +1422,8 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 systemPrompt,
                 intent,
                 effectiveMessage,
-                minimalThinking: options?.minimalThinking === true || ['fast_simple', 'casual_chat', 'chat_title'].includes(String(intent || ''))
+                userSelectedModel: selectedModel,
+                minimalThinking: options?.minimalThinking === true || (!isExplicitReasoningIntent(intent, effectiveMessage) && !String(selectedModel || '').toLowerCase().includes('r1'))
             });
             timing.modelMs += Date.now() - modelStartedAt;
 
@@ -1910,9 +1924,11 @@ const edgeResponseCache = new EdgeSemanticLruCache();
         const temp = Number.isFinite(Number(lengthPolicy?.temperature)) ? Number(lengthPolicy.temperature) : 0.7;
         const maxTokens = clampInt(lengthPolicy?.maxTokens, 8000, 256, 16000) + REASONING_TOKEN_ALLOWANCE;
         const hasImages = Array.isArray(images) && images.length > 0;
-        const queryComplexity = classifyQueryComplexity(options?.effectiveMessage || options?.message || finalPrompt, { intent: options?.intent });
+        const effectiveMsg = options?.effectiveMessage || options?.message || finalPrompt;
+        const queryComplexity = classifyQueryComplexity(effectiveMsg, { intent: options?.intent });
         const routingTier = options?.tier || queryComplexity.tier;
         const speedPreferred = options?.preferSpeed !== undefined ? options.preferSpeed : queryComplexity.preferSpeed;
+        const isReasoningQuery = isExplicitReasoningIntent(options?.intent, effectiveMsg);
 
         const tryRunGroq = async () => {
             const keys = getAllGroqApiKeys();
@@ -1920,7 +1936,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             const groqConfiguredModel = userSelectedModel || String(process.env.GROQ_MODEL || '').trim();
             const groqCandidates = hasImages
                 ? getPreferredGroqVisionCandidates(groqConfiguredModel, userSelectedModel)
-                : getPreferredGroqCandidates(groqConfiguredModel, { preferSpeed: speedPreferred, tier: routingTier, userSelectedModel });
+                : getPreferredGroqCandidates(groqConfiguredModel, { preferSpeed: speedPreferred, tier: routingTier, userSelectedModel, isReasoningQuery });
 
             for (const key of keys) {
                 for (const model of groqCandidates) {
@@ -1951,8 +1967,9 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                         requestBody.response_format = { type: 'json_object' };
                     }
                     if (supportsGroqReasoningFormat(model)) {
-                        const shouldSuppress = options?.minimalThinking === true ||
-                            ['fast_simple', 'casual_chat', 'chat_title', 'internal_summary'].includes(String(options?.intent || ''));
+                        const isReasoning = isExplicitReasoningIntent(options?.intent, finalPrompt) || String(userSelectedModel || '').toLowerCase().includes('r1');
+                        const shouldSuppress = !isReasoning || options?.minimalThinking === true ||
+                            ['fast_simple', 'casual_chat', 'chat_title', 'internal_summary', 'pop_culture_reference', 'chat'].includes(String(options?.intent || ''));
                         if (shouldSuppress) {
                             requestBody.reasoning_format = 'hidden';
                         }
@@ -2145,9 +2162,11 @@ const edgeResponseCache = new EdgeSemanticLruCache();
         const temp = Number.isFinite(Number(lengthPolicy?.temperature)) ? Number(lengthPolicy.temperature) : 0.7;
         const maxTokens = Math.max(8000, clampInt(lengthPolicy?.maxTokens, 8000, 256, 16000)) + REASONING_TOKEN_ALLOWANCE;
         const hasImages = Array.isArray(images) && images.length > 0;
-        const queryComplexity = classifyQueryComplexity(options?.effectiveMessage || options?.message || finalPrompt, { intent: options?.intent });
+        const effectiveMsg = options?.effectiveMessage || options?.message || finalPrompt;
+        const queryComplexity = classifyQueryComplexity(effectiveMsg, { intent: options?.intent });
         const routingTier = options?.tier || queryComplexity.tier;
         const speedPreferred = options?.preferSpeed !== undefined ? options.preferSpeed : (routingTier === 'instant' || queryComplexity.preferSpeed);
+        const isReasoningQuery = isExplicitReasoningIntent(options?.intent, effectiveMsg);
 
         const tryStreamGroq = async () => {
             const keys = getAllGroqApiKeys();
@@ -2155,7 +2174,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             const groqConfiguredModel = userSelectedModel || String(process.env.GROQ_MODEL || '').trim();
             const groqCandidates = hasImages
                 ? getPreferredGroqVisionCandidates(groqConfiguredModel, userSelectedModel)
-                : getPreferredGroqCandidates(groqConfiguredModel, { preferSpeed: speedPreferred, tier: routingTier, userSelectedModel });
+                : getPreferredGroqCandidates(groqConfiguredModel, { preferSpeed: speedPreferred, tier: routingTier, userSelectedModel, isReasoningQuery });
 
             for (const key of keys) {
                 for (const model of groqCandidates) {
@@ -2270,8 +2289,10 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 }
                 messages[targetIdx] = { ...targetMsg, content };
             }
-            const shouldSuppressReasoning = options?.minimalThinking === true ||
-                ['fast_simple', 'casual_chat', 'chat_title', 'internal_summary', 'fast_explainer'].includes(String(options?.intent || ''));
+            const isUserChosenR1 = String(options?.userSelectedModel || '').toLowerCase().includes('r1');
+            const isReasoning = isExplicitReasoningIntent(options?.intent, prompt) || isUserChosenR1;
+            const shouldSuppressReasoning = !isReasoning || options?.minimalThinking === true ||
+                ['fast_simple', 'casual_chat', 'chat_title', 'internal_summary', 'fast_explainer', 'pop_culture_reference', 'chat'].includes(String(options?.intent || ''));
             const modelMaxTokens = supportsGroqReasoningFormat(model) ? 4096 : 8192;
             const groqPayload = {
                 model,
@@ -2444,10 +2465,12 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                     });
                 }
             }
-            const shouldSuppressReasoning = options?.minimalThinking === true ||
+            const isUserChosenR1 = String(options?.userSelectedModel || '').toLowerCase().includes('r1');
+            const isReasoning = isExplicitReasoningIntent(options?.intent, prompt) || isUserChosenR1;
+            const shouldSuppressReasoning = !isReasoning || options?.minimalThinking === true ||
                 options?.preferSpeed === true ||
                 options?.tier === 'instant' ||
-                ['fast_simple', 'casual_chat', 'chat_title', 'internal_summary', 'fast_explainer'].includes(String(options?.intent || ''));
+                ['fast_simple', 'casual_chat', 'chat_title', 'internal_summary', 'fast_explainer', 'pop_culture_reference', 'chat'].includes(String(options?.intent || ''));
             const generationConfig = {
                 temperature,
                 topK: 40,
