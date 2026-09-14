@@ -413,10 +413,10 @@ async function getInstantFactHelper() {
                 mappedGroq,
                 'openai/gpt-oss-120b',
                 'openai/gpt-oss-20b',
+                'llama-3.3-70b-versatile',
                 'qwen/qwen3.6-27b',
                 'qwen/qwen3.8-27b',
                 configured,
-                'llama-3.3-70b-versatile',
                 'qwen-3.6-27b',
                 'llama-3.1-8b-instant',
                 'qwen-2.5-coder-32b',
@@ -1224,7 +1224,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
      */
     function isNativeReasoningModel(modelName = '') {
         const m = String(modelName || '').toLowerCase();
-        return m.includes('deepseek') || m.includes('r1') || m.includes('reasoner') || m.includes('thinking') || m.includes('gpt-oss') || m.includes('qwen');
+        return m.includes('deepseek') || m.includes('r1') || m.includes('reasoner') || m.includes('thinking');
     }
 
     function supportsGroqReasoningFormat(modelName = '') {
@@ -2272,10 +2272,11 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             }
             const shouldSuppressReasoning = options?.minimalThinking === true ||
                 ['fast_simple', 'casual_chat', 'chat_title', 'internal_summary', 'fast_explainer'].includes(String(options?.intent || ''));
+            const modelMaxTokens = supportsGroqReasoningFormat(model) ? 4096 : 8192;
             const groqPayload = {
                 model,
                 temperature,
-                max_tokens: maxTokens,
+                max_tokens: Math.min(maxTokens || 8192, modelMaxTokens),
                 stream: true,
                 messages
             };
@@ -2366,11 +2367,8 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                     onDelta(`\n\n${thoughtText}`);
                 }
             }
-            // If the model was abruptly cut off due to token length limit before generating a substantive answer, cascade
-            if (finishReason === 'length' && cleanContent.length < 35) {
-                recordKeyFailure(apiKey, false);
-                return { ok: false };
-            }
+            // If the model generated substantive content, treat as success (even if finishReason was length,
+            // since partial tokens were already emitted to client via onDelta)
             if (cleanContent.length > 0) {
                 recordKeySuccess(apiKey);
                 return { ok: true, provider: 'groq', modelUsed: model, text };
