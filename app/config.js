@@ -69,7 +69,7 @@ export const APP_CONFIG = Object.freeze({
       chatSessions: 'jarvis_chat_sessions_v1',
       activeDraft: 'jarvis_active_empty_chat_draft_v1',
       deletedSessionIds: 'jarvis_deleted_chat_session_ids_v1',
-      deletedSessionTitles: 'jarvis_deleted_chat_session_titles_v1',
+      deletedSessionTitles: 'jarvis_deleted_chat_session_titles_v1', 
       learnedPreferences: 'jarvis_learned_preferences',
       bookmarkedMessages: 'jarvis_bookmarked_messages',
       userProfile: 'jarvis_user_profile',
