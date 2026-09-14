@@ -3303,7 +3303,7 @@ async function callGeminiJson(prompt, options = {}) {
 
     const groqKey = String(process.env.GROQ_API_KEY || '').trim();
     if (groqKey) {
-        const groqModels = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'openai/gpt-oss-120b'];
+        const groqModels = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.6-27b', 'llama-3.3-70b-versatile'];
         for (const model of groqModels) {
             try {
                 const response = await fetchWithTimeout('https://api.groq.com/openai/v1/chat/completions', {
