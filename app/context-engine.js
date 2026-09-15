@@ -144,7 +144,7 @@ export function classifyInput(message, pending = null, activeThread = null) {
     );
     const hasFollowUpLead = /^(?:show examples?|examples?|more(?: details| info)?|continue(?: speaking| reading)?|explain (?:further|more|simply|it)|tell (?:me )?more|expand(?: on that)?|elaborate|what about|how about|then what|what next|what else|pros and cons|difference|differences|compare|cost|price|details|break that down|go deeper|give (?:some |an? )?(?:examples?|use cases?|code|sample)|can you (?:give|show|explain|elaborate))\b/i.test(lower);
     const hasDefiniteAspect = /\b(?:the|its|their)\s+[a-z]{3,}\b/i.test(lower);
-    const isUltraShortFollowUp = /^(?:why|how|when|where|who|what next|what else|and then|how so|what about that|why so)\??$/i.test(lower.trim());
+    const isUltraShortFollowUp = /^(?:why|how|when|where|who|what next|what else|and then|how so|what about that|what about it|why so|who was it|who is it|what was it|what is that|how come)\??$/i.test(lower.trim());
     const isContinuationOfActiveThread = Boolean(activeThread) && (
         /\b(?:use cases?|real world|applications?|alternatives?|examples?|pros and cons|tradeoffs?|benefits?|drawbacks?|how to implement|why is that|can you explain|walk me through|in practice|code sample)\b/i.test(lower) ||
         (hasAnaphoricReference) ||
@@ -224,7 +224,7 @@ function resolveInput(state, input, limits) {
             resumedThread.updatedAt = Date.now();
             return resolution(
                 originalMessage,
-                resolveFollowUpText(originalMessage, resumedThread.entity || resumedThread.topic, state),
+                originalMessage,
                 resumedThread,
                 'explicit_thread_resume',
                 0.97,
@@ -264,10 +264,9 @@ function resolveInput(state, input, limits) {
                 : 'new_intent_low_context_confidence';
             return resolution(originalMessage, originalMessage, thread, reason, reason === 'clear_new_intent' ? 0.9 : 0.66, null);
         }
-        const resolved = resolveFollowUpText(originalMessage, activeThread.entity || activeThread.topic, state); 
         decisionReason = classification.isCorrection ? 'conversation_repair' : 'contextual_follow_up'; 
         confidence = classification.isFollowUp ? 0.92 : 0.78; 
-        return resolution(originalMessage, resolved, activeThread, decisionReason, confidence, null);
+        return resolution(originalMessage, originalMessage, activeThread, decisionReason, confidence, null);
     }
 
     const thread = activeThread || createThread(state, classification.topic || originalMessage, limits.maxThreads);
@@ -321,10 +320,18 @@ function recordTurn(state, turn, limits) {
     thread.updatedAt = record.createdAt;
     const isAck = vectorCosineSimilarity(embedding, ACKNOWLEDGEMENT_VECTOR) >= 0.36 || /^(?:yes|yeah|yep|yup|ok|okay|sure|alright|fine|thanks|thank you|got it|makes sense|understood)\b/i.test(text.toLowerCase());
     if (role === 'user' && !isAck) {
+        const isFollowUpTurn = /^(?:why|how|when|where|who|tell me more|more|continue|explain|elaborate|what about|how about|what next)\b/i.test(text) ||
+            /\b(?:it|its|this|that|they|them|those|these)\b/i.test(text);
         const entity = deriveEntity(text);
-        if (entity) thread.entity = entity;
-        const topic = deriveTopic(text);
-        if (topic) thread.topic = topic;
+        if (entity && !/^(?:it|its|this|that|them|they|him|her|me|us|more)$/i.test(entity)) {
+            thread.entity = entity;
+        }
+        if (!isFollowUpTurn || !thread.topic) {
+            const topic = deriveTopic(text);
+            if (topic && !/^(?:it|this|that|more|why|how|what)\b/i.test(topic)) {
+                thread.topic = topic;
+            }
+        }
     }
     return { ...record };
 }
@@ -485,11 +492,12 @@ function restoreState(state, snapshot, limits) {
 }
 
 function resolution(originalMessage, resolvedMessage, thread, decisionReason, confidence, cancelledPendingState) {
+    const verbatim = cleanText(originalMessage);
     return {
-        originalMessage,
-        verbatimMessage: originalMessage,
-        resolvedMessage,
-        searchQuery: resolvedMessage,
+        originalMessage: verbatim,
+        verbatimMessage: verbatim,
+        resolvedMessage: verbatim,
+        searchQuery: verbatim,
         activeThread: thread ? { ...thread } : null,
         decisionReason,
         primaryIntent: primaryIntentForDecision(decisionReason),
@@ -578,7 +586,12 @@ function deriveEntity(text) {
     const raw = cleanText(text);
     for (const pattern of ENTITY_PATTERNS) {
         const match = raw.match(pattern);
-        if (match?.[1]) return cleanText(match[1]).replace(/[?.!,;]+$/g, '').slice(0, 80);
+        if (match?.[1]) {
+            const val = cleanText(match[1]).replace(/[?.!,;]+$/g, '').slice(0, 80);
+            if (!/^(?:it|its|this|that|them|they|him|he|her|she|me|us|anything|something|nothing|more|everything)$/i.test(val)) {
+                return val;
+            }
+        }
     }
     const travelPlace = raw.match(
         /\b(?:trip|itinerary|travel|vacation|holiday|visit|weekend|day trip)\s+(?:to|in|for|around)\s+([A-Za-z][A-Za-z\s.'-]{1,50})/i
@@ -595,15 +608,8 @@ function deriveEntity(text) {
 }
 
 function resolvePronouns(text, entity) {
-    const anchor = cleanText(entity);
-    if (!anchor) return text;
-    return cleanText(text).replace(
-        /\b(?:its|his|her)\b/gi,
-        `${anchor}'s`
-    ).replace(
-        /\b(?:he|she|him)\b/gi,
-        anchor
-    );
+    // Preserve verbatim user message without destructive pronoun replacements
+    return cleanText(text);
 }
 
 function findRecentEntityFromState(state) {
@@ -623,30 +629,8 @@ function findRecentEntityFromState(state) {
 }
 
 export function resolveFollowUpText(text, entity, state = null) {
-    const raw = cleanText(text);
-    const anchor = cleanText(entity) || findRecentEntityFromState(state);
-    if (!anchor) return raw;
-    const pronounResolved = resolvePronouns(raw, anchor);
-    if (pronounResolved !== raw) return pronounResolved;
-    if ((PLACE_RELATIVE_FOLLOWUP.test(raw) || PLACE_CATEGORY_FOLLOWUP.test(raw)) && !hasExplicitPlaceMention(raw)) {
-        if (/^(?:nearby|near by|around (?:there|here)|close by)\b/i.test(raw)) {
-            return `${raw} near ${anchor}`;
-        }
-        return `${raw} near ${anchor}`;
-    }
-    if (!isContextualExpansionCandidate(raw)) return pronounResolved;
-    if (/^(?:why|how|when|where|who)\??$/i.test(raw)) {
-        return `${raw.replace(/\?+$/, '')} regarding ${anchor}?`;
-    }
-    // Avoid awkward expansions like "latest on it for SpaceX" when pronouns already resolved.
-    if (/^(?:more|continue|continue from earlier|explain (?:further|more|simply|it)|tell (?:me )?more|further|then what|what next|what else|expand|elaborate)\b/i.test(raw)) {
-        return `${raw} about ${anchor}`;
-    }
-    if (/^(?:latest|price|cost|news|mission|sources?|pros|cons|examples?|difference|differences)\b/i.test(raw)) {
-        return `${raw} about ${anchor}`;
-    }
-    if (/\b(?:about|for|on|regarding)\b/i.test(raw)) return pronounResolved;
-    return `${raw} about ${anchor}`;
+    // Preserve user's exact message unchanged without regex rewrites or synthetic appendages
+    return cleanText(text);
 }
 
 function isContextualExpansionCandidate(text) {
@@ -714,13 +698,12 @@ function hasAmbiguousReferenceAcrossThreads(state, message, activeThread) {
     if (namesOtherThread) return false;
     const isPairwiseRequest = /\b(?:compare|difference|differences|both|between|versus|vs)\b/i.test(raw);
     if (isPairwiseRequest) return true;
-    // Clear continuations ("tell me more about it") bind to the active thread.
-    if (/^(?:tell me more|more|continue|explain further|further|what about it|how about it|latest on it)\b/i.test(raw)) {
+    // Clear continuations bind to the active thread.
+    if (/^(?:tell me more|more|continue|explain further|further|what about (?:it|that|this)|how about (?:it|that|this)|latest on it|who was (?:it|he|she)|what was (?:it|that)|why|how so)\b/i.test(raw)) {
         return false;
     }
     // Only bare pronoun-like replies are treated as ambiguous across threads.
-    return /^(?:it|this|that|they|them|those|these|one|them both|both of them)\??$/i.test(raw) ||
-        tokens.length === 0;
+    return /^(?:it|this|that|they|them|those|these|one|them both|both of them)\??$/i.test(raw);
 }
 
 function tokenize(text) {
@@ -910,7 +893,18 @@ export function retrievePastTurns(turns = [], query = '', options = {}) {
         }
     }
 
-    const matches = exchanges.filter(e => e.similarity >= minSimilarity);
+    let matches = exchanges.filter(e => e.similarity >= minSimilarity);
+
+    // If query is explicitly retrospective (e.g. "what did we discuss earlier?")
+    // but specific lexical/vector similarity was low, intelligently retrieve the foundational earlier exchanges
+    if (isRetrospective && matches.length === 0 && exchanges.length > 0) {
+        matches = exchanges.slice(0, maxPairs).map(e => ({
+            ...e,
+            similarity: 0.5,
+            reason: 'foundational earlier exchange'
+        }));
+    }
+
     matches.sort((a, b) => b.similarity - a.similarity);
     const topMatches = matches.slice(0, maxPairs);
     // Restore chronological order
