@@ -125,7 +125,8 @@ recordExchange(engine, primaryThread, result.resolvedMessage, `${TOPIC.primary} 
 
 result = engine.resolve({ message: PROMPT.followUp });
 assert.equal(result.decisionReason, 'contextual_follow_up');
-assertSemanticMatch(result.resolvedMessage, TOPIC.primary, 0.20, 'Resolved follow-up must anchor to primary topic');
+assert.equal(result.resolvedMessage, PROMPT.followUp);
+assertSemanticMatch(result.activeThread.topic, TOPIC.primary, 0.20, 'Resolved follow-up thread must anchor to primary topic');
 assertUsesThread(result, primaryThread);
 
 engine.setPending({ type: 'weather_location', expected: 'location', threadId: primaryThread });
@@ -179,7 +180,8 @@ const mixedPrimaryThread = resolveAndRecordTopic(mixedInputEngine, TOPIC.primary
 let mixed = mixedInputEngine.resolve({ message: PROMPT.followUp });
 assert.equal(mixed.decisionReason, 'contextual_follow_up');
 assertUsesThread(mixed, mixedPrimaryThread);
-assertSemanticMatch(mixed.resolvedMessage, TOPIC.primary, 0.20);
+assert.equal(mixed.resolvedMessage, PROMPT.followUp);
+assertSemanticMatch(mixed.activeThread.topic, TOPIC.primary, 0.20);
 mixedInputEngine.recordTurn({
     role: 'user',
     text: mixed.resolvedMessage,
@@ -209,7 +211,8 @@ recordExchange(mixedInputEngine, entityThread, mixed.resolvedMessage, `${TOPIC.n
 
 mixed = mixedInputEngine.resolve({ message: PROMPT.followUp });
 assert.equal(mixed.decisionReason, 'contextual_follow_up');
-assertSemanticMatch(mixed.resolvedMessage, TOPIC.namedEntity, 0.20);
+assert.equal(mixed.resolvedMessage, PROMPT.followUp);
+assertSemanticMatch(mixed.activeThread.topic, TOPIC.namedEntity, 0.20);
 
 mixed = mixedInputEngine.resolve({ message: PROMPT.repair });
 assert.equal(mixed.decisionReason, 'conversation_repair');
@@ -255,7 +258,8 @@ recordExchange(contextCopilotEngine, primaryContextThread, copilot.resolvedMessa
 
 copilot = contextCopilotEngine.resolve({ message: PROMPT.followUp });
 assert.equal(copilot.decisionReason, 'contextual_follow_up');
-assertSemanticMatch(copilot.resolvedMessage, primaryContextTopic, 0.20);
+assert.equal(copilot.resolvedMessage, PROMPT.followUp);
+assertSemanticMatch(copilot.activeThread.topic, primaryContextTopic, 0.20);
 recordExchange(contextCopilotEngine, primaryContextThread, copilot.resolvedMessage, `${primaryContextTopic} latest summary.`);
 
 const syntheticInstrumentTopic = syntheticSentence([5, 6, 7, 8]);
@@ -284,13 +288,15 @@ recordExchange(contextCopilotEngine, secondaryContextThread, copilot.resolvedMes
 copilot = contextCopilotEngine.resolve({ message: PROMPT.compare(primaryContextTopic) });
 assert.equal(copilot.decisionReason, 'contextual_follow_up');
 assertUsesThread(copilot, secondaryContextThread);
-assertSemanticMatch(copilot.resolvedMessage, secondaryContextTopic, 0.20);
+assert.equal(copilot.resolvedMessage, PROMPT.compare(primaryContextTopic));
+assertSemanticMatch(copilot.activeThread.topic, secondaryContextTopic, 0.20);
 assertSemanticMatch(copilot.resolvedMessage, primaryContextTopic, 0.20);
 
 copilot = contextCopilotEngine.resolve({ message: PROMPT.repair });
 assert.equal(copilot.decisionReason, 'conversation_repair');
 assertUsesThread(copilot, secondaryContextThread);
-assertSemanticMatch(copilot.resolvedMessage, secondaryContextTopic, 0.20);
+assert.equal(copilot.resolvedMessage, PROMPT.repair);
+assertSemanticMatch(copilot.activeThread.topic, secondaryContextTopic, 0.20);
 
 copilot = contextCopilotEngine.resolve({ message: PROMPT.resume(primaryContextTopic) });
 assert.equal(copilot.decisionReason, 'explicit_thread_resume');
@@ -372,15 +378,18 @@ recordExchange(placeFollowEngine, ootyThread, placeFollow.resolvedMessage, `${TO
 placeFollow = placeFollowEngine.resolve({ message: PROMPT.placeRelative });
 assert.equal(placeFollow.decisionReason, 'contextual_follow_up');
 assertUsesThread(placeFollow, ootyThread);
-assertSemanticMatch(placeFollow.resolvedMessage, TOPIC.placePrimary, 0.20);
-assertSemanticMatch(placeFollow.resolvedMessage, 'beaches', 0.20);
+assert.equal(placeFollow.resolvedMessage, PROMPT.placeRelative);
+assertSemanticMatch(placeFollow.activeThread.topic, TOPIC.placePrimary, 0.20);
 placeFollow = placeFollowEngine.resolve({ message: PROMPT.placeCategory });
 assert.equal(placeFollow.decisionReason, 'contextual_follow_up');
 assertUsesThread(placeFollow, ootyThread);
-assertSemanticMatch(placeFollow.resolvedMessage, TOPIC.placePrimary, 0.20);
+assert.equal(placeFollow.resolvedMessage, PROMPT.placeCategory);
+assertSemanticMatch(placeFollow.activeThread.topic, TOPIC.placePrimary, 0.20);
 placeFollow = placeFollowEngine.resolve({ message: PROMPT.placeGeneral });
 assert.equal(placeFollow.decisionReason, 'contextual_follow_up');
-assertSemanticMatch(placeFollow.resolvedMessage, TOPIC.placePrimary, 0.20);
+assertUsesThread(placeFollow, ootyThread);
+assert.equal(placeFollow.resolvedMessage, PROMPT.placeGeneral);
+assertSemanticMatch(placeFollow.activeThread.topic, TOPIC.placePrimary, 0.20);
 placeFollow = placeFollowEngine.resolve({ message: PROMPT.placeSpecific('beaches', TOPIC.placeSecondary) });
 assert.equal(placeFollow.decisionReason, 'clear_new_intent');
 
@@ -476,19 +485,22 @@ qcEngine.recordTurn({ role: 'assistant', text: 'Quantum computing is a rapidly-e
 const qcFollow1 = qcEngine.resolve({ message: 'How does superposition work in it?' });
 assert.equal(qcFollow1.decisionReason, 'contextual_follow_up');
 assert.equal(qcFollow1.activeThread.id, qcThreadId);
-assert.ok(qcFollow1.resolvedMessage.toLowerCase().includes('quantum computing'));
+assert.equal(qcFollow1.resolvedMessage, 'How does superposition work in it?');
+assert.equal(qcFollow1.activeThread.topic, 'quantum computing');
 
 // Short follow-up ("explain more")
 const qcFollow2 = qcEngine.resolve({ message: 'explain more' });
 assert.equal(qcFollow2.decisionReason, 'contextual_follow_up');
 assert.equal(qcFollow2.activeThread.id, qcThreadId);
-assert.ok(qcFollow2.resolvedMessage.toLowerCase().includes('quantum computing'));
+assert.equal(qcFollow2.resolvedMessage, 'explain more');
+assert.equal(qcFollow2.activeThread.topic, 'quantum computing');
 
 // Ultra-short ("why?")
 const qcFollow3 = qcEngine.resolve({ message: 'why?' });
 assert.equal(qcFollow3.decisionReason, 'contextual_follow_up');
 assert.equal(qcFollow3.activeThread.id, qcThreadId);
-assert.ok(qcFollow3.resolvedMessage.toLowerCase().includes('quantum computing'));
+assert.equal(qcFollow3.resolvedMessage, 'why?');
+assert.equal(qcFollow3.activeThread.topic, 'quantum computing');
 
 // Person entity follow-up test (Albert Einstein -> he / his)
 const personEngine = createConversationEngine();
@@ -500,11 +512,13 @@ personEngine.recordTurn({ role: 'assistant', text: 'Albert Einstein was a German
 const personFollow1 = personEngine.resolve({ message: 'When did he win the Nobel prize?' });
 assert.equal(personFollow1.decisionReason, 'contextual_follow_up');
 assert.equal(personFollow1.activeThread.id, personThreadId);
-assert.ok(personFollow1.resolvedMessage.toLowerCase().includes('albert einstein'));
+assert.equal(personFollow1.resolvedMessage, 'When did he win the Nobel prize?');
+assert.equal(personFollow1.activeThread.entity.toLowerCase(), 'albert einstein');
 
 const personFollow2 = personEngine.resolve({ message: 'What was his biggest mistake?' });
 assert.equal(personFollow2.decisionReason, 'contextual_follow_up');
 assert.equal(personFollow2.activeThread.id, personThreadId);
-assert.ok(personFollow2.resolvedMessage.toLowerCase().includes('albert einstein'));
+assert.equal(personFollow2.resolvedMessage, 'What was his biggest mistake?');
+assert.equal(personFollow2.activeThread.entity.toLowerCase(), 'albert einstein');
 
 console.log('context-engine-tests-ok');
