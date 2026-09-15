@@ -164,7 +164,12 @@ test('ChatGPT-Grade Context Architecture Suite', async (t) => {
         engine.recordTurn({ role: 'assistant', text: 'Yes, on clear days, especially during winter mornings, it can be seen from high observation decks in Tokyo.', threadId });
 
         const resolved = engine.resolveFollowUp('What is its elevation?');
-        assert.match(resolved, /Mount Fuji/i, 'Pronoun "its" should be resolved to Mount Fuji across multiple turns');
+        assert.equal(resolved, 'What is its elevation?', 'User message must remain verbatim unchanged without destructive pronoun rewriting');
+        const res = engine.resolve({ message: 'What is its elevation?' });
+        assert.equal(res.decisionReason, 'contextual_follow_up');
+        assert.equal(res.activeThread.id, threadId);
+        assert.equal(res.activeThread.entity, 'Mount Fuji');
+        assert.equal(res.resolvedMessage, 'What is its elevation?');
     });
 
     await t.test('5. Clean Unpolluted User Message in Structured Messages', () => {
