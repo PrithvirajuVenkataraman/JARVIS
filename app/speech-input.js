@@ -707,6 +707,11 @@ export function createSpeechInputController(options = {}) {
             fallbackMode = true;
             await whisperRecorder.start(language);
         }
+        if (globalThis.JarvisInteractionState) {
+            globalThis.JarvisInteractionState.transition?.('LISTENING', {
+                metadata: { mode }
+            });
+        }
         emitState();
         return true;
     }
@@ -735,6 +740,9 @@ export function createSpeechInputController(options = {}) {
         }
         processing = Boolean(isProc);
         if (processing) {
+            if (globalThis.JarvisInteractionState) {
+                globalThis.JarvisInteractionState.transition?.('TRANSCRIBING');
+            }
             // Auto-release processing lock after 20s safety threshold to prevent permanent DOM locking
             processingTimer = setTimeout(() => {
                 setProcessing(false);
@@ -819,6 +827,13 @@ export function createSpeechInputController(options = {}) {
             mode = 'idle';
         } else if (mode === 'dictation') {
             mode = 'idle';
+        }
+
+        if (globalThis.JarvisInteractionState) {
+            const current = globalThis.JarvisInteractionState.getState?.();
+            if (current === 'LISTENING' || current === 'TRANSCRIBING') {
+                globalThis.JarvisInteractionState.transition?.(options.cancelled ? 'CANCELLED' : 'IDLE');
+            }
         }
 
         const keepStream = options.keepStream === true && !options.disableConverse;
@@ -1251,6 +1266,14 @@ export function installSpeechInputUI(options = {}) {
             controller.setProcessing(false);
         } else if (state.listening || state.converseEnabled) {
             controller.setProcessing(true);
+        }
+    });
+    globalThis.addEventListener?.('jarvis:interaction-state', event => {
+        const next = event.detail?.state;
+        if (['IDLE', 'INTERRUPTED', 'CANCELLED', 'ERROR'].includes(next)) {
+            if (controller.getState().processing) {
+                controller.setProcessing(false);
+            }
         }
     });
     if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
