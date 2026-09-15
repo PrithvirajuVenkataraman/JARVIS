@@ -808,15 +808,15 @@ export function createSpeechInputController(options = {}) {
             clearTimeout(restartTimer);
             restartTimer = null;
         }
+        if (processing) {
+            processing = false;
+            if (typeof document !== 'undefined' && document.body) {
+                document.body.classList.toggle('is-processing', false);
+            }
+        }
         if (options.disableConverse) {
             converseEnabled = false;
             mode = 'idle';
-            if (processing) {
-                processing = false;
-                if (typeof document !== 'undefined' && document.body) {
-                    document.body.classList.toggle('is-processing', false);
-                }
-            }
         } else if (mode === 'dictation') {
             mode = 'idle';
         }
@@ -1247,8 +1247,10 @@ export function installSpeechInputUI(options = {}) {
     vttButton.addEventListener('click', globalThis.toggleVoiceToText);
     globalThis.addEventListener?.('jarvis:assistant-processing', event => {
         const state = controller.getState?.() || {};
-        if (state.listening || state.converseEnabled) {
-            controller.setProcessing(Boolean(event.detail?.active));
+        if (!event.detail?.active) {
+            controller.setProcessing(false);
+        } else if (state.listening || state.converseEnabled) {
+            controller.setProcessing(true);
         }
     });
     if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
