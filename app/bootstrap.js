@@ -26,12 +26,17 @@ import * as JarvisImageConfig from './image-generation-config.js?v=2.0.1';
 import * as JarvisImageStorage from './image-storage.js?v=2.0.1';
 import * as JarvisImageGenerator from './image-generator.js?v=2.0.1';
 
+import { createInteractionStateMachine, InteractionState } from './interaction-state.js?v=2.0.1';
+
 const engine = createConversationEngine({
-    maxTurns: 12,
-    maxContextChars: 9000,
+    maxTurns: 30,
+    maxTurnHistory: 200,
+    maxContextChars: 16000,
     maxThreads: 8
 });
 
+globalThis.InteractionState = InteractionState;
+globalThis.JarvisInteractionState = createInteractionStateMachine();
 globalThis.JarvisConversation = engine;
 globalThis.JarvisApi = Object.freeze({ ApiError, postJson });
 globalThis.JarvisState = createApplicationState();
