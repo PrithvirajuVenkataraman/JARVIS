@@ -3603,6 +3603,7 @@ async function fetchAndDisplayNews(query) {
     }
 
     showThinkingIndicator('Web search in progress...');
+    window.JarvisInteractionState?.transition?.('SEARCHING', { metadata: { query } });
     const controller = beginAbortableRequest();
     const budgetTimer = setTimeout(() => {
         try { controller.abort(); } catch (_) {}
@@ -4898,6 +4899,10 @@ async function streamChatCompletion(payload, options = {}) {
             return;
         }
         if (event.event === 'delta') {
+            if (latencyTrace.requestId && window.JarvisInteractionState?.isCurrentRequest && !window.JarvisInteractionState.isCurrentRequest(latencyTrace.requestId)) {
+                try { reader.cancel(); } catch (_) {}
+                return;
+            }
             const delta = String(event.data?.text || '');
             if (!delta) return;
             accumulated += delta;
@@ -4910,6 +4915,9 @@ async function streamChatCompletion(payload, options = {}) {
             }
             if (!firstDeltaLogged && accumulated) {
                 firstDeltaLogged = true;
+                window.JarvisInteractionState?.transition?.('GENERATING', {
+                    requestId: latencyTrace.requestId || activeResponseRenderContext?.turnId
+                });
                 hideThinkingIndicator();
                 latencyTrace.firstDeltaAt = performance.now();
                 logLatencyTrace('chat_first_delta', {
@@ -5234,6 +5242,10 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
         submittedAt: performance.now()
     };
     const controller = beginAbortableRequest();
+    window.JarvisInteractionState?.transition?.('THINKING', {
+        requestId: latencyTrace.requestId,
+        metadata: { query: normalizedUserMessage }
+    });
     const hadExistingThinkingIndicator = Boolean(document.getElementById('chat-thinking-indicator'));
     let autoIndicatorShown = false;
     let requestSettled = false;
@@ -5394,6 +5406,9 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
             routing: data?.routing || null
         });
         if (requestOptions?.stream !== true) {
+            window.JarvisInteractionState?.transition?.('GENERATING', {
+                requestId: latencyTrace.requestId
+            });
             if (typeof data.response === 'string') {
                 data.response = postProcessAssistantResponse(data.response, normalizedUserMessage);
                 data.response = sanitizeWeakModelAnswer(data.response, normalizedUserMessage);
@@ -6579,7 +6594,8 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             const sendBtn = document.getElementById('send-message-btn');
             if (!sendBtn) return;
             sendBtn.classList.remove('is-converse-ready', 'is-converse-active');
-            if (activeRequestController || isAssistantProcessing()) {
+            const isBusy = Boolean(window.JarvisInteractionState?.isBusy?.() || activeRequestController || isAssistantProcessing());
+            if (isBusy) {
                 sendBtn.classList.add('composer-send-stop');
                 sendBtn.title = 'Stop generating';
                 sendBtn.setAttribute('aria-label', 'Stop generating');
@@ -6601,7 +6617,8 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
         function handlePrimaryActionButtonClick() {
             const btn = document.getElementById('send-message-btn');
             const input = document.getElementById('text-input');
-            if (btn?.classList.contains('composer-send-stop') || activeRequestController || isAssistantProcessing()) {
+            const isBusy = Boolean(window.JarvisInteractionState?.isBusy?.() || btn?.classList.contains('composer-send-stop') || activeRequestController || isAssistantProcessing());
+            if (isBusy) {
                 stopActiveGeneration('manual');
                 return;
             }
@@ -6666,6 +6683,150 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             const message = String(error?.message || error || '').toLowerCase();
             return error?.name === 'AbortError' || message.includes('aborted');
         }
+
+        if (!globalThis.InteractionState) {
+            globalThis.InteractionState = Object.freeze({
+                IDLE: 'IDLE',
+                LISTENING: 'LISTENING',
+                TRANSCRIBING: 'TRANSCRIBING',
+                SUBMITTING: 'SUBMITTING',
+                THINKING: 'THINKING',
+                SEARCHING: 'SEARCHING',
+                GENERATING: 'GENERATING',
+                SPEAKING: 'SPEAKING',
+                INTERRUPTED: 'INTERRUPTED',
+                CANCELLED: 'CANCELLED',
+                ERROR: 'ERROR'
+            });
+        }
+        if (!globalThis.JarvisInteractionState) {
+            const listeners = new Set();
+            let watchdogTimer = null;
+            let requestSequence = 0;
+            const stateRecord = {
+                state: globalThis.InteractionState.IDLE,
+                previousState: null,
+                requestId: null,
+                turnId: null,
+                startedAt: null,
+                updatedAt: Date.now(),
+                metadata: {},
+                error: null
+            };
+            const clearWatchdog = () => {
+                if (watchdogTimer) {
+                    clearTimeout(watchdogTimer);
+                    watchdogTimer = null;
+                }
+            };
+            const isBusy = () => ['TRANSCRIBING', 'SUBMITTING', 'THINKING', 'SEARCHING', 'GENERATING', 'SPEAKING'].includes(stateRecord.state);
+            const isProcessing = () => ['TRANSCRIBING', 'SUBMITTING', 'THINKING', 'SEARCHING', 'GENERATING'].includes(stateRecord.state);
+            const isListening = () => stateRecord.state === 'LISTENING';
+            const isSpeaking = () => stateRecord.state === 'SPEAKING';
+            const isCurrentRequest = reqId => !reqId || !stateRecord.requestId || stateRecord.requestId === reqId;
+            const createRequestId = (prefix = 'req') => {
+                requestSequence += 1;
+                return `${prefix}_${Date.now().toString(36)}_${requestSequence}_${Math.random().toString(36).slice(2, 6)}`;
+            };
+            const getSnapshot = () => ({
+                state: stateRecord.state,
+                previousState: stateRecord.previousState,
+                requestId: stateRecord.requestId,
+                turnId: stateRecord.turnId,
+                startedAt: stateRecord.startedAt,
+                updatedAt: stateRecord.updatedAt,
+                metadata: { ...stateRecord.metadata },
+                error: stateRecord.error,
+                isBusy: isBusy(),
+                isProcessing: isProcessing(),
+                isListening: isListening(),
+                isSpeaking: isSpeaking()
+            });
+            const transition = (nextState, context = {}) => {
+                const prev = stateRecord.state;
+                const now = Date.now();
+                if (context.requestId) {
+                    stateRecord.requestId = context.requestId;
+                } else if (nextState === 'IDLE') {
+                    stateRecord.requestId = null;
+                }
+                if (context.turnId !== undefined) {
+                    stateRecord.turnId = context.turnId;
+                } else if (nextState === 'IDLE') {
+                    stateRecord.turnId = null;
+                }
+                stateRecord.previousState = prev;
+                stateRecord.state = nextState;
+                stateRecord.updatedAt = now;
+                stateRecord.error = context.error || null;
+                stateRecord.metadata = { ...(context.metadata || {}) };
+                if (!stateRecord.startedAt || prev === 'IDLE') stateRecord.startedAt = now;
+                if (nextState === 'IDLE') stateRecord.startedAt = null;
+
+                clearWatchdog();
+                if (!['IDLE', 'CANCELLED', 'INTERRUPTED'].includes(nextState)) {
+                    const timeout = nextState === 'SPEAKING' ? 25000 : 35000;
+                    watchdogTimer = setTimeout(() => {
+                        if (stateRecord.state === nextState) {
+                            console.warn(`[InteractionState] Auto-recovering from frozen state "${nextState}" to IDLE.`);
+                            resetToIdle('watchdog_timeout');
+                        }
+                    }, timeout);
+                }
+
+                const snapshot = getSnapshot();
+                for (const l of listeners) {
+                    try { l(nextState, snapshot); } catch (e) {}
+                }
+                if (typeof globalThis.dispatchEvent === 'function') {
+                    try {
+                        globalThis.dispatchEvent(new CustomEvent('jarvis:interaction-state', { detail: snapshot }));
+                        globalThis.dispatchEvent(new CustomEvent('jarvis:assistant-processing', {
+                            detail: { active: isProcessing(), depth: isProcessing() ? 1 : 0 }
+                        }));
+                    } catch (_) {}
+                }
+                return nextState;
+            };
+            const resetToIdle = (reason = 'manual_reset') => {
+                clearWatchdog();
+                return transition('IDLE', { metadata: { reason } });
+            };
+            const addStateListener = l => {
+                listeners.add(l);
+                return () => listeners.delete(l);
+            };
+
+            globalThis.JarvisInteractionState = {
+                get state() { return stateRecord.state; },
+                getState: () => stateRecord.state,
+                getSnapshot,
+                isBusy,
+                isProcessing,
+                isListening,
+                isSpeaking,
+                isCurrentRequest,
+                createRequestId,
+                transition,
+                resetToIdle,
+                addStateListener
+            };
+        }
+
+        window.addEventListener('jarvis:interaction-state', event => {
+            const isProc = event.detail?.isProcessing;
+            const compShell = document.getElementById('input-bar-inner');
+            if (typeof document !== 'undefined' && document.body) {
+                document.body.classList.toggle('is-processing', Boolean(isProc));
+            }
+            if (compShell) {
+                compShell.classList.toggle('is-processing', Boolean(isProc));
+            }
+            if (!isProc) {
+                hideThinkingIndicator();
+            }
+            toggleSendButton();
+        });
 
         let activeRequestController = null;
         const activeRequestControllers = new Set();
@@ -6735,6 +6896,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             resetAssistantProcessingState();
             hideThinkingIndicator();
             window.JarvisSpeechInput?.setProcessing?.(false);
+            window.JarvisInteractionState?.resetToIdle?.('reset_composer');
             const compShell = document.getElementById('input-bar-inner');
             const vttWave = document.getElementById('vtt-waveform-container');
             if (compShell) compShell.classList.remove('is-voice-active', 'is-processing');
@@ -6890,10 +7052,12 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             const hadRequest = activeRequestControllers.size > 0 || !!activeRequestController;
             const hadTypewriter = activeTypewriterRuns.size > 0 || activeTypewriterTimeouts.size > 0;
             const hadSpeech = isConverseSpeechActive();
-            if (!hadRequest && !hadTypewriter && !hadSpeech && !isAssistantProcessing()) {
+            const hadStateBusy = Boolean(window.JarvisInteractionState?.isBusy?.());
+            if (!hadRequest && !hadTypewriter && !hadSpeech && !isAssistantProcessing() && !hadStateBusy) {
                 resetComposerToIdle();
                 return;
             }
+            window.JarvisInteractionState?.transition?.('INTERRUPTED', { metadata: { reason } });
             for (const controller of activeRequestControllers) {
                 controller.jarvisAbortReason = reason;
                 if (reason === 'converse_interruption') markTurnInterrupted(controller.jarvisTurnId);
@@ -6941,6 +7105,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             }
 
             resetAssistantProcessingState();
+            window.JarvisInteractionState?.resetToIdle?.(reason);
             toggleSendButton();
             if (reason === 'manual') showTemporaryMessage('Response stopped.');
         }
@@ -10635,6 +10800,8 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                     activeConverseSpeechUtterance = null;
                     activeConverseUtterances.clear();
                     setConverseUiState('listening', 'speech_finished');
+                    const continueConverse = window.JarvisSpeechInput?.getState?.().converseEnabled === true;
+                    window.JarvisInteractionState?.transition?.(continueConverse ? 'LISTENING' : 'IDLE');
                     // 150ms acoustic echo debounce before auto-rearming recognition
                     setTimeout(() => {
                         const speechInput = window.JarvisSpeechInput;
@@ -10664,6 +10831,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             }
 
             streamingConverseSpeech.isPlaying = true;
+            window.JarvisInteractionState?.transition?.('SPEAKING');
             setConverseUiState('speaking', 'streaming_segment');
 
             const utterance = createConverseUtterance(nextSegment, streamingConverseSpeech.spokenSegments.length, 10, streamingConverseSpeech.telemetry);
@@ -10761,6 +10929,8 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 activeConverseSpeechUtterance = null;
                 activeConverseUtterances.clear();
                 setConverseUiState('listening', reason || 'speech_finished');
+                const continueConverse = window.JarvisSpeechInput?.getState?.().converseEnabled === true;
+                window.JarvisInteractionState?.transition?.(continueConverse ? 'LISTENING' : 'IDLE');
                 logLatencyTrace('speech_end', { source: 'converse', segments: speechRun.total });
                 setTimeout(() => {
                     const speechInput = window.JarvisSpeechInput;
@@ -10825,6 +10995,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 }
             };
             setConverseUiState('speaking', 'speech_start');
+            window.JarvisInteractionState?.transition?.('SPEAKING');
             logLatencyTrace('speech_start', { source: 'converse', chars: spokenText.length, segments: segments.length });
             speakNextSegment();
         }
@@ -12841,7 +13012,7 @@ async function sendTextInput(submission = {}) {
             if (compShell) compShell.classList.remove('is-voice-active', 'is-processing');
             window.JarvisSpeechInput?.stop?.({ releaseStream: true });
             const sendTrace = {
-                requestId: `send_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
+                requestId: window.JarvisInteractionState?.createRequestId?.('send') || `send_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
                 submittedAt: performance.now()
             };
             logLatencyTrace('chat_submit', {
@@ -12937,6 +13108,10 @@ async function sendTextInput(submission = {}) {
                     }
                 });
                 const previousRenderContext = beginResponseRenderContext(turn);
+                window.JarvisInteractionState?.transition?.('SUBMITTING', {
+                    requestId: sendTrace.requestId,
+                    turnId: turn.id
+                });
                 input.value = '';
                 delete input.dataset.inputSource;
                 globalThis.resetSpeechInputCommittedText?.();
@@ -12966,6 +13141,10 @@ async function sendTextInput(submission = {}) {
                 }
 
                 beginAssistantProcessing();
+                window.JarvisInteractionState?.transition?.('THINKING', {
+                    requestId: sendTrace.requestId,
+                    turnId: turn.id
+                });
                 showThinkingIndicator(attachmentsForSend.length ? 'Reading attachments...' : 'Thinking');
                 try {
                     if (attachmentsForSend.length) {
@@ -13225,6 +13404,10 @@ async function sendTextInput(submission = {}) {
                     }
                 } catch (error) {
                     console.error('sendTextInput failed:', error);
+                    window.JarvisInteractionState?.transition?.('ERROR', {
+                        requestId: sendTrace.requestId,
+                        error
+                    });
                     const fallback = window.JarvisFailurePolicy?.buildUserFacingErrorMessage?.(error) ||
                         'I hit a temporary issue while processing that. Please try again.';
                     if (fallback) addChatMessage(fallback, false);
@@ -13252,6 +13435,7 @@ async function sendTextInput(submission = {}) {
                         document.body.classList.remove('is-processing');
                     }
                     window.JarvisSpeechInput?.setProcessing?.(false);
+                    window.JarvisInteractionState?.resetToIdle?.('send_complete');
                     endAssistantProcessing();
                     resetPrimaryActionButtonWhenIdle();
                 }
@@ -16360,6 +16544,7 @@ async function handleStrictLatestQuery(userText) {
         return publishLiveDisabledMessage(userText);
     }
 
+    window.JarvisInteractionState?.transition?.('SEARCHING', { metadata: { userText } });
     showThinkingIndicator('Checking latest trusted sources...');
     const controller = beginAbortableRequest();
     const budgetMs = TRUST_FIRST_RELIABILITY_POLICY.verificationBudgetMs;
@@ -20002,6 +20187,7 @@ async function handleLiveRetrievalQuery(userText, options = {}) {
         options
     });
 
+    window.JarvisInteractionState?.transition?.('SEARCHING', { metadata: { userText } });
     showThinkingIndicator('Searching live web sources...');
     const controller = beginAbortableRequest();
     const verificationBudgetMs = 3500;
