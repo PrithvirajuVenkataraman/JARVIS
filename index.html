@@ -846,18 +846,21 @@ function isPopCultureReferenceQuery(text) {
         return false;
     }
     if (/\b(best|top|recommend|recommendation|suggest|suggestion|similar to|like)\b/.test(t) &&
-        /\b(sitcom|show|series|movie|film|episode)\b/.test(t)) {
+        /\b(sitcom|show|series|movie|film|episode|song|songs|track|tracks|music|playlist)\b/.test(t)) {
         return false;
     }
 
-    const screenSignal = /\b(sitcom|show|series|web\s*series|movie|film|character)\b/.test(t);
+    const screenSignal = /\b(sitcom|show|series|web\s*series|movie|film|character|song|track|soundtrack|album|lyrics)\b/.test(t);
     const referenceSignal = /\b(reference|ref|quote|scene|episode|inside joke|context|meaning|meme|classic|callback)\b/.test(t);
     const directAskSignal = /^(?:who\s+is|who\s+was|what\s+is|what'?s|what\s+was|explain|tell\s+me\s+about|do\s+you\s+know|what\s+does)\b/.test(t);
     const popCulturePhraseSignal = /\b(pulling a|doing a|giving .* energy|reminds me of|inside joke|callback|heard of .* reference|recognize .* reference)\b/.test(t);
+    const mediaEntityDirectSignal = /^(?:the\s+)?[\w\s.'-]{2,50}\s+(?:song|movie|film|track|soundtrack|album)$/i.test(t) ||
+        /^(?:song|movie|film|track|soundtrack|album)\s+[\w\s.'-]{2,50}$/i.test(t);
 
     return (screenSignal && directAskSignal) ||
         (referenceSignal && directAskSignal) ||
-        popCulturePhraseSignal;
+        popCulturePhraseSignal ||
+        mediaEntityDirectSignal;
 }
 
 function isGeneralJokeRequest(text) {
@@ -6665,6 +6668,8 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
         }
 
         let activeRequestController = null;
+        const activeRequestControllers = new Set();
+        globalThis.__activeRequestControllers = activeRequestControllers;
         let assistantProcessingDepth = 0;
         let converseQueuedSubmissionSequence = 0;
         let activeConverseSpeechUtterance = null;
@@ -6709,6 +6714,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
 
         function resetAssistantProcessingState() {
             assistantProcessingDepth = 0;
+            window.__lastThinkingPhaseStartedAt = null;
             window.dispatchEvent(new CustomEvent('jarvis:assistant-processing', {
                 detail: { active: false, depth: 0 }
             }));
@@ -6718,6 +6724,27 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
         function isAssistantProcessing() {
             return assistantProcessingDepth > 0;
         }
+
+        function resetComposerToIdle() {
+            clearResponseRecoveryPrompt();
+            for (const controller of activeRequestControllers) {
+                try { controller.abort('idle_reset'); } catch (_) {}
+            }
+            activeRequestControllers.clear();
+            activeRequestController = null;
+            resetAssistantProcessingState();
+            hideThinkingIndicator();
+            window.JarvisSpeechInput?.setProcessing?.(false);
+            const compShell = document.getElementById('input-bar-inner');
+            const vttWave = document.getElementById('vtt-waveform-container');
+            if (compShell) compShell.classList.remove('is-voice-active', 'is-processing');
+            if (vttWave) vttWave.classList.add('hidden');
+            if (typeof document !== 'undefined' && document.body) {
+                document.body.classList.remove('is-processing');
+            }
+            toggleSendButton();
+        }
+        window.resetComposerToIdle = resetComposerToIdle;
 
         function setManagedTimeout(callback, delayMs) {
             const id = setTimeout(() => {
@@ -6801,6 +6828,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             const controller = new AbortController();
             controller.jarvisTurnId = String(activeResponseRenderContext?.turnId || '');
             controller.jarvisAbortReason = '';
+            activeRequestControllers.add(controller);
             activeRequestController = controller;
             beginAssistantProcessing();
             setPrimaryActionButtonToStop();
@@ -6810,12 +6838,14 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
 
         function clearActiveRequest(controller) {
             clearResponseRecoveryPrompt();
-            if (controller && activeRequestController !== controller) {
-                endAssistantProcessing();
-                resetPrimaryActionButtonWhenIdle();
-                return;
+            if (controller) {
+                activeRequestControllers.delete(controller);
             }
-            activeRequestController = null;
+            if (!controller || activeRequestController === controller || !activeRequestControllers.has(activeRequestController)) {
+                activeRequestController = activeRequestControllers.size > 0
+                    ? Array.from(activeRequestControllers).pop()
+                    : null;
+            }
             endAssistantProcessing();
             resetPrimaryActionButtonWhenIdle();
         }
@@ -6857,23 +6887,29 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
 
 
         function stopActiveGeneration(reason = 'manual') {
-            const hadRequest = !!activeRequestController;
+            const hadRequest = activeRequestControllers.size > 0 || !!activeRequestController;
             const hadTypewriter = activeTypewriterRuns.size > 0 || activeTypewriterTimeouts.size > 0;
             const hadSpeech = isConverseSpeechActive();
-            if (!hadRequest && !hadTypewriter && !hadSpeech) {
+            if (!hadRequest && !hadTypewriter && !hadSpeech && !isAssistantProcessing()) {
+                resetComposerToIdle();
                 return;
             }
-            const controller = activeRequestController;
-            if (controller) {
+            for (const controller of activeRequestControllers) {
                 controller.jarvisAbortReason = reason;
                 if (reason === 'converse_interruption') markTurnInterrupted(controller.jarvisTurnId);
                 try {
                     controller.abort();
                 } catch (e) {}
-                if (activeRequestController === controller) {
-                    activeRequestController = null;
-                }
             }
+            if (activeRequestController) {
+                activeRequestController.jarvisAbortReason = reason;
+                if (reason === 'converse_interruption') markTurnInterrupted(activeRequestController.jarvisTurnId);
+                try {
+                    activeRequestController.abort();
+                } catch (e) {}
+            }
+            activeRequestControllers.clear();
+            activeRequestController = null;
             stopActiveTypewriterAnimations();
             stopConverseSpeech();
             clearResponseRecoveryPrompt();
@@ -6895,9 +6931,16 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 }
             });
 
-            if (hadRequest || hadTypewriter) {
-                resetAssistantProcessingState();
+            window.JarvisSpeechInput?.setProcessing?.(false);
+            const compShell = document.getElementById('input-bar-inner');
+            const vttWave = document.getElementById('vtt-waveform-container');
+            if (compShell) compShell.classList.remove('is-voice-active', 'is-processing');
+            if (vttWave) vttWave.classList.add('hidden');
+            if (typeof document !== 'undefined' && document.body) {
+                document.body.classList.remove('is-processing');
             }
+
+            resetAssistantProcessingState();
             toggleSendButton();
             if (reason === 'manual') showTemporaryMessage('Response stopped.');
         }
@@ -10767,10 +10810,19 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                     window.JarvisSpeechInput?.resumeListening?.();
                     showConverseSpeechUnlockPrompt();
                 };
-                if (window.speechSynthesis.paused) {
-                    try { window.speechSynthesis.resume(); } catch (_) {}
+                try {
+                    if (window.speechSynthesis.paused) {
+                        try { window.speechSynthesis.resume(); } catch (_) {}
+                    }
+                    window.speechSynthesis.speak(utterance);
+                } catch (err) {
+                    if (segDone) return;
+                    segDone = true;
+                    clearTimeout(segWatchdog);
+                    activeConverseUtterances.delete(utterance);
+                    if (activeConverseSpeechUtterance === utterance) activeConverseSpeechUtterance = null;
+                    speakNextSegment();
                 }
-                window.speechSynthesis.speak(utterance);
             };
             setConverseUiState('speaking', 'speech_start');
             logLatencyTrace('speech_start', { source: 'converse', chars: spokenText.length, segments: segments.length });
@@ -12783,12 +12835,10 @@ ${code}
 
 async function sendTextInput(submission = {}) {
             const isVoice = submission?.source === 'vtt' || submission?.source === 'converse';
-            if (!isVoice) {
-                const vttWave = document.getElementById('vtt-waveform-container');
-                const compShell = document.getElementById('input-bar-inner');
-                if (vttWave) vttWave.classList.add('hidden');
-                if (compShell) compShell.classList.remove('is-voice-active', 'is-processing');
-            }
+            const vttWave = document.getElementById('vtt-waveform-container');
+            const compShell = document.getElementById('input-bar-inner');
+            if (vttWave) vttWave.classList.add('hidden');
+            if (compShell) compShell.classList.remove('is-voice-active', 'is-processing');
             window.JarvisSpeechInput?.stop?.({ releaseStream: true });
             const sendTrace = {
                 requestId: `send_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
@@ -13193,6 +13243,15 @@ async function sendTextInput(submission = {}) {
                     if (typeof setWebSearchMode === 'function') {
                         setWebSearchMode('auto');
                     }
+                    hideThinkingIndicator();
+                    const compShell = document.getElementById('input-bar-inner');
+                    const vttWave = document.getElementById('vtt-waveform-container');
+                    if (compShell) compShell.classList.remove('is-voice-active', 'is-processing');
+                    if (vttWave) vttWave.classList.add('hidden');
+                    if (typeof document !== 'undefined' && document.body) {
+                        document.body.classList.remove('is-processing');
+                    }
+                    window.JarvisSpeechInput?.setProcessing?.(false);
                     endAssistantProcessing();
                     resetPrimaryActionButtonWhenIdle();
                 }
@@ -14448,6 +14507,7 @@ function parseGenericUserIntent(text) {
 }
 
 function isArtistSongRequest(text) {
+    if (isPopCultureReferenceQuery(text)) return false;
     const genericIntent = parseGenericUserIntent(text);
     if (genericIntent.domain === 'songs' && genericIntent.confidence >= 0.55) return true;
 
