@@ -2394,7 +2394,8 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             // If the model hit a length cutoff on an incomplete header/section or truncated short, do not treat as success
             const isIncompleteHeaderOrList = /(?:^|\n)\s*(?:\d+\.|\*|-|#{1,4})\s+[^\n]{0,60}$/.test(cleanContent) && finishReason === 'length';
             const isTruncatedShort = finishReason === 'length' && cleanContent.length < 200;
-            if (cleanContent.length > 0 && !isIncompleteHeaderOrList && !isTruncatedShort) {
+            const isUnclosedMarkdownFragment = /^[*#_`"']{1,4}[^*#_`"'\n]+$/.test(cleanContent) && cleanContent.length < 60;
+            if (cleanContent.length > 0 && !isIncompleteHeaderOrList && !isTruncatedShort && !isUnclosedMarkdownFragment) {
                 recordKeySuccess(apiKey);
                 return { ok: true, provider: 'groq', modelUsed: model, text };
             }
@@ -2564,7 +2565,8 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 }
             }
 
-            return cleanContent.length > 0
+            const isUnclosedMarkdownFragment = /^[*#_`"']{1,4}[^*#_`"'\n]+$/.test(cleanContent) && cleanContent.length < 60;
+            return (cleanContent.length > 0 && !isUnclosedMarkdownFragment)
                 ? { ok: true, provider: 'gemini', modelUsed: model, text }
                 : { ok: false };
         } catch (_) {
@@ -4132,7 +4134,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
     - Languages: Kannada (ಕನ್ನಡ), Tamil (தமிழ்), Telugu (తెలుగు), Malayalam (മലയാളം), Hindi (हिन्दी), English, and phonetic forms (Kanglish, Tanglish, etc.). Match input language and script naturally.
     - Start directly with the answer. Avoid greeting preambles and meta-talk.
     - NO META-TALK RULE: Never start or answer with meta-commentary about search snippets or retrieval results. State the direct factual answer immediately.
-    - Conversational Closure: Conclude substantive or multi-step answers with 1 relevant follow-up question or logical next step. For short/simple queries, answer directly without forcing a follow-up.
+    - Conversational Closure: For substantive or multi-step answers, you may conclude with one genuinely useful contextual follow-up question or concrete next step — only when it naturally advances the conversation. For short, factual, or simple queries, answer directly without any closing question. NEVER end with generic robotic phrases like "Would you like to know more?", "Is there anything else I can help with?", "Let me know if you have more questions", "Feel free to ask if you have any questions", "Hope that helps!", or similar hollow offers — these add no value and feel mechanical.
     - Standalone Entity Queries: For standalone names/concepts (e.g. "Photosynthesis", "React"), provide a direct 2-4 sentence factual overview immediately.
     - Follow-ups & Continuity: Seamlessly continue discussions when the user asks "explain more", "why", or uses pronouns ("it", "this") referring to recent context.
     - Ambiguous Queries: If genuinely ambiguous and lacking context in recent turns, ask one brief clarification question rather than guessing.
