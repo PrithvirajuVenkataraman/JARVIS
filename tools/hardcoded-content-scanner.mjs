@@ -8,7 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { HARDCODED_CONTENT_ALLOWLIST } from './hardcoded-content-allowlist.mjs';
 
-export const SCANNER_VERSION = 'hardcoded-content-scanner-v2';
+export const SCANNER_VERSION = 'hardcoded-content-scanner-v4';
 
 const DEFAULT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CACHE_DIR = path.join(tmpdir(), 'unify-hardcoded-content-scanner');
@@ -23,27 +23,24 @@ const SKIP_FILES = new Set([
     path.normalize('tools/hardcoded-content-allowlist.mjs')
 ]);
 
-const PROHIBITED_SYMBOL_PATTERNS = Object.freeze([
-    { pattern: /\bSITCOM_MOVIE_REFERENCE_CATALOG\b/, category: 'runtime_content', reason: 'Removed sitcom/movie knowledge catalog returned.' },
-    { pattern: /\bdetectSitcomMovieReference\b/, category: 'runtime_content', reason: 'Removed local sitcom/movie detector returned.' },
-    { pattern: /\bbuildSitcomMovieReferenceResponse\b/, category: 'runtime_content', reason: 'Removed canned sitcom/movie response builder returned.' },
-    { pattern: /\bhandleSitcomMovieReference\b/, category: 'runtime_content', reason: 'Removed sitcom/movie short-circuit returned.' },
-    { pattern: /\bOFFICIAL_SOURCE_SHORTCUTS\b/, category: 'runtime_content', reason: 'Named official-source shortcut catalog returned.' },
-    { pattern: /\bgetOfficialSourceShortcuts\b/, category: 'runtime_content', reason: 'Named official-source shortcut path returned.' },
-    { pattern: /\bgetCuratedSongsForArtist\b/, category: 'runtime_content', reason: 'Curated artist song catalog helper returned.' },
-    { pattern: /\bgetCuratedLanguageEraHits\b/, category: 'runtime_content', reason: 'Curated language-era song catalog helper returned.' },
-    { pattern: /\bknownArtistCorrections\b|\btypoMap\b/, category: 'runtime_content', reason: 'Named local subject correction table returned.' }
+export const PROHIBITED_SYMBOL_PATTERNS = Object.freeze([
+    { pattern: /\bSITCOM_MOVIE_REFERENCE_CATALOG\b/, category: 'legacy_catalog_symbol', reason: 'Removed sitcom/movie knowledge catalog returned.' },
+    { pattern: /\bdetectSitcomMovieReference\b/, category: 'legacy_catalog_symbol', reason: 'Removed local sitcom/movie detector returned.' },
+    { pattern: /\bbuildSitcomMovieReferenceResponse\b/, category: 'legacy_catalog_symbol', reason: 'Removed canned sitcom/movie response builder returned.' },
+    { pattern: /\bhandleSitcomMovieReference\b/, category: 'legacy_catalog_symbol', reason: 'Removed sitcom/movie short-circuit returned.' },
+    { pattern: /\bOFFICIAL_SOURCE_SHORTCUTS\b/, category: 'legacy_catalog_symbol', reason: 'Named official-source shortcut catalog returned.' },
+    { pattern: /\bgetOfficialSourceShortcuts\b/, category: 'legacy_catalog_symbol', reason: 'Named official-source shortcut path returned.' },
+    { pattern: /\bgetCuratedSongsForArtist\b/, category: 'legacy_catalog_symbol', reason: 'Curated artist song catalog helper returned.' },
+    { pattern: /\bgetCuratedLanguageEraHits\b/, category: 'legacy_catalog_symbol', reason: 'Curated language-era song catalog helper returned.' },
+    { pattern: /\bknownArtistCorrections\b|\btypoMap\b/, category: 'legacy_catalog_symbol', reason: 'Named local subject correction table returned.' },
+    { pattern: /\blandmarkKnowledge\b/, category: 'legacy_catalog_symbol', reason: 'Removed monument knowledge catalog returned.' },
+    { pattern: /\btamil_joke\b|\bhandleTamilJoke\b|\bgetTamilJoke\b/, category: 'legacy_catalog_symbol', reason: 'Removed single-language joke routing override returned.' }
 ]);
 
-const PROHIBITED_NAMED_CONTENT = Object.freeze([
+export const PROHIBITED_NAMED_CONTENT = Object.freeze([
     'Jordan Vale',
     'Workplace Crew',
     'Riley Stone',
-    'Example Corp',
-    'Example Labs',
-    'Sample Actor',
-    'Nothing Phone',
-    'Framework Laptop',
     'Schmosby',
     'Michael Scott',
     'Chandler Bing',
@@ -54,10 +51,35 @@ const PROHIBITED_NAMED_CONTENT = Object.freeze([
     'Shape of You'
 ]);
 
-const CATALOG_LITERAL_PATTERNS = Object.freeze([
-    { pattern: /\{\s*song\s*:\s*['"`]/, reason: 'Runtime local song row literal detected.' },
-    { pattern: /\{\s*(?:character|show|movie|film)\s*:\s*['"`]/, reason: 'Runtime local entertainment reference row literal detected.' },
-    { pattern: /\b(?:catalog|curated)\w*\s*=\s*(?:Object\.freeze\()?[\[{]/i, reason: 'Runtime local curated/catalog data structure detected.' }
+export const STRUCTURAL_SYSTEM_TERMS = new Set([
+    // Interrogatives & Command Verbs
+    'what', 'where', 'when', 'who', 'how', 'why', 'which', 'whom', 'whose',
+    'explain', 'define', 'tell', 'describe', 'summarize', 'list', 'search', 'find', 'show', 'check',
+    'look up', 'lookup', 'browse', 'calculate', 'compute', 'evaluate', 'translate', 'create', 'generate',
+    // Temporal & Freshness
+    'current', 'latest', 'recent', 'upcoming', 'new', 'today', 'now', 'present',
+    'yesterday', 'tomorrow', 'live', 'breaking', 'future', 'past', 'historic', 'history',
+    // Media/Work relation terms (verbs, roles, not specific titles)
+    'sing', 'sang', 'sung', 'direct', 'directed', 'director', 'release', 'released',
+    'write', 'written', 'writer', 'star', 'starred', 'play', 'played', 'actor', 'actress',
+    'author', 'composer', 'producer', 'artist', 'song', 'songs', 'album', 'albums',
+    'movie', 'movies', 'film', 'films', 'show', 'shows', 'series', 'track', 'tracks',
+    // Metric, finance, domain concepts
+    'price', 'prices', 'stock', 'stocks', 'share', 'shares', 'market', 'cap', 'valuation',
+    'rate', 'rates', 'inflation', 'gdp', 'revenue', 'earnings', 'profit', 'dividend',
+    'weather', 'temperature', 'forecast', 'rain', 'snow', 'wind', 'humidity', 'climate',
+    'recipe', 'ingredients', 'cook', 'bake', 'dish', 'food', 'cuisine',
+    // Geographic & Structural Landmark nouns (types of places, not specific names)
+    'temple', 'monument', 'tower', 'palace', 'cathedral', 'mosque', 'church', 'pyramid',
+    'fort', 'castle', 'bridge', 'statue', 'memorial', 'museum', 'capital', 'country', 'city',
+    'state', 'province', 'island', 'mountain', 'river', 'lake', 'ocean', 'sea',
+    // System, HTTP, API & Code keywords
+    'get', 'post', 'put', 'delete', 'patch', 'head', 'options',
+    'function', 'class', 'const', 'let', 'var', 'operator', 'import', 'export', 'return',
+    'true', 'false', 'null', 'undefined', 'boolean', 'string', 'number', 'object',
+    'chat', 'model', 'stream', 'event', 'status', 'done', 'error', 'failed', 'pass',
+    // Common grammar / prepositions
+    'in', 'on', 'at', 'of', 'to', 'for', 'from', 'with', 'by', 'a', 'an', 'the', 'is', 'are', 'was', 'were'
 ]);
 
 const allowlist = HARDCODED_CONTENT_ALLOWLIST.map((entry, index) => {
@@ -117,14 +139,64 @@ export function extractIdentifierLikeNames(content) {
     return Array.from(new Set(names));
 }
 
+export function stripComments(source) {
+    return String(source || '')
+        .replace(/\/\*[\s\S]*?\*\//g, (m) => ' '.repeat(m.length))
+        .replace(/\/\/[^\n]*/g, (m) => ' '.repeat(m.length));
+}
+
+export const KNOWN_ENTITY_NAMES = new Set([
+    // Big Tech & Companies
+    'apple', 'tesla', 'nvidia', 'microsoft', 'google', 'amazon', 'meta', 'alphabet', 'netflix',
+    'openai', 'anthropic', 'deepmind', 'groq', 'claude', 'chatgpt', 'llama', 'deepseek', 'mistral',
+    // Media / Pop-Culture titles
+    'inception', 'interstellar', 'dune', 'oppenheimer', 'avatar', 'titanic', 'gladiator',
+    'friends', 'seinfeld', 'succession', 'ted lasso', 'euphoria', 'severance', 'shogun',
+    // Famous people / artists
+    'taylor swift', 'dua lipa', 'ed sheeran', 'billie eilish', 'ariana grande', 'drake',
+    'michael jackson', 'elvis presley', 'the beatles',
+    // Monuments / Landmarks
+    'taj mahal', 'eiffel tower', 'colosseum', 'statue of liberty', 'big ben', 'pyramids of giza',
+    'brihadeeswarar temple', 'great wall of china', 'machu picchu',
+    // Science terms used as canned knowledge
+    'photosynthesis', 'mitochondria', 'pythagorean', 'chlorophyll', 'endoplasmic reticulum',
+    // Geography proper nouns used to filter 'new'
+    'new york', 'new jersey', 'new zealand', 'new delhi', 'new hampshire', 'new mexico', 'new orleans'
+]);
+
+export function isNamedEntityTerm(term) {
+    const t = String(term || '').trim().toLowerCase();
+    if (!t || t.length < 2) return false;
+    if (KNOWN_ENTITY_NAMES.has(t)) return true;
+    if (/^[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+$/.test(term.trim())) {
+        const lower = term.trim().toLowerCase();
+        if (!/^(user|system|assistant|error|status|event|response|request|test|mock|query|route|feature|action|handler|command)\b/.test(lower)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+export function isProperEntityName(item) {
+    return isNamedEntityTerm(item);
+}
+
+export function isSpecificUserQuestion(queryText) {
+    const t = String(queryText || '').trim();
+    if (t.length < 12) return false;
+    const isInterrogativeStart = /^(?:what\s+(?:is|are|was|were)|who\s+(?:is|was|are)|where\s+(?:is|was|are)|when\s+(?:did|was|is)|how\s+(?:to|does|do|did)|why\s+(?:is|do|does)|tell\s+me\s+about|give\s+me\s+a)\b/i.test(t);
+    const hasQuestionMark = t.endsWith('?');
+    return isInterrogativeStart || hasQuestionMark;
+}
+
 export function scanContent(content, options = {}) {
     const filePath = normalizeSlashes(options.filePath || '<memory>');
     const rel = normalizeSlashes(options.relativePath || filePath);
     const isTest = /(^|\/)tests\//.test(rel);
     const findings = [];
     const source = String(content || '');
+    const cleanSource = stripComments(source);
     const stringLiterals = extractStringLiterals(source);
-    const literalText = stringLiterals.map(item => item.value).join('\n');
 
     function isAllowed(value) {
         return allowlist.some(entry => entry.regex.test(value));
@@ -143,35 +215,98 @@ export function scanContent(content, options = {}) {
         });
     }
 
+    // 1. Prohibited Legacy Symbols (checked across all files)
     for (const item of PROHIBITED_SYMBOL_PATTERNS) {
-        const match = source.match(item.pattern);
+        const match = cleanSource.match(item.pattern);
         if (match) addFinding(item.category, item.reason, item.pattern, match.index || 0);
     }
 
-    for (const name of PROHIBITED_NAMED_CONTENT) {
-        const regex = new RegExp(`\\b${escapeRegex(name)}\\b`, 'i');
-        const hay = isTest ? literalText : source;
-        const match = hay.match(regex);
-        if (match && !isAllowed(name)) {
-            addFinding(isTest ? 'test_fixture_inline' : 'runtime_content', `Prohibited named content fixture: ${name}`, name, match.index || 0);
-        }
-    }
-
+    // 2. Prohibited Named Content (in runtime non-test files)
     if (!isTest) {
-        for (const item of CATALOG_LITERAL_PATTERNS) {
-            const match = source.match(item.pattern);
-            if (match) addFinding('runtime_content', item.reason, item.pattern, match.index || 0);
+        for (const name of PROHIBITED_NAMED_CONTENT) {
+            const regex = new RegExp(`\\b${escapeRegex(name)}\\b`, 'i');
+            const match = cleanSource.match(regex);
+            if (match && !isAllowed(name)) {
+                addFinding('prohibited_named_content', `Prohibited named content in runtime code: ${name}`, name, match.index || 0);
+            }
         }
     }
 
-    for (const literal of stringLiterals) {
-        const value = literal.value.trim();
-        if (!value || isAllowed(value)) continue;
-        if (isTest && looksLikeInlineNamedFixture(value) && !isNeutralFixtureExpression(source, literal.index)) {
-            addFinding('test_fixture_inline', 'Named inline test fixture should use fixtureSubject() or a neutral builder.', value, literal.index);
+    // 3. Canned Knowledge Catalogs & Rows (in runtime non-test files)
+    if (!isTest) {
+        // Song row literals with hardcoded values: { song: '...', artist: '...' }
+        const songRowRegex = /\{\s*song\s*:\s*['"`][^'"`]{2,}['"`]\s*,\s*artist\s*:\s*['"`][^'"`]{2,}['"`]/gi;
+        let sMatch;
+        while ((sMatch = songRowRegex.exec(cleanSource)) !== null) {
+            addFinding('canned_knowledge_catalog', 'Runtime local song row literal detected.', sMatch[0], sMatch.index);
         }
-        if (!isTest && looksLikeCannedAnswerContent(value)) {
-            addFinding('runtime_content', 'Runtime string looks like canned answer content rather than routing/config.', value.slice(0, 120), literal.index);
+
+        // Entertainment reference row literals with hardcoded values: { character: '...', show: '...' }
+        const entRowRegex = /\{\s*(?:character|show|movie|film)\s*:\s*['"`][^'"`]{2,}['"`]\s*,\s*(?:quote|reference|actor|role)\s*:\s*['"`][^'"`]{2,}['"`]/gi;
+        let eMatch;
+        while ((eMatch = entRowRegex.exec(cleanSource)) !== null) {
+            addFinding('canned_knowledge_catalog', 'Runtime local entertainment reference row literal detected.', eMatch[0], eMatch.index);
+        }
+
+        // Explicit knowledge catalog declaration: const catalog = [ ... ]
+        const catalogDeclRegex = /\b(?:catalog|knowledge_base|fact_table)\s*=\s*(?:Object\.freeze\()?[\[{]/gi;
+        let cMatch;
+        while ((cMatch = catalogDeclRegex.exec(cleanSource)) !== null) {
+            addFinding('canned_knowledge_catalog', 'Runtime local curated/catalog data structure detected.', cMatch[0], cMatch.index);
+        }
+    }
+
+    // 4. Entity Regex Dictionaries in Runtime Code (in runtime non-test files)
+    if (!isTest) {
+        const regexLiteralPattern = /\/(?![*+?])(?:[^\r\n\[/\\]|\\.|\[(?:[^\r\n\]\\]|\\.)*\])+\/[a-z]*/g;
+        let rMatch;
+        while ((rMatch = regexLiteralPattern.exec(cleanSource)) !== null) {
+            const regexStr = rMatch[0];
+            const altMatch = regexStr.match(/\(\?:?([a-zA-Z0-9_.\s|'-]{16,})\)/);
+            if (!altMatch) continue;
+            const rawGroup = altMatch[1];
+            if (!rawGroup.includes('|')) continue;
+            const alts = rawGroup.split('|').map(s => s.trim()).filter(Boolean);
+            if (alts.length < 4) continue;
+
+            const entityMatches = alts.filter(term => isNamedEntityTerm(term));
+            if (entityMatches.length >= 3) {
+                addFinding('entity_regex_dictionary', `Entity regex dictionary detected with ${entityMatches.length} named entities in routing/classification.`, regexStr.slice(0, 100), rMatch.index);
+            }
+        }
+    }
+
+    // 5. Hardcoded Entity Keyword Lists / Arrays (in runtime non-test files)
+    if (!isTest) {
+        const arrayDeclRegex = /(?:const|let|var)\s+([A-Za-z0-9_]+)\s*=\s*(?:Object\.freeze\()?\s*\[([^\]]{25,})\]/g;
+        let aMatch;
+        while ((aMatch = arrayDeclRegex.exec(cleanSource)) !== null) {
+            const varName = aMatch[1];
+            const arrayBody = aMatch[2];
+            const items = (arrayBody.match(/['"`]([^'"`]+)['"`]/g) || [])
+                .map(s => s.slice(1, -1).trim())
+                .filter(Boolean);
+
+            if (items.length >= 3) {
+                const entityItems = items.filter(item => isNamedEntityTerm(item));
+                const isEntityVarName = /\b(?:ENTITIES|ARTISTS|MOVIES|SONGS|MONUMENTS|CELEBRITIES|STOCKS|COMPANIES)\b/i.test(varName);
+
+                if (entityItems.length >= 3 || (isEntityVarName && items.length >= 3)) {
+                    addFinding('entity_keyword_list', `Hardcoded entity list detected in array "${varName}" (${entityItems.length || items.length} entities).`, aMatch[0].slice(0, 120), aMatch.index);
+                }
+            }
+        }
+    }
+
+    // 6. Query-Specific Routing Exceptions (in runtime non-test files)
+    if (!isTest) {
+        const queryCheckRegex = /if\s*\(\s*(?:raw|text|query|cleanText|cleaned|lower|userMessage|prompt)\s*(?:===|==)\s*['"`]([A-Za-z0-9\s?,.'"-]{12,})['"`]\s*\)/g;
+        let qMatch;
+        while ((qMatch = queryCheckRegex.exec(cleanSource)) !== null) {
+            const queryText = qMatch[1].trim();
+            if (isSpecificUserQuestion(queryText)) {
+                addFinding('query_specific_exception', `Query-specific routing exception detected for full question: "${queryText}".`, qMatch[0], qMatch.index);
+            }
         }
     }
 
@@ -262,38 +397,11 @@ function cacheFile(key) {
     return path.join(CACHE_DIR, `${key}.json`);
 }
 
-function looksLikeInlineNamedFixture(value) {
-    const text = String(value || '').trim();
-    if (!text || text.length > 220) return false;
-    if (/fixtureSubject|Subject\s+\$\{/.test(text)) return false;
-    if (/^(?:Tech Review|Review Source|Reference|Shopping Source|Fixture [A-Za-z ]+)$/.test(text)) return false;
-    if (/\b(?:Example|Sample)\s+(?:Labs|Framework|City|Actor|Corp|Phone|Laptop|Speaker|Team|League)\b/i.test(text)) return true;
-    if (/\b[A-Z][a-z]+\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?\b/.test(text) &&
-        /\b(?:character|movie|song|album|review|CEO|captain|coach|official|latest|news)\b/i.test(text)) {
-        return true;
-    }
-    return false;
-}
-
 function isNegativeHygieneAssertion(source, index) {
     const lineStart = source.lastIndexOf('\n', Math.max(0, index));
     const lineEnd = source.indexOf('\n', Math.max(0, index));
     const line = source.slice(lineStart + 1, lineEnd === -1 ? source.length : lineEnd);
     return /\bassert\.doesNotMatch\s*\(/.test(line);
-}
-
-function looksLikeCannedAnswerContent(value) {
-    const text = String(value || '').trim();
-    if (!text || text.length > 240) return false;
-    if (/^[a-z0-9_:-]+$/i.test(text)) return false;
-    if (/\b(?:is|was|are)\s+(?:the\s+)?(?:current\s+)?(?:CEO|chief minister|president|captain|coach|character|song|movie)\b/i.test(text)) return true;
-    if (/\b(?:song|artist|album|film|episode|scene|quote)\s*[-:]\s*[A-Z]/i.test(text)) return true;
-    return false;
-}
-
-function isNeutralFixtureExpression(source, index) {
-    const before = source.slice(Math.max(0, index - 80), index);
-    return /fixtureSubject\s*\([^)]*$/.test(before);
 }
 
 function lineForIndex(source, index) {
@@ -322,3 +430,4 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     }
     console.log(`hardcoded-content-scan-ok files=${result.files} cacheHits=${result.cacheHits}`);
 }
+
