@@ -251,11 +251,67 @@ export function classifyUniversalEntityIntent(rawQuery = '', context = {}) {
     };
 }
 
+export function isMediaOrPopCultureQuery(_text) {
+    return false;
+}
+
 export function isStableGeographyOrGeneralFactQuery(rawQuery = '') {
     const query = String(rawQuery || '').trim();
     if (!query) return false;
+    const lower = query.toLowerCase().replace(/[?!.,;:]+$/g, '').trim();
+
+    // 1. If entity classifier or live signals indicate live data is required, not a stable fact
     const intent = classifyUniversalEntityIntent(query);
-    return !intent.isLiveRequired;
+    if (intent.isLiveRequired) return false;
+
+    // 2. Actionable local places and navigation are not stable facts
+    if (/\b(?:near\s+me|nearby|directions\s+to|hotels?\s+near|restaurants?\s+near|museums?\s+near|open\s+now)\b/i.test(lower)) {
+        return false;
+    }
+
+    // 3. Media works (songs, movies, albums, tracks) are creative/pop-culture discussions, not encyclopedic geography/general facts
+    if (/\b(?:songs?|tracks?|soundtracks?|albums?|lyrics?|singers?|movies?|films?|cinemas?|directors?|actors?|actresses?|starrer|starring)\b/i.test(lower)) {
+        return false;
+    }
+
+    // 4. Stable encyclopedic knowledge domains:
+    // Geography: capitals, continents, oceans, rivers, mountains, currencies, locations
+    if (/\b(?:what\s+(?:is|was)|which\s+city\s+is|name)\s+(?:the\s+)?capital\s+(?:city\s+)?of\s+[a-z\s.'-]+/i.test(lower) ||
+        /\b(?:capital\s+(?:city\s+)?of\s+[a-z\s.'-]+)/i.test(lower) ||
+        /\b[a-z\s.'-]+\s+capital\b/i.test(lower) ||
+        /\b(?:continent|continents|ocean|oceans|sea|seas|river|rivers|mountain|mountains|mountain\s+range|plateau|desert|island|islands|valley|gulf|bay|strait|peninsula|archipelago|hemisphere|equator|latitude|longitude|tropic\s+of\s+(?:cancer|capricorn)|longest\s+river|highest\s+mountain|deepest\s+ocean|largest\s+desert|largest\s+country|smallest\s+country|currency\s+of|official\s+language\s+of|population\s+of|area\s+of|located\s+in|location\s+of|where\s+is\s+.+\s+located|where\s+are\s+.+\s+located)\b/i.test(lower)) {
+        return true;
+    }
+
+    // Structural landmark, architecture, and geological inquiry (capability-driven, zero entity lists)
+    const isLandmarkTopic = (
+        /\b(?:architecture|sculptural\s+style|engineering|construction|geological\s+formation|formation\s+of|erosion|composition\s+of|architectural\s+significance)\b/i.test(lower)
+    ) || /^(?:why\s+was|who\s+(?:built|designed|created|founded)|how\s+(?:was|were))\s+[a-z0-9\s.'-]{2,80}\??$/i.test(lower);
+    if (isLandmarkTopic) return true;
+
+    // History & historical events
+    if (/\b(?:history|ancient|medieval|century|empire|dynasty|civilization|battle\s+of|treaty\s+of|revolution|renaissance|archaeology|historical|cold\s+war|french\s+revolution|world\s+war|bronze\s+age|iron\s+age|mesopotamia|byzantine|ottoman|roman\s+empire|indus\s+valley|new\s+deal|new\s+kingdom|fdr|first\s+president\s+of|former\s+president|magna\s+carta|declaration\s+of\s+independence|constitution)\b/i.test(lower)) {
+        return true;
+    }
+
+    // Science, Mathematics & Physics
+    if (/\b(?:physics|chemistry|biology|astronomy|quantum|gravity|relativity|thermodynamics|evolution|photosynthesis|mitosis|dna|rna|gene|protein|atom|molecule|speed\s+of\s+light|periodic\s+table|atomic\s+number|penicillin|who\s+discovered|who\s+invented|calculate|compute|solve|integrate|integral|derivative|differentiate|equation|formula|pythagorean|factorial|matrix|matrices)\b/i.test(lower) ||
+        /^\s*[\d\s+\-*/^().=xXyYzZ]+\s*$/.test(query)) {
+        return true;
+    }
+
+    // Computer Science, Programming & Algorithms
+    if (/\b(?:how\s+to\s+sort|binary\s+search|linked\s+list|dynamic\s+programming|recursion|quicksort|mergesort|tcp|udp|protocol|nlp|machine\s+learning|deep\s+learning|neural\s+network|computer\s+vision|transformer|algorithm|syntax\s+of|new\s+(?:keyword|operator|array|object|instance|class))\b/i.test(lower)) {
+        return true;
+    }
+
+    // Definitional & Conceptual topics
+    if (/\b(?:definition\s+of|meaning\s+of|what\s+is\s+the\s+definition\s+of|define\s+|difference\s+between|philosophy|ethics|epistemology|metaphysics|stoicism|economics|macroeconomics|inflation|gdp)\b/i.test(lower) ||
+        /^(?:where\s+(?:is|was|are|were)|what\s+(?:is|was|are|were|did)|when\s+(?:is|was|are|were|did)|who\s+(?:is|was|are|were|wrote|built|designed|painted|discovered|invented)|how\s+(?:tall|high|deep|far|long|old|big|much|many|does|do|did|is|was|are|were|to)|why\s+(?:is|was|are|were|did)|explain|define|tell\s+me\s+about)\s+[a-z0-9\s.'-]{2,100}\??$/i.test(lower)) {
+        return true;
+    }
+
+    return false;
 }
 
 /**
