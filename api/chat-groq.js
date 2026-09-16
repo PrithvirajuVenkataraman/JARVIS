@@ -1385,7 +1385,9 @@ const edgeResponseCache = new EdgeSemanticLruCache();
 
         let liveRag = { ragText: '', sources: [] };
         if ((routeDecision.strategy === 'search' || routeDecision.strategy === 'live_first' || routeDecision.webEligible) && !isAttachmentGroundingPayload(grounding, intent)) {
+            writeSse(res, 'status', { state: 'SEARCHING', label: 'Searching...' });
             liveRag = await buildLiveRagContext(effectiveMessage, null, context);
+            writeSse(res, 'status', { state: 'ANALYZING', label: 'Analyzing...' });
             if (liveRag.sources && liveRag.sources.length > 0) {
                 writeSse(res, 'sources', { sources: liveRag.sources });
             }
