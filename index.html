@@ -4908,6 +4908,13 @@ async function streamChatCompletion(payload, options = {}) {
             }
             return;
         }
+        if (event.event === 'status') {
+            const nextState = event.data?.state || 'ANALYZING';
+            const label = event.data?.label || (nextState === 'SEARCHING' ? 'Searching...' : 'Analyzing...');
+            window.JarvisInteractionState?.transition?.(nextState);
+            showThinkingIndicator(label);
+            return;
+        }
         if (event.event === 'delta') {
             if (latencyTrace.requestId && window.JarvisInteractionState?.isCurrentRequest && !window.JarvisInteractionState.isCurrentRequest(latencyTrace.requestId)) {
                 try { reader.cancel(); } catch (_) {}
@@ -5252,7 +5259,7 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
         submittedAt: performance.now()
     };
     const controller = beginAbortableRequest();
-    window.JarvisInteractionState?.transition?.('THINKING', {
+    window.JarvisInteractionState?.transition?.('ANALYZING', {
         requestId: latencyTrace.requestId,
         metadata: { query: normalizedUserMessage }
     });
@@ -5262,13 +5269,10 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
     let data = null;
     let requestPayload = null;
     const minimalThinking = requestOptions?.minimalThinking === true || shouldUseMinimalThinking(normalizedUserMessage, requestOptions?.intent || '');
-    const autoIndicatorTimer = setTimeout(() => {
-        if (requestSettled) return;
-        if (hadExistingThinkingIndicator) return;
-        if (minimalThinking) return;
-        showThinkingIndicator('Generating answer...');
+    if (!hadExistingThinkingIndicator && !minimalThinking) {
+        showThinkingIndicator('Analyzing...');
         autoIndicatorShown = true;
-    }, minimalThinking ? 0 : 80);
+    }
     try {
         const intent = requestOptions?.intent && typeof requestOptions.intent === 'object'
             ? requestOptions.intent
@@ -5599,7 +5603,6 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
         }; 
     } finally {
         requestSettled = true;
-        clearTimeout(autoIndicatorTimer);
         hideThinkingIndicator();
         clearActiveRequest(controller);
     }
@@ -6835,6 +6838,10 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             }
             if (!isProc || ['IDLE', 'GENERATING', 'SPEAKING', 'INTERRUPTED', 'CANCELLED', 'ERROR'].includes(state)) {
                 hideThinkingIndicator();
+            } else if (state === 'SEARCHING') {
+                showThinkingIndicator('Searching...');
+            } else if (['ROUTING', 'ANALYZING', 'THINKING'].includes(state)) {
+                showThinkingIndicator('Analyzing...');
             }
             toggleSendButton();
         });
@@ -13152,11 +13159,11 @@ async function sendTextInput(submission = {}) {
                 }
 
                 beginAssistantProcessing();
-                window.JarvisInteractionState?.transition?.('THINKING', {
+                window.JarvisInteractionState?.transition?.('ROUTING', {
                     requestId: sendTrace.requestId,
                     turnId: turn.id
                 });
-                showThinkingIndicator(attachmentsForSend.length ? 'Reading attachments...' : 'Thinking');
+                showThinkingIndicator(attachmentsForSend.length ? 'Reading attachments...' : 'Analyzing...');
                 try {
                     if (attachmentsForSend.length) {
                         // Detect image-only uploads immediately so we can show the right indicator
@@ -13446,7 +13453,9 @@ async function sendTextInput(submission = {}) {
                         document.body.classList.remove('is-processing');
                     }
                     window.JarvisSpeechInput?.setProcessing?.(false);
-                    window.JarvisInteractionState?.resetToIdle?.('send_complete');
+                    if (window.JarvisInteractionState?.getState?.() !== 'SPEAKING') {
+                        window.JarvisInteractionState?.resetToIdle?.('send_complete');
+                    }
                     endAssistantProcessing();
                     resetPrimaryActionButtonWhenIdle();
                 }
@@ -13711,6 +13720,8 @@ function formatLiveSearchFailureMessage(data = {}, status = 0) {
 }
 
 async function fetchLiveSearchJson(query, options = {}) {
+    window.JarvisInteractionState?.transition?.('SEARCHING', { metadata: { query } });
+    showThinkingIndicator('Searching...');
     const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.search, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -19952,8 +19963,8 @@ async function handleUniversalEntityFactQuery(userText, liveIntent = null) {
     if (pipeline.knownFact) {
         return publishUniversalKnownFact(pipeline, 'Verified live fact');
     }
-    window.JarvisInteractionState?.transition?.('SEARCHING', { metadata: { userText } });
-    showThinkingIndicator('Searching the web...'); 
+    window.JarvisInteractionState?.transition?.('ANALYZING', { metadata: { userText } });
+    showThinkingIndicator('Analyzing...'); 
     const controller = beginAbortableRequest(); 
     const budgetTimer = setTimeout(() => {
         try { controller.abort(); } catch (_) {}
@@ -20201,8 +20212,8 @@ async function handleLiveRetrievalQuery(userText, options = {}) {
         options
     });
 
-    window.JarvisInteractionState?.transition?.('SEARCHING', { metadata: { userText } });
-    showThinkingIndicator('Searching the web...');
+    window.JarvisInteractionState?.transition?.('ANALYZING', { metadata: { userText } });
+    showThinkingIndicator('Analyzing...');
     const controller = beginAbortableRequest();
     const verificationBudgetMs = 3500;
     const budgetTimer = setTimeout(() => {
@@ -20284,8 +20295,8 @@ async function handleLiveRetrievalQuery(userText, options = {}) {
             (answerResults[0].description && answerResults[0].description.length >= 40)
         );
         if (answerResults.length > 0 && (hasConfidentSingleSource || distinctDomains.length >= 2)) {
-            window.JarvisInteractionState?.transition?.('THINKING', { metadata: { userText: query, phase: 'synthesizing' } });
-            showThinkingIndicator('Thinking...');
+            window.JarvisInteractionState?.transition?.('ANALYZING', { metadata: { userText: query, phase: 'synthesizing' } });
+            showThinkingIndicator('Analyzing...');
             const snippets = answerResults
                 .slice(0, 6)
                 .map((r, i) => `${i + 1}. ${r.title}\nSource: ${r.sourceLabel || r.domain || r.url}\nDate: ${r.date || 'Recent 2026'}\nContent: ${r.fullArticleContent || r.fullArticleText || r.description}\nURL: ${r.url}`)
@@ -21033,8 +21044,8 @@ function isWakeGreetingText(text) {
             });
             logRoutingDebug('processCommand route_decision', text, { frontendRoute, contextResolution });
             if (frontendRoute.route === 'live_required' || frontendRoute.requiresSources) {
-                window.JarvisInteractionState?.transition?.('SEARCHING', { metadata: { query: text } });
-                showThinkingIndicator('Searching the web...');
+                window.JarvisInteractionState?.transition?.('ANALYZING', { metadata: { query: text, plannedRoute: 'live_required' } });
+                showThinkingIndicator('Analyzing...');
                 logLatencyTrace('latency_floor_live', { route: frontendRoute.route });
             } else if (frontendRoute.route === 'fast_simple' || frontendRoute.minimalThinking) {
                 // Keep the bubble minimal; stream starts immediately.
@@ -27669,18 +27680,40 @@ function startThinkingPhaseTimeline(initialLabel = 'Thinking...') {
 }
 
 function resolveThinkingPhase(message = '') {
-    const lower = String(message || '').toLowerCase();
-    if (/\b(web search|searching the web|search|sources?|retriev|fetch|look(?:ing)?\s+up|checking verified|checking reliable|checking current|finding|lookup)\b/.test(lower)) {
+    const raw = String(message || '').trim();
+    const lower = raw.toLowerCase();
+    if (/\b(searching\s+the\s+web)\b/i.test(lower)) {
         return { key: 'searching', label: 'Searching the web...' };
     }
-    if (/\b(attachment|reading|image|document|pdf|file|view)\b/.test(lower)) {
-        const isImage = /\bimage\b/.test(lower);
+    if (/\b(web search|search(?:ing)?|sources?|retriev|fetch|look(?:ing)?\s+up|checking verified|checking reliable|checking current|finding|lookup)\b/i.test(lower)) {
+        return { key: 'searching', label: 'Searching...' };
+    }
+    if (/\b(generating|drafting|writing)\b/i.test(lower)) {
+        return { key: 'generating', label: 'Generating...' };
+    }
+    if (/\b(speaking)\b/i.test(lower)) {
+        return { key: 'speaking', label: 'Speaking...' };
+    }
+    if (/\b(listening)\b/i.test(lower)) {
+        return { key: 'listening', label: 'Listening...' };
+    }
+    if (/\b(transcrib)\b/i.test(lower)) {
+        return { key: 'transcribing', label: 'Transcribing...' };
+    }
+    if (/\b(analyzing|analyz)\b/i.test(lower)) {
+        return { key: 'analyzing', label: 'Analyzing...' };
+    }
+    if (/\b(thinking)\b/i.test(lower)) {
+        return { key: 'thinking', label: raw.includes('...') ? raw : 'Thinking...' };
+    }
+    if (/\b(attachment|reading|image|document|pdf|file|view)\b/i.test(lower)) {
+        const isImage = /\bimage\b/i.test(lower);
         return { key: 'reading', label: isImage ? 'Analyzing image...' : 'Analyzing attached document...' };
     }
-    if (/\b(translat|language)\b/.test(lower)) {
+    if (/\b(translat|language)\b/i.test(lower)) {
         return { key: 'translating', label: 'Translating text...' };
     }
-    return { key: 'thinking', label: 'Thinking...' };
+    return { key: 'analyzing', label: 'Analyzing...' };
 }
 
 function hideThinkingIndicator() {
