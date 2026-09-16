@@ -334,7 +334,7 @@ export function classifyDeterministicRetrievalIntent(query = '') {
     const isLiveMarketOrWeather = /\b(weather|temperature|forecast|exchange rate|conversion rate|live score|match score|game score|standings)\b/i.test(text)
         || /\b(?:price of\s+[a-z0-9-]+|(?:bitcoin|btc|crypto|eth|ethereum|solana|stock|share|gold|oil|crude)\s+price|crypto price|stock price)\b/i.test(text);
 
-    const isRecentTournamentOrEvent = /\b(?:who won (?:the )?(?:latest|last|recent|2024|2025|2026)?|winner of (?:the )?(?:latest|last|recent|2024|2025|2026)?|latest fifa|fifa world cup winner|ipl winner|super bowl winner|election results?|breaking news|live news)\b/i.test(text);
+    const isRecentTournamentOrEvent = /\b(?:who won (?:the )?(?:latest|last|recent|\d{4})?|winner of (?:the )?(?:latest|last|recent|\d{4})?|latest fifa|fifa world cup winner|ipl winner|super bowl winner|election results?|breaking news|live news)\b/i.test(text);
 
     const isRecommendationsOrPlaces = /\b(places to visit|attractions in|things to do in|recommendations|reviews of|best restaurants in|hotels in)\b/i.test(text);
 
@@ -374,9 +374,10 @@ export async function classifyRetrievalDecision(query, options = {}) {
     if (hasGeminiKey() || Boolean(process.env.GROQ_API_KEY)) {
         try {
             const todayStr = new Date().toISOString().slice(0, 10);
+            const currentYear = new Date().getFullYear();
             const prompt = `Return strict JSON only.
 Task: Decide whether the user's query needs LIVE WEB SEARCH or can be answered from STABLE MODEL KNOWLEDGE.
-Current Date: ${todayStr} (Year 2026).
+Current Date: ${todayStr} (Year ${currentYear}).
 
 CRITICAL CLASSIFICATION PRINCIPLES:
 - DO NOT classify based on whether a topic is niche, foreign, regional, or unfamiliar (e.g. Serbian cultural concept "Inat", obscure geography, foreign language terms, or specialized scientific facts are stable model knowledge).
@@ -2361,10 +2362,10 @@ function filterSearchResultsForAnswerQuery(query, results) {
         candidates = list.filter(item => {
             const title = String(item?.title || '').toLowerCase();
             const desc = String(item?.description || '').toLowerCase();
-            if (/\b(?:202[6-9]|upcoming|next)\s+(?:assembly\s+)?(?:election|legislative assembly election|opinion poll|exit poll|candidates?\s+list)\b/i.test(title)) {
+            if (/\b(?:\d{4}|upcoming|next|future)\s+(?:assembly\s+)?(?:election|legislative assembly election|opinion poll|exit poll|candidates?\s+list)\b/i.test(title)) {
                 return false;
             }
-            if (/\b(?:all set to swear in|will swear in|predicted to win|landslide victory in 202[6-9])\b/i.test(desc)) {
+            if (/\b(?:all set to swear in|will swear in|predicted to win|landslide victory|claims?\s+to\s+form|vows\s+to\s+become|if\s+elected)\b/i.test(desc)) {
                 return false;
             }
             return true;
@@ -3137,9 +3138,10 @@ async function buildGroundedRagAnswer(query, results, gate, options = {}) {
             temporalStatus: validateClaimTemporalStatus(item)
         }));
         const todayStr = new Date().toISOString().slice(0, 10);
+        const currentYear = new Date().getFullYear();
         const prompt = `Return strict JSON only.
 Task: Answer the user's question directly and factually using ONLY the retrieved web evidence below.
-Current Date: ${todayStr} (Year 2026).
+Current Date: ${todayStr} (Year ${currentYear}).
 
 STRICT ANTI-HEDGING & DIRECT FACT GROUNDING RULES:
 1. FIRST SENTENCE MUST DIRECTLY AND AUTHORITATIVELY STATE THE SPECIFIC ANSWER (e.g. the specific active person, officeholder, or fact).
@@ -3709,13 +3711,10 @@ export function isValidCitationSource(source, query = '') {
         const isLeadership = /\b(?:who\s+is\s+the\s+)?(?:cm|chief minister|prime minister|pm|president|governor|mayor|ceo|leader|head of state|head of government|captain|skipper|coach|manager)\b/i.test(query);
         const isExplicitElection = /\b(?:election|polls?|voting)\b/i.test(query);
         if (isLeadership) {
-            if (!isExplicitElection && /\b(?:202[6-9]|upcoming|next)\s+(?:assembly\s+)?(?:election|legislative assembly election|opinion poll|exit poll|candidates?\s+list)\b/i.test(fullContent)) {
+            if (!isExplicitElection && /\b(?:\d{4}|upcoming|next|future)\s+(?:assembly\s+)?(?:election|legislative assembly election|opinion poll|exit poll|candidates?\s+list)\b/i.test(fullContent)) {
                 return false;
             }
-            if (/\b(?:all set to swear in|will swear in|predicted to win|landslide victory in 202[6-9]|sworn in today at the jawaharlal|c\.\s*joseph vijay.*chief minister|tvk.*won the 2026)\b/i.test(fullContent)) {
-                return false;
-            }
-            if (/\b(?:stakes?\s+claim|claims?\s+to\s+form|to\s+form\s+(?:the\s+)?gov(?:t|ernment)|eyes\s+(?:the\s+)?(?:cm|pm|captain)|future\s+(?:cm|pm)|vows\s+to\s+become|promises\s+to\s+be|if\s+elected|manifesto|election\s+campaign|political\s+rally|party\s+president\s+vijay|tvk\s+chief|why\s+tamil\s+nadu\s+cm)\b/i.test(fullContent)) {
+            if (/\b(?:all set to swear in|will swear in|predicted to win|landslide victory|stakes?\s+claim|claims?\s+to\s+form|to\s+form\s+(?:the\s+)?gov(?:t|ernment)|eyes\s+(?:the\s+)?(?:cm|pm|captain)|future\s+(?:cm|pm)|vows\s+to\s+become|promises\s+to\s+be|if\s+elected|manifesto|election\s+campaign|political\s+rally|party\s+(?:chief|president)\s+vows|opinion\s+poll\s+predicts)\b/i.test(fullContent)) {
                 return false;
             }
             if (/\b(?:makes bold claim|bold claim|will captain|could captain|predicted to captain|maybe|rumou?r|opinion|suggests|urges|WATCH|net practice)\b/i.test(fullContent)) {
