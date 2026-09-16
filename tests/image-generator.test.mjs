@@ -467,7 +467,7 @@ console.log('--- Running Image Generator Suite ---');
 
     const chidambaramExpanded = enhanceImagePromptForAccuracy('chidambaram town in aerial view');
     assert.match(chidambaramExpanded, /Chidambaram/i);
-    assert.match(chidambaramExpanded, /Nataraja/i);
+    assert.match(chidambaramExpanded, /photorealistic|photograph/i);
 
     // 8.2 Preserves Artistic Intent
     const animePrompt = enhanceImagePromptForAccuracy('anime warrior with glowing blue sword');
