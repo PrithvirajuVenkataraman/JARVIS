@@ -159,7 +159,7 @@ export async function resolveInstantFact(query, intentClassification = {}) {
             fetchDuckDuckGoInstantAnswer(rawQuery)
         ]);
 
-        if (ddgAnswer && ddgAnswer.abstract && !/\b(?:202[6-9]|upcoming|next)\s+(?:assembly\s+)?(?:election|legislative assembly election)\b/i.test(ddgAnswer.abstract)) {
+        if (ddgAnswer && ddgAnswer.abstract && !/\b(?:\d{4}|upcoming|next|future)\s+(?:assembly\s+)?(?:election|legislative assembly election)\b/i.test(ddgAnswer.abstract)) {
             facts.push({
                 title: ddgAnswer.heading,
                 summary: ddgAnswer.abstract,
@@ -168,11 +168,11 @@ export async function resolveInstantFact(query, intentClassification = {}) {
             });
         }
 
-        const filteredArticles = wikiArticles.filter(art => !/\b(?:202[6-9]|upcoming|next)\s+(?:assembly\s+)?(?:election|legislative assembly election|opinion poll|exit poll)\b/i.test(art.title));
+        const filteredArticles = wikiArticles.filter(art => !/\b(?:\d{4}|upcoming|next|future)\s+(?:assembly\s+)?(?:election|legislative assembly election|opinion poll|exit poll)\b/i.test(art.title));
 
         for (const article of filteredArticles.slice(0, 2)) {
             const articleSummary = await fetchWikipediaSummary(article.title);
-            if (articleSummary && articleSummary.extract && !/\b(?:202[6-9]|upcoming|next)\s+(?:assembly\s+)?(?:election|legislative assembly election)\b/i.test(articleSummary.extract)) {
+            if (articleSummary && articleSummary.extract && !/\b(?:\d{4}|upcoming|next|future)\s+(?:assembly\s+)?(?:election|legislative assembly election)\b/i.test(articleSummary.extract)) {
                 facts.push({
                     title: articleSummary.title,
                     summary: articleSummary.extract,
