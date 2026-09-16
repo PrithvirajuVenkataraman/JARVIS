@@ -1,3 +1,15 @@
+/**
+ * HARDCODED_CONTENT_ALLOWLIST
+ *
+ * Strictly reserved for legitimate operational and configuration identifiers that
+ * must remain hardcoded (e.g. external data provider names, source registry labels,
+ * runtime UI event/action names, and JSON parser property access fragments).
+ *
+ * This allowlist is strictly for operational/configuration literals and NOT for
+ * content classification. It must NEVER be used to preserve entity names, topics,
+ * keywords, companies, songs, movies, science concepts, monuments, political terms,
+ * or other answer-content vocabulary.
+ */
 export const HARDCODED_CONTENT_ALLOWLIST = Object.freeze([
     {
         pattern: String.raw`\bNASA EONET\b`,
@@ -139,30 +151,5 @@ export const HARDCODED_CONTENT_ALLOWLIST = Object.freeze([
         pattern: String.raw`renderLanguageEraHitsCard`,
         category: 'allowed_config',
         reason: 'Runtime function name for rendering language-era hits card.'
-    },
-    {
-        pattern: String.raw`Who is the CEO of Example Chip Corp\?`,
-        category: 'allowed_config',
-        reason: 'Client frontend route benchmark test prompt in index.html.'
-    },
-    {
-        pattern: String.raw`Search the web for who is the captain of Sample Team in Sample League 2026 with sources`,
-        category: 'allowed_config',
-        reason: 'Client frontend route benchmark test prompt in index.html.'
-    },
-    {
-        pattern: String.raw`Nenjukkul Peidhidum`,
-        category: 'allowed_test_fixture',
-        reason: 'Phase 9 test fixture verifying entity_bare shape classification.'
-    },
-    {
-        pattern: String.raw`What is the latest song from Dua Lipa\?`,
-        category: 'allowed_test_fixture',
-        reason: 'Phase 9 test fixture verifying freshness-driven live routing.'
-    },
-    {
-        pattern: String.raw`Hotel California song`,
-        category: 'allowed_test_fixture',
-        reason: 'Phase 9 test fixture verifying conversational media query routing.'
     }
 ]);
