@@ -88,9 +88,29 @@ export function isCasualConversationQuery(text) {
     return /\b(?:how\s+are\s+you|how\s+you\s+doing|how's\s+it\s+going|what's\s+up|how\s+are\s+things|hi|hello|hey|good\s+(?:morning|evening|afternoon)|thank\s+you|thanks|bye|goodbye)\b/i.test(t);
 }
 
+export function isMediaOrPopCultureQuery(text) {
+    const raw = String(text || '').trim();
+    if (!raw) return false;
+    const t = raw.toLowerCase();
+
+    if (/\b(?:president|prime minister|pm|ceo|cto|cfo|governor|mayor|minister|senator|chairman|leader)\b/i.test(t)) {
+        return false;
+    }
+    if (isVerifyCommand(raw) || isImageGenerationIntent(raw) || isTransformFastQuery(raw) || isStudyCommand(raw)) {
+        return false;
+    }
+    if (/\b(?:latest\s+news|breaking\s+news|price\s+of|weather|near\s+me)\b/i.test(t)) {
+        return false;
+    }
+
+    const mediaSignal = /\b(?:songs?|tracks?|soundtracks?|albums?|lyrics?|singers?|singing|musicians?|composers?|music\s+directors?|movies?|films?|cinemas?|directors?|actors?|actresses?|starrer|starring|cast|episodes?|sitcoms?|web\s*series|animes?)\b/i;
+    return mediaSignal.test(t);
+}
+
 export function isStableGeographyOrGeneralFactQuery(text, context = {}) {
     const raw = String(text || '').trim();
     if (!raw) return false;
+    if (isMediaOrPopCultureQuery(raw)) return false;
     const intent = classifyUniversalEntityIntent(raw, context);
     return !intent.isLiveRequired;
 }
@@ -677,7 +697,118 @@ export function isFastSimpleQuery(text, context = {}) {
         isJokeFastQuery(text);
 }
 
+/**
+ * Classifies the structural *shape* of a query — how it is phrased —
+ * independently of what entity or topic it refers to.
+ *
+ * This allows the router to detect "bare entity lookup" queries (a proper noun
+ * or title given with no surrounding verb, question word, or command) without
+ * needing any hardcoded entity names or keyword lists.
+ *
+ * Shape categories:
+ *   'entity_bare'       - Short phrase with no verb/question/freshness words; likely a title/name lookup.
+ *                         e.g. "Nenjukkul Peidhidum", "Inception", "Billie Eilish", "OpenAI"
+ *   'entity_question'   - Question about a specific entity with media or lookup context.
+ *                         e.g. "Who sang Nenjukkul Peidhidum?", "What film is Inception from?"
+ *   'entity_with_verb'  - Entity name + action verb; still potentially an entity lookup.
+ *                         e.g. "iPhone 16 release date", "Tesla stock today"
+ *   'conceptual'        - Explanation/definition request; best handled by normal LLM.
+ *                         e.g. "Explain what a transformer is", "How does photosynthesis work?"
+ *   'command'           - Explicit action; handled by image, transform, study, etc. routers.
+ *                         e.g. "Create an image of...", "Translate this to French"
+ *   'conversational'    - Social/casual phrase; handled by fast_simple.
+ *                         e.g. "Hi", "Thanks", "How are you?"
+ *
+ * @param {string} text
+ * @returns {{
+ *   shape: 'entity_bare'|'entity_question'|'entity_with_verb'|'conceptual'|'command'|'conversational',
+ *   entityCandidate: string|null,
+ *   tokenCount: number,
+ *   titleCaseRatio: number,
+ *   hasQueryVerb: boolean,
+ *   hasMediaContext: boolean,
+ *   hasNonLatinScript: boolean
+ * }}
+ */
+export function classifyQueryShape(text) {
+    const raw = String(text || '').trim();
+    if (!raw) return { shape: 'conversational', entityCandidate: null, tokenCount: 0, titleCaseRatio: 0, hasQueryVerb: false, hasMediaContext: false, hasNonLatinScript: false };
+
+    // Tokenize on whitespace (preserve original case for ratio calculation)
+    const tokens = raw.split(/\s+/).filter(Boolean);
+    const tokenCount = tokens.length;
+    const lower = raw.toLowerCase();
+
+    // ── Structural signals ─────────────────────────────────────────────────────
+
+    // 1. Interrogative words (what, who, how, when, where, why, which)
+    const hasInterrogative = /^\s*\b(?:what|who|how|when|where|why|which|whose|whom)\b/i.test(raw)
+        || /\b(?:what|who|how|when|where|why|which)\b/i.test(raw);
+
+    // 2. Command/action verbs at the start (explain, create, write, summarize, ...)
+    const hasCommandVerb = /^\s*(?:explain|describe|define|tell\s+me\s+about|summarize|translate|rewrite|create|make|generate|draw|calculate|solve|compare|list|show|find|give\s+me|teach|help\s+me|write)\b/i.test(raw);
+
+    // 3. Freshness/liveness vocabulary (these are already handled by classifyLiveVsNormal)
+    const hasFreshnessWord = /\b(?:latest|current|today|now|price|stock|score|weather|recent|live|breaking|update)\b/i.test(lower);
+
+    // 4. Conversational openers
+    const isConversational = isCasualConversationQuery(raw);
+
+    // 5. Title-case ratio: what fraction of tokens start with an uppercase letter?
+    //    (Proper nouns, titles, names are mostly title-cased in English)
+    const upperTokens = tokens.filter(t => /^[A-Z\u00C0-\u00D6\u00D8-\u00DE]/.test(t)).length;
+    const titleCaseRatio = tokenCount > 0 ? upperTokens / tokenCount : 0;
+
+    // 6. Non-Latin script detection (Tamil, Devanagari, Arabic, CJK, etc.)
+    //    A query entirely in non-Latin script is almost certainly a proper noun lookup.
+    const hasNonLatinScript = /[\u0900-\u097F\u0B80-\u0BFF\u0600-\u06FF\u4E00-\u9FFF\u3040-\u30FF\uAC00-\uD7AF\u0400-\u04FF]/.test(raw);
+    const isMostlyNonLatin = hasNonLatinScript && !/[a-zA-Z]{4,}/.test(raw);
+
+    // 7. Explicit media context words (not the entity itself — surrounding words)
+    const hasMediaContext = /\b(?:song|track|album|lyrics?|singer|sang|music|film|movie|series|episode|actor|actress|director|artist|band|released?|from\s+the\s+movie|from\s+the\s+film|from\s+the\s+show|ost|soundtrack)\b/i.test(lower);
+
+    // ── Shape classification ───────────────────────────────────────────────────
+
+    if (isConversational) {
+        return { shape: 'conversational', entityCandidate: null, tokenCount, titleCaseRatio, hasQueryVerb: false, hasMediaContext, hasNonLatinScript };
+    }
+
+    if (hasCommandVerb && !hasInterrogative) {
+        return { shape: 'command', entityCandidate: null, tokenCount, titleCaseRatio, hasQueryVerb: true, hasMediaContext, hasNonLatinScript };
+    }
+
+    if (hasInterrogative) {
+        // Conceptual: question about a concept/idea with an explanation verb or science term
+        const isConceptual = /^(?:what|how)\s+(?:is|are|does|do|did)\s+/i.test(raw)
+            && !hasMediaContext && tokenCount >= 3;
+        return {
+            shape: isConceptual ? 'conceptual' : 'entity_question',
+            entityCandidate: null,
+            tokenCount, titleCaseRatio, hasQueryVerb: true, hasMediaContext, hasNonLatinScript
+        };
+    }
+
+    // Bare entity: short, no interrogative, no command verb
+    // High confidence when: token count ≤ 6 AND (title-cased OR non-Latin)
+    const isBareEntity = tokenCount <= 6
+        && !hasCommandVerb
+        && !hasInterrogative
+        && (isMostlyNonLatin || titleCaseRatio >= 0.5 || (tokenCount <= 3 && titleCaseRatio > 0));
+
+    if (isBareEntity) {
+        return { shape: 'entity_bare', entityCandidate: raw, tokenCount, titleCaseRatio, hasQueryVerb: false, hasMediaContext, hasNonLatinScript };
+    }
+
+    // Entity with verb (e.g. "iPhone 16 release date", "Tesla stock today")
+    if (tokenCount <= 8 && !hasInterrogative && (titleCaseRatio >= 0.4 || hasNonLatinScript)) {
+        return { shape: 'entity_with_verb', entityCandidate: null, tokenCount, titleCaseRatio, hasQueryVerb: true, hasMediaContext, hasNonLatinScript };
+    }
+
+    return { shape: 'conceptual', entityCandidate: null, tokenCount, titleCaseRatio, hasQueryVerb: true, hasMediaContext, hasNonLatinScript };
+}
+
 export function decideFrontendRoute(text, context = {}) {
+
     const raw = String(text || '').trim();
     const turnSource = String(context.turnSource || context.source || '').toLowerCase();
     const isWebOff = context.webMode === 'off';
@@ -771,7 +902,45 @@ export function decideFrontendRoute(text, context = {}) {
         return res;
     }
 
+    // ── Semantic query-shape check ────────────────────────────────────────────
+    // Runs ONLY when liveDecision already returned 'normal_llm', so it catches
+    // entity-only queries that have NO live-signal vocabulary (no "latest",
+    // no "price", no freshness words) but are still clearly a lookup request:
+    //   "Nenjukkul Peidhidum"   → entity_bare     → live_required
+    //   "Inception"              → entity_bare     → live_required
+    //   "Billie Eilish"          → entity_bare     → live_required
+    //   "Who sang Nenjukkul Peidhidum?" → entity_question + media → live_required
+    // Does NOT affect: "Why?", "Explain photosynthesis", "Hi", "Create an image..."
+    if (!isWebOff) {
+        const qShape = classifyQueryShape(raw);
+        if (qShape.shape === 'entity_bare') {
+            const res = {
+                ...base,
+                route: 'live_required',
+                reason: 'entity_lookup',
+                risk: 'low_risk',
+                requiresSources: true,
+                sourcePolicy: 'required'
+            };
+            FRONTEND_ROUTE_CACHE.set(cacheKey, res);
+            return res;
+        }
+        if (qShape.shape === 'entity_question' && qShape.hasMediaContext) {
+            const res = {
+                ...base,
+                route: 'live_required',
+                reason: 'entity_media_question',
+                risk: 'low_risk',
+                requiresSources: true,
+                sourcePolicy: 'required'
+            };
+            FRONTEND_ROUTE_CACHE.set(cacheKey, res);
+            return res;
+        }
+    }
+
     if (isTransformFastQuery(raw) || isStudyCommand(raw)) {
+
         const res = {
             ...base,
             route: 'fast_simple',
@@ -854,6 +1023,20 @@ export function decideFrontendRoute(text, context = {}) {
             reason: entityIntent.reason || 'source_or_freshness_required',
             requiresSources: true,
             sourcePolicy: 'required'
+        };
+        FRONTEND_ROUTE_CACHE.set(cacheKey, res);
+        return res;
+    }
+
+    if (isMediaOrPopCultureQuery(raw)) {
+        const res = {
+            ...base,
+            route: 'chat_direct',
+            reason: 'media_or_pop_culture_entity',
+            risk: 'low_risk',
+            minimalThinking: false,
+            requiresSources: false,
+            sourcePolicy: 'none'
         };
         FRONTEND_ROUTE_CACHE.set(cacheKey, res);
         return res;
