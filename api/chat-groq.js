@@ -85,7 +85,11 @@ function extractEntityTarget(text) {
         { regex: /\b(?:governor)\s+(?:of\s+)?([a-z\s]+?)(?:\?|\.|\n|$|,)/i, role: 'Governor' },
         { regex: /\b(?:mayor)\s+(?:of\s+)?([a-z\s]+?)(?:\?|\.|\n|$|,)/i, role: 'Mayor' },
         { regex: /\b(?:ceo|chief executive officer)\s+(?:of\s+)?([a-z\s]+?)(?:\?|\.|\n|$|,)/i, role: 'CEO' },
-        { regex: /\b(?:chairman|chairperson)\s+(?:of\s+)?([a-z\s]+?)(?:\?|\.|\n|$|,)/i, role: 'Chairperson' }
+        { regex: /\b(?:chairman|chairperson)\s+(?:of\s+)?([a-z\s]+?)(?:\?|\.|\n|$|,)/i, role: 'Chairperson' },
+        { regex: /\b(?:director|director general)\s+(?:of\s+)?([a-z\s]+?)(?:\?|\.|\n|$|,)/i, role: 'Director' },
+        { regex: /\b(?:chancellor)\s+(?:of\s+)?([a-z\s]+?)(?:\?|\.|\n|$|,)/i, role: 'Chancellor' },
+        { regex: /\b(?:secretary general|secretary)\s+(?:of\s+)?([a-z\s]+?)(?:\?|\.|\n|$|,)/i, role: 'Secretary' },
+        { regex: /\b(?:captain)\s+(?:of\s+)?([a-z\s]+?)(?:\?|\.|\n|$|,)/i, role: 'Captain' }
     ];
     for (const item of roleMatches) {
         const match = t.match(item.regex);
