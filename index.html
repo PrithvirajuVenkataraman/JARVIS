@@ -1769,7 +1769,7 @@ Notes: ...
 Quick recap: ...
 - If user asked for formula/equation, include it explicitly.
 - If term is misspelled, infer the most likely intended term and answer that directly.
-- Do not ask follow-up questions unless ambiguity is high.
+- Do not end with generic filler questions like "Would you like to know more?" or "Is there anything else I can help with?". For substantive technical topics, one specific follow-up question that connects naturally to the next logical concept is acceptable.
 - Teaching depth: ${teachingDepth}. ${depthRule}`;
         const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
             method: 'POST',
@@ -4767,6 +4767,16 @@ function postProcessAssistantResponse(rawText, userMessage = '') {
         .replace(/\s*(?:so,?\s*)?this is (?:the|my) (?:final )?answer[.!]?\s*$/i, '')
         .trim();
 
+    // Strip generic hollow offer-to-help endings that add no conversational value.
+    // These fire as a safety net even when the system prompt rule is clear.
+    text = text
+        .replace(/\s*(?:would you (?:like|want|care) (?:to (?:know|learn|explore|hear)(?: more| about (?:this|that|any of these))?|me to (?:elaborate|explain|expand|continue|go (?:deeper|further)|cover anything else))|(?:is )?(?:there (?:anything|something) else(?: i can| you(?:'d like me to))? (?:help|assist|clarify|explain|cover)))[^.?!]*[.?!]?\s*$/i, '')
+        .replace(/\s*(?:(?:let|feel free to) (?:me know|ask)(?: (?:me )?(?:if|whenever|anytime) you (?:have|need|want|require)|about anything))[^.?!]*[.?!]?\s*$/i, '')
+        .replace(/\s*(?:(?:do|did) you have (?:any (?:other|further|more|additional)|another) (?:questions?|queries?|things? (?:you(?:'d like)|to (?:ask|cover))))[^.?!]*[.?!]?\s*$/i, '')
+        .replace(/\s*(?:hope (?:this|that)[^.!]*[.!]?)\s*$/i, '')
+        .replace(/\s*(?:happy to (?:help|assist|answer|clarify|elaborate)(?: (?:further|more|with anything else))?[.!]?)\s*$/i, '')
+        .trim();
+
     // Keep tense accurate for historical "When did ... release?" questions.
     text = fixHistoricalReleaseWording(text, userMessage);
 
@@ -5326,7 +5336,7 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
             learnedStyleHint,
             learnedPreferenceHint,
             'Image Generation Capability: You have access to an internal high-speed AI image diffusion engine. When the user asks you to create, generate, draw, paint, visualize, illustrate, sketch, or show an image, picture, photo, or artwork of something, emit the visual action tag: :::image[detailed descriptive visual prompt]::: with a vivid, detailed prompt inside the brackets. You may include a brief conversational line before or after the tag. Never emit this tag for educational, diagram code, or non-visual queries.',
-            'Conversational guidelines: Maintain continuity with previous dialogue, resolve pronouns and retrospective references naturally, and avoid repeating information already stated.'
+            'Conversational guidelines: Maintain continuity with previous dialogue, resolve pronouns and retrospective references naturally, and avoid repeating information already stated. Never end responses with generic hollow offers like "Would you like to know more?", "Is there anything else I can help with?", "Feel free to ask", or "Hope that helps!" — these are robotic filler and add no value. For substantive answers, one specific contextual follow-up question or concrete next step is acceptable only when it genuinely advances the discussion; for short or factual queries, answer directly and stop.'
         ].filter(Boolean).join('\n\n');
 
         // Multi-tier conversational context (Tier 1 verbatim window, Tier 2 semantic retrieval, Tier 3 rolling milestone summary)
