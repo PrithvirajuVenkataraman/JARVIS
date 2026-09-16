@@ -867,7 +867,7 @@ function isGeneralJokeRequest(text) {
     const t = String(text || '').toLowerCase().trim();
     if (!t) return false;
     if (!/\b(joke|funny|make me laugh|say something funny|tell me something funny)\b/.test(t)) return false;
-    if (isTamilJokeRequest(t) || isSeriesReferenceJokeRequest(t)) return false;
+    if (isSeriesReferenceJokeRequest(t)) return false;
     return true;
 }
 
@@ -3724,107 +3724,7 @@ async function fetchAndDisplayNews(query) {
 // ========== END NEWS FETCHING FUNCTION ==========
 
 async function handleTamilJokeSearch(queryText) {
-    if (!isFactSearchEnabled()) return false;
-
-    showThinkingIndicator('Searching web for a Tamil joke...');
-    try {
-        const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.search, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                query: 'short Tamil joke with meaning',
-                maxResults: 6
-            })
-        });
-
-        if (!response.ok) {
-            throw new Error('search failed');
-        }
-
-        const data = await response.json();
-        const results = Array.isArray(data.results) ? data.results : [];
-
-        if (!results.length) {
-            throw new Error('no results');
-        }
-
-        const snippetBlock = results
-            .slice(0, 5)
-            .map((r, i) => `${i + 1}. ${r.title}\nSnippet: ${r.description}\nURL: ${r.url}`)
-            .join('\n\n');
-
-        const jokePrompt = `Use the web snippets below only as support and give one VERY SIMPLE Tamil joke.
-
-STRICT FORMAT (exactly 4 lines):
-Tamil: &lt;Tamil script&gt;
-Pronunciation: &lt;simple English letters&gt;
-Meaning: &lt;plain English sentence&gt;
-Why funny: &lt;one short plain-English sentence&gt;
-
-Rules:
-- Keep vocabulary very simple.
-- No made-up words.
-- No complex cultural references.
-- Avoid scary/violent/NSFW content.
-- Make it understandable for a non-Tamil speaker.
-
-Web snippets:
-${snippetBlock}`;
-
-        const ai = await askGeminiAI(jokePrompt);
-        let jokeText = (ai && (ai.response || ai.text)) ? (ai.response || ai.text) : '';
-        if (!/Tamil:\s*/i.test(jokeText) || !/Pronunciation:\s*/i.test(jokeText) || !/Meaning:\s*/i.test(jokeText)) {
-            jokeText = await composeApiReply('tamil_joke_simple', {}, {
-                fallbackText: 'Tamil: Joke unavailable\nPronunciation: Joke unavailable\nMeaning: I could not generate a clean Tamil joke right now.\nWhy funny: Not available.'
-            });
-        }
-        const sourceLines = results.slice(0, 3).map((r, i) => `${i + 1}. [${r.title}](${r.url})`).join('\n');
-
-        const finalMsg = `Tamil joke:\n\n${jokeText}\n\nSources:\n${sourceLines}`;
-        addChatMessage(finalMsg, false);
-        const jokeSummary = await composeApiReply('tamil_joke_ready', {}, {
-            fallbackText: 'Here is a Tamil joke for you.'
-        });
-        saveToHistory(queryText, finalMsg);
-    } catch (error) {
-        try {
-            const directPrompt = `Give one very simple, family-friendly Tamil joke.
-
-STRICT FORMAT (exactly 4 lines):
-Tamil: &lt;Tamil script&gt;
-Pronunciation: &lt;simple English letters&gt;
-Meaning: &lt;plain English sentence&gt;
-Why funny: &lt;one short plain-English sentence&gt;
-
-Rules:
-- Easy words only
-- No made-up words
-- No confusing puns`;
-            const direct = await askGeminiAI(directPrompt);
-            let directText = (direct && (direct.response || direct.text))
-                ? (direct.response || direct.text)
-                : '';
-            if (!/Tamil:\s*/i.test(directText) || !/Pronunciation:\s*/i.test(directText) || !/Meaning:\s*/i.test(directText)) {
-                directText = await composeApiReply('tamil_joke_simple', {}, {
-                    fallbackText: 'Tamil: Joke unavailable\nPronunciation: Joke unavailable\nMeaning: I could not generate a clean Tamil joke right now.\nWhy funny: Not available.'
-                });
-            }
-            const finalMsg = `Tamil joke:\n\n${directText}`;
-            addChatMessage(finalMsg, false);
-            const jokeSummary = await composeApiReply('tamil_joke_ready', {}, {
-                fallbackText: 'Here is a Tamil joke for you.'
-            });
-            saveToHistory(queryText, finalMsg);
-        } catch (fallbackError) {
-            await deliverApiReply('tamil_joke_search_fallback', {
-                searchUrl: 'https://www.google.com/search?q=short+tamil+jokes+with+meaning'
-            }, {
-                fallbackText: 'I could not fetch a live Tamil joke right now.\n\nTry this direct search:\n[Search Tamil jokes on Google](https://www.google.com/search?q=short+tamil+jokes+with+meaning)'
-            });
-        }
-    } finally {
-        hideThinkingIndicator();
-    }
+    return handleGeneralJokeRequest(queryText);
 }
 
 async function handleSeriesReferenceJokeRequest(text) {
@@ -9375,7 +9275,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             }
 
             // 3. Current News / Live Events / Sports / Market Prices
-            if (/\b(news|latest|current|update|today|yesterday|tomorrow|live(?:\s+stream|\s+score|\s+match)?|match score|live score|vs\s+[a-z]+(?:\s+fc)?|stock price|stock market|cryptocurrency price|crypto price|weather|event|launched|2025|2026)\b/i.test(lower) && !/\b(did\s+[a-z]+\s+score|who\s+scored|how\s+many\s+(?:goals|runs|centuries|100'?s|points)\s+did)\b/i.test(lower)) {
+            if (/\b(news|latest|current|update|today|yesterday|tomorrow|live(?:\s+stream|\s+score|\s+match)?|match score|live score|vs\s+[a-z]+(?:\s+fc)?|stock price|stock market|cryptocurrency price|crypto price|weather|event|launched|\d{4})\b/i.test(lower) && !/\b(did\s+[a-z]+\s+score|who\s+scored|how\s+many\s+(?:goals|runs|centuries|100'?s|points)\s+did)\b/i.test(lower)) {
                 return [
                     { title: 'Searching', body: 'Querying verified real-time sources' },
                     { title: 'Synthesizing', body: 'Formulating grounded summary with verified sources' }
@@ -17191,7 +17091,6 @@ function classifyUserMessage(text) {
             liveRetrieval: isLiveRetrievalQuery(raw),
             entityAttribution: isEntityAttributionQuery(raw),
             popCultureReference: isPopCultureReferenceQuery(raw),
-            tamilJoke: isTamilJokeRequest(raw),
             seriesRefJoke: isSeriesReferenceJokeRequest(raw),
             generalJoke: isGeneralJokeRequest(raw),
             recipe: isRecipeRequest(raw),
@@ -17236,7 +17135,6 @@ function decideAnswerPath(classification) {
     if (flags.vagueAdvice) return 'vague_advice';
     if (flags.songMoodGame) return 'song_mood_game';
     if (flags.comparison) return 'comparison';
-    if (flags.tamilJoke) return 'tamil_joke';
     if (flags.seriesRefJoke) return 'series_ref_joke';
     if (flags.generalJoke) return 'general_joke';
     if (flags.recipe) return 'recipe';
@@ -19481,7 +19379,7 @@ function extractRequestedDish(text) {
         if (match?.[1]) {
             return match[1]
                 .replace(/\b(?:good|nice|great|best|proper|perfect)\b/gi, '')
-                .replace(/\bin\s+Thalassery\s+style\b/gi, '')
+                .replace(/\bin\s+[a-z\s]+style\b/gi, '')
                 .replace(/\s+/g, ' ')
                 .replace(/[?.!,;]+$/g, '')
                 .trim();
@@ -19492,7 +19390,6 @@ function extractRequestedDish(text) {
 
 function normalizeRecipeRequestText(text) {
     return String(text || '')
-        .replace(/\b(?:tallessery|tallesery|talassery|tellicherry)\b/gi, 'Thalassery')
         .replace(/\s+/g, ' ')
         .trim();
 }
@@ -19512,9 +19409,8 @@ function extractRecipeStylePreference(text) {
         if (style.pattern.test(raw)) return style.key;
     }
 
-    const regionalMatch = raw.match(/\b(andhra|hyderabadi|tamil|chettinad|kerala|thalassery|tellicherry|tallessery|tallesery|talassery|punjabi|mughlai|bengali|goan|korean|japanese|thai|italian|mexican|french|turkish|arabic)\b/);
+    const regionalMatch = raw.match(/\b(andhra|hyderabadi|tamil|chettinad|kerala|thalassery|punjabi|mughlai|bengali|goan|korean|japanese|thai|italian|mexican|french|turkish|arabic|chinese|indian|mediterranean)\b/);
     if (!regionalMatch) return '';
-    if (/^(tellicherry|tallessery|tallesery|talassery)$/i.test(regionalMatch[1])) return 'thalassery';
     return regionalMatch[1];
 }
 
@@ -21208,12 +21104,7 @@ function isWakeGreetingText(text) {
 
             }
             
-            let cleanText = text;
-            const prefixes = ['hey', 'hi', 'hello', 'ok', 'okay', 'well', 'so', 'um', 'uh'];
-            for (const prefix of prefixes) { 
-                const regex = new RegExp(`^${prefix}[,\\s]+`, 'i'); 
-                cleanText = cleanText.replace(regex, ''); 
-            } 
+            const cleanText = String(text || '').trim();
 
             const isSqlDataQuery = /\b(?:sql|database|postgres|mysql|sqlite|bigquery|snowflake)\b/i.test(cleanText) ||
                 (/\b(?:find|list|show|select|fetch|get|generate|write)\b.*\b(?:all|top|customers|orders|users|products|rows|items|sales|revenue|table|schema|records)\b/i.test(cleanText) &&
@@ -21541,11 +21432,6 @@ function isWakeGreetingText(text) {
                 }
                 const handled = await handleLiveRetrievalQuery(cleanText);
                 if (handled) return;
-            }
-
-            if (answerPath === 'tamil_joke') {
-                await handleTamilJokeSearch(cleanText);
-                return;
             }
 
             if (answerPath === 'series_ref_joke') {
