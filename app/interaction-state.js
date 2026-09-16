@@ -8,6 +8,8 @@ export const InteractionState = Object.freeze({
     LISTENING: 'LISTENING',
     TRANSCRIBING: 'TRANSCRIBING',
     SUBMITTING: 'SUBMITTING',
+    ROUTING: 'ROUTING',
+    ANALYZING: 'ANALYZING',
     THINKING: 'THINKING',
     SEARCHING: 'SEARCHING',
     GENERATING: 'GENERATING',
@@ -16,6 +18,27 @@ export const InteractionState = Object.freeze({
     CANCELLED: 'CANCELLED',
     ERROR: 'ERROR'
 });
+
+export function getInteractionStateLabel(state) {
+    switch (state) {
+        case InteractionState.LISTENING:
+            return 'Listening...';
+        case InteractionState.TRANSCRIBING:
+            return 'Transcribing...';
+        case InteractionState.ROUTING:
+        case InteractionState.ANALYZING:
+        case InteractionState.THINKING:
+            return 'Analyzing...';
+        case InteractionState.SEARCHING:
+            return 'Searching...';
+        case InteractionState.GENERATING:
+            return 'Generating...';
+        case InteractionState.SPEAKING:
+            return 'Speaking...';
+        default:
+            return '';
+    }
+}
 
 const DEFAULT_STATE_WATCHDOG_MS = 35000;
 const SPEAKING_WATCHDOG_MS = 25000;
@@ -67,6 +90,8 @@ export function createInteractionStateMachine(options = {}) {
         return [
             InteractionState.TRANSCRIBING,
             InteractionState.SUBMITTING,
+            InteractionState.ROUTING,
+            InteractionState.ANALYZING,
             InteractionState.THINKING,
             InteractionState.SEARCHING,
             InteractionState.GENERATING,
@@ -78,6 +103,8 @@ export function createInteractionStateMachine(options = {}) {
         return [
             InteractionState.TRANSCRIBING,
             InteractionState.SUBMITTING,
+            InteractionState.ROUTING,
+            InteractionState.ANALYZING,
             InteractionState.THINKING,
             InteractionState.SEARCHING,
             InteractionState.GENERATING
@@ -181,6 +208,9 @@ export function createInteractionStateMachine(options = {}) {
     }
 
     function resetToIdle(reason = 'manual_reset') {
+        if (stateRecord.state === InteractionState.SPEAKING && reason === 'send_complete') {
+            return stateRecord.state;
+        }
         clearWatchdog();
         return transition(InteractionState.IDLE, {
             metadata: { reason }
