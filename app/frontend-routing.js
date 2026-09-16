@@ -171,33 +171,17 @@ export function enhanceImagePromptForAccuracy(prompt) {
     // Check if user requested an explicitly non-photorealistic artistic style
     const isArtistic = /\b(?:anime|manga|oil\s+painting|watercolor|pencil\s+sketch|sketch|drawing|cartoon|illustration|pixel\s+art|cyberpunk|fantasy\s+art|3d\s+render|cgi|surreal)\b/i.test(clean);
 
-    // Entity & Location Expansions
-    const isLA = /^(?:la|l\.a\.|los\s+angeles)$/i.test(clean) || /\b(?:la|l\.a\.)\b/i.test(clean);
-    const isNYC = /^(?:nyc|n\.y\.c\.|new\s+york\s+city)$/i.test(clean) || /\b(?:nyc|n\.y\.c\.)\b/i.test(clean);
-    const isSF = /^(?:sf|s\.f\.|san\s+francisco)$/i.test(clean) || /\b(?:sf|s\.f\.)\b/i.test(clean);
-    const isDC = /^(?:dc|d\.c\.|washington\s+dc)$/i.test(clean) || /\b(?:dc|d\.c\.)\b/i.test(clean);
-    const isChidambaram = /\bchidambaram\b/i.test(clean);
+    // Standard geographic acronym & abbreviation expansion
+    clean = clean
+        .replace(/\b(?:la|l\.a\.)\b/gi, 'Los Angeles')
+        .replace(/\b(?:nyc|n\.y\.c\.)\b/gi, 'New York City')
+        .replace(/\b(?:sf|s\.f\.)\b/gi, 'San Francisco')
+        .replace(/\b(?:dc|d\.c\.)\b/gi, 'Washington, D.C.');
 
     if (!isArtistic) {
-        if (isLA) {
-            return 'Vibrant photograph of Los Angeles, California showing the downtown skyline, palm tree-lined boulevard, active street with cars, under warm golden hour sunlight, authentic 8k photorealistic architecture';
-        }
-        if (isNYC) {
-            return 'Iconic photograph of New York City, bustling Manhattan street with yellow cabs, historic and modern skyscrapers, clear daylight, crisp authentic architectural detail, 8k photography';
-        }
-        if (isSF) {
-            return 'Cinematic photograph of San Francisco, California, Golden Gate vista and iconic rolling hills with Victorian architecture, authentic natural lighting, 8k photorealistic';
-        }
-        if (isDC) {
-            return 'Distinguished photograph of Washington, D.C., National Mall and Capitol architecture with lush greenery and clear sky, authentic photorealistic detail';
-        }
-        if (isChidambaram) {
-            return 'Authentic aerial view of Chidambaram historic temple town, Tamil Nadu, showcasing the Thillai Nataraja Temple complex with grand Dravidian gopurams and sacred Sivaganga water tank, detailed architecture, golden hour';
-        }
-
-        // For brief prompts (< 50 chars), ground with authentic textures, lighting, and detail
+        // For brief prompts (< 50 chars), ground with authentic photographic textures, lighting, and detail
         if (clean.length < 50 && !/\b(?:photograph|photorealistic|detailed|cinematic|lighting|8k|4k)\b/i.test(clean)) {
-            return `${clean}, authentic natural lighting, high detail, sharp focus, photorealistic 8k`;
+            return `Photograph of ${clean}, authentic natural lighting, high detail, sharp focus, photorealistic 8k`;
         }
     }
 
