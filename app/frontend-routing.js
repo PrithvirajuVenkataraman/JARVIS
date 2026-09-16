@@ -88,31 +88,67 @@ export function isCasualConversationQuery(text) {
     return /\b(?:how\s+are\s+you|how\s+you\s+doing|how's\s+it\s+going|what's\s+up|how\s+are\s+things|hi|hello|hey|good\s+(?:morning|evening|afternoon)|thank\s+you|thanks|bye|goodbye)\b/i.test(t);
 }
 
-export function isMediaOrPopCultureQuery(text) {
-    const raw = String(text || '').trim();
-    if (!raw) return false;
-    const t = raw.toLowerCase();
-
-    if (/\b(?:president|prime minister|pm|ceo|cto|cfo|governor|mayor|minister|senator|chairman|leader)\b/i.test(t)) {
-        return false;
-    }
-    if (isVerifyCommand(raw) || isImageGenerationIntent(raw) || isTransformFastQuery(raw) || isStudyCommand(raw)) {
-        return false;
-    }
-    if (/\b(?:latest\s+news|breaking\s+news|price\s+of|weather|near\s+me)\b/i.test(t)) {
-        return false;
-    }
-
-    const mediaSignal = /\b(?:songs?|tracks?|soundtracks?|albums?|lyrics?|singers?|singing|musicians?|composers?|music\s+directors?|movies?|films?|cinemas?|directors?|actors?|actresses?|starrer|starring|cast|episodes?|sitcoms?|web\s*series|animes?)\b/i;
-    return mediaSignal.test(t);
+export function isMediaOrPopCultureQuery(_text) {
+    return false;
 }
 
 export function isStableGeographyOrGeneralFactQuery(text, context = {}) {
     const raw = String(text || '').trim();
     if (!raw) return false;
-    if (isMediaOrPopCultureQuery(raw)) return false;
+    const lower = raw.toLowerCase().replace(/[?!.,;:]+$/g, '').trim();
+
+    // 1. If entity classifier or live signals indicate live data is required, not a stable fact
     const intent = classifyUniversalEntityIntent(raw, context);
-    return !intent.isLiveRequired;
+    if (intent.isLiveRequired) return false;
+
+    // 2. Actionable local places and navigation are not stable facts
+    if (/\b(?:near\s+me|nearby|directions\s+to|hotels?\s+near|restaurants?\s+near|museums?\s+near|open\s+now)\b/i.test(lower)) {
+        return false;
+    }
+
+    // 3. Media works (songs, movies, albums, tracks) are creative/pop-culture discussions, not encyclopedic geography/general facts
+    if (/\b(?:songs?|tracks?|soundtracks?|albums?|lyrics?|singers?|movies?|films?|cinemas?|directors?|actors?|actresses?|starrer|starring)\b/i.test(lower)) {
+        return false;
+    }
+
+    // 4. Stable encyclopedic knowledge domains:
+    // Geography: capitals, continents, oceans, rivers, mountains, currencies, locations
+    if (/\b(?:what\s+(?:is|was)|which\s+city\s+is|name)\s+(?:the\s+)?capital\s+(?:city\s+)?of\s+[a-z\s.'-]+/i.test(lower) ||
+        /\b(?:capital\s+(?:city\s+)?of\s+[a-z\s.'-]+)/i.test(lower) ||
+        /\b[a-z\s.'-]+\s+capital\b/i.test(lower) ||
+        /\b(?:continent|continents|ocean|oceans|sea|seas|river|rivers|mountain|mountains|mountain\s+range|plateau|desert|island|islands|valley|gulf|bay|strait|peninsula|archipelago|hemisphere|equator|latitude|longitude|tropic\s+of\s+(?:cancer|capricorn)|longest\s+river|highest\s+mountain|deepest\s+ocean|largest\s+desert|largest\s+country|smallest\s+country|currency\s+of|official\s+language\s+of|population\s+of|area\s+of|located\s+in|location\s+of|where\s+is\s+.+\s+located|where\s+are\s+.+\s+located)\b/i.test(lower)) {
+        return true;
+    }
+
+    // Structural landmark, architecture, and geological inquiry (capability-driven, zero entity lists)
+    const isLandmarkTopic = (
+        /\b(?:architecture|sculptural\s+style|engineering|construction|geological\s+formation|formation\s+of|erosion|composition\s+of|architectural\s+significance)\b/i.test(lower)
+    ) || /^(?:why\s+was|who\s+(?:built|designed|created|founded)|how\s+(?:was|were))\s+[a-z0-9\s.'-]{2,80}\??$/i.test(lower);
+    if (isLandmarkTopic) return true;
+
+    // History & historical events
+    if (/\b(?:history|ancient|medieval|century|empire|dynasty|civilization|battle\s+of|treaty\s+of|revolution|renaissance|archaeology|historical|cold\s+war|french\s+revolution|world\s+war|bronze\s+age|iron\s+age|mesopotamia|byzantine|ottoman|roman\s+empire|indus\s+valley|new\s+deal|new\s+kingdom|fdr|first\s+president\s+of|former\s+president|magna\s+carta|declaration\s+of\s+independence|constitution)\b/i.test(lower)) {
+        return true;
+    }
+
+    // Science, Mathematics & Physics
+    if (/\b(?:physics|chemistry|biology|astronomy|quantum|gravity|relativity|thermodynamics|evolution|photosynthesis|mitosis|dna|rna|gene|protein|atom|molecule|speed\s+of\s+light|periodic\s+table|atomic\s+number|penicillin|who\s+discovered|who\s+invented|calculate|compute|solve|integrate|integral|derivative|differentiate|equation|formula|pythagorean|factorial|matrix|matrices)\b/i.test(lower) ||
+        /^\s*[\d\s+\-*/^().=xXyYzZ]+\s*$/.test(raw)) {
+        return true;
+    }
+
+    // Computer Science, Programming & Algorithms
+    if (/\b(?:how\s+to\s+sort|binary\s+search|linked\s+list|dynamic\s+programming|recursion|quicksort|mergesort|tcp|udp|protocol|nlp|machine\s+learning|deep\s+learning|neural\s+network|computer\s+vision|transformer|algorithm|syntax\s+of|new\s+(?:keyword|operator|array|object|instance|class))\b/i.test(lower)) {
+        return true;
+    }
+
+    // Definitional & Conceptual topics
+    if (/\b(?:definition\s+of|meaning\s+of|what\s+is\s+the\s+definition\s+of|define\s+|difference\s+between|philosophy|ethics|epistemology|metaphysics|stoicism|economics|macroeconomics|inflation|gdp)\b/i.test(lower) ||
+        /^(?:where\s+(?:is|was|are|were)|what\s+(?:is|was|are|were|did)|when\s+(?:is|was|are|were|did)|who\s+(?:is|was|are|were|wrote|built|designed|painted|discovered|invented)|how\s+(?:tall|high|deep|far|long|old|big|much|many|does|do|did|is|was|are|were|to)|why\s+(?:is|was|are|were|did)|explain|define|tell\s+me\s+about)\s+[a-z0-9\s.'-]{2,100}\??$/i.test(lower)) {
+        return true;
+    }
+
+    return false;
 }
 
 const IMAGE_NEGATIVE_REGEX = /\b(?:how\s+(?:to|can\s+i|do\s+(?:i|we|cameras|lenses|computers|eyes))\s+(?:draw|create|make|generate|paint|render)|explain\s+how\b|tell\s+me\s+how\b|tutorial\s+on\b|guide\s+to\b|learn\s+how\s+to\b|chart|graph|diagram|table|conclusion|flowchart|comparison|schema|wireframe|architecture|uml|draw\s+a\s+(?:conclusion|parallel|distinction|comparison|boundary|line\s+between)|(?:paint|paints|painted)\s+a\s+(?:grim|bleak|rosy|clearer)\s+picture|how\s+(?:cameras|lenses|mirrors|eyes|telescopes)\s+form\s+(?:an?\s+)?image|explain\s+image\s+formation)\b/i;
@@ -437,9 +473,8 @@ export function classifyLiveVsNormal(text, context = {}) {
     // Biology "common ancestor"
     const isCommonAncestor = /\b(?:most\s+recent|latest|last)\s+common\s+ancestor\b/i.test(raw);
 
-    // Proper nouns and programming constructs containing "new"
-    const isNewProperNounOrCode = /\b(?:new\s+york|new\s+jersey|new\s+zealand|new\s+delhi|new\s+mexico|new\s+hampshire|new\s+south\s+wales|papua\s+new\s+guinea|new\s+orleans|new\s+england|new\s+deal|new\s+kingdom|new\s+world|new\s+testament|brand\s+new)\b/i.test(raw)
-        || /\b(?:new\s+(?:keyword|operator|instance|object|array|class|promise|map|set|date|error)|operator\s+new)\b/i.test(raw);
+    // Programming constructs containing "new"
+    const isProgrammingNew = /\b(?:new\s+(?:keyword|operator|instance|object|array|class|promise|map|set|date|error|allocation)|operator\s+new)\b/i.test(raw);
 
     // -------------------------------------------------------------------------
     // Positive Signals (Time-Sensitive, Changing & Live Queries)
@@ -467,8 +502,8 @@ export function classifyLiveVsNormal(text, context = {}) {
     // Specific ISO Date (e.g., 2023-03-15)
     const isSpecificDate = /\b\d{4}-\d{2}-\d{2}\b/.test(raw) || /\b(?:as\s+of|on)\s+\d{4}-\d{2}-\d{2}\b/i.test(raw);
 
-    // Financial & Cryptocurrency Markets
-    const isLiveMarket = /\b(?:stock|share|crypto|cryptocurrency|bitcoin|btc|ethereum|eth|solana|gold|silver|crude\s+oil|forex|fx)\s+(?:price|prices|quotes?|value|rate|rates|all-time\s+high|ath|market\s*cap|trading\s+volume)\b|\b(?:price|quote|market\s*cap|exchange\s+rate|market\s+valuation)\s+of\s+(?:bitcoin|btc|eth|ethereum|solana|crypto|cryptocurrency|stocks?|shares?|gold|silver|apple|tesla|nvidia|microsoft|google|amazon|meta|alphabet)\b|\b(?:exchange\s+rate|currency\s+exchange|conversion\s+rate|market\s+valuation|quarterly\s+earnings|earnings\s+report)\b/i.test(raw);
+    // Financial & Cryptocurrency Markets (capability-driven, no hardcoded company names)
+    const isLiveMarket = /\b(?:stock|share|shares|crypto|cryptocurrency|bitcoin|btc|ethereum|eth|solana|gold|silver|crude\s+oil|forex|fx)\s+(?:price|prices|quotes?|value|rate|rates|all-time\s+high|ath|market\s*cap|trading\s+volume)\b|\b(?:market\s*cap|market\s+valuation|stock\s+price|share\s+price|quarterly\s+earnings|earnings\s+report)\s+of\s+[a-zA-Z0-9_.-]+\b|\b(?:price|quote|exchange\s+rate|market\s+valuation)\s+of\s+(?:[a-zA-Z0-9_.-]+\s+)?(?:stock|shares?|equity|crypto|cryptocurrency|coin|token|assets?|gold|silver|bitcoin|btc|eth|ethereum)\b|\b[a-zA-Z0-9_.-]+\s+(?:stock\s+price|market\s*cap)\b|\b(?:exchange\s+rate|currency\s+exchange|conversion\s+rate|market\s+valuation|quarterly\s+earnings|earnings\s+report)\b/i.test(raw);
 
     // Weather & Real-time environmental
     const isLiveWeather = /\b(?:weather|forecast|temperature|humidity|uv\s+index|rain\s+chances?|air\s+quality|aqi)\s+(?:in|for|at|today|now|tomorrow|this\s+week|right\s+now)\b|\b(?:is\s+it\s+raining|will\s+it\s+rain|weather\s+today|weather\s+forecast)\b/i.test(raw);
@@ -496,7 +531,7 @@ export function classifyLiveVsNormal(text, context = {}) {
         (!isPhysicalCurrent && /\b(?:current|currently|presently)\b/i.test(raw))
         || (!isCommonAncestor && /\b(?:latest|newest|recent|recently)\b/i.test(raw))
         || /\b(?:today|tonight|now|right\s+now|as\s+of\s+(?:today|now)|this\s+week|this\s+month|this\s+year)\b/i.test(raw)
-        || (!isNewProperNounOrCode && /\b(?:what'?s\s+new|new\s+features?)\b/i.test(raw))
+        || (!isProgrammingNew && /\b(?:what'?s\s+new|new\s+features?)\b/i.test(raw))
     );
 
     // Local amenities / places open now
@@ -575,8 +610,12 @@ export function classifyLiveVsNormal(text, context = {}) {
     }
 
     const isConceptualOrScience = (
-        /^(?:what\s+is|what\s+are|define|explain|tell\s+me\s+about\s+the\s+concept\s+of)\s+/i.test(raw)
-        && /\b(?:photosynthesis|mitochondria|pythagorean|gravity|calculus|relativity|quantum|evolution|stoicism|democracy|metaphor|alliteration|osmosis|thermodynamics|newton'?s)\b/i.test(raw)
+        /^(?:what\s+is|what\s+are|define|explain|tell\s+me\s+about\s+(?:the\s+concept\s+of\s+)?)\s+[a-zA-Z0-9\s'-]{2,50}$/i.test(raw)
+        && !hasUnneutralizedFreshness
+        && !isLiveMarket
+        && !isLiveNews
+        && !isLiveSports
+        && !isCurrentLeadership
     );
     if (isConceptualOrScience) {
         score -= 0.45;
@@ -584,7 +623,8 @@ export function classifyLiveVsNormal(text, context = {}) {
 
     const isTimelessHistoryOrGeo = (
         /\b(?:capital\s+of|who\s+wrote|who\s+painted|who\s+composed|who\s+invented|who\s+discovered|speed\s+of\s+light|chemical\s+formula\s+of|atomic\s+number)\b/i.test(raw)
-        || /^(?:when\s+was|where\s+was)\s+[a-zA-Z\s]+\s+(?:born|built|founded|written|signed|invented)\b/i.test(raw)
+        || /^(?:when\s+was|where\s+was|who\s+designed|who\s+built|why\s+was|how\s+was|how\s+were)\s+[a-zA-Z\s]+\s+(?:born|built|founded|written|signed|invented|constructed|designed|formed)\b/i.test(raw)
+        || (/\b(?:architecture|sculptural\s+style|engineering|construction\s+date|geological\s+formation|formation\s+of|erosion|composition\s+of)\b/i.test(raw) && /\b(?:temple|monument|tower|pyramid|palace|castle|fort|tomb|statue|cathedral|park|canyon|falls|mountain|ruins)\b/i.test(raw))
     );
     if (isTimelessHistoryOrGeo && !hasUnneutralizedFreshness && !isLiveMarket) {
         score -= 0.45;
@@ -772,19 +812,22 @@ export function classifyQueryShape(text) {
         };
     }
 
-    // Bare entity: short, no interrogative, no command verb
-    // High confidence when: token count ≤ 6 AND (title-cased OR non-Latin)
+    const hasDescriptorOrTopic = /\b(?:song|track|soundtrack|album|lyrics?|movie|film|cinema|architecture|history|construction|date|geology|formation|erosion|definition|meaning|code|array|algorithm)\b/i.test(lower);
+
+    // Bare entity: short, no interrogative, no command verb, no topic/descriptor
+    // High confidence when: token count <= 6 AND (title-cased OR non-Latin)
     const isBareEntity = tokenCount <= 6
         && !hasCommandVerb
         && !hasInterrogative
+        && !hasDescriptorOrTopic
         && (isMostlyNonLatin || titleCaseRatio >= 0.5 || (tokenCount <= 3 && titleCaseRatio > 0));
 
     if (isBareEntity) {
         return { shape: 'entity_bare', entityCandidate: raw, tokenCount, titleCaseRatio, hasQueryVerb: false, hasMediaContext, hasNonLatinScript };
     }
 
-    // Entity with verb (e.g. "iPhone 16 release date", "Tesla stock today")
-    if (tokenCount <= 8 && !hasInterrogative && (titleCaseRatio >= 0.4 || hasNonLatinScript)) {
+    // Entity with verb or descriptor context (e.g. "iPhone 16 release date", "Tesla stock today", "Nenjukkul peidhidum song")
+    if (tokenCount <= 8 && !hasInterrogative && (titleCaseRatio >= 0.4 || hasNonLatinScript || hasMediaContext || hasDescriptorOrTopic)) {
         return { shape: 'entity_with_verb', entityCandidate: null, tokenCount, titleCaseRatio, hasQueryVerb: true, hasMediaContext, hasNonLatinScript };
     }
 
@@ -895,7 +938,7 @@ export function decideFrontendRoute(text, context = {}) {
     //   "Billie Eilish"          → entity_bare     → live_required
     //   "Who sang Nenjukkul Peidhidum?" → entity_question + media → live_required
     // Does NOT affect: "Why?", "Explain photosynthesis", "Hi", "Create an image..."
-    if (!isWebOff) {
+    if (!isWebOff && !isStableGeographyOrGeneralFactQuery(raw, context)) {
         const qShape = classifyQueryShape(raw);
         if (qShape.shape === 'entity_bare') {
             const res = {
@@ -1012,13 +1055,13 @@ export function decideFrontendRoute(text, context = {}) {
         return res;
     }
 
-    if (isMediaOrPopCultureQuery(raw)) {
+    if (isStableGeographyOrGeneralFactQuery(raw, context) || isSimpleStableQuestion(raw, context)) {
         const res = {
             ...base,
-            route: 'chat_direct',
-            reason: 'media_or_pop_culture_entity',
+            route: 'fast_simple',
+            reason: entityIntent.category || 'stable_geography_or_general_fact',
             risk: 'low_risk',
-            minimalThinking: false,
+            minimalThinking: true,
             requiresSources: false,
             sourcePolicy: 'none'
         };
@@ -1028,10 +1071,10 @@ export function decideFrontendRoute(text, context = {}) {
 
     const res = {
         ...base,
-        route: 'fast_simple',
-        reason: entityIntent.category || 'stable_geography_or_general_fact',
+        route: 'chat_direct',
+        reason: 'default_direct_chat',
         risk: 'low_risk',
-        minimalThinking: true,
+        minimalThinking: false,
         requiresSources: false,
         sourcePolicy: 'none'
     };
