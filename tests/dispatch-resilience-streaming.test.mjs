@@ -15,6 +15,10 @@ import {
 } from '../api/_lib/entity-verifier.js';
 import { __test as chatTest } from '../api/chat-groq.js';
 
+function fixtureSubject(label) {
+    return `Subject ${label}`;
+}
+
 console.log('--- Testing API Dispatch Reliability & Routing Resilience (Milestone 3) ---');
 
 // =========================================================================
@@ -423,6 +427,43 @@ console.log('5. Testing SSE event lifecycle and reasoning token emission...');
         globalThis.fetch = originalFetch;
         process.env.GROQ_API_KEY = originalGroqKey;
     }
+}
+
+// =========================================================================
+// 6. Pop-Culture & Media Entity Resilience & Fragment Defense
+// =========================================================================
+console.log('6. Testing pop-culture & media entity routing and truncated fragment defense...');
+
+{
+    const mediaQueries = [
+        'Nenjukkul peidhidum song',
+        'tell me about the song Nenjukkul peidhidum',
+        `${fixtureSubject('Track')} song`,
+        'Interstellar theme soundtrack',
+        'Inception movie'
+    ];
+
+    for (const q of mediaQueries) {
+        const route = decideFrontendRoute(q);
+        assert.equal(route.route, 'chat_direct', `Expected chat_direct for media query "${q}", got ${route.route}`);
+        assert.equal(route.minimalThinking, false, `minimalThinking must be false for media query "${q}"`);
+        assert.equal(route.requiresSources, false, `requiresSources must be false for "${q}"`);
+
+        const complexity = chatTest.classifyQueryComplexity(q, { intent: 'pop_culture_reference' });
+        assert.equal(complexity.tier, 'standard', `Complexity tier must be standard for "${q}"`);
+        assert.equal(complexity.preferSpeed, false, `preferSpeed must be false for "${q}"`);
+
+        const topModels = chatTest.getPreferredGroqCandidates('', { preferSpeed: complexity.preferSpeed, tier: complexity.tier });
+        assert.ok(
+            topModels.indexOf('llama-3.1-8b-instant') > topModels.indexOf('llama-3.3-70b-versatile'),
+            'llama-3.3-70b-versatile must be prioritized over 8b-instant for media entities'
+        );
+
+        const lengthPolicy = chatTest.buildLengthPolicy(q, '', { intent: 'pop_culture_reference' });
+        assert.ok(lengthPolicy.maxTokens >= 8000, `maxTokens must be >= 8000 for "${q}"`);
+    }
+
+    console.log('  [PASS] Pop-culture & media entities reliably route to rich standard-tier models with full token budgets.');
 }
 
 console.log('--- All Milestone 3 API Dispatch & Routing Resilience tests PASSED ---');
