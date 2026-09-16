@@ -154,8 +154,10 @@ function isStableGeographyOrGeneralFactQuery(rawQuery = '') {
     const geographySignals = /\b(?:continent|continents|ocean|oceans|sea|seas|river|rivers|mountain|mountains|mountain\s+range|plateau|desert|island|islands|valley|gulf|bay|strait|peninsula|archipelago|hemisphere|equator|latitude|longitude|tropic\s+of\s+(?:cancer|capricorn)|longest\s+river|highest\s+mountain|deepest\s+ocean|largest\s+desert|largest\s+country|smallest\s+country|currency\s+of|official\s+language\s+of|national\s+animal|national\s+bird|national\s+flower|national\s+anthem|population\s+of|area\s+of|located\s+in|location\s+of|where\s+is\s+.+\s+located|where\s+are\s+.+\s+located)\b/i;
     if (geographySignals.test(lower)) return true;
 
-    const landmarkKnowledge = /\b(?:brihadeeswarar\s+temple|sun\s+temple|taj\s+mahal|eiffel\s+tower|colosseum|pyramids?\s+of\s+giza|angkor\s+wat|machu\s+picchu|stonehenge|parthenon|great\s+wall\s+of\s+china|statue\s+of\s+liberty|yosemite|grand\s+canyon|niagara\s+falls|mount\s+everest|marianas?\s+trench|louvre|central\s+park\s+design)\b/i;
-    if (landmarkKnowledge.test(lower)) return true;
+    const isLandmarkTopic = (
+        /\b(?:architecture|sculptural\s+style|engineering|construction|geological\s+formation|formation\s+of|erosion|composition\s+of|architectural\s+significance)\b/i.test(lower)
+    ) || /^(?:why\s+was|who\s+(?:built|designed|created|founded)|how\s+(?:was|were))\s+[a-z0-9\s.'-]{2,80}\??$/i.test(lower);
+    if (isLandmarkTopic) return true;
 
     const historySignals = /\b(?:history|ancient|medieval|century|empire|dynasty|civilization|battle\s+of|treaty\s+of|revolution|renaissance|archaeology|historical|cold\s+war|french\s+revolution|world\s+war|bronze\s+age|iron\s+age|mesopotamia|byzantine|ottoman|roman\s+empire|indus\s+valley|new\s+deal|new\s+kingdom|fdr|first\s+president\s+of|former\s+president|magna\s+carta|declaration\s+of\s+independence|constitution)\b/i;
     if (historySignals.test(lower)) return true;
