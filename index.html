@@ -7952,15 +7952,12 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
         function extractContextualEntities(query, answer) {
             const text = `${query} ${answer}`;
             const entities = [];
-            const candidates = [
-                "Anthropic", "Claude", "OpenAI", "ChatGPT", "GPT-4", "GPT-4o", "DeepMind", "Gemini",
-                "Groq", "Meta", "Llama", "DeepSeek", "Mistral", "Nvidia", "Apple", "Microsoft", "Google",
-                "Constitutional AI", "RLHF", "Transformer", "RAG", "Vector Database", "Python", "TypeScript",
-                "JavaScript", "React", "Docker", "Kubernetes", "PostgreSQL", "BigQuery", "PyTorch"
-            ];
-            for (const cand of candidates) {
-                if (new RegExp(`\\b${cand}\\b`, "i").test(text) && !entities.includes(cand)) {
-                    entities.push(cand);
+            const matches = text.match(/\b(?:[A-Z][a-z0-9]+(?:\s+[A-Z][a-z0-9]+)+|[A-Z][A-Za-z0-9_.-]{1,15})\b/g) || [];
+            const stopTerms = new Set(['The', 'This', 'That', 'These', 'Those', 'What', 'Where', 'When', 'Who', 'How', 'Why', 'Provide', 'Compare', 'Explain', 'User', 'Assistant']);
+            for (const match of matches) {
+                const clean = match.trim();
+                if (clean.length >= 2 && !stopTerms.has(clean) && !entities.includes(clean)) {
+                    entities.push(clean);
                 }
             }
             return entities;
@@ -7971,7 +7968,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             if (/\b(roast|joke|funny|satire|sarcastic|humor|grandma|meme)\b/i.test(combined)) {
                 return "critique_roast";
             }
-            if (/\b(anthropic|claude|openai|chatgpt|gemini|deepmind|groq|llama|deepseek|model|llm|ai lab|startup)\b/i.test(combined)) {
+            if (/\b(model|models|llm|llms|agent|agents|ai lab|startup|ai ecosystem|reasoning|benchmark)\b/i.test(combined)) {
                 return "ai_ecosystem";
             }
             if (/\b(architecture|distributed|microservices?|monolith|event-driven|cqrs|system design|kubernetes|k8s|scalability|fault tolerance)\b/i.test(combined)) {
@@ -8000,7 +7997,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
 
             let plan = [];
 
-            if (domain === "critique_roast" || (domain === "ai_ecosystem" && /\b(anthropic|claude|openai|constitution)\b/i.test(q + " " + a))) {
+            if (domain === "critique_roast" || (domain === "ai_ecosystem" && /\b(model|llm|ai|alignment|benchmark)\b/i.test(q + " " + a))) {
                 // Highly contextual follow-ups for AI industry critiques and roasts
                 plan = [
                     {
