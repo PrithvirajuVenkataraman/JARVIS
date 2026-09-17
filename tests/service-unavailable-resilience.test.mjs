@@ -218,6 +218,32 @@ assert.ok(indexHtml.includes("document.documentElement.style.setProperty('--inpu
     'ResizeObserver must dynamically update --input-bar-safe-height custom property');
 console.log('  [PASS] 5.2 ResizeObserver observes #input-bar-container and updates --input-bar-safe-height dynamically');
 
+// ---------------------------------------------------------
+// Test 6: Indicator UI Box Elimination & Scrollbar Tracking
+// ---------------------------------------------------------
+console.log('\n--- Section 6: Indicator UI Box Elimination & Scrollbar Tracking ---');
+// 6.1 Eliminate the unnecessary "Analyzing..." box from rendering
+assert.ok(stylesCss.includes('#chat-thinking-indicator {\n    display: none !important;') ||
+          stylesCss.includes('#chat-thinking-indicator {\r\n    display: none !important;') ||
+          stylesCss.includes('display: none !important;\n    opacity: 0 !important;'),
+    '#chat-thinking-indicator must be suppressed with display: none !important');
+console.log('  [PASS] 6.1 Unnecessary "Analyzing..." box hidden completely from the UI');
+
+// 6.2 Scroll-behavior set to auto to prevent scroll animation lag and mid-flight fighting
+assert.ok(stylesCss.includes('scroll-behavior: auto;'),
+    '.chat-main must use scroll-behavior: auto for instantaneous programmatic scrolling');
+console.log('  [PASS] 6.2 Instantaneous programmatic scroll-behavior verified on .chat-main');
+
+// 6.3 Scroll lock does NOT hijack scrollEl.scrollTop
+assert.ok(!indexHtml.includes('scrollEl.scrollTop = lockedScrollTop;'),
+    'initChatScrollLock must never forcefully overwrite scrollEl.scrollTop to lockedScrollTop');
+console.log('  [PASS] 6.3 Scrollbar hijacking and scrollTop overwrite eliminated');
+
+// 6.4 Auto-scroll forced on question submission and feedback button addition
+assert.ok(indexHtml.includes('maybeAutoScroll(chatContainer, true);'),
+    'User message and feedback buttons must force auto-scroll to the bottom');
+console.log('  [PASS] 6.4 Second question and feedback buttons force auto-scroll to reveal content cleanly');
+
 console.log('\n================================================================');
 console.log('=== All Service Unavailable Resilience & Grounding Tests PASSED ===');
 console.log('================================================================\n');
