@@ -393,16 +393,15 @@ async function getInstantFactHelper() {
 
         let orderedList = [];
         if (tier === 'deep') {
-            // Strict User Requirement: Complex queries MUST route strictly to Groq GPT-OSS-120B first
             orderedList = [
                 safeMappedGroq,
                 'openai/gpt-oss-120b',
+                'llama-3.3-70b-versatile',
+                'qwen-2.5-coder-32b',
                 'qwen/qwen3.6-27b',
                 'qwen/qwen3.8-27b',
                 'openai/gpt-oss-20b',
                 safeConfigured,
-                'llama-3.3-70b-versatile',
-                'qwen-2.5-coder-32b',
                 'llama-3.1-8b-instant',
                 ...(includeR1 ? ['deepseek-r1-distill-llama-70b'] : [])
             ];
@@ -412,9 +411,9 @@ async function getInstantFactHelper() {
             orderedList = [
                 nonReasoningMapped,
                 'openai/gpt-oss-20b',
-                'openai/gpt-oss-120b',
                 'llama-3.1-8b-instant',
                 'llama-3.3-70b-versatile',
+                'openai/gpt-oss-120b',
                 'qwen/qwen3.6-27b',
                 'qwen/qwen3.8-27b',
                 safeConfigured
@@ -422,15 +421,15 @@ async function getInstantFactHelper() {
         } else {
             orderedList = [
                 safeMappedGroq,
-                'openai/gpt-oss-120b',
-                'openai/gpt-oss-20b',
                 'llama-3.3-70b-versatile',
                 'llama-3.1-8b-instant',
+                'qwen-2.5-coder-32b',
+                'openai/gpt-oss-120b',
+                'openai/gpt-oss-20b',
                 'qwen/qwen3.6-27b',
                 'qwen/qwen3.8-27b',
                 safeConfigured,
                 'qwen-3.6-27b',
-                'qwen-2.5-coder-32b',
                 ...(includeR1 ? ['deepseek-r1-distill-llama-70b'] : [])
             ];
         }
@@ -1433,7 +1432,11 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 intent,
                 effectiveMessage,
                 userSelectedModel: selectedModel,
-                minimalThinking: options?.minimalThinking === true || (!isExplicitReasoningIntent(intent, effectiveMessage) && !String(selectedModel || '').toLowerCase().includes('r1'))
+                minimalThinking: options?.minimalThinking === true || (!isExplicitReasoningIntent(intent, effectiveMessage) && !String(selectedModel || '').toLowerCase().includes('r1')),
+                onReset: () => {
+                    streamedText = '';
+                    writeSse(res, 'reset', { reason: 'failover' });
+                }
             });
             timing.modelMs += Date.now() - modelStartedAt;
 
@@ -2188,6 +2191,11 @@ const edgeResponseCache = new EdgeSemanticLruCache();
 
             for (const key of keys) {
                 for (const model of groqCandidates) {
+                    let currentModelDeltasEmitted = false;
+                    const perModelDelta = (delta) => {
+                        currentModelDeltasEmitted = true;
+                        onDelta(delta);
+                    };
                     const result = await streamGroqModel({
                         apiKey: key,
                         model,
@@ -2196,12 +2204,15 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                         temperature: temp,
                         maxTokens,
                         timeoutMs: clampInt(lengthPolicy?.timeoutMs, STREAM_MODEL_FETCH_TIMEOUT_MS, 1000, STREAM_MODEL_FETCH_TIMEOUT_MS),
-                        onDelta,
+                        onDelta: perModelDelta,
                         options
                     });
                     if (result.ok) {
                         advanceGroqKeyRotation();
                         return result;
+                    }
+                    if (currentModelDeltasEmitted && typeof options?.onReset === 'function') {
+                        options.onReset();
                     }
                 }
             }
@@ -2216,6 +2227,11 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 ? getPreferredGeminiVisionCandidates(geminiConfiguredModel, userSelectedModel)
                 : getPreferredGeminiCandidates(geminiConfiguredModel, userSelectedModel, { preferSpeed: speedPreferred, tier: routingTier });
             for (const model of geminiCandidates) {
+                let currentModelDeltasEmitted = false;
+                const perModelDelta = (delta) => {
+                    currentModelDeltasEmitted = true;
+                    onDelta(delta);
+                };
                 const result = await streamGeminiModel({
                     apiKey: geminiApiKey,
                     model,
@@ -2224,10 +2240,13 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                     temperature: temp,
                     maxTokens,
                     timeoutMs: clampInt(lengthPolicy?.timeoutMs, STREAM_MODEL_FETCH_TIMEOUT_MS, 1000, STREAM_MODEL_FETCH_TIMEOUT_MS),
-                    onDelta,
+                    onDelta: perModelDelta,
                     options
                 });
                 if (result.ok) return result;
+                if (currentModelDeltasEmitted && typeof options?.onReset === 'function') {
+                    options.onReset();
+                }
             }
             return null;
         };
