@@ -306,6 +306,11 @@ export function createWhisperRecorder(options = {}) {
                     clearTimeout(silenceTimer);
                     silenceTimer = null;
                 }
+                if (audioCtx) {
+                    try { audioCtx.close(); } catch (_) {}
+                    audioCtx = null;
+                    analyser = null;
+                }
 
                 if (audioChunks.length === 0) {
                     onState({ recording: false, processing: false });
