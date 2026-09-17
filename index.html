@@ -2933,7 +2933,7 @@ async function processTranslatorMode(text) {
 // ============ END TRANSLATOR MODE ============
 
 let conversationContext = [];
-async function callAIWithTyping(message, loadingMessage = 'Assistant is thinking...', options = {}) {
+async function callAIWithTyping(message, loadingMessage = 'Analyzing...', options = {}) {
     const currentState = window.JarvisInteractionState?.getState?.();
     const isAlreadyAnalyzingOrSearching = ['ANALYZING', 'SEARCHING', 'GENERATING'].includes(currentState);
     if (!isAlreadyAnalyzingOrSearching) {
@@ -9691,8 +9691,11 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 } else if (replaceTarget) {
                     replaceTarget.replaceWith(messageDiv);
                 } else if (existingThinking && existingThinking.parentNode === chatContainer) {
-                    existingThinking.replaceWith(messageDiv);
-                
+                    if (allowEmptyAssistant) {
+                        chatContainer.insertBefore(messageDiv, existingThinking);
+                    } else {
+                        existingThinking.replaceWith(messageDiv);
+                    }
                 } else {
                     chatContainer.appendChild(messageDiv);
                 }
@@ -14663,9 +14666,9 @@ function isArtistSongRequest(text) {
     if (!hasMusicAsk) return false;
 
     return /\b(songs?\s+(of|by|from)|tracks?\s+(of|by|from))\b/.test(t) ||
-           /\b(recommend|suggest|best|top|latest|new|newest|recent)\b[^?.!]{0,80}\b(song|songs|track|tracks|music|playlist|hit|hits|melody|melodies)\b/.test(t) ||
-           /\b(song|songs|track|tracks|music|playlist|hit|hits|melody|melodies)\b[^?.!]{0,80}\b(recommend|suggest|best|top|latest|new|newest|recent|of|by|from)\b/.test(t) ||
-           /\b[a-z][a-z0-9.'&\-\s]{2,}\s+songs?\b/.test(t);
+           /\b(recommend|suggest|best|top|latest|new|newest|recent|discography)\b[^?.!]{0,80}\b(songs?|tracks?|music|playlist|hits?)\b/.test(t) ||
+           /\b(songs?|tracks?|music|playlist|hits?)\b[^?.!]{0,80}\b(recommend|suggest|best|top|latest|new|newest|recent|of|by|from)\b/.test(t) ||
+           /\b[a-z][a-z0-9.'&\-\s]{2,}\s+songs\b/.test(t);
 }
 
 function isScreenSuggestionRequest(text) {
@@ -20992,6 +20995,10 @@ function isWakeGreetingText(text) {
                 window.JarvisInteractionState?.transition?.('ANALYZING', { metadata: { query: text, plannedRoute: 'live_required' } });
                 showThinkingIndicator('Analyzing...');
                 logLatencyTrace('latency_floor_live', { route: frontendRoute.route });
+            } else if (frontendRoute.route === 'chat_direct') {
+                window.JarvisInteractionState?.transition?.('ANALYZING', { metadata: { query: text, plannedRoute: 'chat_direct' } });
+                showThinkingIndicator('Analyzing...');
+                logLatencyTrace('latency_floor_direct', { route: frontendRoute.route });
             } else if (frontendRoute.route === 'fast_simple' || frontendRoute.minimalThinking) {
                 // Keep the bubble minimal; stream starts immediately.
                 logLatencyTrace('latency_floor_fast', { route: frontendRoute.route });
@@ -21205,7 +21212,7 @@ function isWakeGreetingText(text) {
                     selectedHandler: 'callAIWithTyping',
                     frontendRoute
                 });
-                const aiResponse = await callAIWithTyping(text, 'Assistant is thinking...', {
+                const aiResponse = await callAIWithTyping(text, 'Analyzing...', {
                     directModel: true,
                     stream: true,
                     displayUserMessage: text,
