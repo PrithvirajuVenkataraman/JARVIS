@@ -4313,6 +4313,9 @@ async function publishResolvedModelMessage(userMessage, answerText, options = {}
         if (streamedMessageId) discardStreamingAssistantMessage(streamedMessageId);
         return false;
     }
+    if (label && /fallback/i.test(String(label))) {
+        window.__jarvisServiceUnavailable = true;
+    }
     const messageMeta = {
         routing: options?.routing || null,
         detached: options?.detached === true
@@ -4776,12 +4779,18 @@ async function streamChatCompletion(payload, options = {}) {
     if (!contentType.includes('text/event-stream')) {
         const data = await parseJsonResponseSafely(response);
         if (!response.ok) {
-            throw new Error(String(data?.error?.message || data?.response || 'AI request failed.'));
+            const err = new Error(String(data?.error?.message || data?.response || 'AI request failed.'));
+            err.status = response.status;
+            err.code = data?.error?.code || (response.status === 503 ? 'service_unavailable' : 'request_failed');
+            throw err;
         }
         return data;
     }
     if (!response.ok || !response.body) {
-        throw new Error('Streaming response failed.');
+        const err = new Error('Streaming response failed.');
+        err.status = response.status;
+        if (response.status === 503) err.code = 'service_unavailable';
+        throw err;
     }
 
     const reader = response.body.getReader();
@@ -4862,6 +4871,7 @@ async function streamChatCompletion(payload, options = {}) {
             }
             if (!firstDeltaLogged && accumulated) {
                 firstDeltaLogged = true;
+                window.__jarvisServiceUnavailable = false;
                 window.JarvisInteractionState?.transition?.('GENERATING', {
                     requestId: latencyTrace.requestId || activeResponseRenderContext?.turnId
                 });
@@ -5028,6 +5038,9 @@ async function streamChatCompletion(payload, options = {}) {
         const targetRow = assistantMessageId ? document.getElementById(assistantMessageId) : null;
         if (targetRow) {
             targetRow.__streamFailed = true;
+        }
+        if (error?.code === 'service_unavailable' || error?.code === 'missing_credentials' || error?.status === 503 || /503|service_unavailable|service unavailable/i.test(String(error?.message || ''))) {
+            window.__jarvisServiceUnavailable = true;
         }
         throw error;
     }
@@ -5481,6 +5494,7 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
             data.routeReason = requestOptions.routeDecision.reason || '';
             data.sourcePolicy = requestOptions.routeDecision.sourcePolicy || '';
         }
+        window.__jarvisServiceUnavailable = false;
         return data;
     } catch (error) {
         if (isAbortError(error)) {
@@ -5501,7 +5515,14 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
         const isPermanentProviderFailure = (err) =>
             err?.code === 'missing_credentials' ||
             err?.code === 'service_unavailable' ||
+            err?.status === 503 ||
+            err?.status === 502 ||
+            err?.status === 504 ||
             /temporarily unavailable|missing credentials|service_unavailable|configure your api key/i.test(String(err?.message || ''));
+
+        if (isPermanentProviderFailure(error)) {
+            window.__jarvisServiceUnavailable = true;
+        }
 
         // Direct API Fallback: Only for eligible transient errors (never for missing credentials or service unavailable)
         if (requestOptions?.stream === true && requestPayload && !isAbortError(error) && !isPermanentProviderFailure(error)) {
@@ -25899,6 +25920,7 @@ function buildChatTitlePrompt(messages = []) {
 
 function shouldGenerateModelChatTitle(session) {
     if (!session || session.titleEdited === true || session.autoTitle === false) return false;
+    if (window.__jarvisServiceUnavailable === true) return false;
     const messages = getChatTitleMessages(session.messages);
     const userCount = messages.filter(item => item.role === 'user').length;
     const assistantCount = messages.filter(item => item.role === 'assistant' && !isAssistantErrorOrFallbackText(item.text)).length;
@@ -25909,6 +25931,7 @@ function shouldGenerateModelChatTitle(session) {
 }
 
 async function generateModelChatTitle(session, fallbackTitle = '') {
+    if (window.__jarvisServiceUnavailable === true) return fallbackTitle || '';
     const titleMessages = getChatTitleMessages(session?.messages || []);
     if (!titleMessages.length) return fallbackTitle || '';
     const prompt = buildChatTitlePrompt(session?.messages || []);
@@ -25930,23 +25953,53 @@ async function generateModelChatTitle(session, fallbackTitle = '') {
             return fallbackTitle || '';
         }
         return normalizeGeneratedChatTitle(rawResponse, fallbackTitle);
-    } catch (_) {
+    } catch (err) {
+        if (err?.status === 503 || err?.code === 'service_unavailable' || /503|service unavailable|temporarily unavailable|missing credentials/i.test(String(err?.message || ''))) {
+            window.__jarvisServiceUnavailable = true;
+        }
         return fallbackTitle || '';
     }
 }
 
 function scheduleChatTitleGeneration(session) {
-    if (!shouldGenerateModelChatTitle(session)) return;
     const sequence = ++chatTitleGenerationSequence;
     const sessionId = String(session.id || '');
     const derivedFallback = deriveChatTitleFromMessages(getChatTitleMessages(session.messages));
     const fallbackTitle = (derivedFallback && !isInvalidOrGenericChatTitle(derivedFallback))
         ? derivedFallback
         : (session.title && !isInvalidOrGenericChatTitle(session.title) ? session.title : 'New chat');
+
+    if (window.__jarvisServiceUnavailable === true || !shouldGenerateModelChatTitle(session)) {
+        if (fallbackTitle && isInvalidOrGenericChatTitle(session.title) && session.titleEdited !== true) {
+            session.title = fallbackTitle;
+            session.updatedAt = new Date().toISOString();
+            saveChatSessions();
+            renderChatSidebarList();
+            if (typeof activeChatSessionId !== 'undefined' && activeChatSessionId === sessionId) {
+                const headerTitle = document.getElementById('chat-header-title');
+                if (headerTitle) headerTitle.textContent = fallbackTitle;
+            }
+        }
+        return;
+    }
+
     setTimeout(async () => {
         const latest = chatSessions.find(item => item.id === sessionId && !item.deleted);
         if (!latest || latest.titleEdited === true || latest.autoTitle === false) return;
         if (sequence < chatTitleGenerationSequence - 4) return;
+        if (window.__jarvisServiceUnavailable === true) {
+            if (fallbackTitle && isInvalidOrGenericChatTitle(latest.title) && latest.titleEdited !== true) {
+                latest.title = fallbackTitle;
+                latest.updatedAt = new Date().toISOString();
+                saveChatSessions();
+                renderChatSidebarList();
+                if (typeof activeChatSessionId !== 'undefined' && activeChatSessionId === sessionId) {
+                    const headerTitle = document.getElementById('chat-header-title');
+                    if (headerTitle) headerTitle.textContent = fallbackTitle;
+                }
+            }
+            return;
+        }
         const title = await generateModelChatTitle(latest, fallbackTitle);
         if (!title || isInvalidOrGenericChatTitle(title) || latest.titleEdited === true || latest.autoTitle === false) return;
         latest.title = title;
