@@ -7481,6 +7481,17 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 chatContainer.addEventListener('scroll', handleScroll, { passive: true });
             }
 
+            const inputBar = document.getElementById('input-bar-container');
+            if (inputBar && inputBar.dataset.wheelBound !== '1') {
+                inputBar.dataset.wheelBound = '1';
+                inputBar.addEventListener('wheel', (e) => {
+                    const scrollable = e.target.closest('#composer-attachment-tray, #composer-actions-menu');
+                    if (!scrollable && scrollEl) {
+                        scrollEl.scrollTop += e.deltaY;
+                    }
+                }, { passive: true });
+            }
+
             updateJumpToLatestButton();
         }
 
@@ -7488,7 +7499,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             const target = document.getElementById('chat-main') || chatContainer || document.getElementById('chat-container');
             if (!target) return true;
             const remaining = target.scrollHeight - target.scrollTop - target.clientHeight;
-            return remaining <= 120;
+            return remaining <= 160;
         }
 
         function maybeAutoScroll(chatContainer, force = false) {
