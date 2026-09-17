@@ -13241,7 +13241,8 @@ async function sendTextInput(submission = {}) {
                     turnId: turn.id,
                     attachments: attachmentMeta
                 });
-                maybeAutoScroll(chatContainer, true);
+                const chatContainer = document.getElementById('chat-container');
+                if (chatContainer) maybeAutoScroll(chatContainer, true);
                 requestAnimationFrame(() => {
                     const chatMain = document.getElementById('chat-main');
                     if (chatMain) chatMain.scrollTop = chatMain.scrollHeight;
