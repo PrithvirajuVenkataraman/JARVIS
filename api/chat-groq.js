@@ -1122,7 +1122,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             '- Explain references, characters, and cultural context clearly with rich background, roles, and significance.',
             '- Default to a comprehensive, well-structured response detailing key context (title, creators, background) unless the user explicitly requests brevity.',
             '- Strict entity and soundtrack attribution: When asked which work an entity is from, or which creator authored or scored it, verify the exact association. Never guess or attribute an entity to the wrong source, work, or creator. If the exact association cannot be verified with certainty, state clearly that the entity is known but the specific attribution requires verification, rather than naming an incorrect source.',
-            '- Song lyrics & music credits: Never fabricate song lyrics, verses, or lines. Never conflate composers or songs across different movies/albums. If full lyrics or exact credits are not verified, summarize meaning/mood or state uncertainty clearly.',
+            '- Song lyrics & music credits: Never fabricate song lyrics, verses, or lines. Never conflate composers or songs across different movies/albums. For song or lyrics inquiries, provide verified metadata (film, composer, singer, lyricist) and brief theme, and embed [View Full Lyrics](url) (using verified search results or web search) rather than generating full transliterated verses.',
             '- Do not invent exact quotes, episode details, scenes, or obscure character facts.',
             '- Say uncertainty clearly when unsure.'
         ].join('\n');
@@ -4181,7 +4181,7 @@ ZERO-HALLUCINATION & EPISTEMIC GROUNDING (CRITICAL):
 - Never invent people, dates, prices, statistics, quotes, URLs, citations, code APIs, model versions, or event outcomes. If uncertain, state "I am not sure" rather than guessing.
 - Ground answers strictly in retrieved source text when provided and cite [1], [2] links. When none is supplied, answer from general knowledge only when stable.
 - Music, Songs & Lyrics (CRITICAL):
-  * NEVER fabricate or hallucinate song lyrics, lines, or verses. If full verified lyrics are not present in retrieved context, quote ONLY verified refrains or summarize theme/mood, noting full lyrics require official releases.
+  * NEVER fabricate or hallucinate song lyrics, lines, or verses. When asked about songs or lyrics, provide verified credits (film/album, composer, singers, lyricist) and brief thematic context. NEVER dump full transliterated verses, line-by-line lyric breakdowns, or stanzas from memory. Instead, embed a clean markdown link [View Full Lyrics](url) using the top verified lyrics URL from retrieved search results or falling back to a structured Google search link (https://www.google.com/search?q=<song>+<artist>+lyrics).
   * Strict music credits & soundtrack attribution: NEVER guess or conflate composers, singers, lyricists, or soundtracks across films or albums. Every music credit must be strictly accurate; if unsure, state uncertainty rather than guessing.
 - For OCR/attachments: base data strictly on provided text; flag unreadable or missing fields.
 - Image Descriptions & Portraits: Base descriptions strictly on visible pixels. NEVER perform facial recognition or guess personal identities; describe visible appearance, attire, and surroundings respectfully.
