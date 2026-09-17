@@ -4317,7 +4317,7 @@ async function publishResolvedModelMessage(userMessage, answerText, options = {}
         if (streamedMessageId) discardStreamingAssistantMessage(streamedMessageId);
         return false;
     }
-    if (label && /fallback/i.test(String(label))) {
+    if (options?.isFallback === true || (label && /fallback/i.test(String(label))) || /fallback/i.test(String(options?.routing?.intent || ''))) {
         window.__jarvisServiceUnavailable = true;
     }
     const messageMeta = {
@@ -19468,7 +19468,11 @@ async function publishUniversalModelFallback(pipeline, label = 'Model fallback')
     const ai = await askGeminiAI(pipeline.userText);
     const answer = String(ai?.response || ai?.text || '').trim();
     if (!answer || ai?.aborted || ai?.intent === 'soft_fallback') return false;
-    return await publishResolvedModelMessage(pipeline.userText, answer, { label, routing: ai?.routing || null });
+    return await publishResolvedModelMessage(pipeline.userText, answer, {
+        label: label || 'Model fallback',
+        isFallback: true,
+        routing: ai?.routing || null
+    });
 }
 
 async function fetchHybridCitationSources(userText, intent, controller) {
@@ -25945,9 +25949,8 @@ function shouldGenerateModelChatTitle(session) {
     const messages = getChatTitleMessages(session.messages);
     const userCount = messages.filter(item => item.role === 'user').length;
     const assistantCount = messages.filter(item => item.role === 'assistant' && !isAssistantErrorOrFallbackText(item.text)).length;
-    if (!userCount) return false;
+    if (!userCount || assistantCount < 1) return false;
     if (isInvalidOrGenericChatTitle(session.title)) return true;
-    if (userCount <= 3 && assistantCount >= 1 && messages.length <= 12) return true;
     return false;
 }
 
@@ -25955,6 +25958,8 @@ async function generateModelChatTitle(session, fallbackTitle = '') {
     if (window.__jarvisServiceUnavailable === true) return fallbackTitle || '';
     const titleMessages = getChatTitleMessages(session?.messages || []);
     if (!titleMessages.length) return fallbackTitle || '';
+    const assistantCount = titleMessages.filter(item => item.role === 'assistant' && !isAssistantErrorOrFallbackText(item.text)).length;
+    if (assistantCount < 1) return fallbackTitle || '';
     const prompt = buildChatTitlePrompt(session?.messages || []);
     try {
         const result = await window.JarvisApi?.postJson?.((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
@@ -25975,9 +25980,7 @@ async function generateModelChatTitle(session, fallbackTitle = '') {
         }
         return normalizeGeneratedChatTitle(rawResponse, fallbackTitle);
     } catch (err) {
-        if (err?.status === 503 || err?.code === 'service_unavailable' || /503|service unavailable|temporarily unavailable|missing credentials/i.test(String(err?.message || ''))) {
-            window.__jarvisServiceUnavailable = true;
-        }
+        window.__jarvisServiceUnavailable = true;
         return fallbackTitle || '';
     }
 }
