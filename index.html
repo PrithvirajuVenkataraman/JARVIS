@@ -2608,7 +2608,13 @@ function addFeedbackButtons(query, response, assistantMessageId = '') {
     } else {
         chatContainer.appendChild(feedbackDiv);
     }
-    maybeAutoScroll(chatContainer);
+    if (!autoScrollLocked) {
+        maybeAutoScroll(chatContainer, true);
+        requestAnimationFrame(() => {
+            const chatMain = document.getElementById('chat-main');
+            if (chatMain) chatMain.scrollTop = chatMain.scrollHeight;
+        });
+    }
 }
 
 // ============ END FEEDBACK SYSTEM ============
@@ -7450,63 +7456,19 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             scrollEl.dataset.scrollLockBound = '1';
             if (chatContainer) chatContainer.dataset.scrollLockBound = '1';
 
-            const markUserScrollIntent = () => {
-                userInitiatedScroll = true;
-                if (userScrollIntentTimer) clearTimeout(userScrollIntentTimer);
-                userScrollIntentTimer = setTimeout(() => { userInitiatedScroll = false; }, 180);
-            };
-
-            scrollEl.addEventListener('wheel', markUserScrollIntent, { passive: true });
-            scrollEl.addEventListener('touchstart', markUserScrollIntent, { passive: true });
-            scrollEl.addEventListener('mousedown', markUserScrollIntent);
-            scrollEl.addEventListener('keydown', markUserScrollIntent);
-            if (chatContainer && chatContainer !== scrollEl) {
-                chatContainer.addEventListener('wheel', markUserScrollIntent, { passive: true });
-                chatContainer.addEventListener('touchstart', markUserScrollIntent, { passive: true });
-                chatContainer.addEventListener('mousedown', markUserScrollIntent);
-                chatContainer.addEventListener('keydown', markUserScrollIntent);
-            }
-
             let isScrolling = false;
             const handleScroll = () => {
                 if (isScrolling) return;
                 isScrolling = true;
                 window.requestAnimationFrame(() => {
-                    if (suppressScrollLockHandler) {
-                        isScrolling = false;
-                        return;
-                    }
                     const nearBottom = isChatNearBottom(scrollEl);
                     if (nearBottom) {
                         autoScrollLocked = false;
                         chatUnreadWhileScrolledUp = false;
-                        updateJumpToLatestButton();
+                    } else {
+                        autoScrollLocked = true;
                     }
-
-                    if (userInitiatedScroll) {
-                        autoScrollLocked = !nearBottom;
-                        if (autoScrollLocked) {
-                            lockedScrollTop = scrollEl.scrollTop;
-                        }
-                        updateJumpToLatestButton();
-                        isScrolling = false;
-                        return;
-                    }
-
-                    if (autoScrollLocked && nearBottom) {
-                        suppressScrollLockHandler = true;
-                        scrollEl.scrollTop = lockedScrollTop;
-                        if (chatContainer && chatContainer !== scrollEl) chatContainer.scrollTop = lockedScrollTop;
-                        suppressScrollLockHandler = false;
-                        updateJumpToLatestButton();
-                        isScrolling = false;
-                        return;
-                    }
-
-                    if (autoScrollLocked) {
-                        lockedScrollTop = scrollEl.scrollTop;
-                        updateJumpToLatestButton();
-                    }
+                    updateJumpToLatestButton();
                     isScrolling = false;
                 });
             };
@@ -7520,17 +7482,17 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
         }
 
         function isChatNearBottom(chatContainer) {
-            const target = chatContainer || document.getElementById('chat-main') || document.getElementById('chat-container');
+            const target = document.getElementById('chat-main') || chatContainer || document.getElementById('chat-container');
             if (!target) return true;
             const remaining = target.scrollHeight - target.scrollTop - target.clientHeight;
             return remaining <= 120;
         }
 
-        function maybeAutoScroll(chatContainer) {
+        function maybeAutoScroll(chatContainer, force = false) {
             const chatMain = document.getElementById('chat-main');
             const targetContainer = chatContainer || document.getElementById('chat-container');
             if (!targetContainer && !chatMain) return;
-            if (autoScrollLocked) {
+            if (!force && autoScrollLocked) {
                 chatUnreadWhileScrolledUp = true;
                 updateJumpToLatestButton();
                 return;
@@ -7538,7 +7500,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             if (chatMain) {
                 chatMain.scrollTop = chatMain.scrollHeight;
             }
-            if (targetContainer) {
+            if (targetContainer && targetContainer !== chatMain) {
                 targetContainer.scrollTop = targetContainer.scrollHeight;
             }
             chatUnreadWhileScrolledUp = false;
@@ -7552,8 +7514,12 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             const chatContainer = document.getElementById('chat-container');
             autoScrollLocked = false;
             chatUnreadWhileScrolledUp = false;
-            if (chatMain) chatMain.scrollTop = chatMain.scrollHeight;
-            if (chatContainer) chatContainer.scrollTop = chatContainer.scrollHeight;
+            if (chatMain) {
+                chatMain.scrollTo({ top: chatMain.scrollHeight, behavior: 'smooth' });
+            }
+            if (chatContainer && chatContainer !== chatMain) {
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+            }
             updateJumpToLatestButton();
             const scrollBtn = document.getElementById('scroll-to-bottom-btn');
             if (scrollBtn) scrollBtn.classList.remove('is-visible');
@@ -9943,7 +9909,13 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             } else {
                 chatContainer.appendChild(messageDiv);
             }
-            maybeAutoScroll(chatContainer);
+            maybeAutoScroll(chatContainer, isUser);
+            if (isUser) {
+                requestAnimationFrame(() => {
+                    const chatMain = document.getElementById('chat-main');
+                    if (chatMain) chatMain.scrollTop = chatMain.scrollHeight;
+                });
+            }
             updateChatEmptyStateVisibility();
             if (!meta?.skipRecord) {
                 chatHistory.push({ text: displayText, isUser });
@@ -13268,6 +13240,11 @@ async function sendTextInput(submission = {}) {
                 addChatMessage(displayOutgoingText, true, null, {
                     turnId: turn.id,
                     attachments: attachmentMeta
+                });
+                maybeAutoScroll(chatContainer, true);
+                requestAnimationFrame(() => {
+                    const chatMain = document.getElementById('chat-main');
+                    if (chatMain) chatMain.scrollTop = chatMain.scrollHeight;
                 });
                 refreshComposerAttachmentTray();
 
