@@ -6759,6 +6759,10 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
         window.addEventListener('jarvis:interaction-state', event => {
             const isProc = event.detail?.isProcessing;
             const state = event.detail?.state;
+            const reason = event.detail?.metadata?.reason;
+            if (state === 'IDLE' && reason === 'watchdog_timeout') {
+                stopActiveGeneration('watchdog_timeout');
+            }
             const compShell = document.getElementById('input-bar-inner');
             if (typeof document !== 'undefined' && document.body) {
                 document.body.classList.toggle('is-processing', Boolean(isProc));
@@ -7016,7 +7020,9 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 resetComposerToIdle();
                 return;
             }
-            window.JarvisInteractionState?.transition?.('INTERRUPTED', { metadata: { reason } });
+            if (reason !== 'watchdog_timeout') {
+                window.JarvisInteractionState?.transition?.('INTERRUPTED', { metadata: { reason } });
+            }
             for (const controller of activeRequestControllers) {
                 controller.jarvisAbortReason = reason;
                 if (reason === 'converse_interruption') markTurnInterrupted(controller.jarvisTurnId);
@@ -7052,6 +7058,21 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 if (header && typeof header.setAttribute === 'function') {
                     header.setAttribute('aria-expanded', 'false');
                 }
+                const row = card.closest('.chat-row');
+                if (row) {
+                    if (row.__thinkingTimerInterval) {
+                        clearInterval(row.__thinkingTimerInterval);
+                        row.__thinkingTimerInterval = null;
+                    }
+                    if (row.__streamRafId) {
+                        if (typeof cancelAnimationFrame === 'function') {
+                            cancelAnimationFrame(row.__streamRafId);
+                        } else {
+                            clearTimeout(row.__streamRafId);
+                        }
+                        row.__streamRafId = null;
+                    }
+                }
             });
 
             window.JarvisSpeechInput?.setProcessing?.(false);
@@ -7064,7 +7085,9 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             }
 
             resetAssistantProcessingState();
-            window.JarvisInteractionState?.resetToIdle?.(reason);
+            if (reason !== 'watchdog_timeout') {
+                window.JarvisInteractionState?.resetToIdle?.(reason);
+            }
             toggleSendButton();
             if (reason === 'manual') showTemporaryMessage('Response stopped.');
         }
@@ -7642,13 +7665,14 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             }
         }
 
-        function renderAssistantMarkdown(rawText, linkClass = 'assistant-link') {
+        function renderAssistantMarkdown(rawText, linkClass = 'assistant-link', options = {}) {
             const text = String(rawText ?? '');
             if (!text.trim()) return '';
 
             if (globalThis.JarvisMarkdownRenderer?.renderMarkdown) {
                 let rendered = globalThis.JarvisMarkdownRenderer.renderMarkdown(text, { linkClass });
-                if (window.JarvisScienceFormat?.enhanceHtml) {
+                // Skip heavy TreeWalker DOM enhancement during active streaming to prevent detached DOM heap thrashing
+                if (options?.streaming !== true && window.JarvisScienceFormat?.enhanceHtml) {
                     rendered = window.JarvisScienceFormat.enhanceHtml(rendered);
                 }
                 return rendered;
@@ -9856,7 +9880,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             const rawAnswer = String(presentation.answerText || '');
             const cleanTextForDisplay = stripStreamedImageTags(rawAnswer);
             const readableText = formatAssistantTextForReadability(normalizeAssistantTextStyle(cleanTextForDisplay));
-            const formatted = sanitizeAssistantMarkup(renderAssistantMarkdown(readableText, linkClass));
+            const formatted = sanitizeAssistantMarkup(renderAssistantMarkdown(readableText, linkClass, options));
             textElement.classList.toggle('is-streaming', options?.streaming === true);
             textElement.innerHTML = formatted;
             if (!cleanTextForDisplay && /:::image\[/i.test(rawAnswer)) {
@@ -10020,7 +10044,28 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 ? String(text || '').replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/^<think>[\s\S]*$/gi, '').replace(/<\/?think>/gi, '').trim()
                 : '';
             const textToRender = cleanAnswer || (isMinimalThinking ? strippedMinimal : (isThinkingStream || thoughtText ? '' : text));
-            renderAssistantTextIntoElement(textElement, textToRender, { streaming: meta?.streaming === true, meta });
+            const isStreaming = meta?.streaming === true;
+            if (isStreaming) {
+                row.__pendingStreamText = textToRender;
+                row.__pendingStreamMeta = meta;
+                if (!row.__streamRafId) {
+                    const rafFn = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : (cb => setTimeout(cb, 30));
+                    row.__streamRafId = rafFn(() => {
+                        row.__streamRafId = null;
+                        renderAssistantTextIntoElement(textElement, row.__pendingStreamText, { streaming: true, meta: row.__pendingStreamMeta });
+                    });
+                }
+            } else {
+                if (row.__streamRafId) {
+                    if (typeof cancelAnimationFrame === 'function') {
+                        cancelAnimationFrame(row.__streamRafId);
+                    } else {
+                        clearTimeout(row.__streamRafId);
+                    }
+                    row.__streamRafId = null;
+                }
+                renderAssistantTextIntoElement(textElement, textToRender, { streaming: false, meta });
+            }
 
             try {
                 const actionRow = row.querySelector('.assistant-action-row');
@@ -10216,7 +10261,21 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             }
             assistantMessageMeta.delete(id);
             const row = findAssistantMessageRow(id);
-            if (row?.parentNode) row.parentNode.removeChild(row);
+            if (row) {
+                if (row.__thinkingTimerInterval) {
+                    clearInterval(row.__thinkingTimerInterval);
+                    row.__thinkingTimerInterval = null;
+                }
+                if (row.__streamRafId) {
+                    if (typeof cancelAnimationFrame === 'function') {
+                        cancelAnimationFrame(row.__streamRafId);
+                    } else {
+                        clearTimeout(row.__streamRafId);
+                    }
+                    row.__streamRafId = null;
+                }
+                if (row.parentNode) row.parentNode.removeChild(row);
+            }
         }
 
         function escapeHtml(text) {
