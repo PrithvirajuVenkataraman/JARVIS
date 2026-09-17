@@ -259,21 +259,13 @@ async function getInstantFactHelper() {
     const REASONING_TOKEN_ALLOWANCE = 4096;
     const CHAT_ROUTER_MODE = String(process.env.CHAT_ROUTER_MODE || 'strict_single_pass').trim().toLowerCase();
     const USER_SELECTABLE_MODELS = new Set([
-        'openai/gpt-oss-120b',
-        'openai/gpt-oss-20b',
-        'qwen/qwen3.6-27b',
-        'qwen-3.6-27b',
-        'qwen/qwen3.8-27b',
-        'qwen-3.8-27b',
-        'llama-3.1-8b-instant',
-        'llama-3.3-70b-versatile',
-        'deepseek-r1-distill-llama-70b',
         'qwen-2.5-coder-32b',
+        'gemma2-9b-it',
+        'deepseek-r1-distill-qwen-32b',
         'gemini-3.7-flash',
         'gemini-2.5-pro',
         'gemini-2.5-flash',
-        'llama-3.2-11b-vision-preview',
-        'meta-llama/llama-3.2-11b-vision-instruct'
+        'gemini-2.0-flash'
     ]);
     const USER_SELECTABLE_GROQ_MODELS = USER_SELECTABLE_MODELS;
     let __groqKeyRotationIdx = 0;
@@ -392,49 +384,34 @@ async function getInstantFactHelper() {
         const safeMappedGroq = (!includeR1 && isNativeReasoningModel(mappedGroq)) ? '' : mappedGroq;
 
         let orderedList = [];
-        if (tier === 'deep') {
+        if (tier === 'deep' || includeR1) {
             orderedList = [
                 safeMappedGroq,
-                'openai/gpt-oss-120b',
+                'deepseek-r1-distill-qwen-32b',
                 'qwen-2.5-coder-32b',
-                'qwen/qwen3.6-27b',
-                'qwen/qwen3.8-27b',
-                'openai/gpt-oss-20b',
+                'gemma2-9b-it',
                 safeConfigured
             ];
         } else if (preferSpeed || tier === 'instant') {
-            // Instant Tier: Sub-200ms TTFT and >200 tokens/sec
             const nonReasoningMapped = isNativeReasoningModel(mappedGroq) ? '' : mappedGroq;
             orderedList = [
                 nonReasoningMapped,
-                'openai/gpt-oss-20b',
                 'qwen-2.5-coder-32b',
-                'openai/gpt-oss-120b',
-                'qwen/qwen3.6-27b',
-                'qwen/qwen3.8-27b',
+                'gemma2-9b-it',
                 safeConfigured
             ];
         } else {
             orderedList = [
                 safeMappedGroq,
                 'qwen-2.5-coder-32b',
-                'qwen/qwen3.6-27b',
-                'qwen/qwen3.8-27b',
-                'openai/gpt-oss-120b',
-                'openai/gpt-oss-20b',
-                safeConfigured,
-                'qwen-3.6-27b'
+                'gemma2-9b-it',
+                safeConfigured
             ];
         }
         return [...new Set(orderedList.filter(Boolean).filter(m => !m.toLowerCase().includes('llama')))];
     }
 
-    const KNOWN_GROQ_VISION_MODELS = new Set([
-        'qwen/qwen3.6-27b',
-        'qwen/qwen3.8-27b',
-        'qwen-3.6-27b',
-        'qwen-3.8-27b'
-    ]);
+    const KNOWN_GROQ_VISION_MODELS = new Set([]);
 
     function getPreferredGroqVisionCandidates(configuredModel = '', userSelectedModel = null) {
         const configured = KNOWN_GROQ_VISION_MODELS.has(String(configuredModel || '').trim())
@@ -443,12 +420,7 @@ async function getInstantFactHelper() {
         const userSelected = KNOWN_GROQ_VISION_MODELS.has(String(userSelectedModel || '').trim())
             ? String(userSelectedModel || '').trim()
             : '';
-        const visionModels = [
-            'qwen/qwen3.6-27b',
-            'qwen/qwen3.8-27b',
-            'qwen-3.6-27b',
-            'qwen-3.8-27b'
-        ];
+        const visionModels = [];
         return [...new Set([userSelected, configured, ...visionModels].filter(Boolean).filter(m => !m.toLowerCase().includes('llama')))];
     }
 
@@ -458,9 +430,9 @@ async function getInstantFactHelper() {
         let mappedGemini = '';
         if (userSelected.startsWith('gemini-')) {
             mappedGemini = userSelected;
-        } else if (['openai/gpt-oss-120b', 'llama-3.3-70b-versatile', 'deepseek-r1-distill-llama-70b', 'qwen-2.5-coder-32b'].includes(userSelected)) {
+        } else if (['deepseek-r1-distill-qwen-32b', 'qwen-2.5-coder-32b'].includes(userSelected)) {
             mappedGemini = 'gemini-2.5-pro';
-        } else if (['openai/gpt-oss-20b', 'llama-3.1-8b-instant'].includes(userSelected)) {
+        } else if (['gemma2-9b-it'].includes(userSelected)) {
             mappedGemini = 'gemini-3.7-flash';
         }
 
@@ -1845,7 +1817,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
         const groqApiKey = process.env.GROQ_API_KEY || process.env.GROQ_KEY;
         if (!groqApiKey) return { blocked: false };
 
-        const model = String(process.env.GROQ_SAFETY_MODEL || 'openai/gpt-oss-safeguard-20b').trim();
+        const model = String(process.env.GROQ_SAFETY_MODEL || 'qwen-2.5-coder-32b').trim();
         const userMessage = String(message || '').trim();
         if (!userMessage) return { blocked: false };
 
@@ -1963,9 +1935,9 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                         max_tokens: maxTokens,
                         messages
                     };
-                    if (['openai/gpt-oss-120b', 'openai/gpt-oss-20b'].includes(model) && isSqlQueryGenerationRequest(finalPrompt)) {
+                    if (isSqlQueryGenerationRequest(finalPrompt)) {
                         requestBody.response_format = SQL_QUERY_GENERATION_SCHEMA;
-                    } else if (['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'openai/gpt-oss-safeguard-20b'].includes(model) && (hasStructuredOutputConstraint(options?.systemPrompt || '', finalPrompt) || options?.response_format)) {
+                    } else if (hasStructuredOutputConstraint(options?.systemPrompt || '', finalPrompt) || options?.response_format) {
                         requestBody.response_format = { type: 'json_object' };
                     }
                     if (supportsGroqReasoningFormat(model)) {
@@ -2178,8 +2150,12 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 ? getPreferredGroqVisionCandidates(groqConfiguredModel, userSelectedModel)
                 : getPreferredGroqCandidates(groqConfiguredModel, { preferSpeed: speedPreferred, tier: routingTier, userSelectedModel, isReasoningQuery });
 
+            let groqAttempts = 0;
+            const maxGroqAttempts = 2;
             for (const key of keys) {
                 for (const model of groqCandidates) {
+                    if (groqAttempts >= maxGroqAttempts) break;
+                    groqAttempts++;
                     let currentModelDeltasEmitted = false;
                     const perModelDelta = (delta) => {
                         currentModelDeltasEmitted = true;
@@ -2204,6 +2180,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                         options.onReset();
                     }
                 }
+                if (groqAttempts >= maxGroqAttempts) break;
             }
             return null;
         };
@@ -4666,6 +4643,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
         runModelWithFallback,
         classifyQueryComplexity,
         getPreferredGroqCandidates,
+        getPreferredGroqVisionCandidates,
         getPreferredGeminiCandidates
     };
 
