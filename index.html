@@ -783,10 +783,8 @@ function isCurrentLocationIntentText(text) {
     return /\b(where\s+am\s+i|where\s+m\s+i|wheres\s+am\s+i|whereami|where\s+i\s+am(?:\s+right\s+now)?|where\s+am\s+i\s+now|what\s+is\s+my\s+(?:exact\s+)?location|what'?s\s+my\s+(?:exact\s+)?location|my\s+current\s+location|current\s+location|find\s+my\s+location|locate\s+me|my\s+coordinates?|current\s+coordinates?|my\s+gps|where'?s\s+my\s+location|pin\s+my\s+location|latitude|longitude|coords?)\b/.test(t);
 }
 
-function isTamilJokeRequest(text) {
-    const t = String(text || '').toLowerCase();
-    if (!/\bjoke|funny|laugh\b/.test(t)) return false;
-    return /\btamil\b|\u0ba4\u0bae\u0bbf\u0bb4\u0bcd/.test(t);
+function isTamilJokeRequest(_text) {
+    return false;
 }
 
 function isSeriesReferenceJokeRequest(text) {
@@ -2936,11 +2934,15 @@ async function processTranslatorMode(text) {
 
 let conversationContext = [];
 async function callAIWithTyping(message, loadingMessage = 'Assistant is thinking...', options = {}) {
-    if (options?.minimalThinking === true) {
-        const label = String(loadingMessage || 'Thinking').trim();
-        if (label) showThinkingIndicator(label);
-    } else {
-        showThinkingIndicator(loadingMessage);
+    const currentState = window.JarvisInteractionState?.getState?.();
+    const isAlreadyAnalyzingOrSearching = ['ANALYZING', 'SEARCHING', 'GENERATING'].includes(currentState);
+    if (!isAlreadyAnalyzingOrSearching) {
+        if (options?.minimalThinking === true) {
+            const label = String(loadingMessage || 'Thinking').trim();
+            if (label) showThinkingIndicator(label);
+        } else {
+            showThinkingIndicator(loadingMessage);
+        }
     }
     try {
         const useDirectModel = Boolean(options?.directModel);
@@ -3076,6 +3078,22 @@ async function processUserQuery(text, options = {}) {
         });
     }
     if (activeWebMode === 'off') {
+        return await askGeminiAI(t, {
+            stream: options?.stream === true,
+            displayUserMessage: options?.displayUserMessage || t,
+            routeDecision: frontendRoute
+        });
+    }
+    if (frontendRoute.route === 'live_required' && isFactSearchEnabled()) {
+        logRoutingDebug('processUserQuery -> authoritative live_required', t, { frontendRoute });
+        const handled = await handleLiveRetrievalQuery(t, {
+            routeDecision: frontendRoute,
+            broadFactualWeb: true
+        });
+        if (handled) return { intent: 'live_retrieval' };
+    }
+    if (frontendRoute.route === 'chat_direct') {
+        logRoutingDebug('processUserQuery -> authoritative chat_direct', t, { frontendRoute });
         return await askGeminiAI(t, {
             stream: options?.stream === true,
             displayUserMessage: options?.displayUserMessage || t,
@@ -4852,6 +4870,18 @@ async function streamChatCompletion(payload, options = {}) {
                 failover: streamMeta.failover || false,
                 route: options?.routeDecision?.route || '',
                 minimalThinking: options?.routeDecision?.minimalThinking === true || options?.routeDecision?.route === 'fast_simple'
+            });
+            return;
+        }
+        if (event.event === 'reset') {
+            accumulated = '';
+            firstDeltaLogged = false;
+            tokenChunkCount = 0;
+            const id = ensureStreamMessage();
+            updateStreamingAssistantMessage(id, '', {
+                userMessage,
+                streaming: true,
+                reset: true
             });
             return;
         }
@@ -6854,6 +6884,13 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 (activeConverseUtterances && activeConverseUtterances.size > 0);
         }
 
+        function getActiveSpokenText() {
+            const currentSegment = activeConverseSpeechUtterance?.text || '';
+            const spoken = (streamingConverseSpeech?.spokenSegments || []).slice(-3).join(' ');
+            return `${spoken} ${currentSegment}`.toLowerCase().trim();
+        }
+        globalThis.getActiveSpokenText = getActiveSpokenText;
+
         function stopConverseSpeech(reason = 'interrupted') {
             if (streamingConverseSpeech?.active || activeConverseSpeechRun || isConverseSpeechActive()) {
                 const remainingSegments = [...(streamingConverseSpeech?.queue || [])];
@@ -6886,6 +6923,10 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 window.speechSynthesis?.cancel?.();
             } catch (e) {}
             setConverseUiState('listening', reason);
+            const continueConverse = window.JarvisSpeechInput?.getState?.().converseEnabled === true;
+            if (window.JarvisInteractionState?.getState?.() === 'SPEAKING') {
+                window.JarvisInteractionState?.transition?.(continueConverse ? 'LISTENING' : 'IDLE');
+            }
         }
 
         function toggleVoiceToText() {
@@ -10892,6 +10933,8 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                     activeConverseSpeechRun = null;
                     setConverseUiState('listening', `speech_blocked:${String(event?.error || 'unknown')}`);
                     logLatencyTrace('speech_blocked', { stage: 'synthesis', error: String(event?.error || 'unknown') });
+                    const continueConverse = window.JarvisSpeechInput?.getState?.().converseEnabled === true;
+                    window.JarvisInteractionState?.transition?.(continueConverse ? 'LISTENING' : 'IDLE');
                     window.JarvisSpeechInput?.resumeListening?.();
                     showConverseSpeechUnlockPrompt();
                 };
@@ -12953,6 +12996,7 @@ async function sendTextInput(submission = {}) {
                     stopActiveGeneration();
                     return;
                 }
+                stopActiveGeneration('superseded');
             }
             if (text || pendingAttachments.length) {
                 if (handleLocalVoiceCommand(text, inputSource)) {
@@ -16998,7 +17042,7 @@ function isBroadFactualWebQuery(text, entityIntent = null, liveIntent = null) {
 
     const lower = raw.toLowerCase();
     if (isInappropriateContent(raw)) return false;
-    if (isRecipeRequest(raw) || isGeneralJokeRequest(raw) || isSeriesReferenceJokeRequest(raw) || isTamilJokeRequest(raw)) return false;
+    if (isRecipeRequest(raw) || isGeneralJokeRequest(raw) || isSeriesReferenceJokeRequest(raw)) return false;
     if (isWeatherIntentText(raw) || isCurrentLocationIntentText(raw)) return false;
     if (isMathCalculationRequest(raw) || isStepByStepMathRequest(raw)) return false;
     if (isMedicalEmergencyIntent(raw) || isMedicalAdviceIntent(raw) || isMentalHealthConversation(raw)) return false;
@@ -20109,7 +20153,9 @@ async function handleLiveRetrievalQuery(userText, options = {}) {
     showThinkingIndicator('Analyzing...');
     const controller = beginAbortableRequest();
     const verificationBudgetMs = 3500;
+    let didBudgetTimeout = false;
     const budgetTimer = setTimeout(() => {
+        didBudgetTimeout = true;
         try { controller.abort(); } catch (_) {}
     }, verificationBudgetMs);
 
@@ -20139,11 +20185,17 @@ async function handleLiveRetrievalQuery(userText, options = {}) {
                 factType: intent.factType || '',
                 mustContain: getLiveSearchMustContainHints(intent, query)
             });
+            clearTimeout(budgetTimer);
         } catch (searchErr) {
-            if (isAbortError(searchErr)) throw searchErr;
-            logRoutingDebug('handler fallback: live_search_error', query, {
-                error: String(searchErr?.message || searchErr)
-            });
+            clearTimeout(budgetTimer);
+            if (isAbortError(searchErr)) {
+                if (!didBudgetTimeout) throw searchErr;
+                logRoutingDebug('handler fallback: search_timeout_reached', query, {});
+            } else {
+                logRoutingDebug('handler fallback: live_search_error', query, {
+                    error: String(searchErr?.message || searchErr)
+                });
+            }
         }
 
         const directAnswer = cleanLiveAnswerText(String(answerData?.answer || '').trim());
@@ -21133,6 +21185,46 @@ function isWakeGreetingText(text) {
                 });
                 const handled = await handleFastExplainerQuery(cleanText, text);
                 if (handled) return;
+            }
+
+            // Authoritative semantic frontend route dispatch (Phase 10)
+            if (frontendRoute?.route === 'live_required' && isFactSearchEnabled()) {
+                logRoutingDebug('processCommand -> authoritative live_required', cleanText, {
+                    selectedHandler: 'handleLiveRetrievalQuery',
+                    frontendRoute
+                });
+                const handled = await handleLiveRetrievalQuery(cleanText, {
+                    routeDecision: frontendRoute,
+                    broadFactualWeb: true
+                });
+                if (handled) return;
+            }
+
+            if (frontendRoute?.route === 'chat_direct') {
+                logRoutingDebug('processCommand -> authoritative chat_direct', cleanText, {
+                    selectedHandler: 'callAIWithTyping',
+                    frontendRoute
+                });
+                const aiResponse = await callAIWithTyping(text, 'Assistant is thinking...', {
+                    directModel: true,
+                    stream: true,
+                    displayUserMessage: text,
+                    routingMessage: text,
+                    routeDecision: frontendRoute
+                });
+                if (aiResponse?.aborted) return;
+                const isStreamed = Boolean(aiResponse?.streamedToChat || aiResponse?.assistantMessageId);
+                const rawStreamed = String(aiResponse?.response || aiResponse?.text || '').trim();
+                const finalizedResponse = isStreamed
+                    ? rawStreamed
+                    : await resolveFinalAssistantAnswer(text, rawStreamed);
+                await publishResolvedModelMessage(text, finalizedResponse, {
+                    label: 'Model answer',
+                    routing: aiResponse?.routing || null,
+                    existingAssistantMessageId: aiResponse?.assistantMessageId || '',
+                    fastFinalizeStreamed: true
+                });
+                return;
             }
 
             const classification = classifyUserMessage(cleanText);
