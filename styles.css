@@ -118,12 +118,12 @@ body {
    ========================================================================== */
 * {
     scrollbar-width: thin;
-    scrollbar-color: rgba(148, 163, 184, 0.28) transparent;
+    scrollbar-color: rgba(148, 163, 184, 0.45) transparent;
 }
 
 ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 8px;
+    height: 8px;
 }
 
 ::-webkit-scrollbar-track {
@@ -131,7 +131,7 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-    background: rgba(148, 163, 184, 0.28);
+    background: rgba(148, 163, 184, 0.45);
     border-radius: 9999px;
     border: 1px solid transparent;
     background-clip: padding-box;
@@ -139,7 +139,7 @@ body {
 }
 
 ::-webkit-scrollbar-thumb:hover {
-    background: rgba(56, 189, 248, 0.65);
+    background: rgba(56, 189, 248, 0.75);
     box-shadow: 0 0 8px rgba(56, 189, 248, 0.5);
 }
 
@@ -1129,6 +1129,18 @@ option {
     margin: 0 auto;
     padding: 0 var(--app-gutter-x);
     box-sizing: border-box;
+    pointer-events: none;
+}
+
+.composer-wrap > * {
+    pointer-events: auto;
+}
+
+.composer-disclaimer {
+    pointer-events: none;
+}
+
+.composer-disclaimer a {
     pointer-events: auto;
 }
 
@@ -7752,10 +7764,34 @@ body:not(.dark) .next-step-title {
     flex-direction: column;
     -webkit-overflow-scrolling: touch;
     scroll-padding-bottom: calc(var(--input-bar-safe-height) + 24px + env(safe-area-inset-bottom));
+    scrollbar-width: thin;
+    scrollbar-color: rgba(148, 163, 184, 0.48) transparent;
+}
+
+.chat-main::-webkit-scrollbar {
+    width: 8px;
+}
+
+.chat-main::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.chat-main::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.48);
+    border-radius: 9999px;
+    border: 1px solid transparent;
+    background-clip: padding-box;
+    transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.chat-main::-webkit-scrollbar-thumb:hover {
+    background: rgba(56, 189, 248, 0.8);
+    box-shadow: 0 0 8px rgba(56, 189, 248, 0.5);
 }
 
 .chat-center-column {
     min-height: 100%;
+    flex-shrink: 0 !important;
     display: flex;
     flex-direction: column;
     justify-content: flex-start;
@@ -7765,7 +7801,7 @@ body:not(.dark) .next-step-title {
 /* Empty State Hero */
 .feedback-container {
     margin-top: 10px !important;
-    margin-bottom: 18px !important;
+    margin-bottom: 24px !important;
     position: relative;
     z-index: 10;
 }
@@ -7935,7 +7971,7 @@ body:not(.dark) .next-step-title {
     max-width: 48rem;
     margin: 0 auto;
     width: 100%;
-    pointer-events: auto;
+    pointer-events: none;
 }
 
 .composer-shell.modern-input {
@@ -8139,6 +8175,7 @@ body:not(.dark) .next-step-title {
     /* Tablet Chat Center Column: Fluid, readable reading line with safe area insets */
     .chat-center-column {
         max-width: min(840px, calc(100% - 36px)) !important;
+        flex-shrink: 0 !important;
         padding-left: max(20px, env(safe-area-inset-left)) !important;
         padding-right: max(20px, env(safe-area-inset-right)) !important;
         padding-bottom: calc(var(--input-bar-safe-height) + 32px + env(safe-area-inset-bottom)) !important;
