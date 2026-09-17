@@ -79,6 +79,18 @@ if (origGoogleKey) process.env.GOOGLE_API_KEY = origGoogleKey; else delete proce
 
 console.log('  [PASS] 2.1 Error classification accurately separates missing_credentials from service_unavailable');
 
+// 2.2 Gemini Thinking Config Schema & Model Compatibility
+const chatGroqSrc = fs.readFileSync(path.resolve('api/chat-groq.js'), 'utf8');
+assert.ok(!chatGroqSrc.includes('thinking_config'), 'thinking_config snake_case must not exist in api/chat-groq.js');
+assert.ok(chatGroqSrc.includes('supportsGeminiThinking(model)'), 'thinkingConfig must only be configured for supported thinking models');
+assert.equal(chatTest.supportsGeminiThinking('gemini-2.5-flash-lite'), false, 'flash-lite must not be flagged as thinking model');
+assert.equal(chatTest.supportsGeminiThinking('gemini-2.5-flash'), false, 'flash must not be flagged as thinking model');
+assert.equal(chatTest.supportsGeminiThinking('gemini-2.0-flash'), false, '2.0 flash must not be flagged as thinking model');
+assert.equal(chatTest.supportsGeminiThinking('gemini-2.5-pro'), true, '2.5-pro must be flagged as thinking model');
+assert.equal(chatTest.supportsGeminiThinking('gemini-3.7-flash'), true, '3.7-flash must be flagged as thinking model');
+assert.equal(chatTest.supportsGeminiThinking('gemini-2.5-flash-thinking'), true, 'flash-thinking must be flagged as thinking model');
+console.log('  [PASS] 2.2 Gemini thinking config guards against unsupported models and invalid snake_case');
+
 // ---------------------------------------------------------
 // Test 3: Music, Song & Lyrics Grounding (Hallucination Prevention)
 // ---------------------------------------------------------
@@ -176,6 +188,12 @@ assert.ok(indexHtml.includes("if (window.__jarvisServiceUnavailable === true) re
     'generateModelChatTitle must bypass network call when service is unavailable');
 assert.ok(indexHtml.includes('window.__jarvisServiceUnavailable === true || !shouldGenerateModelChatTitle(session)'),
     'scheduleChatTitleGeneration must immediately apply local fallback title during service unavailability');
+assert.ok(indexHtml.includes('!userCount || assistantCount < 1'),
+    'shouldGenerateModelChatTitle must require at least 1 valid assistant reply before calling title generation');
+assert.ok(indexHtml.includes('assistantCount < 1) return fallbackTitle'),
+    'generateModelChatTitle must verify assistantCount >= 1 before issuing network request');
+assert.ok(indexHtml.includes('isFallback: true'),
+    'publishUniversalModelFallback must pass isFallback: true to mark service unavailable');
 console.log('  [PASS] 4.5 Background chat title generation suppressed during service outages (zero 503 console errors)');
 
 // ---------------------------------------------------------
