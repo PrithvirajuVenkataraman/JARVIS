@@ -5135,6 +5135,61 @@ body:not(.dark) .agent-dag-pill.is-completed {
     overflow: hidden;
 }
 
+/* ==========================================================================
+   Synthesizing Response Blinker Animation
+   Sleek glowing dot / typing blinker that pulses while awaiting LLM synthesis
+   ========================================================================== */
+#chat-synthesizing-blinker {
+    margin: 8px 0 12px 4px;
+    padding: 0;
+    transition: opacity 0.15s cubic-bezier(0.4, 0, 0.2, 1), transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+    will-change: opacity, transform;
+}
+
+#chat-synthesizing-blinker.chat-synthesizing-blinker-leaving {
+    opacity: 0 !important;
+    transform: scale(0.85);
+    pointer-events: none;
+}
+
+.synthesizing-blinker-wrapper {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px 4px;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+}
+
+.synthesizing-blinker-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: #38bdf8;
+    box-shadow: 0 0 10px rgba(56, 189, 248, 0.85), 0 0 4px rgba(56, 189, 248, 0.5);
+    animation: synthesizingBlinkerPulse 0.85s ease-in-out infinite;
+    display: inline-block;
+}
+
+body:not(.dark) .synthesizing-blinker-dot {
+    background-color: #0284c7;
+    box-shadow: 0 0 8px rgba(2, 132, 199, 0.6);
+}
+
+@keyframes synthesizingBlinkerPulse {
+    0%, 100% {
+        opacity: 0.22;
+        transform: scale(0.75);
+        box-shadow: 0 0 3px rgba(56, 189, 248, 0.25);
+    }
+    50% {
+        opacity: 1;
+        transform: scale(1.25);
+        box-shadow: 0 0 12px rgba(56, 189, 248, 0.95), 0 0 5px rgba(56, 189, 248, 0.65);
+    }
+}
+
 @keyframes assistantBubbleEnter {
     from {
         opacity: 0;
