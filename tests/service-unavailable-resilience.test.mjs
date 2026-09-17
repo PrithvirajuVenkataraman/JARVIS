@@ -123,9 +123,12 @@ assert.ok(systemPrompt.includes('Music, Songs & Lyrics (CRITICAL):'), 'System pr
 assert.ok(systemPrompt.includes('NEVER fabricate or hallucinate song lyrics'), 'System prompt must forbid lyrics hallucination');
 assert.ok(systemPrompt.includes('Strict music credits & soundtrack attribution'), 'System prompt must require strict composer attribution');
 assert.ok(systemPrompt.includes('NEVER guess or conflate composers'), 'System prompt must explicitly forbid cross-movie composer conflation');
+assert.ok(systemPrompt.includes('[View Full Lyrics](url)'), 'System prompt must instruct embedding a [View Full Lyrics](url) link');
+assert.ok(systemPrompt.includes('NEVER dump full transliterated verses'), 'System prompt must forbid dumping full transliterated verses');
 
 const popCultureHint = chatTest.buildIntentPromptHint('pop_culture_reference');
 assert.ok(popCultureHint.includes('Song lyrics & music credits: Never fabricate song lyrics'), 'Pop culture hint must reinforce lyrics grounding');
+assert.ok(popCultureHint.includes('[View Full Lyrics](url)'), 'Pop culture hint must instruct embedding [View Full Lyrics](url) link');
 console.log('  [PASS] 3.3 System prompt and pop_culture_reference include strict epistemic directives for music & lyrics');
 
 // 3.5 Routing of Lyrics Requests to Live Search
@@ -165,6 +168,15 @@ console.log('  [PASS] 4.3 buildSearchFallbackAnswer enforces 3000ms synthesis ti
 assert.ok(indexHtml.includes('targetRow.__fallbackActive === true || targetRow.__fallbackCompleted === true'),
     'Late stream delta lock must ignore incoming events when fallback is active/completed');
 console.log('  [PASS] 4.4 Late stream delta lock protects fallback bubble against stale SSE overwrite');
+
+// Background Chat Title 503 Suppression
+assert.ok(indexHtml.includes('if (window.__jarvisServiceUnavailable === true) return false;'),
+    'shouldGenerateModelChatTitle must suppress AI title generation during service unavailability');
+assert.ok(indexHtml.includes("if (window.__jarvisServiceUnavailable === true) return fallbackTitle || '';"),
+    'generateModelChatTitle must bypass network call when service is unavailable');
+assert.ok(indexHtml.includes('window.__jarvisServiceUnavailable === true || !shouldGenerateModelChatTitle(session)'),
+    'scheduleChatTitleGeneration must immediately apply local fallback title during service unavailability');
+console.log('  [PASS] 4.5 Background chat title generation suppressed during service outages (zero 503 console errors)');
 
 // ---------------------------------------------------------
 // Test 5: Dynamic Composer Height & Clearance
