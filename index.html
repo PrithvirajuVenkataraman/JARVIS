@@ -13226,47 +13226,47 @@ async function sendTextInput(submission = {}) {
                     requestId: sendTrace.requestId,
                     turnId: turn.id
                 });
-                input.value = '';
-                delete input.dataset.inputSource;
-                globalThis.resetSpeechInputCommittedText?.();
-                input.placeholder = 'Ask anything...';
-                toggleSendButton();
-                setLastVisibleUserMessage(displayOutgoingText);
-                addVisibleInputHistory(displayOutgoingText);
-                inputHistoryIndex = -1;
-                clearLiveSpeechTranscriptionOnScreen();
-                autoScrollLocked = false;
-                chatUnreadWhileScrolledUp = false;
-                addChatMessage(displayOutgoingText, true, null, {
-                    turnId: turn.id,
-                    attachments: attachmentMeta
-                });
-                const chatContainer = document.getElementById('chat-container');
-                if (chatContainer) maybeAutoScroll(chatContainer, true);
-                requestAnimationFrame(() => {
-                    const chatMain = document.getElementById('chat-main');
-                    if (chatMain) chatMain.scrollTop = chatMain.scrollHeight;
-                });
-                refreshComposerAttachmentTray();
-
-                if (isDiagnosticsCommand(outgoingText)) {
-                    beginAssistantProcessing();
-                    try {
-                        await showDeploymentDiagnostics();
-                    } finally {
-                        endAssistantProcessing();
-                        restoreResponseRenderContext(previousRenderContext);
-                    }
-                    return;
-                }
-
-                beginAssistantProcessing();
-                window.JarvisInteractionState?.transition?.('ROUTING', {
-                    requestId: sendTrace.requestId,
-                    turnId: turn.id
-                });
-                showThinkingIndicator(attachmentsForSend.length ? 'Reading attachments...' : 'Analyzing...');
                 try {
+                    input.value = '';
+                    delete input.dataset.inputSource;
+                    globalThis.resetSpeechInputCommittedText?.();
+                    input.placeholder = 'Ask anything...';
+                    toggleSendButton();
+                    setLastVisibleUserMessage(displayOutgoingText);
+                    addVisibleInputHistory(displayOutgoingText);
+                    inputHistoryIndex = -1;
+                    clearLiveSpeechTranscriptionOnScreen();
+                    autoScrollLocked = false;
+                    chatUnreadWhileScrolledUp = false;
+                    addChatMessage(displayOutgoingText, true, null, {
+                        turnId: turn.id,
+                        attachments: attachmentMeta
+                    });
+                    const chatContainer = document.getElementById('chat-container');
+                    if (chatContainer) maybeAutoScroll(chatContainer, true);
+                    requestAnimationFrame(() => {
+                        const chatMain = document.getElementById('chat-main');
+                        if (chatMain) chatMain.scrollTop = chatMain.scrollHeight;
+                    });
+                    refreshComposerAttachmentTray();
+
+                    if (isDiagnosticsCommand(outgoingText)) {
+                        beginAssistantProcessing();
+                        try {
+                            await showDeploymentDiagnostics();
+                        } finally {
+                            endAssistantProcessing();
+                            restoreResponseRenderContext(previousRenderContext);
+                        }
+                        return;
+                    }
+
+                    beginAssistantProcessing();
+                    window.JarvisInteractionState?.transition?.('ROUTING', {
+                        requestId: sendTrace.requestId,
+                        turnId: turn.id
+                    });
+                    showThinkingIndicator(attachmentsForSend.length ? 'Reading attachments...' : 'Analyzing...');
                     if (attachmentsForSend.length) {
                         // Detect image-only uploads immediately so we can show the right indicator
                         const hasImageFiles = attachmentsForSend.some(a =>
