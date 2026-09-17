@@ -244,6 +244,23 @@ assert.ok(indexHtml.includes('maybeAutoScroll(chatContainer, true);'),
     'User message and feedback buttons must force auto-scroll to the bottom');
 console.log('  [PASS] 6.4 Second question and feedback buttons force auto-scroll to reveal content cleanly');
 
+// 6.5 Synthesizing response blinker animation verified
+assert.ok(stylesCss.includes('#chat-synthesizing-blinker'),
+    'styles.css must include #chat-synthesizing-blinker styling');
+assert.ok(stylesCss.includes('synthesizing-blinker-dot'),
+    'styles.css must define .synthesizing-blinker-dot animation element');
+assert.ok(stylesCss.includes('synthesizingBlinkerPulse'),
+    'styles.css must define synthesizingBlinkerPulse keyframes');
+assert.ok(indexHtml.includes('function showSynthesizingBlinker()'),
+    'index.html must define showSynthesizingBlinker function');
+assert.ok(indexHtml.includes('function hideSynthesizingBlinker()'),
+    'index.html must define hideSynthesizingBlinker function');
+assert.ok(indexHtml.includes('showSynthesizingBlinker();'),
+    'sendTextInput and streaming init must trigger showSynthesizingBlinker immediately on user entry');
+assert.ok(indexHtml.includes('hideSynthesizingBlinker();'),
+    'Streaming text updates and finalization must hide synthesizing blinker when answer synthesizes');
+console.log('  [PASS] 6.5 Synthesizing response blinker animation verified upon entry and cleared on answer synthesis');
+
 console.log('\n================================================================');
 console.log('=== All Service Unavailable Resilience & Grounding Tests PASSED ===');
 console.log('================================================================\n');
