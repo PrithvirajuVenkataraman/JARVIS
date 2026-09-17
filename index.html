@@ -4053,15 +4053,18 @@ async function buildSearchFallbackAnswer(userMessage) {
                 return `${groundedAnswer}\n\nSources:\n${lines}`;
             }
 
-            // Synthesize direct answer using LLM
+            // Synthesize direct answer using LLM with 3000ms timeout
             const snippets = results
                 .slice(0, 4)
                 .map((r, i) => `${i + 1}. ${r.title}\nContent: ${r.description}`)
                 .join('\n\n');
+            const synthController = new AbortController();
+            const synthTimeout = setTimeout(() => synthController.abort(), 3000);
             try {
                 const synthRes = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
+                    signal: synthController.signal,
                     body: JSON.stringify({
                         message: `Answer the user's question directly and concisely in 1-2 sentences using ONLY the snippets below.
 
@@ -4071,6 +4074,7 @@ Snippets:
 ${snippets}`
                     })
                 });
+                clearTimeout(synthTimeout);
                 if (synthRes.ok) {
                     const synthData = await synthRes.json();
                     const synthText = cleanLiveAnswerText(String(synthData?.response || synthData?.text || '').trim());
@@ -4078,11 +4082,15 @@ ${snippets}`
                         return `${synthText}\n\nSources:\n${lines}`;
                     }
                 }
-            } catch (_) {}
+            } catch (_) {
+                clearTimeout(synthTimeout);
+            }
 
             const top = results[0];
+            const topDesc = String(top?.description || top?.snippet || '').trim();
             const topTitle = String(top?.title || '').trim();
-            return `Based on web records, ${topTitle}.\n\nSources:\n${lines}`;
+            const fallbackSummary = topDesc ? `${topDesc}` : `Based on web records: ${topTitle}.`;
+            return `${fallbackSummary}\n\nSources:\n${lines}`;
         }
     } catch (error) {
     }
@@ -4810,6 +4818,10 @@ async function streamChatCompletion(payload, options = {}) {
     ensureStreamMessage();
     const handleEvent = event => {
         if (!event?.event) return;
+        const targetRow = assistantMessageId ? document.getElementById(assistantMessageId) : null;
+        if (targetRow && (targetRow.__fallbackActive === true || targetRow.__fallbackCompleted === true)) {
+            return;
+        }
         if (event.event === 'meta') {
             streamMeta = event.data || {};
             const id = ensureStreamMessage();
@@ -4942,7 +4954,12 @@ async function streamChatCompletion(payload, options = {}) {
                 stopConverseSpeech('stream_error');
             }
             const errMsg = String(event.data?.message || 'The AI service is temporarily unavailable. Please try again.');
-            throw new Error(errMsg);
+            const errCode = String(event.data?.code || 'service_unavailable');
+            const err = new Error(errMsg);
+            err.code = errCode;
+            err.assistantMessageId = assistantMessageId;
+            try { reader.cancel().catch(() => {}); } catch (_) {}
+            throw err;
         }
     };
 
@@ -5005,11 +5022,12 @@ async function streamChatCompletion(payload, options = {}) {
                 intent: 'partial_stream_recovery'
             };
         }
-        if (assistantMessageId) {
-            const hasActualText = Boolean(accumulated && accumulated.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/<\/?think>/gi, '').trim());
-            if (!hasActualText) {
-                discardStreamingAssistantMessage(assistantMessageId);
-            }
+        if (assistantMessageId && !error.assistantMessageId) {
+            error.assistantMessageId = assistantMessageId;
+        }
+        const targetRow = assistantMessageId ? document.getElementById(assistantMessageId) : null;
+        if (targetRow) {
+            targetRow.__streamFailed = true;
         }
         throw error;
     }
@@ -5477,46 +5495,97 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
             return data;
         }
 
-        // Direct API Fallback: If streaming dropped or stalled, immediately hit the API directly
-        if (requestOptions?.stream === true && requestPayload && !isAbortError(error)) {
+        const targetMessageId = String(error?.assistantMessageId || data?.assistantMessageId || '').trim();
+        const targetRow = targetMessageId ? document.getElementById(targetMessageId) : null;
+
+        const isPermanentProviderFailure = (err) =>
+            err?.code === 'missing_credentials' ||
+            err?.code === 'service_unavailable' ||
+            /temporarily unavailable|missing credentials|service_unavailable|configure your api key/i.test(String(err?.message || ''));
+
+        // Direct API Fallback: Only for eligible transient errors (never for missing credentials or service unavailable)
+        if (requestOptions?.stream === true && requestPayload && !isAbortError(error) && !isPermanentProviderFailure(error)) {
             try {
-                console.warn('[askGeminiAI] Stream failed, attempting direct non-streaming API fetch fallback:', error?.message || error);
+                console.warn('[askGeminiAI] Stream failed, attempting direct non-streaming API fetch fallback for transient error:', error?.message || error);
                 const directRes = await window.JarvisApi.postJson(
                     (window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq,
                     { ...requestPayload, stream: false },
                     {
                         signal: controller.signal,
-                        timeoutMs: 20000
+                        timeoutMs: 4000
                     }
                 );
                 const directText = String(directRes?.response || directRes?.text || '').trim();
                 const cleanDirect = directText.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/^<think>[\s\S]*$/gi, '').replace(/<\/?think>/gi, '').trim();
                 if (cleanDirect) {
+                    if (targetRow) {
+                        targetRow.__fallbackActive = true;
+                        targetRow.__fallbackCompleted = true;
+                    }
                     return {
                         ...directRes,
                         response: cleanDirect,
                         text: cleanDirect,
+                        assistantMessageId: targetMessageId,
                         intent: directRes?.intent || requestOptions?.intent || 'chat'
                     };
                 }
             } catch (directErr) {
-                console.warn('[askGeminiAI] Direct non-streaming API fallback also failed:', directErr?.message || directErr);
+                console.warn('[askGeminiAI] Direct non-streaming API fallback failed:', directErr?.message || directErr);
             }
+        }
+
+        // Handle missing credentials specifically with clear diagnostic message in assistant bubble
+        if (error?.code === 'missing_credentials' || /missing credentials|configure your api key/i.test(String(error?.message || ''))) {
+            const missingNotice = String(error?.message || 'AI chat requires a Groq or Gemini API key. Add GROQ_API_KEY or GEMINI_API_KEY to your .env file to enable AI responses.');
+            if (targetMessageId) {
+                if (targetRow) {
+                    targetRow.__fallbackActive = true;
+                    targetRow.__fallbackCompleted = true;
+                }
+                updateStreamingAssistantMessage(targetMessageId, missingNotice, {
+                    userMessage: normalizedUserMessage,
+                    streaming: false,
+                    modelUsed: 'none',
+                    provider: 'system'
+                });
+            }
+            return {
+                response: missingNotice,
+                intent: 'missing_credentials',
+                assistantMessageId: targetMessageId
+            };
+        }
+
+        if (targetRow) {
+            targetRow.__fallbackActive = true;
         }
 
         const localFallback = await buildLocalAssistantFallback(normalizedUserMessage || userMessage, error);
         if (localFallback) {
+            if (targetRow) targetRow.__fallbackCompleted = true;
             return {
                 response: localFallback,
-                intent: 'local_fallback'
+                intent: 'local_fallback',
+                assistantMessageId: targetMessageId
             };
         }
         if (requestOptions?.fastExplainer !== true) {
             const searchFallback = await buildSearchFallbackAnswer(normalizedUserMessage || userMessage); 
             if (searchFallback) { 
+                if (targetMessageId) {
+                    if (targetRow) targetRow.__fallbackCompleted = true;
+                    updateStreamingAssistantMessage(targetMessageId, searchFallback, {
+                        userMessage: normalizedUserMessage,
+                        streaming: false,
+                        modelUsed: 'web-search',
+                        provider: 'search'
+                    });
+                }
                 return { 
                     response: searchFallback, 
-                    intent: 'search_fallback'
+                    intent: 'search_fallback',
+                    assistantMessageId: targetMessageId
                 };
             }
         }
@@ -5526,10 +5595,20 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
         if (isLikelyLocationOrTravelQuery(normalizedUserMessage || userMessage)) { 
             showFailureFallbackCard(normalizedUserMessage || userMessage, { reason: fallbackReason }); 
         } 
+        if (targetMessageId) {
+            if (targetRow) targetRow.__fallbackCompleted = true;
+            updateStreamingAssistantMessage(targetMessageId, softFallback, {
+                userMessage: normalizedUserMessage,
+                streaming: false,
+                modelUsed: 'offline-fallback',
+                provider: 'offline'
+            });
+        }
         return { 
             response: softFallback,
             fallbackReason,
-            intent: 'soft_fallback'
+            intent: 'soft_fallback',
+            assistantMessageId: targetMessageId
         }; 
     } finally {
         requestSettled = true;
@@ -28820,6 +28899,25 @@ async function shareActiveChat() {
 })();
 
 // Dynamic Viewport Height & Tablet/Mobile Layout Handler
+function initDynamicComposerHeightObserver() {
+    const bar = document.getElementById('input-bar-container') || document.querySelector('.composer-wrap');
+    if (!bar) return;
+    const updateSafeHeight = (height) => {
+        const measured = Math.max(90, Math.ceil(height || bar.offsetHeight || bar.getBoundingClientRect().height || 120));
+        document.documentElement.style.setProperty('--input-bar-safe-height', `${measured}px`);
+    };
+    updateSafeHeight();
+    if (typeof ResizeObserver !== 'undefined') {
+        const observer = new ResizeObserver(entries => {
+            for (const entry of entries) {
+                const h = entry.borderBoxSize?.[0]?.blockSize || entry.contentRect?.height;
+                updateSafeHeight(h);
+            }
+        });
+        observer.observe(bar);
+    }
+}
+
 const setVH = () => {
     const vv = window.visualViewport;
     const height = vv ? vv.height : window.innerHeight;
@@ -28831,6 +28929,11 @@ const setVH = () => {
     const inputH = inputEl ? inputEl.offsetHeight : 72;
     document.documentElement.style.setProperty('--header-height', `${headerH}px`);
     document.documentElement.style.setProperty('--input-height', `${inputH}px`);
+    const barEl = document.getElementById('input-bar-container');
+    if (barEl) {
+        const measuredSafeH = Math.max(90, Math.ceil(barEl.offsetHeight || barEl.getBoundingClientRect().height || 120));
+        document.documentElement.style.setProperty('--input-bar-safe-height', `${measuredSafeH}px`);
+    }
     // Undock sidebar if viewport drops below 1024px (e.g. tablet rotated to portrait)
     if (window.innerWidth < 1024 && document.body.classList.contains('sidebar-docked')) {
         document.body.classList.remove('sidebar-docked');
@@ -28841,7 +28944,10 @@ const setVH = () => {
         }
     }
 };
-window.addEventListener('DOMContentLoaded', setVH);
+window.addEventListener('DOMContentLoaded', () => {
+    setVH();
+    initDynamicComposerHeightObserver();
+});
 window.addEventListener('resize', setVH);
 window.addEventListener('orientationchange', setVH);
 if (window.visualViewport) {
@@ -28849,6 +28955,7 @@ if (window.visualViewport) {
     window.visualViewport.addEventListener('scroll', setVH);
 }
 setVH();
+initDynamicComposerHeightObserver();
 </script>
 
     <!-- Emergency SOS Contact Management Modal -->
