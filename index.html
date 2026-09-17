@@ -4309,6 +4309,9 @@ async function resolveFinalAssistantAnswer(userMessage, answerText) {
 }
 
 async function publishResolvedModelMessage(userMessage, answerText, options = {}) {
+    if (typeof hideSynthesizingBlinker === 'function') {
+        hideSynthesizingBlinker();
+    }
     const label = options?.label || 'Model answer';
     const historyText = options?.historyText || null;
     const rawAnswer = String(answerText || '').trim();
@@ -7538,6 +7541,51 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             jumpToLatest();
         };
 
+        function showSynthesizingBlinker() {
+            const chatContainer = document.getElementById('chat-container');
+            if (!chatContainer) return;
+            let blinker = document.getElementById('chat-synthesizing-blinker');
+            if (blinker) {
+                blinker.classList.remove('chat-synthesizing-blinker-leaving');
+                blinker.style.display = '';
+                return;
+            }
+            blinker = document.createElement('div');
+            blinker.id = 'chat-synthesizing-blinker';
+            blinker.className = 'chat-row flex justify-start items-center gap-3 fade-in';
+            blinker.dataset.role = 'assistant';
+            blinker.setAttribute('role', 'status');
+            blinker.setAttribute('aria-label', 'Synthesizing response');
+            blinker.innerHTML = `
+                <div class="synthesizing-blinker-wrapper">
+                    <span class="synthesizing-blinker-dot"></span>
+                </div>
+            `;
+            chatContainer.appendChild(blinker);
+            const chatMain = document.getElementById('chat-main');
+            if (chatMain) {
+                requestAnimationFrame(() => {
+                    chatMain.scrollTop = chatMain.scrollHeight;
+                });
+            }
+        }
+
+        function hideSynthesizingBlinker() {
+            const blinker = document.getElementById('chat-synthesizing-blinker');
+            if (!blinker) return;
+            if (blinker.classList.contains('chat-synthesizing-blinker-leaving')) return;
+            blinker.classList.add('chat-synthesizing-blinker-leaving');
+            setTimeout(() => {
+                const el = document.getElementById('chat-synthesizing-blinker');
+                if (el && el.parentNode) {
+                    el.parentNode.removeChild(el);
+                }
+            }, 120);
+        }
+
+        window.showSynthesizingBlinker = showSynthesizingBlinker;
+        window.hideSynthesizingBlinker = hideSynthesizingBlinker;
+
         function initSelectionPromptHelper() {
             if (selectionHelperState.popoverEl) return;
 
@@ -9926,6 +9974,9 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             return '';
         }
         function createStreamingAssistantMessage(meta = {}) {
+            if (typeof showSynthesizingBlinker === 'function') {
+                showSynthesizingBlinker();
+            }
             return addChatMessage('', false, false, {
                 ...meta,
                 sourceType: 'model',
@@ -9990,6 +10041,9 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
         function updateStreamingAssistantMessage(messageId, text, meta = {}) {
             const row = findAssistantMessageRow(messageId);
             if (!row) return;
+            if (typeof hideSynthesizingBlinker === 'function') {
+                hideSynthesizingBlinker();
+            }
             if (row.style.display === 'none') {
                 row.style.display = '';
             }
@@ -13242,6 +13296,9 @@ async function sendTextInput(submission = {}) {
                         turnId: turn.id,
                         attachments: attachmentMeta
                     });
+                    if (typeof showSynthesizingBlinker === 'function') {
+                        showSynthesizingBlinker();
+                    }
                     const chatContainer = document.getElementById('chat-container');
                     if (chatContainer) maybeAutoScroll(chatContainer, true);
                     requestAnimationFrame(() => {
@@ -13547,6 +13604,9 @@ async function sendTextInput(submission = {}) {
                         setWebSearchMode('auto');
                     }
                     hideThinkingIndicator();
+                    if (typeof hideSynthesizingBlinker === 'function') {
+                        hideSynthesizingBlinker();
+                    }
                     const compShell = document.getElementById('input-bar-inner');
                     const vttWave = document.getElementById('vtt-waveform-container');
                     if (compShell) compShell.classList.remove('is-voice-active', 'is-processing');
@@ -27892,6 +27952,9 @@ function resolveThinkingPhase(message = '') {
 }
 
 function hideThinkingIndicator() {
+    if (typeof hideSynthesizingBlinker === 'function') {
+        hideSynthesizingBlinker();
+    }
     if (thinkingPhaseTimer) {
         clearInterval(thinkingPhaseTimer);
         thinkingPhaseTimer = null;
