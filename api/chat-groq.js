@@ -1204,6 +1204,11 @@ const edgeResponseCache = new EdgeSemanticLruCache();
         return m.includes('deepseek') || m.includes('r1');
     }
 
+    function supportsGeminiThinking(modelName = '') {
+        const m = String(modelName || '').toLowerCase();
+        return m.includes('thinking') || m.includes('2.5-pro') || m.includes('3.7');
+    }
+
     function isExplicitReasoningIntent(intent = '', message = '') {
         const i = String(intent || '').toLowerCase();
         if (['math_proof', 'complex_reasoning', 'logic_puzzle', 'algebraic_derivation', 'math'].includes(i)) return true;
@@ -2040,9 +2045,8 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                     options?.tier === 'instant' ||
                     ['fast_simple', 'casual_chat', 'chat_title', 'internal_summary', 'fast_explainer'].includes(String(options?.intent || ''));
                 const geminiGenConfig = { temperature: temp, topK: 40, topP: 0.95, maxOutputTokens: maxTokens };
-                if (shouldSuppressGeminiReasoning) {
+                if (shouldSuppressGeminiReasoning && supportsGeminiThinking(model)) {
                     geminiGenConfig.thinkingConfig = { thinkingBudget: 0 };
-                    geminiGenConfig.thinking_config = { thinking_budget: 0 };
                 }
                 const geminiBody = {
                     contents,
@@ -2515,9 +2519,8 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 topP: 0.95,
                 maxOutputTokens: maxTokens
             };
-            if (shouldSuppressReasoning) {
+            if (shouldSuppressReasoning && supportsGeminiThinking(model)) {
                 generationConfig.thinkingConfig = { thinkingBudget: 0 };
-                generationConfig.thinking_config = { thinking_budget: 0 };
             }
             const reqBody = {
                 contents,
@@ -4732,7 +4735,8 @@ Respond conversationally and naturally.`;
         classifyQueryComplexity,
         getPreferredGroqCandidates,
         getPreferredGroqVisionCandidates,
-        getPreferredGeminiCandidates
+        getPreferredGeminiCandidates,
+        supportsGeminiThinking
     };
 
     function applyResponseLengthPostCheck(parsedResponse, lengthPolicy, message, clientSystemPrompt) {
