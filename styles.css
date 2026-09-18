@@ -1699,6 +1699,14 @@ body:not(.dark) #send-message-btn.composer-send-stop svg * {
     flex-direction: column;
     align-items: stretch;
     padding: 0.4rem;
+    cursor: pointer;
+    transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.chat-attachment-card.is-image:hover {
+    transform: translateY(-2px);
+    border-color: rgba(56, 189, 248, 0.55);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
 }
 
 .chat-attachment-image {
@@ -1707,6 +1715,12 @@ body:not(.dark) #send-message-btn.composer-send-stop svg * {
     object-fit: cover;
     border-radius: 10px;
     display: block;
+    cursor: pointer;
+    transition: filter 0.15s ease;
+}
+
+.chat-attachment-card.is-image:hover .chat-attachment-image {
+    filter: brightness(1.06);
 }
 
 .chat-attachment-badge {
@@ -5167,11 +5181,23 @@ body:not(.dark) .agent-dag-pill.is-completed {
 .synthesizing-blinker-wrapper {
     display: inline-flex;
     align-items: center;
-    justify-content: center;
-    padding: 6px 4px;
-    background: transparent;
-    border: none;
-    box-shadow: none;
+    gap: 8px;
+    padding: 6px 12px 6px 8px;
+    background: rgba(56, 189, 248, 0.08);
+    border: 1px solid rgba(56, 189, 248, 0.2);
+    border-radius: 9999px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+    user-select: none;
+    transition: all 0.2s ease;
+}
+
+.synthesizing-blinker-text {
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    color: rgba(224, 242, 254, 0.9);
+    line-height: 1;
+    white-space: nowrap;
 }
 
 .synthesizing-blinker-dot {
@@ -5182,6 +5208,16 @@ body:not(.dark) .agent-dag-pill.is-completed {
     box-shadow: 0 0 10px rgba(56, 189, 248, 0.85), 0 0 4px rgba(56, 189, 248, 0.5);
     animation: synthesizingBlinkerPulse 0.85s ease-in-out infinite;
     display: inline-block;
+    flex-shrink: 0;
+}
+
+body:not(.dark) .synthesizing-blinker-wrapper {
+    background: rgba(2, 132, 199, 0.08);
+    border-color: rgba(2, 132, 199, 0.22);
+}
+
+body:not(.dark) .synthesizing-blinker-text {
+    color: #0369a1;
 }
 
 body:not(.dark) .synthesizing-blinker-dot {
