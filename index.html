@@ -198,8 +198,8 @@
     </div>
 
     <!-- AI Image Lightbox Modal -->
-    <div id="image-lightbox-overlay" class="image-lightbox-overlay" onclick="if (event.target === this) closeImageLightbox()" role="dialog" aria-modal="true" aria-label="Image preview">
-        <div class="image-lightbox-container" onclick="event.stopPropagation()">
+    <div id="image-lightbox-overlay" class="image-lightbox-overlay" onclick="handleImageLightboxBackdropClick(event)" role="dialog" aria-modal="true" aria-label="Image preview">
+        <div class="image-lightbox-container">
             <button type="button" class="image-lightbox-close-btn" onclick="closeImageLightbox()" aria-label="Close image preview">&times;</button>
             <img id="image-lightbox-img" class="image-lightbox-img" src="" alt="Full view">
             <div id="image-lightbox-caption" class="image-lightbox-caption"></div>
@@ -7553,12 +7553,20 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
         };
 
         function showSynthesizingBlinker() {
+            const customLabel = arguments[0];
             const chatContainer = document.getElementById('chat-container');
             if (!chatContainer) return;
             let blinker = document.getElementById('chat-synthesizing-blinker');
+            const existingTextEl = blinker ? blinker.querySelector('.synthesizing-blinker-text') : null;
+            const fallback = (existingTextEl && existingTextEl.textContent.trim()) ? existingTextEl.textContent.trim() : 'Thinking...';
+            const label = (typeof customLabel === 'string' && customLabel.trim()) ? customLabel.trim() : fallback;
             if (blinker) {
                 blinker.classList.remove('chat-synthesizing-blinker-leaving');
                 blinker.style.display = '';
+                blinker.setAttribute('aria-label', label);
+                if (existingTextEl) {
+                    existingTextEl.textContent = label;
+                }
                 return;
             }
             blinker = document.createElement('div');
@@ -7566,10 +7574,12 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             blinker.className = 'chat-row flex justify-start items-center gap-3 fade-in';
             blinker.dataset.role = 'assistant';
             blinker.setAttribute('role', 'status');
-            blinker.setAttribute('aria-label', 'Synthesizing response');
+            blinker.setAttribute('aria-label', label);
+            const safeLabel = (typeof escapeHtml === 'function') ? escapeHtml(label) : label;
             blinker.innerHTML = `
                 <div class="synthesizing-blinker-wrapper">
                     <span class="synthesizing-blinker-dot"></span>
+                    <span class="synthesizing-blinker-text">${safeLabel}</span>
                 </div>
             `;
             chatContainer.appendChild(blinker);
@@ -7578,6 +7588,21 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 requestAnimationFrame(() => {
                     chatMain.scrollTop = chatMain.scrollHeight;
                 });
+            }
+        }
+
+        function updateSynthesizingBlinker(newLabel) {
+            if (!newLabel) return;
+            const label = String(newLabel).trim();
+            const blinker = document.getElementById('chat-synthesizing-blinker');
+            if (!blinker) {
+                showSynthesizingBlinker(label);
+                return;
+            }
+            blinker.setAttribute('aria-label', label);
+            const textEl = blinker.querySelector('.synthesizing-blinker-text');
+            if (textEl) {
+                textEl.textContent = label;
             }
         }
 
@@ -7595,6 +7620,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
         }
 
         window.showSynthesizingBlinker = showSynthesizingBlinker;
+        window.updateSynthesizingBlinker = updateSynthesizingBlinker;
         window.hideSynthesizingBlinker = hideSynthesizingBlinker;
 
         function initSelectionPromptHelper() {
@@ -11756,6 +11782,22 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             a.remove();
         }
 
+        function handleLightboxKeyDown(e) {
+            if (e.key === 'Escape') {
+                closeImageLightbox();
+            }
+        }
+
+        function handleImageLightboxBackdropClick(event) {
+            if (!event) return;
+            const target = event.target;
+            if (target.closest('#image-lightbox-img') || target.closest('.image-lightbox-toolbar') || target.closest('.image-lightbox-close-btn')) {
+                return;
+            }
+            closeImageLightbox();
+        }
+        window.handleImageLightboxBackdropClick = handleImageLightboxBackdropClick;
+
         function openImageLightbox(src, prompt = '') {
             const overlay = document.getElementById('image-lightbox-overlay');
             const img = document.getElementById('image-lightbox-img');
@@ -11764,14 +11806,45 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             img.src = src;
             if (caption) caption.textContent = prompt ? `"${prompt}"` : '';
             overlay.classList.add('is-open');
+            window.removeEventListener('keydown', handleLightboxKeyDown);
+            window.addEventListener('keydown', handleLightboxKeyDown);
         }
         window.openImageLightbox = openImageLightbox;
 
         function closeImageLightbox() {
             const overlay = document.getElementById('image-lightbox-overlay');
             if (overlay) overlay.classList.remove('is-open');
+            window.removeEventListener('keydown', handleLightboxKeyDown);
         }
         window.closeImageLightbox = closeImageLightbox;
+
+        function initChatImageLightboxDelegation() {
+            const chatContainer = document.getElementById('chat-container');
+            if (!chatContainer || chatContainer.__lightboxDelegated) return;
+            chatContainer.__lightboxDelegated = true;
+            chatContainer.addEventListener('click', (e) => {
+                const imgCard = e.target.closest('.chat-attachment-card.is-image');
+                if (imgCard) {
+                    const img = imgCard.querySelector('img.chat-attachment-image') || imgCard.querySelector('img');
+                    const nameEl = imgCard.querySelector('.chat-attachment-name');
+                    const caption = nameEl ? nameEl.textContent.trim() : (img?.alt || '');
+                    if (img && img.src) {
+                        openImageLightbox(img.src, caption);
+                        return;
+                    }
+                }
+                const chatImg = e.target.closest('img.chat-attachment-image, .chat-bubble img, .assistant-message-text img');
+                if (chatImg && chatImg.src && !chatImg.closest('.image-card') && !chatImg.closest('.image-lightbox-overlay')) {
+                    openImageLightbox(chatImg.src, chatImg.alt || '');
+                }
+            });
+        }
+        window.initChatImageLightboxDelegation = initChatImageLightboxDelegation;
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initChatImageLightboxDelegation);
+        } else {
+            initChatImageLightboxDelegation();
+        }
 
         function downloadLightboxImage() {
             const img = document.getElementById('image-lightbox-img');
@@ -12453,7 +12526,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 if (kind === 'image' && item?.previewUrl) {
                     return `
                         <div class="chat-attachment-card-wrapper">
-                            <div class="chat-attachment-card is-image">
+                            <div class="chat-attachment-card is-image" role="button" tabindex="0" title="Click to view full image" onclick="openImageLightbox('${escapeHtml(item.previewUrl)}', '${name}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openImageLightbox('${escapeHtml(item.previewUrl)}', '${name}');}">
                                 <img src="${escapeHtml(item.previewUrl)}" alt="${name}" class="chat-attachment-image">
                                 <div class="chat-attachment-meta">
                                     <span class="chat-attachment-name">${name}</span>
@@ -13307,8 +13380,19 @@ async function sendTextInput(submission = {}) {
                         turnId: turn.id,
                         attachments: attachmentMeta
                     });
+                    const hasImageFiles = attachmentsForSend.some(a =>
+                        /^image\//i.test(a.mimeType || '') ||
+                        /\.(jpe?g|pjpeg|png|gif|webp|bmp|dib|tiff?|heic|heif|heics|heifs|avif|avifs|dng|raw|cr[23]|nef|nrw|arw|srf|sr2|raf|rw2|orf|pef|jp2|j2k|jpf|jpx|jpm|pict?|pct|pic|psd|ico|cur|svgz?)$/i.test(a.name || '')
+                    );
+                    const initialBlinkerLabel = attachmentsForSend.length
+                        ? (hasImageFiles ? 'Analyzing image...' : 'Analyzing document...')
+                        : 'Thinking...';
                     if (typeof showSynthesizingBlinker === 'function') {
-                        showSynthesizingBlinker();
+                        if (initialBlinkerLabel) {
+                            showSynthesizingBlinker(initialBlinkerLabel);
+                        } else {
+                            showSynthesizingBlinker();
+                        }
                     }
                     const chatContainer = document.getElementById('chat-container');
                     if (chatContainer) maybeAutoScroll(chatContainer, true);
@@ -13334,13 +13418,8 @@ async function sendTextInput(submission = {}) {
                         requestId: sendTrace.requestId,
                         turnId: turn.id
                     });
-                    showThinkingIndicator(attachmentsForSend.length ? 'Reading attachments...' : 'Analyzing...');
+                    showThinkingIndicator(attachmentsForSend.length ? (hasImageFiles ? 'Analyzing image...' : 'Analyzing document...') : 'Analyzing...');
                     if (attachmentsForSend.length) {
-                        // Detect image-only uploads immediately so we can show the right indicator
-                        const hasImageFiles = attachmentsForSend.some(a =>
-                            /^image\//i.test(a.mimeType || '') ||
-                            /\.(jpe?g|pjpeg|png|gif|webp|bmp|dib|tiff?|heic|heif|heics|heifs|avif|avifs|dng|raw|cr[23]|nef|nrw|arw|srf|sr2|raf|rw2|orf|pef|jp2|j2k|jpf|jpx|jpm|pict?|pct|pic|psd|ico|cur|svgz?)$/i.test(a.name || '')
-                        );
                         // ── Data-file path: Python Notebook analysis ────────────────
                         const hasDataFiles = attachmentsForSend.some(isDataAnalysisFile);
                         if (hasDataFiles) {
@@ -27858,6 +27937,9 @@ function showThinkingIndicator(message = 'Thinking') {
     updateChatEmptyStateVisibility(true);
 
     const phaseInfo = resolveThinkingPhase(message);
+    if (typeof showSynthesizingBlinker === 'function') {
+        showSynthesizingBlinker(phaseInfo.label);
+    }
 
     let row = document.getElementById('chat-thinking-indicator');
     if (row && row.classList.contains('chat-thinking-indicator-leaving')) {
@@ -27895,6 +27977,9 @@ function showThinkingIndicator(message = 'Thinking') {
         if (timerEl) {
             timerEl.textContent = phaseInfo.label;
         }
+        if (typeof updateSynthesizingBlinker === 'function') {
+            updateSynthesizingBlinker(phaseInfo.label);
+        }
     }
     maybeAutoScroll(chatContainer);
 }
@@ -27918,6 +28003,9 @@ function startThinkingPhaseTimeline(initialLabel = 'Thinking...') {
         const phaseLabel = row.dataset.phaseLabel || initialLabel || 'Thinking...';
         if (timerEl && timerEl.textContent !== phaseLabel) {
             timerEl.textContent = phaseLabel;
+        }
+        if (typeof updateSynthesizingBlinker === 'function') {
+            updateSynthesizingBlinker(phaseLabel);
         }
     };
 
@@ -27946,15 +28034,20 @@ function resolveThinkingPhase(message = '') {
     if (/\b(transcrib)\b/i.test(lower)) {
         return { key: 'transcribing', label: 'Transcribing...' };
     }
+    if (/\b(image|pic|photo|picture)\b/i.test(lower)) {
+        return { key: 'reading', label: 'Analyzing image...' };
+    }
+    if (/\b(document|pdf|docx?|sheet|xlsx?|csv|reading attachments)\b/i.test(lower)) {
+        return { key: 'reading', label: 'Analyzing document...' };
+    }
+    if (/\b(attachment|reading|file|view)\b/i.test(lower)) {
+        return { key: 'reading', label: 'Analyzing attached document...' };
+    }
     if (/\b(analyzing|analyz)\b/i.test(lower)) {
         return { key: 'analyzing', label: 'Analyzing...' };
     }
     if (/\b(thinking)\b/i.test(lower)) {
         return { key: 'thinking', label: raw.includes('...') ? raw : 'Thinking...' };
-    }
-    if (/\b(attachment|reading|image|document|pdf|file|view)\b/i.test(lower)) {
-        const isImage = /\bimage\b/i.test(lower);
-        return { key: 'reading', label: isImage ? 'Analyzing image...' : 'Analyzing attached document...' };
     }
     if (/\b(translat|language)\b/i.test(lower)) {
         return { key: 'translating', label: 'Translating text...' };
