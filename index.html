@@ -20626,6 +20626,18 @@ ${snippets}`;
             }
         }
 
+        // If search providers returned nothing (e.g. scrapers blocked by Vercel IPs,
+        // Gemini grounding unavailable), fall back to the model regardless of failClosed.
+        // "Could not verify" should only fire when we found results but confidence is low.
+        if (answerResults.length === 0) {
+            showThinkingIndicator('Synthesizing answer...');
+            const fallbackPublished = await publishUniversalModelFallback({ userText: query, intent, entityIntent }, 'Model answer');
+            if (fallbackPublished) {
+                hideThinkingIndicator();
+                return true;
+            }
+        }
+
         if (!failClosed && !requiresStrictLiveVerification(query, intent, entityIntent)) {
             showThinkingIndicator('Synthesizing answer...');
             const fallbackPublished = await publishUniversalModelFallback({ userText: query, intent, entityIntent }, 'Model answer');
