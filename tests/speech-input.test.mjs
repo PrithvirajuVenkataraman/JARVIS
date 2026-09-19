@@ -238,24 +238,21 @@ textInput.dispatchEvent({ type: 'input' });
 await globalThis.toggleVoiceToText();
 const activeUiRec = FakeRecognition.instances.at(-1);
 
-// Interim result: appears immediately on screen, NOT stuffed into textInput
+// Interim result: appears directly in textInput (chatbox), fillers cleaned, NOT on chat window
 activeUiRec.onresult?.({
     resultIndex: 0,
     results: [{ 0: { transcript: 'um what is the capital of france' }, isFinal: false }]
 });
-assert.equal(textInput.value, '', 'Prompt box must remain clean');
-assert.ok(liveScreenSpeechUpdates.length > 0);
-assert.equal(liveScreenSpeechUpdates.at(-1).text, 'What is the capital of france');
+assert.equal(textInput.value, 'What is the capital of france', 'Prompt box receives cleaned interim transcript');
+assert.equal(liveScreenSpeechUpdates.filter(u => u.text).length, 0, 'Words must NOT appear on the chat window');
 
-// Final result arrives: Auto-corrected and submitted directly onto screen
+// Final result arrives: Committed into textInput (chatbox), NOT auto-submitted to chat window
 activeUiRec.onresult?.({
     resultIndex: 0,
     results: [{ 0: { transcript: 'um what is the capital of france' }, isFinal: true }]
 });
-assert.equal(textInput.value, '', 'Prompt box stays clean on final submit');
-assert.ok(submittedTranscripts.length > 0);
-assert.equal(submittedTranscripts.at(-1).text, 'What is the capital of france');
-assert.equal(submittedTranscripts.at(-1).source, 'vtt');
+assert.equal(textInput.value, 'What is the capital of france', 'Prompt box retains finalized transcript');
+assert.equal(submittedTranscripts.length, 0, 'VTT words must not auto-submit to chat window');
 await globalThis.toggleVoiceToText(); // stop
 
 // 15. Test Whisper Recorder FileReader Onloadend Network Error Resilience
@@ -582,24 +579,98 @@ assert.equal(completePhraseRes.recommendedTimeoutMs, 1200);
     console.log('  [PASS] 23. VTT button enterprise dictation toggle, ARIA, and input population');
 }
 
-// 24. Test Enterprise Spoken Punctuation, Line Breaks, and Acronym Formatting
+// 24. Test Enterprise Speech Filler Removal & Spoken Formatting Engine
 {
-    import('../app/speech-input.js').then(({ cleanSpeechFillers }) => {
-        // Spoken punctuation
-        const text1 = cleanSpeechFillers('hello comma this is an API test period new line how does AI work question mark');
-        assert.ok(text1.includes('Hello, this is an API test.'), 'Should convert comma, period and capitalize API');
-        assert.ok(text1.includes('\nHow does AI work?'), 'Should convert new line, question mark and capitalize AI');
+    // A. Single and Elongated Verbal Hesitations
+    assert.equal(cleanSpeechFillers('um hello uh world er'), 'Hello world');
+    assert.equal(cleanSpeechFillers('umm uhh er erm ah ahh hmm hm mhm uh-huh what is this'), 'What is this');
+    assert.equal(cleanSpeechFillers('ah explain more details please'), 'Explain more details please');
+    assert.equal(cleanSpeechFillers('erm wait a second'), 'Wait a second');
 
-        // Acronyms and contractions
-        const text2 = cleanSpeechFillers('i cant believe our CEO built this with AWS and SQL');
-        assert.equal(text2, "I can't believe our CEO built this with AWS and SQL");
+    // B. Substring Word Immunity (words containing filler stems must not be mutilated)
+    assert.equal(cleanSpeechFillers('human umbrella summary error terminal'), 'Human umbrella summary error terminal');
 
-        // Mathematical colon and hyphen
-        const text3 = cleanSpeechFillers('note colon use high hyphen quality audio');
-        assert.equal(text3, 'Note: Use high-quality audio');
+    // C. Conversational Filler Phrases
+    assert.equal(cleanSpeechFillers('basically this is literally awesome actually'), 'This is awesome');
+    assert.equal(cleanSpeechFillers('i mean it was cool you know what i mean'), 'It was cool');
+    assert.equal(cleanSpeechFillers('and stuff like that it works or something like that'), 'It works');
 
-        console.log('  [PASS] 24. Enterprise spoken punctuation, line breaks, and acronym formatting');
-        console.log('speech-input-tests-ok');
-    });
+    // D. Context Preservation (legitimate inquiries with question stems preserved)
+    assert.equal(cleanSpeechFillers('do you know if the API is working question mark'), 'Do you know if the API is working?');
+    assert.equal(cleanSpeechFillers('what sort of database is best'), 'What sort of database is best');
+    assert.equal(cleanSpeechFillers('which kind of algorithm should i choose question mark'), 'Which kind of algorithm should I choose?');
+
+    // E. Speech Stutter & Duplicate Word Suppression
+    assert.equal(cleanSpeechFillers('the the quick brown fox to to go to to the store'), 'The quick brown fox to go to the store');
+    assert.equal(cleanSpeechFillers('I I think we we should start'), 'I think we should start');
+
+    // F. Spoken Punctuation & Formatting Commands
+    assert.equal(cleanSpeechFillers('hello comma this is an API test period new line how does AI work question mark'), 'Hello, this is an API test.\nHow does AI work?');
+    assert.equal(cleanSpeechFillers('heading colon new paragraph body text period'), 'Heading:\n\nBody text.');
+    assert.equal(cleanSpeechFillers('note colon use high hyphen quality audio semicolon it works exclamation mark'), 'Note: Use high-quality audio; it works!');
+
+    // G. Acronyms and Contractions
+    assert.equal(cleanSpeechFillers('i cant believe our CEO built this with AWS and SQL'), "I can't believe our CEO built this with AWS and SQL");
+    assert.equal(cleanSpeechFillers('whats the URL for the REST API in JSON format'), "What's the URL for the REST API in JSON format");
+
+    // H. Leading Orphaned Punctuation & Punctuation Collisions
+    assert.equal(cleanSpeechFillers(', ,, um, so what is this'), 'So what is this');
+    assert.equal(cleanSpeechFillers('explain this comma question mark'), 'Explain this?');
+
+    // I. Complex Real-World Dictation (Combining Fillers, Stutter, Contractions, Punctuation)
+    const complexSpeech = 'um uh could you basically explain like how the the API works comma and stuff like that question mark new line also i cant find the docs period';
+    assert.equal(cleanSpeechFillers(complexSpeech), "Could you explain how the API works?\nAlso I can't find the docs.");
+
+    console.log('  [PASS] 24. Enterprise speech filler removal & spoken formatting engine');
 }
+
+// 25. Test VTT Dictation UI: Interim Chatbox Streaming, Filler Handling & Chat Window Exclusion
+{
+    const chatbox = globalThis.document.getElementById('text-input');
+    const vttBtn = globalThis.document.getElementById('voice-to-text-btn');
+    chatbox.value = '';
+
+    let liveRowsCreated = 0;
+    const origCreateElement = globalThis.document.createElement;
+    globalThis.document.createElement = (tag) => {
+        const el = origCreateElement ? origCreateElement(tag) : { id: tag };
+        if (el.id === 'live-speech-transcription-row') liveRowsCreated++;
+        return el;
+    };
+
+    // 1. Start dictation
+    await globalThis.toggleVoiceToText();
+    assert.equal(vttBtn.classList.contains('is-listening'), true);
+
+    const rec = FakeRecognition.instances.at(-1);
+    assert.ok(rec);
+
+    // 2. Interim event with verbal fillers: must stream into chatbox, not chat window
+    rec.onresult?.({
+        resultIndex: 0,
+        results: [{ 0: { transcript: 'um uh how do I configure AWS question mark' }, isFinal: false }]
+    });
+
+    assert.equal(chatbox.value, 'How do I configure AWS?', 'Chatbox must receive interim transcript with fillers removed');
+    assert.equal(liveRowsCreated, 0, 'Chat window must not create live speech transcription rows during VTT');
+
+    // 3. Final event: commits to chatbox and does not auto-submit to chat window
+    rec.onresult?.({
+        resultIndex: 0,
+        results: [{ 0: { transcript: 'um uh how do I configure AWS question mark' }, isFinal: true }]
+    });
+
+    assert.equal(chatbox.value, 'How do I configure AWS?', 'Chatbox retains cleaned finalized text');
+
+    // 4. User stops dictation
+    await globalThis.toggleVoiceToText();
+    assert.equal(vttBtn.classList.contains('is-listening'), false);
+
+    // Restore createElement
+    globalThis.document.createElement = origCreateElement;
+
+    console.log('  [PASS] 25. VTT Dictation UI interim chatbox streaming, filler handling & chat window exclusion');
+}
+
+console.log('speech-input-tests-ok');
 
