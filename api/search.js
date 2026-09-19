@@ -3415,8 +3415,10 @@ export async function searchGeminiGrounding(query, options = {}) {
     if (!normalizedQuery) return { results: [], answer: null, webSearchQueries: [] };
 
     const limit = clampInt(options.limit, 8, 1, 20);
-    const timeoutMs = options.timeoutMs || GEMINI_SEARCH_TIMEOUT_MS;
-    const model = String(process.env.GEMINI_SEARCH_MODEL || process.env.GEMINI_MODEL || 'gemini-2.5-flash').trim();
+    const timeoutMs = options.timeoutMs || 8_000;
+    // Prefer gemini-2.0-flash for grounding (free-tier grounding support);
+    // fall back to env override or gemini-2.5-flash if explicitly configured.
+    const model = String(process.env.GEMINI_SEARCH_MODEL || process.env.GEMINI_MODEL || 'gemini-2.0-flash').trim();
 
     try {
         const url = `${GEMINI_GENERATE_URL}/${model}:generateContent?key=${apiKey}`;
@@ -3436,12 +3438,15 @@ export async function searchGeminiGrounding(query, options = {}) {
         }, timeoutMs);
 
         if (!response.ok) {
+            const errBody = await response.text().catch(() => '');
+            console.error(`[searchGeminiGrounding] API error ${response.status} for model "${model}":`, errBody.slice(0, 300));
             return { results: [], answer: null, webSearchQueries: [] };
         }
 
         const data = await response.json();
         return parseGeminiGroundingResponse(data, normalizedQuery, limit);
-    } catch (_) {
+    } catch (err) {
+        console.error('[searchGeminiGrounding] fetch error:', String(err?.message || err).slice(0, 200));
         return { results: [], answer: null, webSearchQueries: [] };
     }
 }
