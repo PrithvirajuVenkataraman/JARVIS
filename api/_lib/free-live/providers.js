@@ -316,30 +316,20 @@ export async function runFreeLiveSearch(query, route = {}, options = {}) {
     if (category === 'sports') return searchSports(query, { limit });
     if (category === 'tourism_food_places') return searchTourismFoodPlaces(query, { limit });
 
-    // Universal Zero-Key Multi-Engine Parallel Fast-Race (Prioritizing SearXNG Clean JSON)
-    const [searxResults, wikiResults, gdeltResults] = await Promise.allSettled([
-        searchSearXNGJson(query, { limit }),
+    // Universal Zero-Key Multi-Engine Parallel Fast-Race
+    // Note: SearXNG public instances are intentionally excluded — they block Vercel datacenter IPs.
+    // Web coverage comes from Wikipedia + GDELT + Gemini Grounding in searchPublicSources.
+    const [wikiResults, gdeltResults] = await Promise.allSettled([
         searchWikipediaApi(query, { limit: 3 }),
         searchGdeltNews(query, { limit: 3 })
     ]);
 
     const results = [];
-    if (searxResults.status === 'fulfilled' && Array.isArray(searxResults.value) && searxResults.value.length) {
-        results.push(...searxResults.value);
-    }
     if (wikiResults.status === 'fulfilled' && Array.isArray(wikiResults.value)) {
         results.push(...wikiResults.value);
     }
     if (gdeltResults.status === 'fulfilled' && Array.isArray(gdeltResults.value)) {
         results.push(...gdeltResults.value);
-    }
-
-    // Only fallback to DDG HTML scraping if SearXNG yielded no web results
-    if (!results.some(r => r.sourceType === 'live_web')) {
-        const ddgResults = await searchDuckDuckGoHtml(query, { limit }).catch(() => []);
-        if (Array.isArray(ddgResults) && ddgResults.length) {
-            results.push(...ddgResults);
-        }
     }
 
     if (results.length > 0) {
