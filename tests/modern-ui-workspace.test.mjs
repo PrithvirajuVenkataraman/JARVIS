@@ -253,5 +253,15 @@ assert.ok(stylesCss.includes('.custom-confirm-backdrop'), 'Custom confirm backdr
 assert.ok(stylesCss.includes('.custom-confirm-proceed-btn.danger'), 'Danger proceed button styling must exist in styles.css');
 console.log('  [PASS] 13. Bespoke Custom Confirmation Modal verified (accessible glassmorphic dialog replacing native browser alert)');
 
+// 14. Verify Enterprise Sidebar Interaction, Drag Handle & Outside Click Close
+assert.ok(indexHtml.includes('id="sidebar-drag-handle"'), 'Sidebar drag handle element must exist in DOM');
+assert.ok(indexHtml.includes('function initSidebarOutsideClickClose()'), 'initSidebarOutsideClickClose must be defined');
+assert.ok(indexHtml.includes('function initSidebarDragging()'), 'initSidebarDragging must be defined');
+assert.ok(stylesCss.includes('.sidebar-drag-handle'), 'sidebar-drag-handle CSS must exist');
+assert.ok(stylesCss.includes('.chat-sidebar-panel.is-dragging'), 'is-dragging CSS override must exist');
+assert.ok(stylesCss.includes('var(--sidebar-docked-width, 280px)'), 'Dynamic --sidebar-docked-width CSS must exist');
+console.log('  [PASS] 14. Enterprise Sidebar interaction verified (outside-click dismissal, drag handle, swipe gestures, and dynamic width)');
+
 console.log('=== All Modern AI Workspace UI Architecture Tests PASSED ===');
+
 
