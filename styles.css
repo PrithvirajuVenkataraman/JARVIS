@@ -229,36 +229,86 @@ option {
     position: fixed;
     inset: 0;
     z-index: calc(var(--z-chat-sidebar) + 1);
-    background: rgba(0, 0, 0, 0.28);
+    background: rgba(0, 0, 0, 0.45);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    opacity: 0;
+    transition: opacity 0.24s ease;
+    pointer-events: none;
+}
+
+.chat-sidebar-backdrop:not(.hidden) {
+    opacity: 1;
+    pointer-events: auto;
 }
 
 .chat-sidebar-panel {
     position: fixed;
     inset: 0 auto 0 0;
     z-index: calc(var(--z-chat-sidebar) + 2);
-    width: min(304px, calc(100vw - 24px));
+    width: min(280px, calc(100vw - 56px));
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    padding: calc(18px + env(safe-area-inset-top)) 8px calc(12px + env(safe-area-inset-bottom));
-    border-right: 1px solid rgba(255, 255, 255, 0.12);
-    background: #000000;
+    gap: 6px;
+    padding: calc(14px + env(safe-area-inset-top)) 8px calc(16px + env(safe-area-inset-bottom));
+    border-right: 1px solid rgba(255, 255, 255, 0.07);
+    background: rgba(10, 10, 13, 0.97);
+    backdrop-filter: blur(24px) saturate(1.6);
+    -webkit-backdrop-filter: blur(24px) saturate(1.6);
     color: #ffffff;
-    box-shadow: 20px 0 38px rgba(0, 0, 0, 0.32);
-    transform: translateX(-105%);
+    box-shadow: 2px 0 0 0 rgba(255,255,255,0.04), 8px 0 48px rgba(0, 0, 0, 0.55);
+    transform: translateX(-100%);
     visibility: hidden;
     pointer-events: none;
-    transition: transform 0.18s ease, visibility 0.18s ease;
+    /* Spring-like close: fast out */
+    transition: transform 0.22s cubic-bezier(0.32, 0, 0.67, 0),
+                visibility 0s linear 0.22s;
+    will-change: transform;
+    contain: layout style;
 }
 
 .chat-sidebar-panel.is-open {
     transform: translateX(0);
     visibility: visible;
     pointer-events: auto;
+    /* Spring-like open: ease out with slight overshoot feel */
+    transition: transform 0.28s cubic-bezier(0.34, 1.1, 0.64, 1),
+                visibility 0s linear 0s;
 }
 
-.chat-sidebar-panel.is-open {
-    transform: translateX(0);
+/* Drag-in-progress: disable transition for real-time tracking */
+.chat-sidebar-panel.is-dragging {
+    transition: none !important;
+}
+
+/* Sidebar drag handle — invisible 8px strip on the right edge */
+.sidebar-drag-handle {
+    position: absolute;
+    top: 0;
+    right: -4px;
+    width: 8px;
+    height: 100%;
+    cursor: ew-resize;
+    z-index: 1;
+    touch-action: none;
+}
+
+.sidebar-drag-handle::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 2px;
+    height: 48px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.0);
+    transition: background 0.2s ease;
+}
+
+.chat-sidebar-panel.is-open .sidebar-drag-handle::after,
+.sidebar-drag-handle:hover::after {
+    background: rgba(255, 255, 255, 0.12);
 }
 
 .chat-sidebar-header {
@@ -306,68 +356,113 @@ option {
 .chat-sidebar-nav {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 1px;
+    padding: 0 4px;
 }
 
 .chat-sidebar-nav-item {
+    position: relative;
     width: 100%;
-    min-height: 44px;
+    min-height: 42px;
     display: grid;
     grid-template-columns: 28px 1fr;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     border: 0;
     border-radius: 10px;
     background: transparent;
-    color: #ffffff;
+    color: rgba(255, 255, 255, 0.82);
     cursor: pointer;
-    padding: 8px 10px;
+    padding: 8px 12px;
     text-align: left;
+    transition: background 0.15s ease, color 0.15s ease;
+    overflow: hidden;
+}
+
+.chat-sidebar-nav-item::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%) scaleY(0);
+    width: 3px;
+    height: 60%;
+    border-radius: 0 2px 2px 0;
+    background: var(--ui-primary);
+    transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .chat-sidebar-nav-item svg {
-    width: 22px;
-    height: 22px;
+    width: 18px;
+    height: 18px;
+    opacity: 0.72;
+    transition: opacity 0.15s ease;
+    flex-shrink: 0;
 }
 
 .chat-sidebar-nav-item span {
     min-width: 0;
     overflow: hidden;
-    color: #ffffff;
-    font-size: 15px;
-    font-weight: 650;
+    color: inherit;
+    font-size: 14px;
+    font-weight: 500;
     line-height: 1.2;
     text-overflow: ellipsis;
     white-space: nowrap;
+    letter-spacing: -0.01em;
 }
 
 .chat-sidebar-nav-item:hover,
-.chat-sidebar-nav-item:focus-visible,
-.chat-sidebar-nav-item.is-primary {
-    background: rgba(255, 255, 255, 0.10);
+.chat-sidebar-nav-item:focus-visible {
+    background: rgba(255, 255, 255, 0.07);
+    color: #ffffff;
     outline: none;
 }
 
+.chat-sidebar-nav-item:hover svg,
+.chat-sidebar-nav-item:focus-visible svg,
+.chat-sidebar-nav-item.is-primary svg {
+    opacity: 1;
+}
+
+.chat-sidebar-nav-item.is-primary {
+    background: rgba(56, 189, 248, 0.08);
+    color: #ffffff;
+    border: 1px solid rgba(56, 189, 248, 0.14);
+}
+
+.chat-sidebar-nav-item.is-primary::before,
+.chat-sidebar-nav-item:hover::before,
+.chat-sidebar-nav-item:focus-visible::before {
+    transform: translateY(-50%) scaleY(1);
+}
+
 .chat-sidebar-nav-item.is-sos {
-    background: rgba(239, 68, 68, 0.08);
-    border: 1px solid rgba(239, 68, 68, 0.22);
+    background: rgba(239, 68, 68, 0.06);
+    border: 1px solid rgba(239, 68, 68, 0.18);
+    color: #fca5a5;
+    margin-top: 2px;
+}
+
+.chat-sidebar-nav-item.is-sos::before {
+    background: #ef4444;
 }
 
 .chat-sidebar-nav-item.is-sos:hover,
 .chat-sidebar-nav-item.is-sos:focus-visible {
-    background: rgba(239, 68, 68, 0.18);
-    border-color: rgba(239, 68, 68, 0.4);
+    background: rgba(239, 68, 68, 0.14);
+    border-color: rgba(239, 68, 68, 0.36);
     outline: none;
 }
 
 .chat-sidebar-nav-item.is-sos span {
     color: #fca5a5;
-    font-weight: 700;
+    font-weight: 600;
 }
 
 .chat-sidebar-search-field {
     display: none;
-    padding: 6px 10px 8px;
+    padding: 4px 4px 6px;
 }
 
 .chat-sidebar-panel.search-open .chat-sidebar-search-field {
@@ -376,23 +471,27 @@ option {
 
 .chat-sidebar-search-field input {
     width: 100%;
-    height: 38px;
-    border: 1px solid rgba(255, 255, 255, 0.24);
-    border-radius: 10px;
-    background: #050505;
+    height: 36px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 9px;
+    background: rgba(255, 255, 255, 0.05);
     color: #ffffff;
     padding: 0 11px;
     font-size: 13px;
     outline: none;
+    transition: border-color 0.15s ease, background 0.15s ease;
 }
 
 .chat-sidebar-search-field input:focus {
-    border-color: rgba(255, 255, 255, 0.55);
+    border-color: rgba(56, 189, 248, 0.5);
+    background: rgba(255, 255, 255, 0.07);
 }
 
 .chat-sidebar-model-block {
     width: 100%;
-    padding: 8px 10px 10px;
+    padding: 8px 12px 10px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    margin-top: 4px;
 }
 
 .chat-sidebar-model-selector {
@@ -401,25 +500,25 @@ option {
 
 .chat-sidebar-model-label {
     display: block;
-    color: rgba(255, 255, 255, 0.7);
-    font-size: 11px;
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 10px;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-bottom: 4px;
+    letter-spacing: 0.6px;
+    margin-bottom: 6px;
 }
 
 .chat-sidebar-model-select {
     width: 100%;
-    min-height: 40px;
-    border: 1px solid rgba(148, 163, 184, 0.34);
-    border-radius: 10px;
-    background-color: #0a0a0a;
+    min-height: 38px;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    border-radius: 9px;
+    background-color: rgba(255, 255, 255, 0.04);
     color: #ffffff;
     color-scheme: dark;
-    padding: 0 40px 0 12px;
+    padding: 0 36px 0 12px;
     font-size: 13px;
-    font-weight: 650;
+    font-weight: 500;
     line-height: 1.2;
     outline: none;
     cursor: pointer;
@@ -429,32 +528,37 @@ option {
     background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
     background-repeat: no-repeat;
     background-position: right 10px center;
-    background-size: 16px;
-    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02), 0 8px 22px rgba(0, 0, 0, 0.24);
+    background-size: 14px;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.chat-sidebar-model-select:hover {
+    border-color: rgba(255, 255, 255, 0.18);
+    background-color: rgba(255, 255, 255, 0.07);
 }
 
 .chat-sidebar-model-select:focus {
-    border-color: rgba(125, 211, 252, 0.72);
-    box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.18);
+    border-color: rgba(56, 189, 248, 0.55);
+    box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.12);
 }
 
 .chat-sidebar-model-select option {
-    background: #0a0a0a;
+    background: #111113;
     color: #ffffff;
 }
 
 .chat-sidebar-close:hover,
 .chat-session-more:hover {
-    background: rgba(255, 255, 255, 0.10);
-    border-color: rgba(255, 255, 255, 0.28);
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.22);
 }
 
 .chat-sidebar-section-title {
-    margin: 18px 10px 7px;
-    color: #ffffff;
-    font-size: 12px;
-    font-weight: 800;
-    letter-spacing: 0;
+    margin: 16px 12px 6px;
+    color: rgba(255, 255, 255, 0.38);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.6px;
     text-transform: uppercase;
 }
 
@@ -465,37 +569,42 @@ option {
     overflow-x: hidden;
     display: flex;
     flex-direction: column;
-    gap: 2px;
-    padding: 0 0 0;
+    gap: 1px;
+    padding: 0 4px 0;
 }
 
 .chat-sidebar-empty {
-    margin: 8px 10px;
-    color: rgba(255, 255, 255, 0.58);
+    margin: 8px 12px;
+    color: rgba(255, 255, 255, 0.38);
     font-size: 13px;
 }
 
 .chat-session-row {
     display: grid;
-    grid-template-columns: 1fr 32px;
-    gap: 8px;
+    grid-template-columns: 1fr 30px;
+    gap: 6px;
     align-items: center;
-    min-height: 44px;
-    padding: 7px 6px 7px 10px;
+    min-height: 42px;
+    padding: 7px 8px 7px 12px;
     border: 1px solid transparent;
-    border-radius: 10px;
+    border-radius: 9px;
     background: transparent;
     cursor: pointer;
+    transition: background 0.12s ease, border-color 0.12s ease, transform 0.12s ease;
 }
 
-.chat-session-row:hover,
+.chat-session-row:hover {
+    background: rgba(255, 255, 255, 0.06);
+    transform: translateX(1px);
+}
+
 .chat-session-row.is-active {
-    background: rgba(255, 255, 255, 0.10);
-    border-color: transparent;
+    background: rgba(56, 189, 248, 0.07);
+    border-color: rgba(56, 189, 248, 0.12);
 }
 
 .chat-session-row.is-pinned {
-    background: rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.05);
 }
 
 .chat-session-main {
@@ -511,25 +620,26 @@ option {
 }
 
 .chat-session-title {
-    color: #ffffff;
-    font-size: 14px;
-    font-weight: 650;
-    line-height: 1.25;
+    color: rgba(255, 255, 255, 0.90);
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.3;
+    letter-spacing: -0.01em;
 }
 
 .chat-session-meta {
-    margin-top: 3px;
-    color: rgba(255, 255, 255, 0.62);
+    margin-top: 2px;
+    color: rgba(255, 255, 255, 0.40);
     font-size: 11px;
-    font-weight: 650;
+    font-weight: 400;
 }
 
 .chat-session-snippet {
     display: block;
-    margin-top: 4px;
-    color: rgba(255, 255, 255, 0.52);
+    margin-top: 3px;
+    color: rgba(255, 255, 255, 0.38);
     font-size: 11px;
-    font-weight: 600;
+    font-weight: 400;
     line-height: 1.35;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -546,10 +656,11 @@ option {
 }
 
 .chat-session-more {
-    width: 30px;
-    height: 30px;
-    border-radius: 9px;
+    width: 28px;
+    height: 28px;
+    border-radius: 7px;
     opacity: 0;
+    transition: opacity 0.15s ease;
 }
 
 .chat-session-row:hover .chat-session-more,
@@ -8110,20 +8221,32 @@ body:not(.dark) .next-step-title {
 
 /* Dockable Sidebar Push Layout for Desktop */
 @media (min-width: 1024px) {
+    .app-root {
+        transition: padding-left 0.26s cubic-bezier(0.34, 1.1, 0.64, 1);
+    }
+    .floating-input-bar {
+        transition: left 0.26s cubic-bezier(0.34, 1.1, 0.64, 1),
+                    padding 0.2s ease,
+                    bottom 0.2s ease;
+    }
     body.sidebar-docked .chat-sidebar-panel {
         transform: translateX(0);
         visibility: visible;
         pointer-events: auto;
-        box-shadow: none;
+        box-shadow: 1px 0 0 0 rgba(255, 255, 255, 0.08);
     }
     body.sidebar-docked .chat-sidebar-backdrop {
         display: none !important;
     }
     body.sidebar-docked .app-root {
-        padding-left: 304px;
+        padding-left: var(--sidebar-docked-width, 280px);
     }
     body.sidebar-docked .floating-input-bar {
-        left: 304px;
+        left: var(--sidebar-docked-width, 280px);
+    }
+    body.sidebar-dragging .app-root,
+    body.sidebar-dragging .floating-input-bar {
+        transition: none !important;
     }
 }
 
