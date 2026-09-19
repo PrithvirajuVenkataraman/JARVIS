@@ -563,11 +563,10 @@ export async function searchPublicSources(query, options = {}) {
         Promise.allSettled(targetQueries.slice(0, 2).map(candidate => searchGoogleNewsRss(candidate, { limit }))),
         Promise.allSettled(targetQueries.slice(0, 2).map(candidate => searchWikipedia(candidate, { limit: 2 }))),
         Promise.allSettled([searchWikidata(targetQueries[0] || normalizedQuery, { limit: 2 })]),
-        Promise.allSettled(targetQueries.slice(0, 2).map(async (candidate) => {
-            const searxResults = await searchSearXNGJson(candidate, { limit: Math.min(6, limit) }).catch(() => []);
-            if (Array.isArray(searxResults) && searxResults.length) return searxResults;
-            return searchDuckDuckGoHtml(candidate, { limit: Math.min(6, limit) }).catch(() => []);
-        })),
+        // SearXNG public instances (searx.be, priv.au) and DuckDuckGo HTML are blocked by
+        // Vercel datacenter IPs — removed to eliminate the 2.5s wasted timeout on every query.
+        // Web coverage is provided by Gemini Grounding + Google News RSS + GDELT below.
+        Promise.resolve([]),
         options.skipStructuredRoles === true
             ? Promise.resolve([])
             : Promise.allSettled([searchGovernmentRole(normalizedQuery, { limit: Math.min(3, limit) })]),
@@ -1138,11 +1137,13 @@ export async function runVerifiedWebSearch(query, options = {}) {
         ...planningQueries
     ]));
 
-    // Search using clean APIs & scraperless engines (Gemini Grounding, SearXNG, Google News RSS, Wikipedia, Wikidata)
+    // Search using clean APIs & scraperless engines (Gemini Grounding, Google News RSS, Wikipedia, Wikidata, GDELT)
+    // allowDeepCrawl=true enables crawlArticleBody to fetch full article text from returned URLs (built-in free scraper)
     const publicSources = await searchPublicSources(normalizedQuery, {
         limit,
         plannedQueries: searchQueries,
-        skipAutoDeepCrawl: true
+        skipAutoDeepCrawl: false,
+        allowDeepCrawl: true
     }).catch(() => []);
 
     const publicResults = rankSources(normalizedQuery, dedupeSearchResults(publicSources)
