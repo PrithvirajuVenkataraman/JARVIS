@@ -10732,6 +10732,8 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
         }
 
         function updateLiveSpeechTranscriptionOnScreen(text = '', isInterim = false, source = 'voice') {
+            // Enterprise VTT: Dictation must stream exclusively into the composer chatbox, NEVER into the chat window
+            if (source === 'vtt' || source === 'voice' || source === 'dictation' || source !== 'converse') return;
             const chatContainer = document.getElementById('chat-container');
             if (!chatContainer) return;
 
