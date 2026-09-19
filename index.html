@@ -48,6 +48,7 @@
 
     <div id="chat-sidebar-backdrop" class="chat-sidebar-backdrop hidden" onclick="closeChatSidebar()" aria-hidden="true"></div>
     <aside id="chat-sidebar-panel" class="chat-sidebar-panel" aria-label="Chat history" aria-hidden="true">
+        <div class="sidebar-drag-handle" id="sidebar-drag-handle" aria-hidden="true"></div>
         <div class="chat-sidebar-header">
             <div class="chat-sidebar-brand" aria-hidden="true">
                 <svg class="jarvis-sidebar-logo" width="34" height="34" viewBox="0 0 64 64" fill="none" aria-hidden="true">
@@ -26692,6 +26693,275 @@ function openSidebarQuickAction(action) {
     if (action === 'system') {
         setTimeout(() => document.getElementById('custom-system-prompt-input')?.focus(), 0);
     }
+}
+
+let isSidebarDraggingActive = false;
+let sidebarDragLastEndedAt = 0;
+
+function initSidebarOutsideClickClose() {
+    // Dismiss sidebar when tapping/clicking outside panel and toggle
+    document.addEventListener('pointerdown', (e) => {
+        if (Date.now() - sidebarDragLastEndedAt < 250) return;
+
+        const panel = document.getElementById('chat-sidebar-panel');
+        if (!panel) return;
+        const isDocked = document.body.classList.contains('sidebar-docked');
+        const isOpen = panel.classList.contains('is-open') || isDocked;
+        if (!isOpen) return;
+
+        const toggle = document.getElementById('chat-sidebar-toggle');
+        if (panel.contains(e.target)) return;
+        if (toggle && toggle.contains(e.target)) return;
+
+        // Ignore clicks within modals, popups, or lightboxes
+        if (e.target.closest('#sos-contact-modal, #image-lightbox-overlay, #command-palette-modal, .modal-overlay, #settings-modal')) {
+            return;
+        }
+
+        closeChatSidebar();
+    }, { capture: true });
+
+    // Keyboard ESC to close sidebar
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            const panel = document.getElementById('chat-sidebar-panel');
+            const isDocked = document.body.classList.contains('sidebar-docked');
+            if (panel && (panel.classList.contains('is-open') || isDocked)) {
+                closeChatSidebar();
+            }
+        }
+    });
+}
+
+function initSidebarDragging() {
+    const panel = document.getElementById('chat-sidebar-panel');
+    const backdrop = document.getElementById('chat-sidebar-backdrop');
+    const handle = document.getElementById('sidebar-drag-handle');
+    if (!panel) return;
+
+    // Restore persisted sidebar width on desktop
+    try {
+        const savedWidth = parseInt(localStorage.getItem('jarvis_sidebar_width'), 10);
+        if (savedWidth && savedWidth >= 220 && savedWidth <= 520) {
+            document.documentElement.style.setProperty('--sidebar-docked-width', `${savedWidth}px`);
+            if (window.innerWidth >= 1024) {
+                panel.style.width = `${savedWidth}px`;
+            }
+        }
+    } catch (_) {}
+
+    let startX = 0;
+    let startY = 0;
+    let currentX = 0;
+    let startTime = 0;
+    let dragMode = null; // 'close' | 'open' | 'resize'
+    let isTracking = false;
+    let hasDirectionLock = false;
+    let initialWidth = 280;
+
+    function getPanelWidth() {
+        return panel.offsetWidth || 280;
+    }
+
+    // Touch handlers for mobile swipe-to-open and swipe-to-close
+    document.addEventListener('touchstart', (e) => {
+        if (e.touches.length !== 1) return;
+        const touch = e.touches[0];
+        const isDocked = document.body.classList.contains('sidebar-docked');
+        const isOpen = panel.classList.contains('is-open') || isDocked;
+
+        startX = touch.clientX;
+        startY = touch.clientY;
+        currentX = touch.clientX;
+        startTime = Date.now();
+        hasDirectionLock = false;
+
+        if (isOpen) {
+            // If touch started on panel or handle, allow swipe left to close
+            if (panel.contains(touch.target) || (handle && handle.contains(touch.target))) {
+                dragMode = 'close';
+                isTracking = true;
+                initialWidth = getPanelWidth();
+            }
+        } else {
+            // If sidebar closed and touch started near left edge (<= 32px), allow swipe right to open
+            if (startX <= 32) {
+                dragMode = 'open';
+                isTracking = true;
+                initialWidth = getPanelWidth();
+                renderChatSidebarList();
+                initModelSelector();
+            }
+        }
+    }, { passive: true });
+
+    document.addEventListener('touchmove', (e) => {
+        if (!isTracking || e.touches.length !== 1) return;
+        const touch = e.touches[0];
+        currentX = touch.clientX;
+        const deltaX = currentX - startX;
+        const deltaY = touch.clientY - startY;
+
+        // Determine gesture direction
+        if (!hasDirectionLock) {
+            if (Math.abs(deltaY) > 8 && Math.abs(deltaY) > Math.abs(deltaX)) {
+                // User is scrolling vertically inside chat or panel list
+                isTracking = false;
+                return;
+            }
+            if (Math.abs(deltaX) > 8 && Math.abs(deltaX) > Math.abs(deltaY)) {
+                hasDirectionLock = true;
+            } else {
+                return;
+            }
+        }
+
+        isSidebarDraggingActive = true;
+        panel.classList.add('is-dragging');
+        document.body.classList.add('sidebar-dragging');
+
+        if (dragMode === 'close') {
+            // Dragging left (negative deltaX)
+            const clampedDelta = Math.min(0, deltaX);
+            panel.style.transform = `translateX(${clampedDelta}px)`;
+            const width = initialWidth || getPanelWidth();
+            const progress = Math.max(0, Math.min(1, 1 - Math.abs(clampedDelta) / width));
+            if (backdrop) {
+                backdrop.classList.remove('hidden');
+                backdrop.style.opacity = progress.toFixed(2);
+            }
+        } else if (dragMode === 'open') {
+            // Dragging right from left edge
+            const width = initialWidth || getPanelWidth();
+            const clampedOffset = Math.min(0, -width + deltaX);
+            panel.classList.add('is-open');
+            panel.style.transform = `translateX(${clampedOffset}px)`;
+            if (backdrop) {
+                backdrop.classList.remove('hidden');
+                const progress = Math.max(0, Math.min(1, deltaX / width));
+                backdrop.style.opacity = progress.toFixed(2);
+            }
+        }
+    }, { passive: false });
+
+    function endTouchDrag() {
+        if (!isTracking) return;
+        isTracking = false;
+        panel.classList.remove('is-dragging');
+        document.body.classList.remove('sidebar-dragging');
+        panel.style.transform = '';
+        if (backdrop) backdrop.style.opacity = '';
+
+        if (!hasDirectionLock) return;
+
+        const deltaX = currentX - startX;
+        const elapsed = Math.max(1, Date.now() - startTime);
+        const velocityX = deltaX / elapsed;
+        const width = initialWidth || getPanelWidth();
+
+        sidebarDragLastEndedAt = Date.now();
+        setTimeout(() => { isSidebarDraggingActive = false; }, 50);
+
+        if (dragMode === 'close') {
+            if (deltaX < -50 || velocityX < -0.32) {
+                closeChatSidebar();
+            } else {
+                panel.classList.add('is-open');
+            }
+        } else if (dragMode === 'open') {
+            if (deltaX > width * 0.28 || velocityX > 0.32) {
+                toggleChatSidebar();
+            } else {
+                closeChatSidebar();
+            }
+        }
+        dragMode = null;
+    }
+
+    document.addEventListener('touchend', endTouchDrag, { passive: true });
+    document.addEventListener('touchcancel', endTouchDrag, { passive: true });
+
+    // Pointer / Mouse resize & drag on #sidebar-drag-handle
+    if (handle) {
+        handle.addEventListener('pointerdown', (e) => {
+            if (e.button !== 0) return;
+            e.preventDefault();
+            startX = e.clientX;
+            startTime = Date.now();
+            initialWidth = getPanelWidth();
+            dragMode = 'resize';
+            isTracking = true;
+            panel.classList.add('is-dragging');
+            document.body.classList.add('sidebar-dragging');
+            try { handle.setPointerCapture(e.pointerId); } catch (_) {}
+        });
+
+        handle.addEventListener('pointermove', (e) => {
+            if (!isTracking || dragMode !== 'resize') return;
+            const deltaX = e.clientX - startX;
+            isSidebarDraggingActive = true;
+
+            if (window.innerWidth >= 1024) {
+                const newWidth = Math.round(initialWidth + deltaX);
+                if (newWidth < 180 && deltaX < -50) {
+                    panel.style.transform = `translateX(${deltaX}px)`;
+                } else {
+                    const clampedWidth = Math.max(220, Math.min(520, newWidth));
+                    panel.style.transform = '';
+                    panel.style.width = `${clampedWidth}px`;
+                    document.documentElement.style.setProperty('--sidebar-docked-width', `${clampedWidth}px`);
+                }
+            } else {
+                const clampedDelta = Math.min(0, deltaX);
+                panel.style.transform = `translateX(${clampedDelta}px)`;
+            }
+        });
+
+        const endPointerDrag = (e) => {
+            if (!isTracking || dragMode !== 'resize') return;
+            isTracking = false;
+            panel.classList.remove('is-dragging');
+            document.body.classList.remove('sidebar-dragging');
+            panel.style.transform = '';
+
+            try { handle.releasePointerCapture(e.pointerId); } catch (_) {}
+
+            const deltaX = e.clientX - startX;
+            sidebarDragLastEndedAt = Date.now();
+            setTimeout(() => { isSidebarDraggingActive = false; }, 50);
+
+            if (window.innerWidth >= 1024) {
+                const finalWidth = initialWidth + deltaX;
+                if (finalWidth < 180 && deltaX < -50) {
+                    closeChatSidebar();
+                } else {
+                    const clamped = Math.max(220, Math.min(520, Math.round(finalWidth)));
+                    panel.style.width = `${clamped}px`;
+                    document.documentElement.style.setProperty('--sidebar-docked-width', `${clamped}px`);
+                    try { localStorage.setItem('jarvis_sidebar_width', String(clamped)); } catch (_) {}
+                }
+            } else {
+                if (deltaX < -50) {
+                    closeChatSidebar();
+                }
+            }
+            dragMode = null;
+        };
+
+        handle.addEventListener('pointerup', endPointerDrag);
+        handle.addEventListener('pointercancel', endPointerDrag);
+    }
+}
+
+// Auto-initialize when ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        initSidebarOutsideClickClose();
+        initSidebarDragging();
+    });
+} else {
+    initSidebarOutsideClickClose();
+    initSidebarDragging();
 }
 
 const MODEL_STORAGE_KEY = 'jarvis_selected_model';
