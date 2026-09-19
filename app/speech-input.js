@@ -76,7 +76,8 @@ export function cleanSpeechFillers(text = '') {
     s = s.replace(/\b(?:hyphen|dash)\b/gi, '-');
 
     // 1. Remove verbal fillers & hesitations (e.g. "um", "uh", "umm", "uhh", "uhm", "er", "erm", "ah", "ahh", "hmm", "hm", "mhm", "uh-huh")
-    s = s.replace(/\b(?:um+|uh+|er+|ah+|erm+|hmm+|hm+|uhm+|uhh+|aah+|mhm|uh-huh)\b/gi, '');
+    s = s.replace(/\b(?:uh-huh|uh-oh)\b/gi, '');
+    s = s.replace(/\b(?:um+|uh+|er+|ah+|erm+|hmm+|hm+|uhm+|uhh+|aah+|mhm)\b/gi, '');
 
     // 2. Remove filler phrases when surrounded by boundaries or at start/end
     s = s.replace(/\b(?:you know what i mean|you know what im saying|you know what i'm saying)\b/gi, '');
@@ -95,7 +96,7 @@ export function cleanSpeechFillers(text = '') {
     // 3. Remove speech stutter / immediate duplicate words (e.g. "the the", "I I", "to to")
     s = s.replace(/\b([a-zA-Z]+)\s+\1\b/gi, '$1');
     s = s.replace(/\b([a-zA-Z]+)\s+\1\b/gi, '$1');
-    s = s.replace(/^[,\s;:]+/, '');
+    s = s.replace(/^[,\s;:\-]+/, '');
 
     // 4. Auto-correct common speech-to-text contractions, pronouns & slips
     const autoCorrectMap = [
@@ -145,6 +146,7 @@ export function cleanSpeechFillers(text = '') {
 
     // 6. Clean punctuation spacing (e.g. "word , next" -> "word, next")
     s = s.replace(/,\s*,+/g, ',');
+    s = s.replace(/[,;:]\s*([.?!])/g, '$1');
     s = s.replace(/[ \t]+([,.:;?!])/g, '$1');
     s = s.replace(/([,.:;?!])(?=[^\s\d\n])/g, '$1 ');
     s = s.replace(/\s*-\s*/g, '-');
