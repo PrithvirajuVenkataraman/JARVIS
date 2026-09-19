@@ -75,56 +75,28 @@
         </div>
         <div class="chat-sidebar-nav" aria-label="Main chat actions">
             <button type="button" class="chat-sidebar-nav-item is-primary" onclick="startNewChatSession(); closeChatSidebar();">
-                <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" aria-hidden="true">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" aria-hidden="true">
                     <path d="M12 20h9"></path>
                     <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"></path>
                 </svg>
                 <span>New chat</span>
             </button>
             <button type="button" class="chat-sidebar-nav-item" onclick="focusChatSidebarSearch()">
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
                     <circle cx="11" cy="11" r="7"></circle>
                     <path d="m20 20-3.5-3.5"></path>
                 </svg>
                 <span>Search chats</span>
             </button>
-            <button type="button" class="chat-sidebar-nav-item" onclick="openSidebarQuickAction('memory')">
-                <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" aria-hidden="true">
-                    <path d="M12 3a7 7 0 0 0-7 7c0 4.5 4.1 7.2 6 9.5a1.3 1.3 0 0 0 2 0c1.9-2.3 6-5 6-9.5a7 7 0 0 0-7-7z"></path>
-                    <circle cx="12" cy="10" r="2.2"></circle>
-                </svg>
-                <span>Memory</span>
-            </button>
-            <button type="button" class="chat-sidebar-nav-item" onclick="openSidebarQuickAction('system')">
-                <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" aria-hidden="true">
+            <button type="button" class="chat-sidebar-nav-item" onclick="openSidebarQuickAction('settings')">
+                <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" aria-hidden="true">
                     <circle cx="12" cy="12" r="3"></circle>
-                    <path d="M19.4 15a1.8 1.8 0 0 0 .36 2l.04.04a2 2 0 0 1-2.83 2.83l-.04-.04a1.8 1.8 0 0 0-2-.36 1.8 1.8 0 0 0-1.1 1.65V21a2 2 0 0 1-4 0v-.06A1.8 1.8 0 0 0 8.7 19.3a1.8 1.8 0 0 0-2 .36l-.04.04a2 2 0 0 1-2.83-2.83l.04-.04a1.8 1.8 0 0 0 .36-2 1.8 1.8 0 0 0-1.65-1.1H2.5a2 2 0 0 1 0-4h.06A1.8 1.8 0 0 0 4.2 8.6a1.8 1.8 0 0 0-.36-2l-.04-.04a2 2 0 0 1 2.83-2.83l.04.04a1.8 1.8 0 0 0 2 .36A1.8 1.8 0 0 0 9.8 2.5V2a2 2 0 0 1 4 0v.06a1.8 1.8 0 0 0 1.1 1.65 1.8 1.8 0 0 0 2-.36l.04-.04a2 2 0 0 1 2.83 2.83l-.04.04a1.8 1.8 0 0 0-.36 2 1.8 1.8 0 0 0 1.65 1.1h.06a2 2 0 0 1 0 4h-.06A1.8 1.8 0 0 0 19.4 15z"></path>
+                    <path d="M19.4 15a1.8 1.8 0 0 0 .36 2l.04.04a2 2 0 0 1-2.83 2.83l-.04-.04a1.8 1.8 0 0 0-2-.36 1.8 1.8 0 0 0-1.1 1.65V21a2 2 0 0 1-4 0v-.06A1.8 1.8 0 0 0 8.7 19.3a1.8 1.8 0 0 0-2 .36l-.04.04a2 2 0 0 1-2.83-2.83l.04-.04a1.8 1.8 0 0 0 .36-2 1.8 1.8 0 0 0-1.65-1.1H2.5a2 2 0 0 1 0-4h.06A1.8 1.8 0 0 0 4.2 8.6a1.8 1.8 0 0 0-.36-2l-.04-.04a2 2 0 0 1 2.83-2.83l.04-.04a1.8 1.8 0 0 0 2 .36A1.8 1.8 0 0 0 9.8 2.5V2a2 2 0 0 1 4 0v.06a1.8 1.8 0 0 0 1.1 1.65 1.8 1.8 0 0 0 2-.36l.04-.04a2 2 0 0 1 2.83 2.83l-.04-.04a1.8 1.8 0 0 0-.36 2 1.8 1.8 0 0 0 1.65 1.1h.06a2 2 0 0 1 0 4h-.06A1.8 1.8 0 0 0 19.4 15z"></path>
                 </svg>
-                <span>System Instructions</span>
+                <span>Settings</span>
             </button>
-            <button type="button" id="sidebar-emergency-sos-btn" class="chat-sidebar-nav-item is-sos" onclick="openSidebarQuickAction('sos')" title="Emergency SOS & Distress Contacts">
-                <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:#ef4444;">
-                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
-                </svg>
-                <span style="color:#fca5a5;">Emergency SOS</span>
-            </button>
-            <button type="button" id="sidebar-image-history-btn" class="chat-sidebar-nav-item" onclick="openImageGalleryModal(); closeChatSidebar();" title="Generated Images Gallery">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" aria-hidden="true">
-                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                    <circle cx="8.5" cy="8.5" r="1.5"></circle>
-                    <polyline points="21 15 16 10 5 21"></polyline>
-                </svg>
-                <span>Gallery</span>
-            </button>
-            <button type="button" class="chat-sidebar-nav-item" onclick="exportCurrentChat('markdown'); closeChatSidebar();">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" aria-hidden="true">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                    <polyline points="7 10 12 15 17 10"></polyline>
-                    <line x1="12" y1="15" x2="12" y2="3"></line>
-                </svg>
-                <span>Export Chat</span>
-            </button>
-            <div class="chat-sidebar-model-block">
+        </div>
+        <div class="chat-sidebar-model-block">
                 <div class="chat-sidebar-model-selector">
                     <label for="model-selector" class="chat-sidebar-model-label">Model</label>
                     <select id="model-selector" class="chat-sidebar-model-select" onchange="setSelectedModel(this.value)" aria-label="Select AI model">
@@ -6366,6 +6338,53 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                                 rows="5"
                                 maxlength="1200"
                                 placeholder="Example: Reply like ChatGPT. Be concise, structured, direct, and avoid unnecessary endings.">${escapeHtml(customSystemPrompt)}</textarea>
+                        </section>
+
+                        <!-- Memory & Context -->
+                        <section class="help-settings-card" style="margin-top: 14px;">
+                            <div class="help-section-heading">
+                                <div>
+                                    <h3 class="font-bold">Memory & Context</h3>
+                                    <p class="text-xs">Manage personal facts and preferences remembered across chats.</p>
+                                </div>
+                                <button type="button" class="memory-action-btn" onclick="closeHelpModal(); showMemoryManager();">Manage Memory</button>
+                            </div>
+                        </section>
+
+                        <!-- Emergency SOS -->
+                        <section class="help-settings-card" style="margin-top: 14px;">
+                            <div class="help-section-heading">
+                                <div>
+                                    <h3 class="font-bold">Emergency SOS</h3>
+                                    <p class="text-xs">Configure distress contacts and satellite emergency dispatch.</p>
+                                </div>
+                                <button type="button" class="memory-action-btn" style="color: #fca5a5; border-color: rgba(239, 68, 68, 0.35);" onclick="closeHelpModal(); openEmergencyContactModal();">Configure SOS</button>
+                            </div>
+                        </section>
+
+                        <!-- Image Gallery -->
+                        <section class="help-settings-card" style="margin-top: 14px;">
+                            <div class="help-section-heading">
+                                <div>
+                                    <h3 class="font-bold">Image Gallery</h3>
+                                    <p class="text-xs">Browse all AI generated photos, illustrations, and art.</p>
+                                </div>
+                                <button type="button" class="memory-action-btn" onclick="closeHelpModal(); openImageGalleryModal();">Open Gallery</button>
+                            </div>
+                        </section>
+
+                        <!-- Export Conversation -->
+                        <section class="help-settings-card" style="margin-top: 14px;">
+                            <div class="help-section-heading">
+                                <div>
+                                    <h3 class="font-bold">Export Conversation</h3>
+                                    <p class="text-xs">Save current conversation records for offline viewing or backup.</p>
+                                </div>
+                                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                                    <button type="button" class="memory-action-btn" onclick="exportCurrentChat('markdown')">Markdown</button>
+                                    <button type="button" class="memory-action-btn" onclick="exportCurrentChat('json')">JSON</button>
+                                </div>
+                            </div>
                         </section>
 
                         <section class="help-settings-card" style="margin-top: 14px;">
@@ -26714,7 +26733,7 @@ function initSidebarOutsideClickClose() {
         if (toggle && toggle.contains(e.target)) return;
 
         // Ignore clicks within modals, popups, or lightboxes
-        if (e.target.closest('#sos-contact-modal, #image-lightbox-overlay, #command-palette-modal, .modal-overlay, #settings-modal')) {
+        if (e.target.closest('#help-modal, #sos-contact-modal, #image-lightbox-overlay, #command-palette-modal, .modal-overlay, #settings-modal')) {
             return;
         }
 
