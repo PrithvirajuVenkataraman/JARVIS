@@ -15,14 +15,14 @@ const indexHtml = fs.readFileSync(path.resolve('index.html'), 'utf8');
 assert.ok(indexHtml.includes('id="app-header"'), 'App header element must exist');
 assert.ok(indexHtml.includes('id="chat-sidebar-toggle"'), 'Sidebar toggle button must exist');
 assert.ok(indexHtml.includes('id="header-new-chat-btn"'), 'New chat header button must exist');
-assert.ok(indexHtml.includes('id="header-command-palette-btn"'), 'Command palette search trigger must exist');
+assert.ok(!indexHtml.includes('id="header-command-palette-btn"'), 'Header command palette trigger must be removed end-to-end');
 
 // Verified removed from header completely per user directives
 assert.ok(!indexHtml.includes('id="header-canvas-btn"'), 'Artifact Canvas button must be removed');
 assert.ok(!indexHtml.includes('id="header-model-pill"'), 'Header model selector pill must be removed');
 assert.ok(!indexHtml.includes('id="header-model-dropdown"'), 'Header model dropdown list must be removed');
 assert.ok(!indexHtml.includes('id="theme-toggle-btn"'), 'Theme toggle button must be removed (dark mode is exclusive)');
-console.log('  [PASS] 1. Streamlined top navigation bar verified (header model pill, theme toggle, and canvas trigger removed)');
+console.log('  [PASS] 1. Streamlined top navigation bar verified (header model pill, theme toggle, canvas, and command palette search removed)');
 
 // Sidebar model selector preserved
 assert.ok(indexHtml.includes('id="model-selector"'), 'Sidebar model selector must exist');
@@ -202,47 +202,24 @@ assert.ok(combinedDistinctDomains.length >= 2, 'Consensus across >= 2 distinct d
 
 console.log('  [PASS] 11. Scraperless Live Web Search Invariants verified (Native Gemini Grounding, SearXNG JSON meta-search, >= 2 domain consensus)');
 
-// 12. Verify Command Palette (Ctrl+K / ⌘K) Full Functionality & Action Verification
-assert.ok(indexHtml.includes('id="command-palette-modal"'), 'Command palette modal markup must exist');
-assert.ok(indexHtml.includes('id="command-palette-input"'), 'Command palette input must exist');
-assert.ok(indexHtml.includes('id="command-palette-list"'), 'Command palette listbox must exist');
-assert.ok(indexHtml.includes('function openCommandPalette()'), 'openCommandPalette must be defined');
-assert.ok(indexHtml.includes('function closeCommandPalette()'), 'closeCommandPalette must be defined');
-assert.ok(indexHtml.includes('function getCommandPaletteActions()'), 'getCommandPaletteActions must be defined');
-assert.ok(indexHtml.includes('function renderCommandPaletteList()'), 'renderCommandPaletteList must be defined');
-assert.ok(indexHtml.includes('function handleCommandPaletteKeydown('), 'handleCommandPaletteKeydown must be defined');
-assert.ok(indexHtml.includes('function getAllChatSessions()'), 'getAllChatSessions must be defined');
+// 12. Verify End-to-End Removal of Command Palette (Search ⌘K)
+assert.ok(!indexHtml.includes('id="command-palette-modal"'), 'Command palette modal markup must be removed end-to-end');
+assert.ok(!indexHtml.includes('id="command-palette-input"'), 'Command palette input must be removed');
+assert.ok(!indexHtml.includes('id="command-palette-list"'), 'Command palette listbox must be removed');
+assert.ok(!indexHtml.includes('function openCommandPalette()'), 'openCommandPalette must be removed');
+assert.ok(!indexHtml.includes('function closeCommandPalette()'), 'closeCommandPalette must be removed');
+assert.ok(!indexHtml.includes('function getCommandPaletteActions()'), 'getCommandPaletteActions must be removed');
+assert.ok(!stylesCss.includes('.command-palette-backdrop'), 'Command palette CSS backdrop must be removed');
+assert.ok(!stylesCss.includes('.command-palette-container'), 'Command palette CSS container must be removed');
 
-// 12.1 Verify Action 1: New Chat Session
-assert.ok(indexHtml.includes("id: 'new-chat'"), 'New chat session action must exist');
-assert.ok(indexHtml.includes('startNewChatSession'), 'New chat session must route to startNewChatSession');
+// Verify core keyboard shortcuts & direct utilities remain accessible
+assert.ok(indexHtml.includes('getPlatformModifierKey'), 'Modifier key helper preserved for platform shortcuts');
+assert.ok(indexHtml.includes('toggleVoiceToText'), 'Voice dictation accessible via space/speech trigger');
+assert.ok(indexHtml.includes('startNewChatSession'), 'New chat session functionality preserved');
+assert.ok(indexHtml.includes('exportCurrentChat'), 'Direct export functionality preserved');
+assert.ok(indexHtml.includes('showHelpModal()'), 'Settings modal preserved and wired');
 
-// 12.2 Verify Action 2: Toggle Voice Dictation (VTT)
-assert.ok(indexHtml.includes("id: 'toggle-speech'"), 'Toggle voice dictation action must exist');
-assert.ok(indexHtml.includes('toggleVoiceToText'), 'Voice dictation must route to toggleVoiceToText');
-assert.ok(indexHtml.includes('id="voice-to-text-btn"'), 'voice-to-text-btn element must exist in DOM');
-
-// 12.3 Verify Action 3: Export Chat as Markdown (.md)
-assert.ok(indexHtml.includes("id: 'export-markdown'"), 'Export markdown action must exist');
-assert.ok(indexHtml.includes("exportCurrentChat('markdown')"), 'Markdown export must route to exportCurrentChat');
-
-// 12.4 Verify Action 4: Export Chat as JSON (.json)
-assert.ok(indexHtml.includes("id: 'export-json'"), 'Export JSON action must exist');
-assert.ok(indexHtml.includes("exportCurrentChat('json')"), 'JSON export must route to exportCurrentChat');
-assert.ok(indexHtml.includes('exportChatHistoryJson'), 'JSON export fallback must route to exportChatHistoryJson');
-
-// 12.5 Verify Action 5: Open Settings & Privacy
-assert.ok(indexHtml.includes("id: 'open-settings'"), 'Open settings action must exist');
-assert.ok(indexHtml.includes('showHelpModal()'), 'Settings must route to showHelpModal');
-assert.ok(indexHtml.includes('Data & Privacy'), 'Settings modal must contain Data & Privacy section');
-assert.ok(indexHtml.includes('deleteAllLocalDataNow()'), 'Privacy section must support deleteAllLocalDataNow');
-
-// 12.6 Verify Platform-adaptive shortcuts & keyboard handlers
-assert.ok(indexHtml.includes('getPlatformModifierKey'), 'Modifier key must adapt to platform');
-assert.ok(indexHtml.includes("e.key.toLowerCase() === 'k'"), 'Ctrl+K / Cmd+K listener must be registered');
-assert.ok(indexHtml.includes("e.key === 'Escape'"), 'Escape key handler must close palette');
-
-console.log('  [PASS] 12. Command Palette full functionality verified (all 5 actions, search, shortcuts, and privacy wired)');
+console.log('  [PASS] 12. End-to-end removal of Command Palette (Search ⌘K) verified with core shortcuts intact');
 
 // 13. Verify Bespoke Custom Confirmation Modal (Data & Privacy)
 assert.ok(indexHtml.includes('showCustomConfirmDialog'), 'showCustomConfirmDialog must be defined');
