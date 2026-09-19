@@ -75,10 +75,12 @@ export function cleanSpeechFillers(text = '') {
     s = s.replace(/\b(?:semicolon)\b/gi, ';');
     s = s.replace(/\b(?:hyphen|dash)\b/gi, '-');
 
-    // 1. Remove verbal fillers & hesitations (e.g. "um", "uh", "umm", "uhh", "er", "erm", "ah", "ahh", "hmm", "hm")
-    s = s.replace(/\b(?:um+|uh+|er+|ah+|erm+|hmm+|hm+)\b/gi, '');
+    // 1. Remove verbal fillers & hesitations (e.g. "um", "uh", "umm", "uhh", "uhm", "er", "erm", "ah", "ahh", "hmm", "hm", "mhm", "uh-huh")
+    s = s.replace(/\b(?:um+|uh+|er+|ah+|erm+|hmm+|hm+|uhm+|uhh+|aah+|mhm|uh-huh)\b/gi, '');
 
     // 2. Remove filler phrases when surrounded by boundaries or at start/end
+    s = s.replace(/\b(?:you know what i mean|you know what im saying|you know what i'm saying)\b/gi, '');
+    s = s.replace(/\b(?:or something like that|and stuff like that|and all that)\b/gi, '');
     // 'you know' should not be removed if preceded by 'do/did/does/will/if/as' or followed by question words
     s = s.replace(/(?<!\b(?:do|did|does|dont|don't|will|would|could|should|if|as)\s+)\b(?:you know)\b(?!\s+(?:if|that|what|who|when|where|why|how|which|whether|about|\?))/gi, '');
 
@@ -86,13 +88,14 @@ export function cleanSpeechFillers(text = '') {
     s = s.replace(/(?<!\b(?:what|which|this|that|a|an|any|every|some)\s+)\b(?:sort of|kind of)\b/gi, '');
     s = s.replace(/\b(?:i mean)\b/gi, '');
 
-    s = s.replace(/^(?:like|basically|literally)[,\s]+/gi, '');
-    s = s.replace(/[,\s]+(?:like|basically|literally)[,\s]+/gi, ' ');
-    s = s.replace(/[,\s]+(?:like|basically|literally)$/gi, '');
+    s = s.replace(/^(?:like|basically|literally|actually)[,\s]+/gi, '');
+    s = s.replace(/[,\s]+(?:like|basically|literally|actually)[,\s]+/gi, ' ');
+    s = s.replace(/[,\s]+(?:like|basically|literally|actually)$/gi, '');
 
     // 3. Remove speech stutter / immediate duplicate words (e.g. "the the", "I I", "to to")
     s = s.replace(/\b([a-zA-Z]+)\s+\1\b/gi, '$1');
     s = s.replace(/\b([a-zA-Z]+)\s+\1\b/gi, '$1');
+    s = s.replace(/^[,\s;:]+/, '');
 
     // 4. Auto-correct common speech-to-text contractions, pronouns & slips
     const autoCorrectMap = [
@@ -1147,63 +1150,77 @@ export function installSpeechInputUI(options = {}) {
         Recognition,
         language: 'en-US',
         onInterim(text, state) {
+            const isConverse = Boolean(state?.converseEnabled);
             const cleaned = cleanSpeechFillers(text);
             lastInterimText = cleaned;
-            input.value = '';
-            delete input.dataset.inputSource;
-            const isConverse = Boolean(state?.converseEnabled);
 
-            globalThis.updateLiveSpeechTranscriptionOnScreen?.(cleaned, true, isConverse ? 'converse' : 'vtt');
-            if (isConverse) {
-                /* live overlay removed */
+            if (!isConverse) {
+                // VTT Dictation: words stream directly into the chatbox (input textarea), NOT on the chat window
+                const base = committedText ? `${committedText} ` : '';
+                input.value = cleaned ? `${base}${cleaned}` : committedText;
+                delete input.dataset.inputSource;
+                options.onComposerChanged?.();
+                globalThis.handleComposerInput?.();
+                globalThis.autoResizeComposerTextarea?.();
+                globalThis.toggleSendButton?.();
+            } else {
+                globalThis.updateLiveSpeechTranscriptionOnScreen?.(cleaned, true, 'converse');
             }
             visualizer?.pulse?.(0.9);
-            options.onComposerChanged?.();
-            globalThis.handleComposerInput?.();
         },
         async onFinal(text, event) {
             lastInterimText = '';
             const cleaned = cleanSpeechFillers(text);
+            const isConverse = Boolean(event?.converseEnabled || event?.source === 'converse');
+
+            // Strictly clear any live speech rows on the chat window
             globalThis.clearLiveSpeechTranscriptionOnScreen?.();
 
-            if (cleaned) {
-                if (typeof options.onSubmit === 'function') {
-                    input.value = '';
-                    delete input.dataset.inputSource;
-                    options.onComposerChanged?.();
-                    globalThis.handleComposerInput?.();
-                    await options.onSubmit({
-                        text: cleaned,
-                        source: event?.source || 'vtt',
-                        preserveTranscript: true,
-                        interrupt: false
-                    });
-                } else {
-                    // Enterprise Dictation: Commit transcription cleanly to composer
-                    const existing = String(input.value || '').trim();
-                    input.value = existing ? `${existing} ${cleaned}` : cleaned;
-                    delete input.dataset.inputSource;
-                    try {
-                        if (typeof input.dispatchEvent === 'function') {
-                            const ev = typeof Event === 'function' ? new Event('input', { bubbles: true }) : { type: 'input', bubbles: true };
-                            input.dispatchEvent(ev);
-                        }
-                    } catch (_) {}
-                    options.onComposerChanged?.();
-                    globalThis.handleComposerInput?.();
-                    globalThis.toggleSendButton?.();
-                    try {
-                        input.focus();
-                        if (typeof input.setSelectionRange === 'function') {
-                            input.setSelectionRange(input.value.length, input.value.length);
-                        }
-                    } catch (_) {}
-                }
+            if (!cleaned) return;
+
+            if (isConverse && typeof options.onSubmit === 'function' && event?.autoSubmit !== false) {
+                input.value = '';
+                delete input.dataset.inputSource;
+                options.onComposerChanged?.();
+                globalThis.handleComposerInput?.();
+                await options.onSubmit({
+                    text: cleaned,
+                    source: 'converse',
+                    preserveTranscript: true,
+                    interrupt: false
+                });
+            } else {
+                // Enterprise VTT Dictation: Words appear in the chatbox, NOT on the chat window!
+                const base = committedText ? `${committedText} ` : '';
+                const finalStr = cleaned ? `${base}${cleaned}` : committedText;
+                committedText = finalStr.trim();
+                input.value = committedText;
+                delete input.dataset.inputSource;
+
+                try {
+                    if (typeof input.dispatchEvent === 'function') {
+                        const ev = typeof Event === 'function' ? new Event('input', { bubbles: true }) : { type: 'input', bubbles: true };
+                        input.dispatchEvent(ev);
+                    }
+                } catch (_) {}
+
+                options.onComposerChanged?.();
+                globalThis.handleComposerInput?.();
+                globalThis.autoResizeComposerTextarea?.();
+                globalThis.toggleSendButton?.();
+
+                try {
+                    input.focus();
+                    if (typeof input.setSelectionRange === 'function') {
+                        input.setSelectionRange(input.value.length, input.value.length);
+                    }
+                } catch (_) {}
             }
         },
         onState(state) {
             if (!state.listening) {
                 lastInterimText = '';
+                committedText = String(input.value || '').trim();
                 if (!state.processing) {
                     globalThis.clearLiveSpeechTranscriptionOnScreen?.();
                 }
