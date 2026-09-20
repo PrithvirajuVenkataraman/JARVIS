@@ -726,11 +726,56 @@ function isEmergencySosIntentText(text) {
 }
 
 function isCurrentLocationIntentText(text) {
-    const t = String(text || '').toLowerCase().trim();
+    if (window.JarvisLocationSuite?.isCurrentLocationIntent) {
+        return window.JarvisLocationSuite.isCurrentLocationIntent(text);
+    }
+    const raw = String(text || '').trim();
+    if (!raw) return false;
+    const t = raw.toLowerCase().replace(/[?!.,;:]+$/g, '').trim();
     if (!t) return false;
-    if (/\b(share|send|nearest|nearby|hospital|police|pharmacy|atm)\b/.test(t)) return false;
-    if (/\b(weather|forecast|temperature|rain|snow|wind|sunny|cloudy|humid|climate)\b/.test(t)) return false;
-    return /\b(where\s+am\s+i|where\s+m\s+i|wheres\s+am\s+i|whereami|where\s+i\s+am(?:\s+right\s+now)?|where\s+am\s+i\s+now|what\s+is\s+my\s+(?:exact\s+)?location|what'?s\s+my\s+(?:exact\s+)?location|my\s+current\s+location|current\s+location|find\s+my\s+location|locate\s+me|my\s+coordinates?|current\s+coordinates?|my\s+gps|where'?s\s+my\s+location|pin\s+my\s+location|latitude|longitude|coords?)\b/.test(t);
+
+    if (/\b(?:in\s+(?:the|this|my)\s+(?:code|document|file|function|class|book|script|loop|thread|game|project|repo|git|array|database))\b/i.test(t)) {
+        return false;
+    }
+    if (/\b(?:nearest|closest|directions\s+to|how\s+to\s+get\s+to|navigate\s+to|hotels?\s+near|restaurants?\s+near)\b/i.test(t)) {
+        return false;
+    }
+    if (/\b(?:weather|forecast|temperature|humidity)\s+(?:in|at|for|around)\s+[a-z]+/i.test(t)) {
+        return false;
+    }
+    const isFirstPerson = /\b(?:i|we|me|us|my|our|mine|ours|here|this\s+place)\b/i.test(t);
+    if (!isFirstPerson) {
+        const thirdPartyEntityPatterns = [
+            /\bwhere\s+(?:is|was|are|were)\s+(?:the|a|an|mount|lake|river|president|king|queen|saint|dr|mr|mrs)?\s*[a-z0-9\s.'-]+\b/i,
+            /\b(?:location|coordinates?|origin|birthplace)\s+of\s+[a-z0-9\s.'-]+\b/i,
+            /\bwhere\s+did\s+[a-z0-9\s.'-]+\s+(?:live|die|go|grow\s+up|come\s+from|happen|originate)\b/i
+        ];
+        for (const pattern of thirdPartyEntityPatterns) {
+            if (pattern.test(t)) return false;
+        }
+    }
+    if (/\bwhere\s+(?:am\s+i|m\s+i|are\s+we|i\s+am|we\s+are|are\s+you\s+and\s+i)(?:\s+(?:right\s+now|now|currently|standing|located|situated|at|based))?\b/i.test(t)) {
+        return true;
+    }
+    if (/\b(?:what(?:'?s|\s+is)?\s+)?(?:my|our|current)\s+(?:current\s+)?(?:exact\s+)?(?:location|position|coordinates?|whereabouts|address|gps(?:\s+location)?)\b/i.test(t)) {
+        return true;
+    }
+    if (/\b(?:tell\s+me|can\s+you\s+tell\s+me|show(?:\s+me)?|find|locate|pin|detect|track|identify|lookup|get)\s+(?:where\s+(?:i\s+am|we\s+are)|my\s+(?:location|position|coordinates?|address)|me|us)\b/i.test(t)) {
+        return true;
+    }
+    if (/\b(?:which|what)\s+(?:city|town|place|state|province|country|region|neighborhood|area|district)\s+(?:am\s+i|are\s+we)\s*(?:in|at)?\b/i.test(t)) {
+        return true;
+    }
+    if (/\b(?:what|which|where)\s+(?:is\s+this\s+place|place\s+is\s+this|place\s+are\s+we\s+in)\b/i.test(t)) {
+        return true;
+    }
+    if (/\b(?:my|our)\s+(?:gps\s+)?(?:latitude\s+(?:and|&)\s+longitude|coordinates?|coords?|lat\s+(?:and|&)\s+long?)\b/i.test(t)) {
+        return true;
+    }
+    if (/^(?:whereami|where\s+am\s+i|where\s+are\s+we|locate\s+me|my\s+location)$/i.test(t)) {
+        return true;
+    }
+    return false;
 }
 
 function isTamilJokeRequest(_text) {
@@ -23126,13 +23171,38 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
             try {
                 const position = await getCurrentPositionAsync({
                     enableHighAccuracy: action.type === 'whereami',
-                    timeout: 15000,
+                    timeout: action.type === 'whereami' ? 4500 : 15000,
                     maximumAge: action.type === 'whereami' ? 60000 : 300000
                 });
                 hideThinkingIndicator();
                 await continuePendingLocationAction(position);
             } catch (error) {
                 hideThinkingIndicator();
+                if (action.type === 'whereami') {
+                    showThinkingIndicator('Resolving approximate network location...');
+                    try {
+                        const suite = globalThis.JarvisLocationSuite || {};
+                        const ipLoc = typeof suite.fetchApproximateLocationByIp === 'function'
+                            ? await suite.fetchApproximateLocationByIp()
+                            : null;
+                        if (ipLoc) {
+                            const position = {
+                                coords: {
+                                    latitude: ipLoc.latitude,
+                                    longitude: ipLoc.longitude,
+                                    accuracy: ipLoc.accuracy || 5000,
+                                    isApproximate: true
+                                },
+                                isApproximate: true,
+                                approximateDetails: ipLoc,
+                                timestamp: Date.now()
+                            };
+                            await continuePendingLocationAction(position);
+                            return false;
+                        }
+                    } catch (_) {}
+                    hideThinkingIndicator();
+                }
                 await handleGeolocationFailure(error, action);
             }
             return false;
@@ -23214,13 +23284,33 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
             const featureLabel = action?.type === 'weather' ? 'local weather' : 'finding where you are';
             const state = await getGeolocationPermissionState();
 
-            if (state === 'unsupported') {
-                await handleGeolocationFailure(new Error('Geolocation is not supported in this browser.'), action);
-                return;
-            }
-
-            if (state === 'denied') {
-                await handleGeolocationFailure({ code: 1, message: 'denied' }, action);
+            if (state === 'unsupported' || state === 'denied') {
+                if (action?.type === 'whereami') {
+                    showThinkingIndicator('Resolving approximate network location...');
+                    try {
+                        const suite = globalThis.JarvisLocationSuite || {};
+                        const ipLoc = typeof suite.fetchApproximateLocationByIp === 'function'
+                            ? await suite.fetchApproximateLocationByIp()
+                            : null;
+                        if (ipLoc) {
+                            const position = {
+                                coords: {
+                                    latitude: ipLoc.latitude,
+                                    longitude: ipLoc.longitude,
+                                    accuracy: ipLoc.accuracy || 5000,
+                                    isApproximate: true
+                                },
+                                isApproximate: true,
+                                approximateDetails: ipLoc,
+                                timestamp: Date.now()
+                            };
+                            window.__jarvisPendingLocationAction = action;
+                            await continuePendingLocationAction(position);
+                            return;
+                        }
+                    } catch (_) {}
+                }
+                await handleGeolocationFailure(new Error(state === 'denied' ? 'denied' : 'Geolocation is not supported in this browser.'), action);
                 return;
             }
 
@@ -23228,7 +23318,7 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
             try {
                 const position = await getCurrentPositionAsync({
                     enableHighAccuracy: action?.type === 'whereami',
-                    timeout: 15000,
+                    timeout: action?.type === 'whereami' ? 4500 : 15000,
                     maximumAge: action?.type === 'whereami' ? 60000 : 300000
                 });
                 hideThinkingIndicator();
@@ -23236,6 +23326,32 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
                 await continuePendingLocationAction(position);
             } catch (error) {
                 hideThinkingIndicator();
+                if (action?.type === 'whereami') {
+                    showThinkingIndicator('Resolving approximate network location...');
+                    try {
+                        const suite = globalThis.JarvisLocationSuite || {};
+                        const ipLoc = typeof suite.fetchApproximateLocationByIp === 'function'
+                            ? await suite.fetchApproximateLocationByIp()
+                            : null;
+                        if (ipLoc) {
+                            const position = {
+                                coords: {
+                                    latitude: ipLoc.latitude,
+                                    longitude: ipLoc.longitude,
+                                    accuracy: ipLoc.accuracy || 5000,
+                                    isApproximate: true
+                                },
+                                isApproximate: true,
+                                approximateDetails: ipLoc,
+                                timestamp: Date.now()
+                            };
+                            window.__jarvisPendingLocationAction = action;
+                            await continuePendingLocationAction(position);
+                            return;
+                        }
+                    } catch (_) {}
+                    hideThinkingIndicator();
+                }
                 await handleGeolocationFailure(error, action);
             }
         }
@@ -24144,12 +24260,13 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
                 };
 
                 // Parallel fetch: Reverse Geocoding + Live Weather + Nearby Amenities (ATMs, Hospitals, Police, Gas)
-                const [reverseResult, weatherResult] = await Promise.allSettled([
+                const [reverseResult, weatherResult, amenitiesResult] = await Promise.allSettled([
                     fetch(
                         `${(window.APP_CONFIG || APP_CONFIG).externalUrls.nominatimReverse}?lat=${lat}&lon=${lon}&format=json`,
                         { headers: { 'User-Agent': 'JARVISAssistant/1.0' }, signal: createTimeoutSignal(4000) }
                     ).then(r => r.ok ? r.json() : null).catch(() => null),
-                    typeof suite.fetchLiveWeatherForCoords === 'function' ? suite.fetchLiveWeatherForCoords(lat, lon) : fetchLiveWeatherForCoords(lat, lon)
+                    typeof suite.fetchLiveWeatherForCoords === 'function' ? suite.fetchLiveWeatherForCoords(lat, lon) : fetchLiveWeatherForCoords(lat, lon),
+                    typeof suite.fetchNearbyAmenities === 'function' ? suite.fetchNearbyAmenities(lat, lon) : fetchNearbyAmenities(lat, lon)
                 ]);
 
                 const reverseData = reverseResult.status === 'fulfilled' ? reverseResult.value : null;
@@ -24161,8 +24278,18 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
                 if (reverseData) {
                     addressData = reverseData.address || {};
                     exactAddress = reverseData.display_name || '';
+                } else if (position.approximateDetails) {
+                    const ap = position.approximateDetails;
+                    addressData = {
+                        city: ap.city || '',
+                        state: ap.region || '',
+                        country: ap.country || '',
+                        postcode: ap.postal || ''
+                    };
+                    exactAddress = [ap.city, ap.region, ap.country].filter(Boolean).join(', ');
                 }
 
+                const isApproximate = Boolean(position.isApproximate || position.coords?.isApproximate);
                 const latitude = Number(lat.toFixed(6));
                 const longitude = Number(lon.toFixed(6));
 
@@ -24173,6 +24300,7 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
                     exactAddress,
                     address: addressData,
                     weather,
+                    isApproximate,
                     updatedAt: Date.now()
                 };
 
@@ -24186,11 +24314,12 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
                     exactAddress,
                     address: addressData,
                     weather,
-                    amenities
+                    amenities,
+                    isApproximate
                 });
 
-                addChatMessage(cardHtml, false, false);
                 const areaLabel = addressData.city || addressData.town || addressData.suburb || exactAddress || 'your area';
+                addChatMessage(cardHtml, false, false);
                 saveToHistory(originalText || 'where am i', `Current location in ${areaLabel} (${latitude}, ${longitude}).`);
             } finally {
                 hideThinkingIndicator();
