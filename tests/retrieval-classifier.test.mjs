@@ -10,6 +10,10 @@ console.log('--- Section 1: Live & Changing Intent Queries ---');
 
 const liveQueries = [
     'Who is the current CM of Tamil Nadu?',
+    'CM of Tamil Nadu',
+    'CEO of Apple',
+    'President of France',
+    'Tamil Nadu CM',
     "Who is India's current Prime Minister?",
     'What is the current captain of CSK?',
     'Who won the latest FIFA cup',
