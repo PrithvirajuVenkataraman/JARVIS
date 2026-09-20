@@ -732,7 +732,7 @@ function inferCategory(query) {
     if (/\bbitcoin|btc|ethereum|eth|crypto\b/.test(t)) return 'crypto';
     if (/\bsports?|score|fixture|standings|ipl|nba|nfl|epl\b/.test(t)) return 'sports';
     if (/\bearthquake|wildfire|flood|cyclone|hurricane|tsunami|volcano\b/.test(t)) return 'disasters';
-    if (/\btourism|tourist|travel|places to visit|attractions?|temple|museum|hotel|where am i|where i am\b/.test(t)) return 'tourism_food_places';
+    if (/\btourism|tourist|travel|places to visit|attractions?|temple|museum|hotel\b/.test(t)) return 'tourism_food_places';
     return 'unsupported_free_live';
 }
 
