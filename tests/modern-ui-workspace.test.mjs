@@ -33,11 +33,18 @@ console.log('  [PASS] 2. Native sidebar model selector preserved cleanly');
 assert.ok(indexHtml.includes('id="chat-main"'), 'Main chat viewport must exist');
 assert.ok(indexHtml.includes('id="chat-center-column"'), 'Centered reading column must exist');
 assert.ok(indexHtml.includes('id="chat-empty-state"'), 'Empty state hero must exist');
+assert.ok(indexHtml.includes('class="empty-state-capabilities"'), 'Interactive capability pills container must exist');
+assert.ok(indexHtml.includes("handleCapabilityPillClick('live_search')"), 'Live web search pill must exist');
+assert.ok(indexHtml.includes("handleCapabilityPillClick('deep_reasoning')"), 'Deep reasoning pill must exist');
+assert.ok(indexHtml.includes("handleCapabilityPillClick('document_ocr')"), 'Document OCR pill must exist');
+assert.ok(indexHtml.includes("handleCapabilityPillClick('code_math')"), 'Code & Math pill must exist');
+assert.ok(indexHtml.includes('function handleCapabilityPillClick('), 'handleCapabilityPillClick function must be defined');
+assert.ok(indexHtml.includes('class="empty-state-shortcuts"'), 'Keyboard shortcut hints must exist');
 assert.ok(!indexHtml.includes('class="starter-cards-grid"'), 'Starter prompt cards grid must be removed to prevent hallucinations');
 assert.ok(!indexHtml.includes('class="starter-prompt-card"'), 'Starter prompt card buttons must be removed');
 assert.ok(indexHtml.includes('id="chat-container"'), 'Chat container element must exist');
 assert.ok(indexHtml.includes('id="drag-drop-overlay"'), 'Drag and drop overlay must exist');
-console.log('  [PASS] 3. Full-height workspace layout, empty state hero, and drag-drop overlay verified');
+console.log('  [PASS] 3. Full-height workspace layout, empty state hero with interactive capability pills, and drag-drop overlay verified');
 
 // JavaScript UI helper functions & safeguards
 assert.ok(indexHtml.includes('function toggleAppTheme('), 'toggleAppTheme must be defined');
