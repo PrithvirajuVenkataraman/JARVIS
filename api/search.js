@@ -327,9 +327,14 @@ export function classifyDeterministicRetrievalIntent(query = '') {
     }
 
     // 2. Definite live/changing patterns (current leadership, prices, weather, live sports, tournament winners)
-    const isLeadershipOrOffice = /\b(?:who is|who are|what is|tell me|who's)\s+(?:the\s+)?(?:current\s+|latest\s+|present\s+|incumbent\s+)?(?:cm|pm|prime minister|chief minister|president|governor|mayor|ceo|chairman|captain|coach|leader|head of state|head of government)\b/i.test(text)
-        || /\b(?:current|latest|present|incumbent)\s+(?:cm|pm|prime minister|chief minister|president|governor|mayor|ceo|chairman|captain|coach|leader|head of state|head of government)\b/i.test(text)
-        || /\b(?:current captain of|who is captain of|who is the captain of|captain of csk|csk captain)\b/i.test(text);
+    const isHistorical = /\b(was|were|former|previous|past|first|ex-|history|historical|ancient|mythological)\b/i.test(text) || /\b(?:in|during)\s+(?:19|20)\d{2}\b/i.test(text);
+    const isLeadershipOrOffice = !isHistorical && (
+        /\b(?:who is|who are|what is|tell me|who's)\s+(?:the\s+)?(?:current\s+|latest\s+|present\s+|incumbent\s+)?(?:cm|pm|prime minister|chief minister|president|governor|mayor|ceo|cfo|cto|coo|chairman|chairperson|captain|coach|leader|head of state|head of government)\b/i.test(text)
+        || /\b(?:current|latest|present|incumbent)\s+(?:cm|pm|prime minister|chief minister|president|governor|mayor|ceo|cfo|cto|coo|chairman|chairperson|captain|coach|leader|head of state|head of government)\b/i.test(text)
+        || /\b(?:cm|pm|prime minister|chief minister|president|governor|mayor|ceo|cfo|cto|coo|chairman|chairperson|captain|coach|leader|head of state|head of government)\s+(?:of|for|in)\s+[a-z0-9\s.-]+/i.test(text)
+        || /^[a-z0-9\s.-]+\s+(?:cm|pm|ceo|cfo|cto|coo|governor|mayor|president|prime minister|chief minister|captain|coach)$/i.test(text)
+        || /\b(?:current captain of|who is captain of|who is the captain of|captain of csk|csk captain)\b/i.test(text)
+    );
 
     const isLiveMarketOrWeather = /\b(weather|temperature|forecast|exchange rate|conversion rate|live score|match score|game score|standings)\b/i.test(text)
         || /\b(?:price of\s+[a-z0-9-]+|(?:bitcoin|btc|crypto|eth|ethereum|solana|stock|share|gold|oil|crude)\s+price|crypto price|stock price)\b/i.test(text);
@@ -1462,7 +1467,7 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
 
     console.log(`[Search Latency Breakdown] query="${normalizedQuery}" total=${timing.totalMs}ms | intent=${timing.intentMs}ms planning=${timing.planningMs}ms public=${timing.publicSourcesMs}ms structured=${timing.structuredLookupMs}ms embedding=${timing.embeddingMs}ms rerank=${timing.rerankMs}ms crawl=${timing.crawlMs}ms llm=${timing.llmMs}ms phase=${finalPhase}`);
     if (roleIntent && isLeadershipOrRoleTerm(roleIntent.role)) {
-        console.log(`[Leadership RAG FastPath] query="${normalizedQuery}" subject="${roleIntent.subject}" role="${roleIntent.role}" verified=${Boolean(finalAnswer?.verified)} total=${timing.totalMs}ms`);
+        console.log(`[Leadership RAG FastPath] query="${normalizedQuery}" subject="${roleIntent.jurisdiction || roleIntent.subject}" role="${roleIntent.role}" verified=${Boolean(finalAnswer?.verified)} total=${timing.totalMs}ms`);
     }
 
     const results = allResults.slice(0, limit);
@@ -2909,6 +2914,24 @@ export function extractVerifiedLeadershipClaim(query, evidence = []) {
         if (!subjectRegex.test(text) || !roleRegex.test(text)) continue;
 
         if (isCurrent && validateClaimTemporalStatus(item) === 'historical') continue;
+
+        // Structured Infobox check (e.g. Wikipedia infobox incumbent)
+        if (item.infobox && typeof item.infobox === 'object') {
+            const rawIncumbent = item.infobox.incumbent || item.infobox.leader || item.infobox.leader_name;
+            if (rawIncumbent && typeof rawIncumbent === 'string') {
+                const person = cleanExtractedPersonName(rawIncumbent);
+                if (person && !/^(vacant|none|n\/a|tbd)$/i.test(person)) {
+                    return {
+                        person,
+                        subject,
+                        role: roleTitle,
+                        evidenceIndex: i,
+                        evidenceItem: item,
+                        confidence: 0.99
+                    };
+                }
+            }
+        }
 
         // Pattern 0: Bio sentence: "[Name] (born ...) is a ... who is the [Role] of [Subject]"
         const p0 = text.match(new RegExp(`^([A-Z][\\wÀ-ž]+(?:\\s+[A-Z][\\wÀ-ž]+){1,3})[^.]*?\\bwho\\s+is\\s+(?:the\\s+)?(?:current\\s+)?(?:${rolePattern})\\s+(?:at|of|for)\\s+([A-Za-z0-9\\s]+)`, 'i'));
