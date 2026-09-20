@@ -1411,6 +1411,8 @@ option {
     width: 28px !important;
     min-width: 28px !important;
     height: 28px !important;
+    touch-action: manipulation !important;
+    -webkit-tap-highlight-color: transparent !important;
 }
 
 .composer-icon-btn.speech-input-btn svg {
@@ -8304,7 +8306,9 @@ body:not(.dark) .next-step-title {
     .chat-scroll-jump,
     .scroll-to-bottom-pill,
     .composer-plus-btn,
-    .sos-modal-close-btn {
+    .sos-modal-close-btn,
+    .composer-icon-btn.speech-input-btn,
+    #voice-to-text-btn {
         min-width: 44px;
         min-height: 44px;
     }
