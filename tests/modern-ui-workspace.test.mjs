@@ -39,7 +39,7 @@ assert.ok(indexHtml.includes("handleCapabilityPillClick('deep_reasoning')"), 'De
 assert.ok(indexHtml.includes("handleCapabilityPillClick('document_ocr')"), 'Document OCR pill must exist');
 assert.ok(indexHtml.includes("handleCapabilityPillClick('code_math')"), 'Code & Math pill must exist');
 assert.ok(indexHtml.includes('function handleCapabilityPillClick('), 'handleCapabilityPillClick function must be defined');
-assert.ok(indexHtml.includes('class="empty-state-shortcuts"'), 'Keyboard shortcut hints must exist');
+assert.ok(!indexHtml.includes('class="empty-state-shortcuts"'), 'Keyboard shortcut hints must be removed');
 assert.ok(!indexHtml.includes('class="starter-cards-grid"'), 'Starter prompt cards grid must be removed to prevent hallucinations');
 assert.ok(!indexHtml.includes('class="starter-prompt-card"'), 'Starter prompt card buttons must be removed');
 assert.ok(indexHtml.includes('id="chat-container"'), 'Chat container element must exist');
