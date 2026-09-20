@@ -388,7 +388,7 @@
                 <textarea
                     id="text-input"
                     rows="1"
-                    placeholder="Ask anything..."
+                    placeholder="Ask Jarvis..."
                     class="composer-input"
                     onkeydown="handleComposerKeydown(event)"
                     oninput="handleComposerInput()"></textarea>
@@ -6263,7 +6263,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             const input = document.getElementById('text-input');
             if (!input || input.dataset.inputSource) return;
             const hasChat = hasAnyRenderedChatMessages?.() || chatHistory?.length > 0;
-            input.placeholder = hasChat ? 'Type something' : 'Ask anything...';
+            input.placeholder = hasChat ? 'Type something' : 'Ask Jarvis...';
         }
 
 
@@ -10815,9 +10815,9 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 if (window.JarvisSpeechInput?.getState?.().converseEnabled) {
                     if (snapshot.state === 'speaking') input.placeholder = 'Speaking...';
                     else if (snapshot.state === 'thinking' || snapshot.state === 'responding') input.placeholder = 'Thinking...';
-                    else input.placeholder = 'Ask anything...';
+                    else input.placeholder = 'Ask Jarvis...';
                 } else {
-                    input.placeholder = 'Ask anything...';
+                    input.placeholder = 'Ask Jarvis...';
                 }
             }
             updateLiveConverseOverlay(snapshot.state);
@@ -13192,7 +13192,7 @@ ${code}
                 delete input.dataset.inputSource;
                 window.JarvisSessionRecovery?.clearComposerDraft?.();
                 globalThis.resetSpeechInputCommittedText?.();
-                input.placeholder = 'Ask anything...';
+                input.placeholder = 'Ask Jarvis...';
                 autoResizeComposerTextarea();
                 toggleSendButton();
             }
@@ -13367,7 +13367,7 @@ async function sendTextInput(submission = {}) {
                     input.value = '';
                     delete input.dataset.inputSource;
                     globalThis.resetSpeechInputCommittedText?.();
-                    input.placeholder = 'Ask anything...';
+                    input.placeholder = 'Ask Jarvis...';
                     toggleSendButton();
                     setLastVisibleUserMessage(displayOutgoingText);
                     addVisibleInputHistory(displayOutgoingText);
