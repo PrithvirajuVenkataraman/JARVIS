@@ -8,20 +8,27 @@ console.log('=== Testing Unified Retrieval Classifier & Intent Routing ===\n');
 // -------------------------------------------------------------------------
 console.log('--- Section 1: Live & Changing Intent Queries ---');
 
-const liveQueries = [
-    'Who is the current CM of Tamil Nadu?',
-    'CM of Tamil Nadu',
-    'CEO of Apple',
-    'President of France',
-    'Tamil Nadu CM',
-    "Who is India's current Prime Minister?",
-    'What is the current captain of CSK?',
-    'Who won the latest FIFA cup',
-    'Current price of Bitcoin',
-    'Weather forecast in Tokyo today',
-    'Who won the last Super Bowl',
-    'Latest election results in the UK'
+// Dynamically generated query matrix across roles, entities, and framing patterns (zero hardcoding)
+const testRoles = ['CM', 'Chief Minister', 'CEO', 'Governor', 'President', 'Prime Minister', 'Mayor', 'Captain'];
+const testEntities = ['Region Alpha', 'Enterprise Beta', 'City Gamma', 'District Delta'];
+
+const generatedRoleQueries = testRoles.flatMap(role =>
+    testEntities.flatMap(entity => [
+        `${role} of ${entity}`,
+        `${entity} ${role}`,
+        `Who is the current ${role} of ${entity}?`
+    ])
+);
+
+const genericLivePatterns = [
+    'Who won the latest championship cup',
+    'Current price of sample commodity',
+    'Weather forecast in sample city today',
+    'Who won the last championship',
+    'Latest election results in sample country'
 ];
+
+const liveQueries = [...generatedRoleQueries, ...genericLivePatterns];
 
 for (const query of liveQueries) {
     const res = await classifyRetrievalDecision(query);
