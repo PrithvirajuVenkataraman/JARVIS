@@ -557,12 +557,21 @@ export async function searchPublicSources(query, options = {}) {
         ? options.plannedQueries
         : [normalizedQuery];
     const querySet = Array.from(new Set([
+        ...deterministicQueries,
         normalizedQuery,
-        ...plannedQueries.map(item => normalizeSearchQuery(item)).filter(Boolean),
-        ...deterministicQueries
+        ...plannedQueries.map(item => normalizeSearchQuery(item)).filter(Boolean)
     ])).slice(0, 7);
 
     const targetQueries = querySet.slice(0, 3);
+
+    // GDELT is a news index — use the user's original query first so article titles
+    // can be matched against original terms (e.g. "government", "news") rather than
+    // condensed deterministic queries like "Subject Republic news" which may not appear
+    // in the article title and would break isAnswerEvidenceResult's relevance check.
+    const gdeltQueries = Array.from(new Set([
+        normalizedQuery,
+        ...targetQueries
+    ])).slice(0, 2);
 
     const asyncTasks = [
         Promise.allSettled(targetQueries.slice(0, 2).map(candidate => searchGoogleNewsRss(candidate, { limit }))),
@@ -577,7 +586,7 @@ export async function searchPublicSources(query, options = {}) {
             : Promise.allSettled([searchGovernmentRole(normalizedQuery, { limit: Math.min(3, limit) })]),
         options.skipGdelt === true
             ? Promise.resolve([])
-            : Promise.allSettled(targetQueries.slice(0, 2).map(candidate => searchGdeltNews(candidate, { limit }))),
+            : Promise.allSettled(gdeltQueries.map(candidate => searchGdeltNews(candidate, { limit }))),
         hasGeminiKey()
             ? Promise.allSettled([searchGeminiGrounding(targetQueries[0] || normalizedQuery, { limit }).then(r => r.results || [])])
             : Promise.resolve([])
@@ -901,26 +910,36 @@ export async function searchGovernmentRole(query, options = {}) {
     const intent = parseGovernmentRoleQuery(query);
     if (!intent) return [];
     const limit = clampInt(options.limit, 3, 1, 6);
-    const jurisdiction = await resolveWikidataEntity(intent.jurisdiction).catch(() => null);
-    if (!jurisdiction?.id) return [];
-    const sparql = buildGovernmentRoleSparql(intent, jurisdiction.id, limit);
-    try {
-        const response = await fetchWithTimeout(`${WIKIDATA_SPARQL_URL}?query=${encodeURIComponent(sparql)}&format=json`, {
-            headers: {
-                Accept: 'application/sparql-results+json, application/json',
-                'User-Agent': 'UnifyAssistant/2.0 (https://github.com/unify; contact@unify.ai)'
-            }
-        }, 3500);
-        if (response.ok) {
-            const data = await response.json();
-            const bindings = normalizeGovernmentRoleBindings(data, intent, jurisdiction, query).slice(0, limit);
-            if (bindings.length) return bindings;
-        }
-    } catch (_) {}
-
+    const roleTitle = formatRoleDisplayTitle(intent.role);
+    const directTitle = `${roleTitle} of ${intent.jurisdiction}`;
     const wikiQuery = `List of ${intent.role}s of ${intent.jurisdiction}`;
+
+    // Fast-path: query direct canonical role page on Wikipedia first
+    const directWiki = await searchWikipedia(directTitle, { limit: 1 }).catch(() => []);
+    if (directWiki.length && directWiki[0].infobox && (directWiki[0].infobox.incumbent || directWiki[0].infobox.government_head)) {
+        return directWiki;
+    }
+
+    const jurisdiction = await resolveWikidataEntity(intent.jurisdiction).catch(() => null);
+    if (jurisdiction?.id) {
+        const sparql = buildGovernmentRoleSparql(intent, jurisdiction.id, limit);
+        try {
+            const response = await fetchWithTimeout(`${WIKIDATA_SPARQL_URL}?query=${encodeURIComponent(sparql)}&format=json`, {
+                headers: {
+                    Accept: 'application/sparql-results+json, application/json',
+                    'User-Agent': 'UnifyAssistant/2.0 (https://github.com/unify; contact@unify.ai)'
+                }
+            }, 2500);
+            if (response.ok) {
+                const data = await response.json();
+                const bindings = normalizeGovernmentRoleBindings(data, intent, jurisdiction, query).slice(0, limit);
+                if (bindings.length) return bindings;
+            }
+        } catch (_) {}
+    }
+
     const wikiResults = await searchWikipedia(wikiQuery, { limit: 2 }).catch(() => []);
-    return wikiResults;
+    return directWiki.length ? [...directWiki, ...wikiResults] : wikiResults;
 }
 
 export async function resolveWikidataEntity(label) {
@@ -2856,13 +2875,14 @@ function cleanExtractedPersonName(raw) {
     if (!raw) return null;
     let name = String(raw).trim()
         .replace(/^(?:and|or|the|a|an|who|which|is|was|are|were|also|now|current|former|co-founder|founder|executive|businessman|businesswoman|driver|engineer|officer|leader)\s+/gi, '')
+        .replace(/\s+(?:ministry|cabinet|government|administration)$/gi, '')
         .replace(/['’]s$/g, '')
         .replace(/[,:;.]$/, '')
         .trim();
-    if (!name || name.length < 3 || name.length > 50) return null;
+    if (!name || name.length < 2 || name.length > 50) return null;
     const words = name.split(/\s+/);
-    if (words.length < 2 || words.length > 4) return null;
-    const invalidWords = new Set(['and', 'or', 'the', 'is', 'who', 'racing', 'driver', 'executive', 'team', 'company', 'security', 'management', 'platform', 'service', 'inc', 'corp', 'limited', 'ltd']);
+    if (words.length < 1 || words.length > 4) return null;
+    const invalidWords = new Set(['and', 'or', 'the', 'is', 'who', 'racing', 'driver', 'executive', 'team', 'company', 'security', 'management', 'platform', 'service', 'inc', 'corp', 'limited', 'ltd', 'vacant', 'none', 'n/a', 'tbd']);
     if (words.some(w => invalidWords.has(w.toLowerCase()))) return null;
     return name;
 }
@@ -2915,20 +2935,35 @@ export function extractVerifiedLeadershipClaim(query, evidence = []) {
 
         if (isCurrent && validateClaimTemporalStatus(item) === 'historical') continue;
 
-        // Structured Infobox check (e.g. Wikipedia infobox incumbent)
+        // Structured Infobox check (e.g. Wikipedia infobox incumbent, government head, elected after election)
         if (item.infobox && typeof item.infobox === 'object') {
-            const rawIncumbent = item.infobox.incumbent || item.infobox.leader || item.infobox.leader_name;
-            if (rawIncumbent && typeof rawIncumbent === 'string') {
-                const person = cleanExtractedPersonName(rawIncumbent);
-                if (person && !/^(vacant|none|n\/a|tbd)$/i.test(person)) {
-                    return {
-                        person,
-                        subject,
-                        role: roleTitle,
-                        evidenceIndex: i,
-                        evidenceItem: item,
-                        confidence: 0.99
-                    };
+            const infoboxCandidates = [
+                item.infobox.incumbent,
+                item.infobox.government_head,
+                item.infobox.after_election,
+                item.infobox.chief_minister,
+                item.infobox.prime_minister,
+                item.infobox.president,
+                item.infobox.governor,
+                item.infobox.mayor,
+                item.infobox.ceo,
+                item.infobox.leader,
+                item.infobox.leader1,
+                item.infobox.leader_name
+            ];
+            for (const candidate of infoboxCandidates) {
+                if (candidate && typeof candidate === 'string') {
+                    const person = cleanExtractedPersonName(candidate);
+                    if (person && !/^(vacant|none|n\/a|tbd)$/i.test(person)) {
+                        return {
+                            person,
+                            subject,
+                            role: roleTitle,
+                            evidenceIndex: i,
+                            evidenceItem: item,
+                            confidence: 0.99
+                        };
+                    }
                 }
             }
         }
@@ -3041,6 +3076,38 @@ export function extractVerifiedLeadershipClaim(query, evidence = []) {
                     evidenceIndex: i,
                     evidenceItem: item,
                     confidence: 0.97
+                };
+            }
+        }
+
+        // Pattern 7: News headline pattern: "[Subject] [Role] [Person] [action/verb]..."
+        const p7 = text.match(new RegExp(`\\b${escapeRegex(subject)}\\s+(?:${rolePattern})\\s+([A-Z][\\wÀ-ž.]+(?:\\s+[A-Z][\\wÀ-ž.]+){0,2}?)(?=\\s+(?:is|gets|announces|launches|meets|sworn|takes|visits|holds|speaks|arrives|unveils|says|ordered|elected|urges|signs|calls|defends|tells|faces|to|in|on|at|for|by|from)|[?:,–-]|$|\\b)`, 'i'));
+        if (p7 && p7[1]) {
+            const person = cleanExtractedPersonName(p7[1]);
+            if (person) {
+                return {
+                    person,
+                    subject,
+                    role: roleTitle,
+                    evidenceIndex: i,
+                    evidenceItem: item,
+                    confidence: 0.95
+                };
+            }
+        }
+
+        // Pattern 8: "[Role] [Person] ... [Subject]"
+        const p8 = text.match(new RegExp(`\\b(?:${rolePattern})\\s+([A-Z][\\wÀ-ž.]+(?:\\s+[A-Z][\\wÀ-ž.]+){0,2}?)\\s+(?:of|in|for)\\s+${escapeRegex(subject)}`, 'i'));
+        if (p8 && p8[1]) {
+            const person = cleanExtractedPersonName(p8[1]);
+            if (person) {
+                return {
+                    person,
+                    subject,
+                    role: roleTitle,
+                    evidenceIndex: i,
+                    evidenceItem: item,
+                    confidence: 0.95
                 };
             }
         }
@@ -3904,8 +3971,10 @@ export function buildDeterministicSearchQueries(query) {
         const roleText = universal.roleText || role;
         const isCompanyRole = /\b(ceo|cfo|cto|coo|founder|co-founder|managing director|executive)\b/i.test(role);
 
+        const roleTitle = formatRoleDisplayTitle(roleText || role);
         if (isCompanyRole) {
             return Array.from(new Set([
+                `${roleTitle} of ${subj}`.trim(),
                 `"${subj}" ${roleText}`.trim(),
                 `${subj} ${role}`.trim(),
                 `${subj} current ${role}`.trim(),
@@ -3917,6 +3986,7 @@ export function buildDeterministicSearchQueries(query) {
         }
 
         return Array.from(new Set([
+            `${roleTitle} of ${subj}`.trim(),
             `${subj} ${role}`.trim(),
             `${subj} current ${role}`.trim(),
             `who is the ${role} of ${subj}`.trim(),
