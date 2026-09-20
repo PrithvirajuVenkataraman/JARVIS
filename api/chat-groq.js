@@ -3147,6 +3147,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                     pageFetched: Boolean(result?.pageFetched),
                     qualitySignals: Array.isArray(result?.qualitySignals) ? result.qualitySignals : [],
                     trusted: Boolean(result?.trusted),
+                    infobox: result?.infobox || null,
                     query: candidateQuery
                 });
             }
@@ -3183,13 +3184,19 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             `When answering questions about who currently holds an office, political leadership, titles, or active roles, verify the incumbent against the current year and prioritize the latest news sources over older historical pages.`,
             '',
             '=== VERIFIED REAL-TIME WEB SOURCES ===',
-            ...sources.map((item, index) => [
-                `[${index + 1}] Title: ${item.title}`,
-                `URL: ${item.url}`,
-                `Domain: ${item.domain}`,
-                item.extract ? `Full Extract: ${item.extract}` : (item.description ? `Summary: ${item.description}` : ''),
-                item.date ? `Date: ${item.date}` : ''
-            ].filter(Boolean).join('\n')),
+            ...sources.map((item, index) => {
+                const infoboxText = item.infobox?.incumbent
+                    ? `Incumbent from Official Infobox: ${item.infobox.incumbent}${item.infobox.incumbent_since ? ` (In office since: ${item.infobox.incumbent_since})` : ''}`
+                    : '';
+                return [
+                    `[${index + 1}] Title: ${item.title}`,
+                    `URL: ${item.url}`,
+                    `Domain: ${item.domain}`,
+                    infoboxText,
+                    item.extract ? `Full Extract: ${item.extract}` : (item.description ? `Summary: ${item.description}` : ''),
+                    item.date ? `Date: ${item.date}` : ''
+                ].filter(Boolean).join('\n');
+            }),
             '',
             '=== CITATION DIRECTIVE ===',
             'Synthesize a comprehensive, fact-grounded answer based strictly on the verified sources above.',
