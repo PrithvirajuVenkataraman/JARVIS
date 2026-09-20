@@ -108,7 +108,7 @@ assert.ok(indexHtml.includes('forceWebSearch: true'), 'live_search action sets f
 assert.ok(indexHtml.includes('needsLiveVerification'), 'sendTextInput supports multimodal attachment live verification');
 assert.ok(indexHtml.includes('const inputSource = String(submission?.source'), 'sendTextInput declares inputSource to prevent ReferenceError on send');
 assert.ok(indexHtml.includes('pure_coding_fast_path'), 'processCommand fast-paths coding prompts directly to streaming model');
-assert.ok(indexHtml.includes('verificationBudgetMs = 3500'), 'handleLiveRetrievalQuery caps search timeout at 3500ms for low latency');
+assert.ok(indexHtml.includes('verificationBudgetMs = 8000'), 'handleLiveRetrievalQuery allows 8000ms budget for structured infobox lookup (Wikipedia/Wikidata)');
 console.log('  [PASS] 8. Starter shortcuts removed for zero-latency, multimodal synergy and streaming latency invariants verified');
 
 // 5. Verify Robust Live Web Search & Multi-Domain Consensus Verification
@@ -247,5 +247,3 @@ assert.ok(stylesCss.includes('var(--sidebar-docked-width, 280px)'), 'Dynamic --s
 console.log('  [PASS] 14. Enterprise Sidebar interaction verified (outside-click dismissal, drag handle, swipe gestures, and dynamic width)');
 
 console.log('=== All Modern AI Workspace UI Architecture Tests PASSED ===');
-
-
