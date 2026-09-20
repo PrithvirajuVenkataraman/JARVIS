@@ -207,6 +207,13 @@ export function parseWikipediaInfobox(wikitext) {
     if (fields.founders || fields.founder) structured.push(`Founders: ${fields.founders || fields.founder}`);
     if (fields.ceo) structured.push(`CEO: ${fields.ceo}`);
     if (fields.president) structured.push(`President: ${fields.president}`);
+    if (fields.incumbent) structured.push(`Incumbent: ${fields.incumbent}${fields.incumbent_since ? ` (since ${fields.incumbent_since})` : ''}`);
+    if (fields.leader) structured.push(`Leader: ${fields.leader}`);
+    if (fields.after_election) structured.push(`Elected: ${fields.after_election}`);
+    if (fields.prime_minister) structured.push(`Prime Minister: ${fields.prime_minister}`);
+    if (fields.chief_minister) structured.push(`Chief Minister: ${fields.chief_minister}`);
+    if (fields.governor) structured.push(`Governor: ${fields.governor}`);
+    if (fields.mayor) structured.push(`Mayor: ${fields.mayor}`);
     if (fields.cfo) structured.push(`CFO: ${fields.cfo}`);
     if (fields.coo) structured.push(`COO: ${fields.coo}`);
     if (fields.cto) structured.push(`CTO: ${fields.cto}`);
