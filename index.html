@@ -17303,6 +17303,14 @@ function isCurrentInfoQuery(text) {
     const businessEventTerms = /\b(layoff|layoffs|firing|firings|job cuts|cuts|restructuring|reorganization|earnings|results|merger|acquisition|recall|bankruptcy|probe|investigation|antitrust|strike|walkout)\b/;
     const hasYearReference = hasExplicitYearReference(t);
 
+    const isHistorical = /\b(was|were|former|previous|past|first|ex-|history|historical|ancient|mythological)\b/i.test(t) || /\b(?:in|during)\s+(?:19|20)\d{2}\b/i.test(t);
+    const isLeadershipRoleQuery = !isHistorical && (
+        /\b(?:cm|pm|prime minister|chief minister|president|governor|mayor|ceo|cfo|cto|coo|chairman|chairperson|captain|coach|leader|head of state|head of government)\s+(?:of|for|in)\s+[a-z0-9\s.-]+/i.test(t)
+        || /^[a-z0-9\s.-]+\s+(?:cm|pm|ceo|cfo|cto|coo|governor|mayor|president|prime minister|chief minister|captain|coach)$/i.test(t)
+        || /\b(?:current captain of|who is captain of|who is the captain of|captain of csk|csk captain)\b/i.test(t)
+    );
+    if (isLeadershipRoleQuery) return true;
+
     if ((freshnessTerms.test(t) || hasYearReference) && unstableEntityTerms.test(t)) return true;
     if (resultTerms.test(t) && unstableEntityTerms.test(t)) return true;
     if (businessEventTerms.test(t) && (freshnessTerms.test(t) || hasYearReference)) return true;
@@ -19612,6 +19620,11 @@ function isCurrentRoleHolderLiveQuery(text, liveIntent = null, entityIntent = nu
     const officeSignal = /\b(president|prime minister|pm|chief minister|cm|governor|mayor|minister|ceo|cfo|cto|coo|co-founder|founder|captain|coach|chairman|chairperson|head of|leader of|secretary general|director|director general|dean|chancellor|principal|administrator)\b/.test(lower);
     const currentSignal = /\b(who is|what is|current|currently|latest|present|incumbent|as of|today|now|who's|whos)\b/.test(lower);
     if (officeSignal && currentSignal) return true;
+    const isHistorical = /\b(was|were|former|previous|past|first|ex-|history|historical|ancient|mythological)\b/i.test(lower) || /\b(?:in|during)\s+(?:19|20)\d{2}\b/i.test(lower);
+    if (!isHistorical && (
+        /\b(?:cm|pm|prime minister|chief minister|president|governor|mayor|ceo|cfo|cto|coo|chairman|chairperson|captain|coach|leader|head of state|head of government)\s+(?:of|for|in)\s+[a-z0-9\s.-]+/i.test(lower)
+        || /^[a-z0-9\s.-]+\s+(?:cm|pm|ceo|cfo|cto|coo|governor|mayor|president|prime minister|chief minister|captain|coach)$/i.test(lower)
+    )) return true;
     const intent = liveIntent || extractLiveQueryIntent(raw);
     const entity = entityIntent || extractUniversalEntityIntent(raw, intent);
     const roleFact = String(intent?.factType || '').toLowerCase() === 'role' || entity?.relationType === 'role';
@@ -19656,8 +19669,13 @@ function shouldRequireVerifiedSources(classificationOrText, liveIntent = null, e
         isDirectFactLiveQuery(text)
     );
 
-    const leadershipOrOffice = (entity?.relationType === 'role' || /\b(who is the|who is|current|latest|present|who leads)\b/i.test(lower)) &&
-        /\b(president|prime minister|\bpm\b|governor|mayor|minister|ministers|chief minister|\bcm\b|\bmla\b|\bmp\b|leader|ceo|captain|coach|chairman|chairperson|head of|secretary general|director|director general|dean|chancellor|principal|administrator)\b/i.test(lower);
+    const isHistorical = /\b(was|were|former|previous|past|first|ex-|history|historical|ancient|mythological)\b/i.test(lower) || /\b(?:in|during)\s+(?:19|20)\d{2}\b/i.test(lower);
+    const bareRoleQuery = !isHistorical && (
+        /\b(?:cm|pm|prime minister|chief minister|president|governor|mayor|ceo|cfo|cto|coo|chairman|chairperson|captain|coach|leader|head of state|head of government)\s+(?:of|for|in)\s+[a-z0-9\s.-]+/i.test(lower)
+        || /^[a-z0-9\s.-]+\s+(?:cm|pm|ceo|cfo|cto|coo|governor|mayor|president|prime minister|chief minister|captain|coach)$/i.test(lower)
+    );
+    const leadershipOrOffice = !isHistorical && (bareRoleQuery || ((entity?.relationType === 'role' || /\b(who is the|who is|current|latest|present|who leads)\b/i.test(lower)) &&
+        /\b(president|prime minister|\bpm\b|governor|mayor|minister|ministers|chief minister|\bcm\b|\bmla\b|\bmp\b|leader|ceo|captain|coach|chairman|chairperson|head of|secretary general|director|director general|dean|chancellor|principal|administrator)\b/i.test(lower)));
 
     const newsworthy = flags.news ||
         isNewsworthyLiveTopic(text) ||
@@ -21677,7 +21695,7 @@ function isWakeGreetingText(text) {
                 entityIntent: fallbackEntityIntent,
                 riskLevel: getRiskTierForQuery(cleanText, classification.liveIntent, fallbackEntityIntent)
             });
-            const liveSourceRequired = requiresLiveSourceAnswer(cleanText, classification.liveIntent, fallbackEntityIntent);
+            const liveSourceRequired = (frontendRoute?.route === 'live_required' || frontendRoute?.requiresSources) || requiresLiveSourceAnswer(cleanText, classification.liveIntent, fallbackEntityIntent);
 
             if (answerPath === 'moderation') {
                 logRoutingDebug('processCommand -> moderation', cleanText, {
