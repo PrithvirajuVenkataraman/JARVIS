@@ -61,8 +61,8 @@ const ERROR_MESSAGES = {
 };
 
 export function cleanSpeechFillers(text = '') {
-    let s = String(text || '').trim();
-    if (!s) return '';
+    let s = String(text || '').replace(/^[ \t]+|[ \t]+$/g, '');
+    if (!s.trim()) return '';
 
     // 0. Spoken Punctuation & Line Breaks (Enterprise Dictation)
     s = s.replace(/\b(?:new line|newline)\b/gi, '\n');
@@ -96,7 +96,7 @@ export function cleanSpeechFillers(text = '') {
     // 3. Remove speech stutter / immediate duplicate words (e.g. "the the", "I I", "to to")
     s = s.replace(/\b([a-zA-Z]+)\s+\1\b/gi, '$1');
     s = s.replace(/\b([a-zA-Z]+)\s+\1\b/gi, '$1');
-    s = s.replace(/^[,\s;:\-]+/, '');
+    s = s.replace(/^[ \t,;:—\-]+/, '');
 
     // 4. Auto-correct common speech-to-text contractions, pronouns & slips
     const autoCorrectMap = [
@@ -156,8 +156,10 @@ export function cleanSpeechFillers(text = '') {
     // 7. Sentence capitalization (at start of string, or after terminal punctuation / newline / colon)
     s = s.replace(/(^\s*|[.!?:\n]\s*)([a-z])/g, (_, prefix, letter) => prefix + letter.toUpperCase());
 
-    // 8. Clean excessive horizontal whitespace
-    s = s.replace(/[ \t]{2,}/g, ' ').trim();
+    // 8. Clean excessive horizontal whitespace, preserving intentional leading newlines for multi-turn dictation
+    s = s.replace(/[ \t]{2,}/g, ' ');
+    s = s.replace(/^[ \t]+|[ \t]+$/g, '');
+    s = s.replace(/\n+$/, '');
 
     return s;
 }
@@ -537,10 +539,10 @@ export function createSpeechInputController(options = {}) {
                 }
 
                 if (currentFinal) {
-                    accumulatedTranscript = (accumulatedTranscript ? (accumulatedTranscript + ' ' + currentFinal) : currentFinal).trim();
+                    accumulatedTranscript = (accumulatedTranscript ? (accumulatedTranscript + ' ' + currentFinal) : currentFinal).replace(/^[ \t]+|[ \t]+$/g, '');
                 }
 
-                const liveCandidate = (accumulatedTranscript ? (accumulatedTranscript + ' ' + currentInterim) : currentInterim).trim();
+                const liveCandidate = (accumulatedTranscript ? (accumulatedTranscript + ' ' + currentInterim) : currentInterim).replace(/^[ \t]+|[ \t]+$/g, '');
                 const cleanedInterim = cleanSpeechFillers(liveCandidate);
 
                 if (cleanedInterim) {
@@ -1158,7 +1160,7 @@ export function installSpeechInputUI(options = {}) {
 
             if (!isConverse) {
                 // VTT Dictation: words stream directly into the chatbox (input textarea), NOT on the chat window
-                const base = committedText ? `${committedText} ` : '';
+                const base = committedText ? `${committedText}${cleaned.startsWith('\n') ? '' : ' '}` : '';
                 input.value = cleaned ? `${base}${cleaned}` : committedText;
                 delete input.dataset.inputSource;
                 options.onComposerChanged?.();
@@ -1193,7 +1195,7 @@ export function installSpeechInputUI(options = {}) {
                 });
             } else {
                 // Enterprise VTT Dictation: Words appear in the chatbox, NOT on the chat window!
-                const base = committedText ? `${committedText} ` : '';
+                const base = committedText ? `${committedText}${cleaned.startsWith('\n') ? '' : ' '}` : '';
                 const finalStr = cleaned ? `${base}${cleaned}` : committedText;
                 committedText = finalStr.trim();
                 input.value = committedText;
