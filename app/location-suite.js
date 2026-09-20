@@ -123,6 +123,135 @@ export async function fetchNearbyAmenities(lat, lon, radiusMeters = 3000, fetchF
     return categories;
 }
 
+export function isCurrentLocationIntent(text) {
+    const raw = String(text || '').trim();
+    if (!raw) return false;
+    const t = raw.toLowerCase().replace(/[?!.,;:]+$/g, '').trim();
+    if (!t) return false;
+
+    // 1. Guard against coding, programming, or document context
+    if (/\b(?:in\s+(?:the|this|my)\s+(?:code|document|file|function|class|book|script|loop|thread|game|project|repo|git|array|database))\b/i.test(t)) {
+        return false;
+    }
+
+    // 2. Guard against directions, navigation, or finding 3rd-party amenities/places
+    if (/\b(?:nearest|closest|directions\s+to|how\s+to\s+get\s+to|navigate\s+to|hotels?\s+near|restaurants?\s+near)\b/i.test(t)) {
+        return false;
+    }
+
+    // 3. Guard against explicit weather inquiries for a remote/named city: "weather in Tokyo"
+    if (/\b(?:weather|forecast|temperature|humidity)\s+(?:in|at|for|around)\s+[a-z]+/i.test(t)) {
+        return false;
+    }
+
+    // 4. Guard against 3rd-party entity inquiries (asking about other entities/places, not self)
+    const isFirstPerson = /\b(?:i|we|me|us|my|our|mine|ours|here|this\s+place)\b/i.test(t);
+    if (!isFirstPerson) {
+        const thirdPartyEntityPatterns = [
+            /\bwhere\s+(?:is|was|are|were)\s+(?:the|a|an|mount|lake|river|president|king|queen|saint|dr|mr|mrs)?\s*[a-z0-9\s.'-]+\b/i,
+            /\b(?:location|coordinates?|origin|birthplace)\s+of\s+[a-z0-9\s.'-]+\b/i,
+            /\bwhere\s+did\s+[a-z0-9\s.'-]+\s+(?:live|die|go|grow\s+up|come\s+from|happen|originate)\b/i
+        ];
+        for (const pattern of thirdPartyEntityPatterns) {
+            if (pattern.test(t)) return false;
+        }
+    }
+
+    // 5. Positive 1st-person / self-location patterns (grammatical & structural without hardcoding specific locations)
+    // A. "where am i", "where are we", "where m i", "where i am", "where we are", "where am i right now", "where are we currently"
+    if (/\bwhere\s+(?:am\s+i|m\s+i|are\s+we|i\s+am|we\s+are|are\s+you\s+and\s+i)(?:\s+(?:right\s+now|now|currently|standing|located|situated|at|based))?\b/i.test(t)) {
+        return true;
+    }
+
+    // B. "what is my location", "what's my location", "what is our location", "my current location", "my location", "current location"
+    if (/\b(?:what(?:'?s|\s+is)?\s+)?(?:my|our|current)\s+(?:current\s+)?(?:exact\s+)?(?:location|position|coordinates?|whereabouts|address|gps(?:\s+location)?)\b/i.test(t)) {
+        return true;
+    }
+
+    // C. "tell me where i am", "can you tell me where i am", "show me where i am", "show my location", "find my location", "locate me", "pin my location", "detect my location"
+    if (/\b(?:tell\s+me|can\s+you\s+tell\s+me|show(?:\s+me)?|find|locate|pin|detect|track|identify|lookup|get)\s+(?:where\s+(?:i\s+am|we\s+are)|my\s+(?:location|position|coordinates?|address)|me|us)\b/i.test(t)) {
+        return true;
+    }
+
+    // D. "which city am i in", "what city am i in", "what country am i in", "which place is this", "what place is this", "what town am i in", "what area am i in"
+    if (/\b(?:which|what)\s+(?:city|town|place|state|province|country|region|neighborhood|area|district)\s+(?:am\s+i|are\s+we)\s*(?:in|at)?\b/i.test(t)) {
+        return true;
+    }
+
+    // E. "what place is this", "what is this place", "where is this place", "which place is this"
+    if (/\b(?:what|which|where)\s+(?:is\s+this\s+place|place\s+is\s+this|place\s+are\s+we\s+in)\b/i.test(t)) {
+        return true;
+    }
+
+    // F. "my coordinates", "what are my coordinates", "my latitude and longitude", "my gps coordinates"
+    if (/\b(?:my|our)\s+(?:gps\s+)?(?:latitude\s+(?:and|&)\s+longitude|coordinates?|coords?|lat\s+(?:and|&)\s+long?)\b/i.test(t)) {
+        return true;
+    }
+
+    // G. Standalone queries
+    if (/^(?:whereami|where\s+am\s+i|where\s+are\s+we|locate\s+me|my\s+location)$/i.test(t)) {
+        return true;
+    }
+
+    return false;
+}
+
+export async function fetchApproximateLocationByIp(fetchFn = globalThis.fetch) {
+    try {
+        const res = await fetchFn('https://freeipapi.com/api/json', {
+            signal: AbortSignal.timeout(3500),
+            headers: { 'Accept': 'application/json' }
+        });
+        if (res.ok) {
+            const data = await res.json();
+            const lat = Number(data.latitude);
+            const lon = Number(data.longitude);
+            if (Number.isFinite(lat) && Number.isFinite(lon) && (lat !== 0 || lon !== 0)) {
+                return {
+                    latitude: lat,
+                    longitude: lon,
+                    accuracy: 5000,
+                    isApproximate: true,
+                    source: 'ip_lookup',
+                    city: data.cityName || '',
+                    region: data.regionName || '',
+                    country: data.countryName || '',
+                    postal: data.zipCode || ''
+                };
+            }
+        }
+    } catch (_) {}
+
+    try {
+        const res = await fetchFn('https://ipwho.is/', {
+            signal: AbortSignal.timeout(3500),
+            headers: { 'Accept': 'application/json' }
+        });
+        if (res.ok) {
+            const data = await res.json();
+            if (data && data.success !== false) {
+                const lat = Number(data.latitude);
+                const lon = Number(data.longitude);
+                if (Number.isFinite(lat) && Number.isFinite(lon) && (lat !== 0 || lon !== 0)) {
+                    return {
+                        latitude: lat,
+                        longitude: lon,
+                        accuracy: 8000,
+                        isApproximate: true,
+                        source: 'ip_lookup',
+                        city: data.city || '',
+                        region: data.region || '',
+                        country: data.country || '',
+                        postal: data.postal || ''
+                    };
+                }
+            }
+        }
+    } catch (_) {}
+
+    return null;
+}
+
 export function escapeHtmlText(str) {
     return String(str || '')
         .replace(/&/g, '&amp;')
@@ -138,6 +267,7 @@ export function buildDynamicLocationSuiteHtml(data = {}) {
     const addr = data.address || {};
     const weather = data.weather || null;
     const amenities = data.amenities || { atms: [], hospitals: [], police: [], gasStations: [] };
+    const isApproximate = Boolean(data.isApproximate);
 
     const neighborhood = addr.neighbourhood || addr.suburb || addr.hamlet || addr.village || addr.residential || '';
     const city = addr.city || addr.town || addr.municipality || addr.state_district || addr.county || 'Your Area';
@@ -157,7 +287,7 @@ export function buildDynamicLocationSuiteHtml(data = {}) {
     if (state || country) {
         aiSummary += `, ${escapeHtmlText([state, country].filter(Boolean).join(', '))}`;
     }
-    aiSummary += `.`;
+    aiSummary += `${isApproximate ? ' *(detected via approximate network location)*' : ''}.`;
 
     if (weather) {
         aiSummary += ` The current local weather is **${weather.temperatureC}°C** (${escapeHtmlText(weather.condition)}) with **${weather.humidity}%** humidity and winds at **${weather.windSpeedKmH} km/h**.`;
@@ -188,6 +318,7 @@ export function buildDynamicLocationSuiteHtml(data = {}) {
         state ? `<tr><td style="padding:4px 8px; color:#94a3b8; font-size:12px;">State / Region</td><td style="padding:4px 8px; font-weight:600; font-size:12px;">${escapeHtmlText(state)}</td></tr>` : '',
         country ? `<tr><td style="padding:4px 8px; color:#94a3b8; font-size:12px;">Country</td><td style="padding:4px 8px; font-weight:600; font-size:12px;">${escapeHtmlText(country)}</td></tr>` : '',
         postcode ? `<tr><td style="padding:4px 8px; color:#94a3b8; font-size:12px;">Postal / ZIP Code</td><td style="padding:4px 8px; font-weight:600; font-size:12px;">${escapeHtmlText(postcode)}</td></tr>` : '',
+        isApproximate ? `<tr><td style="padding:4px 8px; color:#94a3b8; font-size:12px;">Position Source</td><td style="padding:4px 8px; font-weight:600; font-size:12px; color:#facc15;">Approximate Network IP Geolocation</td></tr>` : '',
         `<tr><td style="padding:4px 8px; color:#94a3b8; font-size:12px;">GPS Coordinates</td><td style="padding:4px 8px; font-weight:600; font-size:12px;"><code>${lat.toFixed(6)}, ${lon.toFixed(6)}</code></td></tr>`
     ].filter(Boolean).join('');
 
@@ -269,7 +400,7 @@ export function buildDynamicLocationSuiteHtml(data = {}) {
             </iframe>
         </div>
         <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px; font-size:12px; color:#94a3b8; flex-wrap:wrap; gap:8px;">
-            <span>Exact Pin: <strong>${escapeHtmlText(exactAddress || locationTitle)}</strong></span>
+            <span>${isApproximate ? 'Estimated Pin' : 'Exact Pin'}: <strong>${escapeHtmlText(exactAddress || locationTitle)}</strong></span>
             <div style="display:flex; gap:12px;">
                 <a href="${mapsUrl}" target="_blank" rel="noopener noreferrer" style="color:#38bdf8; text-decoration:none; font-weight:600; display:flex; align-items:center; gap:4px;">🗺️ Open in Google Maps</a>
                 <a href="${directionsBaseUrl}${lat},${lon}" target="_blank" rel="noopener noreferrer" style="color:#38bdf8; text-decoration:none; font-weight:600; display:flex; align-items:center; gap:4px;">🧭 Get Directions</a>
@@ -279,9 +410,14 @@ export function buildDynamicLocationSuiteHtml(data = {}) {
 
     return `
         <div class="location-suite-card" style="margin-top:8px; padding:16px; background:rgba(30,41,59,0.7); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px); border:1px solid rgba(148,163,184,0.2); border-radius:16px; color:#f8fafc; font-family:inherit;">
-            <div style="display:flex; align-items:center; gap:8px; margin-bottom:10px;">
-                <span style="font-size:20px;">🧭</span>
-                <h3 style="margin:0; font-size:16px; font-weight:700; color:#f8fafc;">Current Location & Area Intelligence</h3>
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span style="font-size:20px;">🧭</span>
+                    <h3 style="margin:0; font-size:16px; font-weight:700; color:#f8fafc;">Current Location & Area Intelligence</h3>
+                </div>
+                ${isApproximate ? `
+                    <span style="font-size:11px; font-weight:600; background:rgba(234,179,8,0.15); color:#facc15; border:1px solid rgba(234,179,8,0.3); border-radius:999px; padding:2px 10px;">Approximate Network Location</span>
+                ` : ''}
             </div>
             
             <p style="margin:0 0 10px; font-size:14px; line-height:1.5; color:#cbd5e1;">${aiSummary}</p>
@@ -295,6 +431,8 @@ export function buildDynamicLocationSuiteHtml(data = {}) {
                     </tbody>
                 </table>
             </div>
+
+            ${amenitiesGridHtml}
 
             ${mapHtml}
         </div>
