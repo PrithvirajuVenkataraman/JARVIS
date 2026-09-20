@@ -110,7 +110,7 @@ const CATEGORY_PATTERNS = Object.freeze([
         category: 'tourism_food_places',
         route: 'live_required',
         reason: 'place_or_travel_request_needs_location_source',
-        pattern: /\b(tourism|tourist|travel|places to visit|attractions?|temple|museum|hotel|where am i|where i am)\b/i,
+        pattern: /\b(tourism|tourist|travel|places to visit|attractions?|temple|museum|hotel)\b/i,
         vector: textToEmbeddingVector('tourism tourist travel places to visit attractions sightseeing hotels')
     },
     {
