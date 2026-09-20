@@ -260,6 +260,31 @@
                     </div>
                     <h2 class="empty-state-headline">What can I help with today?</h2>
                     <p class="empty-state-sub">Multimodal intelligence with live web search, deep reasoning, and document OCR.</p>
+                    <div class="empty-state-capabilities" aria-label="Key capabilities">
+                        <span class="empty-state-pill">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                            <span>Live Web Search</span>
+                        </span>
+                        <span class="empty-state-pill">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"></path></svg>
+                            <span>Deep Reasoning</span>
+                        </span>
+                        <span class="empty-state-pill">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                            <span>Document OCR</span>
+                        </span>
+                        <span class="empty-state-pill">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
+                            <span>Code & Math</span>
+                        </span>
+                    </div>
+                    <div class="empty-state-shortcuts" aria-hidden="true">
+                        <span><kbd>Enter</kbd> to send</span>
+                        <span>&bull;</span>
+                        <span><kbd>Shift</kbd>+<kbd>Enter</kbd> new line</span>
+                        <span>&bull;</span>
+                        <span><kbd>Ctrl</kbd>+<kbd>O</kbd> new chat</span>
+                    </div>
                 </div>
 
                 <!-- Chat History Feed -->
@@ -8011,7 +8036,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 };
                 const langLabel = block.lang ? escapeHtml(block.lang) : 'CODE';
                 const copyBtnHtml = `<button type="button" class="code-header-btn" onclick="copyCodeBlock(this, '${blockId}')" title="Copy code">
-                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                    <span class="code-copy-icon"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></span>
                     <span>Copy</span>
                 </button>`;
 
@@ -27495,8 +27520,11 @@ function initScrollToBottomWatchdog() {
         const distanceFromBottom = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
         if (distanceFromBottom > threshold) {
             scrollBtn.classList.add('is-visible');
+            scrollBtn.classList.toggle('has-unread', Boolean(chatUnreadWhileScrolledUp));
         } else {
             scrollBtn.classList.remove('is-visible');
+            scrollBtn.classList.remove('has-unread');
+            chatUnreadWhileScrolledUp = false;
         }
     };
 
@@ -27524,11 +27552,19 @@ function copyCodeBlock(btn, blockId) {
     if (!data || !data.code) return;
     const updateBtn = () => {
         const span = btn?.querySelector('span');
-        if (span) {
-            const prev = span.innerText;
-            span.innerText = 'Copied!';
-            setTimeout(() => { span.innerText = prev; }, 1600);
+        const iconWrap = btn?.querySelector('.code-copy-icon');
+        if (btn) btn.classList.add('is-copied');
+        if (span) span.innerText = 'Copied!';
+        if (iconWrap) {
+            iconWrap.innerHTML = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
         }
+        setTimeout(() => {
+            if (btn) btn.classList.remove('is-copied');
+            if (span) span.innerText = 'Copy';
+            if (iconWrap) {
+                iconWrap.innerHTML = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
+            }
+        }, 1600);
         triggerJarvisHaptic(10);
     };
 
