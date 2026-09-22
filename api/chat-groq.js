@@ -3,6 +3,7 @@ import { applyApiSecurity } from './_lib/security.js';
 import { validateAndRepairCodeAndMath } from './_lib/code-math-validator.js';
 import { inspectPromptSecurity } from './_lib/prompt-guard.js';
 import { redactSensitiveData } from './_lib/pii-redactor.js';
+import { evaluateDraftSolution, needsRefinement, buildRefinementPrompt, synthesizeSelfCritiqueMetadata } from './_lib/self-critique-loop.js';
 
 /* ── Image MIME normalizer ────────────────────────────────── */
 // Gemini and Groq only accept jpeg/png/webp/gif.
@@ -1049,10 +1050,38 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 contextBlock
             });
             finalParsed = normalizeAssistantResponseStyle(finalParsed);
+
+            // Recursive In-Flight Self-Critique & Refinement Loop
+            let selfCritiqueMetadata = null;
+            if (intent === 'deep_reasoning' || routeDecision?.tier === 'deep' || Boolean(req.body?.forceReasoning)) {
+                try {
+                    const critiqueResult = evaluateDraftSolution(effectiveMessage, finalParsed?.response);
+                    let refined = false;
+                    if (needsRefinement(critiqueResult)) {
+                        const refinementSystemPrompt = buildRefinementPrompt(effectiveMessage, finalParsed?.response, critiqueResult, systemPrompt);
+                        const refinePass = await runModelWithFallback(refinementSystemPrompt + '\n\n' + effectiveMessage, lengthPolicy, preferences?.selectedModel || null, undefined, {
+                            systemPrompt: refinementSystemPrompt,
+                            userMessage: effectiveMessage,
+                            effectiveMessage,
+                            intent,
+                            minimalThinking: false
+                        });
+                        if (refinePass.ok && refinePass.parsedResponse?.response) {
+                            finalParsed = { ...finalParsed, response: refinePass.parsedResponse.response };
+                            refined = true;
+                        }
+                    }
+                    selfCritiqueMetadata = synthesizeSelfCritiqueMetadata(critiqueResult, refined);
+                } catch (critiqueErr) {
+                    console.warn('[chat-groq] self-critique loop error', critiqueErr?.message);
+                }
+            }
+
             timing.totalMs = Date.now() - timing.startedAt;
             return res.status(200).json({
                 success: true,
                 ...finalParsed,
+                selfCritique: selfCritiqueMetadata || undefined,
                 sources: Array.isArray(liveRag.sources) && liveRag.sources.length > 0 ? liveRag.sources : undefined,
                 requestId,
                 modelUsed: selectedPass.modelUsed,
@@ -1475,12 +1504,22 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             finalText = streamThought
                 ? `<think>\n${streamThought}\n</think>\n${evaluationText}`
                 : evaluationText;
+
+            let streamCritiqueMetadata = null;
+            if (intent === 'deep_reasoning' || routeDecision?.tier === 'deep' || Boolean(options?.forceReasoning)) {
+                try {
+                    const critiqueResult = evaluateDraftSolution(effectiveMessage, evaluationText);
+                    streamCritiqueMetadata = synthesizeSelfCritiqueMetadata(critiqueResult, false);
+                } catch (_) {}
+            }
+
             timing.totalMs = Date.now() - timing.startedAt;
             writeSse(res, 'done', {
                 success: true,
                 requestId,
                 intent: 'casual_chat',
                 response: finalText,
+                selfCritique: streamCritiqueMetadata || undefined,
                 sources: Array.isArray(liveRag.sources) && liveRag.sources.length > 0 ? liveRag.sources : undefined,
                 action: null,
                 provider: streamResult.provider,
@@ -4211,6 +4250,9 @@ Answer directly.`;
             supportive: 'Be empathetic and encouraging while remaining concrete and direct.',
             debate: 'Respectfully challenge assumptions and present relevant counterarguments.'
         };
+        const learnedDirectives = Array.isArray(preferences?.learnedDirectives) && preferences.learnedDirectives.length > 0
+            ? preferences.learnedDirectives.filter(d => typeof d === 'string' && d.trim()).slice(0, 8)
+            : [];
         return `You are JARVIS, a helpful text-first assistant.${userName ? ` The user's name is ${userName}.` : ''}
 
 Capabilities:
@@ -4245,6 +4287,14 @@ Tone, Safety & Boundaries:
 - Response style: ${responseStyle}. ${styleInstructions[responseStyle]}
 ${customSystemPrompt ? `- User custom reply instructions: ${customSystemPrompt}
 - Treat custom reply instructions as tone and formatting preferences only.` : ''}
+${learnedDirectives.length > 0 ? `
+LEARNED USER PREFERENCES & HEURISTICS (ADAPTIVE MEMORY):
+${learnedDirectives.map(d => `- ${d}`).join('\n')}` : ''}
+${intent === 'deep_reasoning' ? `
+DEEP REASONING & RECURSIVE VERIFICATION DIRECTIVE:
+- Execute rigorous step-by-step deduction.
+- Before reaching conclusions, explicitly verify: (1) all premises and constraint conditions, (2) deductive consistency without inverted assumptions, (3) elimination of false cases with explicit disproofs.
+- For logic puzzles, test every branch exhaustively and show that alternative assignments yield contradictions.` : ''}
 
 Respond conversationally and naturally.`;
     }
@@ -4298,7 +4348,10 @@ Respond conversationally and naturally.`;
                 responseFormat: String(body.preferences.responseFormat || 'paragraph'),
                 responseStyle: normalizeResponseStyle(body.preferences.responseStyle || body.preferences.supportMode),
                 customSystemPrompt: normalizeCustomSystemPrompt(body.preferences.customSystemPrompt),
-                selectedModel: normalizeSelectedModel(body.preferences.selectedModel)
+                selectedModel: normalizeSelectedModel(body.preferences.selectedModel),
+                learnedDirectives: Array.isArray(body.preferences.learnedDirectives)
+                    ? body.preferences.learnedDirectives.filter(d => typeof d === 'string' && d.trim()).slice(0, 8)
+                    : []
             }
             : {};
         const intent = normalizeIntent(body.intent);
@@ -4334,7 +4387,7 @@ Respond conversationally and naturally.`;
 
     function normalizeIntent(value) {
         const intent = String(value || 'chat').trim().toLowerCase();
-        return ['chat', 'fast_explainer', 'chat_title', 'pop_culture_reference', 'verify_answer', 'selection_explain', 'selection_verify', 'selection_rewrite', 'selection_translate', 'selection_custom']
+        return ['chat', 'deep_reasoning', 'fast_simple', 'fast_explainer', 'chat_title', 'pop_culture_reference', 'verify_answer', 'selection_explain', 'selection_verify', 'selection_rewrite', 'selection_translate', 'selection_custom']
             .includes(intent) ? intent : 'chat';
     }
 
