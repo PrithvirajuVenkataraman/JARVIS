@@ -35,9 +35,9 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css?v=2.0.4">
+    <link rel="stylesheet" href="styles.css?v=2.0.5">
     <script src="science-format.js?v=2.0.1"></script>
-    <script type="module" src="app/bootstrap.js?v=2.0.1"></script>
+    <script type="module" src="app/bootstrap.js?v=2.0.2"></script>
 </head>
 <body class="dark min-h-screen bg-black text-white">
 
@@ -4865,7 +4865,7 @@ async function streamChatCompletion(payload, options = {}) {
     let buffer = '';
     let accumulated = '';
     let donePayload = null;
-    let assistantMessageId = '';
+    let assistantMessageId = String(options?.assistantMessageId || '').trim();
     const ensureStreamMessage = () => {
         if (assistantMessageId) return assistantMessageId;
         assistantMessageId = createStreamingAssistantMessage({
@@ -4895,7 +4895,7 @@ async function streamChatCompletion(payload, options = {}) {
     const handleEvent = event => {
         if (!event?.event) return;
         const targetRow = assistantMessageId ? document.getElementById(assistantMessageId) : null;
-        if (targetRow && (targetRow.__fallbackActive === true || targetRow.__fallbackCompleted === true)) {
+        if (targetRow && (targetRow.__fallbackActive === true || targetRow.__fallbackCompleted === true || targetRow.dataset?.boundedResearchTerminal === 'true')) {
             return;
         }
         if (event.event === 'meta') {
@@ -4928,6 +4928,9 @@ async function streamChatCompletion(payload, options = {}) {
             }
             const delta = String(event.data?.text || '');
             if (!delta) return;
+            if (typeof options?.onToken === 'function') {
+                options.onToken(delta);
+            }
             accumulated += delta;
             if (!firstTokenAt) {
                 firstTokenAt = performance.now();
@@ -4958,6 +4961,7 @@ async function streamChatCompletion(payload, options = {}) {
                 provider: streamMeta.provider || '',
                 failover: streamMeta.failover || false,
                 route: options?.routeDecision?.route || '',
+                sources: options?.sources || undefined,
                 minimalThinking: options?.routeDecision?.minimalThinking === true || options?.routeDecision?.route === 'fast_simple'
             });
             return;
@@ -8263,8 +8267,12 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
 
             html = html.replace(/`([^`\n]+)`/g, '<code class="assistant-md-inline-code">$1</code>');
             html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-            html = html.replace(/\[(\d+)\]\((https?:\/\/[^)]+)\)/g, `<a href="$2" target="_blank" rel="noopener noreferrer" class="citation-badge" title="Source [$1]"><sup>[$1]</sup></a>`);
+            html = html.replace(/\[(\d+)\]\((https?:\/\/[^)]+)\)/g, `<a href="$2" target="_blank" rel="noopener noreferrer" class="citation-badge" data-source-id="$1" title="Source [$1]"><sup>[$1]</sup></a>`);
             html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, `<a href="$2" target="_blank" rel="noopener noreferrer" class="${linkClass}">$1</a>`);
+            html = html.replace(/(?<![\[\w`])\[(\d+(?:\s*,\s*\d+)*)\](?![\]\(])/g, (match, idsStr) => {
+                const ids = idsStr.split(',').map(s => s.trim()).filter(Boolean);
+                return ids.map(id => `<button type="button" class="citation-badge" data-source-id="${id}" onclick="window.JarvisLiveResearch?.highlightSource('${id}')" title="Source [${id}]"><sup>[${id}]</sup></button>`).join('');
+            });
 
             html = html.replace(/__CODE_BLOCK_(\d+)__/g, (_, idx) => {
                 const block = codeBlocks[Number(idx)];
@@ -14325,7 +14333,8 @@ async function fetchLiveSearchJson(query, options = {}) {
             domain: options.domain || '',
             factType: options.factType || '',
             mode: options.mode || options.searchMode || '',
-            mustContain: Array.isArray(options.mustContain) ? options.mustContain : []
+            mustContain: Array.isArray(options.mustContain) ? options.mustContain : [],
+            timeoutMs: options.timeoutMs || 2200
         })
     });
     const data = await parseJsonResponseSafely(response);
@@ -20803,6 +20812,174 @@ async function handleUniversalEntityFactQuery(userText, liveIntent = null) {
 }
 
 
+async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = {}) {
+    const query = String(cleanText || '').trim();
+    if (!query) return false;
+
+    // Abort any existing active live research controller to prevent races
+    if (window.JarvisLiveResearch?.activeController) {
+        try { window.JarvisLiveResearch.activeController.abort(); } catch (_) {}
+    }
+
+    const ControllerClass = window.JarvisLiveResearch?.BoundedLiveResearchController ||
+        globalThis.JarvisLiveResearch?.BoundedLiveResearchController;
+    if (!ControllerClass) {
+        return handleLiveRetrievalQuery(query, options);
+    }
+
+    const controller = new ControllerClass({
+        searchCutoffMs: 2500,
+        fallbackWarningMs: 8500,
+        hardDeadlineMs: 9000
+    });
+    if (window.JarvisLiveResearch) {
+        window.JarvisLiveResearch.activeController = controller;
+    }
+
+    window.JarvisInteractionState?.transition?.('SEARCHING', { metadata: { query, turnId: controller.turnId } });
+    showThinkingIndicator('Searching web sources...');
+
+    const assistantMessageId = addChatMessage('', false, null, {
+        allowEmpty: true,
+        turnId: controller.turnId,
+        sourceType: 'verified'
+    });
+
+    let activeRow = null;
+    const getRow = () => {
+        if (activeRow && activeRow.isConnected) return activeRow;
+        activeRow = document.querySelector(`.chat-row[data-turn-id="${controller.turnId}"]`) ||
+            (assistantMessageId ? document.querySelector(`[data-message-id="${assistantMessageId}"]`) : null) ||
+            document.getElementById('chat-container')?.lastElementChild;
+        return activeRow;
+    };
+
+    return new Promise((resolve) => {
+        controller.execute({
+            query,
+            userText: rawUserText || query,
+            assistantMessageId,
+            fetchSearchFn: async ({ query, signal, timeoutMs }) => {
+                return fetchLiveSearchJson(query, {
+                    signal,
+                    maxResults: 8,
+                    answer: true,
+                    mode: 'rag',
+                    timeoutMs: timeoutMs || 2200
+                });
+            },
+            streamSynthesisFn: async ({ prompt, sources, signal, onToken }) => {
+                return streamChatCompletion({
+                    message: query,
+                    customSystemPrompt: prompt,
+                    grounding: { sources },
+                    intent: 'live_search'
+                }, {
+                    signal,
+                    assistantMessageId,
+                    userMessage: rawUserText || query,
+                    sources,
+                    onToken
+                });
+            },
+            uiCallbacks: {
+                onSourcesReady: ({ sources }) => {
+                    hideThinkingIndicator();
+                    window.JarvisInteractionState?.transition?.('GENERATING', { metadata: { turnId: controller.turnId } });
+                    const row = getRow();
+                    if (row) {
+                        row.style.display = '';
+                        if (window.JarvisLiveResearch?.renderOrUpdateSourcesCarousel) {
+                            window.JarvisLiveResearch.renderOrUpdateSourcesCarousel(row, sources);
+                        }
+                        maybeAutoScroll(document.getElementById('chat-container'));
+                    }
+                },
+                onToken: ({ streamedText }) => {
+                    const row = getRow();
+                    if (row) row.style.display = '';
+                    updateStreamingAssistantMessage(assistantMessageId, streamedText, {
+                        turnId: controller.turnId,
+                        streaming: true,
+                        sources: controller.sources,
+                        sourceType: 'verified'
+                    });
+                },
+                onStreamComplete: ({ content, sources, telemetry }) => {
+                    hideThinkingIndicator();
+                    const row = getRow();
+                    if (row) {
+                        row.style.display = '';
+                        if (window.JarvisLiveResearch?.renderOrUpdateSourcesCarousel) {
+                            window.JarvisLiveResearch.renderOrUpdateSourcesCarousel(row, sources);
+                        }
+                    }
+                    updateStreamingAssistantMessage(assistantMessageId, content, {
+                        turnId: controller.turnId,
+                        streaming: false,
+                        sources,
+                        sourceType: 'verified'
+                    });
+
+                    if (row && window.JarvisLiveResearch?.generateRelatedResearchQuestions) {
+                        const questions = window.JarvisLiveResearch.generateRelatedResearchQuestions(query, sources);
+                        window.JarvisLiveResearch.renderRelatedQuestionsTray(row, questions);
+                    }
+
+                    console.log('[Bounded Live Research Telemetry]', {
+                        turnId: controller.turnId,
+                        totalDurationMs: telemetry.t_completed ? Math.round(telemetry.t_completed - telemetry.t_start) : null,
+                        searchCutoffMs: telemetry.t_search_cutoff ? Math.round(telemetry.t_search_cutoff - telemetry.t_start) : null,
+                        sourcesCount: sources.length,
+                        telemetry
+                    });
+
+                    window.JarvisInteractionState?.transition?.('IDLE');
+                    saveToHistory(rawUserText || query, content);
+                    if (typeof setWebSearchMode === 'function') setWebSearchMode('off');
+                    resolve(true);
+                },
+                onFallbackComplete: ({ content, sources, telemetry }) => {
+                    hideThinkingIndicator();
+                    const row = getRow();
+                    if (row) {
+                        row.style.display = '';
+                        row.dataset.boundedResearchTerminal = 'true';
+                        if (window.JarvisLiveResearch?.renderOrUpdateSourcesCarousel) {
+                            window.JarvisLiveResearch.renderOrUpdateSourcesCarousel(row, sources);
+                        }
+                    }
+                    updateStreamingAssistantMessage(assistantMessageId, content, {
+                        turnId: controller.turnId,
+                        streaming: false,
+                        sources,
+                        sourceType: 'verified',
+                        isFallback: true
+                    });
+
+                    if (row && window.JarvisLiveResearch?.generateRelatedResearchQuestions) {
+                        const questions = window.JarvisLiveResearch.generateRelatedResearchQuestions(query, sources);
+                        window.JarvisLiveResearch.renderRelatedQuestionsTray(row, questions);
+                    }
+
+                    console.warn('[Bounded Live Research 9.0s Fallback Triggered]', {
+                        turnId: controller.turnId,
+                        totalDurationMs: telemetry.t_completed ? Math.round(telemetry.t_completed - telemetry.t_start) : null,
+                        searchCutoffMs: telemetry.t_search_cutoff ? Math.round(telemetry.t_search_cutoff - telemetry.t_start) : null,
+                        sourcesCount: sources.length,
+                        telemetry
+                    });
+
+                    window.JarvisInteractionState?.transition?.('IDLE');
+                    saveToHistory(rawUserText || query, content);
+                    if (typeof setWebSearchMode === 'function') setWebSearchMode('off');
+                    resolve(true);
+                }
+            }
+        });
+    });
+}
+
 async function handleLiveRetrievalQuery(userText, options = {}) {
     const rawInput = String(userText || '').trim();
     const contextResolution = window.JarvisConversation?.resolve?.({ message: rawInput });
@@ -21876,16 +22053,16 @@ function isWakeGreetingText(text) {
                 if (handled) return;
             }
 
-            // Authoritative semantic frontend route dispatch — only when user toggled Live Web Search ON
+            // Authoritative bounded live research dispatch — strictly when user toggled Live Web Search ON or submission forced it
             const _activeWebMode = typeof getWebSearchMode === 'function' ? getWebSearchMode() : 'off';
-            if (_activeWebMode === 'force' && frontendRoute?.route === 'live_required' && isFactSearchEnabled()) {
-                logRoutingDebug('processCommand -> authoritative live_required (user-forced)', cleanText, {
-                    selectedHandler: 'handleLiveRetrievalQuery',
+            if ((_activeWebMode === 'force' || submission?.forceWebSearch) && isFactSearchEnabled()) {
+                logRoutingDebug('processCommand -> bounded live research (user-forced)', cleanText, {
+                    selectedHandler: 'handleBoundedLiveResearchQuery',
                     frontendRoute
                 });
-                const handled = await handleLiveRetrievalQuery(cleanText, {
+                const handled = await handleBoundedLiveResearchQuery(cleanText, text, {
                     routeDecision: frontendRoute,
-                    broadFactualWeb: true
+                    submission
                 });
                 if (handled) return;
             }
