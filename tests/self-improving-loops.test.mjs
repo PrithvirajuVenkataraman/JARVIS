@@ -58,6 +58,23 @@ assert.ok(injected.includes(basePrompt), 'Injected prompt must preserve base pro
 assert.ok(injected.includes(uniqueKey), 'Injected prompt must contain active learned preferences');
 console.log('  [PASS] 1.3 System prompt injection preserves base envelope and injects learned memory');
 
+// Invariant 1.4: Negative Feedback Distillation
+const distilledItem = await memoryEngine.distillNegativeFeedback('too verbose and wordy', 'test query', 'test answer');
+assert.ok(distilledItem, 'Must distill negative feedback into an actionable directive');
+assert.equal(distilledItem.category, 'conciseness');
+assert.ok(memoryEngine.getDirectives().some(d => d.includes('concise')), 'Directives must include distilled rule');
+console.log('  [PASS] 1.4 Negative feedback cleanly distilled into actionable adaptation rule');
+
+// Invariant 1.5: Preference Toggle Invariant
+const itemToToggle = memoryEngine.getAll()[0];
+assert.ok(itemToToggle, 'Must have at least one item');
+await memoryEngine.toggle(itemToToggle.id, false);
+const directivesAfterDisable = memoryEngine.getDirectives();
+assert.ok(!directivesAfterDisable.includes(itemToToggle.directive), 'Disabled preference must not be injected');
+await memoryEngine.toggle(itemToToggle.id, true);
+assert.ok(memoryEngine.getDirectives().includes(itemToToggle.directive), 'Re-enabled preference must be injected');
+console.log('  [PASS] 1.5 Preference toggle and activation states cleanly managed');
+
 // ============================================================================
 // Section 2: Mathematical & Syntactic Invariants for Fast Validator & Speculative Guard
 // ============================================================================
