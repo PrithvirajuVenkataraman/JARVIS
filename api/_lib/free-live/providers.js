@@ -239,7 +239,7 @@ export async function fetchWikipediaInfobox(title) {
     if (!title) return null;
     try {
         const parseUrl = `https://en.wikipedia.org/w/api.php?action=parse&page=${encodeURIComponent(title)}&prop=wikitext&section=0&format=json`;
-        const res = await fetchWithTimeout(parseUrl, { headers: { 'User-Agent': 'UnifyAssistant/2.0 (https://github.com/unify; contact@unify.ai)' } }, 2500);
+        const res = await fetchWithTimeout(parseUrl, { headers: { 'User-Agent': 'UnifyAssistant/2.0 (https://github.com/unify; contact@unify.ai)' } }, 5000);
         if (!res.ok) return null;
         const data = await res.json();
         const wikitext = data?.parse?.wikitext?.['*'];
@@ -253,7 +253,7 @@ export async function searchWikipediaApi(query, options = {}) {
     const limit = options.limit || 3;
     try {
         const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&utf8=&format=json&srlimit=${limit}`;
-        const res = await fetchWithTimeout(searchUrl, { headers: { 'User-Agent': 'JarvisAI/1.0 (free live search)' } }, 2500);
+        const res = await fetchWithTimeout(searchUrl, { headers: { 'User-Agent': 'UnifyAssistant/2.0 (https://github.com/unify; contact@unify.ai)' } }, 5000);
         if (!res.ok) return [];
         const data = await res.json();
         const list = data?.query?.search || [];
@@ -364,50 +364,54 @@ export async function searchWeather(query, options = {}) {
         return unsupportedFreeLive(query, 'weather', 'Weather needs a location. Ask with a city, for example "weather in Chennai".');
     }
     const source = FREE_LIVE_SOURCES.openMeteo;
-    const geocodeUrl = new URL(OPEN_METEO_GEOCODE_URL);
-    geocodeUrl.searchParams.set('name', location);
-    geocodeUrl.searchParams.set('count', '1');
-    geocodeUrl.searchParams.set('language', 'en');
-    geocodeUrl.searchParams.set('format', 'json');
-    const geoResponse = await fetchWithTimeout(geocodeUrl.toString(), {
-        headers: { Accept: 'application/json' }
-    }, source.timeoutMs);
-    if (!geoResponse.ok) return emptyProvider('open-meteo', 'Weather location lookup failed.');
-    const geo = await geoResponse.json();
-    const place = Array.isArray(geo?.results) ? geo.results[0] : null;
-    if (!place) return emptyProvider('open-meteo', `No weather location matched "${location}".`);
+    try {
+        const geocodeUrl = new URL(OPEN_METEO_GEOCODE_URL);
+        geocodeUrl.searchParams.set('name', location);
+        geocodeUrl.searchParams.set('count', '1');
+        geocodeUrl.searchParams.set('language', 'en');
+        geocodeUrl.searchParams.set('format', 'json');
+        const geoResponse = await fetchWithTimeout(geocodeUrl.toString(), {
+            headers: { Accept: 'application/json' }
+        }, source.timeoutMs);
+        if (!geoResponse.ok) return emptyProvider('open-meteo', 'Weather location lookup failed.');
+        const geo = await geoResponse.json();
+        const place = Array.isArray(geo?.results) ? geo.results[0] : null;
+        if (!place) return emptyProvider('open-meteo', `No weather location matched "${location}".`);
 
-    const forecastUrl = new URL(OPEN_METEO_FORECAST_URL);
-    forecastUrl.searchParams.set('latitude', String(place.latitude));
-    forecastUrl.searchParams.set('longitude', String(place.longitude));
-    forecastUrl.searchParams.set('current', 'temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m');
-    forecastUrl.searchParams.set('daily', 'temperature_2m_max,temperature_2m_min,precipitation_probability_max');
-    forecastUrl.searchParams.set('timezone', 'auto');
-    const forecastResponse = await fetchWithTimeout(forecastUrl.toString(), {
-        headers: { Accept: 'application/json' }
-    }, source.timeoutMs);
-    if (!forecastResponse.ok) return emptyProvider('open-meteo', 'Weather forecast lookup failed.');
-    const forecast = await forecastResponse.json();
-    const current = forecast?.current || {};
-    const units = forecast?.current_units || {};
-    const titleLocation = [place.name, place.admin1, place.country].filter(Boolean).join(', ');
-    const description = [
-        Number.isFinite(Number(current.temperature_2m)) ? `Temperature: ${current.temperature_2m}${units.temperature_2m || 'C'}` : '',
-        Number.isFinite(Number(current.apparent_temperature)) ? `Feels like: ${current.apparent_temperature}${units.apparent_temperature || 'C'}` : '',
-        Number.isFinite(Number(current.relative_humidity_2m)) ? `Humidity: ${current.relative_humidity_2m}${units.relative_humidity_2m || '%'}` : '',
-        Number.isFinite(Number(current.wind_speed_10m)) ? `Wind: ${current.wind_speed_10m} ${units.wind_speed_10m || 'km/h'}` : ''
-    ].filter(Boolean).join(' | ');
-    return oneResult({
-        title: `Current weather for ${titleLocation}`,
-        description: description || 'Open-Meteo returned current weather conditions.',
-        url: 'https://open-meteo.com/',
-        source: source.name,
-        sourceType: 'free_weather',
-        freshness: 'current_model_data',
-        trusted: true,
-        qualitySignals: ['free_public_api', 'weather_model'],
-        query
-    }, 'open-meteo', 'weather');
+        const forecastUrl = new URL(OPEN_METEO_FORECAST_URL);
+        forecastUrl.searchParams.set('latitude', String(place.latitude));
+        forecastUrl.searchParams.set('longitude', String(place.longitude));
+        forecastUrl.searchParams.set('current', 'temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m');
+        forecastUrl.searchParams.set('daily', 'temperature_2m_max,temperature_2m_min,precipitation_probability_max');
+        forecastUrl.searchParams.set('timezone', 'auto');
+        const forecastResponse = await fetchWithTimeout(forecastUrl.toString(), {
+            headers: { Accept: 'application/json' }
+        }, source.timeoutMs);
+        if (!forecastResponse.ok) return emptyProvider('open-meteo', 'Weather forecast lookup failed.');
+        const forecast = await forecastResponse.json();
+        const current = forecast?.current || {};
+        const units = forecast?.current_units || {};
+        const titleLocation = [place.name, place.admin1, place.country].filter(Boolean).join(', ');
+        const description = [
+            Number.isFinite(Number(current.temperature_2m)) ? `Temperature: ${current.temperature_2m}${units.temperature_2m || 'C'}` : '',
+            Number.isFinite(Number(current.apparent_temperature)) ? `Feels like: ${current.apparent_temperature}${units.apparent_temperature || 'C'}` : '',
+            Number.isFinite(Number(current.relative_humidity_2m)) ? `Humidity: ${current.relative_humidity_2m}${units.relative_humidity_2m || '%'}` : '',
+            Number.isFinite(Number(current.wind_speed_10m)) ? `Wind: ${current.wind_speed_10m} ${units.wind_speed_10m || 'km/h'}` : ''
+        ].filter(Boolean).join(' | ');
+        return oneResult({
+            title: `Current weather for ${titleLocation}`,
+            description: description || 'Open-Meteo returned current weather conditions.',
+            url: 'https://open-meteo.com/',
+            source: source.name,
+            sourceType: 'free_weather',
+            freshness: 'current_model_data',
+            trusted: true,
+            qualitySignals: ['free_public_api', 'weather_model'],
+            query
+        }, 'open-meteo', 'weather');
+    } catch (err) {
+        return emptyProvider('open-meteo', `Weather lookup temporarily unavailable: ${err?.message || 'timeout'}`);
+    }
 }
 
 export async function searchCrypto(query, options = {}) {
