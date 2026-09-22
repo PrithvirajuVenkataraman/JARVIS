@@ -35,7 +35,9 @@ assert.ok(indexHtml.includes('id="chat-center-column"'), 'Centered reading colum
 assert.ok(indexHtml.includes('id="chat-empty-state"'), 'Empty state hero must exist');
 assert.ok(indexHtml.includes('class="empty-state-capabilities"'), 'Interactive capability pills container must exist');
 assert.ok(indexHtml.includes("handleCapabilityPillClick('live_search')"), 'Live web search pill must exist');
-assert.ok(indexHtml.includes("handleCapabilityPillClick('deep_reasoning')"), 'Deep reasoning pill must exist');
+assert.ok(indexHtml.includes('id="composer-think-btn"'), 'Permanent Think (Deep Reasoning) button must exist in prompt box');
+assert.ok(indexHtml.includes('class="composer-think-label"'), 'Think button label must exist');
+assert.ok(indexHtml.includes('function toggleDeepReasoningMode('), 'toggleDeepReasoningMode function must be defined');
 assert.ok(indexHtml.includes("handleCapabilityPillClick('document_ocr')"), 'Document OCR pill must exist');
 assert.ok(!indexHtml.includes("handleCapabilityPillClick('code_math')"), 'Code & Math pill must be deleted');
 assert.ok(indexHtml.includes('id="composer-mode-badge"'), 'Composer mode indicator badge must exist on prompt box');
@@ -249,5 +251,3 @@ assert.ok(stylesCss.includes('var(--sidebar-docked-width, 280px)'), 'Dynamic --s
 console.log('  [PASS] 14. Enterprise Sidebar interaction verified (outside-click dismissal, drag handle, swipe gestures, and dynamic width)');
 
 console.log('=== All Modern AI Workspace UI Architecture Tests PASSED ===');
-
-
