@@ -29,7 +29,11 @@ console.log('\n=== Testing Live Web Search Pipeline (End-to-End) ===\n');
 // ─── Section 1: Real-Time Weather Retrieval ───────────────────────────────────
 console.log('--- Section 1: Real-Time Weather Retrieval (Open-Meteo) ---');
 {
-    const weather = await runFreeLiveSearch('current weather in Tokyo');
+    let weather = await runFreeLiveSearch('current weather in Tokyo');
+    if (!weather || !weather.results || weather.results.length === 0) {
+        await new Promise(r => setTimeout(r, 1000));
+        weather = await runFreeLiveSearch('current weather in Tokyo');
+    }
     assert.ok(weather, 'Weather search must return a response object');
     assert.equal(weather.provider, 'open-meteo', 'Weather provider should be open-meteo');
     assert.ok(Array.isArray(weather.results), 'Results should be an array');
@@ -81,7 +85,11 @@ console.log('--- Section 3: General Web Search (DuckDuckGo HTML) ---');
 // ─── Section 4: Wikipedia Public Knowledge & Infobox Extraction ───────────────
 console.log('--- Section 4: Wikipedia Knowledge & Infobox Extraction ---');
 {
-    const wikiHits = await searchWikipediaApi('James Webb Space Telescope', { limit: 3 });
+    let wikiHits = await searchWikipediaApi('James Webb Space Telescope', { limit: 3 });
+    if (!wikiHits || wikiHits.length === 0) {
+        await new Promise(r => setTimeout(r, 600));
+        wikiHits = await searchWikipediaApi('James Webb Space Telescope', { limit: 3 });
+    }
     assert.ok(Array.isArray(wikiHits), 'Wikipedia search must return an array');
     assert.ok(wikiHits.length > 0, 'Wikipedia should find results for major astronomical topic');
 
