@@ -37,7 +37,9 @@ assert.ok(indexHtml.includes('class="empty-state-capabilities"'), 'Interactive c
 assert.ok(indexHtml.includes("handleCapabilityPillClick('live_search')"), 'Live web search pill must exist');
 assert.ok(indexHtml.includes("handleCapabilityPillClick('deep_reasoning')"), 'Deep reasoning pill must exist');
 assert.ok(indexHtml.includes("handleCapabilityPillClick('document_ocr')"), 'Document OCR pill must exist');
-assert.ok(indexHtml.includes("handleCapabilityPillClick('code_math')"), 'Code & Math pill must exist');
+assert.ok(!indexHtml.includes("handleCapabilityPillClick('code_math')"), 'Code & Math pill must be deleted');
+assert.ok(indexHtml.includes('id="composer-mode-badge"'), 'Composer mode indicator badge must exist on prompt box');
+assert.ok(indexHtml.includes('function updateComposerModeIndicatorUi('), 'updateComposerModeIndicatorUi function must be defined');
 assert.ok(indexHtml.includes('function handleCapabilityPillClick('), 'handleCapabilityPillClick function must be defined');
 assert.ok(!indexHtml.includes('class="empty-state-shortcuts"'), 'Keyboard shortcut hints must be removed');
 assert.ok(!indexHtml.includes('class="starter-cards-grid"'), 'Starter prompt cards grid must be removed to prevent hallucinations');
@@ -247,3 +249,5 @@ assert.ok(stylesCss.includes('var(--sidebar-docked-width, 280px)'), 'Dynamic --s
 console.log('  [PASS] 14. Enterprise Sidebar interaction verified (outside-click dismissal, drag handle, swipe gestures, and dynamic width)');
 
 console.log('=== All Modern AI Workspace UI Architecture Tests PASSED ===');
+
+
