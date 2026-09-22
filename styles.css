@@ -581,7 +581,7 @@ option {
 
 .chat-session-row {
     display: grid;
-    grid-template-columns: 1fr 30px;
+    grid-template-columns: 1fr auto;
     gap: 6px;
     align-items: center;
     min-height: 42px;
@@ -655,18 +655,42 @@ option {
     20% { filter: drop-shadow(0 0 16px rgba(88, 166, 255, 0.48)); }
 }
 
-.chat-session-more {
+.chat-session-more,
+.chat-session-delete-btn {
     width: 28px;
     height: 28px;
     border-radius: 7px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(255, 255, 255, 0.40);
     opacity: 0;
-    transition: opacity 0.15s ease;
+    transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.chat-session-delete-btn:hover,
+.chat-session-delete-btn:focus-visible {
+    background: rgba(239, 68, 68, 0.18);
+    color: #ef4444;
 }
 
 .chat-session-row:hover .chat-session-more,
 .chat-session-row:focus-within .chat-session-more,
-.chat-session-row.is-active .chat-session-more {
+.chat-session-row.is-active .chat-session-more,
+.chat-session-row:hover .chat-session-delete-btn,
+.chat-session-row:focus-within .chat-session-delete-btn,
+.chat-session-row.is-active .chat-session-delete-btn {
     opacity: 1;
+}
+
+@media (max-width: 640px) {
+    .chat-session-more,
+    .chat-session-delete-btn {
+        opacity: 0.75;
+    }
 }
 
 .chat-session-menu {
