@@ -330,7 +330,7 @@ async function getInstantFactHelper() {
 
     function classifyQueryComplexity(rawQuery = '', options = {}) {
         const intent = String(options?.intent || '');
-        if (options?.tier === 'deep' || options?.forceReasoning === true || intent === 'deep_reasoning' || intent === 'coding_math') {
+        if (options?.tier === 'deep' || options?.forceReasoning === true || intent === 'deep_reasoning') {
             return { tier: 'deep', preferSpeed: false, reason: 'explicit_deep_tier_request' };
         }
         if (['fast_simple', 'casual_chat', 'chat_title', 'fast_explainer', 'internal_summary'].includes(intent) || options?.minimalThinking === true) {
@@ -1149,7 +1149,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
 
     function shouldStreamChatRequest(body, intent, grounding, routeDecision, isInternalSummary) {
         if (!body || body.stream !== true) return false;
-        if (!['chat', 'pop_culture_reference', 'fast_simple', 'fast_explainer', 'casual_chat', 'coding_math', 'deep_reasoning'].includes(String(intent || 'chat'))) return false;
+        if (!['chat', 'pop_culture_reference', 'fast_simple', 'fast_explainer', 'casual_chat', 'deep_reasoning'].includes(String(intent || 'chat'))) return false;
         if (grounding) return false;
         if (isInternalSummary) return false;
         const routingProbe = String(body.routingMessage || body.displayUserMessage || body.message || '');
