@@ -14004,6 +14004,14 @@ async function sendTextInput(submission = {}) {
                         });
                     } else {
                         sendTrace.routeStartedAt = performance.now();
+                        const isWebForced = (typeof getWebSearchMode === 'function' ? getWebSearchMode() === 'force' : _composerWebMode === 'force') || Boolean(submission?.forceWebSearch);
+                        if (isWebForced && isFactSearchEnabled()) {
+                            const webHandled = await handleBoundedLiveResearchQuery(normalizedOutgoingText, outgoingText, { submission });
+                            if (webHandled) {
+                                sendTrace.routeEndedAt = performance.now();
+                                return;
+                            }
+                        }
                         if (submission?.forceWebSearch) {
                             const webHandled = await handleLiveRetrievalQuery(normalizedOutgoingText);
                             if (webHandled) {
@@ -20869,11 +20877,24 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                 });
             },
             streamSynthesisFn: async ({ prompt, sources, signal, onToken }) => {
+                const searchGrounding = {
+                    kind: 'selection',
+                    selectedText: prompt,
+                    sourceAnswer: prompt,
+                    sources: sources || []
+                };
                 return streamChatCompletion({
                     message: query,
-                    customSystemPrompt: prompt,
-                    grounding: { sources },
-                    intent: 'live_search'
+                    context: window.JarvisConversation?.buildContext?.({ maxTurns: 6 }) || [],
+                    preferences: {
+                        userName: typeof userName !== 'undefined' ? userName : '',
+                        responseLength: typeof responseMode !== 'undefined' ? responseMode : 'normal',
+                        customSystemPrompt: prompt
+                    },
+                    grounding: searchGrounding,
+                    sources: sources || [],
+                    ragText: prompt,
+                    intent: 'chat'
                 }, {
                     signal,
                     assistantMessageId,
@@ -22053,16 +22074,15 @@ function isWakeGreetingText(text) {
                 if (handled) return;
             }
 
-            // Authoritative bounded live research dispatch — strictly when user toggled Live Web Search ON or submission forced it
+            // Authoritative bounded live research dispatch — strictly when user toggled Live Web Search ON
             const _activeWebMode = typeof getWebSearchMode === 'function' ? getWebSearchMode() : 'off';
-            if ((_activeWebMode === 'force' || submission?.forceWebSearch) && isFactSearchEnabled()) {
+            if (_activeWebMode === 'force' && isFactSearchEnabled()) {
                 logRoutingDebug('processCommand -> bounded live research (user-forced)', cleanText, {
                     selectedHandler: 'handleBoundedLiveResearchQuery',
                     frontendRoute
                 });
                 const handled = await handleBoundedLiveResearchQuery(cleanText, text, {
-                    routeDecision: frontendRoute,
-                    submission
+                    routeDecision: frontendRoute
                 });
                 if (handled) return;
             }
