@@ -360,10 +360,10 @@
                                     type="button"
                                     class="composer-action-item composer-web-search-menuitem"
                                     onclick="cycleWebSearchMode()"
-                                    data-web-mode="auto"
+                                    data-web-mode="off"
                                     role="menuitem"
-                                    title="Web search mode (Auto / On / Off)"
-                                    aria-label="Web search mode">
+                                    title="Live Web Search (OFF — click to turn on)"
+                                    aria-label="Live Web Search OFF">
                                     <span class="composer-web-search-item-left">
                                         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                                             <circle cx="12" cy="12" r="10"></circle>
@@ -372,7 +372,7 @@
                                         </svg>
                                         <span>Web Search</span>
                                     </span>
-                                    <span class="web-search-mode-badge web-search-mode-label">Auto</span>
+                                    <span class="web-search-mode-badge web-search-mode-label">OFF</span>
                                 </button>
                                 <button
                                     type="button"
@@ -3107,8 +3107,10 @@ async function processUserQuery(text, options = {}) {
             routeDecision: frontendRoute
         });
     }
-    if (frontendRoute.route === 'live_required' && isFactSearchEnabled()) {
-        logRoutingDebug('processUserQuery -> authoritative live_required', t, { frontendRoute });
+    // Only route to live search when user explicitly toggled it ON (webMode = 'force')
+    // The classifier may still tag queries as live_required, but we only honour it when forced
+    if (activeWebMode === 'force' && frontendRoute.route === 'live_required' && isFactSearchEnabled()) {
+        logRoutingDebug('processUserQuery -> authoritative live_required (user-forced)', t, { frontendRoute });
         const handled = await handleLiveRetrievalQuery(t, {
             routeDecision: frontendRoute,
             broadFactualWeb: true
@@ -6284,7 +6286,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                     input.placeholder = 'Search the live web for anything...';
                 }
                 if (typeof showTemporaryMessage === 'function') {
-                    showTemporaryMessage('Web Search activated (Forced mode)');
+                    showTemporaryMessage('Live Web Search is ON for this message');
                 }
                 return;
             }
@@ -13228,26 +13230,26 @@ ${code}
         /* ==========================================================================
            3-State Smart Web Search Controller (Auto / ON / OFF)
            ========================================================================== */
-        let _composerWebMode = 'auto'; // 'auto' | 'force' | 'off'
+        let _composerWebMode = 'off'; // 'force' | 'off' — live web search is OFF by default
 
         function getWebSearchMode() {
-            return _composerWebMode || 'auto';
+            return _composerWebMode || 'off';
         }
 
-        function setWebSearchMode(mode = 'auto') {
-            const valid = ['auto', 'force', 'off'].includes(mode) ? mode : 'auto';
-            _composerWebMode = valid;
+        function setWebSearchMode(mode = 'off') {
+            // Normalize: 'auto' treated as 'off' — classifier no longer auto-triggers live search
+            const normalized = mode === 'force' ? 'force' : 'off';
+            _composerWebMode = normalized;
             updateWebSearchToggleUi();
         }
 
         function cycleWebSearchMode() {
             triggerJarvisHaptic(12);
-            if (_composerWebMode === 'auto') {
-                setWebSearchMode('force');
-            } else if (_composerWebMode === 'force') {
+            // Simple two-state toggle: ON (force) ↔ OFF
+            if (_composerWebMode === 'force') {
                 setWebSearchMode('off');
             } else {
-                setWebSearchMode('auto');
+                setWebSearchMode('force');
             }
         }
 
@@ -13261,17 +13263,13 @@ ${code}
             if (_composerWebMode === 'force') {
                 btn.classList.add('is-web-forced');
                 if (label) label.textContent = 'ON';
-                btn.title = 'Web search (ON)';
-                btn.setAttribute('aria-label', 'Web search (ON)');
-            } else if (_composerWebMode === 'off') {
+                btn.title = 'Live Web Search (ON — click to turn off)';
+                btn.setAttribute('aria-label', 'Live Web Search ON');
+            } else {
                 btn.classList.add('is-web-disabled');
                 if (label) label.textContent = 'OFF';
-                btn.title = 'Web search (OFF)';
-                btn.setAttribute('aria-label', 'Web search (OFF)');
-            } else {
-                if (label) label.textContent = 'Auto';
-                btn.title = 'Web search (Auto)';
-                btn.setAttribute('aria-label', 'Web search (Auto)');
+                btn.title = 'Live Web Search (OFF — click to turn on)';
+                btn.setAttribute('aria-label', 'Live Web Search OFF');
             }
         }
 
@@ -13798,7 +13796,7 @@ async function sendTextInput(submission = {}) {
                     window.JarvisSessionRecovery?.clearComposerDraft?.();
                     restoreResponseRenderContext(previousRenderContext);
                     if (typeof setWebSearchMode === 'function') {
-                        setWebSearchMode('auto');
+                        setWebSearchMode('off'); // Reset to OFF after each message — user must re-enable
                     }
                     hideThinkingIndicator();
                     if (typeof hideSynthesizingBlinker === 'function') {
@@ -17287,7 +17285,7 @@ async function buildFutureYearResponse(intent) {
 }
 
 function isCurrentInfoQuery(text) {
-    const t = String(text || '').toLowerCase().trim();
+    const t = String(text || '').toLowerCase().replace(/[?!.,;:]+$/g, '').trim();
     if (!t) return false;
     const technicalConceptSignals = /\b(hld|lld|system design|design pattern|architecture|api design|database design|algorithm|data structure|time complexity|space complexity|java|javascript|python|react|node|sql|backend|frontend|microservices?)\b/;
     const explicitLiveContext = /\b(news|headlines?|breaking|live|right now|current events?|today|latest|recent|update|status|who won|winner|score|standings|fixture|schedule|market|price|rate|currency|exchange|war|conflict|election|breakthroughs?|developments?|advancements?|discoveries|this year)\b/;
@@ -20592,7 +20590,7 @@ async function handleLiveRetrievalQuery(userText, options = {}) {
     window.JarvisInteractionState?.transition?.('ANALYZING', { metadata: { userText } });
     showThinkingIndicator('Analyzing...');
     const controller = beginAbortableRequest();
-    const verificationBudgetMs = 3500;
+    const verificationBudgetMs = 8000;
     let didBudgetTimeout = false;
     const budgetTimer = setTimeout(() => {
         didBudgetTimeout = true;
@@ -21643,9 +21641,10 @@ function isWakeGreetingText(text) {
                 if (handled) return;
             }
 
-            // Authoritative semantic frontend route dispatch (Phase 10)
-            if (frontendRoute?.route === 'live_required' && isFactSearchEnabled()) {
-                logRoutingDebug('processCommand -> authoritative live_required', cleanText, {
+            // Authoritative semantic frontend route dispatch — only when user toggled Live Web Search ON
+            const _activeWebMode = typeof getWebSearchMode === 'function' ? getWebSearchMode() : 'off';
+            if (_activeWebMode === 'force' && frontendRoute?.route === 'live_required' && isFactSearchEnabled()) {
+                logRoutingDebug('processCommand -> authoritative live_required (user-forced)', cleanText, {
                     selectedHandler: 'handleLiveRetrievalQuery',
                     frontendRoute
                 });
@@ -21695,7 +21694,8 @@ function isWakeGreetingText(text) {
                 entityIntent: fallbackEntityIntent,
                 riskLevel: getRiskTierForQuery(cleanText, classification.liveIntent, fallbackEntityIntent)
             });
-            const liveSourceRequired = (frontendRoute?.route === 'live_required' || frontendRoute?.requiresSources) || requiresLiveSourceAnswer(cleanText, classification.liveIntent, fallbackEntityIntent);
+            // liveSourceRequired is only true when user has explicitly toggled web search ON
+            const liveSourceRequired = _activeWebMode === 'force' && ((frontendRoute?.route === 'live_required' || frontendRoute?.requiresSources) || requiresLiveSourceAnswer(cleanText, classification.liveIntent, fallbackEntityIntent));
 
             if (answerPath === 'moderation') {
                 logRoutingDebug('processCommand -> moderation', cleanText, {
@@ -27378,7 +27378,8 @@ function handleChatSessionMenuAction(action) {
         void shareChatSession(session);
         return;
     } else if (action === 'delete') {
-        openChatDeleteDialog(session);
+        closeChatSessionMenu();
+        deleteChatSession(session);
         return;
     }
     saveChatSessions();
