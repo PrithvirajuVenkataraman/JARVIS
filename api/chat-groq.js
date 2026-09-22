@@ -866,7 +866,9 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                     lengthPolicy,
                     tier: req.body?.tier || preferences?.tier,
                     forceReasoning: req.body?.forceReasoning === true || preferences?.forceReasoning === true,
-                    selectedModel: preferences?.selectedModel || null
+                    selectedModel: preferences?.selectedModel || null,
+                    sources: Array.isArray(req.body?.sources) ? req.body.sources : (Array.isArray(grounding?.sources) ? grounding.sources : null),
+                    ragText: typeof req.body?.ragText === 'string' ? req.body.ragText : null
                 });
             }
 
@@ -889,7 +891,17 @@ const edgeResponseCache = new EdgeSemanticLruCache();
 
             // Route path: live_first can pre-load web context before the first model call.
             let preloadedLiveRag = { ragText: '', sources: [] };
-            if (routeDecision.strategy === 'live_first' && !isAttachmentGrounding) {
+            if (Array.isArray(req.body?.sources) && req.body.sources.length > 0) {
+                preloadedLiveRag = {
+                    sources: req.body.sources,
+                    ragText: req.body.ragText || req.body.sources.map((s, idx) => `[${s.id || idx + 1}] ${s.title || ''}: ${s.snippet || s.text || s.description || ''} (${s.url || ''})`).join('\n\n')
+                };
+            } else if (Array.isArray(grounding?.sources) && grounding.sources.length > 0) {
+                preloadedLiveRag = {
+                    sources: grounding.sources,
+                    ragText: grounding.sources.map((s, idx) => `[${s.id || idx + 1}] ${s.title || ''}: ${s.snippet || s.text || s.description || ''} (${s.url || ''})`).join('\n\n')
+                };
+            } else if (routeDecision.strategy === 'live_first' && !isAttachmentGrounding) {
                 preloadedLiveRag = await buildLiveRagContext(effectiveMessage, req, context);
             }
 
@@ -1119,6 +1131,13 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 reason: errorMessage,
                 stack: String(error?.stack || '').split('\n').slice(0, 5).join('\n')
             });
+            if (res.headersSent) {
+                try {
+                    res.write(`event: error\ndata: ${JSON.stringify({ code: 'service_error', message: 'The AI service hit a recoverable server error. Please try again in a moment.' })}\n\n`);
+                    res.end();
+                } catch (_) {}
+                return;
+            }
             return res.status(200).json({
                 success: true,
                 requestId: `cg_error_${Date.now().toString(36)}`,
@@ -1392,7 +1411,13 @@ const edgeResponseCache = new EdgeSemanticLruCache();
         }
 
         let liveRag = { ragText: '', sources: [] };
-        if ((routeDecision.strategy === 'search' || routeDecision.strategy === 'live_first' || routeDecision.webEligible) && !isAttachmentGroundingPayload(grounding, intent)) {
+        if (Array.isArray(options?.sources) && options.sources.length > 0) {
+            liveRag = {
+                sources: options.sources,
+                ragText: options.ragText || options.sources.map((s, idx) => `[${s.id || idx + 1}] ${s.title || ''}: ${s.snippet || s.text || s.description || ''} (${s.url || ''})`).join('\n\n')
+            };
+            writeSse(res, 'sources', { sources: liveRag.sources });
+        } else if ((routeDecision.strategy === 'search' || routeDecision.strategy === 'live_first' || routeDecision.webEligible) && !isAttachmentGroundingPayload(grounding, intent)) {
             writeSse(res, 'status', { state: 'SEARCHING', label: 'Searching...' });
             liveRag = await buildLiveRagContext(effectiveMessage, null, context);
             writeSse(res, 'status', { state: 'ANALYZING', label: 'Analyzing...' });
