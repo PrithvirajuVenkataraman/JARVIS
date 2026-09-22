@@ -3,7 +3,7 @@
  * @description Service Worker for JARVIS PWA & Offline Shell Caching
  */
 
-const CACHE_NAME = 'jarvis-cache-v2';
+const CACHE_NAME = 'jarvis-cache-v3';
 const STATIC_ASSETS = [
     '/',
     '/index.html',
@@ -72,7 +72,7 @@ self.addEventListener('fetch', (event) => {
                         return new Response('Network error and no cache available', { status: 503 });
                     });
                 })
-        ); 
+        );
         return;
     }
 
