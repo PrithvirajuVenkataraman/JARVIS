@@ -8032,6 +8032,60 @@ body:not(.dark) .next-step-title {
     flex-shrink: 0;
 }
 
+.composer-mode-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 999px;
+    border: 1px solid rgba(56, 189, 248, 0.45);
+    background: rgba(14, 165, 233, 0.12);
+    color: #38bdf8;
+    cursor: pointer;
+    padding: 0;
+    margin-left: 4px;
+    flex: 0 0 auto;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: 0 0 10px rgba(14, 165, 233, 0.2);
+}
+
+.composer-mode-badge:hover {
+    background: rgba(14, 165, 233, 0.22);
+    border-color: rgba(56, 189, 248, 0.75);
+    color: #7dd3fc;
+    box-shadow: 0 0 14px rgba(14, 165, 233, 0.35);
+    transform: scale(1.05);
+}
+
+.composer-mode-badge.is-reasoning {
+    border-color: rgba(168, 85, 247, 0.45);
+    background: rgba(168, 85, 247, 0.14);
+    color: #c084fc;
+    box-shadow: 0 0 10px rgba(168, 85, 247, 0.2);
+}
+
+.composer-mode-badge.is-reasoning:hover {
+    background: rgba(168, 85, 247, 0.24);
+    border-color: rgba(168, 85, 247, 0.75);
+    color: #e9d5ff;
+    box-shadow: 0 0 14px rgba(168, 85, 247, 0.35);
+}
+
+.composer-mode-badge.is-document {
+    border-color: rgba(52, 211, 153, 0.45);
+    background: rgba(16, 185, 129, 0.14);
+    color: #34d399;
+    box-shadow: 0 0 10px rgba(16, 185, 129, 0.2);
+}
+
+.composer-mode-badge.is-document:hover {
+    background: rgba(16, 185, 129, 0.24);
+    border-color: rgba(52, 211, 153, 0.75);
+    color: #6ee7b7;
+    box-shadow: 0 0 14px rgba(16, 185, 129, 0.35);
+}
+
 .starter-cards-grid {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
