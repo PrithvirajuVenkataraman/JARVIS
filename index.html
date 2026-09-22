@@ -13610,7 +13610,7 @@ async function sendTextInput(submission = {}) {
             const input = document.getElementById('text-input');
             if (!input && submission?.text === undefined) return;
             const inputSource = String(submission?.source || input?.dataset?.inputSource || 'text');
-            const text = String(submission?.text !== undefined ? submission.text : (input?.value || '')).trim();
+            const text = String(submission?.text !== undefined ? submission.text : (input?.value || '')).replace(/[\u00A0\u200B-\u200D\uFEFF]/g, ' ').trim();
             const pendingAttachments = window.JarvisAttachments?.getPendingAttachments?.() || [];
             if (submission?.isRetry === true && activeRequestController) {
                 try { activeRequestController.abort('retry'); } catch (_) {}
@@ -20821,7 +20821,7 @@ async function handleUniversalEntityFactQuery(userText, liveIntent = null) {
 
 
 async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = {}) {
-    const query = String(cleanText || '').trim();
+    const query = String(cleanText || '').replace(/[\u00A0\u200B-\u200D\uFEFF]/g, ' ').trim();
     if (!query) return false;
 
     // Abort any existing active live research controller to prevent races
