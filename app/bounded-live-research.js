@@ -84,8 +84,11 @@ export function formatSourcesForPrompt(sources = []) {
  * Used when the 9.0s hard application deadline is reached.
  */
 export function generateSnippetFallback(query, sources = []) {
-    const cleanQ = String(query || '').trim();
+    const cleanQ = String(query || '').replace(/[\u00A0\u200B-\u200D\uFEFF]/g, ' ').trim();
     if (!sources || !sources.length) {
+        if (!cleanQ) {
+            return 'Please provide a search topic or question so I can retrieve verified live web sources.';
+        }
         return `I searched for current information on "${cleanQ}", but the live web search providers did not return verified records before the deadline. Please try rephrasing your search query.`;
     }
 
@@ -94,7 +97,8 @@ export function generateSnippetFallback(query, sources = []) {
         return `• ${text} [${s.id}]`;
     }).join('\n');
 
-    return `### Verified Summary for "${cleanQ}"\n\n${bullets}\n\n*Gathered from verified live sources within the 9.0s deadline.*`;
+    const topicHeading = cleanQ ? `### Verified Summary for "${cleanQ}"` : '### Verified Summary';
+    return `${topicHeading}\n\n${bullets}\n\n*Gathered from verified live sources within the 9.0s deadline.*`;
 }
 
 /**
