@@ -1,6 +1,6 @@
 import { FREE_LIVE_SOURCES } from './source-registry.js';
 import { cleanQueryTarget, extractQueryTargetMetadata } from '../query-target-cleanup.js';
-import { cleanSnippetText } from '../snippet-sanitizer.js';
+import { cleanSnippetText, decodeHtmlEntities } from '../snippet-sanitizer.js';
 
 const OPEN_METEO_GEOCODE_URL = 'https://geocoding-api.open-meteo.com/v1/search';
 const OPEN_METEO_FORECAST_URL = 'https://api.open-meteo.com/v1/forecast';
@@ -113,43 +113,167 @@ export function parseSearXNGResults(data, query = '', limit = 8) {
     return results;
 }
 
-export async function searchSearXNGJson(query, options = {}) {
+export async function searchSearXNGRacer(query, options = {}) {
     const rawQ = String(query || '').trim();
     if (!rawQ) return [];
     const limit = clampInt(options.limit, 8, 1, 20);
-    const timeoutMs = options.timeoutMs || 2500;
+    const timeoutMs = Math.min(options.timeoutMs || 2000, 2400);
     const configuredUrl = String(process.env.SEARXNG_URL || process.env.SEARX_URL || '').trim().replace(/\/+$/, '');
     const endpoints = configuredUrl 
         ? [configuredUrl.endsWith('/search') ? configuredUrl : `${configuredUrl}/search`]
         : [
             'https://searx.be/search',
             'https://priv.au/search',
-            'https://baresearch.org/search'
+            'https://baresearch.org/search',
+            'https://search.sapti.me/search'
         ];
 
-    for (const baseEndpoint of endpoints) {
-        try {
-            const url = new URL(baseEndpoint);
-            url.searchParams.set('q', rawQ);
-            url.searchParams.set('format', 'json');
-            url.searchParams.set('categories', 'general');
+    const fetchSingleEndpoint = async (baseEndpoint) => {
+        const url = new URL(baseEndpoint);
+        url.searchParams.set('q', rawQ);
+        url.searchParams.set('format', 'json');
+        url.searchParams.set('categories', 'general');
 
-            const response = await fetchWithTimeout(url.toString(), {
-                headers: {
-                    'Accept': 'application/json',
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
-                }
-            }, timeoutMs);
+        const response = await fetchWithTimeout(url.toString(), {
+            headers: {
+                'Accept': 'application/json',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+            },
+            signal: options.signal
+        }, timeoutMs);
 
-            if (!response.ok) continue;
-            const data = await response.json();
-            const results = parseSearXNGResults(data, rawQ, limit);
-            if (results.length > 0) {
-                return results;
-            }
-        } catch (_) {}
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        const results = parseSearXNGResults(data, rawQ, limit);
+        if (!results.length) throw new Error('No results from endpoint');
+        return results;
+    };
+
+    try {
+        return await Promise.any(endpoints.map(ep => fetchSingleEndpoint(ep)));
+    } catch (_) {
+        return [];
     }
-    return [];
+}
+
+export const searchSearXNGJson = searchSearXNGRacer;
+
+export function parseGoogleNewsRssXml(xml, query, limit = 8) {
+    const items = [];
+    const itemRegex = /<item>([\s\S]*?)<\/item>/gi;
+    let match;
+
+    while ((match = itemRegex.exec(xml)) !== null && items.length < limit) {
+        const itemBlock = match[1];
+        const titleMatch = /<title>([\s\S]*?)<\/title>/i.exec(itemBlock);
+        const linkMatch = /<link>([\s\S]*?)<\/link>/i.exec(itemBlock);
+        const pubDateMatch = /<pubDate>([\s\S]*?)<\/pubDate>/i.exec(itemBlock);
+        const descMatch = /<description>([\s\S]*?)<\/description>/i.exec(itemBlock);
+        const sourceMatch = /<source\s+url="([^"]*)"[^>]*>([\s\S]*?)<\/source>/i.exec(itemBlock);
+
+        let rawTitle = cleanSnippetText(titleMatch?.[1] || '');
+        let link = decodeHtmlEntities(linkMatch?.[1] || '').trim();
+        const pubDate = cleanSnippetText(pubDateMatch?.[1] || '');
+        let desc = cleanSnippetText(descMatch?.[1] || '');
+        const sourceName = cleanSnippetText(sourceMatch?.[2] || '');
+
+        let publisher = sourceName;
+        if (rawTitle.includes(' - ')) {
+            const parts = rawTitle.split(' - ');
+            if (!publisher && parts.length > 1) {
+                publisher = parts[parts.length - 1].trim();
+            }
+        }
+
+        if (rawTitle && link) {
+            const domain = getDomainFromUrl(link) || 'news.google.com';
+            items.push({
+                title: rawTitle,
+                description: desc || rawTitle,
+                snippet: desc || rawTitle,
+                url: link,
+                domain: domain,
+                source: publisher ? `Google News (${publisher})` : 'Google News',
+                sourceType: 'trusted_news',
+                sourceLabel: publisher ? `Google News / ${publisher}` : 'Google News',
+                date: pubDate,
+                freshness: pubDate || 'live_news',
+                trusted: true,
+                qualitySignals: ['google_news_rss', 'live_news'],
+                confidence: 0.94,
+                query
+            });
+        }
+    }
+    return items;
+}
+
+export async function searchGoogleNewsRss(query, options = {}) {
+    const rawQ = String(query || '').trim();
+    if (!rawQ) return [];
+    const limit = clampInt(options.limit, 8, 1, 20);
+    const timeoutMs = Math.min(options.timeoutMs || 2200, 2500);
+    try {
+        const url = `https://news.google.com/rss/search?q=${encodeURIComponent(rawQ)}&hl=en&gl=US&ceid=US:en`;
+        const response = await fetchWithTimeout(url, {
+            headers: {
+                'Accept': 'application/rss+xml, application/xml, text/xml, */*',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+            },
+            signal: options.signal
+        }, timeoutMs);
+        if (!response || !response.ok) return [];
+        const xml = await response.text();
+        if (!xml || !xml.includes('<item>')) return [];
+        return parseGoogleNewsRssXml(xml, rawQ, limit);
+    } catch (_) {
+        return [];
+    }
+}
+
+export async function searchYahooFinanceQuotes(query, options = {}) {
+    const rawQ = String(query || '').trim();
+    if (!rawQ) return [];
+    const match = rawQ.match(/\b([A-Za-z]{1,5}|[A-Za-z]{1,5}-[A-Za-z]{2,4})\b/);
+    if (!match) return [];
+    const symbol = match[1].toUpperCase();
+    const timeoutMs = Math.min(options.timeoutMs || 1800, 2200);
+    try {
+        const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=1d`;
+        const response = await fetchWithTimeout(url, {
+            headers: {
+                'Accept': 'application/json',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            },
+            signal: options.signal
+        }, timeoutMs);
+        if (!response.ok) return [];
+        const data = await response.json();
+        const meta = data?.chart?.result?.[0]?.meta;
+        if (!meta || !meta.regularMarketPrice) return [];
+        const price = meta.regularMarketPrice;
+        const prevClose = meta.chartPreviousClose || meta.previousClose;
+        const change = prevClose ? (price - prevClose).toFixed(2) : '0.00';
+        const changePct = prevClose ? (((price - prevClose) / prevClose) * 100).toFixed(2) : '0.00';
+        const currency = meta.currency || 'USD';
+        const name = meta.shortName || meta.symbol || symbol;
+        const sign = Number(change) >= 0 ? '+' : '';
+        return [{
+            title: `${name} (${symbol}): ${price} ${currency} (${sign}${change} / ${sign}${changePct}%)`,
+            description: `${name} (${symbol}) is trading at ${price} ${currency} (${sign}${change} / ${sign}${changePct}%).`,
+            snippet: `${name} (${symbol}) is trading at ${price} ${currency} (${sign}${change} / ${sign}${changePct}%).`,
+            url: `https://finance.yahoo.com/quote/${encodeURIComponent(symbol)}`,
+            domain: 'finance.yahoo.com',
+            source: 'Yahoo Finance',
+            sourceType: 'financial_market',
+            trusted: true,
+            freshness: 'real_time_quote',
+            qualitySignals: ['live_market_quote', 'yahoo_finance'],
+            query: rawQ
+        }];
+    } catch (_) {
+        return [];
+    }
 }
 
 export function parseWikipediaInfobox(wikitext) {
@@ -817,13 +941,25 @@ function getDomainFromUrl(url) {
     }
 }
 
-async function fetchWithTimeout(url, init, timeoutMs) {
+async function fetchWithTimeout(url, init = {}, timeoutMs = 2500) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    let abortListener = null;
+    if (init?.signal) {
+        if (init.signal.aborted) {
+            controller.abort();
+        } else {
+            abortListener = () => controller.abort();
+            init.signal.addEventListener('abort', abortListener, { once: true });
+        }
+    }
     try {
         return await fetch(url, { ...init, signal: controller.signal });
     } finally {
         clearTimeout(timeout);
+        if (init?.signal && abortListener) {
+            init.signal.removeEventListener('abort', abortListener);
+        }
     }
 }
 
@@ -844,5 +980,8 @@ export const __test = {
     scorePlaceEvidence,
     normalizeResult,
     parseSearXNGResults,
-    searchSearXNGJson
+    searchSearXNGJson,
+    searchSearXNGRacer,
+    searchGoogleNewsRss,
+    searchYahooFinanceQuotes
 };
