@@ -24,7 +24,7 @@ export const FREE_LIVE_SOURCES = Object.freeze({
         name: 'Open-Meteo',
         category: 'weather',
         attribution: 'Open-Meteo',
-        timeoutMs: 5000,
+        timeoutMs: 10000,
         cacheTtlMs: 10 * 60 * 1000,
         limitations: 'Forecast/model data by coordinates; location must be resolvable.'
     },
