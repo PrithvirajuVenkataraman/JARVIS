@@ -26808,13 +26808,23 @@ function renderChatSidebarList() {
                 <span class="chat-session-meta">${session.pinned ? 'Pinned' : formatChatSessionDate(session.updatedAt)}</span>
                 ${snippet ? `<span class="chat-session-snippet">${escapeHtml(snippet)}</span>` : ''}
             </div>
-            <button type="button" class="chat-session-more" onclick="event.stopPropagation(); openChatSessionMenu(event, '${escapeJsString(session.id)}')" aria-label="Chat actions">
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
-                    <circle cx="12" cy="5" r="1"></circle>
-                    <circle cx="12" cy="12" r="1"></circle>
-                    <circle cx="12" cy="19" r="1"></circle>
-                </svg>
-            </button>
+            <div class="chat-session-actions-group">
+                <button type="button" class="chat-session-delete-btn" onclick="event.stopPropagation(); deleteChatSessionById('${escapeJsString(session.id)}')" aria-label="Delete chat" title="Delete chat">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                        <line x1="10" y1="11" x2="10" y2="17"></line>
+                        <line x1="14" y1="11" x2="14" y2="17"></line>
+                    </svg>
+                </button>
+                <button type="button" class="chat-session-more" onclick="event.stopPropagation(); openChatSessionMenu(event, '${escapeJsString(session.id)}')" aria-label="Chat actions" title="More options">
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+                        <circle cx="12" cy="5" r="1"></circle>
+                        <circle cx="12" cy="12" r="1"></circle>
+                        <circle cx="12" cy="19" r="1"></circle>
+                    </svg>
+                </button>
+            </div>
         </div>
     `;
     };
@@ -26921,10 +26931,13 @@ function initSidebarOutsideClickClose() {
         if (panel.contains(e.target)) return;
         if (toggle && toggle.contains(e.target)) return;
 
-        // Ignore clicks within modals, popups, or lightboxes
-        if (e.target.closest('#help-modal, #sos-contact-modal, #image-lightbox-overlay, .modal-overlay, #settings-modal')) {
+        // Ignore clicks within modals, popups, menus, or lightboxes
+        if (e.target.closest('#help-modal, #sos-contact-modal, #image-lightbox-overlay, .modal-overlay, #settings-modal, #chat-session-menu, #chat-delete-dialog-backdrop, #confirm-action-dialog-backdrop')) {
             return;
         }
+
+        const menu = document.getElementById('chat-session-menu');
+        if (menu && menu.contains(e.target)) return;
 
         closeChatSidebar();
     }, { capture: true });
@@ -27269,25 +27282,36 @@ function openChatSessionMenu(event, sessionId) {
     menu.style.left = `${Math.round(left)}px`;
     menu.style.top = `${Math.round(top)}px`;
     menu.style.visibility = 'visible';
-    setTimeout(() => document.addEventListener('pointerdown', handleOutsideChatSessionMenu, { once: true }), 0);
+    menu.dataset.sessionId = session.id;
+    setTimeout(() => {
+        document.removeEventListener('pointerdown', handleOutsideChatSessionMenu);
+        document.addEventListener('pointerdown', handleOutsideChatSessionMenu);
+    }, 50);
 }
 
 function handleOutsideChatSessionMenu(event) {
     const menu = document.getElementById('chat-session-menu');
-    if (menu?.contains(event.target)) {
-        document.addEventListener('pointerdown', handleOutsideChatSessionMenu, { once: true });
-        return;
-    }
+    if (!menu || menu.classList.contains('hidden')) return;
+    if (menu.contains(event.target)) return;
+    if (event.target.closest?.('.chat-session-more')) return;
     closeChatSessionMenu();
 }
 
 function closeChatSessionMenu() {
+    document.removeEventListener('pointerdown', handleOutsideChatSessionMenu);
     const menu = document.getElementById('chat-session-menu');
     if (menu) {
         menu.classList.add('hidden');
         menu.style.visibility = '';
+        delete menu.dataset.sessionId;
     }
     activeChatSessionMenuId = '';
+}
+
+function deleteChatSessionById(sessionId) {
+    const session = chatSessions.find(item => item.id === sessionId && !item.deleted);
+    if (!session) return;
+    deleteChatSession(session);
 }
 
 function openChatDeleteDialog(session) {
@@ -27358,8 +27382,13 @@ async function shareChatSession(session) {
 }
 
 function handleChatSessionMenuAction(action) {
-    const session = chatSessions.find(item => item.id === activeChatSessionMenuId && !item.deleted);
-    if (!session) return;
+    const menu = document.getElementById('chat-session-menu');
+    const sessionId = activeChatSessionMenuId || menu?.dataset?.sessionId;
+    const session = chatSessions.find(item => item.id === sessionId && !item.deleted);
+    if (!session) {
+        closeChatSessionMenu();
+        return;
+    }
     if (action === 'rename') {
         const next = window.prompt('Rename chat:', session.title || 'New chat');
         if (next !== null) {
