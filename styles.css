@@ -1101,6 +1101,77 @@ option {
     font-size: 12px;
 }
 
+.memory-manager-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 2px;
+}
+
+.memory-tab-btn {
+    padding: 6px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.6);
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.18s ease;
+}
+
+.memory-tab-btn.is-active {
+    color: #ffffff;
+    background: rgba(56, 189, 248, 0.16);
+    border-color: rgba(56, 189, 248, 0.45);
+}
+
+.learned-rule-badge {
+    display: inline-block;
+    padding: 2px 6px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    border-radius: 4px;
+    background: rgba(14, 165, 233, 0.15);
+    color: #38bdf8;
+    border: 1px solid rgba(14, 165, 233, 0.3);
+}
+
+.self-critique-badge-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #38bdf8 !important;
+    background: rgba(56, 189, 248, 0.1) !important;
+    border: 1px solid rgba(56, 189, 248, 0.25) !important;
+    border-radius: 9999px;
+    cursor: pointer;
+    transition: all 0.18s ease;
+}
+
+.self-critique-badge-btn:hover {
+    background: rgba(56, 189, 248, 0.22) !important;
+    border-color: rgba(56, 189, 248, 0.5) !important;
+}
+
+.self-critique-drawer {
+    margin-top: 8px;
+    padding: 10px 12px;
+    background: rgba(15, 23, 42, 0.75);
+    border: 1px solid rgba(56, 189, 248, 0.22);
+    border-radius: 8px;
+    font-size: 12px;
+    color: #94a3b8;
+    line-height: 1.5;
+}
+
+.self-critique-drawer.hidden {
+    display: none;
+}
+
 @media (max-width: 640px) {
     .memory-manager-backdrop {
         align-items: stretch;
