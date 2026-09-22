@@ -5,7 +5,7 @@ import { applyApiSecurity } from './_lib/security.js';
 import { classifyFreeLiveIntent, routeMessage } from './_lib/latest/router.js';
 import { searchItems } from './_lib/latest/latest-cache.js';
 import { ingestLatestSources } from './_lib/latest/latest-ingest.js';
-import { runFreeLiveSearch, searchDuckDuckGoHtml, searchSearXNGJson, fetchWikipediaInfobox } from './_lib/free-live/providers.js';
+import { runFreeLiveSearch, searchDuckDuckGoHtml, searchSearXNGJson, searchSearXNGRacer, searchYahooFinanceQuotes, fetchWikipediaInfobox } from './_lib/free-live/providers.js';
 import { extractWithCrawl4Ai } from './_lib/crawl4ai-client.js';
 import { rankTextsByEmbedding, chunkTextForEmbedding, hasNvidiaEmbeddingKey, rerankTexts, getNvidiaRerankModel } from './_lib/embeddings.js';
 import { cleanQueryTarget, extractQueryTargetMetadata } from './_lib/query-target-cleanup.js';
@@ -573,20 +573,18 @@ export async function searchPublicSources(query, options = {}) {
         ...targetQueries
     ])).slice(0, 2);
 
+    const boundedTimeoutMs = Math.min(Number(options.timeoutMs) || 2200, 2400);
     const asyncTasks = [
-        Promise.allSettled(targetQueries.slice(0, 2).map(candidate => searchGoogleNewsRss(candidate, { limit }))),
-        Promise.allSettled(targetQueries.slice(0, 2).map(candidate => searchWikipedia(candidate, { limit: 2 }))),
-        Promise.allSettled([searchWikidata(targetQueries[0] || normalizedQuery, { limit: 2 })]),
-        // SearXNG public instances (searx.be, priv.au) and DuckDuckGo HTML are blocked by
-        // Vercel datacenter IPs — removed to eliminate the 2.5s wasted timeout on every query.
-        // Web coverage is provided by Gemini Grounding + Google News RSS + GDELT below.
-        Promise.resolve([]),
+        Promise.allSettled(targetQueries.slice(0, 2).map(candidate => searchGoogleNewsRss(candidate, { limit, timeoutMs: boundedTimeoutMs }))),
+        Promise.allSettled(targetQueries.slice(0, 2).map(candidate => searchWikipedia(candidate, { limit: 2, timeoutMs: boundedTimeoutMs }))),
+        Promise.allSettled([searchWikidata(targetQueries[0] || normalizedQuery, { limit: 2, timeoutMs: boundedTimeoutMs })]),
+        Promise.allSettled([searchYahooFinanceQuotes(normalizedQuery, { limit: 2, timeoutMs: 1800 })]),
         options.skipStructuredRoles === true
             ? Promise.resolve([])
-            : Promise.allSettled([searchGovernmentRole(normalizedQuery, { limit: Math.min(3, limit) })]),
+            : Promise.allSettled([searchGovernmentRole(normalizedQuery, { limit: Math.min(3, limit), timeoutMs: boundedTimeoutMs })]),
         options.skipGdelt === true
             ? Promise.resolve([])
-            : Promise.allSettled(gdeltQueries.map(candidate => searchGdeltNews(candidate, { limit }))),
+            : Promise.allSettled(gdeltQueries.map(candidate => searchGdeltNews(candidate, { limit, timeoutMs: boundedTimeoutMs }))),
         hasGeminiKey()
             ? Promise.allSettled([searchGeminiGrounding(targetQueries[0] || normalizedQuery, { limit }).then(r => r.results || [])])
             : Promise.resolve([])
@@ -4097,13 +4095,25 @@ function sanitizeUpstreamDetail(detail) {
     return text.slice(0, 220);
 }
 
-async function fetchWithTimeout(url, init, timeoutMs) {
+async function fetchWithTimeout(url, init = {}, timeoutMs = 2500) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    let abortListener = null;
+    if (init?.signal) {
+        if (init.signal.aborted) {
+            controller.abort();
+        } else {
+            abortListener = () => controller.abort();
+            init.signal.addEventListener('abort', abortListener, { once: true });
+        }
+    }
     try {
         return await fetch(url, { ...init, signal: controller.signal });
     } finally {
         clearTimeout(timeout);
+        if (init?.signal && abortListener) {
+            init.signal.removeEventListener('abort', abortListener);
+        }
     }
 }
 
