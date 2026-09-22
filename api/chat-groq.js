@@ -330,6 +330,9 @@ async function getInstantFactHelper() {
 
     function classifyQueryComplexity(rawQuery = '', options = {}) {
         const intent = String(options?.intent || '');
+        if (options?.tier === 'deep' || options?.forceReasoning === true || intent === 'deep_reasoning' || intent === 'coding_math') {
+            return { tier: 'deep', preferSpeed: false, reason: 'explicit_deep_tier_request' };
+        }
         if (['fast_simple', 'casual_chat', 'chat_title', 'fast_explainer', 'internal_summary'].includes(intent) || options?.minimalThinking === true) {
             return { tier: 'instant', preferSpeed: true, reason: 'fast_intent_policy' };
         }
@@ -860,6 +863,8 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                     images,
                     routeDecision,
                     lengthPolicy,
+                    tier: req.body?.tier || preferences?.tier,
+                    forceReasoning: req.body?.forceReasoning === true || preferences?.forceReasoning === true,
                     selectedModel: preferences?.selectedModel || null
                 });
             }
@@ -919,6 +924,8 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 userMessage: effectiveMessage,
                 effectiveMessage,
                 intent,
+                tier: req.body?.tier || preferences?.tier,
+                forceReasoning: req.body?.forceReasoning === true || preferences?.forceReasoning === true,
                 minimalThinking: req.body?.minimalThinking === true || preferences?.minimalThinking === true || ['fast_simple', 'casual_chat', 'chat_title'].includes(String(intent || '')),
                 isAttachmentGrounding,
                 structuredMessages: firstStructured
@@ -1142,7 +1149,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
 
     function shouldStreamChatRequest(body, intent, grounding, routeDecision, isInternalSummary) {
         if (!body || body.stream !== true) return false;
-        if (!['chat', 'pop_culture_reference', 'fast_simple', 'fast_explainer', 'casual_chat'].includes(String(intent || 'chat'))) return false;
+        if (!['chat', 'pop_culture_reference', 'fast_simple', 'fast_explainer', 'casual_chat', 'coding_math', 'deep_reasoning'].includes(String(intent || 'chat'))) return false;
         if (grounding) return false;
         if (isInternalSummary) return false;
         const routingProbe = String(body.routingMessage || body.displayUserMessage || body.message || '');
@@ -1398,8 +1405,10 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 systemPrompt,
                 intent,
                 effectiveMessage,
+                tier: options?.tier,
+                forceReasoning: options?.forceReasoning,
                 userSelectedModel: selectedModel,
-                minimalThinking: options?.minimalThinking === true || (!isExplicitReasoningIntent(intent, effectiveMessage) && !String(selectedModel || '').toLowerCase().includes('r1')),
+                minimalThinking: options?.minimalThinking === true || (!options?.forceReasoning && options?.tier !== 'deep' && !isExplicitReasoningIntent(intent, effectiveMessage) && !String(selectedModel || '').toLowerCase().includes('r1')),
                 onReset: () => {
                     streamedText = '';
                     writeSse(res, 'reset', { reason: 'failover' });
@@ -1903,7 +1912,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
     async function runModelWithFallback(finalPrompt, lengthPolicy = {}, userSelectedModel = null, images = undefined, options = {}) {
         const temp = Number.isFinite(Number(lengthPolicy?.temperature)) ? Number(lengthPolicy.temperature) : 0.7;
         const effectiveMsg = options?.effectiveMessage || options?.message || finalPrompt;
-        const queryComplexity = classifyQueryComplexity(effectiveMsg, { intent: options?.intent });
+        const queryComplexity = classifyQueryComplexity(effectiveMsg, { intent: options?.intent, tier: options?.tier, forceReasoning: options?.forceReasoning });
         const routingTier = options?.tier || queryComplexity.tier;
         const speedPreferred = options?.preferSpeed !== undefined ? options.preferSpeed : queryComplexity.preferSpeed;
         const isReasoningQuery = isExplicitReasoningIntent(options?.intent, effectiveMsg);
@@ -2160,7 +2169,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
     async function streamModelWithFallback(finalPrompt, lengthPolicy = {}, onDelta = () => {}, userSelectedModel = null, images = undefined, options = {}) {
         const temp = Number.isFinite(Number(lengthPolicy?.temperature)) ? Number(lengthPolicy.temperature) : 0.7;
         const effectiveMsg = options?.effectiveMessage || options?.message || finalPrompt;
-        const queryComplexity = classifyQueryComplexity(effectiveMsg, { intent: options?.intent });
+        const queryComplexity = classifyQueryComplexity(effectiveMsg, { intent: options?.intent, tier: options?.tier, forceReasoning: options?.forceReasoning });
         const routingTier = options?.tier || queryComplexity.tier;
         const speedPreferred = options?.preferSpeed !== undefined ? options.preferSpeed : (routingTier === 'instant' || queryComplexity.preferSpeed);
         const isReasoningQuery = isExplicitReasoningIntent(options?.intent, effectiveMsg);
@@ -3185,8 +3194,12 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             '',
             '=== VERIFIED REAL-TIME WEB SOURCES ===',
             ...sources.map((item, index) => {
-                const infoboxText = item.infobox?.incumbent
-                    ? `Incumbent from Official Infobox: ${item.infobox.incumbent}${item.infobox.incumbent_since ? ` (In office since: ${item.infobox.incumbent_since})` : ''}`
+                const infoboxCandidate = item.infobox?.government_head || item.infobox?.after_election || item.infobox?.incumbent || item.infobox?.chief_minister || item.infobox?.prime_minister || item.infobox?.president || item.infobox?.governor || item.infobox?.mayor || item.infobox?.ceo || item.infobox?.leader;
+                const cleanCandidate = typeof infoboxCandidate === 'string'
+                    ? infoboxCandidate.replace(/\s+(?:ministry|cabinet|government|administration)$/i, '').trim()
+                    : '';
+                const infoboxText = cleanCandidate
+                    ? `Incumbent from Official Infobox: ${cleanCandidate}${item.infobox?.incumbent_since ? ` (In office since: ${item.infobox.incumbent_since})` : ''}`
                     : '';
                 return [
                     `[${index + 1}] Title: ${item.title}`,
@@ -3313,12 +3326,13 @@ const edgeResponseCache = new EdgeSemanticLruCache();
         if (leadershipMatch && isLeadershipOrTemporal) {
             const role = leadershipMatch[1].replace(/\b(?:the|who|is|was|current|latest)\b/gi, '').trim();
             const subject = leadershipMatch[2].replace(/[?.!]+$/, '').trim();
+            const canonicalRole = role.toLowerCase() === 'cm' ? 'Chief Minister' : (role.toLowerCase() === 'pm' ? 'Prime Minister' : role);
             if (role && subject) {
                 return [
+                    `${canonicalRole} of ${subject}`,
                     `${subject} ${role}`,
                     `${subject} current ${role}`,
-                    `who is the ${role} of ${subject}`,
-                    `${subject} founder ${role}`
+                    `who is the ${role} of ${subject}`
                 ];
             }
         }
