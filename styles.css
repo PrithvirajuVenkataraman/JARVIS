@@ -8014,6 +8014,19 @@ body:not(.dark) .next-step-title {
     box-shadow: 0 4px 12px rgba(56, 189, 248, 0.12);
 }
 
+.empty-state-pill.is-active {
+    background: rgba(56, 189, 248, 0.14);
+    border-color: rgba(56, 189, 248, 0.6);
+    color: #38bdf8;
+    box-shadow: 0 0 16px rgba(56, 189, 248, 0.28);
+    transform: translateY(-1px);
+}
+
+.empty-state-pill.is-active svg {
+    color: #38bdf8;
+    filter: drop-shadow(0 0 6px rgba(56, 189, 248, 0.5));
+}
+
 .empty-state-pill svg {
     color: #38bdf8;
     flex-shrink: 0;
