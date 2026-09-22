@@ -273,10 +273,6 @@
                             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
                             <span>Document OCR</span>
                         </button>
-                        <button type="button" class="empty-state-pill" data-capability="code_math" onclick="handleCapabilityPillClick('code_math')" title="Switch to Code & Math focus">
-                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
-                            <span>Code & Math</span>
-                        </button>
                     </div>
                 </div>
 
@@ -402,6 +398,15 @@
                             </div>
                         </div>
                     </div>
+                    <button
+                        id="composer-mode-badge"
+                        type="button"
+                        class="composer-mode-badge hidden"
+                        onclick="handleComposerModeBadgeClick()"
+                        title="Active mode — click to disable"
+                        aria-label="Active mode — click to disable">
+                        <span class="composer-mode-icon" id="composer-mode-icon"></span>
+                    </button>
                 </div>
                 <textarea
                     id="text-input"
@@ -5320,11 +5325,6 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
         const baseSystemPrompt = typeof JarvisSelfImprovingMemory !== 'undefined'
             ? JarvisSelfImprovingMemory.injectIntoSystemPrompt(customSystemPrompt)
             : customSystemPrompt;
-        const isCodeMathActive = (typeof _activeSpecialCapability !== 'undefined' && _activeSpecialCapability === 'code_math') || requestOptions?.intent === 'coding_math';
-        const codeMathDirective = isCodeMathActive
-            ? 'Coding & Math Precision Directives: Prioritize clean, idiomatic code blocks with complete implementation and syntax highlighting. For algorithmic, engineering, or mathematical problems, provide rigorous step-by-step logic, exact derivations, time/space complexity analysis, and edge case coverage. Avoid truncated snippets or hand-waving explanations.'
-            : '';
-
         // Route formatting, style, length, and learned memory into system directives rather than polluting the user prompt
         const systemDirectives = isFastSimpleRequest
             ? [
@@ -5348,7 +5348,6 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
                 fastExplainerHint,
                 learnedStyleHint,
                 learnedPreferenceHint,
-                codeMathDirective,
                 'Image Generation Capability: You have access to an internal high-speed AI image diffusion engine. When the user asks you to create, generate, draw, paint, visualize, illustrate, sketch, or show an image, picture, photo, or artwork of something, emit the visual action tag: :::image[detailed descriptive visual prompt]::: with a vivid, detailed prompt inside the brackets. You may include a brief conversational line before or after the tag. Never emit this tag for educational, diagram code, or non-visual queries.',
                 'Conversational guidelines: Maintain continuity with previous dialogue, resolve pronouns and retrospective references naturally, and avoid repeating information already stated. Never end responses with generic hollow offers like "Would you like to know more?", "Is there anything else I can help with?", "Feel free to ask", or "Hope that helps!" — these are robotic filler and add no value. For substantive answers, one specific contextual follow-up question or concrete next step is acceptable only when it genuinely advances the discussion; for short or factual queries, answer directly and stop.'
             ].filter(Boolean).join('\n\n');
@@ -6284,9 +6283,8 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             void sendTextInput({ text, source: 'starter_card' });
         }
 
-        let _activeCapabilityPill = null; // 'live_search' | 'deep_reasoning' | 'document_ocr' | 'code_math' | null
+        let _activeCapabilityPill = null; // 'live_search' | 'deep_reasoning' | 'document_ocr' | null
         let _preferredModelTier = 'standard'; // 'standard' | 'deep' | 'instant'
-        let _activeSpecialCapability = null; // 'code_math' | null
 
         function getActiveCapabilityPill() {
             return _activeCapabilityPill;
@@ -6300,6 +6298,61 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             return _preferredModelTier || 'standard';
         }
 
+        function updateComposerModeIndicatorUi() {
+            const badge = document.getElementById('composer-mode-badge');
+            const iconContainer = document.getElementById('composer-mode-icon');
+            if (!badge || !iconContainer) return;
+
+            const isWebForced = typeof getWebSearchMode === 'function' ? getWebSearchMode() === 'force' : _composerWebMode === 'force';
+            const isWebSearch = _activeCapabilityPill === 'live_search' || isWebForced;
+            const isReasoning = _activeCapabilityPill === 'deep_reasoning';
+            const isDocumentOcr = _activeCapabilityPill === 'document_ocr';
+
+            badge.classList.remove('is-reasoning', 'is-document');
+
+            if (isWebSearch) {
+                badge.classList.remove('hidden');
+                badge.title = 'Live Web Search active (click to turn off)';
+                badge.setAttribute('aria-label', 'Live Web Search active — click to turn off');
+                iconContainer.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.2" y2="16.2"></line></svg>';
+                return;
+            }
+
+            if (isReasoning) {
+                badge.classList.remove('hidden');
+                badge.classList.add('is-reasoning');
+                badge.title = 'Deep Reasoning active (click to turn off)';
+                badge.setAttribute('aria-label', 'Deep Reasoning active — click to turn off');
+                iconContainer.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 4.44-2.04z"></path><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-4.44-2.04z"></path></svg>';
+                return;
+            }
+
+            if (isDocumentOcr) {
+                badge.classList.remove('hidden');
+                badge.classList.add('is-document');
+                badge.title = 'Document OCR active (click to turn off)';
+                badge.setAttribute('aria-label', 'Document OCR active — click to turn off');
+                iconContainer.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>';
+                return;
+            }
+
+            badge.classList.add('hidden');
+            iconContainer.innerHTML = '';
+        }
+
+        function handleComposerModeBadgeClick() {
+            triggerJarvisHaptic(10);
+            resetCapabilityPillsUi();
+            if (typeof setWebSearchMode === 'function') {
+                setWebSearchMode('off');
+            }
+            const input = document.getElementById('text-input');
+            if (input) {
+                input.placeholder = 'Ask anything, explore ideas, or paste code...';
+                input.focus();
+            }
+        }
+
         function updateCapabilityPillsUi() {
             const pills = document.querySelectorAll('.empty-state-pill[data-capability]');
             pills.forEach(pill => {
@@ -6308,13 +6361,14 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 pill.classList.toggle('is-active', isActive);
                 pill.setAttribute('aria-pressed', isActive ? 'true' : 'false');
             });
+            updateComposerModeIndicatorUi();
         }
 
         function resetCapabilityPillsUi() {
             _activeCapabilityPill = null;
             _preferredModelTier = 'standard';
-            _activeSpecialCapability = null;
             updateCapabilityPillsUi();
+            updateComposerModeIndicatorUi();
         }
 
         function handleCapabilityPillClick(capability) {
@@ -6331,9 +6385,6 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 if (input) {
                     input.placeholder = 'Ask anything, explore ideas, or paste code...';
                 }
-                if (typeof showTemporaryMessage === 'function') {
-                    showTemporaryMessage('Mode reset to standard');
-                }
                 return;
             }
 
@@ -6345,20 +6396,15 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                     setWebSearchMode('force');
                 }
                 _preferredModelTier = 'standard';
-                _activeSpecialCapability = null;
                 if (input) {
                     input.focus();
                     input.placeholder = 'Search the live web for anything...';
-                }
-                if (typeof showTemporaryMessage === 'function') {
-                    showTemporaryMessage('Live Web Search is ON for this message');
                 }
                 return;
             }
 
             if (capability === 'deep_reasoning') {
                 setPreferredModelTier('deep');
-                _activeSpecialCapability = null;
                 if (typeof setWebSearchMode === 'function') {
                     setWebSearchMode('off');
                 }
@@ -6366,24 +6412,17 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                     input.focus();
                     input.placeholder = 'Ask a complex reasoning or architectural question...';
                 }
-                if (typeof showTemporaryMessage === 'function') {
-                    showTemporaryMessage('Deep reasoning model activated');
-                }
                 return;
             }
 
             if (capability === 'document_ocr') {
                 _preferredModelTier = 'standard';
-                _activeSpecialCapability = null;
                 if (typeof setWebSearchMode === 'function') {
                     setWebSearchMode('off');
                 }
                 if (input) {
                     input.focus();
                     input.placeholder = 'Attach a document, invoice, or PDF to analyze...';
-                }
-                if (typeof showTemporaryMessage === 'function') {
-                    showTemporaryMessage('Select a document or image for OCR analysis');
                 }
                 if (typeof triggerComposerFilePicker === 'function') {
                     triggerComposerFilePicker('file-browse');
@@ -6396,23 +6435,12 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 }
                 return;
             }
-
-            if (capability === 'code_math') {
-                _activeSpecialCapability = 'code_math';
-                setPreferredModelTier('deep');
-                if (typeof setWebSearchMode === 'function') {
-                    setWebSearchMode('off');
-                }
-                if (input) {
-                    input.focus();
-                    input.placeholder = 'Enter an algorithm, debugging problem, or math derivation...';
-                }
-                if (typeof showTemporaryMessage === 'function') {
-                    showTemporaryMessage('Code & Math mode ready');
-                }
-                return;
-            }
         }
+
+        // Defensive purge: Remove any deprecated code_math button immediately if loaded from stale cache
+        try {
+            document.querySelectorAll('.empty-state-pill[data-capability="code_math"]').forEach(el => el.remove());
+        } catch (_) {}
 
         function updateChatEmptyStateVisibility(forceHide = false) {
             const emptyState = document.getElementById('chat-empty-state');
@@ -13365,6 +13393,9 @@ ${code}
                 if (label) label.textContent = 'OFF';
                 btn.title = 'Live Web Search (OFF — click to turn on)';
                 btn.setAttribute('aria-label', 'Live Web Search OFF');
+            }
+            if (typeof updateComposerModeIndicatorUi === 'function') {
+                updateComposerModeIndicatorUi();
             }
         }
 
