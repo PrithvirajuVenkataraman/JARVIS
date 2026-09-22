@@ -25,6 +25,7 @@ import * as JarvisEmergencySOS from './emergency-sos.js?v=2.0.1';
 import * as JarvisImageConfig from './image-generation-config.js?v=2.0.1';
 import * as JarvisImageStorage from './image-storage.js?v=2.0.1';
 import * as JarvisImageGenerator from './image-generator.js?v=2.0.1';
+import { selfImprovingMemory } from './self-improving-memory.js?v=2.0.1';
 
 import { createInteractionStateMachine, InteractionState } from './interaction-state.js?v=2.0.1';
 
@@ -63,6 +64,8 @@ globalThis.JarvisEmergencySOS = Object.freeze({ ...JarvisEmergencySOS });
 globalThis.JarvisImageConfig = Object.freeze({ ...JarvisImageConfig });
 globalThis.JarvisImageStorage = Object.freeze({ ...JarvisImageStorage });
 globalThis.JarvisImageGenerator = Object.freeze({ ...JarvisImageGenerator });
+globalThis.JarvisSelfImprovingMemory = selfImprovingMemory;
+selfImprovingMemory.init().catch(() => {});
 
 function initializeSpeechInput() {
     if (globalThis.__jarvisSpeechInputInstalled) return;
