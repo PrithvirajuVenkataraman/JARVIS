@@ -86,13 +86,15 @@ export function buildSourceTransparencyHtml(meta = {}, text = '') {
     );
 
     const sourceType = String(meta?.sourceType || '').toLowerCase();
-    const verified = meta?.verified === true
+    const verified = (sources.length > 0) && (
+        meta?.verified === true
         || sourceType === 'verified'
         || Boolean(meta?.routing?.verified)
-        || sources.length > 0 && /verified/i.test(String(meta?.sourceLabel || ''));
+        || /verified/i.test(String(meta?.sourceLabel || ''))
+    );
     const reason = String(meta?.reason || meta?.sourceReason || '').trim();
 
-    if (!sources.length && !verified && !reason && sourceType !== 'verified') {
+    if (!sources.length && !verified && !reason) {
         return '';
     }
 
