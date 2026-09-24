@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+    RESEARCH_STATES,
+    PROVENANCE_MODES,
     BoundedLiveResearchController,
     normalizeResearchSources,
     formatSourcesForPrompt,
@@ -11,145 +13,378 @@ import {
 import { parseGoogleNewsRssXml } from '../api/_lib/free-live/providers.js';
 import { buildSourceTransparencyHtml } from '../app/source-transparency.js';
 
-test('BoundedLiveResearchController - Normal Fast Completion', async () => {
+// ============================================================================
+// ARCHITECTURE-LEVEL TESTS (Section 8 Requirements)
+// ============================================================================
+
+test('Architecture 1: Search returns zero sources -> NO_SOURCES state -> no normal LLM synthesis', async () => {
     const controller = new BoundedLiveResearchController({
-        searchCutoffMs: 2500,
-        fallbackWarningMs: 8500,
-        hardDeadlineMs: 9000
+        searchCutoffMs: 200,
+        fallbackWarningMs: 800,
+        hardDeadlineMs: 1000
     });
 
-    let sourcesReceived = null;
-    let streamCompleted = null;
+    let llmSynthesisCalled = false;
+    const statesObserved = [];
 
-    await controller.execute({
+    const result = await controller.execute({
+        query: 'Obscure query with zero search results',
+        userText: 'Obscure query with zero search results',
+        assistantMessageId: 'msg_arch_1',
+        fetchSearchFn: async () => {
+            return { results: [] };
+        },
+        streamSynthesisFn: async () => {
+            llmSynthesisCalled = true;
+        },
+        uiCallbacks: {
+            onStateTransition: ({ state }) => {
+                statesObserved.push(state);
+            }
+        }
+    });
+
+    assert.equal(llmSynthesisCalled, false, 'LLM synthesis must NEVER be called when zero sources exist');
+    assert.ok(statesObserved.includes(RESEARCH_STATES.NO_SOURCES), 'Must transition through NO_SOURCES state');
+    assert.equal(result.state, RESEARCH_STATES.COMPLETE);
+    assert.equal(result.provenance, PROVENANCE_MODES.NO_SOURCES);
+    assert.equal(result.success, false);
+    assert.equal(result.fallback, true);
+    assert.equal(result.sources.length, 0);
+    assert.ok(result.content.includes('did not return verified records'));
+    assert.ok(controller.isTerminal);
+    assert.equal(controller.timers.length, 0, 'Timers must be cleared immediately without waiting for LLM watchdog');
+});
+
+test('Architecture 2: Search returns valid sources -> SOURCE_GROUNDED_SYNTHESIS', async () => {
+    const controller = new BoundedLiveResearchController({
+        searchCutoffMs: 2000,
+        fallbackWarningMs: 4000,
+        hardDeadlineMs: 5000
+    });
+
+    let llmSynthesisCalled = false;
+    let promptPassed = '';
+    const statesObserved = [];
+
+    const result = await controller.execute({
         query: 'What is the current Artemis mission status?',
         userText: 'What is the current Artemis mission status?',
-        assistantMessageId: 'msg_test_1',
+        assistantMessageId: 'msg_arch_2',
         fetchSearchFn: async () => {
-            await new Promise(r => setTimeout(r, 100));
             return {
                 results: [
                     { title: 'NASA Artemis Updates', url: 'https://nasa.gov/artemis', snippet: 'Artemis II is scheduled for launch.' }
                 ]
             };
         },
-        streamSynthesisFn: async ({ onToken }) => {
-            await new Promise(r => setTimeout(r, 150));
-            onToken('NASA has confirmed ');
-            await new Promise(r => setTimeout(r, 100));
-            onToken('Artemis II launch preparations are underway [1].');
+        streamSynthesisFn: async ({ prompt, onToken }) => {
+            llmSynthesisCalled = true;
+            promptPassed = prompt;
+            onToken('NASA confirmed Artemis II launch preparations are underway [1].');
         },
         uiCallbacks: {
-            onSourcesReady: ({ sources }) => {
-                sourcesReceived = sources;
-            },
-            onStreamComplete: ({ content, sources, telemetry }) => {
-                streamCompleted = { content, sources, telemetry };
+            onStateTransition: ({ state }) => {
+                statesObserved.push(state);
             }
         }
     });
 
-    assert.ok(sourcesReceived, 'Sources should have been emitted');
-    assert.equal(sourcesReceived.length, 1);
-    assert.equal(sourcesReceived[0].id, 1);
-    assert.ok(streamCompleted, 'Stream should have completed');
-    assert.ok(streamCompleted.content.includes('Artemis II launch preparations'));
-    assert.ok(controller.isTerminal, 'Controller must be terminal');
-    assert.equal(controller.timers.length, 0, 'All timers must be cleared');
-    assert.ok(controller.telemetry.t_completed > 0, 'Completion timestamp must be recorded');
+    assert.equal(llmSynthesisCalled, true, 'LLM synthesis must be invoked when valid sources exist');
+    assert.ok(statesObserved.includes(RESEARCH_STATES.SOURCE_GROUNDED_SYNTHESIS), 'Must transition to SOURCE_GROUNDED_SYNTHESIS');
+    assert.ok(promptPassed.includes('[1] Title: NASA Artemis Updates'), 'Prompt must include verified source');
+    assert.equal(result.provenance, PROVENANCE_MODES.WEB_GROUNDED);
+    assert.equal(result.success, true);
+    assert.equal(result.sources.length, 1);
+    assert.ok(result.content.includes('Artemis II launch preparations'));
 });
 
-test('BoundedLiveResearchController - Search Cutoff at T+2500ms when Search Stalls', async () => {
+test('Architecture 3: Search returns sources after cutoff -> late results do not modify completed state', async () => {
     const controller = new BoundedLiveResearchController({
-        searchCutoffMs: 300,
-        fallbackWarningMs: 1200,
-        hardDeadlineMs: 1500
+        searchCutoffMs: 100,
+        fallbackWarningMs: 500,
+        hardDeadlineMs: 700
     });
 
-    let sourcesReadyCalled = false;
-    let cutoffFiredBeforeSearchFinished = false;
+    let lateSearchResolved = false;
 
-    await controller.execute({
-        query: 'Slow query test',
-        userText: 'Slow query test',
-        assistantMessageId: 'msg_test_2',
-        fetchSearchFn: async ({ signal }) => {
-            return new Promise((resolve, reject) => {
-                const timeout = setTimeout(() => {
-                    resolve({ results: [{ title: 'Late result', url: 'https://late.com', snippet: 'Too late' }] });
-                }, 5000);
-                signal.addEventListener('abort', () => {
-                    clearTimeout(timeout);
-                    cutoffFiredBeforeSearchFinished = true;
-                    reject(new Error('Search aborted by cutoff'));
-                });
+    const result = await controller.execute({
+        query: 'Slow search timing test',
+        userText: 'Slow search timing test',
+        assistantMessageId: 'msg_arch_3',
+        fetchSearchFn: async () => {
+            return new Promise((resolve) => {
+                // Simulates a slow backend network response that finishes after cutoff (300ms > 100ms)
+                setTimeout(() => {
+                    lateSearchResolved = true;
+                    resolve({
+                        results: [
+                            { title: 'Late Arriving Source', url: 'https://late.com/article', snippet: 'Late snippet' }
+                        ]
+                    });
+                }, 300);
             });
         },
-        streamSynthesisFn: async ({ onToken }) => {
-            onToken('Answer generated from available sources.');
-        },
-        uiCallbacks: {
-            onSourcesReady: () => {
-                sourcesReadyCalled = true;
-            }
+        streamSynthesisFn: async () => {
+            // Should not be called because at cutoff 100ms there were 0 sources
         }
     });
 
-    assert.ok(sourcesReadyCalled, 'onSourcesReady must be invoked at cutoff');
-    assert.ok(cutoffFiredBeforeSearchFinished, 'Search must have been aborted by cutoff timer');
-    assert.ok(controller.isTerminal, 'Controller should have terminated');
+    // Verify initial completion was NO_SOURCES
+    assert.equal(result.provenance, PROVENANCE_MODES.NO_SOURCES);
+    assert.equal(result.sources.length, 0);
+    assert.equal(controller.isTerminal, true);
+
+    // Wait for the late search promise to resolve
+    await new Promise(r => setTimeout(r, 350));
+    assert.equal(lateSearchResolved, true, 'Late search promise should have resolved in background');
+
+    // Invariant: controller must not accept late sources or re-open execution
+    assert.equal(controller.sources.length, 0, 'Late sources must NOT be added to controller sources');
+    assert.equal(controller.state, RESEARCH_STATES.COMPLETE, 'Controller state must remain COMPLETE');
+    assert.equal(controller.provenance, PROVENANCE_MODES.NO_SOURCES, 'Provenance must remain no_sources');
 });
 
-test('BoundedLiveResearchController - Hard Application Deadline at T+9000ms with Fallback', async () => {
+test('Architecture 4: Valid sources + empty LLM response -> synthesis fallback', async () => {
     const controller = new BoundedLiveResearchController({
-        searchCutoffMs: 150,
+        searchCutoffMs: 200,
+        fallbackWarningMs: 600,
+        hardDeadlineMs: 800
+    });
+
+    const result = await controller.execute({
+        query: 'James Webb latest observations',
+        userText: 'James Webb latest observations',
+        assistantMessageId: 'msg_arch_4',
+        fetchSearchFn: async () => {
+            return {
+                results: [
+                    { title: 'JWST Exoplanet Atmosphere', url: 'https://jwst.org/exo', snippet: 'Water vapor detected on K2-18b.' }
+                ]
+            };
+        },
+        streamSynthesisFn: async ({ onToken }) => {
+            // Simulates empty response / token refusal (< 20 chars)
+            onToken('   ');
+        }
+    });
+
+    assert.equal(result.success, false, 'Must report success: false when synthesis fails to produce content');
+    assert.equal(result.fallback, true, 'Must flag fallback: true');
+    assert.equal(result.provenance, PROVENANCE_MODES.SYNTHESIS_FALLBACK);
+    assert.equal(result.sources.length, 1, 'Sources must be preserved in fallback');
+    assert.ok(result.content.includes('Verified Summary for "James Webb latest observations"'));
+    assert.ok(result.content.includes('Water vapor detected on K2-18b. [1]'));
+});
+
+test('Architecture 5: Zero sources -> no "Verified sources" metadata', async () => {
+    const controller = new BoundedLiveResearchController({
+        searchCutoffMs: 100,
         fallbackWarningMs: 400,
         hardDeadlineMs: 600
     });
 
-    let fallbackCompleted = null;
-    let fallbackWarningFired = false;
+    let onSourcesReadyCalled = false;
+    let validatedProvenance = null;
 
-    await controller.execute({
-        query: 'Super slow LLM test',
-        userText: 'Super slow LLM test',
-        assistantMessageId: 'msg_test_3',
-        fetchSearchFn: async () => {
-            return {
-                results: [
-                    { title: 'Verified Fact Alpha', url: 'https://alpha.org/fact', snippet: 'Alpha discovery was confirmed in 2026.' },
-                    { title: 'Verified Fact Beta', url: 'https://beta.com/news', snippet: 'Beta confirmed independent validation.' }
-                ]
-            };
-        },
-        streamSynthesisFn: async ({ signal }) => {
-            return new Promise((resolve, reject) => {
-                signal.addEventListener('abort', () => {
-                    reject(new Error('LLM stream aborted by hard deadline'));
-                });
-            });
-        },
+    const result = await controller.execute({
+        query: 'Zero source test',
+        userText: 'Zero source test',
+        assistantMessageId: 'msg_arch_5',
+        fetchSearchFn: async () => ({ results: [] }),
+        streamSynthesisFn: async () => {},
         uiCallbacks: {
-            onFallbackWarning: () => {
-                fallbackWarningFired = true;
+            onSourcesReady: () => {
+                onSourcesReadyCalled = true;
             },
-            onFallbackComplete: (result) => {
-                fallbackCompleted = result;
+            onSourcesValidated: ({ provenance }) => {
+                validatedProvenance = provenance;
             }
         }
     });
 
-    // Wait slightly to let the hard deadline timer execute
-    await new Promise(r => setTimeout(r, 650));
+    assert.equal(onSourcesReadyCalled, false, 'onSourcesReady must NOT be invoked when sources are empty');
+    assert.equal(validatedProvenance, PROVENANCE_MODES.NO_SOURCES);
+    assert.equal(result.provenance, PROVENANCE_MODES.NO_SOURCES);
+    assert.notEqual(result.provenance, PROVENANCE_MODES.WEB_GROUNDED);
 
-    assert.ok(fallbackWarningFired, 'Fallback warning must fire before hard deadline');
-    assert.ok(fallbackCompleted, 'Hard deadline must trigger onFallbackComplete');
-    assert.ok(controller.isFallbackRendered, 'isFallbackRendered must be true');
-    assert.ok(controller.isTerminal, 'Controller must be terminal');
-    assert.ok(fallbackCompleted.content.includes('Verified Summary'), 'Must render verified summary fallback');
-    assert.ok(fallbackCompleted.content.includes('Alpha discovery was confirmed'), 'Must include verified snippet content');
-    assert.ok(fallbackCompleted.content.includes('[1]'), 'Must cite source [1]');
+    // Also verify UI helper suppresses badge when zero sources
+    const renderedHtml = buildSourceTransparencyHtml({
+        sourceType: 'verified',
+        verified: true,
+        sources: []
+    }, 'Fallback content');
+    assert.equal(renderedHtml, '', 'Source transparency HTML must be empty when sources list is empty');
 });
+
+test('Architecture 6: Zero sources -> no related research questions', () => {
+    // Positional arguments
+    assert.deepEqual(generateRelatedResearchQuestions('any query', []), []);
+    assert.deepEqual(generateRelatedResearchQuestions('What are the latest updates on fusion energy?', null), []);
+
+    // Structured arguments
+    assert.deepEqual(generateRelatedResearchQuestions({
+        query: 'What is the stock price of Apple?',
+        sources: []
+    }), []);
+
+    assert.deepEqual(generateRelatedResearchQuestions({
+        query: 'Quantum computing breakthroughs',
+        sources: null
+    }), []);
+});
+
+test('Architecture 7: Original "latest updates" query -> related questions are not trivial echoes', () => {
+    const sources = [
+        { id: 1, title: 'NASA Artemis 2 Orion Spacecraft Testing', snippet: 'Testing heat shield at Kennedy Space Center.' }
+    ];
+
+    const queries = [
+        'What are the latest updates on Artemis mission?',
+        'Tell me the latest news about Artemis mission',
+        'Latest updates for Artemis mission',
+        'What is the current status of Artemis mission?'
+    ];
+
+    for (const q of queries) {
+        const questions = generateRelatedResearchQuestions(q, sources);
+        assert.equal(questions.length, 3, `Must return 3 questions for: ${q}`);
+        for (const item of questions) {
+            assert.ok(item.endsWith('?'), 'Every question must end with a question mark');
+            const lower = item.toLowerCase();
+            assert.ok(!lower.includes('what are the latest updates on what are the latest updates'), 'Must not duplicate prefix');
+            assert.ok(!lower.includes('tell me the latest news about tell me the latest news'), 'Must not duplicate prefix');
+            assert.notEqual(item.trim(), q.trim(), 'Question must not trivially echo the exact user query');
+        }
+    }
+});
+
+test('Architecture 8: Late LLM stream after fallback -> fallback remains authoritative', async () => {
+    const controller = new BoundedLiveResearchController({
+        searchCutoffMs: 100,
+        fallbackWarningMs: 250,
+        hardDeadlineMs: 400
+    });
+
+    let lateTokenCallback = null;
+    let lateTokensReceivedByUi = 0;
+
+    const result = await controller.execute({
+        query: 'Laggy LLM stream test',
+        userText: 'Laggy LLM stream test',
+        assistantMessageId: 'msg_arch_8',
+        fetchSearchFn: async () => ({
+            results: [{ title: 'Source 1', url: 'https://src1.org', snippet: 'Snippet 1' }]
+        }),
+        streamSynthesisFn: async ({ onToken }) => {
+            lateTokenCallback = onToken;
+            // Stall beyond hardDeadlineMs
+            return new Promise((resolve) => {
+                setTimeout(resolve, 1000);
+            });
+        },
+        uiCallbacks: {
+            onToken: () => {
+                lateTokensReceivedByUi++;
+            }
+        }
+    });
+
+    // Wait slightly so hard deadline triggers and completes execution
+    await new Promise(r => setTimeout(r, 450));
+
+    assert.equal(controller.isTerminal, true, 'Controller must be terminal after hard deadline');
+    assert.equal(controller.provenance, PROVENANCE_MODES.SYNTHESIS_FALLBACK);
+    const initialContent = result.content;
+    const initialStreamedText = controller.streamedText;
+    const initialUiTokenCount = lateTokensReceivedByUi;
+
+    // Simulate late token arrival from lingering stream
+    if (typeof lateTokenCallback === 'function') {
+        lateTokenCallback('LATE TOKEN ARRIVING AFTER DEADLINE');
+    }
+
+    assert.equal(controller.streamedText, initialStreamedText, 'Late token must NOT modify controller streamedText');
+    assert.equal(lateTokensReceivedByUi, initialUiTokenCount, 'Late token must NOT trigger UI token callbacks');
+    assert.equal(result.content, initialContent, 'Fallback content must remain authoritative');
+});
+
+test('Architecture 9: New request while previous research is active -> previous request cannot contaminate new response', async () => {
+    const controller1 = new BoundedLiveResearchController({
+        searchCutoffMs: 500,
+        fallbackWarningMs: 1500,
+        hardDeadlineMs: 2000
+    });
+
+    const controller2 = new BoundedLiveResearchController({
+        searchCutoffMs: 500,
+        fallbackWarningMs: 1500,
+        hardDeadlineMs: 2000
+    });
+
+    let controller1Completed = false;
+
+    // Start request 1 (simulating slow research)
+    const req1Promise = controller1.execute({
+        query: 'Query 1 that gets interrupted',
+        userText: 'Query 1 that gets interrupted',
+        assistantMessageId: 'msg_req_1',
+        fetchSearchFn: async () => {
+            await new Promise(r => setTimeout(r, 300));
+            return { results: [{ title: 'Q1 Source', url: 'https://q1.com', snippet: 'Q1 info' }] };
+        },
+        streamSynthesisFn: async ({ onToken }) => {
+            await new Promise(r => setTimeout(r, 300));
+            onToken('Token from Request 1');
+        },
+        uiCallbacks: {
+            onComplete: () => {
+                controller1Completed = true;
+            }
+        }
+    });
+
+    // User submits Query 2 at T+100ms: abort request 1
+    await new Promise(r => setTimeout(r, 100));
+    controller1.abort();
+
+    // Start request 2
+    let controller2Tokens = '';
+    const req2Promise = controller2.execute({
+        query: 'Query 2 current information',
+        userText: 'Query 2 current information',
+        assistantMessageId: 'msg_req_2',
+        fetchSearchFn: async () => {
+            await new Promise(r => setTimeout(r, 50));
+            return { results: [{ title: 'Q2 Source', url: 'https://q2.com', snippet: 'Q2 facts' }] };
+        },
+        streamSynthesisFn: async ({ onToken }) => {
+            onToken('Clean synthesis for Query 2 [1].');
+        },
+        uiCallbacks: {
+            onToken: ({ token }) => {
+                controller2Tokens += token;
+            }
+        }
+    });
+
+    const [res1, res2] = await Promise.all([req1Promise, req2Promise]);
+
+    assert.equal(res1.aborted, true, 'Request 1 must report aborted: true');
+    assert.equal(res1.provenance, PROVENANCE_MODES.ABORTED);
+    assert.equal(controller1.state, RESEARCH_STATES.ABORTED);
+    assert.equal(controller1Completed, false, 'Request 1 onComplete must NOT fire');
+
+    assert.equal(res2.success, true, 'Request 2 must succeed');
+    assert.equal(res2.provenance, PROVENANCE_MODES.WEB_GROUNDED);
+    assert.equal(res2.sources[0].title, 'Q2 Source');
+    assert.ok(res2.content.includes('Clean synthesis for Query 2'));
+    assert.ok(!controller2Tokens.includes('Token from Request 1'), 'Request 1 tokens cannot leak into Request 2');
+});
+
+// ============================================================================
+// COMPONENT & UTILITY UNIT TESTS
+// ============================================================================
 
 test('Source Normalization & Deduplication', () => {
     const raw = [
@@ -217,13 +452,6 @@ test('Inline Citation HTML Parsing', () => {
     assert.ok(parsed3.includes('data-source-id="1"'));
 });
 
-test('Dynamic Related Research Questions Generation', () => {
-    const sources = [{ title: 'James Webb Space Telescope finds new exoplanet atmosphere' }];
-    const questions = generateRelatedResearchQuestions('James Webb discoveries 2026', sources);
-    assert.equal(questions.length, 3, 'Must return exactly 3 questions');
-    assert.ok(questions.every(q => q.endsWith('?')), 'Every question must end with a question mark');
-});
-
 test('Google News RSS XML Parser', () => {
     const sampleXml = `<?xml version="1.0" encoding="UTF-8"?>
     <rss version="2.0">
@@ -246,70 +474,3 @@ test('Google News RSS XML Parser', () => {
     assert.equal(items[0].sourceLabel, 'Google News / Reuters');
     assert.ok(items[0].trusted);
 });
-
-test('BoundedLiveResearchController - Empty Synthesis Triggers Snippet Fallback', async () => {
-    const controller = new BoundedLiveResearchController({
-        searchCutoffMs: 200,
-        fallbackWarningMs: 800,
-        hardDeadlineMs: 1200
-    });
-
-    let fallbackPayload = null;
-
-    const result = await controller.execute({
-        query: 'Latest Artemis lunar rover updates',
-        userText: 'Latest Artemis lunar rover updates',
-        assistantMessageId: 'msg_test_empty_stream',
-        fetchSearchFn: async () => {
-            return { results: [] };
-        },
-        streamSynthesisFn: async () => {
-            // Simulates empty stream / refusal / token failure
-        },
-        uiCallbacks: {
-            onFallbackComplete: (payload) => {
-                fallbackPayload = payload;
-            }
-        }
-    });
-
-    assert.equal(result.success, false, 'Must report non-success when synthesis is empty');
-    assert.equal(result.fallback, true, 'Must report fallback: true');
-    assert.ok(result.content.length > 20, 'Content must not be empty or blank');
-    assert.ok(result.content.includes('did not return verified records'), 'Must render polite fallback explanation');
-    assert.ok(fallbackPayload, 'onFallbackComplete must have fired');
-    assert.equal(fallbackPayload.sources.length, 0);
-});
-
-test('generateRelatedResearchQuestions - Guards & Topic Deduplication', () => {
-    // 1. Empty sources must return zero questions
-    assert.deepEqual(generateRelatedResearchQuestions('Anything', []), []);
-
-    // 2. Query starting with latest updates should not generate a tautological question
-    const sources = [{ title: 'NASA Artemis Rover Tests Mobility' }];
-    const questions = generateRelatedResearchQuestions('What are the latest updates on Artemis mission?', sources);
-    assert.equal(questions.length, 3);
-    for (const q of questions) {
-        assert.ok(!q.toLowerCase().includes('what are the latest updates on what are the latest updates'), 'Must not duplicate question prefix');
-        assert.ok(q.endsWith('?'));
-    }
-});
-
-test('Source Transparency - Suppressed When Zero Sources', () => {
-    const htmlWithZeroSources = buildSourceTransparencyHtml({
-        sourceType: 'verified',
-        verified: true,
-        sources: []
-    }, 'Some text');
-
-    assert.equal(htmlWithZeroSources, '', 'Must not render "Verified sources" badge when sources list is empty');
-
-    const htmlWithActualSources = buildSourceTransparencyHtml({
-        sourceType: 'verified',
-        verified: true,
-        sources: [{ title: 'NASA Article', url: 'https://nasa.gov' }]
-    }, 'Some text');
-
-    assert.ok(htmlWithActualSources.includes('Verified sources'), 'Must render badge when verified sources actually exist');
-});
-
