@@ -12341,7 +12341,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 ...meta,
                 sources,
                 sourceType: meta?.sourceType || '',
-                verified: meta?.verified === true || String(meta?.sourceType || '').toLowerCase() === 'verified',
+                verified: hasTopSources && (meta?.verified === true || String(meta?.sourceType || '').toLowerCase() === 'verified'),
                 reason: meta?.reason || meta?.sourceReason || ''
             };
             // The top interactive Sources Carousel displays the verified sources; omit the redundant bottom text list.
@@ -20843,7 +20843,7 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
     const assistantMessageId = addChatMessage('', false, null, {
         allowEmpty: true,
         turnId: controller.turnId,
-        sourceType: 'verified'
+        sourceType: 'model'
     });
 
     let activeRow = null;
@@ -20903,7 +20903,7 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                     const row = getRow();
                     if (row) {
                         row.style.display = '';
-                        if (window.JarvisLiveResearch?.renderOrUpdateSourcesCarousel) {
+                        if (sources && sources.length > 0 && window.JarvisLiveResearch?.renderOrUpdateSourcesCarousel) {
                             window.JarvisLiveResearch.renderOrUpdateSourcesCarousel(row, sources);
                         }
                         maybeAutoScroll(document.getElementById('chat-container'));
@@ -20912,32 +20912,36 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                 onToken: ({ streamedText }) => {
                     const row = getRow();
                     if (row) row.style.display = '';
+                    const hasLiveSources = Array.isArray(controller.sources) && controller.sources.length > 0;
                     updateStreamingAssistantMessage(assistantMessageId, streamedText, {
                         turnId: controller.turnId,
                         streaming: true,
                         sources: controller.sources,
-                        sourceType: 'verified'
+                        sourceType: hasLiveSources ? 'verified' : 'model'
                     });
                 },
                 onStreamComplete: ({ content, sources, telemetry }) => {
                     hideThinkingIndicator();
                     const row = getRow();
+                    const hasSources = Array.isArray(sources) && sources.length > 0;
                     if (row) {
                         row.style.display = '';
-                        if (window.JarvisLiveResearch?.renderOrUpdateSourcesCarousel) {
+                        if (hasSources && window.JarvisLiveResearch?.renderOrUpdateSourcesCarousel) {
                             window.JarvisLiveResearch.renderOrUpdateSourcesCarousel(row, sources);
                         }
                     }
                     updateStreamingAssistantMessage(assistantMessageId, content, {
                         turnId: controller.turnId,
                         streaming: false,
-                        sources,
-                        sourceType: 'verified'
+                        sources: sources || [],
+                        sourceType: hasSources ? 'verified' : 'model'
                     });
 
-                    if (row && window.JarvisLiveResearch?.generateRelatedResearchQuestions) {
+                    if (row && hasSources && window.JarvisLiveResearch?.generateRelatedResearchQuestions) {
                         const questions = window.JarvisLiveResearch.generateRelatedResearchQuestions(query, sources);
-                        window.JarvisLiveResearch.renderRelatedQuestionsTray(row, questions);
+                        if (questions && questions.length > 0) {
+                            window.JarvisLiveResearch.renderRelatedQuestionsTray(row, questions);
+                        }
                     }
 
                     console.log('[Bounded Live Research Telemetry]', {
@@ -20956,24 +20960,27 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                 onFallbackComplete: ({ content, sources, telemetry }) => {
                     hideThinkingIndicator();
                     const row = getRow();
+                    const hasSources = Array.isArray(sources) && sources.length > 0;
                     if (row) {
                         row.style.display = '';
                         row.dataset.boundedResearchTerminal = 'true';
-                        if (window.JarvisLiveResearch?.renderOrUpdateSourcesCarousel) {
+                        if (hasSources && window.JarvisLiveResearch?.renderOrUpdateSourcesCarousel) {
                             window.JarvisLiveResearch.renderOrUpdateSourcesCarousel(row, sources);
                         }
                     }
                     updateStreamingAssistantMessage(assistantMessageId, content, {
                         turnId: controller.turnId,
                         streaming: false,
-                        sources,
-                        sourceType: 'verified',
+                        sources: sources || [],
+                        sourceType: hasSources ? 'verified' : 'model',
                         isFallback: true
                     });
 
-                    if (row && window.JarvisLiveResearch?.generateRelatedResearchQuestions) {
+                    if (row && hasSources && window.JarvisLiveResearch?.generateRelatedResearchQuestions) {
                         const questions = window.JarvisLiveResearch.generateRelatedResearchQuestions(query, sources);
-                        window.JarvisLiveResearch.renderRelatedQuestionsTray(row, questions);
+                        if (questions && questions.length > 0) {
+                            window.JarvisLiveResearch.renderRelatedQuestionsTray(row, questions);
+                        }
                     }
 
                     console.warn('[Bounded Live Research 9.0s Fallback Triggered]', {
