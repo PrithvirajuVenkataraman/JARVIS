@@ -20897,48 +20897,69 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                 });
             },
             uiCallbacks: {
-                onSourcesReady: ({ sources }) => {
+                onStateTransition: ({ state, meta }) => {
+                    if (state === 'SEARCHING') {
+                        window.JarvisInteractionState?.transition?.('SEARCHING', { metadata: { query, turnId: controller.turnId } });
+                        showThinkingIndicator('Searching web sources...');
+                    } else if (state === 'SOURCE_GROUNDED_SYNTHESIS') {
+                        window.JarvisInteractionState?.transition?.('GENERATING', { metadata: { turnId: controller.turnId } });
+                        showThinkingIndicator('Synthesizing grounded answer...');
+                    }
+                },
+                onSourcesValidated: ({ sources, provenance }) => {
                     hideThinkingIndicator();
-                    window.JarvisInteractionState?.transition?.('GENERATING', { metadata: { turnId: controller.turnId } });
                     const row = getRow();
                     if (row) {
                         row.style.display = '';
-                        if (sources && sources.length > 0 && window.JarvisLiveResearch?.renderOrUpdateSourcesCarousel) {
+                        if (provenance === 'web_grounded' && sources && sources.length > 0 && window.JarvisLiveResearch?.renderOrUpdateSourcesCarousel) {
                             window.JarvisLiveResearch.renderOrUpdateSourcesCarousel(row, sources);
                         }
                         maybeAutoScroll(document.getElementById('chat-container'));
                     }
                 },
                 onToken: ({ streamedText }) => {
+                    if (window.JarvisLiveResearch?.activeController !== controller || controller.isTerminal) return;
                     const row = getRow();
                     if (row) row.style.display = '';
-                    const hasLiveSources = Array.isArray(controller.sources) && controller.sources.length > 0;
                     updateStreamingAssistantMessage(assistantMessageId, streamedText, {
                         turnId: controller.turnId,
                         streaming: true,
                         sources: controller.sources,
-                        sourceType: hasLiveSources ? 'verified' : 'model'
+                        sourceType: 'verified',
+                        provenance: 'web_grounded'
                     });
                 },
-                onStreamComplete: ({ content, sources, telemetry }) => {
+                onComplete: ({ content, sources, provenance, telemetry }) => {
+                    if (window.JarvisLiveResearch?.activeController !== controller && !controller.isTerminal) return;
                     hideThinkingIndicator();
                     const row = getRow();
-                    const hasSources = Array.isArray(sources) && sources.length > 0;
+                    const isWebGrounded = provenance === 'web_grounded' && Array.isArray(sources) && sources.length > 0;
                     if (row) {
                         row.style.display = '';
-                        if (hasSources && window.JarvisLiveResearch?.renderOrUpdateSourcesCarousel) {
+                        if (provenance !== 'web_grounded') {
+                            row.dataset.boundedResearchTerminal = 'true';
+                        }
+                        if (isWebGrounded && window.JarvisLiveResearch?.renderOrUpdateSourcesCarousel) {
                             window.JarvisLiveResearch.renderOrUpdateSourcesCarousel(row, sources);
                         }
                     }
+
                     updateStreamingAssistantMessage(assistantMessageId, content, {
                         turnId: controller.turnId,
                         streaming: false,
                         sources: sources || [],
-                        sourceType: hasSources ? 'verified' : 'model'
+                        sourceType: isWebGrounded ? 'verified' : (provenance === 'no_sources' ? 'no_sources' : 'model'),
+                        sourceLabel: isWebGrounded ? `${sources.length} verified sources` : (provenance === 'no_sources' ? 'No live sources returned' : 'Fallback answer'),
+                        provenance,
+                        isFallback: provenance !== 'web_grounded'
                     });
 
-                    if (row && hasSources && window.JarvisLiveResearch?.generateRelatedResearchQuestions) {
-                        const questions = window.JarvisLiveResearch.generateRelatedResearchQuestions(query, sources);
+                    if (row && isWebGrounded && window.JarvisLiveResearch?.generateRelatedResearchQuestions) {
+                        const questions = window.JarvisLiveResearch.generateRelatedResearchQuestions({
+                            query,
+                            sources,
+                            answer: content
+                        });
                         if (questions && questions.length > 0) {
                             window.JarvisLiveResearch.renderRelatedQuestionsTray(row, questions);
                         }
@@ -20946,48 +20967,11 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
 
                     console.log('[Bounded Live Research Telemetry]', {
                         turnId: controller.turnId,
+                        state: controller.state,
+                        provenance,
                         totalDurationMs: telemetry.t_completed ? Math.round(telemetry.t_completed - telemetry.t_start) : null,
                         searchCutoffMs: telemetry.t_search_cutoff ? Math.round(telemetry.t_search_cutoff - telemetry.t_start) : null,
-                        sourcesCount: sources.length,
-                        telemetry
-                    });
-
-                    window.JarvisInteractionState?.transition?.('IDLE');
-                    saveToHistory(rawUserText || query, content);
-                    if (typeof setWebSearchMode === 'function') setWebSearchMode('off');
-                    resolve(true);
-                },
-                onFallbackComplete: ({ content, sources, telemetry }) => {
-                    hideThinkingIndicator();
-                    const row = getRow();
-                    const hasSources = Array.isArray(sources) && sources.length > 0;
-                    if (row) {
-                        row.style.display = '';
-                        row.dataset.boundedResearchTerminal = 'true';
-                        if (hasSources && window.JarvisLiveResearch?.renderOrUpdateSourcesCarousel) {
-                            window.JarvisLiveResearch.renderOrUpdateSourcesCarousel(row, sources);
-                        }
-                    }
-                    updateStreamingAssistantMessage(assistantMessageId, content, {
-                        turnId: controller.turnId,
-                        streaming: false,
-                        sources: sources || [],
-                        sourceType: hasSources ? 'verified' : 'model',
-                        isFallback: true
-                    });
-
-                    if (row && hasSources && window.JarvisLiveResearch?.generateRelatedResearchQuestions) {
-                        const questions = window.JarvisLiveResearch.generateRelatedResearchQuestions(query, sources);
-                        if (questions && questions.length > 0) {
-                            window.JarvisLiveResearch.renderRelatedQuestionsTray(row, questions);
-                        }
-                    }
-
-                    console.warn('[Bounded Live Research 9.0s Fallback Triggered]', {
-                        turnId: controller.turnId,
-                        totalDurationMs: telemetry.t_completed ? Math.round(telemetry.t_completed - telemetry.t_start) : null,
-                        searchCutoffMs: telemetry.t_search_cutoff ? Math.round(telemetry.t_search_cutoff - telemetry.t_start) : null,
-                        sourcesCount: sources.length,
+                        sourcesCount: sources ? sources.length : 0,
                         telemetry
                     });
 
