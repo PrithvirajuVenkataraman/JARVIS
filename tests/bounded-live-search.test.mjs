@@ -8,7 +8,9 @@ import {
     formatSourcesForPrompt,
     generateSnippetFallback,
     generateRelatedResearchQuestions,
-    parseCitationsInHtml
+    parseCitationsInHtml,
+    normalizeUserQuery,
+    hasSearchableContent
 } from '../app/bounded-live-research.js';
 import { parseGoogleNewsRssXml } from '../api/_lib/free-live/providers.js';
 import { buildSourceTransparencyHtml } from '../app/source-transparency.js';
@@ -474,3 +476,176 @@ test('Google News RSS XML Parser', () => {
     assert.equal(items[0].sourceLabel, 'Google News / Reuters');
     assert.ok(items[0].trusted);
 });
+
+// ============================================================================
+// CANONICAL QUERY NORMALIZATION & SEARCHABLE CONTENT VALIDATION TESTS
+// ============================================================================
+
+test('Canonical Query Normalizer - whitespace, HTML entities, and invisible format characters', () => {
+    // Null/undefined/empty
+    assert.equal(normalizeUserQuery(null), '');
+    assert.equal(normalizeUserQuery(undefined), '');
+    assert.equal(normalizeUserQuery(''), '');
+    assert.equal(normalizeUserQuery('   '), '');
+
+    // HTML entities
+    assert.equal(normalizeUserQuery('&nbsp;&nbsp;'), '');
+    assert.equal(normalizeUserQuery('hello&nbsp;world'), 'hello world');
+    assert.equal(normalizeUserQuery('&NBSP;test&nbsp;'), 'test');
+
+    // Standalone blank glyphs: Braille Pattern Blank (\u2800), Hangul Fillers (\u3164, \uFFA0)
+    assert.equal(normalizeUserQuery('\u2800'), '');
+    assert.equal(normalizeUserQuery('\u3164'), '');
+    assert.equal(normalizeUserQuery('\uFFA0'), '');
+    assert.equal(normalizeUserQuery(' \u2800 \u3164 '), '');
+
+    // Unicode format characters (\p{Cf}): zero-width spaces, bidi marks, word joiners, BOM
+    assert.equal(normalizeUserQuery('\u200B'), ''); // Zero-width space
+    assert.equal(normalizeUserQuery('\u200C'), ''); // Zero-width non-joiner
+    assert.equal(normalizeUserQuery('\u200D'), ''); // Zero-width joiner
+    assert.equal(normalizeUserQuery('\u200E'), ''); // Left-to-right mark
+    assert.equal(normalizeUserQuery('\u200F'), ''); // Right-to-left mark
+    assert.equal(normalizeUserQuery('\u202A\u202E'), ''); // Embedding and override
+    assert.equal(normalizeUserQuery('\u2060'), ''); // Word joiner
+    assert.equal(normalizeUserQuery('\u2066\u2069'), ''); // Isolates
+    assert.equal(normalizeUserQuery('\uFEFF'), ''); // BOM / ZWNBSP
+    assert.equal(normalizeUserQuery('\u180E'), ''); // Mongolian vowel separator
+
+    // Combinations of invisibles, HTML entities, and whitespace
+    assert.equal(normalizeUserQuery(' \u200B &nbsp; \u2800 \uFEFF \u200E  '), '');
+
+    // Embedded invisibles inside real text should be cleanly stripped while text is preserved
+    assert.equal(normalizeUserQuery('live\u200Bsearch\uFEFFquery'), 'livesearchquery');
+    assert.equal(normalizeUserQuery('  what  \u200E is  \u2800  AI?  '), 'what is AI?');
+});
+
+test('Canonical Query Normalizer - multilingual query preservation', () => {
+    // English
+    assert.equal(normalizeUserQuery('What is quantum computing?'), 'What is quantum computing?');
+
+    // Tamil
+    assert.equal(normalizeUserQuery('சென்னை வானிலை என்ன?'), 'சென்னை வானிலை என்ன?');
+
+    // Hindi
+    assert.equal(normalizeUserQuery('आज का मौसम कैसा है?'), 'आज का मौसम कैसा है?');
+
+    // Kannada
+    assert.equal(normalizeUserQuery('ಬೆಂಗಳೂರು ಹವಾಮಾನ'), 'ಬೆಂಗಳೂರು ಹವಾಮಾನ');
+
+    // Chinese
+    assert.equal(normalizeUserQuery('今天的最新新闻'), '今天的最新新闻');
+
+    // Japanese
+    assert.equal(normalizeUserQuery('東京の天気'), '東京の天気');
+
+    // Digits / Alphanumeric
+    assert.equal(normalizeUserQuery('2026 inflation rate forecast'), '2026 inflation rate forecast');
+});
+
+test('Canonical Searchable Content Validation - hasSearchableContent', () => {
+    // Non-searchable: empty, whitespace, invisibles
+    assert.equal(hasSearchableContent(''), false);
+    assert.equal(hasSearchableContent('   '), false);
+    assert.equal(hasSearchableContent(null), false);
+    assert.equal(hasSearchableContent(undefined), false);
+    assert.equal(hasSearchableContent('&nbsp;'), false);
+    assert.equal(hasSearchableContent('\u2800'), false);
+    assert.equal(hasSearchableContent('\u200B\uFEFF'), false);
+    assert.equal(hasSearchableContent(' \u200B \u2800 \u3164 \uFEFF '), false);
+
+    // Non-searchable: punctuation only (cannot produce meaningful web search)
+    assert.equal(hasSearchableContent('???'), false);
+    assert.equal(hasSearchableContent('...!@#$%^&*()'), false);
+    assert.equal(hasSearchableContent('---'), false);
+    assert.equal(hasSearchableContent('.,;:'), false);
+
+    // Searchable: valid multilingual text
+    assert.equal(hasSearchableContent('hello'), true);
+    assert.equal(hasSearchableContent('What is quantum computing?'), true);
+    assert.equal(hasSearchableContent('சென்னை'), true);
+    assert.equal(hasSearchableContent('मौसम'), true);
+    assert.equal(hasSearchableContent('ಬೆಂಗಳೂರು'), true);
+    assert.equal(hasSearchableContent('新闻'), true);
+    assert.equal(hasSearchableContent('天気'), true);
+    assert.equal(hasSearchableContent('2026'), true);
+    assert.equal(hasSearchableContent('  AI 2026?  '), true);
+});
+
+test('Pre-network Rejection: Invalid or invisible query invokes fetchSearchFn ZERO times', async () => {
+    const invalidInputs = [
+        '',
+        '   ',
+        '\u200B',
+        '\u2800',
+        '\u3164',
+        '&nbsp;&nbsp;',
+        ' \u200B \u2800 \uFEFF \u200E ',
+        '???',
+        '...!@#'
+    ];
+
+    for (const raw of invalidInputs) {
+        const controller = new BoundedLiveResearchController({
+            searchCutoffMs: 200,
+            fallbackWarningMs: 500,
+            hardDeadlineMs: 700
+        });
+
+        let fetchSearchCallCount = 0;
+        let llmSynthesisCallCount = 0;
+
+        const result = await controller.execute({
+            query: raw,
+            userText: raw,
+            assistantMessageId: 'msg_pre_network_test',
+            fetchSearchFn: async () => {
+                fetchSearchCallCount++;
+                return { results: [] };
+            },
+            streamSynthesisFn: async () => {
+                llmSynthesisCallCount++;
+            }
+        });
+
+        // Strict Architectural Invariants:
+        assert.equal(fetchSearchCallCount, 0, `fetchSearchFn must NEVER be invoked for invalid input: ${JSON.stringify(raw)}`);
+        assert.equal(llmSynthesisCallCount, 0, `LLM synthesis must NEVER be invoked for invalid input: ${JSON.stringify(raw)}`);
+        assert.equal(controller.timers.length, 0, 'No timers should remain active');
+        assert.equal(result.state, RESEARCH_STATES.COMPLETE);
+        assert.equal(result.provenance, PROVENANCE_MODES.NO_SOURCES);
+        assert.equal(result.success, false);
+        assert.equal(result.fallback, true);
+        assert.equal(result.sources.length, 0);
+
+        // Content must be the actionable user-facing guidance, NEVER " "
+        assert.ok(!result.content.includes('" "'), `Content must never interpolate empty string into quotes: ${result.content}`);
+        assert.equal(result.content, 'Please provide a search topic or question so I can retrieve verified live web sources.');
+    }
+});
+
+test('Safety Fallback Invariant: generateSnippetFallback never renders " " for invalid or invisible queries', () => {
+    const edgeCases = [
+        '',
+        '   ',
+        '\u200B',
+        '\u2800',
+        '\u3164',
+        '\uFEFF',
+        '&nbsp;',
+        ' \u200B \u2800 ',
+        '???',
+        '!!!'
+    ];
+
+    for (const q of edgeCases) {
+        const res = generateSnippetFallback(q, []);
+        assert.ok(!res.includes('" "'), `generateSnippetFallback must not output " " for input ${JSON.stringify(q)}`);
+        assert.equal(res, 'Please provide a search topic or question so I can retrieve verified live web sources.');
+    }
+
+    // When valid query is passed with zero sources
+    const validRes = generateSnippetFallback('Mars Rover', []);
+    assert.ok(validRes.includes('Mars Rover'));
+    assert.ok(validRes.includes('did not return verified records before the deadline'));
+});
+
