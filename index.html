@@ -14356,10 +14356,40 @@ function formatLiveSearchFailureMessage(data = {}, status = 0) {
 async function fetchLiveSearchJson(query, options = {}) {
     window.JarvisInteractionState?.transition?.('SEARCHING', { metadata: { query } });
     showThinkingIndicator('Searching...');
+    const searchTimeout = options.timeoutMs || 4500;
+    let signal = options.signal;
+    if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+        const timeoutSig = AbortSignal.timeout(searchTimeout);
+        if (options.signal) {
+            if (typeof AbortSignal.any === 'function') {
+                signal = AbortSignal.any([options.signal, timeoutSig]);
+            } else {
+                const combinedController = new AbortController();
+                const forwardAbort = () => {
+                    try {
+                        combinedController.abort(options.signal.aborted ? options.signal.reason : timeoutSig.reason);
+                    } catch (_) {
+                        combinedController.abort();
+                    }
+                };
+                if (options.signal.aborted) {
+                    forwardAbort();
+                } else if (timeoutSig.aborted) {
+                    forwardAbort();
+                } else {
+                    options.signal.addEventListener('abort', forwardAbort, { once: true });
+                    timeoutSig.addEventListener('abort', forwardAbort, { once: true });
+                }
+                signal = combinedController.signal;
+            }
+        } else {
+            signal = timeoutSig;
+        }
+    }
     const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.search, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        signal: options.signal,
+        signal,
         body: JSON.stringify({
             query,
             maxResults: options.maxResults || 8,
@@ -14368,7 +14398,7 @@ async function fetchLiveSearchJson(query, options = {}) {
             factType: options.factType || '',
             mode: options.mode || options.searchMode || '',
             mustContain: Array.isArray(options.mustContain) ? options.mustContain : [],
-            timeoutMs: options.timeoutMs || 2200
+            timeoutMs: searchTimeout
         })
     });
     const data = await parseJsonResponseSafely(response);
@@ -20864,7 +20894,7 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
     const budgets = window.JarvisLiveResearch?.LIVE_RESEARCH_BUDGETS || {};
     const controller = new ControllerClass({
         searchCutoffMs: budgets.SEARCH_CUTOFF_MS ?? 5000,
-        searchTimeoutMs: budgets.SEARCH_TIMEOUT_MS ?? 4800,
+        searchTimeoutMs: budgets.SEARCH_TIMEOUT_MS ?? 4500,
         fallbackWarningMs: budgets.FALLBACK_WARNING_MS ?? 8500,
         hardDeadlineMs: budgets.HARD_DEADLINE_MS ?? 9000,
         minSourcesForEarlySynthesis: budgets.MIN_SOURCES_FOR_EARLY_SYNTHESIS ?? 2
@@ -20902,7 +20932,7 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                     maxResults: 8,
                     answer: false,
                     mode: 'rag',
-                    timeoutMs: timeoutMs || controller.searchTimeoutMs || 4800
+                    timeoutMs: timeoutMs || controller.searchTimeoutMs || 4500
                 });
             },
             streamSynthesisFn: async ({ prompt, sources, signal, timeoutMs, onToken }) => {
@@ -21008,6 +21038,8 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                         totalDurationMs: telemetry.t_completed ? Math.round(telemetry.t_completed - telemetry.t_start) : null,
                         searchCutoffMs: telemetry.t_search_cutoff ? Math.round(telemetry.t_search_cutoff - telemetry.t_start) : null,
                         sourcesCount: sources ? sources.length : 0,
+                        searchError: telemetry.searchError || null,
+                        httpStatus: telemetry.httpStatus || null,
                         providerTiming: telemetry.providerTiming || null,
                         telemetry
                     });
