@@ -134,7 +134,12 @@ export default async function handler(req, res) {
         const limit = clampInt(req.body?.limit || req.body?.maxResults, 8, 1, 20);
         const mode = normalizeSearchMode(req.body?.mode || req.body?.searchMode || '');
         if (mode === 'rag') {
-            const search = await runEvidenceFirstWebRag(query, { limit });
+            const answer = req.body?.answer !== false;
+            const search = await runEvidenceFirstWebRag(query, {
+                limit,
+                answer,
+                timeoutMs: req.body?.timeoutMs
+            });
             return res.status(200).json({
                 success: true,
                 query,
@@ -557,8 +562,8 @@ export async function searchPublicSources(query, options = {}) {
         ? options.plannedQueries
         : [normalizedQuery];
     const querySet = Array.from(new Set([
-        ...deterministicQueries,
         normalizedQuery,
+        ...deterministicQueries,
         ...plannedQueries.map(item => normalizeSearchQuery(item)).filter(Boolean)
     ])).slice(0, 7);
 
@@ -573,36 +578,62 @@ export async function searchPublicSources(query, options = {}) {
         ...targetQueries
     ])).slice(0, 2);
 
-    const boundedTimeoutMs = Math.min(Number(options.timeoutMs) || 2200, 2400);
-    const asyncTasks = [
-        Promise.allSettled(targetQueries.slice(0, 2).map(candidate => searchGoogleNewsRss(candidate, { limit, timeoutMs: boundedTimeoutMs }))),
-        Promise.allSettled(targetQueries.slice(0, 2).map(candidate => searchWikipedia(candidate, { limit: 2, timeoutMs: boundedTimeoutMs }))),
-        Promise.allSettled([searchWikidata(targetQueries[0] || normalizedQuery, { limit: 2, timeoutMs: boundedTimeoutMs })]),
-        Promise.allSettled([searchYahooFinanceQuotes(normalizedQuery, { limit: 2, timeoutMs: 1800 })]),
-        options.skipStructuredRoles === true
-            ? Promise.resolve([])
-            : Promise.allSettled([searchGovernmentRole(normalizedQuery, { limit: Math.min(3, limit), timeoutMs: boundedTimeoutMs })]),
-        options.skipGdelt === true
-            ? Promise.resolve([])
-            : Promise.allSettled(gdeltQueries.map(candidate => searchGdeltNews(candidate, { limit, timeoutMs: boundedTimeoutMs }))),
-        hasGeminiKey()
-            ? Promise.allSettled([searchGeminiGrounding(targetQueries[0] || normalizedQuery, { limit }).then(r => r.results || [])])
-            : Promise.resolve([])
-    ];
-
-    const settled = await Promise.all(asyncTasks);
-    const liveNews = (Array.isArray(settled[0]) ? settled[0] : []).flatMap(r => r.status === 'fulfilled' ? r.value : []);
-    const wiki = (Array.isArray(settled[1]) ? settled[1] : []).flatMap(r => r.status === 'fulfilled' ? r.value : []).slice(0, 3);
-    const wikidata = (Array.isArray(settled[2]) ? settled[2] : []).flatMap(r => r.status === 'fulfilled' ? r.value : []).slice(0, 2);
-    const liveWeb = (Array.isArray(settled[3]) ? settled[3] : [])
-        .flatMap(r => r.status === 'fulfilled' ? r.value : [])
-        .filter(item => !isPolitical || (!String(item?.url || '').includes('wikipedia.org') && !String(item?.url || '').includes('wikidata.org')));
-    const governmentRoleResults = (Array.isArray(settled[4]) ? settled[4] : []).flatMap(r => r.status === 'fulfilled' ? r.value : []);
-    const gdelt = (Array.isArray(settled[5]) ? settled[5] : []).flatMap(r => r.status === 'fulfilled' ? r.value : []);
-    const geminiGroundingResults = (Array.isArray(settled[6]) ? settled[6] : []).flatMap(r => r.status === 'fulfilled' ? r.value : []);
-
+    const boundedTimeoutMs = Math.min(Number(options.timeoutMs) || 4800, 4800);
     const roleIntent = parseGovernmentRoleQuery(normalizedQuery);
-    const isLeadership = roleIntent && isLeadershipOrRoleTerm(roleIntent.role);
+    const isLeadership = Boolean(roleIntent && isLeadershipOrRoleTerm(roleIntent.role));
+
+    let liveNews = [];
+    let wiki = [];
+    let wikidata = [];
+    let liveWeb = [];
+    let governmentRoleResults = [];
+    let gdelt = [];
+    let geminiGroundingResults = [];
+
+    const taskNews = Promise.allSettled(targetQueries.slice(0, 2).map(candidate => searchGoogleNewsRss(candidate, { limit, timeoutMs: Math.min(boundedTimeoutMs, 2500) })))
+        .then(s => { liveNews = s.flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []); });
+    const taskWiki = Promise.allSettled(targetQueries.slice(0, 2).map(candidate => searchWikipedia(candidate, { limit: 2, timeoutMs: Math.min(boundedTimeoutMs, 2500) })))
+        .then(s => { wiki = s.flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []).slice(0, 3); });
+    const taskWikidata = Promise.allSettled([searchWikidata(targetQueries[0] || normalizedQuery, { limit: 2, timeoutMs: Math.min(boundedTimeoutMs, 2200) })])
+        .then(s => { wikidata = s.flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []).slice(0, 2); });
+    const taskYahoo = Promise.allSettled([searchYahooFinanceQuotes(normalizedQuery, { limit: 2, timeoutMs: 1800 })])
+        .then(s => {
+            liveWeb = s.flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : [])
+                .filter(item => !isPolitical || (!String(item?.url || '').includes('wikipedia.org') && !String(item?.url || '').includes('wikidata.org')));
+        });
+    const taskGov = (options.skipStructuredRoles === true || !isLeadership)
+        ? Promise.resolve()
+        : Promise.allSettled([searchGovernmentRole(normalizedQuery, { limit: Math.min(3, limit), timeoutMs: Math.min(boundedTimeoutMs, 2500) })])
+            .then(s => { governmentRoleResults = (Array.isArray(s) ? s : []).flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []); });
+    const taskGdelt = options.skipGdelt === true
+        ? Promise.resolve()
+        : Promise.allSettled(gdeltQueries.map(candidate => searchGdeltNews(candidate, { limit, timeoutMs: boundedTimeoutMs })))
+            .then(s => { gdelt = (Array.isArray(s) ? s : []).flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []); });
+    const taskGemini = hasGeminiKey()
+        ? Promise.allSettled([searchGeminiGrounding(targetQueries[0] || normalizedQuery, { limit }).then(r => r.results || [])])
+            .then(s => { geminiGroundingResults = (Array.isArray(s) ? s : []).flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []); })
+        : Promise.resolve();
+
+    const fastTasks = [taskNews, taskWiki, taskWikidata, taskYahoo, taskGov];
+    const allTasks = [...fastTasks, taskGdelt, taskGemini];
+
+    // Wait for fast tasks to complete (or time out after 2500ms)
+    await Promise.race([
+        Promise.all(fastTasks),
+        new Promise(res => setTimeout(res, Math.min(boundedTimeoutMs, 2500)))
+    ]);
+
+    const getFastCount = () => (liveNews.length + wiki.length + wikidata.length + liveWeb.length + governmentRoleResults.length);
+
+    // If fast tasks returned sufficient sources (>= 4), proceed immediately!
+    // Otherwise wait for slower trailing tasks up to boundedTimeoutMs
+    if (getFastCount() < 4) {
+        const remainingMs = Math.max(100, boundedTimeoutMs - 2500);
+        await Promise.race([
+            Promise.all(allTasks),
+            new Promise(res => setTimeout(res, remainingMs))
+        ]);
+    }
 
     const combined = [
         ...governmentRoleResults,
@@ -623,8 +654,8 @@ export async function searchPublicSources(query, options = {}) {
         deduped.push(item);
         if (deduped.length >= Math.max(limit, 8)) break;
     }
-    if (options.skipAutoDeepCrawl !== true && options.allowDeepCrawl === true) {
-        await enrichSearchResultsWithDeepCrawl(deduped, 3).catch(() => {});
+    if (options.skipAutoDeepCrawl !== true && options.allowDeepCrawl === true && deduped.length < 3) {
+        await enrichSearchResultsWithDeepCrawl(deduped, 2).catch(() => {});
     }
     return deduped;
 }
@@ -1305,7 +1336,8 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
             limit,
             plannedQueries: phase1Queries,
             skipStructuredRoles: true,
-            skipAutoDeepCrawl: true
+            skipAutoDeepCrawl: true,
+            timeoutMs: options.timeoutMs
         }).then(r => {
             timing.publicSourcesMs = Number((performance.now() - searchStart).toFixed(1));
             return r;
@@ -1343,6 +1375,24 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
             skipEmbedding: options.skipEmbedding === true
         }).catch(() => rankSources(normalizedQuery, dedupeSearchResults(allResults).filter(item => isValidCitationSource(item, normalizedQuery))));
     allResults = allResults.slice(0, Math.max(limit, 8));
+
+    // Fast return if caller only requests verified sources without backend LLM synthesis
+    if (options.answer === false) {
+        timing.totalMs = Number((performance.now() - totalStart).toFixed(1));
+        timing.totalLatencyMs = timing.totalMs;
+        const results = allResults.slice(0, limit);
+        return {
+            provider: 'web_rag',
+            results,
+            sourceCount: results.length,
+            distinctDomains: Array.from(new Set(results.map(item => item.domain).filter(Boolean))),
+            distinctDomainCount: new Set(results.map(item => item.domain).filter(Boolean)).size,
+            trustedCount: results.filter(item => item.trusted || item.sourceType === 'official_source').length,
+            publicSourceCount: results.length,
+            timing,
+            warnings
+        };
+    }
 
     if (process.env.NVIDIA_API_KEY && allResults.length > 0 && options.skipEmbedding !== true) {
         const embStart = performance.now();
@@ -1729,9 +1779,13 @@ export function parseGovernmentRoleQuery(query) {
     // 1. "[Who/What is/was the] [Predicate] of/for/in [Subject]?"
     const ofMatch = raw.match(/^(?:(?:who|what)\s+(?:is|was|are|were)\s+)?(?:the\s+)?(?:current\s+|latest\s+)?(.+?)\s+(?:of|for|in|during)\s+(.+?)[?.!]*$/i);
     if (ofMatch && ofMatch[1] && ofMatch[2]) {
-        predicate = cleanPredicateText(ofMatch[1]);
-        subject = cleanSubjectText(ofMatch[2]);
-        roleText = ofMatch[1].trim();
+        const candidatePred = cleanPredicateText(ofMatch[1]);
+        const candidateSubj = cleanSubjectText(ofMatch[2]);
+        if (!/\b(news|updates?|price|prices|reviews?|photos?|pictures?|images?|features?|specs?|specifications?|meaning|definition|weather|temperature|stock|shares?|lyrics|trailer)\b/i.test(candidatePred)) {
+            predicate = candidatePred;
+            subject = candidateSubj;
+            roleText = ofMatch[1].trim();
+        }
     }
 
     // 2. "[Subject] [Predicate]" e.g. "Tamil Nadu CM", "Apollo 11 commander", "France president"
@@ -1746,9 +1800,11 @@ export function parseGovernmentRoleQuery(query) {
                 roleText = lastTwo;
             } else {
                 const lastOne = words[words.length - 1];
-                predicate = cleanPredicateText(lastOne);
-                subject = cleanSubjectText(words.slice(0, -1).join(' '));
-                roleText = lastOne;
+                if (isLeadershipOrRoleTerm(lastOne)) {
+                    predicate = cleanPredicateText(lastOne);
+                    subject = cleanSubjectText(words.slice(0, -1).join(' '));
+                    roleText = lastOne;
+                }
             }
         }
     }
@@ -3956,7 +4012,7 @@ function buildSearchQueryRewrite(query) {
 }
 
 export function isLeadershipOrRoleTerm(term = '') {
-    return /\b(ceo|chief executive officer|managing director|chairman|chairperson|president|prime minister|pm|chief minister|cm|governor|mayor|founder|captain|coach|leader|premier|chancellor|minister|head of state|head of government|monarch|director)\b/i.test(term);
+    return /\b(ceo|chief executive officer|cfo|cto|coo|managing director|chairman|chairperson|president|prime minister|pm|chief minister|cm|governor|mayor|founder|co-founder|captain|coach|leader|civic leader|premier|chancellor|minister|head of state|head of government|monarch|director|commander|secretary general|pope|king|queen|emperor|viceroy|god of war|god of underworld)\b/i.test(term);
 }
 
 export function buildDeterministicSearchQueries(query) {
@@ -4019,7 +4075,7 @@ function extractSearchSubject(query) {
     if (universal?.jurisdiction) return cleanQueryTarget(universal.jurisdiction);
     const normalized = normalizeSearchQuery(query);
     const text = normalized
-        .replace(/\b(?:latest|recent|current|newest|reviews?|review|hands-on|worth\s+it|good|best|price|available|availability|launched|released?|winner|won|champion|rankings?|standings?|compare|comparison|vs|movies?|films?|songs?|albums?|releases?)\b/gi, ' ')
+        .replace(/\b(?:latest|recent|current|newest|reviews?|review|hands-on|worth\s+it|good|best|price|available|availability|launched|released?|winner|won|champion|rankings?|standings?|compare|comparison|vs|movies?|films?|songs?|albums?|releases?|facts?|info(?:rmation)?|background|overview|details?)\b/gi, ' ')
         .replace(/\b(?:in|during|as of|by|before|after)\s+\d{4}\b/gi, ' ')
         .replace(/\b(?:of|for|about|on|the|is|are|should|i|buy|get|now|today|live|exact|rate)\b/gi, ' ')
         .replace(/\s+/g, ' ')
