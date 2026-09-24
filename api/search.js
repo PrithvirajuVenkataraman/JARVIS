@@ -138,7 +138,7 @@ export default async function handler(req, res) {
             const search = await runEvidenceFirstWebRag(query, {
                 limit,
                 answer,
-                timeoutMs: req.body?.timeoutMs
+                timeoutMs: Math.min(Number(req.body?.timeoutMs) || 4000, 4000)
             });
             return res.status(200).json({
                 success: true,
@@ -578,7 +578,7 @@ export async function searchPublicSources(query, options = {}) {
         ...targetQueries
     ])).slice(0, 2);
 
-    const boundedTimeoutMs = Math.min(Number(options.timeoutMs) || 4800, 4800);
+    const boundedTimeoutMs = Math.min(Number(options.timeoutMs) || 4000, 4000);
     const roleIntent = parseGovernmentRoleQuery(normalizedQuery);
     const isLeadership = Boolean(roleIntent && isLeadershipOrRoleTerm(roleIntent.role));
 
@@ -607,7 +607,7 @@ export async function searchPublicSources(query, options = {}) {
             .then(s => { governmentRoleResults = (Array.isArray(s) ? s : []).flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []); });
     const taskGdelt = options.skipGdelt === true
         ? Promise.resolve()
-        : Promise.allSettled(gdeltQueries.map(candidate => searchGdeltNews(candidate, { limit, timeoutMs: boundedTimeoutMs })))
+        : Promise.allSettled(gdeltQueries.map(candidate => searchGdeltNews(candidate, { limit, timeoutMs: Math.min(boundedTimeoutMs, 3000) })))
             .then(s => { gdelt = (Array.isArray(s) ? s : []).flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []); });
     const taskGemini = hasGeminiKey()
         ? Promise.allSettled([searchGeminiGrounding(targetQueries[0] || normalizedQuery, { limit }).then(r => r.results || [])])
@@ -625,10 +625,10 @@ export async function searchPublicSources(query, options = {}) {
 
     const getFastCount = () => (liveNews.length + wiki.length + wikidata.length + liveWeb.length + governmentRoleResults.length);
 
-    // If fast tasks returned sufficient sources (>= 4), proceed immediately!
+    // If fast tasks returned sufficient sources (>= 2), proceed immediately!
     // Otherwise wait for slower trailing tasks up to boundedTimeoutMs
-    if (getFastCount() < 4) {
-        const remainingMs = Math.max(100, boundedTimeoutMs - 2500);
+    if (getFastCount() < 2) {
+        const remainingMs = Math.max(50, boundedTimeoutMs - 2500);
         await Promise.race([
             Promise.all(allTasks),
             new Promise(res => setTimeout(res, remainingMs))
@@ -1337,7 +1337,7 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
             plannedQueries: phase1Queries,
             skipStructuredRoles: true,
             skipAutoDeepCrawl: true,
-            timeoutMs: options.timeoutMs
+            timeoutMs: Math.min(Number(options.timeoutMs) || 4000, 4000)
         }).then(r => {
             timing.publicSourcesMs = Number((performance.now() - searchStart).toFixed(1));
             return r;
@@ -1372,7 +1372,7 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
     // In-Process Hybrid Reranking (BM25 + Semantic Embeddings + Reciprocal Rank Fusion)
     allResults = await hybridRerank(normalizedQuery, dedupeSearchResults(allResults)
         .filter(item => isValidCitationSource(item, normalizedQuery)), {
-            skipEmbedding: options.skipEmbedding === true
+            skipEmbedding: options.skipEmbedding === true || options.answer === false
         }).catch(() => rankSources(normalizedQuery, dedupeSearchResults(allResults).filter(item => isValidCitationSource(item, normalizedQuery))));
     allResults = allResults.slice(0, Math.max(limit, 8));
 
