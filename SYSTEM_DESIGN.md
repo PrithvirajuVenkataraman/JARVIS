@@ -15,7 +15,7 @@ graph TD
         VTTController["Enterprise Voice-to-Text (VTT & Dictation)"]
         EmergencySosSubsystem["Emergency SOS & Satellite Distress Subsystem"]
         OfflineWatchdog["Network Resilience Watchdog"]
-        AudioHaptics["Web Audio Chimes & Haptics Engine"]
+        AudioHaptics["Web Audio Chimes Engine"]
         VectorEngine["512-Dim Dense Vector Embedding & Semantic Search"]
     end
 
@@ -196,9 +196,9 @@ For long conversations (50+ turns), JARVIS maintains full conversational coheren
 ```mermaid
 flowchart LR
     A["Raw Chat History (Turns 1 to N)"] --> B{"Turn Count > 10?"}
-    B -- No --> C["Verbatim Context (All Turns)"]
-    B -- Yes --> D["Older Turns (1 to N-10) -> Condensed (Conversation Digest)"]
-    B -- Yes --> E["Recent Turns (N-9 to N) -> Verbatim Stream Block"]
+    B -->|"No"| C["Verbatim Context (All Turns)"]
+    B -->|"Yes"| D["Older Turns (1 to N-10) &rarr; Condensed (Conversation Digest)"]
+    B -->|"Yes"| E["Recent Turns (N-9 to N) &rarr; Verbatim Stream Block"]
     D --> F["Compacted Context Payload"]
     E --> F
 ```
@@ -225,7 +225,6 @@ JARVIS features an enterprise-grade production dictation system matching profess
    - Automatic fallback to high-accuracy Whisper STT (`/api/stt`) when browser recognition is unsupported or network errors occur.
 5. **Sensory Feedback**:
    - Native Web Audio synthesizer chimes (`playJarvisChime`) on activation.
-   - Haptic vibration feedback (`triggerJarvisHaptic`) on mobile devices.
 
 ---
 
