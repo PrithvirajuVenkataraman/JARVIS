@@ -10,6 +10,24 @@
  * - T + 9000ms: HARD APPLICATION DEADLINE. Abort stream. Render verified snippet answer. Lock turn state.
  */
 
+export const RESEARCH_STATES = Object.freeze({
+    REQUESTED: 'REQUESTED',
+    SEARCHING: 'SEARCHING',
+    SEARCH_DEADLINE: 'SEARCH_DEADLINE',
+    SOURCE_VALIDATION: 'SOURCE_VALIDATION',
+    SOURCE_GROUNDED_SYNTHESIS: 'SOURCE_GROUNDED_SYNTHESIS',
+    NO_SOURCES: 'NO_SOURCES',
+    COMPLETE: 'COMPLETE',
+    ABORTED: 'ABORTED'
+});
+
+export const PROVENANCE_MODES = Object.freeze({
+    WEB_GROUNDED: 'web_grounded',
+    NO_SOURCES: 'no_sources',
+    SYNTHESIS_FALLBACK: 'synthesis_fallback',
+    ABORTED: 'aborted'
+});
+
 export function getDomainFromUrl(url) {
     try {
         return new URL(String(url || '')).hostname.toLowerCase().replace(/^www\./, '');
@@ -105,7 +123,23 @@ export function generateSnippetFallback(query, sources = []) {
  * Generates 3 contextual follow-up research questions.
  * Strictly non-blocking. Derived dynamically with zero hardcoding.
  */
-export function generateRelatedResearchQuestions(query, sources = []) {
+export function generateRelatedResearchQuestions(optionsOrQuery, sourcesArg = [], answerArg = '') {
+    let query = '';
+    let topicInput = '';
+    let sources = [];
+    let answer = '';
+
+    if (optionsOrQuery && typeof optionsOrQuery === 'object' && !Array.isArray(optionsOrQuery)) {
+        query = optionsOrQuery.query || '';
+        topicInput = optionsOrQuery.topic || '';
+        sources = Array.isArray(optionsOrQuery.sources) ? optionsOrQuery.sources : [];
+        answer = optionsOrQuery.answer || '';
+    } else {
+        query = String(optionsOrQuery || '');
+        sources = Array.isArray(sourcesArg) ? sourcesArg : [];
+        answer = String(answerArg || '');
+    }
+
     if (!Array.isArray(sources) || sources.length === 0) {
         return [];
     }
@@ -302,8 +336,15 @@ export function renderRelatedQuestionsTray(rowElement, questions = [], onSelect 
     `;
 }
 
+let _globalGenerationCounter = 0;
+
 /**
  * Master Bounded Live Research Controller with strict Application Deadline.
+ * Enforces explicit lifecycle state machine and provenance contract:
+ * REQUESTED -> SEARCHING -> SEARCH_DEADLINE -> SOURCE_VALIDATION
+ *           -> SOURCE_GROUNDED_SYNTHESIS (if sources.length > 0)
+ *           -> NO_SOURCES (if sources.length === 0)
+ *           -> COMPLETE
  */
 export class BoundedLiveResearchController {
     constructor(options = {}) {
@@ -311,7 +352,10 @@ export class BoundedLiveResearchController {
         this.fallbackWarningMs = options.fallbackWarningMs || 8500;
         this.hardDeadlineMs = options.hardDeadlineMs || 9000;
         this.turnId = 'turn_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+        this.generationId = ++_globalGenerationCounter;
 
+        this.state = RESEARCH_STATES.REQUESTED;
+        this.provenance = null;
         this.isTerminal = false;
         this.isFallbackRendered = false;
         this.sources = [];
@@ -332,15 +376,48 @@ export class BoundedLiveResearchController {
         this.searchAbortController = new AbortController();
         this.streamAbortController = new AbortController();
         this.timers = [];
+        this._resolveExecution = null;
+    }
+
+    transition(nextState, meta = {}, uiCallbacks = {}) {
+        if (this.isTerminal) return false;
+        const prevState = this.state;
+        this.state = nextState;
+
+        if (nextState === RESEARCH_STATES.COMPLETE || nextState === RESEARCH_STATES.ABORTED) {
+            this.isTerminal = true;
+            this.clearAllTimers();
+        }
+
+        try {
+            uiCallbacks.onStateTransition?.({
+                state: nextState,
+                prevState,
+                turnId: this.turnId,
+                provenance: this.provenance,
+                meta
+            });
+        } catch (_) {}
+        return true;
     }
 
     abort() {
-        this.isTerminal = true;
+        if (this.isTerminal) return;
+        this.provenance = PROVENANCE_MODES.ABORTED;
+        this.transition(RESEARCH_STATES.ABORTED);
         this.clearAllTimers();
         try { this.searchAbortController.abort(); } catch (_) {}
         try { this.streamAbortController.abort(); } catch (_) {}
         if (typeof this._resolveExecution === 'function') {
-            this._resolveExecution({ success: false, aborted: true });
+            this._resolveExecution({
+                success: false,
+                aborted: true,
+                state: RESEARCH_STATES.ABORTED,
+                provenance: PROVENANCE_MODES.ABORTED,
+                turnId: this.turnId,
+                content: '',
+                sources: []
+            });
             this._resolveExecution = null;
         }
     }
@@ -363,109 +440,210 @@ export class BoundedLiveResearchController {
         return new Promise((resolve) => {
             this._resolveExecution = resolve;
             this.telemetry.t_start = performance.now();
-            const startTime = this.telemetry.t_start;
 
-        // Schedule Search Cutoff at T+2500ms
-        let searchCutoffTriggered = false;
-        const triggerSearchCutoff = () => {
-            if (searchCutoffTriggered || this.isTerminal) return;
-            searchCutoffTriggered = true;
-            this.telemetry.t_search_cutoff = performance.now();
-            try { this.searchAbortController.abort(); } catch (_) {}
-            this.sources = normalizeResearchSources(this.rawSearchResults, query);
-            this.telemetry.t_sources_rendered = performance.now();
+            this.transition(RESEARCH_STATES.SEARCHING, {}, uiCallbacks);
 
-            if (typeof uiCallbacks.onSourcesReady === 'function') {
-                uiCallbacks.onSourcesReady({
+            let searchCutoffTriggered = false;
+
+            const completeExecution = ({ success, fallback = false, provenance, content, sources }) => {
+                if (this.state === RESEARCH_STATES.COMPLETE || this.state === RESEARCH_STATES.ABORTED) return;
+                this.provenance = provenance;
+                this.telemetry.t_completed = performance.now();
+                this.transition(RESEARCH_STATES.COMPLETE, { provenance }, uiCallbacks);
+
+                const finalPayload = {
+                    success,
+                    fallback,
+                    state: RESEARCH_STATES.COMPLETE,
+                    provenance,
+                    content,
+                    sources: sources || [],
                     turnId: this.turnId,
-                    sources: this.sources,
-                    assistantMessageId
-                });
-            }
-
-            // Immediately dispatch LLM synthesis with available sources
-            startSynthesis();
-        };
-
-        const cutoffTimer = setTimeout(triggerSearchCutoff, this.searchCutoffMs);
-        this.timers.push(cutoffTimer);
-
-        // Schedule Fallback Warning at T+8500ms
-        const fallbackWarningTimer = setTimeout(() => {
-            if (this.isTerminal) return;
-            this.telemetry.t_fallback_triggered = performance.now();
-            if (typeof uiCallbacks.onFallbackWarning === 'function') {
-                uiCallbacks.onFallbackWarning({ turnId: this.turnId, telemetry: this.telemetry });
-            }
-        }, this.fallbackWarningMs);
-        this.timers.push(fallbackWarningTimer);
-
-        // Schedule Hard Application Deadline at T+9000ms
-        const hardDeadlineTimer = setTimeout(() => {
-            if (this.isTerminal) return;
-            this.isTerminal = true;
-            this.isFallbackRendered = true;
-            this.telemetry.t_completed = performance.now();
-            this.clearAllTimers();
-
-            try { this.streamAbortController.abort(); } catch (_) {}
-
-            // Synthesize structured fallback from verified snippets
-            const currentStreamLength = (this.streamedText || '').trim().length;
-            let finalContent = '';
-            if (currentStreamLength >= 60) {
-                // Keep partial streamed answer and append note
-                finalContent = `${this.streamedText.trim()}\n\n*(Synthesis completed at the 9.0s deadline)*`;
-            } else {
-                finalContent = generateSnippetFallback(query, this.sources);
-            }
-
-            if (typeof uiCallbacks.onFallbackComplete === 'function') {
-                uiCallbacks.onFallbackComplete({
-                    turnId: this.turnId,
-                    content: finalContent,
-                    sources: this.sources,
                     assistantMessageId,
                     telemetry: this.telemetry
-                });
-            }
-            resolve({ success: false, fallback: true, content: finalContent, sources: this.sources, telemetry: this.telemetry });
-        }, this.hardDeadlineMs);
-        this.timers.push(hardDeadlineTimer);
+                };
 
-        // Dispatches search providers concurrently
-        const runSearch = async () => {
-            try {
-                if (typeof fetchSearchFn === 'function') {
-                    const searchRes = await fetchSearchFn({
-                        query,
-                        signal: this.searchAbortController.signal,
-                        timeoutMs: Math.max(100, this.searchCutoffMs - 200)
-                    });
-                    if (this.telemetry.t_first_search === 0) {
-                        this.telemetry.t_first_search = performance.now();
+                // Unified first-class completion callback
+                if (typeof uiCallbacks.onComplete === 'function') {
+                    try { uiCallbacks.onComplete(finalPayload); } catch (_) {}
+                }
+
+                // Backwards-compatible legacy callbacks
+                if (success && !fallback) {
+                    if (typeof uiCallbacks.onStreamComplete === 'function') {
+                        try {
+                            uiCallbacks.onStreamComplete({
+                                turnId: this.turnId,
+                                content,
+                                sources: finalPayload.sources,
+                                assistantMessageId,
+                                telemetry: this.telemetry,
+                                provenance
+                            });
+                        } catch (_) {}
                     }
-                    if (Array.isArray(searchRes?.results)) {
-                        this.rawSearchResults.push(...searchRes.results);
+                } else {
+                    this.isFallbackRendered = true;
+                    if (typeof uiCallbacks.onFallbackComplete === 'function') {
+                        try {
+                            uiCallbacks.onFallbackComplete({
+                                turnId: this.turnId,
+                                content,
+                                sources: finalPayload.sources,
+                                assistantMessageId,
+                                telemetry: this.telemetry,
+                                provenance
+                            });
+                        } catch (_) {}
                     }
                 }
-            } catch (_) {}
 
-            // If search completed before T+2500ms cutoff, trigger cutoff early
-            if (!searchCutoffTriggered && !this.isTerminal) {
-                clearTimeout(cutoffTimer);
-                triggerSearchCutoff();
-            }
-        };
+                resolve(finalPayload);
+            };
 
-        // Dispatches streaming LLM synthesis
-        const startSynthesis = async () => {
-            if (this.isTerminal) return;
-            this.telemetry.t_llm_start = performance.now();
+            const onSearchDeadline = () => {
+                if (searchCutoffTriggered || this.isTerminal) return;
+                searchCutoffTriggered = true;
+                this.telemetry.t_search_cutoff = performance.now();
 
-            const sourcesContext = formatSourcesForPrompt(this.sources);
-            const prompt = (this.sources && this.sources.length > 0)
-                ? `You are a real-time research assistant. Answer the user's question directly, comprehensively, and factually using ONLY the verified web content below.
+                this.transition(RESEARCH_STATES.SEARCH_DEADLINE, {}, uiCallbacks);
+
+                // Abort pending search fetches immediately
+                try { this.searchAbortController.abort(); } catch (_) {}
+
+                // SOURCE_VALIDATION
+                this.transition(RESEARCH_STATES.SOURCE_VALIDATION, {}, uiCallbacks);
+                this.sources = normalizeResearchSources(this.rawSearchResults, query);
+                this.telemetry.t_sources_rendered = performance.now();
+
+                // INVARIANT 1: Zero usable sources -> enter NO_SOURCES state immediately
+                if (!this.sources || this.sources.length === 0) {
+                    this.transition(RESEARCH_STATES.NO_SOURCES, {}, uiCallbacks);
+                    this.clearAllTimers();
+
+                    if (typeof uiCallbacks.onSourcesValidated === 'function') {
+                        try {
+                            uiCallbacks.onSourcesValidated({
+                                turnId: this.turnId,
+                                sources: [],
+                                provenance: PROVENANCE_MODES.NO_SOURCES,
+                                assistantMessageId
+                            });
+                        } catch (_) {}
+                    }
+
+                    // Complete immediately with no-source fallback. Zero LLM delay!
+                    const noSourceFallback = generateSnippetFallback(query, []);
+                    completeExecution({
+                        success: false,
+                        fallback: true,
+                        provenance: PROVENANCE_MODES.NO_SOURCES,
+                        content: noSourceFallback,
+                        sources: []
+                    });
+                    return;
+                }
+
+                // INVARIANT 2: Valid usable sources -> enter SOURCE_GROUNDED_SYNTHESIS
+                this.transition(RESEARCH_STATES.SOURCE_GROUNDED_SYNTHESIS, { count: this.sources.length }, uiCallbacks);
+
+                if (typeof uiCallbacks.onSourcesValidated === 'function') {
+                    try {
+                        uiCallbacks.onSourcesValidated({
+                            turnId: this.turnId,
+                            sources: this.sources,
+                            provenance: PROVENANCE_MODES.WEB_GROUNDED,
+                            assistantMessageId
+                        });
+                    } catch (_) {}
+                }
+                if (typeof uiCallbacks.onSourcesReady === 'function') {
+                    try {
+                        uiCallbacks.onSourcesReady({
+                            turnId: this.turnId,
+                            sources: this.sources,
+                            assistantMessageId
+                        });
+                    } catch (_) {}
+                }
+
+                startSourceGroundedSynthesis();
+            };
+
+            const cutoffTimer = setTimeout(onSearchDeadline, this.searchCutoffMs);
+            this.timers.push(cutoffTimer);
+
+            const fallbackWarningTimer = setTimeout(() => {
+                if (this.isTerminal || this.state !== RESEARCH_STATES.SOURCE_GROUNDED_SYNTHESIS) return;
+                this.telemetry.t_fallback_triggered = performance.now();
+                if (typeof uiCallbacks.onFallbackWarning === 'function') {
+                    try { uiCallbacks.onFallbackWarning({ turnId: this.turnId, telemetry: this.telemetry }); } catch (_) {}
+                }
+            }, this.fallbackWarningMs);
+            this.timers.push(fallbackWarningTimer);
+
+            const hardDeadlineTimer = setTimeout(() => {
+                if (this.isTerminal) return;
+                try { this.streamAbortController.abort(); } catch (_) {}
+
+                const currentStreamLength = (this.streamedText || '').trim().length;
+                let finalContent = '';
+                let finalProvenance = PROVENANCE_MODES.SYNTHESIS_FALLBACK;
+
+                if (currentStreamLength >= 60) {
+                    finalContent = `${this.streamedText.trim()}\n\n*(Synthesis completed at the 9.0s deadline)*`;
+                    finalProvenance = PROVENANCE_MODES.WEB_GROUNDED;
+                } else {
+                    finalContent = generateSnippetFallback(query, this.sources);
+                }
+
+                completeExecution({
+                    success: finalProvenance === PROVENANCE_MODES.WEB_GROUNDED,
+                    fallback: finalProvenance !== PROVENANCE_MODES.WEB_GROUNDED,
+                    provenance: finalProvenance,
+                    content: finalContent,
+                    sources: this.sources
+                });
+            }, this.hardDeadlineMs);
+            this.timers.push(hardDeadlineTimer);
+
+            const runSearch = async () => {
+                try {
+                    if (typeof fetchSearchFn === 'function') {
+                        const searchRes = await fetchSearchFn({
+                            query,
+                            signal: this.searchAbortController.signal,
+                            timeoutMs: Math.max(100, this.searchCutoffMs - 200)
+                        });
+                        // Invariant: drop late search results if deadline has passed or controller is terminal
+                        if (searchCutoffTriggered || this.isTerminal) return;
+
+                        if (this.telemetry.t_first_search === 0) {
+                            this.telemetry.t_first_search = performance.now();
+                        }
+                        if (Array.isArray(searchRes?.results)) {
+                            this.rawSearchResults.push(...searchRes.results);
+                        }
+                    }
+                } catch (_) {}
+
+                // Early search completion before cutoff
+                if (!searchCutoffTriggered && !this.isTerminal) {
+                    clearTimeout(cutoffTimer);
+                    onSearchDeadline();
+                }
+            };
+
+            const startSourceGroundedSynthesis = async () => {
+                // Invariant: SOURCE_GROUNDED_SYNTHESIS requires sources.length > 0
+                if (this.isTerminal || !this.sources || this.sources.length === 0) {
+                    onSearchDeadline();
+                    return;
+                }
+
+                this.telemetry.t_llm_start = performance.now();
+                const sourcesContext = formatSourcesForPrompt(this.sources);
+                const prompt = `You are a real-time research assistant. Answer the user's question directly, comprehensively, and factually using ONLY the verified web content below.
 RULES:
 1. Cite verified sources using [1], [2], etc., matching the exact source numbers in the provided list. Do not invent citation numbers.
 2. If evidence is contradictory or insufficient, state it clearly.
@@ -474,100 +652,72 @@ RULES:
 User question: "${query}"
 
 Verified Sources:
-${sourcesContext}`
-                : `You are a helpful AI research assistant.
-Live web search providers did not return real-time records before the search cutoff.
-Answer the user's question directly and concisely based on verified general knowledge, clearly noting that live web sources were not available before the deadline.
+${sourcesContext}`;
 
-User question: "${query}"`;
-
-            try {
-                if (typeof streamSynthesisFn === 'function') {
-                    await streamSynthesisFn({
-                        prompt,
-                        rawQuery: query,
-                        sources: this.sources,
-                        signal: this.streamAbortController.signal,
-                        onToken: (token) => {
-                            if (this.isTerminal) return;
-                            if (this.telemetry.t_first_token === 0) {
-                                this.telemetry.t_first_token = performance.now();
+                try {
+                    if (typeof streamSynthesisFn === 'function') {
+                        await streamSynthesisFn({
+                            prompt,
+                            rawQuery: query,
+                            sources: this.sources,
+                            signal: this.streamAbortController.signal,
+                            onToken: (token) => {
+                                // Invariant: drop tokens if terminal or no longer in synthesis state
+                                if (this.isTerminal || this.state !== RESEARCH_STATES.SOURCE_GROUNDED_SYNTHESIS) return;
+                                if (this.telemetry.t_first_token === 0) {
+                                    this.telemetry.t_first_token = performance.now();
+                                }
+                                this.streamedText += token;
+                                if (typeof uiCallbacks.onToken === 'function') {
+                                    try {
+                                        uiCallbacks.onToken({
+                                            turnId: this.turnId,
+                                            token,
+                                            streamedText: this.streamedText,
+                                            assistantMessageId
+                                        });
+                                    } catch (_) {}
+                                }
                             }
-                            this.streamedText += token;
-                            if (typeof uiCallbacks.onToken === 'function') {
-                                uiCallbacks.onToken({
-                                    turnId: this.turnId,
-                                    token,
-                                    streamedText: this.streamedText,
-                                    assistantMessageId
-                                });
-                            }
-                        }
-                    });
-                }
-
-                // If finished cleanly before 9000ms deadline
-                if (!this.isTerminal) {
-                    this.isTerminal = true;
-                    this.telemetry.t_completed = performance.now();
-                    this.clearAllTimers();
-
-                    const cleanStreamed = (this.streamedText || '').trim();
-                    const hasValidContent = cleanStreamed.length >= 20;
-                    const finalContent = hasValidContent
-                        ? cleanStreamed
-                        : generateSnippetFallback(query, this.sources);
-
-                    if (hasValidContent) {
-                        if (typeof uiCallbacks.onStreamComplete === 'function') {
-                            uiCallbacks.onStreamComplete({
-                                turnId: this.turnId,
-                                content: finalContent,
-                                sources: this.sources,
-                                assistantMessageId,
-                                telemetry: this.telemetry
-                            });
-                        }
-                        resolve({ success: true, content: finalContent, sources: this.sources, telemetry: this.telemetry });
-                    } else {
-                        this.isFallbackRendered = true;
-                        if (typeof uiCallbacks.onFallbackComplete === 'function') {
-                            uiCallbacks.onFallbackComplete({
-                                turnId: this.turnId,
-                                content: finalContent,
-                                sources: this.sources,
-                                assistantMessageId,
-                                telemetry: this.telemetry
-                            });
-                        }
-                        resolve({ success: false, fallback: true, content: finalContent, sources: this.sources, telemetry: this.telemetry });
+                        });
                     }
-                }
-            } catch (err) {
-                // If stream was aborted by our own hard deadline timer, the timer handler already took care of fallback
-                if (this.isTerminal) return;
 
-                // If unexpected synthesis failure occurred, trigger fallback immediately
-                this.isTerminal = true;
-                this.telemetry.t_completed = performance.now();
-                this.clearAllTimers();
-
-                const fallbackAnswer = generateSnippetFallback(query, this.sources);
-                if (typeof uiCallbacks.onFallbackComplete === 'function') {
-                    uiCallbacks.onFallbackComplete({
-                        turnId: this.turnId,
-                        content: fallbackAnswer,
-                        sources: this.sources,
-                        assistantMessageId,
-                        telemetry: this.telemetry
+                    if (!this.isTerminal) {
+                        const cleanStreamed = (this.streamedText || '').trim();
+                        // Invariant: empty/trivial output protection
+                        if (cleanStreamed.length >= 20) {
+                            completeExecution({
+                                success: true,
+                                fallback: false,
+                                provenance: PROVENANCE_MODES.WEB_GROUNDED,
+                                content: cleanStreamed,
+                                sources: this.sources
+                            });
+                        } else {
+                            const snippetFallback = generateSnippetFallback(query, this.sources);
+                            completeExecution({
+                                success: false,
+                                fallback: true,
+                                provenance: PROVENANCE_MODES.SYNTHESIS_FALLBACK,
+                                content: snippetFallback,
+                                sources: this.sources
+                            });
+                        }
+                    }
+                } catch (err) {
+                    if (this.isTerminal) return;
+                    const snippetFallback = generateSnippetFallback(query, this.sources);
+                    completeExecution({
+                        success: false,
+                        fallback: true,
+                        provenance: PROVENANCE_MODES.SYNTHESIS_FALLBACK,
+                        content: snippetFallback,
+                        sources: this.sources
                     });
                 }
-                resolve({ success: false, fallback: true, content: fallbackAnswer, sources: this.sources, telemetry: this.telemetry });
-            }
-        };
+            };
 
-        // Fire initial search
-        runSearch();
+            runSearch();
         });
     }
 }
@@ -575,6 +725,8 @@ User question: "${query}"`;
 // Global namespace registration for browser
 if (typeof window !== 'undefined') {
     window.JarvisLiveResearch = {
+        RESEARCH_STATES,
+        PROVENANCE_MODES,
         BoundedLiveResearchController,
         normalizeResearchSources,
         generateSnippetFallback,
@@ -595,3 +747,4 @@ if (typeof window !== 'undefined') {
         }
     };
 }
+
