@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+    LIVE_RESEARCH_BUDGETS,
     RESEARCH_STATES,
     PROVENANCE_MODES,
     BoundedLiveResearchController,
@@ -648,4 +649,111 @@ test('Safety Fallback Invariant: generateSnippetFallback never renders " " for i
     assert.ok(validRes.includes('Mars Rover'));
     assert.ok(validRes.includes('did not return verified records before the deadline'));
 });
+
+test('Centralized LIVE_RESEARCH_BUDGETS contract & defaults', () => {
+    assert.equal(LIVE_RESEARCH_BUDGETS.HARD_DEADLINE_MS, 9000);
+    assert.equal(LIVE_RESEARCH_BUDGETS.SEARCH_CUTOFF_MS, 5000);
+    assert.equal(LIVE_RESEARCH_BUDGETS.SEARCH_TIMEOUT_MS, 4800);
+    assert.equal(LIVE_RESEARCH_BUDGETS.FALLBACK_WARNING_MS, 8500);
+    assert.equal(LIVE_RESEARCH_BUDGETS.MIN_SOURCES_FOR_EARLY_SYNTHESIS, 2);
+
+    const controller = new BoundedLiveResearchController();
+    assert.equal(controller.hardDeadlineMs, 9000);
+    assert.equal(controller.searchCutoffMs, 5000);
+    assert.equal(controller.searchTimeoutMs, 4800);
+    assert.equal(controller.fallbackWarningMs, 8500);
+    assert.equal(controller.minSourcesForEarlySynthesis, 2);
+    assert.equal(controller.telemetry.providerTiming, null);
+});
+
+test('Early Synthesis Transition: Receiving 2+ sources before cutoff begins synthesis immediately', async () => {
+    const controller = new BoundedLiveResearchController({
+        searchCutoffMs: 2000,
+        hardDeadlineMs: 4000
+    });
+
+    const transitions = [];
+    let synthesisInvoked = false;
+    let synthesisTimeoutReceived = null;
+
+    const result = await controller.execute({
+        query: 'quantum computing breakthroughs',
+        userText: 'quantum computing breakthroughs',
+        assistantMessageId: 'msg_early_synth_test',
+        fetchSearchFn: async () => {
+            return {
+                timing: { publicSourcesMs: 120 },
+                results: [
+                    { title: 'Quantum Breakthrough 1', url: 'https://nature.com/article1', snippet: 'Major qubit coherence advance' },
+                    { title: 'Quantum Breakthrough 2', url: 'https://science.org/article2', snippet: 'Fault-tolerant quantum error correction' }
+                ]
+            };
+        },
+        streamSynthesisFn: async ({ timeoutMs, onToken }) => {
+            synthesisInvoked = true;
+            synthesisTimeoutReceived = timeoutMs;
+            onToken('Quantum computing has made significant progress in qubit coherence and fault-tolerant error correction [1][2].');
+        },
+        uiCallbacks: {
+            onStateTransition: ({ state }) => {
+                transitions.push(state);
+            }
+        }
+    });
+
+    assert.equal(synthesisInvoked, true);
+    assert.equal(result.success, true);
+    assert.equal(result.fallback, false);
+    assert.equal(result.provenance, PROVENANCE_MODES.WEB_GROUNDED);
+    assert.equal(result.sources.length, 2);
+    assert.ok(synthesisTimeoutReceived > 1000, `Expected dynamic timeoutMs > 1000, received ${synthesisTimeoutReceived}`);
+    assert.ok(transitions.includes(RESEARCH_STATES.SEARCHING));
+    assert.ok(transitions.includes(RESEARCH_STATES.SOURCE_VALIDATION));
+    assert.ok(transitions.includes(RESEARCH_STATES.SOURCE_GROUNDED_SYNTHESIS));
+    assert.ok(!transitions.includes(RESEARCH_STATES.SEARCH_DEADLINE), 'Early synthesis should not transition to SEARCH_DEADLINE');
+    assert.equal(result.telemetry.providerTiming.publicSourcesMs, 120);
+});
+
+test('Cutoff Finalization: 1 verified source transitions to synthesis without NO_SOURCES', async () => {
+    const controller = new BoundedLiveResearchController({
+        searchCutoffMs: 150,
+        hardDeadlineMs: 600
+    });
+
+    const transitions = [];
+    let synthesisInvoked = false;
+
+    const result = await controller.execute({
+        query: 'niche historical fact',
+        userText: 'niche historical fact',
+        assistantMessageId: 'msg_single_source_test',
+        fetchSearchFn: async () => {
+            await new Promise(r => setTimeout(r, 50));
+            return {
+                results: [
+                    { title: 'Historical Record', url: 'https://history.org/doc1', snippet: 'Verified event details.' }
+                ]
+            };
+        },
+        streamSynthesisFn: async ({ onToken }) => {
+            synthesisInvoked = true;
+            onToken('According to historical records, the verified event happened as documented [1].');
+        },
+        uiCallbacks: {
+            onStateTransition: ({ state }) => {
+                transitions.push(state);
+            }
+        }
+    });
+
+    assert.equal(synthesisInvoked, true);
+    assert.equal(result.success, true);
+    assert.equal(result.provenance, PROVENANCE_MODES.WEB_GROUNDED);
+    assert.equal(result.sources.length, 1);
+    assert.ok(transitions.includes(RESEARCH_STATES.SEARCH_DEADLINE));
+    assert.ok(transitions.includes(RESEARCH_STATES.SOURCE_VALIDATION));
+    assert.ok(transitions.includes(RESEARCH_STATES.SOURCE_GROUNDED_SYNTHESIS));
+    assert.ok(!transitions.includes(RESEARCH_STATES.NO_SOURCES), 'Should not enter NO_SOURCES when 1 source is present');
+});
+
 
