@@ -20861,10 +20861,13 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
         return handleLiveRetrievalQuery(query, options);
     }
 
+    const budgets = window.JarvisLiveResearch?.LIVE_RESEARCH_BUDGETS || {};
     const controller = new ControllerClass({
-        searchCutoffMs: 2500,
-        fallbackWarningMs: 8500,
-        hardDeadlineMs: 9000
+        searchCutoffMs: budgets.SEARCH_CUTOFF_MS ?? 5000,
+        searchTimeoutMs: budgets.SEARCH_TIMEOUT_MS ?? 4800,
+        fallbackWarningMs: budgets.FALLBACK_WARNING_MS ?? 8500,
+        hardDeadlineMs: budgets.HARD_DEADLINE_MS ?? 9000,
+        minSourcesForEarlySynthesis: budgets.MIN_SOURCES_FOR_EARLY_SYNTHESIS ?? 2
     });
     if (window.JarvisLiveResearch) {
         window.JarvisLiveResearch.activeController = controller;
@@ -20897,12 +20900,12 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                 return fetchLiveSearchJson(query, {
                     signal,
                     maxResults: 8,
-                    answer: true,
+                    answer: false,
                     mode: 'rag',
-                    timeoutMs: timeoutMs || 2200
+                    timeoutMs: timeoutMs || controller.searchTimeoutMs || 4800
                 });
             },
-            streamSynthesisFn: async ({ prompt, sources, signal, onToken }) => {
+            streamSynthesisFn: async ({ prompt, sources, signal, timeoutMs, onToken }) => {
                 const searchGrounding = {
                     kind: 'selection',
                     selectedText: prompt,
@@ -21005,6 +21008,7 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                         totalDurationMs: telemetry.t_completed ? Math.round(telemetry.t_completed - telemetry.t_start) : null,
                         searchCutoffMs: telemetry.t_search_cutoff ? Math.round(telemetry.t_search_cutoff - telemetry.t_start) : null,
                         sourcesCount: sources ? sources.length : 0,
+                        providerTiming: telemetry.providerTiming || null,
                         telemetry
                     });
 
