@@ -16,7 +16,7 @@ export { normalizeUserQuery, hasSearchableContent };
 export const LIVE_RESEARCH_BUDGETS = Object.freeze({
     HARD_DEADLINE_MS: 9000,
     SEARCH_CUTOFF_MS: 5000,
-    SEARCH_TIMEOUT_MS: 4800,
+    SEARCH_TIMEOUT_MS: 4500,
     FALLBACK_WARNING_MS: 8500,
     MIN_SOURCES_FOR_EARLY_SYNTHESIS: 2
 });
@@ -384,7 +384,11 @@ export class BoundedLiveResearchController {
             t_first_token: 0,
             t_fallback_triggered: 0,
             t_completed: 0,
-            providerTiming: null
+            providerTiming: null,
+            searchError: null,
+            httpStatus: null,
+            sourcesCount: 0,
+            totalDurationMs: 0
         };
 
         this.searchAbortController = new AbortController();
@@ -491,6 +495,10 @@ export class BoundedLiveResearchController {
                 if (this.state === RESEARCH_STATES.COMPLETE || this.state === RESEARCH_STATES.ABORTED) return;
                 this.provenance = provenance;
                 this.telemetry.t_completed = performance.now();
+                this.telemetry.sourcesCount = (sources || []).length;
+                this.telemetry.totalDurationMs = this.telemetry.t_start
+                    ? Math.round(this.telemetry.t_completed - this.telemetry.t_start)
+                    : 0;
                 this.transition(RESEARCH_STATES.COMPLETE, { provenance }, uiCallbacks);
 
                 const finalPayload = {
@@ -502,6 +510,8 @@ export class BoundedLiveResearchController {
                     sources: sources || [],
                     turnId: this.turnId,
                     assistantMessageId,
+                    sourcesCount: this.telemetry.sourcesCount,
+                    totalDurationMs: this.telemetry.totalDurationMs,
                     telemetry: this.telemetry
                 };
 
@@ -673,7 +683,15 @@ export class BoundedLiveResearchController {
                             this.rawSearchResults.push(...searchRes.results);
                         }
                     }
-                } catch (_) {}
+                } catch (err) {
+                    if (searchCutoffTriggered || this.isTerminal) return;
+                    this.telemetry.searchError = err?.message || String(err);
+                    this.telemetry.httpStatus = err?.status || null;
+                    console.error(`[BoundedLiveResearch:${this.turnId}] Search failed (status: ${err?.status || 'N/A'}):`, err);
+                    clearTimeout(cutoffTimer);
+                    onSearchDeadline();
+                    return;
+                }
 
                 // Invariant: drop late search results if deadline has passed or controller is terminal
                 if (searchCutoffTriggered || this.isTerminal) return;
