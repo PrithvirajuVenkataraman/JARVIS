@@ -10,6 +10,9 @@
  * - T + 9000ms: HARD APPLICATION DEADLINE. Abort stream. Render verified snippet answer. Lock turn state.
  */
 
+import { normalizeUserQuery, hasSearchableContent } from './query-normalizer.js';
+export { normalizeUserQuery, hasSearchableContent };
+
 export const RESEARCH_STATES = Object.freeze({
     REQUESTED: 'REQUESTED',
     SEARCHING: 'SEARCHING',
@@ -102,9 +105,9 @@ export function formatSourcesForPrompt(sources = []) {
  * Used when the 9.0s hard application deadline is reached.
  */
 export function generateSnippetFallback(query, sources = []) {
-    const cleanQ = String(query || '').replace(/[\u00A0\u200B-\u200D\uFEFF]/g, ' ').trim();
+    const cleanQ = normalizeUserQuery(query);
     if (!sources || !sources.length) {
-        if (!cleanQ) {
+        if (!hasSearchableContent(cleanQ)) {
             return 'Please provide a search topic or question so I can retrieve verified live web sources.';
         }
         return `I searched for current information on "${cleanQ}", but the live web search providers did not return verified records before the deadline. Please try rephrasing your search query.`;
@@ -115,7 +118,7 @@ export function generateSnippetFallback(query, sources = []) {
         return `• ${text} [${s.id}]`;
     }).join('\n');
 
-    const topicHeading = cleanQ ? `### Verified Summary for "${cleanQ}"` : '### Verified Summary';
+    const topicHeading = hasSearchableContent(cleanQ) ? `### Verified Summary for "${cleanQ}"` : '### Verified Summary';
     return `${topicHeading}\n\n${bullets}\n\n*Gathered from verified live sources within the 9.0s deadline.*`;
 }
 
@@ -430,7 +433,7 @@ export class BoundedLiveResearchController {
     }
 
     execute({
-        query,
+        query: rawQuery,
         userText,
         assistantMessageId,
         fetchSearchFn,
@@ -439,10 +442,37 @@ export class BoundedLiveResearchController {
     }) {
         return new Promise((resolve) => {
             this._resolveExecution = resolve;
+            const query = normalizeUserQuery(rawQuery);
             this.telemetry.t_start = performance.now();
 
-            this.transition(RESEARCH_STATES.SEARCHING, {}, uiCallbacks);
+            // Pre-network rejection for empty/whitespace/invisible/non-searchable queries
+            if (!hasSearchableContent(query)) {
+                this.telemetry.t_completed = performance.now();
+                const fallbackContent = generateSnippetFallback(query, []);
+                this.provenance = PROVENANCE_MODES.NO_SOURCES;
+                this.transition(RESEARCH_STATES.COMPLETE, { provenance: this.provenance }, uiCallbacks);
+                const finalPayload = {
+                    success: false,
+                    fallback: true,
+                    state: RESEARCH_STATES.COMPLETE,
+                    provenance: PROVENANCE_MODES.NO_SOURCES,
+                    content: fallbackContent,
+                    sources: [],
+                    turnId: this.turnId,
+                    assistantMessageId,
+                    telemetry: this.telemetry
+                };
+                if (typeof uiCallbacks.onComplete === 'function') {
+                    try { uiCallbacks.onComplete(finalPayload); } catch (_) {}
+                }
+                if (typeof uiCallbacks.onFallbackComplete === 'function') {
+                    try { uiCallbacks.onFallbackComplete(finalPayload); } catch (_) {}
+                }
+                resolve(finalPayload);
+                return;
+            }
 
+            this.transition(RESEARCH_STATES.SEARCHING, {}, uiCallbacks);
             let searchCutoffTriggered = false;
 
             const completeExecution = ({ success, fallback = false, provenance, content, sources }) => {
@@ -735,6 +765,8 @@ if (typeof window !== 'undefined') {
         renderOrUpdateSourcesCarousel,
         highlightSource: (id) => highlightSourceCard(id, document),
         renderRelatedQuestionsTray,
+        normalizeUserQuery,
+        hasSearchableContent,
         askRelatedQuestion: (text) => {
             const composer = document.getElementById('chat-composer-input') || document.getElementById('user-input');
             if (composer) {
