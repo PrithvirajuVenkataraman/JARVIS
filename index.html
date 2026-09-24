@@ -6348,7 +6348,6 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
         }
 
         function toggleDeepReasoningMode(forceState = null) {
-            triggerJarvisHaptic(12);
             const nextState = forceState !== null ? Boolean(forceState) : !isDeepReasoningActive();
             _isDeepReasoningEnabled = nextState;
             if (nextState) {
@@ -6427,7 +6426,6 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
         }
 
         function handleComposerModeBadgeClick() {
-            triggerJarvisHaptic(10);
             resetCapabilityPillsUi();
             if (typeof setWebSearchMode === 'function') {
                 setWebSearchMode('off');
@@ -6461,7 +6459,6 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
         }
 
         function handleCapabilityPillClick(capability) {
-            triggerJarvisHaptic(12);
             if (capability === 'deep_reasoning') {
                 toggleDeepReasoningMode();
                 return;
@@ -7038,9 +7035,6 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             const btn = document.getElementById('send-message-btn');
             const currentState = window.JarvisSpeechInput?.getState?.() || {};
             const willEnable = !currentState.converseEnabled;
-            if (willEnable) {
-                triggerJarvisHaptic(18);
-            }
             if (btn) {
                 btn.classList.toggle('is-converse-active', willEnable);
                 btn.classList.remove('composer-send-stop', 'is-send-ready');
@@ -13471,7 +13465,6 @@ ${code}
         }
 
         function cycleWebSearchMode() {
-            triggerJarvisHaptic(12);
             // Simple two-state toggle: ON (force) ↔ OFF
             if (_composerWebMode === 'force') {
                 setWebSearchMode('off');
@@ -28004,12 +27997,8 @@ function exportCurrentChat(format = 'markdown') {
 }
 
 
-function triggerJarvisHaptic(pattern = 15) {
-    try {
-        if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
-            navigator.vibrate(pattern);
-        }
-    } catch (_) {}
+function triggerJarvisHaptic() {
+    // Haptic feedback disabled end-to-end to avoid browser intervention errors
 }
 
 function initNetworkResilienceWatchdog() {
@@ -28173,7 +28162,6 @@ function copyCodeBlock(btn, blockId) {
                 iconWrap.innerHTML = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
             }
         }, 1600);
-        triggerJarvisHaptic(10);
     };
 
     if (navigator?.clipboard?.writeText) {
