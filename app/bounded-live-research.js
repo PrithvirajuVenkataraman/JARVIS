@@ -13,6 +13,14 @@
 import { normalizeUserQuery, hasSearchableContent } from './query-normalizer.js';
 export { normalizeUserQuery, hasSearchableContent };
 
+export const LIVE_RESEARCH_BUDGETS = Object.freeze({
+    HARD_DEADLINE_MS: 9000,
+    SEARCH_CUTOFF_MS: 5000,
+    SEARCH_TIMEOUT_MS: 4800,
+    FALLBACK_WARNING_MS: 8500,
+    MIN_SOURCES_FOR_EARLY_SYNTHESIS: 2
+});
+
 export const RESEARCH_STATES = Object.freeze({
     REQUESTED: 'REQUESTED',
     SEARCHING: 'SEARCHING',
@@ -351,9 +359,11 @@ let _globalGenerationCounter = 0;
  */
 export class BoundedLiveResearchController {
     constructor(options = {}) {
-        this.searchCutoffMs = options.searchCutoffMs || 2500;
-        this.fallbackWarningMs = options.fallbackWarningMs || 8500;
-        this.hardDeadlineMs = options.hardDeadlineMs || 9000;
+        this.searchCutoffMs = options.searchCutoffMs ?? LIVE_RESEARCH_BUDGETS.SEARCH_CUTOFF_MS;
+        this.searchTimeoutMs = options.searchTimeoutMs ?? LIVE_RESEARCH_BUDGETS.SEARCH_TIMEOUT_MS;
+        this.fallbackWarningMs = options.fallbackWarningMs ?? LIVE_RESEARCH_BUDGETS.FALLBACK_WARNING_MS;
+        this.hardDeadlineMs = options.hardDeadlineMs ?? LIVE_RESEARCH_BUDGETS.HARD_DEADLINE_MS;
+        this.minSourcesForEarlySynthesis = options.minSourcesForEarlySynthesis ?? LIVE_RESEARCH_BUDGETS.MIN_SOURCES_FOR_EARLY_SYNTHESIS;
         this.turnId = 'turn_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
         this.generationId = ++_globalGenerationCounter;
 
@@ -373,7 +383,8 @@ export class BoundedLiveResearchController {
             t_llm_start: 0,
             t_first_token: 0,
             t_fallback_triggered: 0,
-            t_completed: 0
+            t_completed: 0,
+            providerTiming: null
         };
 
         this.searchAbortController = new AbortController();
@@ -474,6 +485,7 @@ export class BoundedLiveResearchController {
 
             this.transition(RESEARCH_STATES.SEARCHING, {}, uiCallbacks);
             let searchCutoffTriggered = false;
+            let synthesisStarted = false;
 
             const completeExecution = ({ success, fallback = false, provenance, content, sources }) => {
                 if (this.state === RESEARCH_STATES.COMPLETE || this.state === RESEARCH_STATES.ABORTED) return;
@@ -536,10 +548,13 @@ export class BoundedLiveResearchController {
                 searchCutoffTriggered = true;
                 this.telemetry.t_search_cutoff = performance.now();
 
-                this.transition(RESEARCH_STATES.SEARCH_DEADLINE, {}, uiCallbacks);
-
                 // Abort pending search fetches immediately
                 try { this.searchAbortController.abort(); } catch (_) {}
+
+                // If synthesis has already started (early synthesis path), do not restart or transition backwards
+                if (synthesisStarted) return;
+
+                this.transition(RESEARCH_STATES.SEARCH_DEADLINE, {}, uiCallbacks);
 
                 // SOURCE_VALIDATION
                 this.transition(RESEARCH_STATES.SOURCE_VALIDATION, {}, uiCallbacks);
@@ -643,7 +658,7 @@ export class BoundedLiveResearchController {
                         const searchRes = await fetchSearchFn({
                             query,
                             signal: this.searchAbortController.signal,
-                            timeoutMs: Math.max(100, this.searchCutoffMs - 200)
+                            timeoutMs: this.searchTimeoutMs
                         });
                         // Invariant: drop late search results if deadline has passed or controller is terminal
                         if (searchCutoffTriggered || this.isTerminal) return;
@@ -651,14 +666,51 @@ export class BoundedLiveResearchController {
                         if (this.telemetry.t_first_search === 0) {
                             this.telemetry.t_first_search = performance.now();
                         }
+                        if (searchRes?.timing || searchRes?.providerTiming) {
+                            this.telemetry.providerTiming = searchRes.providerTiming || searchRes.timing;
+                        }
                         if (Array.isArray(searchRes?.results)) {
                             this.rawSearchResults.push(...searchRes.results);
                         }
                     }
                 } catch (_) {}
 
-                // Early search completion before cutoff
-                if (!searchCutoffTriggered && !this.isTerminal) {
+                // Invariant: drop late search results if deadline has passed or controller is terminal
+                if (searchCutoffTriggered || this.isTerminal) return;
+
+                const currentSources = normalizeResearchSources(this.rawSearchResults, query);
+                this.sources = currentSources;
+
+                // Early synthesis: If minimum verified sources arrived before cutoff, begin synthesis immediately!
+                if (currentSources.length >= this.minSourcesForEarlySynthesis) {
+                    clearTimeout(cutoffTimer);
+                    this.telemetry.t_sources_rendered = performance.now();
+                    this.transition(RESEARCH_STATES.SOURCE_VALIDATION, { early: true }, uiCallbacks);
+                    this.transition(RESEARCH_STATES.SOURCE_GROUNDED_SYNTHESIS, { count: currentSources.length, early: true }, uiCallbacks);
+
+                    if (typeof uiCallbacks.onSourcesValidated === 'function') {
+                        try {
+                            uiCallbacks.onSourcesValidated({
+                                turnId: this.turnId,
+                                sources: currentSources,
+                                provenance: PROVENANCE_MODES.WEB_GROUNDED,
+                                assistantMessageId
+                            });
+                        } catch (_) {}
+                    }
+                    if (typeof uiCallbacks.onSourcesReady === 'function') {
+                        try {
+                            uiCallbacks.onSourcesReady({
+                                turnId: this.turnId,
+                                sources: currentSources,
+                                assistantMessageId
+                            });
+                        } catch (_) {}
+                    }
+
+                    startSourceGroundedSynthesis();
+                } else {
+                    // Search completed early with fewer than minSourcesForEarlySynthesis: finalize at cutoff or complete
                     clearTimeout(cutoffTimer);
                     onSearchDeadline();
                 }
@@ -666,10 +718,10 @@ export class BoundedLiveResearchController {
 
             const startSourceGroundedSynthesis = async () => {
                 // Invariant: SOURCE_GROUNDED_SYNTHESIS requires sources.length > 0
-                if (this.isTerminal || !this.sources || this.sources.length === 0) {
-                    onSearchDeadline();
+                if (synthesisStarted || this.isTerminal || !this.sources || this.sources.length === 0) {
                     return;
                 }
+                synthesisStarted = true;
 
                 this.telemetry.t_llm_start = performance.now();
                 const sourcesContext = formatSourcesForPrompt(this.sources);
@@ -684,6 +736,10 @@ User question: "${query}"
 Verified Sources:
 ${sourcesContext}`;
 
+                // Dynamic remaining synthesis budget: hard deadline - elapsed so far - 300ms buffer
+                const elapsedSoFar = performance.now() - this.telemetry.t_start;
+                const remainingBudgetMs = Math.max(1000, Math.round(this.hardDeadlineMs - elapsedSoFar - 300));
+
                 try {
                     if (typeof streamSynthesisFn === 'function') {
                         await streamSynthesisFn({
@@ -691,6 +747,7 @@ ${sourcesContext}`;
                             rawQuery: query,
                             sources: this.sources,
                             signal: this.streamAbortController.signal,
+                            timeoutMs: remainingBudgetMs,
                             onToken: (token) => {
                                 // Invariant: drop tokens if terminal or no longer in synthesis state
                                 if (this.isTerminal || this.state !== RESEARCH_STATES.SOURCE_GROUNDED_SYNTHESIS) return;
@@ -755,6 +812,7 @@ ${sourcesContext}`;
 // Global namespace registration for browser
 if (typeof window !== 'undefined') {
     window.JarvisLiveResearch = {
+        LIVE_RESEARCH_BUDGETS,
         RESEARCH_STATES,
         PROVENANCE_MODES,
         BoundedLiveResearchController,
