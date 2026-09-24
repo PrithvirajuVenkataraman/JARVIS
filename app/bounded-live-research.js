@@ -106,28 +106,63 @@ export function generateSnippetFallback(query, sources = []) {
  * Strictly non-blocking. Derived dynamically with zero hardcoding.
  */
 export function generateRelatedResearchQuestions(query, sources = []) {
+    if (!Array.isArray(sources) || sources.length === 0) {
+        return [];
+    }
     const q = String(query || '').trim();
     const cleanQ = q.replace(/[?.!]+$/g, '').trim();
+    if (!cleanQ) return [];
+
     const words = cleanQ.split(/\s+/).filter(w => w.length > 3 && !/^(what|when|where|which|who|whom|whose|why|how|tell|find|search|show)$/i.test(w));
     const mainTopic = words.length > 0 ? words.slice(-3).join(' ') : cleanQ;
 
-    const questions = [
-        `What are the latest updates or ongoing developments for ${cleanQ}?`,
-        `What is the key background context behind ${mainTopic}?`
-    ];
+    // Strip leading question prefixes to isolate the core subject
+    const strippedQuery = cleanQ
+        .replace(/^(?:what\s+(?:is|are|was|were)|tell\s+me\s+(?:about)?|search\s+(?:for)?|find\s+(?:out\s+about)?|who\s+(?:is|was)|how\s+does|how\s+to|explain)\s+/i, '')
+        .replace(/^(?:the\s+)?(?:latest|current|recent|new)\s+(?:updates?|news|status|developments?|info(?:rmation)?)\s+(?:on|for|about|regarding)?\s*/i, '')
+        .trim();
+    const topic = strippedQuery || mainTopic;
+
+    const isUpdateQuery = /\b(latest|current|recent|update|updates|news|today|now)\b/i.test(cleanQ);
+
+    const candidates = [];
+
+    if (isUpdateQuery) {
+        candidates.push(`What is the key background context behind ${topic}?`);
+        candidates.push(`What are the anticipated next steps or timeline for ${topic}?`);
+    } else {
+        candidates.push(`What are the latest updates or ongoing developments for ${topic}?`);
+        candidates.push(`What is the key background context behind ${topic}?`);
+    }
 
     if (sources && sources.length > 0 && sources[0].title) {
         const titleSnippet = cleanTextSnippet(sources[0].title).replace(/\s*[-–|].*$/, '').trim();
-        if (titleSnippet && titleSnippet.length > 10 && titleSnippet.toLowerCase() !== cleanQ.toLowerCase()) {
-            questions.push(`What are more details about ${titleSnippet}?`);
+        const tLower = titleSnippet.toLowerCase();
+        const qLower = cleanQ.toLowerCase();
+        if (titleSnippet && titleSnippet.length > 10 && !qLower.includes(tLower) && !tLower.includes(qLower)) {
+            candidates.push(`What are more details about ${titleSnippet}?`);
         } else {
-            questions.push(`What are the main perspectives or next steps regarding ${mainTopic}?`);
+            candidates.push(`What are the main perspectives or next steps regarding ${topic}?`);
         }
     } else {
-        questions.push(`What are the main perspectives or next steps regarding ${mainTopic}?`);
+        candidates.push(`What are the main perspectives or next steps regarding ${topic}?`);
     }
 
-    return questions.slice(0, 3);
+    candidates.push(`What are the primary factors or implications surrounding ${topic}?`);
+
+    const qLower = cleanQ.toLowerCase();
+    const filtered = [];
+    for (const cand of candidates) {
+        const cLower = cand.toLowerCase().replace(/[?.!]+$/g, '').trim();
+        if (cLower === qLower) continue;
+        if (isUpdateQuery && cLower.startsWith('what are the latest updates') && qLower.includes('latest update')) continue;
+        if (!filtered.includes(cand)) {
+            filtered.push(cand);
+        }
+        if (filtered.length >= 3) break;
+    }
+
+    return filtered.slice(0, 3);
 }
 
 /**
@@ -429,7 +464,8 @@ export class BoundedLiveResearchController {
             this.telemetry.t_llm_start = performance.now();
 
             const sourcesContext = formatSourcesForPrompt(this.sources);
-            const prompt = `You are a real-time research assistant. Answer the user's question directly, comprehensively, and factually using ONLY the verified web content below.
+            const prompt = (this.sources && this.sources.length > 0)
+                ? `You are a real-time research assistant. Answer the user's question directly, comprehensively, and factually using ONLY the verified web content below.
 RULES:
 1. Cite verified sources using [1], [2], etc., matching the exact source numbers in the provided list. Do not invent citation numbers.
 2. If evidence is contradictory or insufficient, state it clearly.
@@ -438,7 +474,12 @@ RULES:
 User question: "${query}"
 
 Verified Sources:
-${sourcesContext || 'No live sources were returned before the search cutoff.'}`;
+${sourcesContext}`
+                : `You are a helpful AI research assistant.
+Live web search providers did not return real-time records before the search cutoff.
+Answer the user's question directly and concisely based on verified general knowledge, clearly noting that live web sources were not available before the deadline.
+
+User question: "${query}"`;
 
             try {
                 if (typeof streamSynthesisFn === 'function') {
@@ -471,16 +512,36 @@ ${sourcesContext || 'No live sources were returned before the search cutoff.'}`;
                     this.telemetry.t_completed = performance.now();
                     this.clearAllTimers();
 
-                    if (typeof uiCallbacks.onStreamComplete === 'function') {
-                        uiCallbacks.onStreamComplete({
-                            turnId: this.turnId,
-                            content: this.streamedText,
-                            sources: this.sources,
-                            assistantMessageId,
-                            telemetry: this.telemetry
-                        });
+                    const cleanStreamed = (this.streamedText || '').trim();
+                    const hasValidContent = cleanStreamed.length >= 20;
+                    const finalContent = hasValidContent
+                        ? cleanStreamed
+                        : generateSnippetFallback(query, this.sources);
+
+                    if (hasValidContent) {
+                        if (typeof uiCallbacks.onStreamComplete === 'function') {
+                            uiCallbacks.onStreamComplete({
+                                turnId: this.turnId,
+                                content: finalContent,
+                                sources: this.sources,
+                                assistantMessageId,
+                                telemetry: this.telemetry
+                            });
+                        }
+                        resolve({ success: true, content: finalContent, sources: this.sources, telemetry: this.telemetry });
+                    } else {
+                        this.isFallbackRendered = true;
+                        if (typeof uiCallbacks.onFallbackComplete === 'function') {
+                            uiCallbacks.onFallbackComplete({
+                                turnId: this.turnId,
+                                content: finalContent,
+                                sources: this.sources,
+                                assistantMessageId,
+                                telemetry: this.telemetry
+                            });
+                        }
+                        resolve({ success: false, fallback: true, content: finalContent, sources: this.sources, telemetry: this.telemetry });
                     }
-                    resolve({ success: true, content: this.streamedText, sources: this.sources, telemetry: this.telemetry });
                 }
             } catch (err) {
                 // If stream was aborted by our own hard deadline timer, the timer handler already took care of fallback
