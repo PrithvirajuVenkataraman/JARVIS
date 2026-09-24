@@ -9,6 +9,7 @@ import {
     parseCitationsInHtml
 } from '../app/bounded-live-research.js';
 import { parseGoogleNewsRssXml } from '../api/_lib/free-live/providers.js';
+import { buildSourceTransparencyHtml } from '../app/source-transparency.js';
 
 test('BoundedLiveResearchController - Normal Fast Completion', async () => {
     const controller = new BoundedLiveResearchController({
@@ -245,3 +246,70 @@ test('Google News RSS XML Parser', () => {
     assert.equal(items[0].sourceLabel, 'Google News / Reuters');
     assert.ok(items[0].trusted);
 });
+
+test('BoundedLiveResearchController - Empty Synthesis Triggers Snippet Fallback', async () => {
+    const controller = new BoundedLiveResearchController({
+        searchCutoffMs: 200,
+        fallbackWarningMs: 800,
+        hardDeadlineMs: 1200
+    });
+
+    let fallbackPayload = null;
+
+    const result = await controller.execute({
+        query: 'Latest Artemis lunar rover updates',
+        userText: 'Latest Artemis lunar rover updates',
+        assistantMessageId: 'msg_test_empty_stream',
+        fetchSearchFn: async () => {
+            return { results: [] };
+        },
+        streamSynthesisFn: async () => {
+            // Simulates empty stream / refusal / token failure
+        },
+        uiCallbacks: {
+            onFallbackComplete: (payload) => {
+                fallbackPayload = payload;
+            }
+        }
+    });
+
+    assert.equal(result.success, false, 'Must report non-success when synthesis is empty');
+    assert.equal(result.fallback, true, 'Must report fallback: true');
+    assert.ok(result.content.length > 20, 'Content must not be empty or blank');
+    assert.ok(result.content.includes('did not return verified records'), 'Must render polite fallback explanation');
+    assert.ok(fallbackPayload, 'onFallbackComplete must have fired');
+    assert.equal(fallbackPayload.sources.length, 0);
+});
+
+test('generateRelatedResearchQuestions - Guards & Topic Deduplication', () => {
+    // 1. Empty sources must return zero questions
+    assert.deepEqual(generateRelatedResearchQuestions('Anything', []), []);
+
+    // 2. Query starting with latest updates should not generate a tautological question
+    const sources = [{ title: 'NASA Artemis Rover Tests Mobility' }];
+    const questions = generateRelatedResearchQuestions('What are the latest updates on Artemis mission?', sources);
+    assert.equal(questions.length, 3);
+    for (const q of questions) {
+        assert.ok(!q.toLowerCase().includes('what are the latest updates on what are the latest updates'), 'Must not duplicate question prefix');
+        assert.ok(q.endsWith('?'));
+    }
+});
+
+test('Source Transparency - Suppressed When Zero Sources', () => {
+    const htmlWithZeroSources = buildSourceTransparencyHtml({
+        sourceType: 'verified',
+        verified: true,
+        sources: []
+    }, 'Some text');
+
+    assert.equal(htmlWithZeroSources, '', 'Must not render "Verified sources" badge when sources list is empty');
+
+    const htmlWithActualSources = buildSourceTransparencyHtml({
+        sourceType: 'verified',
+        verified: true,
+        sources: [{ title: 'NASA Article', url: 'https://nasa.gov' }]
+    }, 'Some text');
+
+    assert.ok(htmlWithActualSources.includes('Verified sources'), 'Must render badge when verified sources actually exist');
+});
+
