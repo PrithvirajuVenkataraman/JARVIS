@@ -6971,6 +6971,32 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             btn.title = 'Stop generating';
         }
 
+        function normalizeUserQuery(value) {
+            if (typeof window !== 'undefined' && typeof window.JarvisQueryNormalizer?.normalizeUserQuery === 'function') {
+                return window.JarvisQueryNormalizer.normalizeUserQuery(value);
+            }
+            if (typeof window !== 'undefined' && typeof window.JarvisLiveResearch?.normalizeUserQuery === 'function') {
+                return window.JarvisLiveResearch.normalizeUserQuery(value);
+            }
+            if (value == null) return '';
+            let text = String(value);
+            text = text.replace(/&nbsp;/gi, ' ');
+            text = text.replace(/[\u2800\u3164\uFFA0]/g, ' ');
+            text = text.replace(/\p{Cf}/gu, '');
+            text = text.replace(/[\p{Zs}\s]+/gu, ' ');
+            return text.trim();
+        }
+
+        function hasSearchableContent(value) {
+            if (typeof window !== 'undefined' && typeof window.JarvisQueryNormalizer?.hasSearchableContent === 'function') {
+                return window.JarvisQueryNormalizer.hasSearchableContent(value);
+            }
+            if (typeof window !== 'undefined' && typeof window.JarvisLiveResearch?.hasSearchableContent === 'function') {
+                return window.JarvisLiveResearch.hasSearchableContent(value);
+            }
+            return /[\p{L}\p{N}]/u.test(normalizeUserQuery(value));
+        }
+
         function toggleSendButton() {
             const input = document.getElementById('text-input');
             const sendBtn = document.getElementById('send-message-btn');
@@ -6988,7 +7014,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             sendBtn.title = 'Send message';
             sendBtn.setAttribute('aria-label', 'Send message');
             sendBtn.innerHTML = getSendIconSvg();
-            const hasText = Boolean(input && input.value.trim().length > 0);
+            const hasText = Boolean(input && hasSearchableContent(input.value));
             const hasAttachments = window.JarvisAttachments?.hasPendingAttachments?.() === true;
             const canSend = hasText || hasAttachments;
             sendBtn.disabled = !canSend;
@@ -7004,7 +7030,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 stopActiveGeneration('manual');
                 return;
             }
-            const hasInput = !!(input && input.value.trim().length > 0);
+            const hasInput = !!(input && hasSearchableContent(input.value));
             const hasAttachments = window.JarvisAttachments?.hasPendingAttachments?.() === true;
             if (hasInput || hasAttachments) {
                 void sendTextInput();
@@ -7018,7 +7044,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 window.initializeSpeechInput();
             }
             const input = document.getElementById('text-input');
-            if (input?.value?.trim()) {
+            if (input && hasSearchableContent(input.value)) {
                 void sendTextInput();
                 return;
             }
@@ -13603,7 +13629,9 @@ async function sendTextInput(submission = {}) {
             const input = document.getElementById('text-input');
             if (!input && submission?.text === undefined) return;
             const inputSource = String(submission?.source || input?.dataset?.inputSource || 'text');
-            const text = String(submission?.text !== undefined ? submission.text : (input?.value || '')).replace(/[\u00A0\u200B-\u200D\uFEFF]/g, ' ').trim();
+            const rawTextInput = submission?.text !== undefined ? submission.text : (input?.value || '');
+            const text = normalizeUserQuery(rawTextInput);
+            const hasText = hasSearchableContent(text);
             const pendingAttachments = window.JarvisAttachments?.getPendingAttachments?.() || [];
             if (submission?.isRetry === true && activeRequestController) {
                 try { activeRequestController.abort('retry'); } catch (_) {}
@@ -13613,14 +13641,19 @@ async function sendTextInput(submission = {}) {
                 clearActiveRequest(activeRequestController);
             }
             if (submission?.isRetry !== true && (activeRequestController || isAssistantProcessing())) {
-                if (!text && !pendingAttachments.length) {
+                if (!hasText && !pendingAttachments.length) {
                     stopActiveGeneration();
                     return;
                 }
                 stopActiveGeneration('superseded');
             }
-            if (text || pendingAttachments.length) {
-                if (handleLocalVoiceCommand(text, inputSource)) {
+            if (!hasText && !pendingAttachments.length) {
+                if (input) input.value = '';
+                toggleSendButton();
+                return;
+            }
+            if (hasText || pendingAttachments.length) {
+                if (hasText && handleLocalVoiceCommand(text, inputSource)) {
                     input.value = '';
                     delete input.dataset.inputSource;
                     globalThis.resetSpeechInputCommittedText?.();
@@ -20814,8 +20847,8 @@ async function handleUniversalEntityFactQuery(userText, liveIntent = null) {
 
 
 async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = {}) {
-    const query = String(cleanText || '').replace(/[\u00A0\u200B-\u200D\uFEFF]/g, ' ').trim();
-    if (!query) return false;
+    const query = normalizeUserQuery(cleanText || rawUserText);
+    if (!hasSearchableContent(query)) return false;
 
     // Abort any existing active live research controller to prevent races
     if (window.JarvisLiveResearch?.activeController) {
