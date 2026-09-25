@@ -13,9 +13,9 @@ import {
     normalizeUserQuery,
     hasSearchableContent
 } from '../app/bounded-live-research.js';
-import { parseGoogleNewsRssXml } from '../api/_lib/free-live/providers.js';
+import { parseGoogleNewsRssXml, searchDuckDuckGoHtml } from '../api/_lib/free-live/providers.js';
 import { buildSourceTransparencyHtml } from '../app/source-transparency.js';
-import { searchGovernmentRole, runEvidenceFirstWebRag } from '../api/search.js';
+import { searchGovernmentRole, runEvidenceFirstWebRag, searchPublicSources } from '../api/search.js';
 
 // ============================================================================
 // ARCHITECTURE-LEVEL TESTS (Section 8 Requirements)
@@ -886,6 +886,91 @@ test('Backend Contract: runEvidenceFirstWebRag answer:false is capped to <= 3000
     assert.ok(res.results.length >= 2, `Expected >= 2 results, got ${res.results.length}`);
 });
 
+test('Backend Contract: searchDuckDuckGoHtml respects AbortSignal and bounds timeout', async () => {
+    const abortCtrl = new AbortController();
+    abortCtrl.abort();
+    const res = await searchDuckDuckGoHtml('Release date of the paradise movie starring Nani', {
+        signal: abortCtrl.signal,
+        timeoutMs: 1500
+    });
+    assert.deepEqual(res, []);
+});
 
+test('Backend Contract: searchPublicSources gathers diverse sources including general web and news', async () => {
+    const res = await searchPublicSources('Release date of the paradise movie starring Nani', {
+        limit: 8,
+        timeoutMs: 2500
+    });
+    assert.ok(Array.isArray(res));
+    assert.ok(res.length >= 2, `Expected >= 2 sources, got ${res.length}`);
+    // Ensure sources are not restricted to only Google News
+    const hasNonNews = res.some(s => !String(s.url || '').includes('news.google.com') && !String(s.source || '').toLowerCase().includes('google news'));
+    assert.ok(hasNonNews, 'searchPublicSources must include general web or non-Google-News sources');
+});
 
+test('Synthesis Error Diagnostics: Controller records synthesisError on failure and falls back safely', async () => {
+    const controller = new BoundedLiveResearchController({
+        searchCutoffMs: 2000,
+        searchTimeoutMs: 2000,
+        hardDeadlineMs: 4000,
+        minSourcesForEarlySynthesis: 1
+    });
 
+    const result = await controller.execute({
+        query: 'Release date of the paradise movie starring Nani',
+        userText: 'Release date of the paradise movie starring Nani',
+        assistantMessageId: 'msg_synthesis_err',
+        fetchSearchFn: async () => {
+            return {
+                results: [{
+                    title: 'The Paradise Movie',
+                    url: 'https://example.com/paradise',
+                    snippet: 'Releasing on August 21'
+                }]
+            };
+        },
+        streamSynthesisFn: async () => {
+            throw new Error('LLM synthesis service unavailable (503)');
+        }
+    });
+
+    assert.equal(result.success, false);
+    assert.equal(result.fallback, true);
+    assert.equal(result.provenance, PROVENANCE_MODES.SYNTHESIS_FALLBACK);
+    assert.ok(result.telemetry.synthesisError.includes('503'));
+    assert.ok(result.content.includes('Verified Summary'));
+});
+
+test('Synthesis Success Invariant: Clean streamed response completes with WEB_GROUNDED provenance without snippet bullets', async () => {
+    const controller = new BoundedLiveResearchController({
+        searchCutoffMs: 2000,
+        searchTimeoutMs: 2000,
+        hardDeadlineMs: 4000,
+        minSourcesForEarlySynthesis: 1
+    });
+
+    const result = await controller.execute({
+        query: 'Release date of the paradise movie starring Nani',
+        userText: 'Release date of the paradise movie starring Nani',
+        assistantMessageId: 'msg_synthesis_ok',
+        fetchSearchFn: async () => {
+            return {
+                results: [{
+                    id: 1,
+                    title: 'The Paradise Movie',
+                    url: 'https://example.com/paradise',
+                    snippet: 'Releasing on August 21'
+                }]
+            };
+        },
+        streamSynthesisFn: async ({ onToken }) => {
+            onToken("The release date of 'The Paradise' starring Nani is August 21, 2026, as announced by the makers [1].");
+        }
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(result.fallback, false);
+    assert.equal(result.provenance, PROVENANCE_MODES.WEB_GROUNDED);
+    assert.ok(result.content.includes('August 21'));
+    assert.ok(!result.content.includes('Verified Summary for'));
+});
