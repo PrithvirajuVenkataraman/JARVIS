@@ -819,6 +819,8 @@ ${sourcesContext}`;
                     }
                 } catch (err) {
                     if (this.isTerminal) return;
+                    this.telemetry.synthesisError = err?.message || String(err);
+                    console.error(`[BoundedLiveResearch:${this.turnId}] Synthesis failed:`, err);
                     const snippetFallback = generateSnippetFallback(query, this.sources);
                     completeExecution({
                         success: false,
