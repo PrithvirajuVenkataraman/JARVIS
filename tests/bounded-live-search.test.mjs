@@ -15,6 +15,7 @@ import {
 } from '../app/bounded-live-research.js';
 import { parseGoogleNewsRssXml } from '../api/_lib/free-live/providers.js';
 import { buildSourceTransparencyHtml } from '../app/source-transparency.js';
+import { searchGovernmentRole, runEvidenceFirstWebRag } from '../api/search.js';
 
 // ============================================================================
 // ARCHITECTURE-LEVEL TESTS (Section 8 Requirements)
@@ -833,6 +834,58 @@ test('Telemetry Invariant: sourcesCount and totalDurationMs are populated on fin
     assert.ok(result.telemetry.t_sources_rendered > 0);
     assert.ok(result.telemetry.t_completed >= result.telemetry.t_start);
 });
+
+test('Client Timeout Normalization: TimeoutError and "signal timed out" map to client_search_timeout (4500ms)', async () => {
+    const controller = new BoundedLiveResearchController({
+        searchCutoffMs: 5000,
+        searchTimeoutMs: 4500,
+        hardDeadlineMs: 9000
+    });
+
+    const timeoutError = new Error('signal timed out');
+    timeoutError.name = 'TimeoutError';
+
+    const result = await controller.execute({
+        query: 'timeout query test',
+        userText: 'timeout query test',
+        assistantMessageId: 'msg_timeout_test',
+        fetchSearchFn: async () => {
+            throw timeoutError;
+        },
+        streamSynthesisFn: async () => {
+            throw new Error('Should not synthesize on timeout');
+        }
+    });
+
+    assert.equal(result.success, false);
+    assert.equal(result.provenance, PROVENANCE_MODES.NO_SOURCES);
+    assert.equal(result.telemetry.searchError, 'client_search_timeout (4500ms)');
+    assert.equal(result.telemetry.httpStatus, null);
+});
+
+test('Backend Contract: searchGovernmentRole respects <= 1500ms timeout and AbortSignal', async () => {
+    const abortCtrl = new AbortController();
+    abortCtrl.abort();
+    const res = await searchGovernmentRole('who is the CEO of Apple', {
+        signal: abortCtrl.signal,
+        timeoutMs: 1500
+    });
+    assert.deepEqual(res, []);
+});
+
+test('Backend Contract: runEvidenceFirstWebRag answer:false is capped to <= 3000ms', async () => {
+    const t0 = performance.now();
+    const res = await runEvidenceFirstWebRag('who is the CEO of Apple', {
+        limit: 8,
+        answer: false,
+        timeoutMs: 3000
+    });
+    const duration = performance.now() - t0;
+    assert.ok(duration <= 3000, `Expected duration <= 3000ms, got ${duration}ms`);
+    assert.ok(Array.isArray(res.results));
+    assert.ok(res.results.length >= 2, `Expected >= 2 results, got ${res.results.length}`);
+});
+
 
 
 
