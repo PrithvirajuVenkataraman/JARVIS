@@ -685,7 +685,15 @@ export class BoundedLiveResearchController {
                     }
                 } catch (err) {
                     if (searchCutoffTriggered || this.isTerminal) return;
-                    this.telemetry.searchError = err?.message || String(err);
+                    const errStr = String(err?.message || err || '').toLowerCase();
+                    const isTimeout = err?.name === 'TimeoutError' ||
+                        errStr.includes('timed out') ||
+                        errStr.includes('timeout') ||
+                        this.searchAbortController.signal.aborted;
+                    const timeoutBound = this.searchTimeoutMs || 4500;
+                    this.telemetry.searchError = isTimeout
+                        ? `client_search_timeout (${timeoutBound}ms)`
+                        : (err?.message || String(err));
                     this.telemetry.httpStatus = err?.status || null;
                     console.error(`[BoundedLiveResearch:${this.turnId}] Search failed (status: ${err?.status || 'N/A'}):`, err);
                     clearTimeout(cutoffTimer);
