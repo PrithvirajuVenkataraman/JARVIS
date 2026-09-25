@@ -135,10 +135,11 @@ export default async function handler(req, res) {
         const mode = normalizeSearchMode(req.body?.mode || req.body?.searchMode || '');
         if (mode === 'rag') {
             const answer = req.body?.answer !== false;
+            const maxBudget = answer ? 4000 : 3000;
             const search = await runEvidenceFirstWebRag(query, {
                 limit,
                 answer,
-                timeoutMs: Math.min(Number(req.body?.timeoutMs) || 4000, 4000)
+                timeoutMs: Math.min(Number(req.body?.timeoutMs) || maxBudget, maxBudget)
             });
             return res.status(200).json({
                 success: true,
@@ -578,7 +579,8 @@ export async function searchPublicSources(query, options = {}) {
         ...targetQueries
     ])).slice(0, 2);
 
-    const boundedTimeoutMs = Math.min(Number(options.timeoutMs) || 4000, 4000);
+    const maxCeiling = options.answer === false ? 3000 : 4000;
+    const boundedTimeoutMs = Math.min(Number(options.timeoutMs) || maxCeiling, maxCeiling);
     const roleIntent = parseGovernmentRoleQuery(normalizedQuery);
     const isLeadership = Boolean(roleIntent && isLeadershipOrRoleTerm(roleIntent.role));
 
@@ -590,11 +592,11 @@ export async function searchPublicSources(query, options = {}) {
     let gdelt = [];
     let geminiGroundingResults = [];
 
-    const taskNews = Promise.allSettled(targetQueries.slice(0, 2).map(candidate => searchGoogleNewsRss(candidate, { limit, timeoutMs: Math.min(boundedTimeoutMs, 2500) })))
+    const taskNews = Promise.allSettled(targetQueries.slice(0, 2).map(candidate => searchGoogleNewsRss(candidate, { limit, timeoutMs: Math.min(boundedTimeoutMs, 2000) })))
         .then(s => { liveNews = s.flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []); });
-    const taskWiki = Promise.allSettled(targetQueries.slice(0, 2).map(candidate => searchWikipedia(candidate, { limit: 2, timeoutMs: Math.min(boundedTimeoutMs, 2500) })))
+    const taskWiki = Promise.allSettled(targetQueries.slice(0, 2).map(candidate => searchWikipedia(candidate, { limit: 2, timeoutMs: Math.min(boundedTimeoutMs, 2000) })))
         .then(s => { wiki = s.flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []).slice(0, 3); });
-    const taskWikidata = Promise.allSettled([searchWikidata(targetQueries[0] || normalizedQuery, { limit: 2, timeoutMs: Math.min(boundedTimeoutMs, 2200) })])
+    const taskWikidata = Promise.allSettled([searchWikidata(targetQueries[0] || normalizedQuery, { limit: 2, timeoutMs: Math.min(boundedTimeoutMs, 1800) })])
         .then(s => { wikidata = s.flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []).slice(0, 2); });
     const taskYahoo = Promise.allSettled([searchYahooFinanceQuotes(normalizedQuery, { limit: 2, timeoutMs: 1800 })])
         .then(s => {
@@ -603,11 +605,11 @@ export async function searchPublicSources(query, options = {}) {
         });
     const taskGov = (options.skipStructuredRoles === true || !isLeadership)
         ? Promise.resolve()
-        : Promise.allSettled([searchGovernmentRole(normalizedQuery, { limit: Math.min(3, limit), timeoutMs: Math.min(boundedTimeoutMs, 2500) })])
+        : Promise.allSettled([searchGovernmentRole(normalizedQuery, { limit: Math.min(3, limit), timeoutMs: Math.min(boundedTimeoutMs, 1500) })])
             .then(s => { governmentRoleResults = (Array.isArray(s) ? s : []).flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []); });
     const taskGdelt = options.skipGdelt === true
         ? Promise.resolve()
-        : Promise.allSettled(gdeltQueries.map(candidate => searchGdeltNews(candidate, { limit, timeoutMs: Math.min(boundedTimeoutMs, 3000) })))
+        : Promise.allSettled(gdeltQueries.map(candidate => searchGdeltNews(candidate, { limit, timeoutMs: Math.min(boundedTimeoutMs, 2500) })))
             .then(s => { gdelt = (Array.isArray(s) ? s : []).flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []); });
     const taskGemini = hasGeminiKey()
         ? Promise.allSettled([searchGeminiGrounding(targetQueries[0] || normalizedQuery, { limit }).then(r => r.results || [])])
@@ -617,10 +619,10 @@ export async function searchPublicSources(query, options = {}) {
     const fastTasks = [taskNews, taskWiki, taskWikidata, taskYahoo, taskGov];
     const allTasks = [...fastTasks, taskGdelt, taskGemini];
 
-    // Wait for fast tasks to complete (or time out after 2500ms)
+    // Wait for fast tasks to complete (or time out after 2000ms)
     await Promise.race([
         Promise.all(fastTasks),
-        new Promise(res => setTimeout(res, Math.min(boundedTimeoutMs, 2500)))
+        new Promise(res => setTimeout(res, Math.min(boundedTimeoutMs, 2000)))
     ]);
 
     const getFastCount = () => (liveNews.length + wiki.length + wikidata.length + liveWeb.length + governmentRoleResults.length);
@@ -628,7 +630,7 @@ export async function searchPublicSources(query, options = {}) {
     // If fast tasks returned sufficient sources (>= 2), proceed immediately!
     // Otherwise wait for slower trailing tasks up to boundedTimeoutMs
     if (getFastCount() < 2) {
-        const remainingMs = Math.max(50, boundedTimeoutMs - 2500);
+        const remainingMs = Math.max(50, boundedTimeoutMs - 2000);
         await Promise.race([
             Promise.all(allTasks),
             new Promise(res => setTimeout(res, remainingMs))
@@ -662,6 +664,8 @@ export async function searchPublicSources(query, options = {}) {
 
 export async function searchWikipedia(query, options = {}) {
     const limit = clampInt(options.limit, 4, 1, 10);
+    const timeoutMs = Math.min(Number(options.timeoutMs) || PUBLIC_SOURCE_TIMEOUT_MS, PUBLIC_SOURCE_TIMEOUT_MS);
+    const signal = options.signal;
     const url = new URL(WIKIPEDIA_SEARCH_URL);
     url.searchParams.set('action', 'query');
     url.searchParams.set('list', 'search');
@@ -672,8 +676,9 @@ export async function searchWikipedia(query, options = {}) {
         headers: {
             Accept: 'application/json',
             'User-Agent': 'UnifyAssistant/2.0 (https://github.com/unify; contact@unify.ai)'
-        }
-    }, PUBLIC_SOURCE_TIMEOUT_MS);
+        },
+        signal
+    }, timeoutMs);
     if (!response.ok) return [];
     const data = await response.json();
     const hits = Array.isArray(data?.query?.search) ? data.query.search : [];
@@ -682,7 +687,7 @@ export async function searchWikipedia(query, options = {}) {
             const title = String(hit?.title || '').trim();
             if (!title) return null;
             const [summary, infobox] = await Promise.all([
-                fetchWikipediaSummary(title).catch(() => null),
+                fetchWikipediaSummary(title, { timeoutMs, signal }).catch(() => null),
                 fetchWikipediaInfobox(title).catch(() => null)
             ]);
             return normalizeWikipediaItem(summary || hit, query, infobox);
@@ -939,17 +944,23 @@ export async function searchGovernmentRole(query, options = {}) {
     const intent = parseGovernmentRoleQuery(query);
     if (!intent) return [];
     const limit = clampInt(options.limit, 3, 1, 6);
+    const timeoutMs = Math.min(Number(options.timeoutMs) || 1500, 1500);
+    const signal = options.signal;
+    if (signal?.aborted) return [];
+
     const roleTitle = formatRoleDisplayTitle(intent.role);
     const directTitle = `${roleTitle} of ${intent.jurisdiction}`;
     const wikiQuery = `List of ${intent.role}s of ${intent.jurisdiction}`;
 
-    // Fast-path: query direct canonical role page on Wikipedia first
-    const directWiki = await searchWikipedia(directTitle, { limit: 1 }).catch(() => []);
+    // Fast-path: query direct canonical role page on Wikipedia first (<= 1500ms)
+    const directWiki = await searchWikipedia(directTitle, { limit: 1, timeoutMs, signal }).catch(() => []);
+    if (signal?.aborted) return [];
     if (directWiki.length && directWiki[0].infobox && (directWiki[0].infobox.incumbent || directWiki[0].infobox.government_head)) {
         return directWiki;
     }
 
-    const jurisdiction = await resolveWikidataEntity(intent.jurisdiction).catch(() => null);
+    const jurisdiction = await resolveWikidataEntity(intent.jurisdiction, { timeoutMs, signal }).catch(() => null);
+    if (signal?.aborted) return [];
     if (jurisdiction?.id) {
         const sparql = buildGovernmentRoleSparql(intent, jurisdiction.id, limit);
         try {
@@ -957,8 +968,9 @@ export async function searchGovernmentRole(query, options = {}) {
                 headers: {
                     Accept: 'application/sparql-results+json, application/json',
                     'User-Agent': 'UnifyAssistant/2.0 (https://github.com/unify; contact@unify.ai)'
-                }
-            }, 2500);
+                },
+                signal
+            }, timeoutMs);
             if (response.ok) {
                 const data = await response.json();
                 const bindings = normalizeGovernmentRoleBindings(data, intent, jurisdiction, query).slice(0, limit);
@@ -967,17 +979,20 @@ export async function searchGovernmentRole(query, options = {}) {
         } catch (_) {}
     }
 
-    const wikiResults = await searchWikipedia(wikiQuery, { limit: 2 }).catch(() => []);
+    if (signal?.aborted) return [];
+    const wikiResults = await searchWikipedia(wikiQuery, { limit: 2, timeoutMs, signal }).catch(() => []);
     return directWiki.length ? [...directWiki, ...wikiResults] : wikiResults;
 }
 
-export async function resolveWikidataEntity(label) {
+export async function resolveWikidataEntity(label, options = {}) {
     const query = normalizeSearchQuery(label);
     if (!query) return null;
     const cacheKey = query.toLowerCase();
     if (WIKIDATA_ENTITY_CACHE.has(cacheKey)) {
         return WIKIDATA_ENTITY_CACHE.get(cacheKey);
     }
+    const timeoutMs = Math.min(Number(options.timeoutMs) || 1500, 1500);
+    const signal = options.signal;
     const url = new URL(WIKIDATA_SEARCH_URL);
     url.searchParams.set('action', 'wbsearchentities');
     url.searchParams.set('search', query);
@@ -989,8 +1004,9 @@ export async function resolveWikidataEntity(label) {
         headers: {
             Accept: 'application/json',
             'User-Agent': 'UnifyAssistant/2.0 (https://github.com/unify; contact@unify.ai)'
-        }
-    }, PUBLIC_SOURCE_TIMEOUT_MS);
+        },
+        signal
+    }, timeoutMs);
     if (!response.ok) return null;
     const data = await response.json();
     const hits = Array.isArray(data?.search) ? data.search : [];
@@ -1330,36 +1346,74 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
     // GDELT, Reddit, deep crawl, embeddings, reranking = fallback only
     const phase1Queries = phases[0] || [normalizedQuery];
     const searchStart = performance.now();
+    const serverTimeoutMs = options.answer === false
+        ? Math.min(Number(options.timeoutMs) || 3000, 3000)
+        : Math.min(Number(options.timeoutMs) || 4000, 4000);
 
-    const tier1Tasks = [
-        searchPublicSources(normalizedQuery, {
-            limit,
-            plannedQueries: phase1Queries,
-            skipStructuredRoles: true,
-            skipAutoDeepCrawl: true,
-            timeoutMs: Math.min(Number(options.timeoutMs) || 4000, 4000)
-        }).then(r => {
-            timing.publicSourcesMs = Number((performance.now() - searchStart).toFixed(1));
-            return r;
-        }).catch(error => {
-            warnings.push(`rag_phase_1_failed:${String(error?.code || error?.message || 'unknown')}`);
-            return [];
-        })
-    ];
+    const publicSearchPromise = searchPublicSources(normalizedQuery, {
+        limit,
+        plannedQueries: phase1Queries,
+        skipStructuredRoles: true,
+        skipAutoDeepCrawl: true,
+        answer: options.answer,
+        timeoutMs: serverTimeoutMs
+    }).then(r => {
+        timing.publicSourcesMs = Number((performance.now() - searchStart).toFixed(1));
+        return r;
+    }).catch(error => {
+        warnings.push(`rag_phase_1_failed:${String(error?.code || error?.message || 'unknown')}`);
+        return [];
+    });
 
-    // Structured Wikidata role lookup runs concurrently (only for role queries)
+    let rolePromise = null;
+    let roleAbortController = null;
     if (roleIntent) {
-        tier1Tasks.push(
-            searchGovernmentRole(normalizedQuery, { limit: Math.min(3, limit) }).then(r => {
-                timing.structuredLookupMs = Number((performance.now() - searchStart).toFixed(1));
-                return r;
-            }).catch(() => [])
-        );
+        roleAbortController = new AbortController();
+        const roleTimeout = Math.min(serverTimeoutMs, 1500);
+        rolePromise = searchGovernmentRole(normalizedQuery, {
+            limit: Math.min(3, limit),
+            timeoutMs: roleTimeout,
+            signal: roleAbortController.signal
+        }).then(r => {
+            timing.structuredLookupMs = Number((performance.now() - searchStart).toFixed(1));
+            return r;
+        }).catch(() => []);
     }
 
-    const tier1Settled = await Promise.all(tier1Tasks);
-    const publicResults = tier1Settled[0] || [];
-    const structRoleResults = tier1Settled[1] || [];
+    // Await public sources
+    const publicResults = (await publicSearchPromise) || [];
+
+    let structRoleResults = [];
+    if (rolePromise) {
+        const verifiedPublicCount = publicResults.filter(item => isValidCitationSource(item, normalizedQuery)).length;
+        if (verifiedPublicCount >= 2) {
+            // Once public search produces >= 2 verified sources, give role lookup only a 300ms grace window
+            const roleRace = await Promise.race([
+                rolePromise,
+                new Promise(resolve => setTimeout(() => resolve('GRACE_EXPIRED'), 300))
+            ]);
+            if (roleRace === 'GRACE_EXPIRED') {
+                try { roleAbortController.abort(); } catch (_) {}
+                structRoleResults = [];
+            } else if (Array.isArray(roleRace)) {
+                structRoleResults = roleRace;
+            }
+        } else {
+            // Slower public search (<2 verified sources): give role lookup the remaining server budget
+            const elapsed = performance.now() - searchStart;
+            const remainingBudget = Math.max(50, serverTimeoutMs - elapsed);
+            const roleRace = await Promise.race([
+                rolePromise,
+                new Promise(resolve => setTimeout(() => resolve('BUDGET_EXPIRED'), remainingBudget))
+            ]);
+            if (roleRace === 'BUDGET_EXPIRED') {
+                try { roleAbortController.abort(); } catch (_) {}
+                structRoleResults = [];
+            } else if (Array.isArray(roleRace)) {
+                structRoleResults = roleRace;
+            }
+        }
+    }
 
     // Structured claims go first for priority
     for (const item of [...structRoleResults, ...publicResults]) {
@@ -1682,11 +1736,13 @@ export function isTrustedLiveSource(urlOrDomain) {
     return TRUSTED_SOURCE_HOSTS.some(host => domain === host || domain.endsWith(`.${host}`));
 }
 
-async function fetchWikipediaSummary(title) {
+async function fetchWikipediaSummary(title, options = {}) {
+    const timeoutMs = Math.min(Number(options.timeoutMs) || PUBLIC_SOURCE_TIMEOUT_MS, PUBLIC_SOURCE_TIMEOUT_MS);
     const url = `${WIKIPEDIA_SUMMARY_URL}/${encodeURIComponent(String(title || '').replace(/\s+/g, '_'))}`;
     const response = await fetchWithTimeout(url, {
-        headers: { Accept: 'application/json' }
-    }, PUBLIC_SOURCE_TIMEOUT_MS);
+        headers: { Accept: 'application/json' },
+        signal: options.signal
+    }, timeoutMs);
     if (!response.ok) return null;
     return response.json();
 }
