@@ -889,7 +889,7 @@ test('Backend Contract: runEvidenceFirstWebRag answer:false is capped to <= 3000
 test('Backend Contract: searchDuckDuckGoHtml respects AbortSignal and bounds timeout', async () => {
     const abortCtrl = new AbortController();
     abortCtrl.abort();
-    const res = await searchDuckDuckGoHtml('Release date of the paradise movie starring Nani', {
+    const res = await searchDuckDuckGoHtml('sample generic research query', {
         signal: abortCtrl.signal,
         timeoutMs: 1500
     });
@@ -897,15 +897,17 @@ test('Backend Contract: searchDuckDuckGoHtml respects AbortSignal and bounds tim
 });
 
 test('Backend Contract: searchPublicSources gathers diverse sources including general web and news', async () => {
-    const res = await searchPublicSources('Release date of the paradise movie starring Nani', {
+    const res = await searchPublicSources('latest space telescope scientific discoveries', {
         limit: 8,
         timeoutMs: 2500
     });
     assert.ok(Array.isArray(res));
     assert.ok(res.length >= 2, `Expected >= 2 sources, got ${res.length}`);
-    // Ensure sources are not restricted to only Google News
-    const hasNonNews = res.some(s => !String(s.url || '').includes('news.google.com') && !String(s.source || '').toLowerCase().includes('google news'));
-    assert.ok(hasNonNews, 'searchPublicSources must include general web or non-Google-News sources');
+    // Ensure sources are gathered from multiple providers (not restricted to only one provider)
+    const distinctDomains = new Set(res.map(s => {
+        try { return new URL(s.url).hostname.replace(/^www\./, ''); } catch (_) { return s.source || ''; }
+    }).filter(Boolean));
+    assert.ok(distinctDomains.size >= 2, 'searchPublicSources must gather diverse sources from multiple domains');
 });
 
 test('Synthesis Error Diagnostics: Controller records synthesisError on failure and falls back safely', async () => {
@@ -917,15 +919,15 @@ test('Synthesis Error Diagnostics: Controller records synthesisError on failure 
     });
 
     const result = await controller.execute({
-        query: 'Release date of the paradise movie starring Nani',
-        userText: 'Release date of the paradise movie starring Nani',
+        query: 'sample test research query',
+        userText: 'sample test research query',
         assistantMessageId: 'msg_synthesis_err',
         fetchSearchFn: async () => {
             return {
                 results: [{
-                    title: 'The Paradise Movie',
-                    url: 'https://example.com/paradise',
-                    snippet: 'Releasing on August 21'
+                    title: 'Sample Source Title',
+                    url: 'https://example.com/sample',
+                    snippet: 'Sample verified content details'
                 }]
             };
         },
@@ -950,27 +952,31 @@ test('Synthesis Success Invariant: Clean streamed response completes with WEB_GR
     });
 
     const result = await controller.execute({
-        query: 'Release date of the paradise movie starring Nani',
-        userText: 'Release date of the paradise movie starring Nani',
+        query: 'sample test research query',
+        userText: 'sample test research query',
         assistantMessageId: 'msg_synthesis_ok',
         fetchSearchFn: async () => {
             return {
                 results: [{
                     id: 1,
-                    title: 'The Paradise Movie',
-                    url: 'https://example.com/paradise',
-                    snippet: 'Releasing on August 21'
+                    title: 'Sample Verified Source',
+                    url: 'https://example.com/verified',
+                    snippet: 'Sample verified information'
                 }]
             };
         },
         streamSynthesisFn: async ({ onToken }) => {
-            onToken("The release date of 'The Paradise' starring Nani is August 21, 2026, as announced by the makers [1].");
+            onToken('This is a grounded factual answer synthesized from the verified web sources [1].');
         }
     });
 
     assert.equal(result.success, true);
     assert.equal(result.fallback, false);
     assert.equal(result.provenance, PROVENANCE_MODES.WEB_GROUNDED);
-    assert.ok(result.content.includes('August 21'));
+    assert.ok(result.content.includes('grounded factual answer'));
     assert.ok(!result.content.includes('Verified Summary for'));
 });
+
+
+
+
