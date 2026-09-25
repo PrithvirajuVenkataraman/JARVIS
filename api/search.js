@@ -4323,7 +4323,7 @@ export const __test = {
     extractOfficialCurrentRoleEvidence,
     parseDiscoveryFactQuery,
     isDiscoveryAnswerSource,
-    rankSources,
+    rankSources, 
     searchPublicSources,
     searchWikipedia,
     extractSearchTargetQuery,
