@@ -4851,6 +4851,10 @@ async function streamChatCompletion(payload, options = {}) {
             err.code = data?.error?.code || (response.status === 503 ? 'service_unavailable' : 'request_failed');
             throw err;
         }
+        const text = String(data?.response || data?.text || data?.answer || '').trim();
+        if (text && typeof options?.onToken === 'function') {
+            options.onToken(text);
+        }
         return data;
     }
     if (!response.ok || !response.body) {
@@ -20936,21 +20940,18 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                 });
             },
             streamSynthesisFn: async ({ prompt, sources, signal, timeoutMs, onToken }) => {
-                const searchGrounding = {
-                    kind: 'selection',
-                    selectedText: prompt,
-                    sourceAnswer: prompt,
-                    sources: sources || []
-                };
+                const currentModel = typeof getSelectedModel === 'function' ? getSelectedModel() : 'auto';
+                const selectedModel = currentModel && currentModel !== 'auto' ? currentModel : undefined;
                 return streamChatCompletion({
                     message: query,
                     context: window.JarvisConversation?.buildContext?.({ maxTurns: 6 }) || [],
                     preferences: {
                         userName: typeof userName !== 'undefined' ? userName : '',
                         responseLength: typeof responseMode !== 'undefined' ? responseMode : 'normal',
-                        customSystemPrompt: prompt
+                        customSystemPrompt: prompt,
+                        selectedModel
                     },
-                    grounding: searchGrounding,
+                    selectedModel,
                     sources: sources || [],
                     ragText: prompt,
                     intent: 'chat'
