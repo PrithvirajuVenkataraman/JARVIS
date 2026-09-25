@@ -968,7 +968,7 @@ async function fetchWithTimeout(url, init = {}, timeoutMs = 2500) {
 function clampInt(value, fallback, min, max) {
     const n = Number.parseInt(value, 10);
     if (!Number.isFinite(n)) return fallback;
-    return Math.max(min, Math.min(max, n));
+    return Math.max(min, Math.min(max, n)); 
 }
 
 export const __test = {
