@@ -1421,8 +1421,15 @@ const edgeResponseCache = new EdgeSemanticLruCache();
     function shouldStreamChatRequest(body, intent, grounding, routeDecision, isInternalSummary) {
         if (!body || body.stream !== true) return false;
         if (!['chat', 'pop_culture_reference', 'fast_simple', 'fast_explainer', 'casual_chat', 'deep_reasoning'].includes(String(intent || 'chat'))) return false;
-        if (grounding) return false;
+        if (isAttachmentGroundingPayload(grounding, intent)) return false;
         if (isInternalSummary) return false;
+
+        // Pre-grounded live RAG request with verified sources already supplied by caller
+        const hasPreloadedSources = (Array.isArray(body?.sources) && body.sources.length > 0) || Boolean(body?.ragText);
+        if (hasPreloadedSources) {
+            return true;
+        }
+
         const routingProbe = String(body.routingMessage || body.displayUserMessage || body.message || '');
         const generationMessage = String(body.message || '');
         if (needsPreStreamSafetyReview(routingProbe) || needsPreStreamSafetyReview(generationMessage)) return false;
