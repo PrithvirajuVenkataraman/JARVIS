@@ -588,12 +588,15 @@ export async function searchPublicSources(query, options = {}) {
     let wiki = [];
     let wikidata = [];
     let liveWeb = [];
+    let ddgWeb = [];
     let governmentRoleResults = [];
     let gdelt = [];
     let geminiGroundingResults = [];
 
     const taskNews = Promise.allSettled(targetQueries.slice(0, 2).map(candidate => searchGoogleNewsRss(candidate, { limit, timeoutMs: Math.min(boundedTimeoutMs, 2000) })))
         .then(s => { liveNews = s.flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []); });
+    const taskDdg = Promise.allSettled(targetQueries.slice(0, 2).map(candidate => searchDuckDuckGoHtml(candidate, { limit: 4, timeoutMs: Math.min(boundedTimeoutMs, 2000), signal: options.signal })))
+        .then(s => { ddgWeb = s.flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []); });
     const taskWiki = Promise.allSettled(targetQueries.slice(0, 2).map(candidate => searchWikipedia(candidate, { limit: 2, timeoutMs: Math.min(boundedTimeoutMs, 2000) })))
         .then(s => { wiki = s.flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []).slice(0, 3); });
     const taskWikidata = Promise.allSettled([searchWikidata(targetQueries[0] || normalizedQuery, { limit: 2, timeoutMs: Math.min(boundedTimeoutMs, 1800) })])
@@ -605,7 +608,7 @@ export async function searchPublicSources(query, options = {}) {
         });
     const taskGov = (options.skipStructuredRoles === true || !isLeadership)
         ? Promise.resolve()
-        : Promise.allSettled([searchGovernmentRole(normalizedQuery, { limit: Math.min(3, limit), timeoutMs: Math.min(boundedTimeoutMs, 1500) })])
+        : Promise.allSettled([searchGovernmentRole(normalizedQuery, { limit: Math.min(3, limit), timeoutMs: Math.min(boundedTimeoutMs, 1500), signal: options.signal })])
             .then(s => { governmentRoleResults = (Array.isArray(s) ? s : []).flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []); });
     const taskGdelt = options.skipGdelt === true
         ? Promise.resolve()
@@ -616,7 +619,7 @@ export async function searchPublicSources(query, options = {}) {
             .then(s => { geminiGroundingResults = (Array.isArray(s) ? s : []).flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []); })
         : Promise.resolve();
 
-    const fastTasks = [taskNews, taskWiki, taskWikidata, taskYahoo, taskGov];
+    const fastTasks = [taskNews, taskDdg, taskWiki, taskWikidata, taskYahoo, taskGov];
     const allTasks = [...fastTasks, taskGdelt, taskGemini];
 
     // Wait for fast tasks to complete (or time out after 2000ms)
@@ -625,7 +628,7 @@ export async function searchPublicSources(query, options = {}) {
         new Promise(res => setTimeout(res, Math.min(boundedTimeoutMs, 2000)))
     ]);
 
-    const getFastCount = () => (liveNews.length + wiki.length + wikidata.length + liveWeb.length + governmentRoleResults.length);
+    const getFastCount = () => (liveNews.length + ddgWeb.length + wiki.length + wikidata.length + liveWeb.length + governmentRoleResults.length);
 
     // If fast tasks returned sufficient sources (>= 2), proceed immediately!
     // Otherwise wait for slower trailing tasks up to boundedTimeoutMs
@@ -642,6 +645,7 @@ export async function searchPublicSources(query, options = {}) {
         ...wikidata,
         ...wiki,
         ...geminiGroundingResults,
+        ...ddgWeb,
         ...liveWeb,
         ...(isLeadership ? liveNews.slice(0, 3) : liveNews),
         ...gdelt
