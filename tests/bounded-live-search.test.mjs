@@ -653,17 +653,19 @@ test('Safety Fallback Invariant: generateSnippetFallback never renders " " for i
 test('Centralized LIVE_RESEARCH_BUDGETS contract & defaults', () => {
     assert.equal(LIVE_RESEARCH_BUDGETS.HARD_DEADLINE_MS, 9000);
     assert.equal(LIVE_RESEARCH_BUDGETS.SEARCH_CUTOFF_MS, 5000);
-    assert.equal(LIVE_RESEARCH_BUDGETS.SEARCH_TIMEOUT_MS, 4800);
+    assert.equal(LIVE_RESEARCH_BUDGETS.SEARCH_TIMEOUT_MS, 4500);
     assert.equal(LIVE_RESEARCH_BUDGETS.FALLBACK_WARNING_MS, 8500);
     assert.equal(LIVE_RESEARCH_BUDGETS.MIN_SOURCES_FOR_EARLY_SYNTHESIS, 2);
 
     const controller = new BoundedLiveResearchController();
     assert.equal(controller.hardDeadlineMs, 9000);
     assert.equal(controller.searchCutoffMs, 5000);
-    assert.equal(controller.searchTimeoutMs, 4800);
+    assert.equal(controller.searchTimeoutMs, 4500);
     assert.equal(controller.fallbackWarningMs, 8500);
     assert.equal(controller.minSourcesForEarlySynthesis, 2);
     assert.equal(controller.telemetry.providerTiming, null);
+    assert.equal(controller.telemetry.searchError, null);
+    assert.equal(controller.telemetry.httpStatus, null);
 });
 
 test('Early Synthesis Transition: Receiving 2+ sources before cutoff begins synthesis immediately', async () => {
@@ -755,5 +757,82 @@ test('Cutoff Finalization: 1 verified source transitions to synthesis without NO
     assert.ok(transitions.includes(RESEARCH_STATES.SOURCE_GROUNDED_SYNTHESIS));
     assert.ok(!transitions.includes(RESEARCH_STATES.NO_SOURCES), 'Should not enter NO_SOURCES when 1 source is present');
 });
+
+test('Fail-Fast on Search Error: Immediate rejection reaches NO_SOURCES in < 50ms and captures telemetry', async () => {
+    const controller = new BoundedLiveResearchController({
+        searchCutoffMs: 5000,
+        hardDeadlineMs: 9000
+    });
+
+    const transitions = [];
+    const t0 = performance.now();
+
+    const fetchError = new Error('Failed to fetch from live search server');
+    fetchError.status = 502;
+
+    const result = await controller.execute({
+        query: 'fast failure query',
+        userText: 'fast failure query',
+        assistantMessageId: 'msg_fail_fast_test',
+        fetchSearchFn: async () => {
+            throw fetchError;
+        },
+        streamSynthesisFn: async () => {
+            throw new Error('Should not be called when search fails');
+        },
+        uiCallbacks: {
+            onStateTransition: ({ state }) => {
+                transitions.push(state);
+            }
+        }
+    });
+
+    const elapsedMs = performance.now() - t0;
+    assert.ok(elapsedMs < 100, `Expected fail-fast execution in < 100ms, took ${elapsedMs}ms`);
+    assert.equal(result.success, false);
+    assert.equal(result.fallback, true);
+    assert.equal(result.provenance, PROVENANCE_MODES.NO_SOURCES);
+    assert.equal(result.sources.length, 0);
+    assert.equal(result.sourcesCount, 0);
+    assert.equal(result.telemetry.searchError, 'Failed to fetch from live search server');
+    assert.equal(result.telemetry.httpStatus, 502);
+    assert.ok(transitions.includes(RESEARCH_STATES.SEARCHING));
+    assert.ok(transitions.includes(RESEARCH_STATES.SEARCH_DEADLINE));
+    assert.ok(transitions.includes(RESEARCH_STATES.NO_SOURCES));
+    assert.ok(transitions.includes(RESEARCH_STATES.COMPLETE));
+});
+
+test('Telemetry Invariant: sourcesCount and totalDurationMs are populated on finalPayload', async () => {
+    const controller = new BoundedLiveResearchController({
+        searchCutoffMs: 500,
+        hardDeadlineMs: 1000
+    });
+
+    const result = await controller.execute({
+        query: 'telemetry invariant query',
+        userText: 'telemetry invariant query',
+        assistantMessageId: 'msg_telemetry_test',
+        fetchSearchFn: async () => {
+            return {
+                results: [
+                    { title: 'Doc 1', url: 'https://example.com/1', snippet: 'Snippet 1' },
+                    { title: 'Doc 2', url: 'https://example.com/2', snippet: 'Snippet 2' }
+                ]
+            };
+        },
+        streamSynthesisFn: async ({ onToken }) => {
+            onToken('Answer token [1][2]');
+        }
+    });
+
+    assert.equal(result.sourcesCount, 2);
+    assert.ok(typeof result.totalDurationMs === 'number');
+    assert.ok(result.totalDurationMs >= 0);
+    assert.equal(result.telemetry.sourcesCount, 2);
+    assert.ok(result.telemetry.t_first_search > 0);
+    assert.ok(result.telemetry.t_sources_rendered > 0);
+    assert.ok(result.telemetry.t_completed >= result.telemetry.t_start);
+});
+
 
 
