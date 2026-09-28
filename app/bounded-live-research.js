@@ -121,12 +121,21 @@ export function generateSnippetFallback(query, sources = []) {
         return `I searched for current information on "${cleanQ}", but the live web search providers did not return verified records before the deadline. Please try rephrasing your search query.`;
     }
 
-    const bullets = sources.slice(0, 4).map((s) => {
-        const text = s.snippet || s.title;
-        return `• ${text} [${s.id}]`;
-    }).join('\n');
+    const topSources = sources.slice(0, 6);
+    const bullets = topSources.map((s, idx) => {
+        const num = idx + 1;
+        const title = cleanTextSnippet(s.title || s.domain || 'Source');
+        const snippet = cleanTextSnippet(s.snippet || s.description || '');
+        const domain = s.domain || '';
+        const domainLabel = domain ? ` — ${domain}` : '';
+        return snippet
+            ? `**[${num}] ${title}**${domainLabel}\n${snippet}`
+            : `**[${num}] ${title}**${domainLabel}`;
+    }).join('\n\n');
 
-    const topicHeading = hasSearchableContent(cleanQ) ? `### Verified Summary for "${cleanQ}"` : '### Verified Summary';
+    const topicHeading = hasSearchableContent(cleanQ)
+        ? `### Live Web Results for "${cleanQ}"`
+        : '### Live Web Results';
     return `${topicHeading}\n\n${bullets}\n\n*Gathered from verified live sources within the 9.0s deadline.*`;
 }
 
@@ -625,8 +634,12 @@ export class BoundedLiveResearchController {
                 startSourceGroundedSynthesis();
             };
 
-            const cutoffTimer = setTimeout(onSearchDeadline, this.searchCutoffMs);
-            this.timers.push(cutoffTimer);
+            // Guard: only set cutoff timer if budget is positive.
+            // A zero searchCutoffMs would fire immediately before any results arrive.
+            const cutoffTimer = this.searchCutoffMs > 0
+                ? setTimeout(onSearchDeadline, this.searchCutoffMs)
+                : null;
+            if (cutoffTimer !== null) this.timers.push(cutoffTimer);
 
             const fallbackWarningTimer = setTimeout(() => {
                 if (this.isTerminal || this.state !== RESEARCH_STATES.SOURCE_GROUNDED_SYNTHESIS) return;
@@ -645,7 +658,7 @@ export class BoundedLiveResearchController {
                 let finalContent = '';
                 let finalProvenance = PROVENANCE_MODES.SYNTHESIS_FALLBACK;
 
-                if (currentStreamLength >= 60) {
+                if (currentStreamLength >= 30) {
                     finalContent = `${this.streamedText.trim()}\n\n*(Synthesis completed at the 9.0s deadline)*`;
                     finalProvenance = PROVENANCE_MODES.WEB_GROUNDED;
                 } else {
@@ -797,8 +810,8 @@ ${sourcesContext}`;
 
                     if (!this.isTerminal) {
                         const cleanStreamed = (this.streamedText || '').trim();
-                        // Invariant: empty/trivial output protection
-                        if (cleanStreamed.length >= 20) {
+                        // Invariant: empty/trivial output protection — 10 chars minimum to distinguish real output from blank
+                        if (cleanStreamed.length >= 10) {
                             completeExecution({
                                 success: true,
                                 fallback: false,
