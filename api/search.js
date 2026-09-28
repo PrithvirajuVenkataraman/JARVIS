@@ -629,18 +629,19 @@ export async function searchPublicSources(query, options = {}) {
     const fastTasks = [taskNews, taskDdg, taskSearXNG, taskWiki, taskWikidata, taskYahoo, taskGov];
     const allTasks = [...fastTasks, taskGdelt, taskGemini];
 
-    // Wait for fast tasks to complete (or time out after 2000ms)
+    // Wait for fast tasks to complete (or time out after 2200ms)
     await Promise.race([
         Promise.all(fastTasks),
-        new Promise(res => setTimeout(res, Math.min(boundedTimeoutMs, 2000)))
+        new Promise(res => setTimeout(res, Math.min(boundedTimeoutMs, 2200)))
     ]);
 
-    const getFastCount = () => (liveNews.length + ddgWeb.length + wiki.length + wikidata.length + liveWeb.length + governmentRoleResults.length);
+    const getFastCount = () => (liveNews.length + ddgWeb.length + searxngWeb.length + wiki.length + wikidata.length + liveWeb.length + governmentRoleResults.length);
+    const getGeneralWebCount = () => (ddgWeb.length + searxngWeb.length + wiki.length + wikidata.length + liveWeb.length);
 
-    // If fast tasks returned sufficient sources (>= 2), proceed immediately!
-    // Otherwise wait for slower trailing tasks up to boundedTimeoutMs
-    if (getFastCount() < 2) {
-        const remainingMs = Math.max(50, boundedTimeoutMs - 2000);
+    // If fast tasks returned sufficient sources AND at least 1 general web source arrived (or leadership query), proceed.
+    // Otherwise wait for trailing tasks (DDG, SearXNG, GDELT) up to boundedTimeoutMs.
+    if (getFastCount() < 2 || (!isLeadership && getGeneralWebCount() === 0)) {
+        const remainingMs = Math.max(50, boundedTimeoutMs - 2200);
         await Promise.race([
             Promise.all(allTasks),
             new Promise(res => setTimeout(res, remainingMs))
