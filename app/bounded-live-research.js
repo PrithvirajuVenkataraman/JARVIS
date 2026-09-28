@@ -766,7 +766,7 @@ export class BoundedLiveResearchController {
                 const sourcesContext = formatSourcesForPrompt(this.sources);
                 const prompt = `You are a real-time research assistant. Answer the user's question directly, comprehensively, and factually using ONLY the verified web content below.
 RULES:
-1. Cite verified sources using [1], [2], etc., matching the exact source numbers in the provided list. Do not invent citation numbers.
+1. Deliver a natural, fluent, and well-structured answer. Do not insert bracketed citation numbers like [1] or [1, 2] into the text sentences — all verified sources are showcased in the Sources Carousel directly above.
 2. If evidence is contradictory or insufficient, state it clearly.
 3. Structure with a direct answer first, followed by essential verified details.
 
