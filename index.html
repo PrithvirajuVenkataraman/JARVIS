@@ -5084,7 +5084,9 @@ async function streamChatCompletion(payload, options = {}) {
                     intent: 'aborted'
                 };
             }
-            discardStreamingAssistantMessage(assistantMessageId);
+            if (options?.preserveMessageOnAbort !== true) {
+                discardStreamingAssistantMessage(assistantMessageId);
+            }
             throw error;
         }
         if (window.JarvisFailurePolicy?.shouldPreservePartialStream?.(error, accumulated) && assistantMessageId && accumulated.trim()) {
@@ -20960,7 +20962,8 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                     assistantMessageId,
                     userMessage: rawUserText || query,
                     sources,
-                    onToken
+                    onToken,
+                    preserveMessageOnAbort: true
                 });
             },
             uiCallbacks: {
@@ -20978,7 +20981,7 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                     const row = getRow();
                     if (row) {
                         row.style.display = '';
-                        if (provenance === 'web_grounded' && sources && sources.length > 0 && window.JarvisLiveResearch?.renderOrUpdateSourcesCarousel) {
+                        if (sources && sources.length > 0 && window.JarvisLiveResearch?.renderOrUpdateSourcesCarousel) {
                             window.JarvisLiveResearch.renderOrUpdateSourcesCarousel(row, sources);
                         }
                         maybeAutoScroll(document.getElementById('chat-container'));
@@ -21000,13 +21003,14 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                     if (window.JarvisLiveResearch?.activeController !== controller && !controller.isTerminal) return;
                     hideThinkingIndicator();
                     const row = getRow();
-                    const isWebGrounded = provenance === 'web_grounded' && Array.isArray(sources) && sources.length > 0;
+                    const hasSources = Array.isArray(sources) && sources.length > 0;
+                    const isWebGrounded = provenance === 'web_grounded' && hasSources;
                     if (row) {
                         row.style.display = '';
                         if (provenance !== 'web_grounded') {
                             row.dataset.boundedResearchTerminal = 'true';
                         }
-                        if (isWebGrounded && window.JarvisLiveResearch?.renderOrUpdateSourcesCarousel) {
+                        if (hasSources && window.JarvisLiveResearch?.renderOrUpdateSourcesCarousel) {
                             window.JarvisLiveResearch.renderOrUpdateSourcesCarousel(row, sources);
                         }
                     }
@@ -21015,13 +21019,13 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                         turnId: controller.turnId,
                         streaming: false,
                         sources: sources || [],
-                        sourceType: isWebGrounded ? 'verified' : (provenance === 'no_sources' ? 'no_sources' : 'model'),
-                        sourceLabel: isWebGrounded ? `${sources.length} verified sources` : (provenance === 'no_sources' ? 'No live sources returned' : 'Fallback answer'),
+                        sourceType: hasSources ? 'verified' : (provenance === 'no_sources' ? 'no_sources' : 'model'),
+                        sourceLabel: hasSources ? `${sources.length} verified sources` : (provenance === 'no_sources' ? 'No live sources returned' : 'Fallback answer'),
                         provenance,
                         isFallback: provenance !== 'web_grounded'
                     });
 
-                    if (row && isWebGrounded && window.JarvisLiveResearch?.generateRelatedResearchQuestions) {
+                    if (row && hasSources && window.JarvisLiveResearch?.generateRelatedResearchQuestions) {
                         const questions = window.JarvisLiveResearch.generateRelatedResearchQuestions({
                             query,
                             sources,
