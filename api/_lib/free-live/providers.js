@@ -124,6 +124,7 @@ export async function searchSearXNGRacer(query, options = {}) {
     const endpoints = configuredUrl 
         ? [configuredUrl.endsWith('/search') ? configuredUrl : `${configuredUrl}/search`]
         : [
+            'https://etsi.me/search',
             'https://searx.be/search',
             'https://priv.au/search',
             'https://baresearch.org/search',
@@ -968,7 +969,7 @@ async function fetchWithTimeout(url, init = {}, timeoutMs = 2500) {
 function clampInt(value, fallback, min, max) {
     const n = Number.parseInt(value, 10);
     if (!Number.isFinite(n)) return fallback;
-    return Math.max(min, Math.min(max, n)); 
+    return Math.max(min, Math.min(max, n));
 }
 
 export const __test = {
