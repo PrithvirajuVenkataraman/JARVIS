@@ -594,9 +594,9 @@ export async function searchPublicSources(query, options = {}) {
     let gdelt = [];
     let geminiGroundingResults = [];
 
-    const taskNews = Promise.allSettled(targetQueries.slice(0, 2).map(candidate => searchGoogleNewsRss(candidate, { limit, timeoutMs: Math.min(boundedTimeoutMs, 2000) })))
+    const taskNews = Promise.allSettled(targetQueries.slice(0, 1).map(candidate => searchGoogleNewsRss(candidate, { limit: Math.min(limit, 4), timeoutMs: Math.min(boundedTimeoutMs, 2000) })))
         .then(s => { liveNews = s.flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []); });
-    const taskDdg = Promise.allSettled(targetQueries.slice(0, 1).map(candidate => searchDuckDuckGoHtml(candidate, { limit: 4, timeoutMs: Math.min(boundedTimeoutMs, 2000), signal: options.signal })))
+    const taskDdg = Promise.allSettled(targetQueries.slice(0, 2).map(candidate => searchDuckDuckGoHtml(candidate, { limit, timeoutMs: Math.min(boundedTimeoutMs, 2000), signal: options.signal })))
         .then(s => { ddgWeb = s.flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []); });
     // SearXNG: zero-config metasearch (aggregates Google, Bing, Brave, DuckDuckGo, 70+ engines).
     // Uses SEARXNG_URL env if configured (own/hosted instance); otherwise races 4 public fallback instances.
