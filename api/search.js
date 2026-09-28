@@ -589,14 +589,20 @@ export async function searchPublicSources(query, options = {}) {
     let wikidata = [];
     let liveWeb = [];
     let ddgWeb = [];
+    let searxngWeb = [];
     let governmentRoleResults = [];
     let gdelt = [];
     let geminiGroundingResults = [];
 
     const taskNews = Promise.allSettled(targetQueries.slice(0, 2).map(candidate => searchGoogleNewsRss(candidate, { limit, timeoutMs: Math.min(boundedTimeoutMs, 2000) })))
         .then(s => { liveNews = s.flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []); });
-    const taskDdg = Promise.allSettled(targetQueries.slice(0, 2).map(candidate => searchDuckDuckGoHtml(candidate, { limit: 4, timeoutMs: Math.min(boundedTimeoutMs, 2000), signal: options.signal })))
+    const taskDdg = Promise.allSettled(targetQueries.slice(0, 1).map(candidate => searchDuckDuckGoHtml(candidate, { limit: 4, timeoutMs: Math.min(boundedTimeoutMs, 2000), signal: options.signal })))
         .then(s => { ddgWeb = s.flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []); });
+    // SearXNG: zero-config metasearch (aggregates Google, Bing, Brave, DuckDuckGo, 70+ engines).
+    // Uses SEARXNG_URL env if configured (own/hosted instance); otherwise races 4 public fallback instances.
+    // No API key required. Works on Vercel free tier out of the box.
+    const taskSearXNG = Promise.allSettled(targetQueries.slice(0, 2).map(candidate => searchSearXNGRacer(candidate, { limit: 6, timeoutMs: Math.min(boundedTimeoutMs, 2200), signal: options.signal })))
+        .then(s => { searxngWeb = s.flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []); });
     const taskWiki = Promise.allSettled(targetQueries.slice(0, 2).map(candidate => searchWikipedia(candidate, { limit: 2, timeoutMs: Math.min(boundedTimeoutMs, 2000) })))
         .then(s => { wiki = s.flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []).slice(0, 3); });
     const taskWikidata = Promise.allSettled([searchWikidata(targetQueries[0] || normalizedQuery, { limit: 2, timeoutMs: Math.min(boundedTimeoutMs, 1800) })])
@@ -619,7 +625,8 @@ export async function searchPublicSources(query, options = {}) {
             .then(s => { geminiGroundingResults = (Array.isArray(s) ? s : []).flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []); })
         : Promise.resolve();
 
-    const fastTasks = [taskNews, taskDdg, taskWiki, taskWikidata, taskYahoo, taskGov];
+    // SearXNG is in fastTasks: races in parallel with News/DDG/Wikipedia/Wikidata/Yahoo
+    const fastTasks = [taskNews, taskDdg, taskSearXNG, taskWiki, taskWikidata, taskYahoo, taskGov];
     const allTasks = [...fastTasks, taskGdelt, taskGemini];
 
     // Wait for fast tasks to complete (or time out after 2000ms)
@@ -645,6 +652,7 @@ export async function searchPublicSources(query, options = {}) {
         ...wikidata,
         ...wiki,
         ...geminiGroundingResults,
+        ...searxngWeb,
         ...ddgWeb,
         ...liveWeb,
         ...(isLeadership ? liveNews.slice(0, 3) : liveNews),
@@ -4323,7 +4331,7 @@ export const __test = {
     extractOfficialCurrentRoleEvidence,
     parseDiscoveryFactQuery,
     isDiscoveryAnswerSource,
-    rankSources, 
+    rankSources,
     searchPublicSources,
     searchWikipedia,
     extractSearchTargetQuery,
