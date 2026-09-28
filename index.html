@@ -3568,9 +3568,9 @@ function buildVerificationSnapshot(items, domain = 'general', riskLevel = 'mediu
 
 function stripInlineCitationMarkers(text) {
     return String(text || '')
-        .replace(/\s*【\d+】/g, '')
-        .replace(/\s*\[\d+\](?=\s|[.,;:!?)]|$)/g, '')
-        .replace(/\s+\(\d+\)(?=\s|[.,;:!?]|$)/g, '');
+        .replace(/\s*【\d+(?:\s*,\s*\d+)*】/g, '')
+        .replace(/\s*\[\d+(?:\s*,\s*\d+)*\](?=\s|[.,;:!?)]|$)/g, '')
+        .replace(/\s+\(\d+(?:\s*,\s*\d+)*\)(?=\s|[.,;:!?]|$)/g, '');
 }
 
 function cleanLiveAnswerText(text) {
@@ -10419,7 +10419,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 : 'text-indigo-700 hover:text-indigo-900 underline font-medium';
             const presentation = prepareAssistantSourcePresentation(text, options?.meta || {});
             const rawAnswer = String(presentation.answerText || '');
-            const cleanTextForDisplay = stripStreamedImageTags(rawAnswer);
+            const cleanTextForDisplay = stripInlineCitationMarkers(stripStreamedImageTags(rawAnswer));
             const readableText = formatAssistantTextForReadability(normalizeAssistantTextStyle(cleanTextForDisplay));
             const formatted = sanitizeAssistantMarkup(renderAssistantMarkdown(readableText, linkClass, options));
             textElement.classList.toggle('is-streaming', options?.streaming === true);
