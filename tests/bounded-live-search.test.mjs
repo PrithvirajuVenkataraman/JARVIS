@@ -177,8 +177,8 @@ test('Architecture 4: Valid sources + empty LLM response -> synthesis fallback',
     assert.equal(result.fallback, true, 'Must flag fallback: true');
     assert.equal(result.provenance, PROVENANCE_MODES.SYNTHESIS_FALLBACK);
     assert.equal(result.sources.length, 1, 'Sources must be preserved in fallback');
-    assert.ok(result.content.includes('Verified Summary for "James Webb latest observations"'));
-    assert.ok(result.content.includes('Water vapor detected on K2-18b. [1]'));
+    assert.ok(result.content.includes('Live Web Results for "James Webb latest observations"'));
+    assert.ok(result.content.includes('Water vapor detected on K2-18b'));
 });
 
 test('Architecture 5: Zero sources -> no "Verified sources" metadata', async () => {
@@ -418,9 +418,9 @@ test('Prompt Formatting & Snippet Fallback', () => {
     assert.ok(formattedPrompt.includes('[2] Title: Title 2'));
 
     const fallback = generateSnippetFallback('Test Topic', sources);
-    assert.ok(fallback.includes('### Verified Summary for "Test Topic"'));
-    assert.ok(fallback.includes('• Fact 1 [1]'));
-    assert.ok(fallback.includes('• Fact 2 [2]'));
+    assert.ok(fallback.includes('### Live Web Results for "Test Topic"'));
+    assert.ok(fallback.includes('[1] Title 1'));
+    assert.ok(fallback.includes('[2] Title 2'));
 
     // Test zero sources with valid query
     const fallbackZeroSources = generateSnippetFallback('Gold price today', []);
@@ -940,7 +940,7 @@ test('Synthesis Error Diagnostics: Controller records synthesisError on failure 
     assert.equal(result.fallback, true);
     assert.equal(result.provenance, PROVENANCE_MODES.SYNTHESIS_FALLBACK);
     assert.ok(result.telemetry.synthesisError.includes('503'));
-    assert.ok(result.content.includes('Verified Summary'));
+    assert.ok(result.content.includes('Live Web Results'));
 });
 
 test('Synthesis Success Invariant: Clean streamed response completes with WEB_GROUNDED provenance without snippet bullets', async () => {
@@ -977,6 +977,47 @@ test('Synthesis Success Invariant: Clean streamed response completes with WEB_GR
     assert.ok(!result.content.includes('Verified Summary for'));
 });
 
+test('Synthesis Fallback Invariant: 0 streamed tokens triggers SYNTHESIS_FALLBACK with sources intact', async () => {
+    const controller = new BoundedLiveResearchController({
+        searchCutoffMs: 200,
+        searchTimeoutMs: 150,
+        fallbackWarningMs: 250,
+        hardDeadlineMs: 350,
+        minSourcesForEarlySynthesis: 1
+    });
 
+    const result = await controller.execute({
+        query: 'sample test research query',
+        userText: 'sample test research query',
+        assistantMessageId: 'msg_synthesis_timeout',
+        fetchSearchFn: async () => {
+            return {
+                results: [{
+                    id: 1,
+                    title: 'Sample Grounded Source',
+                    url: 'https://example.com/grounded',
+                    snippet: 'Sample grounded information about the topic'
+                }]
+            };
+        },
+        streamSynthesisFn: async ({ signal }) => {
+            // Emulate hanging / silent stream that produces 0 tokens until hard deadline
+            await new Promise((resolve, reject) => {
+                const timer = setTimeout(resolve, 2000);
+                signal?.addEventListener('abort', () => {
+                    clearTimeout(timer);
+                    const err = new Error('The operation was aborted');
+                    err.name = 'AbortError';
+                    reject(err);
+                });
+            });
+        }
+    });
 
-
+    assert.equal(result.success, false);
+    assert.equal(result.fallback, true);
+    assert.equal(result.provenance, PROVENANCE_MODES.SYNTHESIS_FALLBACK);
+    assert.equal(result.sources.length, 1);
+    assert.ok(result.content.includes('### Live Web Results for'));
+    assert.ok(result.content.includes('Sample Grounded Source'));
+});
