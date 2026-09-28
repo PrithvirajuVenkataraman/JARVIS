@@ -6311,7 +6311,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             if (action === 'document_ocr') {
                 if (input) {
                     input.focus();
-                    input.placeholder = 'Attach a document, invoice, or PDF to analyze...';
+                    input.placeholder = 'Ask Jarvis...';
                 }
                 if (typeof triggerComposerFilePicker === 'function') {
                     triggerComposerFilePicker('file-browse');
@@ -6361,7 +6361,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 _activeCapabilityPill = 'deep_reasoning';
                 const input = document.getElementById('text-input');
                 if (input && !input.value.trim()) {
-                    input.placeholder = 'Ask a complex reasoning or architectural question...';
+                    input.placeholder = 'Ask Jarvis...';
                 }
             } else {
                 if (_preferredModelTier === 'deep') {
@@ -6372,7 +6372,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 }
                 const input = document.getElementById('text-input');
                 if (input && !input.value.trim()) {
-                    input.placeholder = 'Ask anything, explore ideas, or paste code...';
+                    input.placeholder = 'Ask Jarvis...';
                 }
             }
             updateDeepReasoningUi();
@@ -6423,7 +6423,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 badge.classList.add('is-document');
                 badge.title = 'Document OCR active (click to turn off)';
                 badge.setAttribute('aria-label', 'Document OCR active — click to turn off');
-                iconContainer.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>';
+                iconContainer.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>';
                 return;
             }
 
@@ -6438,7 +6438,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             }
             const input = document.getElementById('text-input');
             if (input) {
-                input.placeholder = 'Ask anything, explore ideas, or paste code...';
+                input.placeholder = 'Ask Jarvis...';
                 input.focus();
             }
         }
@@ -6480,7 +6480,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                     setWebSearchMode('off');
                 }
                 if (input) {
-                    input.placeholder = 'Ask anything, explore ideas, or paste code...';
+                    input.placeholder = 'Ask Jarvis...';
                 }
                 return;
             }
@@ -6495,7 +6495,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 _preferredModelTier = 'standard';
                 if (input) {
                     input.focus();
-                    input.placeholder = 'Search the live web for anything...';
+                    input.placeholder = 'Ask Jarvis...';
                 }
                 return;
             }
@@ -6507,7 +6507,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 }
                 if (input) {
                     input.focus();
-                    input.placeholder = 'Attach a document, invoice, or PDF to analyze...';
+                    input.placeholder = 'Ask Jarvis...';
                 }
                 if (typeof triggerComposerFilePicker === 'function') {
                     triggerComposerFilePicker('file-browse');
@@ -6579,9 +6579,8 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
 
         function updateComposerPlaceholder() {
             const input = document.getElementById('text-input');
-            if (!input || input.dataset.inputSource) return;
-            const hasChat = hasAnyRenderedChatMessages?.() || chatHistory?.length > 0;
-            input.placeholder = hasChat ? 'Type something' : 'Ask Jarvis...';
+            if (!input) return;
+            input.placeholder = 'Ask Jarvis...';
         }
 
 
@@ -9669,7 +9668,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 if (input) {
                     input.value = 'About this answer: ';
                     input.dataset.inputSource = 'selection';
-                    input.placeholder = 'Ask JARVIS about the selected text...';
+                    input.placeholder = 'Ask Jarvis...';
                     input.focus();
                     input.setSelectionRange?.(input.value.length, input.value.length);
                     toggleSendButton();
@@ -11175,13 +11174,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             }
             const input = document.getElementById('text-input');
             if (input && !input.value) {
-                if (window.JarvisSpeechInput?.getState?.().converseEnabled) {
-                    if (snapshot.state === 'speaking') input.placeholder = 'Speaking...';
-                    else if (snapshot.state === 'thinking' || snapshot.state === 'responding') input.placeholder = 'Thinking...';
-                    else input.placeholder = 'Ask Jarvis...';
-                } else {
-                    input.placeholder = 'Ask Jarvis...';
-                }
+                input.placeholder = 'Ask Jarvis...';
             }
             updateLiveConverseOverlay(snapshot.state);
             toggleSendButton();
