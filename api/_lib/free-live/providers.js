@@ -24,7 +24,63 @@ const CRYPTO_IDS = Object.freeze({
 export async function searchDuckDuckGoHtml(query, options = {}) {
     const limit = options.limit || 8;
     const timeoutMs = Math.min(Number(options.timeoutMs) || 2500, 3500);
-    try {
+
+    const tryDdgLite = async () => {
+        const response = await fetchWithTimeout('https://lite.duckduckgo.com/lite/', {
+            method: 'POST',
+            signal: options.signal,
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+            },
+            body: `q=${encodeURIComponent(query)}`
+        }, timeoutMs);
+        if (!response.ok) return [];
+        const html = await response.text();
+        const linkRegex = /<a\s+[^>]*class=['"]result-link['"][^>]*>([\s\S]*?)<\/a>/gi;
+        const snippetRegex = /<td\s+[^>]*class=['"]result-snippet['"][^>]*>([\s\S]*?)<\/td>/gi;
+        const links = [];
+        let match;
+        while ((match = linkRegex.exec(html)) !== null) {
+            const hrefMatch = /href=['"]([^'"]+)['"]/i.exec(match[0]);
+            let rawUrl = hrefMatch ? hrefMatch[1] : '';
+            if (rawUrl.includes('uddg=')) {
+                try {
+                    const u = /uddg=([^&]+)/.exec(rawUrl);
+                    if (u) rawUrl = decodeURIComponent(u[1]);
+                } catch (_) {}
+            }
+            if (rawUrl.startsWith('//')) rawUrl = `https:${rawUrl}`;
+            links.push({ title: cleanSnippetText(match[1]), url: rawUrl });
+        }
+        const snippets = [];
+        let sMatch;
+        while ((sMatch = snippetRegex.exec(html)) !== null) {
+            snippets.push(cleanSnippetText(sMatch[1]));
+        }
+        const results = [];
+        for (let i = 0; i < links.length && results.length < limit; i++) {
+            const l = links[i];
+            if (l.title && l.url && l.url.startsWith('http')) {
+                results.push({
+                    title: l.title,
+                    description: snippets[i] || '',
+                    snippet: snippets[i] || '',
+                    url: l.url,
+                    source: 'DuckDuckGo Web',
+                    sourceType: 'live_web',
+                    trusted: true,
+                    freshness: 'live_web_index',
+                    qualitySignals: ['live_search_index', 'ddg_html'],
+                    query
+                });
+            }
+        }
+        return results;
+    };
+
+    const tryDdgHtml = async () => {
         const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
         const response = await fetchWithTimeout(url, {
             signal: options.signal,
@@ -80,6 +136,14 @@ export async function searchDuckDuckGoHtml(query, options = {}) {
                 });
             }
         }
+        return results;
+    };
+
+    try {
+        const results = await Promise.any([
+            tryDdgLite().then(r => r && r.length ? r : Promise.reject()),
+            tryDdgHtml().then(r => r && r.length ? r : Promise.reject())
+        ]);
         return results;
     } catch (_) {
         return [];
