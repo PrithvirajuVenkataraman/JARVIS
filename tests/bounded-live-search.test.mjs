@@ -11,11 +11,21 @@ import {
     generateRelatedResearchQuestions,
     parseCitationsInHtml,
     normalizeUserQuery,
-    hasSearchableContent
+    hasSearchableContent,
+    isAuthoritativeResearchSource,
+    evaluateSourceQualityForEarlySynthesis
 } from '../app/bounded-live-research.js';
 import { parseGoogleNewsRssXml, searchDuckDuckGoHtml } from '../api/_lib/free-live/providers.js';
 import { buildSourceTransparencyHtml } from '../app/source-transparency.js';
-import { searchGovernmentRole, runEvidenceFirstWebRag, searchPublicSources } from '../api/search.js';
+import {
+    searchGovernmentRole,
+    runEvidenceFirstWebRag,
+    searchPublicSources,
+    isTechnicalDocumentationQuery,
+    buildDeterministicSearchQueries,
+    scoreSearchResult
+} from '../api/search.js';
+import { classifyFreeLiveIntent } from '../api/_lib/free-live/classifier.js';
 
 // ============================================================================
 // ARCHITECTURE-LEVEL TESTS (Section 8 Requirements)
@@ -1160,3 +1170,164 @@ test('Live Search Progress Lifecycle Invariant: Continuous indicator hides immed
     assert.equal(showCount, 1, 'Only one continuous show event throughout retrieval and synthesis');
     assert.equal(hideCount, 1, 'Cleanly hidden on first token');
 });
+
+// ============================================================================
+// LIVE SEARCH RETRIEVAL & SYNTHESIS REGRESSION TESTS
+// ============================================================================
+
+test('Regression 1: Query Classification - Python release comparison classifies as technical_documentation', () => {
+    const query = 'What changed in the latest release of Python compared with the previous stable release?';
+    const classification = classifyFreeLiveIntent(query);
+    assert.equal(classification.category, 'technical_documentation', 'Must categorize as technical_documentation');
+    assert.equal(classification.route, 'live_required', 'Must route to live_required for up-to-date documentation');
+    assert.equal(isTechnicalDocumentationQuery(query), true, 'isTechnicalDocumentationQuery must be true');
+});
+
+test('Regression 2: News Exclusion - isTechnicalDocumentationQuery disables Google News for technical queries', () => {
+    const techQueries = [
+        'What changed in the latest release of Python compared with the previous stable release?',
+        'Node.js 22 changelog release notes',
+        'React 19 breaking changes API docs',
+        'What is new in the latest release of Rust'
+    ];
+    for (const q of techQueries) {
+        assert.equal(isTechnicalDocumentationQuery(q), true, `Must classify "${q}" as technical documentation`);
+    }
+});
+
+test('Regression 3: News Retention - Genuine breaking news queries retain news category and enable news sources', () => {
+    const newsQueries = [
+        'Breaking news: peace talks conclude in Geneva',
+        'Latest headlines about the presidential press release',
+        'Current events and news bulletin from the UN assembly'
+    ];
+    for (const q of newsQueries) {
+        assert.equal(isTechnicalDocumentationQuery(q), false, `Must NOT classify "${q}" as technical documentation`);
+        const classification = classifyFreeLiveIntent(q);
+        assert.equal(classification.category, 'news', `Must classify "${q}" as news category`);
+    }
+});
+
+test('Regression 4: Semantic Query Rewriting - Conversational prompt produces concise queries without duplicate modifiers', () => {
+    const prompt = 'What changed in the latest release of Python compared with the previous stable release?';
+    const rewritten = buildDeterministicSearchQueries(prompt);
+    assert.ok(rewritten.length >= 3, 'Must produce multiple concise retrieval queries');
+    for (const q of rewritten) {
+        assert.ok(!q.includes('What changed in'), `Query should not retain conversational fluff: "${q}"`);
+        assert.ok(!q.includes('compared with'), `Query should not retain comparison fluff: "${q}"`);
+        assert.ok(!/\b(\w+)\s+\1\b/i.test(q), `Query must not contain duplicate adjacent tokens like "latest latest": "${q}"`);
+        assert.ok(q.toLowerCase().includes('python'), `Query must preserve core technology subject: "${q}"`);
+    }
+    assert.ok(rewritten.some(q => q.toLowerCase().includes('release notes') || q.toLowerCase().includes('changelog')), 'Must plan release notes / changelog queries');
+});
+
+test('Regression 5: Authoritative Ranking - First-party documentation outranks generic news aggregators on tech queries', () => {
+    const query = 'What changed in the latest release of Python compared with the previous stable release?';
+    const terms = ['python', 'release', 'latest', 'changes'];
+
+    const officialDocSource = {
+        title: "What's New In Python 3.14 — Python 3.14.0 documentation",
+        domain: 'docs.python.org',
+        url: 'https://docs.python.org/3/whatsnew/3.14.html',
+        description: 'This article explains the new features in Python 3.14 compared to 3.13.'
+    };
+
+    const newsAggregatorSource = {
+        title: 'Fedora Linux 45 Beta Released with Python 3.15, GCC 16.2',
+        domain: 'news.google.com',
+        url: 'https://news.google.com/rss/articles/CBMisgFBVV95cUxQdEE...',
+        description: 'Fedora Linux 45 has been released featuring Python 3.15 and new GCC compilers.'
+    };
+
+    const officialScore = scoreSearchResult(officialDocSource, terms, query);
+    const newsScore = scoreSearchResult(newsAggregatorSource, terms, query);
+
+    assert.ok(officialScore > newsScore, `Official Python doc (${officialScore}) must outrank generic news aggregator (${newsScore})`);
+    assert.ok(isAuthoritativeResearchSource(officialDocSource, query), 'docs.python.org must be recognized as authoritative');
+    assert.ok(!isAuthoritativeResearchSource(newsAggregatorSource, query), 'news.google.com must not be recognized as authoritative doc');
+});
+
+test('Regression 6: Quality-Aware Early Synthesis - Two weak news sources cannot trigger early synthesis for tech doc query', () => {
+    const techQuery = 'What changed in the latest release of Python compared with the previous stable release?';
+    const weakNewsSources = [
+        {
+            title: 'Microsoft Agent Framework Setup: 13 Steps, 90 Min',
+            domain: 'news.google.com',
+            url: 'https://news.google.com/rss/articles/CBMib0FVX3lxTE1XNk...',
+            snippet: 'Guide to setting up Microsoft Agent Framework with various AI tools.'
+        },
+        {
+            title: 'PyPI hardens package security with new upload restrictions',
+            domain: 'helpnetsecurity.com',
+            url: 'https://helpnetsecurity.com/2026/03/pypi-security',
+            snippet: 'PyPI implements new security requirements for python package uploads.'
+        }
+    ];
+
+    const earlySynthAllowed = evaluateSourceQualityForEarlySynthesis(weakNewsSources, techQuery);
+    assert.equal(earlySynthAllowed, false, 'Two weak/irrelevant news sources must NOT trigger early synthesis for tech queries');
+
+    const authoritativeSources = [
+        {
+            title: "What's New In Python 3.14 — Python 3.14.0 documentation",
+            domain: 'docs.python.org',
+            url: 'https://docs.python.org/3/whatsnew/3.14.html',
+            snippet: 'Python 3.14 includes support for template strings, enhanced error messages, and substantial interpreter speedups.'
+        },
+        {
+            title: 'Python 3.14.0 Release Notes',
+            domain: 'python.org',
+            url: 'https://www.python.org/downloads/release/python-3140/',
+            snippet: 'Official Python 3.14.0 release announcement and detailed changelog.'
+        }
+    ];
+
+    const authEarlySynthAllowed = evaluateSourceQualityForEarlySynthesis(authoritativeSources, techQuery);
+    assert.equal(authEarlySynthAllowed, true, 'Authoritative documentation sources MUST trigger early synthesis');
+});
+
+test('Regression 7: Zero-Token Fallback - Produces clean coherent facts without fake stitched headlines or headings', () => {
+    const techQuery = 'What changed in the latest release of Python compared with the previous stable release?';
+    const officialSources = [
+        {
+            title: 'Python 3.14.0 Release Summary',
+            domain: 'python.org',
+            url: 'https://docs.python.org/3/whatsnew/3.14.html',
+            snippet: 'Python 3.14 includes support for template strings, enhanced error messages, and substantial interpreter speedups.'
+        },
+        {
+            title: 'Python 3.14 Security Improvements',
+            domain: 'python.org',
+            url: 'https://python.org/news/3.14',
+            snippet: 'Security enhancements include hardened package verification and updated TLS default configurations.'
+        }
+    ];
+
+    const fallback = generateSnippetFallback(techQuery, officialSources);
+
+    assert.ok(!fallback.includes('### Live Web Results'), 'Must not include technical headers');
+    assert.ok(!fallback.includes('deadline'), 'Must not include deadline disclaimers');
+    assert.ok(!fallback.includes('[1]'), 'Must not include bracket citations');
+    assert.ok(fallback.includes('template strings'), 'Must preserve key technical features');
+    assert.ok(fallback.includes('Security enhancements'), 'Must preserve secondary verified features');
+
+    // Completely off-topic sources return clean limitation message rather than stitched falsehoods
+    const irrelevantSources = [
+        {
+            title: 'Cooking Recipe for Chocolate Brownies',
+            domain: 'cooking.com',
+            url: 'https://cooking.com/brownies',
+            snippet: 'Bake at 350 degrees for 25 minutes until toothpick comes out clean.'
+        }
+    ];
+    const irrelevantFallback = generateSnippetFallback(techQuery, irrelevantSources);
+    assert.ok(irrelevantFallback.includes('could not be completed') || irrelevantFallback.includes('carousel above'), 'Must return clean limitation message for off-topic sources');
+    assert.ok(!irrelevantFallback.includes('Chocolate Brownies'), 'Must not stitch off-topic headlines into technical fallback');
+});
+
+test('Regression 8: Hard Deadline Invariant - 9000ms remains absolute safety ceiling', () => {
+    assert.equal(LIVE_RESEARCH_BUDGETS.HARD_DEADLINE_MS, 9000, 'HARD_DEADLINE_MS budget contract must be exactly 9000ms');
+    const controller = new BoundedLiveResearchController();
+    assert.equal(controller.hardDeadlineMs, 9000, 'Controller default hardDeadlineMs must be exactly 9000ms');
+});
+
