@@ -2417,7 +2417,7 @@ async function callHandler(handler, req) {
         status(code) {
             this.statusCode = code;
             return this;
-        },
+        }, 
         json(payload) {
             this.body = payload;
             return this;
