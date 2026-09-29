@@ -1839,6 +1839,7 @@ function normalizeWikidataItem(item, query, index) {
 export function parseGovernmentRoleQuery(query) {
     const raw = normalizeSearchQuery(query);
     if (!raw) return null;
+    if (/^\s*(?:how|where|when|why|did|do|does|can|could|would|should)\b/i.test(raw)) return null;
     const dateIntent = parseStructuredDateWindow(raw);
 
     let predicate = '';
@@ -1851,9 +1852,11 @@ export function parseGovernmentRoleQuery(query) {
         const candidatePred = cleanPredicateText(ofMatch[1]);
         const candidateSubj = cleanSubjectText(ofMatch[2]);
         if (!/\b(news|updates?|price|prices|reviews?|photos?|pictures?|images?|features?|specs?|specifications?|meaning|definition|weather|temperature|stock|shares?|lyrics|trailer)\b/i.test(candidatePred)) {
-            predicate = candidatePred;
-            subject = candidateSubj;
-            roleText = ofMatch[1].trim();
+            if (!/\b(?:score|scored|scores|scoring|did|do|does|play|played|playing|happen|happened|win|won|winning|make|made|making|run|ran|build|built)\b/i.test(candidatePred) && candidatePred.split(/\s+/).length <= 5) {
+                predicate = candidatePred;
+                subject = candidateSubj;
+                roleText = ofMatch[1].trim();
+            }
         }
     }
 
@@ -3993,8 +3996,17 @@ function isStrongGenericQuerySourceMatch(query, haystack) {
     const queryTerms = tokenize(query)
         .filter(term => term.length >= 2 || /^\d{4}$/.test(term));
     if (compactSubject && compactSubject.split(/\s+/).length >= 2 && text.includes(compactSubject)) return true;
-    const terms = subjectTerms.length ? subjectTerms : queryTerms;
-    if (!terms.length) return false;
+    const rawTerms = subjectTerms.length ? subjectTerms : queryTerms;
+    if (!rawTerms.length) return false;
+
+    const QUERY_FUNCTION_WORDS = new Set([
+        'how', 'many', 'much', 'who', 'what', 'where', 'when', 'why', 'which',
+        'did', 'do', 'does', 'done', 'doing', 'is', 'are', 'was', 'were',
+        'the', 'a', 'an', 'in', 'on', 'at', 'of', 'for', 'to', 'from', 'with', 'by'
+    ]);
+    const meaningfulTerms = rawTerms.filter(term => !QUERY_FUNCTION_WORDS.has(term));
+    const terms = meaningfulTerms.length ? meaningfulTerms : rawTerms;
+
     const matched = terms.filter(term => text.includes(term));
     if (terms.length === 1) return terms[0].length >= 2 && matched.length === 1;
     return matched.length >= Math.min(terms.length, Math.max(2, Math.ceil(terms.length * 0.67)));
