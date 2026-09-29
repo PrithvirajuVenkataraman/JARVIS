@@ -136,14 +136,17 @@ export function generateSnippetFallback(query, sources = []) {
 
         const rawSentences = fullText.split(/(?<=[.!?])\s+/);
         for (let sentence of rawSentences) {
+            if (/\b(?:404|500|502|503)\b/.test(sentence)) continue;
             sentence = cleanTextSnippet(sentence)
                 .replace(/^[-*•\s\d.)\][]+/, '')
-                .replace(/^(?:read more|continue reading|source|news|updates?):?\s*/i, '')
-                .replace(/^(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2},?\s+\d{4}\s*[—–-]\s*/i, '')
+                .replace(/^[^\s:]{2,20}:\s*/, '')
+                .replace(/^\p{L}{3,9}\s+\d{1,2},?\s+\d{4}\s*[—–-]\s*/u, '')
+                .replace(/^\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}\s*[—–-]\s*/, '')
                 .replace(/\s+/g, ' ')
                 .trim();
             if (sentence.length < 5 || sentence.length > 300) continue;
-            if (/^(cookie|privacy policy|sign in|subscribe|all rights reserved|click here|advertisement|javascript|not found|page not found|access denied|forbidden|bad request|internal server error|error \d+|untitled|home|loading)/i.test(sentence)) continue;
+            if (/\b(?:404|500|502|503)\b/.test(sentence)) continue;
+            if (sentence.replace(/[^a-zA-Z0-9]/g, '').length < 3) continue;
             
             const normalized = sentence.toLowerCase().replace(/[^a-z0-9]/g, '');
             if (seenSentences.has(normalized)) continue;
@@ -187,60 +190,82 @@ export function generateRelatedResearchQuestions(optionsOrQuery, sourcesArg = []
     if (!Array.isArray(sources) || sources.length === 0) {
         return [];
     }
-    const q = String(query || '').trim();
-    const cleanQ = q.replace(/[?.!]+$/g, '').trim();
+    const cleanQ = normalizeUserQuery(query).replace(/[?.!]+$/g, '').trim();
     if (!cleanQ) return [];
 
-    const words = cleanQ.split(/\s+/).filter(w => w.length > 3 && !/^(what|when|where|which|who|whom|whose|why|how|tell|find|search|show)$/i.test(w));
-    const mainTopic = words.length > 0 ? words.slice(-3).join(' ') : cleanQ;
-
-    // Strip leading question prefixes to isolate the core subject
-    const strippedQuery = cleanQ
-        .replace(/^(?:what\s+(?:is|are|was|were)|tell\s+me\s+(?:about)?|search\s+(?:for)?|find\s+(?:out\s+about)?|who\s+(?:is|was)|how\s+does|how\s+to|explain)\s+/i, '')
-        .replace(/^(?:the\s+)?(?:latest|current|recent|new)\s+(?:updates?|news|status|developments?|info(?:rmation)?)\s+(?:on|for|about|regarding)?\s*/i, '')
-        .trim();
-    const topic = strippedQuery || mainTopic;
-
-    const isUpdateQuery = /\b(latest|current|recent|update|updates|news|today|now)\b/i.test(cleanQ);
-
+    const normalizedQuery = cleanQ.toLowerCase();
     const candidates = [];
+    const seen = new Set();
 
-    if (isUpdateQuery) {
-        candidates.push(`What is the key background context behind ${topic}?`);
-        candidates.push(`What are the anticipated next steps or timeline for ${topic}?`);
-    } else {
-        candidates.push(`What are the latest updates or ongoing developments for ${topic}?`);
-        candidates.push(`What is the key background context behind ${topic}?`);
-    }
+    const addCandidate = (text) => {
+        if (!text || typeof text !== 'string') return;
+        const clean = cleanTextSnippet(text)
+            .replace(/^[-*•\s\d.)\][]+/, '')
+            .replace(/[?.!]+$/g, '')
+            .trim();
+        if (clean.length < 4 || clean.length > 120) return;
+        const lower = clean.toLowerCase();
+        if (lower === normalizedQuery) return;
+        if (/^https?:\/\//i.test(clean) || /^[a-z0-9-]+\.[a-z]{2,}(?:\/|$)/i.test(clean)) return;
 
-    if (sources && sources.length > 0 && sources[0].title) {
-        const titleSnippet = cleanTextSnippet(sources[0].title).replace(/\s*[-–|].*$/, '').trim();
-        const tLower = titleSnippet.toLowerCase();
-        const qLower = cleanQ.toLowerCase();
-        if (titleSnippet && titleSnippet.length > 10 && !qLower.includes(tLower) && !tLower.includes(qLower)) {
-            candidates.push(`What are more details about ${titleSnippet}?`);
-        } else {
-            candidates.push(`What are the main perspectives or next steps regarding ${topic}?`);
+        const formatted = `${clean}?`;
+        const key = formatted.toLowerCase();
+        if (!seen.has(key)) {
+            seen.add(key);
+            candidates.push(formatted);
         }
-    } else {
-        candidates.push(`What are the main perspectives or next steps regarding ${topic}?`);
-    }
+    };
 
-    candidates.push(`What are the primary factors or implications surrounding ${topic}?`);
+    // 1. Extract from verified source titles and headline segments
+    for (const s of sources) {
+        if (!s || !s.title) continue;
+        const rawTitle = cleanTextSnippet(s.title);
+        const mainTitle = rawTitle.replace(/\s*[-–|—:·].*$/, '').trim();
+        addCandidate(mainTitle);
 
-    const qLower = cleanQ.toLowerCase();
-    const filtered = [];
-    for (const cand of candidates) {
-        const cLower = cand.toLowerCase().replace(/[?.!]+$/g, '').trim();
-        if (cLower === qLower) continue;
-        if (isUpdateQuery && cLower.startsWith('what are the latest updates') && qLower.includes('latest update')) continue;
-        if (!filtered.includes(cand)) {
-            filtered.push(cand);
+        const segments = rawTitle.split(/\s*[-–|—:·]\s*/);
+        for (const seg of segments) {
+            addCandidate(seg);
+            if (candidates.length >= 6) break;
         }
-        if (filtered.length >= 3) break;
+        if (candidates.length >= 6) break;
     }
 
-    return filtered.slice(0, 3);
+    // 2. Extract from verified source snippets / answer sentences
+    for (const s of sources) {
+        if (candidates.length >= 6) break;
+        const text = cleanTextSnippet(s?.snippet || s?.description || '');
+        if (!text) continue;
+        const sentences = text.split(/(?<=[.!?])\s+/);
+        for (const sentence of sentences) {
+            addCandidate(sentence);
+            if (candidates.length >= 6) break;
+        }
+    }
+
+    // 3. If still fewer than 3 candidates, derive sub-phrases from source titles
+    if (candidates.length < 3) {
+        for (const s of sources) {
+            if (!s || !s.title) continue;
+            const words = cleanTextSnippet(s.title).replace(/\s*[-–|—:·].*$/, '').trim().split(/\s+/).filter(Boolean);
+            if (words.length >= 4) {
+                const mid = Math.ceil(words.length / 2);
+                addCandidate(words.slice(mid).join(' '));
+                addCandidate(words.slice(0, mid).join(' '));
+            }
+            if (candidates.length >= 3) break;
+        }
+    }
+
+    // 4. Fallback combination if still fewer than 3 candidates
+    if (candidates.length < 3 && sources[0]?.title) {
+        const titleRef = cleanTextSnippet(sources[0].title).replace(/\s*[-–|—:·].*$/, '').trim();
+        if (titleRef && !titleRef.toLowerCase().includes(normalizedQuery)) {
+            addCandidate(`${titleRef} (${cleanQ})`);
+        }
+    }
+
+    return candidates.slice(0, 3);
 }
 
 /**
@@ -327,7 +352,7 @@ export function renderOrUpdateSourcesCarousel(rowElement, sources = []) {
 }
 
 /**
- * Highlights a source card pill in the carousel when its citation badge is clicked or hovered.
+ * Highlights a source card pill in the carousel upon citation badge click or hover.
  */
 export function highlightSourceCard(sourceId, container = document) {
     if (!sourceId) return;
@@ -793,7 +818,7 @@ RULES:
 1. Deliver a natural, fluent, and well-structured answer. Do not insert bracketed citation numbers like [1] or [1, 2] into the text sentences — all verified sources are showcased in the Sources Carousel directly above.
 2. If evidence is contradictory or insufficient, state it clearly.
 3. Structure with a direct answer first, followed by essential verified details.
-4. Authoritative Recency & Version Verification: For queries inquiring about the "latest", "current", "today", "newest", "recent release", or "as of [date]", establish the actual current/latest entity or version and its release date from authoritative official evidence before describing changes or prior versions. Do not treat incidental news mentions as proof of being the latest release. Where sources disagree, prioritize primary official documentation. Never fabricate missing information.
+4. Authoritative Recency & Version Verification: For recency-sensitive, release, or version queries, establish the authoritative current entity or version and its release date from verified evidence before describing changes or prior versions. Prioritize primary official documentation over incidental mentions. In case of conflicting sources, prioritize primary official documentation. Never fabricate missing information.
 
 User question: "${query}"
 
