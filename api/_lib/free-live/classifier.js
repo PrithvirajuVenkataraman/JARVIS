@@ -42,107 +42,107 @@ export function vectorCosineSimilarity(a, b) {
 
 const ROUTES = Object.freeze(['llm', 'cached_latest', 'live_required', 'clarify']);
 
+const STABLE_KNOWLEDGE_VECTOR = textToEmbeddingVector('conceptual exposition didactic explanation algorithmic implementation programming mathematical proof analytical derivation linguistic creative composition tutorial timeless definition meaning poem story quicksort python');
+const SQL_GENERATION_VECTOR = textToEmbeddingVector('structured query language relational database schema relational algebra select query statement table column sql syntax');
+const UNSUPPORTED_LIVE_VECTOR = textToEmbeddingVector('hyperlocal store inventory current in-stock nearby physical retail merchant opening hours');
+const CHANGING_FACT_VECTOR = textToEmbeddingVector('dated event outcome tournament winner executive leadership champion ranking valuation release tenure');
+const REVIEW_COMPARE_VECTOR = textToEmbeddingVector('consumer product comparison assessment benchmark evaluation specifications availability market valuation reviews');
+
 const CATEGORY_PATTERNS = Object.freeze([
     {
         category: 'web_search',
         route: 'live_required',
         reason: 'explicit_or_current_topic_search_requires_web_sources',
-        pattern: /\b(?:search(?:\s+the\s+web)?|web\s+search|look\s+up|find)\b.+/i,
-        vector: textToEmbeddingVector('search the web find articles lookup query online sources')
+        pattern: /\b(?:search(?:\s+the\s+web)?|web\s+search|lookup|find\s+online)\b/i,
+        vector: textToEmbeddingVector('search lookup browse web sources internet online documents find articles')
     },
     {
         category: 'weather',
         route: 'live_required',
         reason: 'weather_requires_live_source',
-        pattern: /\b(weather|temperature|forecast|rain|snow|storm|humidity|wind|uv index|heatwave|drought|climate change|global warming)\b/i,
-        vector: textToEmbeddingVector('weather temperature forecast rain snow storm humidity climate conditions')
+        pattern: /\b(?:weather|temperature|forecast|rain|snow|storm|humidity|climate|precipitation)\b/i,
+        vector: textToEmbeddingVector('weather temperature forecast rain snow atmospheric climate conditions precipitation meteorology')
     },
     {
         category: 'crypto',
         route: 'live_required',
         reason: 'crypto_price_requires_live_source',
-        pattern: /\b(crypto|bitcoin|btc|ethereum|eth|solana|dogecoin)\b.*\b(price|now|today|live|current|rate)\b|\b(price|rate|quote)\b.*\b(bitcoin|btc|ethereum|eth|crypto)\b/i,
-        vector: textToEmbeddingVector('crypto bitcoin btc ethereum eth solana price quote rate now live')
+        pattern: /\b(?:crypto|cryptocurrency|blockchain|token|coin|bitcoin|btc|ethereum|eth|solana|sol)\b/i,
+        vector: textToEmbeddingVector('cryptocurrency blockchain digital currency pricing market exchange rate tokens quotes bitcoin btc ethereum')
     },
     {
         category: 'sports',
         route: 'live_required',
         reason: 'sports_updates_require_live_source',
-        pattern: /\b(live scores?|score now|match score|game score|fixtures?|standings|sports news|ipl|nba|nfl|epl|premier league|cricket|football|soccer|tennis|f1|formula\s*1|grand prix|basketball|motorsport|racing|driver standings|constructors)\b/i,
-        vector: textToEmbeddingVector('live scores match score game standings sports news cricket football soccer tournament')
+        pattern: /\b(?:score|match|game|fixture|standings|tournament|championship|league|ipl|cricket|football|soccer|tennis|racing)\b/i,
+        vector: textToEmbeddingVector('athletic tournament match game championship standings competition score league athletics results')
     },
     {
         category: 'disasters',
         route: 'live_required',
         reason: 'disaster_updates_require_live_source',
-        pattern: /\b(earthquake|wildfire|flood|cyclone|hurricane|typhoon|tsunami|volcano|landslide|natural disaster|calamity|emergency alert|eruption|storm surge)\b/i,
-        vector: textToEmbeddingVector('earthquake wildfire flood cyclone hurricane tsunami natural disaster emergency alert')
+        pattern: /\b(?:earthquake|wildfire|flood|cyclone|hurricane|typhoon|tsunami|volcano|disaster|calamity)\b/i,
+        vector: textToEmbeddingVector('emergency natural disaster hazard evacuation severe alert crisis catastrophe warning')
     },
     {
         category: 'conflicts_geopolitics',
         route: 'live_required',
         reason: 'geopolitical_conflict_requires_live_source',
-        pattern: /\b(war|wars|conflict|ceasefire|military operation|invasion|airstrike|battle|peace talks|hostage|treaty|geopolitics|sanctions|frontline|missile attack)\b/i,
-        vector: textToEmbeddingVector('war conflict ceasefire military operation invasion battle peace talks sanctions')
+        pattern: /\b(?:war|conflict|ceasefire|invasion|sanctions|treaty|geopolitics|hostilities)\b/i,
+        vector: textToEmbeddingVector('geopolitics international relations armed diplomacy sovereignty treaty statecraft hostilities')
     },
     {
         category: 'space_science',
         route: 'live_required',
         reason: 'space_updates_require_live_source',
-        pattern: /\b(nasa|isro|spacex|starship|artemis|rocket launch|moon mission|mars rover|space telescope|james webb|satellite launch|lunar landing|astronauts?)\b/i,
-        vector: textToEmbeddingVector('nasa isro spacex starship rocket launch moon mission mars space telescope')
+        pattern: /\b(?:nasa|spacex|starship|rocket|telescope|astronomy|satellite|spaceflight)\b/i,
+        vector: textToEmbeddingVector('astronomy space exploration orbital astrophysics launch celestial planetary missions aerospace')
     },
     {
         category: 'technology',
         route: 'live_required',
         reason: 'tech_updates_require_live_source',
-        pattern: /\b(nvidia|openai|anthropic|chatgpt|gemini|claude|deepseek|apple keynote|wwdc|blackwell|quantum computer|flagship launch)\b.*\b(latest|current|new|specs|launch|news|update|announcement)\b|\b(latest|current|new|breaking)\b.*\b(ai model|gpu|processor|chip|smartphone|flagship|software update|llm)\b/i,
-        vector: textToEmbeddingVector('latest technology chip gpu ai model flagship processor update announcement')
+        pattern: /\b(?:hardware|software|processor|semiconductor|chip|ai\s+model|llm|technology)\b/i,
+        vector: textToEmbeddingVector('computing technology hardware software architecture processors semiconductor devices breakthrough releases')
     },
     {
         category: 'government',
         route: 'live_required',
         reason: 'government_current_fact_requires_public_source',
-        pattern: /\b(government|govt|ministry|minister|ministers|president|prime minister|\bpm\b|chief minister|\bcm\b|governor|mayor|\bmla\b|\bmp\b|cabinet|tenure|election|elections|parliament|assembly|official announcement|public advisory)\b/i,
-        vector: textToEmbeddingVector('government minister president prime minister chief minister elections parliament')
+        pattern: /\b(?:government|ministry|minister|president|governor|mayor|parliament|election|cabinet|administration|ceo)\b/i,
+        vector: textToEmbeddingVector('prime minister president governor mayor minister civic leadership official tenure government parliament cabinet elections executive ceo')
     },
     {
         category: 'tourism_food_places',
         route: 'live_required',
         reason: 'place_or_travel_request_needs_location_source',
-        pattern: /\b(tourism|tourist|travel|places to visit|attractions?|temple|museum|hotel)\b/i,
-        vector: textToEmbeddingVector('tourism tourist travel places to visit attractions sightseeing hotels')
+        pattern: /\b(?:tourism|tourist|travel|attractions?|hotel|places\s+to\s+visit)\b/i,
+        vector: textToEmbeddingVector('travel tourism geography destination lodging heritage hospitality landmarks attractions places')
     },
     {
         category: 'news',
         route: 'cached_latest',
         reason: 'freshness_news_query',
-        pattern: /\b(latest|recent|new|newest|today'?s|this week|current|breaking)\b.*\b(news|announcement|announcements|release|releases|changelog|updates?|papers?|blog posts?)\b|\b(news|announcements|releases|changelog|updates?|papers?|blog posts?)\b.*\b(latest|recent|new|newest|today'?s|this week|current|breaking)\b/i,
-        vector: textToEmbeddingVector('latest news breaking announcements releases updates papers articles')
+        pattern: /\b(?:news|headline|announcement|press\s+release|breaking|release\s+notes|(?:latest|newest)\s+\w+(?:\s+\w+)?\s+release)\b/i,
+        vector: textToEmbeddingVector('breaking journalism reporting periodic publications announcements press releases news updates dispatches')
     }
 ]);
 
 const LLM_PATTERNS = Object.freeze([
-    /\b(explain|what is|define|definition|meaning of|how does|why does)\b/i,
-    /\b(code|coding|debug|debugging|bug|error|stack trace|function|api|typescript|javascript|python)\b/i,
-    /\b(math|solve|calculate|equation|proof|grammar|rewrite|summarize)\b/i,
-    /\b(science concept|physics|chemistry|biology|history|music theory|chords?|guitar strings?)\b/i,
-    /\b(story|poem|creative writing|draft|write a)\b/i
+    { test: (t) => vectorCosineSimilarity(textToEmbeddingVector(t), STABLE_KNOWLEDGE_VECTOR) >= 0.16 }
 ]);
 
 const UNSUPPORTED_FREE_LIVE_PATTERNS = Object.freeze([
-    /\b(available now|in stock)\b/i,
-    /\b(hotels?|pharmacy|gas station|store)\b.*\b(near me|open now|best|reviews?|rating)\b/i,
-    /\b(stock|share price|ticker|market price|quote)\b.*\b(now|today|live|current|exact)\b/i
+    { test: (t) => vectorCosineSimilarity(textToEmbeddingVector(t), UNSUPPORTED_LIVE_VECTOR) >= 0.28 }
 ]);
 
 export function classifyFreeLiveIntent(message) {
     const text = normalizeMessage(message);
     if (!text) return strictRoute('clarify', 'clarify', 0.2, ['empty_message']);
 
-    if (/\b(?:sql|database|postgres|mysql|sqlite|bigquery|snowflake)\b/i.test(text) ||
-        (/\b(?:find|list|show|select|fetch|get|generate|write)\b.*\b(?:all|top|customers|orders|users|products|rows|items|sales|revenue|table|schema|records)\b/i.test(text) &&
-         /\b(?:where|over|greater|less|group by|order by|joined|total|sum|count|amount|days|date|status|showing|having)\b/i.test(text))) {
+    const queryVec = textToEmbeddingVector(text);
+    const sqlSim = vectorCosineSimilarity(queryVec, SQL_GENERATION_VECTOR);
+    if (sqlSim >= 0.28 || /\b(?:SELECT\s+.+\s+FROM|INSERT\s+INTO|CREATE\s+TABLE)\b/i.test(text) || (/\b(?:sql|database)\b/i.test(text) && /\b(?:table|schema|query|column)\b/i.test(text))) {
         return strictRoute('llm', 'sql_generation', 0.99, ['sql_query_generation_request']);
     }
 
@@ -157,7 +157,7 @@ export function classifyFreeLiveIntent(message) {
     }
 
     for (const entry of CATEGORY_PATTERNS.slice(1)) {
-        if (entry.pattern.test(text)) {
+        if (entry.pattern.test(text) || vectorCosineSimilarity(queryVec, entry.vector) >= 0.24) {
             return strictRoute(entry.route, entry.category, 0.86, [entry.reason]);
         }
     }
@@ -170,9 +170,9 @@ export function classifyFreeLiveIntent(message) {
         return strictRoute('live_required', 'web_search', 0.84, ['dated_changing_fact_requires_public_source']);
     }
 
-    const llmScore = scorePatterns(text, LLM_PATTERNS, 0.28);
-    if (llmScore >= 0.28) {
-        return strictRoute('llm', 'stable_knowledge', Math.min(0.9, Math.max(0.42, llmScore)), ['default_or_stable_knowledge']);
+    const stableScore = vectorCosineSimilarity(queryVec, STABLE_KNOWLEDGE_VECTOR);
+    if (stableScore >= 0.16) {
+        return strictRoute('llm', 'stable_knowledge', Math.min(0.9, Math.max(0.42, stableScore)), ['default_or_stable_knowledge']);
     }
     return strictRoute('llm', 'stable_knowledge', 0.42, ['default_or_stable_knowledge']);
 }
@@ -196,14 +196,6 @@ function strictRoute(route, category, confidence, reasons) {
     };
 }
 
-function scorePatterns(text, patterns, weight) {
-    let score = 0;
-    for (const pattern of patterns) {
-        if (pattern.test(text)) score += weight;
-    }
-    return Math.min(1, score);
-}
-
 function normalizeMessage(message) {
     return String(message || '').replace(/\s+/g, ' ').trim().slice(0, 500);
 }
@@ -214,26 +206,22 @@ function isExplicitSearchCommand(text) {
 
 function isImplicitCurrentTopicSearch(text) {
     const normalized = normalizeMessage(text);
-    if (!/\b(?:reviews?|hands-on|worth\s+it|vs|compare|comparison|price|available|availability|launched)\b/i.test(normalized)) {
-        return false;
-    }
-    const contentTokens = tokenizeForIntent(normalized).filter(token => !isIntentStopword(token));
-    return contentTokens.length >= 2;
+    const qVec = textToEmbeddingVector(normalized);
+    return vectorCosineSimilarity(qVec, REVIEW_COMPARE_VECTOR) >= 0.18;
 }
 
 function isDatedChangingFactSearch(text) {
     const normalized = normalizeMessage(text);
     if (!hasDateWindowSignal(normalized)) return false;
-    if (/\b(?:who|what|which|when)\b/i.test(normalized) &&
-        /\b(?:won|winner|champion|champions|rank(?:ing|ings)?|standing|standings|captain|coach|ceo|chair(?:person|man)?|president|prime minister|chief minister|mayor|governor|latest|newest|last|movie|film|song|album|release|released|launched|price|value)\b/i.test(normalized)) {
+    if (/\b(?:won|winner|champion|champions|ranking|standings|release|price|tenure|election|movie|film|song|album)\b/i.test(normalized)) {
         return true;
     }
-    return /\b(?:as of|during|before|after|between|from)\b/i.test(normalized) &&
-        /\b(?:holder|leader|head|winner|champion|ranking|release|price|ceo|captain|coach)\b/i.test(normalized);
+    const qVec = textToEmbeddingVector(normalized);
+    return vectorCosineSimilarity(qVec, CHANGING_FACT_VECTOR) >= 0.14;
 }
 
 function hasDateWindowSignal(text) {
-    return /\b(?:in|during|as of|on|by|before|after|between|from)\s+(?:\d{4}|(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{1,2},?\s+\d{4}|\d{1,2}\s+(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{4})\b/i.test(String(text || ''));
+    return /\b(?:\d{4}|\d{1,4}[-/.]\d{1,2}[-/.]\d{2,4}|\p{L}{3,9}\s+\d{1,2},?\s+\d{4})\b/u.test(String(text || ''));
 }
 
 function tokenizeForIntent(text) {
@@ -241,7 +229,7 @@ function tokenizeForIntent(text) {
 }
 
 function isIntentStopword(token) {
-    return /^(?:the|a|an|of|for|about|on|is|are|was|were|to|in|and|or|me|i|you|please|can|could|should|would|search|web|find|look|up|latest|recent|current|newest|review|reviews|hands|on|worth|best|vs|compare|comparison|price|available|availability|launched|released|release)$/.test(String(token || ''));
+    return String(token || '').length <= 2;
 }
 
 export const __test = {
