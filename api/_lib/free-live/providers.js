@@ -613,16 +613,41 @@ export async function searchCrypto(query, options = {}) {
     url.searchParams.set('ids', id);
     url.searchParams.set('vs_currencies', 'usd,inr');
     url.searchParams.set('include_24hr_change', 'true');
-    const response = await fetchWithTimeout(url.toString(), {
-        headers: { Accept: 'application/json' }
-    }, source.timeoutMs);
-    if (!response.ok) return emptyProvider('coingecko', 'CoinGecko public price lookup failed.');
-    const data = await response.json();
-    const item = data?.[id] || {};
-    const usd = Number(item.usd);
-    const inr = Number(item.inr);
-    const change = Number(item.usd_24h_change);
-    if (!Number.isFinite(usd) && !Number.isFinite(inr)) return emptyProvider('coingecko', 'CoinGecko returned no public price for that asset.');
+    let usd = NaN;
+    let inr = NaN;
+    let change = NaN;
+    try {
+        const response = await fetchWithTimeout(url.toString(), {
+            headers: { Accept: 'application/json' }
+        }, source.timeoutMs);
+        if (response.ok) {
+            const data = await response.json();
+            const item = data?.[id] || {};
+            usd = Number(item.usd);
+            inr = Number(item.inr);
+            change = Number(item.usd_24h_change);
+        }
+    } catch {
+        // Fall through to fallback provider
+    }
+
+    if (!Number.isFinite(usd) && !Number.isFinite(inr)) {
+        try {
+            const symbolMap = { bitcoin: 'BTC', btc: 'BTC', ethereum: 'ETH', eth: 'ETH', solana: 'SOL', dogecoin: 'DOGE', doge: 'DOGE' };
+            const sym = symbolMap[id] || id.toUpperCase();
+            const fallbackResp = await fetchWithTimeout(`https://api.coinbase.com/v2/prices/${sym}-USD/spot`, {
+                headers: { Accept: 'application/json' }
+            }, source.timeoutMs);
+            if (fallbackResp.ok) {
+                const fbData = await fallbackResp.json();
+                usd = Number(fbData?.data?.amount);
+            }
+        } catch {
+            // Ignore fallback network error
+        }
+    }
+
+    if (!Number.isFinite(usd) && !Number.isFinite(inr)) return emptyProvider('coingecko', 'CoinGecko public price lookup failed.');
     return oneResult({
         title: `${formatCryptoName(id)} public price`,
         description: [
