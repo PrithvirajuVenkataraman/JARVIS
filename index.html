@@ -10108,7 +10108,10 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                         .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
                     formattedText = formattedText.replace(/\n(?![^<]*>)/g, '<br>');
                 } else {
-                    formattedText = allowEmptyAssistant ? '<span class="streaming-placeholder">Thinking</span>' : renderAssistantMarkdown(readableText, linkClass);
+                    const isLiveSearchTurn = meta?.isLiveSearch === true || meta?.sourceType === 'verified' || meta?.liveResearch === true;
+                    formattedText = allowEmptyAssistant
+                        ? (isLiveSearchTurn ? '' : '<span class="streaming-placeholder">Thinking</span>')
+                        : renderAssistantMarkdown(readableText, linkClass);
                 }
                 formattedText = sanitizeAssistantMarkup(formattedText);
 
@@ -20907,6 +20910,7 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
 
     const assistantMessageId = addChatMessage('', false, null, {
         allowEmpty: true,
+        isLiveSearch: true,
         turnId: controller.turnId,
         sourceType: 'model'
     });
@@ -20966,11 +20970,11 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                         showThinkingIndicator('Searching web sources...');
                     } else if (state === 'SOURCE_GROUNDED_SYNTHESIS') {
                         window.JarvisInteractionState?.transition?.('GENERATING', { metadata: { turnId: controller.turnId } });
-                        showThinkingIndicator('Synthesizing grounded answer...');
+                        // Keep 'Searching web sources...' continuous without intermediate status text transitions
                     }
                 },
                 onSourcesValidated: ({ sources, provenance }) => {
-                    hideThinkingIndicator();
+                    // Do not hide progress indicator here; keep active continuously until first token
                     const row = getRow();
                     if (row) {
                         row.style.display = '';
@@ -20982,6 +20986,7 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                 },
                 onToken: ({ streamedText }) => {
                     if (window.JarvisLiveResearch?.activeController !== controller || controller.isTerminal) return;
+                    hideThinkingIndicator();
                     const row = getRow();
                     if (row) row.style.display = '';
                     updateStreamingAssistantMessage(assistantMessageId, streamedText, {
@@ -21048,6 +21053,10 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                     resolve(true);
                 }
             }
+        }).catch((err) => {
+            hideThinkingIndicator();
+            window.JarvisInteractionState?.transition?.('IDLE');
+            resolve(false);
         });
     });
 }
