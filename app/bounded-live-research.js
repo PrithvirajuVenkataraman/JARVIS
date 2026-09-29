@@ -818,7 +818,7 @@ RULES:
 1. Deliver a natural, fluent, and well-structured answer. Do not insert bracketed citation numbers like [1] or [1, 2] into the text sentences — all verified sources are showcased in the Sources Carousel directly above.
 2. If evidence is contradictory or insufficient, state it clearly.
 3. Structure with a direct answer first, followed by essential verified details.
-4. Authoritative Recency & Version Verification: For recency-sensitive, release, or version queries, establish the authoritative current entity or version and its release date from verified evidence before describing changes or prior versions. Prioritize primary official documentation over incidental mentions. In case of conflicting sources, prioritize primary official documentation. Never fabricate missing information.
+4. Base your answer strictly on the provided evidence. Never fabricate information.
 
 User question: "${query}"
 
