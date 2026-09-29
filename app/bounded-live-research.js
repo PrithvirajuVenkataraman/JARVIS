@@ -108,6 +108,40 @@ export function formatSourcesForPrompt(sources = []) {
     }).join('\n\n');
 }
 
+export function isAuthoritativeResearchSource(source, query = '') {
+    if (!source) return false;
+    const domain = String(source.domain || '').toLowerCase();
+    const url = String(source.url || '').toLowerCase();
+    if (source.sourceType === 'official_source' || source.trusted === true) {
+        if (!/\b(?:news\.google\.com|yahoo\.com|msn\.com)\b/i.test(domain)) return true;
+    }
+    const isDocDomain = /\b(?:docs\.python\.org|python\.org|github\.com|developer\.mozilla\.org|go\.dev|rust-lang\.org|kernel\.org)\b/i.test(domain)
+        || domain.startsWith('docs.')
+        || domain.startsWith('developer.')
+        || domain.startsWith('api.');
+    if (isDocDomain) return true;
+    if (/\b(?:docs|documentation|changelog|whatsnew|release-notes)\b/i.test(url)) return true;
+    return false;
+}
+
+export function evaluateSourceQualityForEarlySynthesis(sources = [], query = '') {
+    if (!Array.isArray(sources) || sources.length === 0) return false;
+    const isTechDoc = /\b(?:release|version|changelog|docs?|documentation|api|whatsnew|what\s+changed\s+in)\b/i.test(String(query || ''));
+    if (isTechDoc) {
+        // Technical & software release queries require at least 1 authoritative source or strong relevance consensus (>= 3 sources)
+        const hasAuthoritative = sources.some(s => isAuthoritativeResearchSource(s, query));
+        if (hasAuthoritative) return true;
+        const cleanTerms = String(query).toLowerCase().replace(/[^a-z0-9]+/g, ' ').split(/\s+/).filter(t => t.length >= 3 && !/^(?:what|changed|latest|release|version|previous|stable|with|from|than|does|will|could|should|about|the|and|for)\b/.test(t));
+        const matchedSources = sources.filter(s => {
+            const text = `${s.title || ''} ${s.snippet || ''}`.toLowerCase();
+            return cleanTerms.some(t => text.includes(t));
+        });
+        return matchedSources.length >= 3;
+    }
+    // General queries require at least 2 sources with descriptive content
+    return sources.length >= 2 && sources.some(s => (s.snippet || s.description || '').length >= 20);
+}
+
 /**
  * Synthesizes a structured bounded fallback answer strictly from verified source snippets.
  * Produces clean natural-language prose without raw bullets, technical headings, or timing disclaimers.
@@ -121,10 +155,14 @@ export function generateSnippetFallback(query, sources = []) {
         return `I searched for current information on "${cleanQ}", but the live web search did not return verified records. Please try rephrasing your search query.`;
     }
 
+    const isTechDoc = /\b(?:release|version|changelog|docs?|documentation|api|whatsnew|what\s+changed\s+in)\b/i.test(cleanQ);
+    const authSources = sources.filter(s => isAuthoritativeResearchSource(s, cleanQ));
+    const effectiveSources = (isTechDoc && authSources.length) ? authSources : sources;
+
     const facts = [];
     const seenSentences = new Set();
 
-    for (const s of sources.slice(0, 6)) {
+    for (const s of effectiveSources.slice(0, 6)) {
         const textParts = [];
         if (s.title && !/^https?:\/\//i.test(s.title)) {
             textParts.push(s.title);
@@ -144,7 +182,7 @@ export function generateSnippetFallback(query, sources = []) {
                 .replace(/^\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}\s*[—–-]\s*/, '')
                 .replace(/\s+/g, ' ')
                 .trim();
-            if (sentence.length < 5 || sentence.length > 300) continue;
+            if (sentence.length < 5 || sentence.length > 400) continue;
             if (/\b(?:404|500|502|503)\b/.test(sentence)) continue;
             if (sentence.replace(/[^a-zA-Z0-9]/g, '').length < 3) continue;
             
@@ -161,9 +199,15 @@ export function generateSnippetFallback(query, sources = []) {
         return `Verified live sources were gathered regarding "${cleanQ}", but they did not contain sufficient detail to construct a confident answer. Please review the verified source references above.`;
     }
 
-    const paragraph1 = facts.slice(0, 3).join(' ');
-    const paragraph2 = facts.slice(3, 6).join(' ');
-    return paragraph2 ? `${paragraph1}\n\n${paragraph2}` : paragraph1;
+    // Subject relevance validation for technical documentation queries:
+    // If the query asks about a specific technology release (e.g. Python), ensure gathered facts mention it.
+    const subjectMatch = cleanQ.match(/(?:(?:latest|current|newest|recent|stable)\s+(?:release|version|update|build)\s+of|changes?\s+in\s+(?:the\s+)?(?:latest\s+)?(?:release|version)\s+of)\s+([a-z0-9_.-]+)/i);
+    const subject = subjectMatch ? subjectMatch[1].toLowerCase() : null;
+    if (isTechDoc && subject && !facts.some(f => f.toLowerCase().includes(subject))) {
+        return `Verified live web sources were retrieved regarding "${cleanQ}", but real-time AI synthesis could not be completed. Please review the verified source references in the carousel above.`;
+    }
+
+    return facts.slice(0, 4).join(' ');
 }
 
 /**
@@ -769,8 +813,13 @@ export class BoundedLiveResearchController {
                 const currentSources = normalizeResearchSources(this.rawSearchResults, query);
                 this.sources = currentSources;
 
-                // Early synthesis: If minimum verified sources arrived before cutoff, begin synthesis immediately!
-                if (currentSources.length >= this.minSourcesForEarlySynthesis) {
+                // Quality-aware early synthesis:
+                // Only trigger early synthesis if sources meet quality standards (e.g. authoritative docs for tech queries)
+                // and minimum source count is satisfied.
+                const meetsQuality = currentSources.length >= this.minSourcesForEarlySynthesis &&
+                    evaluateSourceQualityForEarlySynthesis(currentSources, query);
+
+                if (meetsQuality) {
                     clearTimeout(cutoffTimer);
                     this.telemetry.t_sources_rendered = performance.now();
                     this.transition(RESEARCH_STATES.SOURCE_VALIDATION, { early: true }, uiCallbacks);
@@ -798,7 +847,7 @@ export class BoundedLiveResearchController {
 
                     startSourceGroundedSynthesis();
                 } else {
-                    // Search completed early with fewer than minSourcesForEarlySynthesis: finalize at cutoff or complete
+                    // Search completed early with fewer than minSourcesForEarlySynthesis or insufficient quality: finalize at cutoff or complete
                     clearTimeout(cutoffTimer);
                     onSearchDeadline();
                 }
@@ -908,6 +957,8 @@ if (typeof window !== 'undefined') {
         PROVENANCE_MODES,
         BoundedLiveResearchController,
         normalizeResearchSources,
+        isAuthoritativeResearchSource,
+        evaluateSourceQualityForEarlySynthesis,
         generateSnippetFallback,
         generateRelatedResearchQuestions,
         parseCitationsInHtml,
