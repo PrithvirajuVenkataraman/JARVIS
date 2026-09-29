@@ -110,7 +110,7 @@ export function formatSourcesForPrompt(sources = []) {
 
 /**
  * Synthesizes a structured bounded fallback answer strictly from verified source snippets.
- * Used when the 9.0s hard application deadline is reached.
+ * Produces clean natural-language prose without raw bullets, technical headings, or timing disclaimers.
  */
 export function generateSnippetFallback(query, sources = []) {
     const cleanQ = normalizeUserQuery(query);
@@ -118,25 +118,49 @@ export function generateSnippetFallback(query, sources = []) {
         if (!hasSearchableContent(cleanQ)) {
             return 'Please provide a search topic or question so I can retrieve verified live web sources.';
         }
-        return `I searched for current information on "${cleanQ}", but the live web search providers did not return verified records before the deadline. Please try rephrasing your search query.`;
+        return `I searched for current information on "${cleanQ}", but the live web search did not return verified records. Please try rephrasing your search query.`;
     }
 
-    const topSources = sources.slice(0, 6);
-    const bullets = topSources.map((s, idx) => {
-        const num = idx + 1;
-        const title = cleanTextSnippet(s.title || s.domain || 'Source');
-        const snippet = cleanTextSnippet(s.snippet || s.description || '');
-        const domain = s.domain || '';
-        const domainLabel = domain ? ` — ${domain}` : '';
-        return snippet
-            ? `**[${num}] ${title}**${domainLabel}\n${snippet}`
-            : `**[${num}] ${title}**${domainLabel}`;
-    }).join('\n\n');
+    const facts = [];
+    const seenSentences = new Set();
 
-    const topicHeading = hasSearchableContent(cleanQ)
-        ? `### Live Web Results for "${cleanQ}"`
-        : '### Live Web Results';
-    return `${topicHeading}\n\n${bullets}\n\n*Gathered from verified live sources within the 9.0s deadline.*`;
+    for (const s of sources.slice(0, 6)) {
+        const textParts = [];
+        if (s.title && !/^https?:\/\//i.test(s.title)) {
+            textParts.push(s.title);
+        }
+        if (s.snippet || s.description) {
+            textParts.push(s.snippet || s.description);
+        }
+        const fullText = textParts.join('. ');
+
+        const rawSentences = fullText.split(/(?<=[.!?])\s+/);
+        for (let sentence of rawSentences) {
+            sentence = cleanTextSnippet(sentence)
+                .replace(/^[-*•\s\d.)\][]+/, '')
+                .replace(/^(?:read more|continue reading|source|news|updates?):?\s*/i, '')
+                .replace(/^(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2},?\s+\d{4}\s*[—–-]\s*/i, '')
+                .replace(/\s+/g, ' ')
+                .trim();
+            if (sentence.length < 5 || sentence.length > 300) continue;
+            if (/^(cookie|privacy policy|sign in|subscribe|all rights reserved|click here|advertisement|javascript|not found|page not found|access denied|forbidden|bad request|internal server error|error \d+|untitled|home|loading)/i.test(sentence)) continue;
+            
+            const normalized = sentence.toLowerCase().replace(/[^a-z0-9]/g, '');
+            if (seenSentences.has(normalized)) continue;
+            seenSentences.add(normalized);
+            facts.push(sentence.endsWith('.') ? sentence : `${sentence}.`);
+            if (facts.length >= 6) break;
+        }
+        if (facts.length >= 6) break;
+    }
+
+    if (!facts.length) {
+        return `Verified live sources were gathered regarding "${cleanQ}", but they did not contain sufficient detail to construct a confident answer. Please review the verified source references above.`;
+    }
+
+    const paragraph1 = facts.slice(0, 3).join(' ');
+    const paragraph2 = facts.slice(3, 6).join(' ');
+    return paragraph2 ? `${paragraph1}\n\n${paragraph2}` : paragraph1;
 }
 
 /**
@@ -769,6 +793,7 @@ RULES:
 1. Deliver a natural, fluent, and well-structured answer. Do not insert bracketed citation numbers like [1] or [1, 2] into the text sentences — all verified sources are showcased in the Sources Carousel directly above.
 2. If evidence is contradictory or insufficient, state it clearly.
 3. Structure with a direct answer first, followed by essential verified details.
+4. Authoritative Recency & Version Verification: For queries inquiring about the "latest", "current", "today", "newest", "recent release", or "as of [date]", establish the actual current/latest entity or version and its release date from authoritative official evidence before describing changes or prior versions. Do not treat incidental news mentions as proof of being the latest release. Where sources disagree, prioritize primary official documentation. Never fabricate missing information.
 
 User question: "${query}"
 
