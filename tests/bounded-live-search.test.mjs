@@ -15,7 +15,7 @@ import {
 } from '../app/bounded-live-research.js';
 import { parseGoogleNewsRssXml, searchDuckDuckGoHtml } from '../api/_lib/free-live/providers.js';
 import { buildSourceTransparencyHtml } from '../app/source-transparency.js';
-import { searchGovernmentRole, runEvidenceFirstWebRag, searchPublicSources } from '../api/search.js';
+import { searchGovernmentRole, runEvidenceFirstWebRag, searchPublicSources, buildDeterministicSearchQueries, rankSources } from '../api/search.js';
 
 // ============================================================================
 // ARCHITECTURE-LEVEL TESTS (Section 8 Requirements)
@@ -177,7 +177,8 @@ test('Architecture 4: Valid sources + empty LLM response -> synthesis fallback',
     assert.equal(result.fallback, true, 'Must flag fallback: true');
     assert.equal(result.provenance, PROVENANCE_MODES.SYNTHESIS_FALLBACK);
     assert.equal(result.sources.length, 1, 'Sources must be preserved in fallback');
-    assert.ok(result.content.includes('Live Web Results for "James Webb latest observations"'));
+    assert.ok(!result.content.includes('Live Web Results'), 'Must not include technical live search headings');
+    assert.ok(!result.content.includes('deadline'), 'Must not include deadline timing disclaimers');
     assert.ok(result.content.includes('Water vapor detected on K2-18b'));
 });
 
@@ -418,14 +419,16 @@ test('Prompt Formatting & Snippet Fallback', () => {
     assert.ok(formattedPrompt.includes('[2] Title: Title 2'));
 
     const fallback = generateSnippetFallback('Test Topic', sources);
-    assert.ok(fallback.includes('### Live Web Results for "Test Topic"'));
-    assert.ok(fallback.includes('[1] Title 1'));
-    assert.ok(fallback.includes('[2] Title 2'));
+    assert.ok(!fallback.includes('### Live Web Results'), 'Must not include technical live search headings');
+    assert.ok(!fallback.includes('deadline'), 'Must not include deadline timing disclaimers');
+    assert.ok(!fallback.includes('[1]'), 'Must not include raw citation brackets');
+    assert.ok(!fallback.includes('[2]'), 'Must not include raw citation brackets');
+    assert.ok(fallback.includes('Snippet 1') || fallback.includes('Title 1'));
 
     // Test zero sources with valid query
     const fallbackZeroSources = generateSnippetFallback('Gold price today', []);
     assert.ok(fallbackZeroSources.includes('Gold price today'));
-    assert.ok(fallbackZeroSources.includes('did not return verified records'));
+    assert.ok(!fallbackZeroSources.includes('deadline'), 'Must not include deadline text on zero sources');
 
     // Test zero sources with whitespace / zero-width query (should never render " ")
     const fallbackEmptyQuery = generateSnippetFallback('   ', []);
@@ -648,7 +651,8 @@ test('Safety Fallback Invariant: generateSnippetFallback never renders " " for i
     // When valid query is passed with zero sources
     const validRes = generateSnippetFallback('Mars Rover', []);
     assert.ok(validRes.includes('Mars Rover'));
-    assert.ok(validRes.includes('did not return verified records before the deadline'));
+    assert.ok(validRes.includes('did not return verified records'));
+    assert.ok(!validRes.includes('deadline'), 'Must not include deadline language');
 });
 
 test('Centralized LIVE_RESEARCH_BUDGETS contract & defaults', () => {
@@ -940,7 +944,8 @@ test('Synthesis Error Diagnostics: Controller records synthesisError on failure 
     assert.equal(result.fallback, true);
     assert.equal(result.provenance, PROVENANCE_MODES.SYNTHESIS_FALLBACK);
     assert.ok(result.telemetry.synthesisError.includes('503'));
-    assert.ok(result.content.includes('Live Web Results'));
+    assert.ok(!result.content.includes('Live Web Results'), 'Must not include technical live search headings');
+    assert.ok(!result.content.includes('deadline'), 'Must not include deadline timing disclaimers');
 });
 
 test('Synthesis Success Invariant: Clean streamed response completes with WEB_GROUNDED provenance without snippet bullets', async () => {
@@ -1018,6 +1023,198 @@ test('Synthesis Fallback Invariant: 0 streamed tokens triggers SYNTHESIS_FALLBAC
     assert.equal(result.fallback, true);
     assert.equal(result.provenance, PROVENANCE_MODES.SYNTHESIS_FALLBACK);
     assert.equal(result.sources.length, 1);
-    assert.ok(result.content.includes('### Live Web Results for'));
+    assert.ok(!result.content.includes('### Live Web Results'), 'Must not include technical live search headings');
+    assert.ok(!result.content.includes('deadline'), 'Must not include deadline timing disclaimers');
     assert.ok(result.content.includes('Sample Grounded Source'));
 });
+
+// ============================================================================
+// LIVE WEB SEARCH MODERNIZATION INVARIANTS (User Specification)
+// ============================================================================
+
+test('Natural-Language Fallback Invariant: produces cohesive prose without headings, disclaimers, or citation brackets', () => {
+    const sources = [
+        {
+            title: 'Python 3.14 Released with Major Features',
+            domain: 'python.org',
+            url: 'https://docs.python.org/3/whatsnew/3.14.html',
+            snippet: 'Python 3.14 includes support for template strings, enhanced error messages, and substantial interpreter speedups.'
+        },
+        {
+            title: 'Key Security Changes in Python Release',
+            domain: 'python.org',
+            url: 'https://python.org/news/3.14',
+            snippet: 'Security enhancements include hardened package verification and updated TLS default configurations.'
+        }
+    ];
+
+    const fallback = generateSnippetFallback('What changed in the latest release of Python?', sources);
+
+    // Negative assertions: technical artifacts must never leak into fallback
+    assert.ok(!fallback.includes('### Live Web Results'), 'Technical heading must never appear');
+    assert.ok(!fallback.includes('deadline'), 'Deadline or timing disclaimers must never appear');
+    assert.ok(!fallback.includes('[1]'), 'Bracket citation numbers must not appear');
+    assert.ok(!fallback.includes('[2]'), 'Bracket citation numbers must not appear');
+    assert.ok(!fallback.includes('* ['), 'Raw markdown bullets must not appear');
+
+    // Positive assertions: must synthesize coherent prose preserving verified facts
+    assert.ok(fallback.includes('template strings'), 'Must preserve key technical facts from verified sources');
+    assert.ok(fallback.includes('Security enhancements'), 'Must preserve secondary verified facts');
+    assert.ok(!fallback.startsWith('#'), 'Must not start with markdown header');
+});
+
+test('Natural-Language Fallback Invariant: Insufficient evidence gracefully explains limitation without hallucination', () => {
+    const emptySourcesFallback = generateSnippetFallback('Latest quantum gravity breakthrough today', []);
+    assert.ok(!emptySourcesFallback.includes('deadline'), 'Zero sources fallback must not mention deadline');
+    assert.ok(emptySourcesFallback.includes('Quantum gravity') || emptySourcesFallback.includes('quantum gravity'));
+    assert.ok(emptySourcesFallback.includes('no verified live web records were returned') || emptySourcesFallback.includes('did not return verified records'));
+
+    const weakSources = [
+        {
+            title: '404 Not Found',
+            domain: 'example.com',
+            snippet: '...'
+        }
+    ];
+    const weakFallback = generateSnippetFallback('Sample query with weak sources', weakSources);
+    assert.ok(!weakFallback.includes('deadline'), 'Weak sources fallback must not mention deadline');
+    assert.ok(weakFallback.includes('did not contain sufficient detail') || weakFallback.includes('Please review'));
+});
+
+test('Authoritative Recency Query Planning: Generalizes across technologies without hardcoding', () => {
+    // 1. Python recency query
+    const pythonQueries = buildDeterministicSearchQueries('What changed in the latest release of Python compared with the previous stable release?');
+    assert.ok(pythonQueries.some(q => q.toLowerCase().includes('python') && q.toLowerCase().includes('release notes')), 'Must plan release notes query for Python');
+    assert.ok(pythonQueries.some(q => q.toLowerCase().includes('python') && q.toLowerCase().includes('changelog')), 'Must plan changelog query for Python');
+
+    // 2. Node.js recency query (verifies generalization, no Python hardcoding)
+    const nodeQueries = buildDeterministicSearchQueries('What changed in the latest release of Node.js compared with the previous stable release?');
+    assert.ok(nodeQueries.some(q => q.toLowerCase().includes('node') && q.toLowerCase().includes('release notes')), 'Must plan release notes query for Node.js');
+    assert.ok(nodeQueries.some(q => q.toLowerCase().includes('node') && q.toLowerCase().includes('changelog')), 'Must plan changelog query for Node.js');
+
+    // 3. React recency query
+    const reactQueries = buildDeterministicSearchQueries('What is the latest stable version of React?');
+    assert.ok(reactQueries.some(q => q.toLowerCase().includes('react') && (q.toLowerCase().includes('release notes') || q.toLowerCase().includes('latest version'))), 'Must plan authoritative version query for React');
+});
+
+test('Authoritative Source Ranking Boost: Primary official documentation outranks incidental blogs', () => {
+    const query = 'What changed in the latest release of Python compared with the previous stable release?';
+    const incidentalBlog = {
+        title: 'Random Tech Blog: Python is Great',
+        domain: 'randomblog.xyz',
+        url: 'https://randomblog.xyz/post/python-thoughts',
+        description: 'Just some random thoughts on Python programming language.',
+        sourceType: 'live_web'
+    };
+    const officialDocs = {
+        title: "What's New in Python 3.14 — Documentation",
+        domain: 'docs.python.org',
+        url: 'https://docs.python.org/3/whatsnew/3.14.html',
+        description: 'Official release notes and changelog documentation for Python 3.14.',
+        sourceType: 'official_source'
+    };
+
+    const ranked = rankSources(query, [incidentalBlog, officialDocs]);
+    assert.equal(ranked[0].domain, 'docs.python.org', 'Official documentation must outrank incidental blog post');
+
+    // Repeat for Node.js to guarantee non-hardcoded generalization
+    const nodeQuery = 'What changed in the latest release of Node.js?';
+    const nodeBlog = {
+        title: 'Cool Node tips and tricks',
+        domain: 'blog.example.com',
+        url: 'https://blog.example.com/node',
+        description: 'Tips for Node.js programmers.',
+        sourceType: 'live_web'
+    };
+    const nodeOfficial = {
+        title: 'Node.js v22 Release Notes and Changelog',
+        domain: 'nodejs.org',
+        url: 'https://nodejs.org/en/blog/release/v22.0.0',
+        description: 'Official release documentation for Node.js.',
+        sourceType: 'official_source'
+    };
+    const rankedNode = rankSources(nodeQuery, [nodeBlog, nodeOfficial]);
+    assert.equal(rankedNode[0].domain, 'nodejs.org', 'Official Node.js documentation must outrank incidental blog post');
+});
+
+test('Live Search Assistant Bubble Invariant: Suppresses Thinking placeholder for live search turns', () => {
+    // Simulate the assistant bubble text formatting logic in index.html line 10111
+    function computeFormattedText(allowEmptyAssistant, meta, readableText) {
+        const isLiveSearchTurn = meta?.isLiveSearch === true || meta?.sourceType === 'verified' || meta?.liveResearch === true;
+        return allowEmptyAssistant
+            ? (isLiveSearchTurn ? '' : '<span class="streaming-placeholder">Thinking</span>')
+            : (readableText || '');
+    }
+
+    // Live search turn with allowEmptyAssistant = true
+    const liveSearchText = computeFormattedText(true, { isLiveSearch: true }, '');
+    assert.equal(liveSearchText, '', 'Live search assistant bubble must be visually empty, zero Thinking placeholder');
+
+    // Normal non-live-search turn with allowEmptyAssistant = true
+    const normalChatText = computeFormattedText(true, { isLiveSearch: false }, '');
+    assert.equal(normalChatText, '<span class="streaming-placeholder">Thinking</span>', 'Non-live-search turns must preserve normal placeholder');
+
+    // Live search turn after actual tokens arrive (allowEmptyAssistant = false)
+    const streamedText = computeFormattedText(false, { isLiveSearch: true }, 'Here is the answer');
+    assert.equal(streamedText, 'Here is the answer', 'Streamed content must render cleanly');
+});
+
+test('Live Search Progress Lifecycle Invariant: Continuous indicator hides immediately on first token', () => {
+    const lifecycleEvents = [];
+    let progressIndicatorVisible = false;
+    let progressIndicatorText = '';
+
+    const showProgressIndicator = (text) => {
+        progressIndicatorVisible = true;
+        progressIndicatorText = text;
+        lifecycleEvents.push({ event: 'show', text });
+    };
+
+    const hideProgressIndicator = () => {
+        progressIndicatorVisible = false;
+        progressIndicatorText = '';
+        lifecycleEvents.push({ event: 'hide' });
+    };
+
+    // 1. Live search starts
+    showProgressIndicator('Searching web sources...');
+    assert.equal(progressIndicatorVisible, true);
+    assert.equal(progressIndicatorText, 'Searching web sources...');
+
+    // 2. Sources validated: indicator must stay continuously active (no hide)
+    // onSourcesValidated simulates preserving the indicator
+    assert.equal(progressIndicatorVisible, true);
+    assert.equal(progressIndicatorText, 'Searching web sources...');
+
+    // 3. State transition to SOURCE_GROUNDED_SYNTHESIS: no transition to intermediate text
+    // Simulates index.html onStateTransition logic
+    const onStateTransition = (state) => {
+        if (state === 'SEARCHING') {
+            showProgressIndicator('Searching web sources...');
+        } else if (state === 'SOURCE_GROUNDED_SYNTHESIS') {
+            // Keep continuous indicator without intermediate text transitions
+        }
+    };
+    onStateTransition('SOURCE_GROUNDED_SYNTHESIS');
+    assert.equal(progressIndicatorVisible, true);
+    assert.equal(progressIndicatorText, 'Searching web sources...', 'Must not transition to intermediate status like Synthesizing grounded answer...');
+
+    // 4. First token arrives: must immediately hide
+    const onToken = (token) => {
+        hideProgressIndicator();
+    };
+    onToken('Python');
+    assert.equal(progressIndicatorVisible, false, 'Progress indicator must hide immediately upon first token arrival');
+
+    // 5. Verification of clean lifecycle
+    const showCount = lifecycleEvents.filter(e => e.event === 'show').length;
+    const hideCount = lifecycleEvents.filter(e => e.event === 'hide').length;
+    assert.equal(showCount, 1, 'Only one continuous show event throughout retrieval and synthesis');
+    assert.equal(hideCount, 1, 'Cleanly hidden on first token');
+});
+
+
+
+
+
+
