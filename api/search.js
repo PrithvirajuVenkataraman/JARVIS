@@ -192,7 +192,7 @@ export default async function handler(req, res) {
             });
         }
         if (route.route === 'live_required') {
-            if (route.category === 'government' || route.category === 'news' || route.category === 'web_search') {
+            if (route.category === 'government' || route.category === 'news' || route.category === 'web_search' || route.category === 'technical_documentation') {
                 const search = await runVerifiedWebSearch(query, { limit });
                 return res.status(200).json({
                     success: true,
@@ -442,7 +442,8 @@ JSON shape: {"decision":"needs_live_search"|"stable_answer","confidence":0.0,"re
 export async function resolveRetrievalRoute(message, fallbackRoute = {}, options = {}) {
     const route = normalizeRetrievalRoute(fallbackRoute);
 
-    if (route.route === 'cached_latest' || route.category === 'latest') {
+    const hasCachedMatch = typeof searchItems === 'function' && searchItems(message, { limit: 1 }).length > 0;
+    if (route.route === 'cached_latest' || route.category === 'latest' || hasCachedMatch) {
         return {
             route: 'cached_latest',
             category: 'latest',
@@ -553,20 +554,41 @@ export function isPoliticalOrLeadershipQuery(query) {
     return /\b(cm|chief minister|prime minister|pm|president|governor|mayor|leader|minister|election|elections|mla|mp|cabinet|tenure|political party|candidate|assembly|parliament)\b/i.test(raw);
 }
 
+export function isTechnicalDocumentationQuery(query) {
+    const raw = String(query || '').toLowerCase();
+    return /\b(?:release\s+notes|changelog|what(?:'s|\s+is)\s+new|version\s+changes?|api\s+docs?|documentation|official\s+docs?|whatsnew|what\s+changed\s+in|(?:latest|previous|current|newest|stable)\s+(?:release|version)|(?:release|version)\s+of\s+[a-z0-9_.-]+)\b/i.test(raw);
+}
+
 export async function searchPublicSources(query, options = {}) {
     const normalizedQuery = normalizeSearchQuery(query);
     if (!normalizedQuery) return [];
     const limit = clampInt(options.limit, 8, 1, 20);
+    const roleIntent = parseGovernmentRoleQuery(normalizedQuery);
+    const isLeadership = Boolean(roleIntent && isLeadershipOrRoleTerm(roleIntent.role));
     const isPolitical = isPoliticalOrLeadershipQuery(normalizedQuery);
+    const isTechDocs = isTechnicalDocumentationQuery(normalizedQuery);
     const deterministicQueries = buildDeterministicSearchQueries(normalizedQuery);
     const plannedQueries = Array.isArray(options.plannedQueries) && options.plannedQueries.length
         ? options.plannedQueries
-        : [normalizedQuery];
-    const querySet = Array.from(new Set([
-        normalizedQuery,
-        ...deterministicQueries,
-        ...plannedQueries.map(item => normalizeSearchQuery(item)).filter(Boolean)
-    ])).slice(0, 7);
+        : [];
+    
+    // Technical documentation, leadership, or long conversational queries (> 6 words)
+    // prioritize concise deterministic queries so search engines never receive conversational fluff.
+    // Short direct queries (<= 6 words, e.g. "France facts") keep the exact user query first.
+    const isLongConversational = normalizedQuery.split(/\s+/).filter(Boolean).length > 6;
+    const prioritizeRewritten = isTechDocs || isLeadership || (deterministicQueries.length > 0 && isLongConversational);
+
+    const querySet = prioritizeRewritten
+        ? Array.from(new Set([
+            ...deterministicQueries,
+            ...plannedQueries.map(item => normalizeSearchQuery(item)).filter(Boolean),
+            normalizedQuery
+        ])).slice(0, 7)
+        : Array.from(new Set([
+            normalizedQuery,
+            ...deterministicQueries,
+            ...plannedQueries.map(item => normalizeSearchQuery(item)).filter(Boolean)
+        ])).slice(0, 7);
 
     const targetQueries = querySet.slice(0, 3);
 
@@ -581,8 +603,6 @@ export async function searchPublicSources(query, options = {}) {
 
     const maxCeiling = options.answer === false ? 3000 : 4000;
     const boundedTimeoutMs = Math.min(Number(options.timeoutMs) || maxCeiling, maxCeiling);
-    const roleIntent = parseGovernmentRoleQuery(normalizedQuery);
-    const isLeadership = Boolean(roleIntent && isLeadershipOrRoleTerm(roleIntent.role));
 
     let liveNews = [];
     let wiki = [];
@@ -594,14 +614,20 @@ export async function searchPublicSources(query, options = {}) {
     let gdelt = [];
     let geminiGroundingResults = [];
 
-    const taskNews = Promise.allSettled(targetQueries.slice(0, 1).map(candidate => searchGoogleNewsRss(candidate, { limit: Math.min(limit, 4), timeoutMs: Math.min(boundedTimeoutMs, 2000) })))
-        .then(s => { liveNews = s.flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []); });
-    const taskDdg = Promise.allSettled(targetQueries.slice(0, 2).map(candidate => searchDuckDuckGoHtml(candidate, { limit, timeoutMs: Math.min(boundedTimeoutMs, 2000), signal: options.signal })))
+    // Technical documentation & software release queries must NEVER query Google News RSS
+    const taskNews = isTechDocs
+        ? Promise.resolve()
+        : Promise.allSettled(targetQueries.slice(0, 1).map(candidate => searchGoogleNewsRss(candidate, { limit: Math.min(limit, 4), timeoutMs: Math.min(boundedTimeoutMs, 2000) })))
+            .then(s => { liveNews = s.flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []); });
+    
+    // General web search (DuckDuckGo & SearXNG) given full 2800ms individual budget
+    const webSearchTimeoutMs = Math.min(boundedTimeoutMs, 2800);
+    const taskDdg = Promise.allSettled(targetQueries.slice(0, 2).map(candidate => searchDuckDuckGoHtml(candidate, { limit, timeoutMs: webSearchTimeoutMs, signal: options.signal })))
         .then(s => { ddgWeb = s.flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []); });
     // SearXNG: zero-config metasearch (aggregates Google, Bing, Brave, DuckDuckGo, 70+ engines).
     // Uses SEARXNG_URL env if configured (own/hosted instance); otherwise races 4 public fallback instances.
     // No API key required. Works on Vercel free tier out of the box.
-    const taskSearXNG = Promise.allSettled(targetQueries.slice(0, 2).map(candidate => searchSearXNGRacer(candidate, { limit: 6, timeoutMs: Math.min(boundedTimeoutMs, 2200), signal: options.signal })))
+    const taskSearXNG = Promise.allSettled(targetQueries.slice(0, 2).map(candidate => searchSearXNGRacer(candidate, { limit: 6, timeoutMs: webSearchTimeoutMs, signal: options.signal })))
         .then(s => { searxngWeb = s.flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []); });
     const taskWiki = Promise.allSettled(targetQueries.slice(0, 2).map(candidate => searchWikipedia(candidate, { limit: 2, timeoutMs: Math.min(boundedTimeoutMs, 2000) })))
         .then(s => { wiki = s.flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []).slice(0, 3); });
@@ -616,7 +642,7 @@ export async function searchPublicSources(query, options = {}) {
         ? Promise.resolve()
         : Promise.allSettled([searchGovernmentRole(normalizedQuery, { limit: Math.min(3, limit), timeoutMs: Math.min(boundedTimeoutMs, 1500), signal: options.signal })])
             .then(s => { governmentRoleResults = (Array.isArray(s) ? s : []).flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []); });
-    const taskGdelt = options.skipGdelt === true
+    const taskGdelt = (options.skipGdelt === true || isTechDocs)
         ? Promise.resolve()
         : Promise.allSettled(gdeltQueries.map(candidate => searchGdeltNews(candidate, { limit, timeoutMs: Math.min(boundedTimeoutMs, 2500) })))
             .then(s => { gdelt = (Array.isArray(s) ? s : []).flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []); });
@@ -629,10 +655,10 @@ export async function searchPublicSources(query, options = {}) {
     const fastTasks = [taskNews, taskDdg, taskSearXNG, taskWiki, taskWikidata, taskYahoo, taskGov];
     const allTasks = [...fastTasks, taskGdelt, taskGemini];
 
-    // Wait for fast tasks to complete (or time out after 2200ms)
+    // Wait for fast tasks to complete (or time out after 2800ms)
     await Promise.race([
         Promise.all(fastTasks),
-        new Promise(res => setTimeout(res, Math.min(boundedTimeoutMs, 2200)))
+        new Promise(res => setTimeout(res, Math.min(boundedTimeoutMs, 2800)))
     ]);
 
     const getFastCount = () => (liveNews.length + ddgWeb.length + searxngWeb.length + wiki.length + wikidata.length + liveWeb.length + governmentRoleResults.length);
@@ -641,7 +667,7 @@ export async function searchPublicSources(query, options = {}) {
     // If fast tasks returned sufficient sources AND at least 1 general web source arrived (or leadership query), proceed.
     // Otherwise wait for trailing tasks (DDG, SearXNG, GDELT) up to boundedTimeoutMs.
     if (getFastCount() < 2 || (!isLeadership && getGeneralWebCount() === 0)) {
-        const remainingMs = Math.max(50, boundedTimeoutMs - 2200);
+        const remainingMs = Math.max(50, boundedTimeoutMs - 2800);
         await Promise.race([
             Promise.all(allTasks),
             new Promise(res => setTimeout(res, remainingMs))
@@ -666,7 +692,10 @@ export async function searchPublicSources(query, options = {}) {
     for (const item of rankedCandidates) {
         if (!item.url || seenUrls.has(item.url)) continue;
         seenUrls.add(item.url);
-        deduped.push(item);
+        deduped.push({
+            ...item,
+            query: normalizedQuery
+        });
         if (deduped.length >= Math.max(limit, 8)) break;
     }
     if (options.skipAutoDeepCrawl !== true && options.allowDeepCrawl === true && deduped.length < 3) {
@@ -3839,7 +3868,7 @@ export function rankSources(query, results) {
     return [...(Array.isArray(results) ? results : [])].sort((a, b) => scoreSearchResult(b, terms, query) - scoreSearchResult(a, terms, query));
 }
 
-function scoreSearchResult(item, terms, query = '') {
+export function scoreSearchResult(item, terms, query = '') {
     const title = String(item?.title || '').toLowerCase();
     const description = String(item?.description || '').toLowerCase();
     const domain = String(item?.domain || '').toLowerCase();
@@ -3871,16 +3900,27 @@ function scoreSearchResult(item, terms, query = '') {
                 score += 40;
             }
         }
-        const isVersionOrRecencyQuery = /\b(latest|current|newest|recent|stable)\s+(?:release|version|update|build|edition)\b/i.test(query)
+        const isTechDoc = isTechnicalDocumentationQuery(query);
+        const isVersionOrRecencyQuery = isTechDoc
+            || /\b(latest|current|newest|recent|stable)\s+(?:release|version|update|build|edition)\b/i.test(query)
             || /\b(?:what changed in|what is new in|new features in|changelog of|release notes for)\b/i.test(query);
         if (isVersionOrRecencyQuery) {
             const urlStr = String(item?.url || '').toLowerCase();
-            const isDocOrRelease = /\b(release|documentation|changelog|what's new|whats new|notes|downloads?)\b/i.test(`${title} ${urlStr} ${description}`);
-            const isOfficialCandidate = domain.includes('.org') || domain.startsWith('docs.') || domain.startsWith('developer.') || domain.includes('github.com') || item?.sourceType === 'official_source';
-            if (isOfficialCandidate && isDocOrRelease) {
-                score += 35;
+            const isDocOrRelease = /\b(release|documentation|changelog|what's new|whats new|whatsnew|notes|downloads?)\b/i.test(`${title} ${urlStr} ${description}`);
+            const isOfficialDocDomain = /\b(?:docs\.python\.org|python\.org|developer\.mozilla\.org|go\.dev|rust-lang\.org|kernel\.org|github\.com)\b/i.test(domain)
+                || domain.startsWith('docs.')
+                || domain.startsWith('developer.')
+                || domain.startsWith('api.')
+                || item?.sourceType === 'official_source';
+            if (isOfficialDocDomain && isDocOrRelease) {
+                score += 65;
+            } else if (isOfficialDocDomain) {
+                score += 40;
             } else if (isDocOrRelease) {
-                score += 15;
+                score += 20;
+            }
+            if (isTechDoc && /\b(?:news\.google\.com|yahoo\.com|msn\.com)\b/i.test(domain)) {
+                score -= 30;
             }
         }
         const dateIntent = roleIntent?.dateIntent || parseStructuredDateWindow(query);
@@ -4143,22 +4183,25 @@ export function buildDeterministicSearchQueries(query) {
     }
     const subject = extractSearchSubject(normalized);
     if (!subject) return [];
-    const intent = extractSearchIntentTerm(normalized);
-    const isRecencyOrVersionQuery = /\b(?:latest|current|newest|recent|stable|release|version|changelog|changes?|updates?)\b/i.test(normalized);
+    const isTechDoc = isTechnicalDocumentationQuery(normalized);
+    const isRecencyOrVersionQuery = isTechDoc || /\b(?:latest|current|newest|recent|stable|release|version|changelog|changes?|updates?)\b/i.test(normalized);
     if (isRecencyOrVersionQuery) {
+        const cleanSubject = subject.replace(/\b(?:latest|recent|current|newest|release|version|changelog|changes?|updates?)\b/gi, '').replace(/\s+/g, ' ').trim() || subject;
         return Array.from(new Set([
-            `${subject} latest release notes official documentation`.trim(),
-            `${subject} changelog release notes latest stable release`.trim(),
-            `${subject} latest version official release`.trim(),
-            `${subject} ${intent}`.trim(),
-            `${subject} latest ${intent}`.trim()
-        ].map(normalizeSearchQuery).filter(Boolean)));
+            `${cleanSubject} latest release notes official`.trim(),
+            `${cleanSubject} latest changelog what's new`.trim(),
+            `${cleanSubject} latest release changes`.trim(),
+            `${cleanSubject} latest release notes official documentation`.trim(),
+            `${cleanSubject} changelog release notes latest stable release`.trim(),
+            `${cleanSubject} latest version official release`.trim()
+        ].map(s => s.replace(/\b(\w+)\s+\1\b/gi, '$1')).map(normalizeSearchQuery).filter(Boolean)));
     }
+    const intent = extractSearchIntentTerm(normalized);
     return Array.from(new Set([
         `${subject} ${intent}`.trim(),
         `${subject} recent ${intent}`.trim(),
         `${subject} latest ${intent}`.trim()
-    ].map(normalizeSearchQuery).filter(Boolean)));
+    ].map(s => s.replace(/\b(\w+)\s+\1\b/gi, '$1')).map(normalizeSearchQuery).filter(Boolean)));
 }
 
 function isCurrentTopicSearchQuery(query) {
@@ -4394,5 +4437,7 @@ export const __test = {
     runCachedLatestSearch,
     callGeminiJson,
     searchGeminiGrounding,
-    parseGeminiGroundingResponse
+    parseGeminiGroundingResponse,
+    isTechnicalDocumentationQuery,
+    scoreSearchResult
 };
