@@ -3868,6 +3868,18 @@ function scoreSearchResult(item, terms, query = '') {
                 score += 40;
             }
         }
+        const isVersionOrRecencyQuery = /\b(latest|current|newest|recent|stable)\s+(?:release|version|update|build|edition)\b/i.test(query)
+            || /\b(?:what changed in|what is new in|new features in|changelog of|release notes for)\b/i.test(query);
+        if (isVersionOrRecencyQuery) {
+            const urlStr = String(item?.url || '').toLowerCase();
+            const isDocOrRelease = /\b(release|documentation|changelog|what's new|whats new|notes|downloads?)\b/i.test(`${title} ${urlStr} ${description}`);
+            const isOfficialCandidate = domain.includes('.org') || domain.startsWith('docs.') || domain.startsWith('developer.') || domain.includes('github.com') || item?.sourceType === 'official_source';
+            if (isOfficialCandidate && isDocOrRelease) {
+                score += 35;
+            } else if (isDocOrRelease) {
+                score += 15;
+            }
+        }
         const dateIntent = roleIntent?.dateIntent || parseStructuredDateWindow(query);
         if (dateIntent?.hasDate) {
             if (roleClaimOverlapsWindow(item, dateIntent)) {
@@ -4120,6 +4132,16 @@ export function buildDeterministicSearchQueries(query) {
     const subject = extractSearchSubject(normalized);
     if (!subject) return [];
     const intent = extractSearchIntentTerm(normalized);
+    const isRecencyOrVersionQuery = /\b(?:latest|current|newest|recent|stable|release|version|changelog|changes? in the latest|what changed in|new in|what's new in)\b/i.test(normalized);
+    if (isRecencyOrVersionQuery) {
+        return Array.from(new Set([
+            `${subject} latest release notes official documentation`.trim(),
+            `${subject} changelog what's new latest stable release`.trim(),
+            `${subject} latest version official release`.trim(),
+            `${subject} ${intent}`.trim(),
+            `${subject} latest ${intent}`.trim()
+        ].map(normalizeSearchQuery).filter(Boolean)));
+    }
     return Array.from(new Set([
         `${subject} ${intent}`.trim(),
         `${subject} recent ${intent}`.trim(),
@@ -4140,10 +4162,16 @@ function isDatedChangingFactSearchQuery(query) {
 }
 
 function extractSearchSubject(query) {
-    const universal = parseUniversalEntityQuery(query);
-    if (universal?.jurisdiction) return cleanQueryTarget(universal.jurisdiction);
     const normalized = normalizeSearchQuery(query);
+    const releaseOfMatch = normalized.match(/(?:(?:latest|current|newest|recent|stable)\s+(?:release|version|update|build)\s+of|changes?\s+in\s+(?:the\s+)?(?:latest\s+)?(?:release|version)\s+of)\s+([a-z0-9_.-]+)/i);
+    if (releaseOfMatch && releaseOfMatch[1]) {
+        return cleanQueryTarget(releaseOfMatch[1]);
+    }
+    const universal = parseUniversalEntityQuery(query);
+    if (universal?.jurisdiction && isLeadershipOrRoleTerm(universal?.role)) return cleanQueryTarget(universal.jurisdiction);
     const text = normalized
+        .replace(/\s+(?:compared with|compared to|difference between|versus|vs\.?).*$/i, '')
+        .replace(/\b(?:what changed in|what(?:'s| is) new in|whats new in)\b/gi, ' ')
         .replace(/\b(?:latest|recent|current|newest|reviews?|review|hands-on|worth\s+it|good|best|price|available|availability|launched|released?|winner|won|champion|rankings?|standings?|compare|comparison|vs|movies?|films?|songs?|albums?|releases?|facts?|info(?:rmation)?|background|overview|details?)\b/gi, ' ')
         .replace(/\b(?:in|during|as of|by|before|after)\s+\d{4}\b/gi, ' ')
         .replace(/\b(?:of|for|about|on|the|is|are|should|i|buy|get|now|today|live|exact|rate)\b/gi, ' ')
