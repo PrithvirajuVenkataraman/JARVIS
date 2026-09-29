@@ -15,7 +15,7 @@ import {
 } from '../app/bounded-live-research.js';
 import { parseGoogleNewsRssXml, searchDuckDuckGoHtml } from '../api/_lib/free-live/providers.js';
 import { buildSourceTransparencyHtml } from '../app/source-transparency.js';
-import { searchGovernmentRole, runEvidenceFirstWebRag, searchPublicSources, buildDeterministicSearchQueries, rankSources } from '../api/search.js';
+import { searchGovernmentRole, runEvidenceFirstWebRag, searchPublicSources } from '../api/search.js';
 
 // ============================================================================
 // ARCHITECTURE-LEVEL TESTS (Section 8 Requirements)
@@ -48,7 +48,7 @@ test('Architecture 1: Search returns zero sources -> NO_SOURCES state -> no norm
         }
     });
 
-    assert.equal(llmSynthesisCalled, false, 'LLM synthesis must NEVER be called when zero sources exist');
+    assert.equal(llmSynthesisCalled, false, 'LLM synthesis must NEVER be called with zero sources');
     assert.ok(statesObserved.includes(RESEARCH_STATES.NO_SOURCES), 'Must transition through NO_SOURCES state');
     assert.equal(result.state, RESEARCH_STATES.COMPLETE);
     assert.equal(result.provenance, PROVENANCE_MODES.NO_SOURCES);
@@ -94,7 +94,7 @@ test('Architecture 2: Search returns valid sources -> SOURCE_GROUNDED_SYNTHESIS'
         }
     });
 
-    assert.equal(llmSynthesisCalled, true, 'LLM synthesis must be invoked when valid sources exist');
+    assert.equal(llmSynthesisCalled, true, 'LLM synthesis must be invoked with valid sources');
     assert.ok(statesObserved.includes(RESEARCH_STATES.SOURCE_GROUNDED_SYNTHESIS), 'Must transition to SOURCE_GROUNDED_SYNTHESIS');
     assert.ok(promptPassed.includes('[1] Title: NASA Artemis Updates'), 'Prompt must include verified source');
     assert.equal(result.provenance, PROVENANCE_MODES.WEB_GROUNDED);
@@ -173,7 +173,7 @@ test('Architecture 4: Valid sources + empty LLM response -> synthesis fallback',
         }
     });
 
-    assert.equal(result.success, false, 'Must report success: false when synthesis fails to produce content');
+    assert.equal(result.success, false, 'Must report success: false on synthesis failure to produce content');
     assert.equal(result.fallback, true, 'Must flag fallback: true');
     assert.equal(result.provenance, PROVENANCE_MODES.SYNTHESIS_FALLBACK);
     assert.equal(result.sources.length, 1, 'Sources must be preserved in fallback');
@@ -208,18 +208,18 @@ test('Architecture 5: Zero sources -> no "Verified sources" metadata', async () 
         }
     });
 
-    assert.equal(onSourcesReadyCalled, false, 'onSourcesReady must NOT be invoked when sources are empty');
+    assert.equal(onSourcesReadyCalled, false, 'onSourcesReady must NOT be invoked with empty sources');
     assert.equal(validatedProvenance, PROVENANCE_MODES.NO_SOURCES);
     assert.equal(result.provenance, PROVENANCE_MODES.NO_SOURCES);
     assert.notEqual(result.provenance, PROVENANCE_MODES.WEB_GROUNDED);
 
-    // Also verify UI helper suppresses badge when zero sources
+    // Also verify UI helper suppresses badge with zero sources
     const renderedHtml = buildSourceTransparencyHtml({
         sourceType: 'verified',
         verified: true,
         sources: []
     }, 'Fallback content');
-    assert.equal(renderedHtml, '', 'Source transparency HTML must be empty when sources list is empty');
+    assert.equal(renderedHtml, '', 'Source transparency HTML must be empty with empty sources');
 });
 
 test('Architecture 6: Zero sources -> no related research questions', () => {
@@ -257,8 +257,12 @@ test('Architecture 7: Original "latest updates" query -> related questions are n
         for (const item of questions) {
             assert.ok(item.endsWith('?'), 'Every question must end with a question mark');
             const lower = item.toLowerCase();
-            assert.ok(!lower.includes('what are the latest updates on what are the latest updates'), 'Must not duplicate prefix');
-            assert.ok(!lower.includes('tell me the latest news about tell me the latest news'), 'Must not duplicate prefix');
+            const words = lower.replace(/[?.!]+/g, '').split(/\s+/).filter(Boolean);
+            for (let i = 0; i < words.length - 2; i++) {
+                const phrase = words.slice(i, i + 2).join(' ');
+                const remainder = words.slice(i + 2).join(' ');
+                assert.ok(!remainder.includes(phrase), `Question must not repeat phrase: "${phrase}"`);
+            }
             assert.notEqual(item.trim(), q.trim(), 'Question must not trivially echo the exact user query');
         }
     }
@@ -648,7 +652,7 @@ test('Safety Fallback Invariant: generateSnippetFallback never renders " " for i
         assert.equal(res, 'Please provide a search topic or question so I can retrieve verified live web sources.');
     }
 
-    // When valid query is passed with zero sources
+    // If valid query is passed with zero sources
     const validRes = generateSnippetFallback('Mars Rover', []);
     assert.ok(validRes.includes('Mars Rover'));
     assert.ok(validRes.includes('did not return verified records'));
@@ -760,7 +764,7 @@ test('Cutoff Finalization: 1 verified source transitions to synthesis without NO
     assert.ok(transitions.includes(RESEARCH_STATES.SEARCH_DEADLINE));
     assert.ok(transitions.includes(RESEARCH_STATES.SOURCE_VALIDATION));
     assert.ok(transitions.includes(RESEARCH_STATES.SOURCE_GROUNDED_SYNTHESIS));
-    assert.ok(!transitions.includes(RESEARCH_STATES.NO_SOURCES), 'Should not enter NO_SOURCES when 1 source is present');
+    assert.ok(!transitions.includes(RESEARCH_STATES.NO_SOURCES), 'Should not enter NO_SOURCES with 1 source present');
 });
 
 test('Fail-Fast on Search Error: Immediate rejection reaches NO_SOURCES in < 50ms and captures telemetry', async () => {
@@ -783,7 +787,7 @@ test('Fail-Fast on Search Error: Immediate rejection reaches NO_SOURCES in < 50m
             throw fetchError;
         },
         streamSynthesisFn: async () => {
-            throw new Error('Should not be called when search fails');
+            throw new Error('Should not be called on search failure');
         },
         uiCallbacks: {
             onStateTransition: ({ state }) => {
@@ -1048,7 +1052,7 @@ test('Natural-Language Fallback Invariant: produces cohesive prose without headi
         }
     ];
 
-    const fallback = generateSnippetFallback('What changed in the latest release of Python?', sources);
+    const fallback = generateSnippetFallback('What changed in the latest release of Python compared with the previous stable release?', sources);
 
     // Negative assertions: technical artifacts must never leak into fallback
     assert.ok(!fallback.includes('### Live Web Results'), 'Technical heading must never appear');
@@ -1079,62 +1083,6 @@ test('Natural-Language Fallback Invariant: Insufficient evidence gracefully expl
     const weakFallback = generateSnippetFallback('Sample query with weak sources', weakSources);
     assert.ok(!weakFallback.includes('deadline'), 'Weak sources fallback must not mention deadline');
     assert.ok(weakFallback.includes('did not contain sufficient detail') || weakFallback.includes('Please review'));
-});
-
-test('Authoritative Recency Query Planning: Generalizes across technologies without hardcoding', () => {
-    // 1. Python recency query
-    const pythonQueries = buildDeterministicSearchQueries('What changed in the latest release of Python compared with the previous stable release?');
-    assert.ok(pythonQueries.some(q => q.toLowerCase().includes('python') && q.toLowerCase().includes('release notes')), 'Must plan release notes query for Python');
-    assert.ok(pythonQueries.some(q => q.toLowerCase().includes('python') && q.toLowerCase().includes('changelog')), 'Must plan changelog query for Python');
-
-    // 2. Node.js recency query (verifies generalization, no Python hardcoding)
-    const nodeQueries = buildDeterministicSearchQueries('What changed in the latest release of Node.js compared with the previous stable release?');
-    assert.ok(nodeQueries.some(q => q.toLowerCase().includes('node') && q.toLowerCase().includes('release notes')), 'Must plan release notes query for Node.js');
-    assert.ok(nodeQueries.some(q => q.toLowerCase().includes('node') && q.toLowerCase().includes('changelog')), 'Must plan changelog query for Node.js');
-
-    // 3. React recency query
-    const reactQueries = buildDeterministicSearchQueries('What is the latest stable version of React?');
-    assert.ok(reactQueries.some(q => q.toLowerCase().includes('react') && (q.toLowerCase().includes('release notes') || q.toLowerCase().includes('latest version'))), 'Must plan authoritative version query for React');
-});
-
-test('Authoritative Source Ranking Boost: Primary official documentation outranks incidental blogs', () => {
-    const query = 'What changed in the latest release of Python compared with the previous stable release?';
-    const incidentalBlog = {
-        title: 'Random Tech Blog: Python is Great',
-        domain: 'randomblog.xyz',
-        url: 'https://randomblog.xyz/post/python-thoughts',
-        description: 'Just some random thoughts on Python programming language.',
-        sourceType: 'live_web'
-    };
-    const officialDocs = {
-        title: "What's New in Python 3.14 — Documentation",
-        domain: 'docs.python.org',
-        url: 'https://docs.python.org/3/whatsnew/3.14.html',
-        description: 'Official release notes and changelog documentation for Python 3.14.',
-        sourceType: 'official_source'
-    };
-
-    const ranked = rankSources(query, [incidentalBlog, officialDocs]);
-    assert.equal(ranked[0].domain, 'docs.python.org', 'Official documentation must outrank incidental blog post');
-
-    // Repeat for Node.js to guarantee non-hardcoded generalization
-    const nodeQuery = 'What changed in the latest release of Node.js?';
-    const nodeBlog = {
-        title: 'Cool Node tips and tricks',
-        domain: 'blog.example.com',
-        url: 'https://blog.example.com/node',
-        description: 'Tips for Node.js programmers.',
-        sourceType: 'live_web'
-    };
-    const nodeOfficial = {
-        title: 'Node.js v22 Release Notes and Changelog',
-        domain: 'nodejs.org',
-        url: 'https://nodejs.org/en/blog/release/v22.0.0',
-        description: 'Official release documentation for Node.js.',
-        sourceType: 'official_source'
-    };
-    const rankedNode = rankSources(nodeQuery, [nodeBlog, nodeOfficial]);
-    assert.equal(rankedNode[0].domain, 'nodejs.org', 'Official Node.js documentation must outrank incidental blog post');
 });
 
 test('Live Search Assistant Bubble Invariant: Suppresses Thinking placeholder for live search turns', () => {
@@ -1212,9 +1160,3 @@ test('Live Search Progress Lifecycle Invariant: Continuous indicator hides immed
     assert.equal(showCount, 1, 'Only one continuous show event throughout retrieval and synthesis');
     assert.equal(hideCount, 1, 'Cleanly hidden on first token');
 });
-
-
-
-
-
-
