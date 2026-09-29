@@ -4115,7 +4115,7 @@ export function buildDeterministicSearchQueries(query) {
                 `${subj} current ${role}`.trim(),
                 `${subj} leadership executive team`.trim(),
                 `${subj} CEO founder`.trim(),
-                `who is the ${role} of ${subj}`.trim(),
+                `${role} of ${subj}`.trim(),
                 `${subj} management team`.trim()
             ].map(normalizeSearchQuery).filter(Boolean)));
         }
@@ -4124,7 +4124,7 @@ export function buildDeterministicSearchQueries(query) {
             `${roleTitle} of ${subj}`.trim(),
             `${subj} ${role}`.trim(),
             `${subj} current ${role}`.trim(),
-            `who is the ${role} of ${subj}`.trim(),
+            `${role} of ${subj}`.trim(),
             `${subj} ${roleText}`.trim(),
             `List of ${role}s of ${subj}`.trim()
         ].map(normalizeSearchQuery).filter(Boolean)));
@@ -4132,11 +4132,11 @@ export function buildDeterministicSearchQueries(query) {
     const subject = extractSearchSubject(normalized);
     if (!subject) return [];
     const intent = extractSearchIntentTerm(normalized);
-    const isRecencyOrVersionQuery = /\b(?:latest|current|newest|recent|stable|release|version|changelog|changes? in the latest|what changed in|new in|what's new in)\b/i.test(normalized);
+    const isRecencyOrVersionQuery = /\b(?:latest|current|newest|recent|stable|release|version|changelog|changes?|updates?)\b/i.test(normalized);
     if (isRecencyOrVersionQuery) {
         return Array.from(new Set([
             `${subject} latest release notes official documentation`.trim(),
-            `${subject} changelog what's new latest stable release`.trim(),
+            `${subject} changelog release notes latest stable release`.trim(),
             `${subject} latest version official release`.trim(),
             `${subject} ${intent}`.trim(),
             `${subject} latest ${intent}`.trim()
@@ -4171,7 +4171,7 @@ function extractSearchSubject(query) {
     if (universal?.jurisdiction && isLeadershipOrRoleTerm(universal?.role)) return cleanQueryTarget(universal.jurisdiction);
     const text = normalized
         .replace(/\s+(?:compared with|compared to|difference between|versus|vs\.?).*$/i, '')
-        .replace(/\b(?:what changed in|what(?:'s| is) new in|whats new in)\b/gi, ' ')
+        .replace(/\b(?:changes?\s+in|updates?\s+in|new\s+in)\b/gi, ' ')
         .replace(/\b(?:latest|recent|current|newest|reviews?|review|hands-on|worth\s+it|good|best|price|available|availability|launched|released?|winner|won|champion|rankings?|standings?|compare|comparison|vs|movies?|films?|songs?|albums?|releases?|facts?|info(?:rmation)?|background|overview|details?)\b/gi, ' ')
         .replace(/\b(?:in|during|as of|by|before|after)\s+\d{4}\b/gi, ' ')
         .replace(/\b(?:of|for|about|on|the|is|are|should|i|buy|get|now|today|live|exact|rate)\b/gi, ' ')
