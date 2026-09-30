@@ -32,7 +32,10 @@ export async function searchDuckDuckGoHtml(query, options = {}) {
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Cookie': 'kl=-1; k5=1; k1=-1'
             },
             body: `q=${encodeURIComponent(query)}`
         }, timeoutMs);
@@ -88,7 +91,9 @@ export async function searchDuckDuckGoHtml(query, options = {}) {
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0',
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.5'
+                'Accept-Language': 'en-US,en;q=0.5',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Referer': 'https://duckduckgo.com/'
             }
         }, timeoutMs);
 
@@ -190,11 +195,15 @@ export async function searchSearXNGRacer(query, options = {}) {
     const endpoints = configuredUrl 
         ? [configuredUrl.endsWith('/search') ? configuredUrl : `${configuredUrl}/search`]
         : [
+            // Curated list of public SearXNG instances — ordered by typical cloud-IP acceptance
+            'https://search.sapti.me/search',
             'https://etsi.me/search',
-            'https://searx.be/search',
-            'https://priv.au/search',
             'https://baresearch.org/search',
-            'https://search.sapti.me/search'
+            'https://priv.au/search',
+            'https://searx.be/search',
+            'https://searx.tiekoetter.com/search',
+            'https://search.disroot.org/search',
+            'https://paulgo.io/search'
         ];
 
     const fetchSingleEndpoint = async (baseEndpoint) => {
@@ -205,7 +214,9 @@ export async function searchSearXNGRacer(query, options = {}) {
 
         const response = await fetchWithTimeout(url.toString(), {
             headers: {
-                'Accept': 'application/json',
+                'Accept': 'application/json, text/javascript, */*',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept-Encoding': 'gzip, deflate, br',
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
             },
             signal: options.signal
@@ -224,6 +235,7 @@ export async function searchSearXNGRacer(query, options = {}) {
         return [];
     }
 }
+
 
 export const searchSearXNGJson = searchSearXNGRacer;
 
