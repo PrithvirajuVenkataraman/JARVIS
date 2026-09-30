@@ -3928,7 +3928,7 @@ export async function searchGeminiGrounding(query, options = {}) {
                     }]
                 }],
                 tools: [{
-                    googleSearch: {}
+                    google_search: {}
                 }]
             })
         }, timeoutMs);
