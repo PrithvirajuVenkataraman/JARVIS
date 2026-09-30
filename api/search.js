@@ -874,10 +874,14 @@ export async function searchPublicSources(query, options = {}) {
         : Promise.allSettled(gdeltQueries.map(candidate => searchGdeltNews(candidate, { limit, timeoutMs: Math.min(boundedTimeoutMs, 2500) })))
             .then(s => { gdelt = (Array.isArray(s) ? s : []).flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []); });
     // Gemini Grounding: primary live web provider — runs in the fast window alongside DDG/SearXNG.
-    // Capped to 2800ms so it never delays the fast path.  Results rank first when available
-    // because Gemini grounds against live Google Search, fully bypassing cloud-IP scraping blocks.
-    const geminiTimeoutMs = Math.min(boundedTimeoutMs, 2800);
-    const taskGemini = hasGeminiKey()
+    // Results rank first when available because Gemini grounds against live Google Search,
+    // fully bypassing cloud-IP scraping blocks.
+    const geminiTimeoutMs = Math.min(boundedTimeoutMs, 3800);
+    const hasSeedGrounding = Array.isArray(options.seedResults) && options.seedResults.length > 0;
+    if (hasSeedGrounding) {
+        geminiGroundingResults = options.seedResults;
+    }
+    const taskGemini = (hasGeminiKey() && !hasSeedGrounding)
         ? Promise.allSettled([searchGeminiGrounding(targetQueries[0] || normalizedQuery, { limit, timeoutMs: geminiTimeoutMs }).then(r => r.results || [])])
             .then(s => { geminiGroundingResults = (Array.isArray(s) ? s : []).flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []); })
         : Promise.resolve();
@@ -1465,6 +1469,7 @@ export async function runVerifiedWebSearch(query, options = {}) {
     let geminiGroundingAnswer = null;
     let geminiPlanningWarning = '';
     const planningQueries = [];
+    let initialGroundedResults = [];
 
     if (hasGeminiKey()) {
         const [planRes, groundRes] = await Promise.allSettled([
@@ -1478,8 +1483,13 @@ export async function runVerifiedWebSearch(query, options = {}) {
             if (Array.isArray(planRes.value.queries)) planningQueries.push(...planRes.value.queries);
             if (planRes.value.warning) geminiPlanningWarning = planRes.value.warning;
         }
-        if (groundRes.status === 'fulfilled' && groundRes.value?.answer) {
-            geminiGroundingAnswer = groundRes.value.answer;
+        if (groundRes.status === 'fulfilled' && groundRes.value) {
+            if (groundRes.value.answer) {
+                geminiGroundingAnswer = groundRes.value.answer;
+            }
+            if (Array.isArray(groundRes.value.results) && groundRes.value.results.length > 0) {
+                initialGroundedResults = groundRes.value.results;
+            }
         }
     }
 
@@ -1494,11 +1504,17 @@ export async function runVerifiedWebSearch(query, options = {}) {
     const publicSources = await searchPublicSources(normalizedQuery, {
         limit,
         plannedQueries: searchQueries,
+        seedResults: initialGroundedResults,
         skipAutoDeepCrawl: false,
         allowDeepCrawl: true
     }).catch(() => []);
 
-    const publicResults = rankSources(normalizedQuery, dedupeSearchResults(publicSources)
+    const allCandidateSources = [
+        ...initialGroundedResults,
+        ...publicSources
+    ];
+
+    const publicResults = rankSources(normalizedQuery, dedupeSearchResults(allCandidateSources)
         .filter(item => isValidCitationSource(item, normalizedQuery))).slice(0, limit);
 
     let warnings = buildSearchWarnings(publicResults, geminiPlanningWarning ? [geminiPlanningWarning] : []);
@@ -3767,35 +3783,50 @@ JSON shape: {"ranked":[{"index":0,"relevance":"relevant","description":"...","re
 async function callGeminiJson(prompt, options = {}) {
     const apiKey = getGeminiApiKey();
     if (apiKey) {
-        try {
-            const model = String(process.env.GEMINI_SEARCH_MODEL || process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite').trim();
-            const response = await fetchWithTimeout(`${GEMINI_GENERATE_URL}/${model}:generateContent?key=${apiKey}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    contents: [{ parts: [{ text: prompt }] }],
-                    generationConfig: {
-                        temperature: Number.isFinite(Number(options.temperature)) ? Number(options.temperature) : 0.1,
-                        maxOutputTokens: clampInt(options.maxOutputTokens, 700, 100, 1600)
-                    }
-                })
-            }, GEMINI_SEARCH_TIMEOUT_MS);
-            if (response.ok) {
-                const data = await response.json();
-                const text = String(data?.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
-                const parsed = extractJsonObject(text);
-                if (parsed) return parsed;
-            } else if (options.throwOnError) {
-                throw createSearchError({
-                    code: 'gemini_search_enhancer_failed',
-                    httpStatus: 200,
-                    upstreamStatus: response.status,
-                    publicMessage: 'Gemini search enhancement failed.',
-                    retryable: true
-                });
+        const configuredModel = String(process.env.GEMINI_SEARCH_MODEL || process.env.GEMINI_MODEL || '').trim();
+        const candidateModels = Array.from(new Set([
+            configuredModel,
+            'gemini-2.0-flash',
+            'gemini-1.5-flash',
+            'gemini-2.0-flash-lite'
+        ])).filter(Boolean);
+
+        let lastStatus = 0;
+        for (const model of candidateModels) {
+            try {
+                const response = await fetchWithTimeout(`${GEMINI_GENERATE_URL}/${model}:generateContent?key=${apiKey}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: [{ parts: [{ text: prompt }] }],
+                        generationConfig: {
+                            temperature: Number.isFinite(Number(options.temperature)) ? Number(options.temperature) : 0.1,
+                            maxOutputTokens: clampInt(options.maxOutputTokens, 700, 100, 1600)
+                        }
+                    })
+                }, GEMINI_SEARCH_TIMEOUT_MS);
+                if (response.ok) {
+                    const data = await response.json();
+                    const text = String(data?.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
+                    const parsed = extractJsonObject(text);
+                    if (parsed) return parsed;
+                } else {
+                    lastStatus = response.status;
+                }
+            } catch (err) {
+                if (options.throwOnError && err?.code && err.code !== 'fetch_timeout') {
+                    // Continue to next candidate model on network/model error
+                }
             }
-        } catch (err) {
-            if (options.throwOnError) throw err;
+        }
+        if (options.throwOnError && lastStatus) {
+            throw createSearchError({
+                code: 'gemini_search_enhancer_failed',
+                httpStatus: 200,
+                upstreamStatus: lastStatus,
+                publicMessage: 'Gemini search enhancement failed.',
+                retryable: true
+            });
         }
     }
 
@@ -3912,39 +3943,47 @@ export async function searchGeminiGrounding(query, options = {}) {
 
     const limit = clampInt(options.limit, 8, 1, 20);
     const timeoutMs = options.timeoutMs || 8_000;
-    // Prefer gemini-2.0-flash for grounding (free-tier grounding support);
-    // fall back to env override or gemini-2.5-flash if explicitly configured.
-    const model = String(process.env.GEMINI_SEARCH_MODEL || process.env.GEMINI_MODEL || 'gemini-2.0-flash').trim();
+    const configuredModel = String(process.env.GEMINI_SEARCH_MODEL || process.env.GEMINI_MODEL || '').trim();
+    const candidateModels = Array.from(new Set([
+        configuredModel,
+        'gemini-2.0-flash',
+        'gemini-1.5-flash'
+    ])).filter(Boolean);
 
-    try {
-        const url = `${GEMINI_GENERATE_URL}/${model}:generateContent?key=${apiKey}`;
-        const response = await fetchWithTimeout(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                contents: [{
-                    parts: [{
-                        text: `Answer with fresh, factual evidence using Google Search: ${normalizedQuery}`
+    for (const model of candidateModels) {
+        try {
+            const url = `${GEMINI_GENERATE_URL}/${model}:generateContent?key=${apiKey}`;
+            const response = await fetchWithTimeout(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contents: [{
+                        parts: [{
+                            text: `Answer with fresh, factual evidence using Google Search: ${normalizedQuery}`
+                        }]
+                    }],
+                    tools: [{
+                        google_search: {}
                     }]
-                }],
-                tools: [{
-                    google_search: {}
-                }]
-            })
-        }, timeoutMs);
+                })
+            }, timeoutMs);
 
-        if (!response.ok) {
-            const errBody = await response.text().catch(() => '');
-            console.error(`[searchGeminiGrounding] API error ${response.status} for model "${model}":`, errBody.slice(0, 300));
-            return { results: [], answer: null, webSearchQueries: [] };
+            if (!response.ok) {
+                const errBody = await response.text().catch(() => '');
+                console.error(`[searchGeminiGrounding] API error ${response.status} for model "${model}":`, errBody.slice(0, 300));
+                continue;
+            }
+
+            const data = await response.json();
+            const parsed = parseGeminiGroundingResponse(data, normalizedQuery, limit);
+            if (parsed.results?.length > 0 || parsed.answer) {
+                return parsed;
+            }
+        } catch (err) {
+            console.error('[searchGeminiGrounding] fetch error:', String(err?.message || err).slice(0, 200));
         }
-
-        const data = await response.json();
-        return parseGeminiGroundingResponse(data, normalizedQuery, limit);
-    } catch (err) {
-        console.error('[searchGeminiGrounding] fetch error:', String(err?.message || err).slice(0, 200));
-        return { results: [], answer: null, webSearchQueries: [] };
     }
+    return { results: [], answer: null, webSearchQueries: [] };
 }
 
 async function discoverOfficialSourceCandidates(query, options = {}) {
