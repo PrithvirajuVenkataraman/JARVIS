@@ -104,9 +104,12 @@ export function normalizeResearchSources(results = [], query = '', limit = 6) {
 export function formatSourcesForPrompt(sources = []) {
     if (!Array.isArray(sources) || !sources.length) return '';
     return sources.map(s => {
-        return `[${s.id}] Title: ${s.title}\nDomain: ${s.domain}\nURL: ${s.url}\nSnippet: ${s.snippet}${s.date ? `\nDate: ${s.date}` : ''}`;
+        const textContent = String(s.snippet || s.description || s.text || '').trim();
+        const publisherStr = s.publisher || s.source ? ` (${s.publisher || s.source})` : '';
+        return `[${s.id}] Title: ${s.title}${publisherStr}\nDomain: ${s.domain}\nURL: ${s.url}\nSnippet: ${textContent || 'No snippet available.'}${s.date ? `\nDate: ${s.date}` : ''}`;
     }).join('\n\n');
 }
+
 
 export function isAuthoritativeResearchSource(source, query = '') {
     if (!source) return false;
@@ -871,7 +874,17 @@ export class BoundedLiveResearchController {
 
                 this.telemetry.t_llm_start = performance.now();
                 const sourcesContext = formatSourcesForPrompt(this.sources);
+                const now = new Date();
+                const currentDateStr = now.toLocaleDateString('en-US', {
+                    weekday: 'long',
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric'
+                });
                 const prompt = `You are a real-time research assistant. Answer the user's question directly, comprehensively, and factually using ONLY the verified web content below.
+TEMPORAL ANCHOR:
+Today's Date: ${currentDateStr}. Use this exact date as your reference point for phrases like 'today', 'this month', 'recently', 'latest', 'current', or 'this year'.
+
 RULES:
 1. Deliver a natural, fluent, and well-structured answer. Do not insert bracketed citation numbers like [1] or [1, 2] into the text sentences — all verified sources are showcased in the Sources Carousel directly above.
 2. If evidence is contradictory or insufficient, state it clearly.
