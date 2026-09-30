@@ -60,6 +60,30 @@ export function cleanTextSnippet(text) {
         .trim();
 }
 
+export function distillSearchQuery(rawQuery) {
+    if (!rawQuery) return '';
+    let text = String(rawQuery).trim();
+    const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    if (lines.length > 1) {
+        const contentLines = [];
+        for (const line of lines) {
+            if (/^(?:please\s+provide|please\s+include|please\s+format|format\s+as|output\s+as|structure\s+as|requirements?:|instructions?:|columns?:|notes?:|\d+[\.)]\s+|-|\*)/i.test(line)) {
+                break;
+            }
+            contentLines.push(line);
+        }
+        if (contentLines.length > 0) text = contentLines.join(' ');
+        else text = lines[0];
+    }
+    text = text
+        .replace(/\b(?:please\s+)?(?:provide|include|format|output|render|display)\s+(?:a|an|the)?\s+(?:markdown\s+)?(?:table|comparison\s+table|bulleted\s+list|summary|checklist|columns|code\s+block).*$/gi, '')
+        .replace(/\b(?:make\s+sure\s+to|be\s+sure\s+to|don't\s+forget\s+to|do\s+not\s+include|ensure\s+that)\b.*$/gi, '')
+        .replace(/\b(?:in\s+\d+\s+words|concise\s+summary|step\s+by\s+step|briefly|in\s+detail)\b/gi, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    return text.trim() || rawQuery;
+}
+
 /**
  * Normalizes, deduplicates, ranks, and assigns stable numeric IDs (1..N) to sources.
  */
@@ -151,7 +175,7 @@ export function evaluateSourceQualityForEarlySynthesis(sources = [], query = '')
  * Produces clean natural-language prose without raw bullets, technical headings, or timing disclaimers.
  */
 export function generateSnippetFallback(query, sources = []) {
-    const cleanQ = normalizeUserQuery(query);
+    const cleanQ = normalizeUserQuery(distillSearchQuery(query));
     if (!sources || !sources.length) {
         if (!hasSearchableContent(cleanQ)) {
             return 'Please provide a search topic or question so I can retrieve verified live web sources.';
@@ -784,7 +808,7 @@ export class BoundedLiveResearchController {
                 try {
                     if (typeof fetchSearchFn === 'function') {
                         const searchRes = await fetchSearchFn({
-                            query,
+                            query: distillSearchQuery(query) || query,
                             signal: this.searchAbortController.signal,
                             timeoutMs: this.searchTimeoutMs
                         });
