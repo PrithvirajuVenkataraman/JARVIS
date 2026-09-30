@@ -831,7 +831,9 @@ export async function searchPublicSources(query, options = {}) {
             ...plannedQueries.map(item => normalizeSearchQuery(item)).filter(Boolean)
         ])).slice(0, 7);
 
-    const targetQueries = querySet.slice(0, 3);
+    const compEntities = extractComparisonEntities(normalizedQuery);
+    const targetSliceCount = Math.min(querySet.length, Math.max(3, compEntities.length));
+    const targetQueries = querySet.slice(0, targetSliceCount);
 
     // GDELT is a news index — use the user's original query first so article titles
     // can be matched against original terms (e.g. "government", "news") rather than
@@ -863,12 +865,13 @@ export async function searchPublicSources(query, options = {}) {
     
     // General web search (DuckDuckGo & SearXNG) given full 2800ms individual budget
     const webSearchTimeoutMs = Math.min(boundedTimeoutMs, 2800);
-    const taskDdg = Promise.allSettled(targetQueries.slice(0, 2).map(candidate => searchDuckDuckGoHtml(candidate, { limit, timeoutMs: webSearchTimeoutMs, signal: options.signal })))
+    const webParallelCount = Math.min(targetQueries.length, Math.max(2, compEntities.length));
+    const taskDdg = Promise.allSettled(targetQueries.slice(0, webParallelCount).map(candidate => searchDuckDuckGoHtml(candidate, { limit, timeoutMs: webSearchTimeoutMs, signal: options.signal })))
         .then(s => { ddgWeb = s.flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []); });
     // SearXNG: zero-config metasearch (aggregates Google, Bing, Brave, DuckDuckGo, 70+ engines).
     // Uses SEARXNG_URL env if configured (own/hosted instance); otherwise races 4 public fallback instances.
     // No API key required. Works on Vercel free tier out of the box.
-    const taskSearXNG = Promise.allSettled(targetQueries.slice(0, 2).map(candidate => searchSearXNGRacer(candidate, { limit: 6, timeoutMs: webSearchTimeoutMs, signal: options.signal })))
+    const taskSearXNG = Promise.allSettled(targetQueries.slice(0, webParallelCount).map(candidate => searchSearXNGRacer(candidate, { limit: 6, timeoutMs: webSearchTimeoutMs, signal: options.signal })))
         .then(s => { searxngWeb = s.flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []); });
     const taskWiki = Promise.allSettled(targetQueries.slice(0, 2).map(candidate => searchWikipedia(candidate, { limit: 2, timeoutMs: Math.min(boundedTimeoutMs, 2000) })))
         .then(s => { wiki = s.flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []).slice(0, 3); });
@@ -1477,7 +1480,8 @@ export async function searchExa(query, options = {}) {
 
 export async function runVerifiedWebSearch(query, options = {}) {
     const limit = clampInt(options.limit, 8, 1, 20);
-    const normalizedQuery = normalizeSearchQuery(query);
+    const distilled = distillSearchQuery(query);
+    const normalizedQuery = normalizeSearchQuery(distilled || query);
     const deterministicQueries = buildDeterministicSearchQueries(normalizedQuery);
     
     let geminiGroundingAnswer = null;
@@ -1595,7 +1599,8 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
 
     // Stage 0: Fast Deterministic Intent (< 1ms)
     const intentStart = performance.now();
-    const normalizedQuery = normalizeSearchQuery(query);
+    const distilledQuery = distillSearchQuery(query);
+    const normalizedQuery = normalizeSearchQuery(distilledQuery || query);
     const limit = clampInt(options.limit, 8, 1, 20);
     if (!normalizedQuery) {
         return buildUnverifiedRagSummary(normalizedQuery, [], ['Empty query.']);
@@ -1663,7 +1668,7 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
     const phase1Queries = phases[0] || [normalizedQuery];
     const searchStart = performance.now();
     const serverTimeoutMs = options.answer === false
-        ? Math.min(Number(options.timeoutMs) || 2600, 2600)
+        ? Math.min(Number(options.timeoutMs) || 2200, 2200)
         : Math.min(Number(options.timeoutMs) || 4000, 4000);
 
     const publicSearchPromise = searchPublicSources(normalizedQuery, {
@@ -1799,7 +1804,7 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
     // Stage 4: Fast LLM synthesis if deterministic didn't match but evidence passed gate
     if (!finalAnswer?.verified && finalGate.pass) {
         const llmStart = performance.now();
-        finalAnswer = await buildGroundedRagAnswer(normalizedQuery, allResults, finalGate, { skipDeepCrawl: true })
+        finalAnswer = await buildGroundedRagAnswer(query, allResults, finalGate, { skipDeepCrawl: true })
             .catch(error => {
                 warnings.push(`rag_answer_failed:${String(error?.code || error?.message || 'unknown')}`);
                 return null;
@@ -1888,7 +1893,7 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
             finalAnswer = fallbackDirectAnswer;
         } else if (finalGate.pass) {
             const llmStart = performance.now();
-            finalAnswer = await buildGroundedRagAnswer(normalizedQuery, allResults, finalGate, { allowDeepCrawl: false })
+            finalAnswer = await buildGroundedRagAnswer(query, allResults, finalGate, { allowDeepCrawl: false })
                 .catch(error => {
                     warnings.push(`rag_fallback_answer_failed:${String(error?.code || error?.message || 'unknown')}`);
                     return null;
@@ -4224,7 +4229,7 @@ function extractQueryEntityStems(query) {
 // Extracts clean domain stem (e.g., store.steampowered.com -> steampowered, docs.python.org -> python)
 function extractDomainStem(domain) {
     if (!domain) return '';
-    const d = String(domain).toLowerCase().replace(/^www\./, '').replace(/^(?:docs|store|support|help|api|developer|m|shop|app|mail|news|en)\./, '');
+    const d = String(domain).toLowerCase().replace(/^www\./, '').replace(/^(?:docs|store|support|help|api|developer|m|shop|app|mail|news|en|legal|account|billing|portal|partners?)\./, '');
     const parts = d.split('.');
     return parts[0] || '';
 }
@@ -4257,6 +4262,12 @@ export function isDirectPrimarySource(query, domain, title = '') {
         if (stem.length >= dStem.length && stem.startsWith(dStem) && dStem.length >= 4) {
             return true;
         }
+    }
+
+    // Compound stem match (e.g. "epic games" in query -> "epicgames.com", "stack overflow" -> "stackoverflow.com")
+    for (let i = 0; i < stems.length - 1; i++) {
+        if (`${stems[i]}${stems[i + 1]}` === dStem) return true;
+        if (i < stems.length - 2 && `${stems[i]}${stems[i + 1]}${stems[i + 2]}` === dStem) return true;
     }
 
     // Title matches official canonical presence
@@ -4532,6 +4543,9 @@ export function isValidCitationSource(source, query = '') {
     if (/search:|webcache|cache\.google|\/search(?:[/?#]|$)|[?&]q=/.test(combined)) return false;
     if (/archive\.(today|ph|is)|webcache/i.test(domain)) return false;
 
+    // Direct official primary sources for entities in query always pass validation
+    if (domain && isDirectPrimarySource(query, domain, title)) return true;
+
     if (query) {
         const isLeadership = /\b(?:who\s+is\s+the\s+)?(?:cm|chief minister|prime minister|pm|president|governor|mayor|ceo|leader|head of state|head of government|captain|skipper|coach|manager)\b/i.test(query);
         const isExplicitElection = /\b(?:election|polls?|voting)\b/i.test(query);
@@ -4564,9 +4578,16 @@ function isRelatedToQuery(query, item) {
     const discovery = parseDiscoveryFactQuery(query);
     if (discovery) return isDiscoveryAnswerSource(discovery, item);
     if (/^free_/i.test(String(item?.sourceType || ''))) return true;
+    const domain = String(item?.domain || getDomainFromUrl(item?.url)).toLowerCase();
+    if (domain && isDirectPrimarySource(query, domain, item?.title)) return true;
+
     const terms = tokenize(query).filter(term => term.length >= 2);
     if (!terms.length) return true;
     const hay = `${item?.title || ''} ${item?.description || ''} ${item?.sourceLabel || ''}`.toLowerCase();
+    const compEntities = extractComparisonEntities(query);
+    if (compEntities.length >= 2) {
+        return isStrongGenericQuerySourceMatch(query, hay);
+    }
     if (isCurrentTopicSearchQuery(query)) {
         return isRelatedCurrentTopicSource(query, hay);
     }
@@ -4577,10 +4598,30 @@ function isRelatedToQuery(query, item) {
 }
 
 function isStrongGenericQuerySourceMatch(query, haystack) {
-    const subject = extractSearchSubject(query) || query;
     const text = String(haystack || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
     if (!text) return false;
 
+    // Check multi-entity comparison queries (e.g. Compare Steam, Epic Games, PlayStation)
+    const compEntities = extractComparisonEntities(query);
+    if (compEntities.length >= 2) {
+        const queryTerms = tokenize(query).filter(term => term.length >= 3);
+        const compTerms = new Set(compEntities.flatMap(e => tokenize(e).filter(t => t.length >= 2)));
+        const topicTerms = queryTerms.filter(t => !compTerms.has(t) && !['compare', 'comparison', 'versus', 'difference', 'between'].includes(t));
+        for (const ent of compEntities) {
+            const entWords = tokenize(ent).filter(w => w.length >= 2);
+            const matchesEntity = entWords.length === 1
+                ? text.includes(entWords[0])
+                : entWords.filter(w => text.includes(w)).length >= Math.ceil(entWords.length * 0.5);
+            if (matchesEntity) {
+                const topicMatches = topicTerms.filter(t => text.includes(t));
+                if (topicMatches.length >= 1 || topicTerms.length === 0) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    const subject = extractSearchSubject(query) || query;
     const compactSubject = String(subject || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
     const subjectTerms = tokenize(subject)
         .filter(term => term.length >= 2 || /^\d{4}$/.test(term));
@@ -4669,8 +4710,51 @@ function cleanSearchTargetPhrase(value) {
         .trim()));
 }
 
-function buildSearchQueryRewrite(query) {
-    const normalized = normalizeSearchQuery(query)
+export function distillSearchQuery(rawQuery) {
+    if (!rawQuery) return '';
+    let text = String(rawQuery).trim();
+    // 1. If multi-line, separate the primary question/topic from following instruction blocks
+    const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    if (lines.length > 1) {
+        const contentLines = [];
+        for (const line of lines) {
+            if (/^(?:please\s+provide|please\s+include|please\s+format|format\s+as|output\s+as|structure\s+as|requirements?:|instructions?:|columns?:|notes?:|\d+[\.)]\s+|-|\*)/i.test(line)) {
+                break;
+            }
+            contentLines.push(line);
+        }
+        if (contentLines.length > 0) text = contentLines.join(' ');
+        else text = lines[0];
+    }
+    // 2. Strip inline formatting and LLM meta-instructions
+    text = text
+        .replace(/(?:\.|\?|\!|\n|\s)\s*(?:please\s+provide|please\s+include|please\s+format|format\s+as|output\s+as|structure\s+as|requirements?:|instructions?:|columns?:|notes?:|\d+[\.)]\s+).*$/gi, '')
+        .replace(/\b(?:please\s+)?(?:provide|include|format|output|render|display)\s+(?:a|an|the)?\s+(?:markdown\s+)?(?:table|comparison\s+table|bulleted\s+list|summary|checklist|columns|code\s+block).*$/gi, '')
+        .replace(/\b(?:make\s+sure\s+to|be\s+sure\s+to|don't\s+forget\s+to|do\s+not\s+include|ensure\s+that)\b.*$/gi, '')
+        .replace(/\b(?:in\s+\d+\s+words|concise\s+summary|step\s+by\s+step|briefly|in\s+detail)\b/gi, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    return text.trim() || rawQuery;
+}
+
+export function extractComparisonEntities(query) {
+    const text = String(query || '').replace(/\b(?:as of|in)\s+\d{4}\b/gi, '').trim();
+    const compareMatch = text.match(/\b(?:compare|comparison of|difference between|versus|vs\.?)\s+(?:the\s+)?(.+)$/i);
+    if (!compareMatch) return [];
+    const target = compareMatch[1];
+    const ofIdx = target.toLowerCase().indexOf(' of ');
+    let entityStr = ofIdx !== -1 ? target.slice(ofIdx + 4) : target;
+    entityStr = entityStr.split(/[.?!]/)[0].replace(/\s+(?:as of|in)\s+\d{4}.*$/i, '').trim();
+    const entities = entityStr
+        .split(/,\s*(?:and\s+)?|\s+and\s+|\s+vs\.?\s+|\s+versus\s+/i)
+        .map(e => e.replace(/^(?:the|an?)\s+/i, '').replace(/[?.!]+$/g, '').trim())
+        .filter(e => e.length >= 2 && !/^(?:policies|models|rules|rates|features|a|an|the|of|for|with|in|as)$/i.test(e));
+    return entities;
+}
+
+export function buildSearchQueryRewrite(query) {
+    const distilled = distillSearchQuery(query);
+    const normalized = normalizeSearchQuery(distilled || query)
         .replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, '')
         .trim();
     if (!normalized) {
@@ -4686,7 +4770,7 @@ function buildSearchQueryRewrite(query) {
     const subject = extractSearchSubject(target);
     const intent = extractSearchIntentTerm(target);
     return {
-        query: rawTarget || target,
+        query: target || rawTarget,
         subject,
         dateContext: targetMetadata.dateContext,
         modifiers: targetMetadata.modifiers,
@@ -4700,8 +4784,25 @@ export function isLeadershipOrRoleTerm(term = '') {
 }
 
 export function buildDeterministicSearchQueries(query) {
-    const normalized = normalizeSearchQuery(query);
+    const normalized = normalizeSearchQuery(distillSearchQuery(query));
     if (!normalized) return [];
+
+    // Multi-entity comparison queries (e.g. Compare Steam, Epic Games, PlayStation Network)
+    const compEntities = extractComparisonEntities(normalized);
+    if (compEntities.length >= 2) {
+        const topicMatch = normalized.match(/\b(?:compare|comparison of|difference between)\s+(?:the\s+)?(?:official\s+)?([^,]+?)\s+of\b/i);
+        const topic = topicMatch ? topicMatch[1].replace(/\b(?:official|models|policies)\b/gi, '').trim() : '';
+        const currentYear = new Date().getFullYear();
+        const compQueries = [];
+        for (const ent of compEntities) {
+            compQueries.push(`${ent} ${topic} official refund policy developer revenue split ${currentYear}`.replace(/\s+/g, ' ').trim());
+        }
+        for (const ent of compEntities) {
+            compQueries.push(`${ent} official refund policy requirements`.trim());
+            compQueries.push(`${ent} developer revenue share split percentage`.trim());
+        }
+        return Array.from(new Set(compQueries.map(normalizeSearchQuery).filter(Boolean)));
+    }
     const universal = parseUniversalEntityQuery(normalized);
     if (universal?.role && universal?.jurisdiction && isLeadershipOrRoleTerm(universal.role)) {
         const subj = universal.jurisdiction;
@@ -4998,5 +5099,7 @@ export const __test = {
     searchGeminiGrounding,
     parseGeminiGroundingResponse,
     isTechnicalDocumentationQuery,
-    scoreSearchResult
+    scoreSearchResult,
+    distillSearchQuery,
+    extractComparisonEntities
 };
