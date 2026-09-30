@@ -52,47 +52,167 @@ export const LIVE_SEARCH_DISABLED_RESPONSE = Object.freeze({
     results: []
 });
 
+// Global wire services — file from every country, no national editorial bias.
+// National publications (BBC, NYT, WashPost, TheHindu, etc.) are intentionally
+// excluded: they carry regional editorial perspectives and should surface through
+// Gemini/DDG/SearXNG when relevant, but never get a blanket structural bonus.
 const TRUSTED_SOURCE_HOSTS = Object.freeze([
+    // Global news networks and wire services (worldwide bureaus)
     'apnews.com',
+    'reuters.com',
+    'afp.com',
     'bbc.com',
     'bbc.co.uk',
-    'reuters.com',
-    'thehindu.com',
-    'indianexpress.com',
-    'nytimes.com',
-    'washingtonpost.com',
+    // Intergovernmental & international bodies (no national ownership)
+    'un.org',
     'who.int',
+    'wto.org',
+    'imf.org',
+    'worldbank.org',
+    'oecd.org',
+    'iaea.org',
+    'icrc.org',               // International Committee of the Red Cross
+    'icc-cpi.int',            // International Criminal Court
+    'icj-cij.org',            // International Court of Justice
+    'africanunion.org',
+    'asean.org',
+    'unep.org',               // UN Environment Programme
+    'unfccc.int',             // UN Climate Change
+    'iea.org',                // International Energy Agency
+    'ipcc.ch',                // Intergovernmental Panel on Climate Change
+    'bis.org',                // Bank for International Settlements
+    'ilo.org',                // International Labour Organization
+    'unicef.org',
+    'unhcr.org',
+    'wfp.org',                // World Food Programme
+    'fao.org',                // Food and Agriculture Organization
+    // Technical standards bodies (globally authoritative, no national bias)
+    'w3.org',
+    'ietf.org',
+    'ieee.org',
+    'iso.org',
+    // US federal agencies that are globally referenced (science/health data)
     'nih.gov',
     'cdc.gov',
     'noaa.gov',
     'nasa.gov',
-    'isro.gov.in',
-    'rbi.org.in',
     'sec.gov',
-    'imf.org',
-    'worldbank.org',
-    'europa.eu',
-    'gov.uk',
-    'usa.gov',
+    // Reference (structurally global)
     'wikipedia.org',
     'wikidata.org',
     'britannica.com',
-    'reddit.com',
+    // Web archives (neutral preservation)
     'archive.today',
     'archive.ph',
     'archive.is'
 ]);
 
+// Government domain patterns — matches ANY country's official government site.
+// Covers: .gov (US), .gov.xx (most countries), .gouv.xx (Francophone),
+// .go.xx (Asia-Pacific), .gob.xx (LatAm/Spain), .gc.ca (Canada),
+// .admin.ch (Switzerland), .govt.xx (NZ/others), .gv.at (Austria).
 const OFFICIAL_GOVERNMENT_DOMAIN_PATTERNS = Object.freeze([
     /\.gov$/i,
-    /\.gouv(?:\.[a-z]{2})?$/i,
-    /\.go\.[a-z]{2}$/i,
-    /\.gov\.[a-z]{2}$/i,
-    /^gov\.[a-z]{2}$/i,
-    /^gc\.ca$/i,
+    /\.gov\.[a-z]{2,3}$/i,
+    /\.gouv(?:\.[a-z]{2,3})?$/i,
+    /\.go\.[a-z]{2,3}$/i,
+    /^gov\.[a-z]{2,3}$/i,
+    /\.gob(?:\.[a-z]{2,3})?$/i,      // Spanish-speaking: gob.mx, gob.ar, gob.es
+    /\.govt\.[a-z]{2,3}$/i,           // NZ: govt.nz, others
+    /\.gv\.[a-z]{2,3}$/i,             // Austria: gv.at
+    /^gc\.ca$/i,                       // Canadian federal
+    /\.admin\.ch$/i,                   // Swiss federal
     /^europa\.eu$/i,
     /^un\.org$/i
 ]);
+
+// Academic domain patterns — universities and research institutions worldwide.
+// .edu (US), .ac.xx (UK/Australia/Japan/etc.), .edu.xx (international variants).
+const OFFICIAL_ACADEMIC_DOMAIN_PATTERNS = Object.freeze([
+    /\.edu$/i,
+    /\.edu\.[a-z]{2,3}$/i,
+    /\.ac\.[a-z]{2,3}$/i,             // ac.uk, ac.jp, ac.in, ac.za, ac.nz, etc.
+    /\.uni-[a-z]+\.[a-z]{2,3}$/i,     // German: uni-bonn.de, uni-berlin.de
+    /\.univ-[a-z]+\.[a-z]{2,3}$/i     // French: univ-paris.fr
+]);
+
+// Topic-aware authority registry. Maps classifier topic categories to
+// structural domain signals that are GLOBALLY authoritative for that field.
+// Only intergovernmental bodies and pattern-based structural signals — no
+// named national publications. Bonus is +15 (enough to tip ties, not override
+// Gemini grounding +20 or structured_claim +45).
+const TOPIC_AUTHORITY_REGISTRY = Object.freeze({
+    // World politics, diplomacy, international law
+    conflicts_geopolitics: {
+        bonus: 15,
+        hosts: ['un.org', 'icrc.org', 'icc-cpi.int', 'icj-cij.org', 'crisisgroup.org'],
+        patterns: [OFFICIAL_GOVERNMENT_DOMAIN_PATTERNS]
+    },
+    government: {
+        bonus: 15,
+        hosts: ['un.org', 'oecd.org', 'worldbank.org'],
+        patterns: [OFFICIAL_GOVERNMENT_DOMAIN_PATTERNS]
+    },
+    // Health and medicine
+    health_medicine: {
+        bonus: 15,
+        hosts: ['who.int', 'nih.gov', 'cdc.gov', 'unicef.org', 'ilo.org', 'fao.org'],
+        patterns: [OFFICIAL_GOVERNMENT_DOMAIN_PATTERNS, OFFICIAL_ACADEMIC_DOMAIN_PATTERNS]
+    },
+    // Economics, trade, finance
+    economics_finance: {
+        bonus: 15,
+        hosts: ['imf.org', 'worldbank.org', 'wto.org', 'oecd.org', 'bis.org', 'ilo.org', 'unctad.org'],
+        patterns: [OFFICIAL_GOVERNMENT_DOMAIN_PATTERNS]
+    },
+    // Environment, climate, energy
+    environment_climate: {
+        bonus: 15,
+        hosts: ['unfccc.int', 'unep.org', 'ipcc.ch', 'iea.org', 'fao.org', 'worldbank.org'],
+        patterns: [OFFICIAL_GOVERNMENT_DOMAIN_PATTERNS]
+    },
+    // Science, space, research
+    space_science: {
+        bonus: 15,
+        hosts: ['nasa.gov', 'esa.int', 'esa.europa.eu', 'isro.gov.in', 'jaxa.jp', 'cnes.fr'],
+        patterns: [OFFICIAL_GOVERNMENT_DOMAIN_PATTERNS, OFFICIAL_ACADEMIC_DOMAIN_PATTERNS]
+    },
+    // Disasters, humanitarian crises
+    disasters: {
+        bonus: 15,
+        hosts: ['un.org', 'icrc.org', 'unhcr.org', 'wfp.org', 'reliefweb.int', 'unocha.org'],
+        patterns: [OFFICIAL_GOVERNMENT_DOMAIN_PATTERNS]
+    },
+    // Technology, standards, internet governance
+    technology: {
+        bonus: 15,
+        hosts: ['w3.org', 'ietf.org', 'ieee.org', 'iso.org'],
+        patterns: [OFFICIAL_ACADEMIC_DOMAIN_PATTERNS]
+    },
+    technical_documentation: {
+        bonus: 15,
+        hosts: ['w3.org', 'ietf.org', 'ieee.org', 'iso.org'],
+        patterns: [OFFICIAL_ACADEMIC_DOMAIN_PATTERNS]
+    },
+    // Sports — no structural intergovernmental authority; rely on wire services
+    sports: {
+        bonus: 10,
+        hosts: ['olympics.com', 'fifa.com', 'ioc.org', 'worldathletics.org', 'fivb.com'],
+        patterns: []
+    },
+    // Crypto — only official regulators qualify for structural trust
+    crypto: {
+        bonus: 12,
+        hosts: ['bis.org', 'fsb.org', 'iosco.org'],
+        patterns: [OFFICIAL_GOVERNMENT_DOMAIN_PATTERNS]
+    },
+    // News / general current events
+    news: {
+        bonus: 10,
+        hosts: ['apnews.com', 'reuters.com', 'afp.com', 'un.org'],
+        patterns: []
+    }
+});
 
 export default async function handler(req, res) {
     const guard = applyApiSecurity(req, res, {
@@ -1789,7 +1909,13 @@ export function isTrustedLiveSource(urlOrDomain) {
         ? getDomainFromUrl(urlOrDomain)
         : String(urlOrDomain || '').toLowerCase().replace(/^www\./, '');
     if (!domain) return false;
-    return TRUSTED_SOURCE_HOSTS.some(host => domain === host || domain.endsWith(`.${host}`));
+    // Named international orgs and wire services
+    if (TRUSTED_SOURCE_HOSTS.some(host => domain === host || domain.endsWith(`.${host}`))) return true;
+    // Any country's government domain (gov.br, gouv.fr, go.jp, gob.mx, gc.ca, etc.)
+    if (isGovernmentDomain(domain)) return true;
+    // Any academic institution worldwide (.edu, .ac.uk, .ac.jp, .edu.br, etc.)
+    if (isAcademicDomain(domain)) return true;
+    return false;
 }
 
 async function fetchWikipediaSummary(title, options = {}) {
@@ -3877,6 +4003,62 @@ function rankSearchResults(query, results) {
     return rankSources(query, results);
 }
 
+// Returns true if domain matches any country's official government pattern.
+function isGovernmentDomain(domain) {
+    if (!domain) return false;
+    const d = String(domain).toLowerCase().replace(/^www\./, '');
+    return OFFICIAL_GOVERNMENT_DOMAIN_PATTERNS.some(pat => pat.test(d));
+}
+
+// Returns true if domain is an academic/research institution worldwide.
+function isAcademicDomain(domain) {
+    if (!domain) return false;
+    const d = String(domain).toLowerCase().replace(/^www\./, '');
+    return OFFICIAL_ACADEMIC_DOMAIN_PATTERNS.some(pat => pat.test(d));
+}
+
+// Infers the authoritative topic category from a free-text query.
+// Uses keyword patterns aligned with the classifier — no imports needed.
+function detectQueryTopic(query) {
+    const q = String(query || '').toLowerCase();
+    if (/\b(?:war|conflict|ceasefire|invasion|sanctions|treaty|geopolit|hostilities|diplomatic|sovereignty|nato|un\s+security|peacekeeping)\b/.test(q)) return 'conflicts_geopolitics';
+    if (/\b(?:president|prime\s+minister|minister|parliament|election|cabinet|mayor|governor|government|administration|referendum|policy|legislation|senate|congress|assembly)\b/.test(q)) return 'government';
+    if (/\b(?:health|disease|virus|pandemic|vaccine|hospital|medicine|medical|cancer|malaria|hiv|aids|who\s+|outbreak|epidemic|pathogen|clinical)\b/.test(q)) return 'health_medicine';
+    if (/\b(?:economy|gdp|inflation|trade|tariff|export|import|central\s+bank|monetary|fiscal|recession|unemployment|stock|bond|currency|exchange\s+rate|imf|world\s+bank|wto)\b/.test(q)) return 'economics_finance';
+    if (/\b(?:climate|carbon|emission|greenhouse|fossil|renewable|solar|wind|energy\s+transition|net\s+zero|cop\d|deforestation|biodiversity|ecosystem|pollution)\b/.test(q)) return 'environment_climate';
+    if (/\b(?:nasa|spacex|rocket|satellite|astronomy|telescope|orbit|spacecraft|iss|moon|mars|planet|esa|isro|jaxa|launch)\b/.test(q)) return 'space_science';
+    if (/\b(?:earthquake|wildfire|flood|cyclone|hurricane|typhoon|tsunami|volcano|disaster|famine|refugee|humanitarian|displaced)\b/.test(q)) return 'disasters';
+    if (/\b(?:hardware|processor|semiconductor|ai\s+model|llm|machine\s+learning|open\s+source|chip|internet\s+governance|broadband|5g|cybersecurity|data\s+privacy)\b/.test(q)) return 'technology';
+    if (/\b(?:release\s+notes|changelog|api\s+docs?|documentation|version\s+changes?|what(?:'s|\s+is)\s+new|official\s+docs?)\b/.test(q)) return 'technical_documentation';
+    if (/\b(?:score|match|fixture|standings|tournament|championship|league|ipl|cricket|football|soccer|tennis|olympics|world\s+cup)\b/.test(q)) return 'sports';
+    if (/\b(?:crypto|bitcoin|ethereum|blockchain|token|defi|nft|stablecoin)\b/.test(q)) return 'crypto';
+    if (/\b(?:news|headline|breaking|latest\s+update|current\s+event|press\s+release|bulletin)\b/.test(q)) return 'news';
+    return null;
+}
+
+// Returns a scoring bonus when a result's domain is structurally authoritative
+// for the detected topic of the query. Works for ANY country — no named
+// national publications involved.
+function getTopicAuthorityBonus(domain, query) {
+    if (!domain || !query) return 0;
+    const topic = detectQueryTopic(query);
+    if (!topic) return 0;
+    const entry = TOPIC_AUTHORITY_REGISTRY[topic];
+    if (!entry) return 0;
+    const d = String(domain).toLowerCase().replace(/^www\./, '');
+    // Check named intergovernmental hosts first
+    if (entry.hosts && entry.hosts.some(h => d === h || d.endsWith(`.${h}`))) {
+        return entry.bonus;
+    }
+    // Check structural domain patterns
+    if (entry.patterns && entry.patterns.some(patternArray =>
+        Array.isArray(patternArray) && patternArray.some(pat => pat.test(d))
+    )) {
+        return Math.round(entry.bonus * 0.8); // Slightly lower for pattern match vs named org
+    }
+    return 0;
+}
+
 export function rankSources(query, results) {
     const terms = tokenize(query);
     return [...(Array.isArray(results) ? results : [])].sort((a, b) => scoreSearchResult(b, terms, query) - scoreSearchResult(a, terms, query));
@@ -3897,6 +4079,15 @@ export function scoreSearchResult(item, terms, query = '') {
     if (item?.sourceType === 'community_discussion') score -= 6;
     if (item?.sourceType === 'reference_lookup') score -= 12;
     if (item?.sourceType === 'archive_lookup') score -= 16;
+
+    // Structural domain trust — works for EVERY country, no named publications.
+    // Any government site (.gov, .gob.mx, .gouv.fr, .gov.br, .go.jp, etc.) +18.
+    if (domain && isGovernmentDomain(domain)) score += 18;
+    // Any academic institution worldwide (.edu, .ac.uk, .ac.jp, .edu.br, etc.) +10.
+    if (domain && isAcademicDomain(domain)) score += 10;
+    // Topic-aware intergovernmental authority bonus (WHO for health, WTO for trade, etc.)
+    score += getTopicAuthorityBonus(domain, query);
+
     for (const term of terms) {
         if (title.includes(term)) score += 5;
         if (domain.includes(term)) score += 4;
