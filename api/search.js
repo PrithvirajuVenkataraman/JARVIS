@@ -4632,21 +4632,29 @@ export function buildDeterministicSearchQueries(query) {
     const isRecencyOrVersionQuery = isTechDoc || /\b(?:latest|current|newest|recent|stable|release|version|changelog|changes?|updates?)\b/i.test(normalized);
     if (isRecencyOrVersionQuery) {
         const cleanSubject = subject.replace(/\b(?:latest|recent|current|newest|release|version|changelog|changes?|updates?)\b/gi, '').replace(/\s+/g, ' ').trim() || subject;
+        const currentYear = new Date().getFullYear();
         return Array.from(new Set([
             `${cleanSubject} latest release notes official`.trim(),
             `${cleanSubject} latest changelog what's new`.trim(),
             `${cleanSubject} latest release changes`.trim(),
             `${cleanSubject} latest release notes official documentation`.trim(),
             `${cleanSubject} changelog release notes latest stable release`.trim(),
+            `${cleanSubject} ${currentYear} release notes`.trim(),
             `${cleanSubject} latest version official release`.trim()
         ].map(s => s.replace(/\b(\w+)\s+\1\b/gi, '$1')).map(normalizeSearchQuery).filter(Boolean)));
     }
     const intent = extractSearchIntentTerm(normalized);
-    return Array.from(new Set([
+    const currentYear = new Date().getFullYear();
+    const hasRelativeTime = /\b(?:this\s+(?:month|year|week)|latest|recent|newest|current|today)\b/i.test(normalized);
+    const candidates = [
         `${subject} ${intent}`.trim(),
         `${subject} recent ${intent}`.trim(),
         `${subject} latest ${intent}`.trim()
-    ].map(s => s.replace(/\b(\w+)\s+\1\b/gi, '$1')).map(normalizeSearchQuery).filter(Boolean)));
+    ];
+    if (hasRelativeTime && !normalized.includes(String(currentYear))) {
+        candidates.push(`${subject} ${currentYear} ${intent}`.trim());
+    }
+    return Array.from(new Set(candidates.map(s => s.replace(/\b(\w+)\s+\1\b/gi, '$1')).map(normalizeSearchQuery).filter(Boolean)));
 }
 
 function isCurrentTopicSearchQuery(query) {
