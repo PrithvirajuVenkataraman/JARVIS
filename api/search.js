@@ -162,8 +162,8 @@ const OFFICIAL_ACADEMIC_DOMAIN_PATTERNS = Object.freeze([
 
 // Topic-aware authority registry. Maps classifier topic categories to
 // structural domain signals that are GLOBALLY authoritative for that field.
-// Only intergovernmental bodies and pattern-based structural signals — no
-// named national publications.
+// Covers all 26 knowledge verticals across science, governance, culture,
+// commerce, technology, and everyday consumer life.
 const TOPIC_AUTHORITY_REGISTRY = Object.freeze({
     // World politics, diplomacy, international law & sovereignty
     conflicts_geopolitics: {
@@ -182,19 +182,25 @@ const TOPIC_AUTHORITY_REGISTRY = Object.freeze({
         hosts: ['ohchr.org', 'icc-cpi.int', 'icj-cij.org', 'echr.coe.int', 'curia.europa.eu', 'un.org', 'amnesty.org', 'hrw.org'],
         patterns: [OFFICIAL_GOVERNMENT_DOMAIN_PATTERNS, OFFICIAL_INTERNATIONAL_ORG_PATTERNS]
     },
-    // Health and medicine
+    // Health, Clinical Medicine & Epidemiology
     health_medicine: {
         bonus: 15,
         hosts: ['who.int', 'nih.gov', 'cdc.gov', 'unicef.org', 'ilo.org', 'fao.org', 'ema.europa.eu'],
         patterns: [OFFICIAL_GOVERNMENT_DOMAIN_PATTERNS, OFFICIAL_ACADEMIC_DOMAIN_PATTERNS, OFFICIAL_INTERNATIONAL_ORG_PATTERNS]
     },
-    // Economics, trade, finance & central banking
+    // Economics, Macro Policy, International Trade & Multilateral Finance
     economics_finance: {
         bonus: 15,
         hosts: ['imf.org', 'worldbank.org', 'wto.org', 'oecd.org', 'bis.org', 'ilo.org', 'unctad.org', 'ecb.europa.eu'],
         patterns: [OFFICIAL_GOVERNMENT_DOMAIN_PATTERNS, OFFICIAL_INTERNATIONAL_ORG_PATTERNS]
     },
-    // Environment, climate, energy & conservation
+    // Retail Markets, Public Company Filings, Equities & Trading
+    finance_markets: {
+        bonus: 15,
+        hosts: ['sec.gov', 'bloomberg.com', 'finance.yahoo.com', 'investopedia.com', 'morningstar.com', 'tradingview.com', 'ft.com'],
+        patterns: [OFFICIAL_GOVERNMENT_DOMAIN_PATTERNS]
+    },
+    // Environment, Climate, Energy Transition & Conservation
     environment_climate: {
         bonus: 15,
         hosts: ['unfccc.int', 'unep.org', 'ipcc.ch', 'iea.org', 'fao.org', 'worldbank.org', 'irena.org', 'iucn.org'],
@@ -206,17 +212,35 @@ const TOPIC_AUTHORITY_REGISTRY = Object.freeze({
         hosts: ['fao.org', 'wfp.org', 'cgiar.org', 'ifad.org', 'efsa.europa.eu'],
         patterns: [OFFICIAL_GOVERNMENT_DOMAIN_PATTERNS, OFFICIAL_INTERNATIONAL_ORG_PATTERNS]
     },
-    // Science, space, physics & academic research
+    // Space, Astrophysics, Physics & Fundamental Research
     space_science: {
         bonus: 15,
         hosts: ['nasa.gov', 'esa.int', 'esa.europa.eu', 'isro.gov.in', 'jaxa.jp', 'cnes.fr', 'cern.ch', 'home.cern'],
         patterns: [OFFICIAL_GOVERNMENT_DOMAIN_PATTERNS, OFFICIAL_ACADEMIC_DOMAIN_PATTERNS, OFFICIAL_INTERNATIONAL_ORG_PATTERNS]
+    },
+    // Academic Preprints, Peer-Reviewed Papers & Biomedical Databases
+    academic_preprints_research: {
+        bonus: 16,
+        hosts: ['arxiv.org', 'ncbi.nlm.nih.gov', 'biorxiv.org', 'medrxiv.org', 'semanticscholar.org', 'crossref.org'],
+        patterns: [OFFICIAL_ACADEMIC_DOMAIN_PATTERNS]
     },
     // Transportation, Aviation & Maritime Safety
     transport_aviation_maritime: {
         bonus: 15,
         hosts: ['icao.int', 'imo.org', 'easa.europa.eu', 'ntsb.gov'],
         patterns: [OFFICIAL_GOVERNMENT_DOMAIN_PATTERNS, OFFICIAL_INTERNATIONAL_ORG_PATTERNS]
+    },
+    // Automotive, Electric Vehicles, Crash Ratings & Vehicle Specs
+    automotive_mobility: {
+        bonus: 14,
+        hosts: ['euroncap.com', 'iihs.org', 'edmunds.com', 'caranddriver.com', 'motortrend.com', 'kbb.com'],
+        patterns: [OFFICIAL_GOVERNMENT_DOMAIN_PATTERNS]
+    },
+    // Consumer Electronics, Benchmarks, Hardware Reviews & Teardowns
+    consumer_tech_hardware: {
+        bonus: 14,
+        hosts: ['gsmarena.com', 'rtings.com', 'notebookcheck.net', 'ifixit.com', 'anandtech.com', 'tomshardware.com'],
+        patterns: []
     },
     // Labor, Employment, Worker Rights & Social Protection
     labor_employment: {
@@ -236,6 +260,24 @@ const TOPIC_AUTHORITY_REGISTRY = Object.freeze({
         hosts: ['unesco.org', 'archive.org', 'loc.gov', 'bl.uk'],
         patterns: [OFFICIAL_GOVERNMENT_DOMAIN_PATTERNS, OFFICIAL_ACADEMIC_DOMAIN_PATTERNS]
     },
+    // Travel, Tourism, Visa Requirements & Entry Rules
+    travel_tourism_visas: {
+        bonus: 15,
+        hosts: ['iatatravelcentre.com', 'wikivoyage.org', 'lonelyplanet.com', 'tripadvisor.com'],
+        patterns: [OFFICIAL_GOVERNMENT_DOMAIN_PATTERNS]
+    },
+    // Reference, Dictionaries, Language & Philosophy
+    reference_philosophy_language: {
+        bonus: 15,
+        hosts: ['plato.stanford.edu', 'merriam-webster.com', 'dictionary.cambridge.org', 'oxfordlearnersdictionaries.com', 'britannica.com', 'wikipedia.org'],
+        patterns: [OFFICIAL_ACADEMIC_DOMAIN_PATTERNS]
+    },
+    // Meteorology, Climatological Data & Weather Forecasters
+    meteorology_atmosphere: {
+        bonus: 15,
+        hosts: ['wmo.int', 'ecmwf.int', 'weather.gov', 'metoffice.gov.uk'],
+        patterns: [OFFICIAL_GOVERNMENT_DOMAIN_PATTERNS, OFFICIAL_INTERNATIONAL_ORG_PATTERNS]
+    },
     // Disasters, humanitarian crises & emergency relief
     disasters: {
         bonus: 15,
@@ -252,6 +294,12 @@ const TOPIC_AUTHORITY_REGISTRY = Object.freeze({
         bonus: 15,
         hosts: ['w3.org', 'ietf.org', 'ieee.org', 'iso.org'],
         patterns: [OFFICIAL_ACADEMIC_DOMAIN_PATTERNS]
+    },
+    // Entertainment, Cinema, Television, Music Charts & Gaming
+    entertainment_gaming: {
+        bonus: 14,
+        hosts: ['imdb.com', 'rottentomatoes.com', 'metacritic.com', 'ign.com', 'steampowered.com', 'variety.com', 'hollywoodreporter.com', 'billboard.com'],
+        patterns: []
     },
     // Sports — global governing bodies & Olympic movement
     sports: {
@@ -4086,8 +4134,75 @@ function isAcademicDomain(domain) {
     return OFFICIAL_ACADEMIC_DOMAIN_PATTERNS.some(pat => pat.test(d));
 }
 
+// Extracts core brand/entity/subject keywords from query to identify canonical primary sources
+function extractQueryEntityStems(query) {
+    if (!query) return [];
+    const stopWords = new Set([
+        'what', 'whats', 'what\'s', 'is', 'the', 'a', 'an', 'of', 'in', 'for', 'to', 'and', 'or', 'on',
+        'at', 'by', 'from', 'with', 'about', 'how', 'when', 'where', 'who', 'why', 'can', 'does',
+        'do', 'did', 'will', 'would', 'could', 'should', 'are', 'was', 'were', 'been', 'being',
+        'have', 'has', 'had', 'price', 'pricing', 'cost', 'specs', 'specifications', 'review',
+        'reviews', 'versus', 'vs', 'difference', 'between', 'best', 'top', 'cheap', 'free',
+        'download', 'buy', 'online', 'store', 'return', 'policy', 'refund', 'official', 'website',
+        'site', 'portal', 'login', 'signup', 'requirements', 'admission', 'tuition', 'fee', 'fees',
+        'guide', 'tutorial', 'documentation', 'docs', 'manual', 'features', 'changelog', 'update',
+        'updates', 'latest', 'new', 'release', 'notes', 'version', 'error', 'issue', 'fix', 'problem',
+        'solved', 'help', 'support', 'customer', 'service', 'phone', 'number', 'address', 'hours',
+        'today', 'now', 'current', 'news', 'headline', 'headlines', 'tell', 'show', 'search', 'find'
+    ]);
+    const words = String(query).toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter(Boolean);
+    return words.filter(w => w.length >= 3 && !stopWords.has(w));
+}
+
+// Extracts clean domain stem (e.g., store.steampowered.com -> steampowered, docs.python.org -> python)
+function extractDomainStem(domain) {
+    if (!domain) return '';
+    const d = String(domain).toLowerCase().replace(/^www\./, '').replace(/^(?:docs|store|support|help|api|developer|m|shop|app|mail|news|en)\./, '');
+    const parts = d.split('.');
+    return parts[0] || '';
+}
+
+// Returns true if the search result domain is the direct primary/canonical home of the queried entity.
+// Tier 0 authority: if user asks about "Steam refund", "Harvard admission", "Sony camera", or "Ryanair flights",
+// steampowered.com, harvard.edu, sony.com, and ryanair.com receive top authority universally.
+function isDirectPrimarySource(query, domain, title = '') {
+    if (!query || !domain) return false;
+    const stems = extractQueryEntityStems(query);
+    if (!stems.length) return false;
+    const dStem = extractDomainStem(domain);
+    if (!dStem || dStem.length < 3) return false;
+
+    // Direct domain stem match against entity keywords
+    for (const stem of stems) {
+        if (dStem === stem) return true;
+        // e.g. "steam" in query -> "steampowered" domain
+        if (dStem.length >= stem.length && dStem.startsWith(stem)) return true;
+        // e.g. "playstation" in query -> "playstation" domain
+        if (stem.length >= dStem.length && stem.startsWith(dStem)) return true;
+    }
+
+    // Title matches official canonical presence
+    const t = String(title || '').toLowerCase();
+    if (/\b(?:official\s+(?:site|website|page|portal|home)|welcome\s+to\s+the\s+official)\b/i.test(t)) {
+        for (const stem of stems) {
+            if (t.includes(stem)) return true;
+        }
+    }
+    return false;
+}
+
+// Identifies low-quality clickbait, content mills, and scraper blogs
+function isLowQualityOrScraperDomain(domain, title = '') {
+    if (!domain) return false;
+    const d = String(domain).toLowerCase().replace(/^www\./, '');
+    if (/(?:^|\.)(?:pinterest|quora|answers|ehow|wikihow|ezinearticles|hubpages)\.(?:com|[a-z]{2,3})$/i.test(d)) return true;
+    if (/(?:^|\.)(?:softonic|cnet|download\.com|filehippo|tucows)\.(?:com|[a-z]{2,3})$/i.test(d)) return true;
+    if (/(?:^|\.)(?:apkpure|apkmirror|uptodown)\.(?:com|[a-z]{2,3})$/i.test(d)) return true;
+    return false;
+}
+
 // Infers the authoritative topic category from a free-text query.
-// Uses keyword patterns covering all fields of knowledge — no imports needed.
+// Uses keyword patterns covering all 26 fields of knowledge — no imports needed.
 function detectQueryTopic(query) {
     const q = String(query || '').toLowerCase();
     // Geopolitics, conflict, diplomacy & international sovereignty
@@ -4098,8 +4213,12 @@ function detectQueryTopic(query) {
     if (/\b(?:president|prime\s+minister|minister|parliament|election|cabinet|mayor|governor|government|administration|referendum|policy|legislation|senate|congress|assembly)\b/.test(q)) return 'government';
     // Health, disease, medicine & clinical science
     if (/\b(?:health|disease|virus|pandemic|vaccine|hospital|medicine|medical|cancer|malaria|hiv|aids|who\s+|outbreak|epidemic|pathogen|clinical|pharmaceutic)\b/.test(q)) return 'health_medicine';
+    // Academic Preprints, Peer-Reviewed Papers & Biomedical Databases
+    if (/\b(?:arxiv|pubmed|peer\s+review|clinical\s+trial|meta-analysis|systematic\s+review|doi:|biorxiv|medrxiv|scientific\s+paper|scholarly\s+article|preprint)\b/.test(q)) return 'academic_preprints_research';
     // Economics, trade, fiscal policy & central banking
-    if (/\b(?:economy|gdp|inflation|trade|tariff|export|import|central\s+bank|monetary|fiscal|recession|unemployment|stock|bond|currency|exchange\s+rate|imf|world\s+bank|wto)\b/.test(q)) return 'economics_finance';
+    if (/\b(?:economy|gdp|inflation|trade|tariff|export|import|central\s+bank|monetary|fiscal|recession|unemployment|currency|exchange\s+rate|imf|world\s+bank|wto)\b/.test(q)) return 'economics_finance';
+    // Retail Markets, Public Company Filings, Equities & Trading
+    if (/\b(?:stocks?|shares?|nasdaq|dow\s+jones|s&p\s*500|equities|earnings\s+report|sec\s+filing|10-k|quarterly\s+revenue|dividend|market\s+cap|etf|tradingview)\b/.test(q)) return 'finance_markets';
     // Climate, environment, energy & conservation
     if (/\b(?:climate|carbon|emission|greenhouse|fossil|renewable|solar|wind|energy\s+transition|net\s+zero|cop\d|deforestation|biodiversity|ecosystem|pollution)\b/.test(q)) return 'environment_climate';
     // Agriculture, food systems & nutrition
@@ -4108,14 +4227,26 @@ function detectQueryTopic(query) {
     if (/\b(?:nasa|spacex|rocket|satellite|astronomy|telescope|orbit|spacecraft|iss|moon|mars|planet|esa|isro|jaxa|launch|cern|particle\s+physics|quantum)\b/.test(q)) return 'space_science';
     // Transportation, aviation & maritime safety
     if (/\b(?:aviation|airline|icao|flight\s+safety|maritime|imo|shipping|cargo|vessel|freight|transit|railway|seaport|air\s+traffic|navigation)\b/.test(q)) return 'transport_aviation_maritime';
+    // Automotive, Electric Vehicles, Crash Ratings & Vehicle Specs
+    if (/\b(?:cars?|electric\s+vehicles?|evs?|hybrids?|crash\s+test|euroncap|iihs|horsepower|torque|mpg|wltp|epa\s+range|automotive|sedan|suv|engine|transmission)\b/.test(q)) return 'automotive_mobility';
+    // Consumer Electronics, Benchmarks, Hardware Reviews & Teardowns
+    if (/\b(?:smartphones?|phone\s+specs|display\s+specs|screen\s+refresh|oled|amoled|geekbench|antutu|teardown|ifixit|gpu\s+benchmark|cpu\s+benchmark|motherboard|camera\s+sensor)\b/.test(q)) return 'consumer_tech_hardware';
     // Labor, employment & workplace protection
     if (/\b(?:labor|labour|ilo|workplace|employment|minimum\s+wage|trade\s+union|worker\s+rights|occupational\s+safety|child\s+labor|forced\s+labor)\b/.test(q)) return 'labor_employment';
     // Intellectual property, patents & standards
     if (/\b(?:patent|trademark|copyright|wipo|intellectual\s+property|infringement|epo|uspto|prior\s+art|licensing)\b/.test(q)) return 'ip_patents';
+    // Travel, Tourism, Visa Requirements & Entry Rules
+    if (/\b(?:visa\s+requirements?|passports?|entry\s+permit|visa\s+free|tourism|tourist|travel\s+advisory|attractions?|hotels?|itinerary|places\s+to\s+visit)\b/.test(q)) return 'travel_tourism_visas';
+    // Reference, Dictionaries, Language & Philosophy
+    if (/\b(?:definition\s+of|meaning\s+of|etymology|pronunciation|synonyms?|antonyms?|philosophy|epistemology|metaphysics|ethics|dictionary|encyclopedia)\b/.test(q)) return 'reference_philosophy_language';
+    // Meteorology, Climatological Data & Weather Forecasters
+    if (/\b(?:weather\s+forecast|meteorolog|barometric|radar|satellite\s+loop|hurricane\s+track|typhoon\s+track|monsoon|el\s+nino|la\s+nina|wmo|ecmwf)\b/.test(q)) return 'meteorology_atmosphere';
     // Education, culture, heritage, history & archives
-    if (/\b(?:unesco|heritage|monument|museum|archaeol|civilization|historical\s+archive|literary|tradition|indigenous|culture|folklore|ancient\s+history)\b/.test(q)) return 'education_culture';
+    if (/\b(?:unesco|heritage|monuments?|museums?|archaeol|civilization|historical\s+archive|literary|tradition|indigenous|culture|folklore|ancient\s+history)\b/.test(q)) return 'education_culture';
     // Disasters, humanitarian crises & emergency relief
     if (/\b(?:earthquake|wildfire|flood|cyclone|hurricane|typhoon|tsunami|volcano|disaster|famine|refugee|humanitarian|displaced)\b/.test(q)) return 'disasters';
+    // Entertainment, Cinema, Television, Music Charts & Gaming
+    if (/\b(?:movies?|films?|trailers?|box\s+office|rotten\s+tomatoes|imdb|tv\s+series|season\s+\d|episodes?|cast|actor|actress|video\s+games?|steam|playstation|xbox|nintendo|gameplay|release\s+date\s+game)\b/.test(q)) return 'entertainment_gaming';
     // Computing, hardware, semiconductors, AI & internet architecture
     if (/\b(?:hardware|processor|semiconductor|ai\s+model|llm|machine\s+learning|open\s+source|chip|internet\s+governance|broadband|5g|cybersecurity|data\s+privacy)\b/.test(q)) return 'technology';
     // Technical software releases, changelogs & developer documentation
@@ -4123,12 +4254,11 @@ function detectQueryTopic(query) {
     // Athletics, tournaments, fixtures & championships
     if (/\b(?:score|match|fixture|standings|tournament|championship|league|ipl|cricket|football|soccer|tennis|olympics|world\s+cup)\b/.test(q)) return 'sports';
     // Cryptocurrencies, tokens & decentralized finance
-    if (/\b(?:crypto|bitcoin|ethereum|blockchain|token|defi|nft|stablecoin)\b/.test(q)) return 'crypto';
+    if (/\b(?:crypto|bitcoin|ethereum|blockchain|tokens?|defi|nft|stablecoins?)\b/.test(q)) return 'crypto';
     // General breaking headlines & journalistic reporting
-    if (/\b(?:news|headline|breaking|latest\s+update|current\s+event|press\s+release|bulletin)\b/.test(q)) return 'news';
+    if (/\b(?:news|headlines?|breaking|latest\s+update|current\s+events?|press\s+release|bulletin)\b/.test(q)) return 'news';
     return null;
 }
-
 
 // Returns a scoring bonus when a result's domain is structurally authoritative
 // for the detected topic of the query. Works for ANY country — no named
@@ -4173,6 +4303,22 @@ export function scoreSearchResult(item, terms, query = '') {
     if (item?.sourceType === 'community_discussion') score -= 6;
     if (item?.sourceType === 'reference_lookup') score -= 12;
     if (item?.sourceType === 'archive_lookup') score -= 16;
+
+    // Tier 0: Direct Primary Source Engine.
+    // If the search result domain belongs directly to the subject/brand/entity being asked about,
+    // grant highest canonical primary authority (+35).
+    if (domain && query && isDirectPrimarySource(query, domain, title)) {
+        score += 35;
+        if (!item.qualitySignals) item.qualitySignals = [];
+        if (!item.qualitySignals.includes('direct_primary_source')) {
+            item.qualitySignals.push('direct_primary_source');
+        }
+    }
+
+    // Scraper, content-farm & clickbait penalty (-30)
+    if (domain && isLowQualityOrScraperDomain(domain, title)) {
+        score -= 30;
+    }
 
     // Structural domain trust — works for EVERY country, no named publications.
     // Any government site (.gov, .gob.mx, .gouv.fr, .gov.br, .go.jp, etc.) +18.
