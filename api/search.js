@@ -128,7 +128,8 @@ const OFFICIAL_GOVERNMENT_DOMAIN_PATTERNS = Object.freeze([
     /\.gob(?:\.[a-z]{2,3})?$/i,      // Spanish-speaking Americas & Spain: gob.mx, gob.ar, gob.es, gob.cl, gob.pe
     /\.govt\.[a-z]{2,3}$/i,           // New Zealand and commonwealth: govt.nz
     /\.gv\.[a-z]{2,3}$/i,             // Austria: gv.at
-    /\.nic\.in$/i,                    // India National Informatics Centre (Supreme Court, ministries, states)
+    /(?:^|\.)nic\.in$/i,              // India National Informatics Centre (Supreme Court, ministries, states)
+    /(?:^|\.)service-public\.fr$/i,   // France Public Services Portal
     /\.fgov\.be$/i,                   // Belgium Federal Public Services
     /(?:^|\.)canada\.ca$/i,           // Canadian Federal Portal
     /(?:^|\.)gc\.ca$/i,               // Government of Canada
@@ -154,9 +155,9 @@ const OFFICIAL_ACADEMIC_DOMAIN_PATTERNS = Object.freeze([
     /\.edu$/i,
     /\.edu\.[a-z]{2,3}$/i,
     /\.ac\.[a-z]{2,3}$/i,
-    /\.uni-[a-z0-9-]+\.[a-z]{2,3}$/i,
-    /\.tu-[a-z0-9-]+\.[a-z]{2,3}$/i,
-    /\.univ-[a-z0-9-]+\.[a-z]{2,3}$/i,
+    /(?:^|\.)uni-[a-z0-9-]+\.[a-z]{2,3}$/i,
+    /(?:^|\.)tu-[a-z0-9-]+\.[a-z]{2,3}$/i,
+    /(?:^|\.)univ-[a-z0-9-]+\.[a-z]{2,3}$/i,
     /(?:^|\.)(?:ethz\.ch|epfl\.ch)$/i
 ]);
 
@@ -683,24 +684,23 @@ JSON shape: {"decision":"needs_live_search"|"stable_answer","confidence":0.0,"re
 export async function resolveRetrievalRoute(message, fallbackRoute = {}, options = {}) {
     const route = normalizeRetrievalRoute(fallbackRoute);
 
-    const hasCachedMatch = typeof searchItems === 'function' && searchItems(message, { limit: 1 }).length > 0;
-    if (route.route === 'cached_latest' || route.category === 'latest' || hasCachedMatch) {
-        return {
-            route: 'cached_latest',
-            category: 'latest',
-            confidence: 0.95,
-            reasons: ['latest_cache_lookup'],
-            temporal: true,
-            decision: 'needs_live_search'
-        };
-    }
-
     if (isSpecializedRetrievalRoute(route) && route.route === 'live_required') {
         return {
             route: 'live_required',
             category: route.category,
             confidence: route.confidence || 0.95,
             reasons: route.reasons || ['specialized_live_source_required'],
+            temporal: true,
+            decision: 'needs_live_search'
+        };
+    }
+
+    if (route.route === 'cached_latest' || route.category === 'latest') {
+        return {
+            route: 'cached_latest',
+            category: 'latest',
+            confidence: 0.95,
+            reasons: ['latest_cache_lookup'],
             temporal: true,
             decision: 'needs_live_search'
         };
@@ -1663,7 +1663,7 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
     const phase1Queries = phases[0] || [normalizedQuery];
     const searchStart = performance.now();
     const serverTimeoutMs = options.answer === false
-        ? Math.min(Number(options.timeoutMs) || 3000, 3000)
+        ? Math.min(Number(options.timeoutMs) || 2600, 2600)
         : Math.min(Number(options.timeoutMs) || 4000, 4000);
 
     const publicSearchPromise = searchPublicSources(normalizedQuery, {
@@ -2799,6 +2799,7 @@ function buildSearchSummary(results, metadata = {}) {
     const directAnswer = buildSourceDerivedAnswer(summaryResults, { ...metadata, query });
     return {
         results: summaryResults,
+        sources: summaryResults,
         answer: directAnswer.answer || undefined,
         answerProvider: directAnswer.provider || undefined,
         distinctDomains,
@@ -3803,9 +3804,11 @@ async function callGeminiJson(prompt, options = {}) {
         const configuredModel = String(process.env.GEMINI_SEARCH_MODEL || process.env.GEMINI_MODEL || '').trim();
         const candidateModels = Array.from(new Set([
             configuredModel,
-            'gemini-2.0-flash',
-            'gemini-1.5-flash',
-            'gemini-2.0-flash-lite'
+            'gemini-2.5-flash',
+            'gemini-flash-latest',
+            'gemini-2.5-flash-lite',
+            'gemini-3.7-flash',
+            'gemini-2.0-flash'
         ])).filter(Boolean);
 
         let lastStatus = 0;
@@ -3963,8 +3966,11 @@ export async function searchGeminiGrounding(query, options = {}) {
     const configuredModel = String(process.env.GEMINI_SEARCH_MODEL || process.env.GEMINI_MODEL || '').trim();
     const candidateModels = Array.from(new Set([
         configuredModel,
-        'gemini-2.0-flash',
-        'gemini-1.5-flash'
+        'gemini-2.5-flash',
+        'gemini-flash-latest',
+        'gemini-2.5-flash-lite',
+        'gemini-3.7-flash',
+        'gemini-2.0-flash'
     ])).filter(Boolean);
 
     let lastGroundingError = null;
@@ -4175,21 +4181,21 @@ function rankSearchResults(query, results) {
 }
 
 // Returns true if domain matches an international treaty organization pattern (.int TLD).
-function isInternationalOrgDomain(domain) {
+export function isInternationalOrgDomain(domain) {
     if (!domain) return false;
     const d = String(domain).toLowerCase().replace(/^www\./, '');
     return OFFICIAL_INTERNATIONAL_ORG_PATTERNS.some(pat => pat.test(d));
 }
 
 // Returns true if domain matches any country's official government pattern.
-function isGovernmentDomain(domain) {
+export function isGovernmentDomain(domain) {
     if (!domain) return false;
     const d = String(domain).toLowerCase().replace(/^www\./, '');
     return OFFICIAL_GOVERNMENT_DOMAIN_PATTERNS.some(pat => pat.test(d));
 }
 
 // Returns true if domain is an academic/research institution worldwide.
-function isAcademicDomain(domain) {
+export function isAcademicDomain(domain) {
     if (!domain) return false;
     const d = String(domain).toLowerCase().replace(/^www\./, '');
     return OFFICIAL_ACADEMIC_DOMAIN_PATTERNS.some(pat => pat.test(d));
@@ -4226,20 +4232,31 @@ function extractDomainStem(domain) {
 // Returns true if the search result domain is the direct primary/canonical home of the queried entity.
 // Tier 0 authority: if user asks about "Steam refund", "Harvard admission", "Sony camera", or "Ryanair flights",
 // steampowered.com, harvard.edu, sony.com, and ryanair.com receive top authority universally.
-function isDirectPrimarySource(query, domain, title = '') {
+export function isDirectPrimarySource(query, domain, title = '') {
     if (!query || !domain) return false;
     const stems = extractQueryEntityStems(query);
     if (!stems.length) return false;
     const dStem = extractDomainStem(domain);
     if (!dStem || dStem.length < 3) return false;
 
+    // Disqualify known third-party blog, guide, aggregator, forum, or fan domains from being mistaken as primary
+    if (/(?:navigator|guide|insider|central|rumor|fan|club|blog|review|tips|daily|times|radar|geek|digest|arena|forum|portal|advisor|finder|hound|pulse|watch)/i.test(dStem)
+        && !/^(?:steamcommunity)$/i.test(dStem)) {
+        return false;
+    }
+
     // Direct domain stem match against entity keywords
     for (const stem of stems) {
         if (dStem === stem) return true;
-        // e.g. "steam" in query -> "steampowered" domain
-        if (dStem.length >= stem.length && dStem.startsWith(stem)) return true;
-        // e.g. "playstation" in query -> "playstation" domain
-        if (stem.length >= dStem.length && stem.startsWith(dStem)) return true;
+        // Known canonical multi-brand entity extensions (e.g. "steam" in query -> "steampowered")
+        if (stem === 'steam' && (dStem === 'steampowered' || dStem === 'steamcommunity')) return true;
+        if (stem === 'playstation' && (dStem === 'playstation' || dStem === 'sony')) return true;
+        if (stem === 'xbox' && (dStem === 'xbox' || dStem === 'microsoft')) return true;
+        if (dStem === `${stem}official` || dStem === `${stem}app` || dStem === `get${stem}`) return true;
+        // e.g. "playstation" in query -> "sony" (or stem longer than dStem where dStem is the root corporate parent)
+        if (stem.length >= dStem.length && stem.startsWith(dStem) && dStem.length >= 4) {
+            return true;
+        }
     }
 
     // Title matches official canonical presence
@@ -4253,7 +4270,7 @@ function isDirectPrimarySource(query, domain, title = '') {
 }
 
 // Identifies low-quality clickbait, content mills, and scraper blogs
-function isLowQualityOrScraperDomain(domain, title = '') {
+export function isLowQualityOrScraperDomain(domain, title = '') {
     if (!domain) return false;
     const d = String(domain).toLowerCase().replace(/^www\./, '');
     if (/(?:^|\.)(?:pinterest|quora|answers|ehow|wikihow|ezinearticles|hubpages)\.(?:com|[a-z]{2,3})$/i.test(d)) return true;
@@ -4264,7 +4281,7 @@ function isLowQualityOrScraperDomain(domain, title = '') {
 
 // Infers the authoritative topic category from a free-text query.
 // Uses keyword patterns covering all 26 fields of knowledge — no imports needed.
-function detectQueryTopic(query) {
+export function detectQueryTopic(query) {
     const q = String(query || '').toLowerCase();
     // Geopolitics, conflict, diplomacy & international sovereignty
     if (/\b(?:war|conflict|ceasefire|invasion|sanctions|treaty|geopolit|hostilities|diplomatic|sovereignty|nato|un\s+security|peacekeeping|territorial)\b/.test(q)) return 'conflicts_geopolitics';
@@ -4309,7 +4326,7 @@ function detectQueryTopic(query) {
     // Entertainment, Cinema, Television, Music Charts & Gaming
     if (/\b(?:movies?|films?|trailers?|box\s+office|rotten\s+tomatoes|imdb|tv\s+series|season\s+\d|episodes?|cast|actor|actress|video\s+games?|steam|playstation|xbox|nintendo|gameplay|release\s+date\s+game)\b/.test(q)) return 'entertainment_gaming';
     // Computing, hardware, semiconductors, AI & internet architecture
-    if (/\b(?:hardware|processor|semiconductor|ai\s+model|llm|machine\s+learning|open\s+source|chip|internet\s+governance|broadband|5g|cybersecurity|data\s+privacy)\b/.test(q)) return 'technology';
+    if (/\b(?:hardware|processor|semiconductor|ai\s+model|llm|machine\s+learning|open\s+source|chip|internet\s+governance|broadband|5g|cybersecurity|data\s+privacy|ietf|rfc|protocols?|standards?|w3c|ieee|specifications?)\b/.test(q)) return 'technology';
     // Technical software releases, changelogs & developer documentation
     if (/\b(?:release\s+notes|changelog|api\s+docs?|documentation|version\s+changes?|what(?:'s|\s+is)\s+new|official\s+docs?)\b/.test(q)) return 'technical_documentation';
     // Athletics, tournaments, fixtures & championships
@@ -4324,7 +4341,7 @@ function detectQueryTopic(query) {
 // Returns a scoring bonus when a result's domain is structurally authoritative
 // for the detected topic of the query. Works for ANY country — no named
 // national publications involved.
-function getTopicAuthorityBonus(domain, query) {
+export function getTopicAuthorityBonus(domain, query) {
     if (!domain || !query) return 0;
     const topic = detectQueryTopic(query);
     if (!topic) return 0;
@@ -4367,27 +4384,55 @@ export function scoreSearchResult(item, terms, query = '') {
 
     // Tier 0: Direct Primary Source Engine.
     // If the search result domain belongs directly to the subject/brand/entity being asked about,
-    // grant highest canonical primary authority (+35).
-    if (domain && query && isDirectPrimarySource(query, domain, title)) {
-        score += 35;
+    // grant highest canonical primary authority (+45).
+    const isPrimary = domain && query && isDirectPrimarySource(query, domain, title);
+    if (isPrimary) {
+        score += 45;
+        item.authorityTier = 0;
         if (!item.qualitySignals) item.qualitySignals = [];
         if (!item.qualitySignals.includes('direct_primary_source')) {
             item.qualitySignals.push('direct_primary_source');
+        }
+        // Subdomain booster for first-party documentation/help/support
+        if (/^(?:docs|help|support|developer|api)\./i.test(domain)) {
+            score += 20;
         }
     }
 
     // Scraper, content-farm & clickbait penalty (-30)
     if (domain && isLowQualityOrScraperDomain(domain, title)) {
         score -= 30;
+        item.authorityTier = 3;
+    }
+
+    // Third-party blog or article penalty on non-primary sources
+    const urlStr = String(item?.url || '').toLowerCase();
+    if (/\/blog\/|\/article\/|\/posts?\//i.test(urlStr) && !isPrimary) {
+        score -= 10;
     }
 
     // Structural domain trust — works for EVERY country, no named publications.
-    // Any government site (.gov, .gob.mx, .gouv.fr, .gov.br, .go.jp, etc.) +18.
-    if (domain && isGovernmentDomain(domain)) score += 18;
-    // Any academic institution worldwide (.edu, .ac.uk, .ac.jp, .edu.br, etc.) +10.
-    if (domain && isAcademicDomain(domain)) score += 10;
+    // Any government site (.gov, .gob.mx, .gouv.fr, .gov.br, .go.jp, etc.) +25.
+    if (domain && isGovernmentDomain(domain)) {
+        score += 25;
+        if (item.authorityTier === undefined) item.authorityTier = 1;
+    }
+    // Any international organization (.int, un.org, etc.) +25.
+    if (domain && isInternationalOrgDomain(domain)) {
+        score += 25;
+        if (item.authorityTier === undefined) item.authorityTier = 1;
+    }
+    // Any academic institution worldwide (.edu, .ac.uk, .ac.jp, .edu.br, etc.) +15.
+    if (domain && isAcademicDomain(domain)) {
+        score += 15;
+        if (item.authorityTier === undefined) item.authorityTier = 1;
+    }
     // Topic-aware intergovernmental authority bonus (WHO for health, WTO for trade, etc.)
-    score += getTopicAuthorityBonus(domain, query);
+    const topicBonus = getTopicAuthorityBonus(domain, query);
+    if (topicBonus > 0) {
+        score += topicBonus;
+        if (item.authorityTier === undefined) item.authorityTier = 2;
+    }
 
     for (const term of terms) {
         if (title.includes(term)) score += 5;
