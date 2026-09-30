@@ -480,6 +480,7 @@ export default async function handler(req, res) {
         const search = await runVerifiedWebSearch(query, { limit });
         return res.status(200).json({
             success: true,
+            engineVersion: '2026.09.30-v2',
             query,
             originalQuery: originalQuery === query ? undefined : originalQuery,
             searchRewrite: rewrite,
@@ -1490,6 +1491,9 @@ export async function runVerifiedWebSearch(query, options = {}) {
             if (Array.isArray(groundRes.value.results) && groundRes.value.results.length > 0) {
                 initialGroundedResults = groundRes.value.results;
             }
+            if (groundRes.value.error) {
+                geminiPlanningWarning = [geminiPlanningWarning, `grounding_error:${groundRes.value.error}`].filter(Boolean).join('; ');
+            }
         }
     }
 
@@ -1525,7 +1529,7 @@ export async function runVerifiedWebSearch(query, options = {}) {
         const enhanced = await enhanceResultsWithGemini(normalizedQuery, publicResults, { limit }).catch(error => ({
             results: publicResults,
             enhanced: false,
-            warning: `gemini_enhancement_failed:${String(error?.code || error?.message || 'unknown')}`
+            warning: `gemini_enhancement_failed:${error?.upstreamStatus ? `http_${error.upstreamStatus}_` : ''}${String(error?.code || error?.message || 'unknown')}`
         }));
         enhancedResults = rankSources(normalizedQuery, dedupeSearchResults(enhanced.results || publicResults)
             .filter(item => isValidCitationSource(item, normalizedQuery))).slice(0, limit);
@@ -3821,7 +3825,7 @@ async function callGeminiJson(prompt, options = {}) {
         }
         if (options.throwOnError && lastStatus) {
             throw createSearchError({
-                code: 'gemini_search_enhancer_failed',
+                code: `gemini_search_enhancer_failed_${lastStatus}`,
                 httpStatus: 200,
                 upstreamStatus: lastStatus,
                 publicMessage: 'Gemini search enhancement failed.',
@@ -3950,40 +3954,43 @@ export async function searchGeminiGrounding(query, options = {}) {
         'gemini-1.5-flash'
     ])).filter(Boolean);
 
+    let lastGroundingError = null;
     for (const model of candidateModels) {
-        try {
-            const url = `${GEMINI_GENERATE_URL}/${model}:generateContent?key=${apiKey}`;
-            const response = await fetchWithTimeout(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    contents: [{
-                        parts: [{
-                            text: `Answer with fresh, factual evidence using Google Search: ${normalizedQuery}`
-                        }]
-                    }],
-                    tools: [{
-                        google_search: {}
-                    }]
-                })
-            }, timeoutMs);
+        for (const toolDef of [{ google_search: {} }, { googleSearch: {} }]) {
+            try {
+                const url = `${GEMINI_GENERATE_URL}/${model}:generateContent?key=${apiKey}`;
+                const response = await fetchWithTimeout(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: [{
+                            parts: [{
+                                text: `Answer with fresh, factual evidence using Google Search: ${normalizedQuery}`
+                            }]
+                        }],
+                        tools: [toolDef]
+                    })
+                }, timeoutMs);
 
-            if (!response.ok) {
-                const errBody = await response.text().catch(() => '');
-                console.error(`[searchGeminiGrounding] API error ${response.status} for model "${model}":`, errBody.slice(0, 300));
-                continue;
-            }
+                if (!response.ok) {
+                    const errBody = await response.text().catch(() => '');
+                    lastGroundingError = `${response.status}_${errBody.slice(0, 150)}`;
+                    console.error(`[searchGeminiGrounding] API error ${response.status} for model "${model}":`, errBody.slice(0, 300));
+                    continue;
+                }
 
-            const data = await response.json();
-            const parsed = parseGeminiGroundingResponse(data, normalizedQuery, limit);
-            if (parsed.results?.length > 0 || parsed.answer) {
-                return parsed;
+                const data = await response.json();
+                const parsed = parseGeminiGroundingResponse(data, normalizedQuery, limit);
+                if (parsed.results?.length > 0 || parsed.answer) {
+                    return parsed;
+                }
+            } catch (err) {
+                lastGroundingError = `fetch_error:${String(err?.message || err).slice(0, 100)}`;
+                console.error('[searchGeminiGrounding] fetch error:', String(err?.message || err).slice(0, 200));
             }
-        } catch (err) {
-            console.error('[searchGeminiGrounding] fetch error:', String(err?.message || err).slice(0, 200));
         }
     }
-    return { results: [], answer: null, webSearchQueries: [] };
+    return { results: [], answer: null, webSearchQueries: [], error: lastGroundingError };
 }
 
 async function discoverOfficialSourceCandidates(query, options = {}) {
@@ -4911,7 +4918,7 @@ export const __test = {
     searchPublicSources,
     searchWikipedia,
     extractSearchTargetQuery,
-    buildSearchQueryRewrite, 
+    buildSearchQueryRewrite,
     resolveRetrievalRoute,
     classifyRetrievalDecision,
     classifyDeterministicRetrievalIntent,
