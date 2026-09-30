@@ -646,14 +646,18 @@ export async function searchPublicSources(query, options = {}) {
         ? Promise.resolve()
         : Promise.allSettled(gdeltQueries.map(candidate => searchGdeltNews(candidate, { limit, timeoutMs: Math.min(boundedTimeoutMs, 2500) })))
             .then(s => { gdelt = (Array.isArray(s) ? s : []).flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []); });
+    // Gemini Grounding: primary live web provider — runs in the fast window alongside DDG/SearXNG.
+    // Capped to 2800ms so it never delays the fast path.  Results rank first when available
+    // because Gemini grounds against live Google Search, fully bypassing cloud-IP scraping blocks.
+    const geminiTimeoutMs = Math.min(boundedTimeoutMs, 2800);
     const taskGemini = hasGeminiKey()
-        ? Promise.allSettled([searchGeminiGrounding(targetQueries[0] || normalizedQuery, { limit }).then(r => r.results || [])])
+        ? Promise.allSettled([searchGeminiGrounding(targetQueries[0] || normalizedQuery, { limit, timeoutMs: geminiTimeoutMs }).then(r => r.results || [])])
             .then(s => { geminiGroundingResults = (Array.isArray(s) ? s : []).flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []); })
         : Promise.resolve();
 
-    // SearXNG is in fastTasks: races in parallel with News/DDG/Wikipedia/Wikidata/Yahoo
-    const fastTasks = [taskNews, taskDdg, taskSearXNG, taskWiki, taskWikidata, taskYahoo, taskGov];
-    const allTasks = [...fastTasks, taskGdelt, taskGemini];
+    // Gemini is now a fast-path provider: runs in parallel with News/DDG/SearXNG/Wikipedia/Wikidata/Yahoo.
+    const fastTasks = [taskNews, taskDdg, taskSearXNG, taskWiki, taskWikidata, taskYahoo, taskGov, taskGemini];
+    const allTasks = [...fastTasks, taskGdelt];
 
     // Wait for fast tasks to complete (or time out after 2800ms)
     await Promise.race([
@@ -661,11 +665,11 @@ export async function searchPublicSources(query, options = {}) {
         new Promise(res => setTimeout(res, Math.min(boundedTimeoutMs, 2800)))
     ]);
 
-    const getFastCount = () => (liveNews.length + ddgWeb.length + searxngWeb.length + wiki.length + wikidata.length + liveWeb.length + governmentRoleResults.length);
-    const getGeneralWebCount = () => (ddgWeb.length + searxngWeb.length + wiki.length + wikidata.length + liveWeb.length);
+    const getFastCount = () => (liveNews.length + ddgWeb.length + searxngWeb.length + wiki.length + wikidata.length + liveWeb.length + governmentRoleResults.length + geminiGroundingResults.length);
+    const getGeneralWebCount = () => (ddgWeb.length + searxngWeb.length + wiki.length + wikidata.length + liveWeb.length + geminiGroundingResults.length);
 
     // If fast tasks returned sufficient sources AND at least 1 general web source arrived (or leadership query), proceed.
-    // Otherwise wait for trailing tasks (DDG, SearXNG, GDELT) up to boundedTimeoutMs.
+    // Otherwise wait for trailing tasks (GDELT) up to boundedTimeoutMs.
     if (getFastCount() < 2 || (!isLeadership && getGeneralWebCount() === 0)) {
         const remainingMs = Math.max(50, boundedTimeoutMs - 2800);
         await Promise.race([
@@ -675,10 +679,11 @@ export async function searchPublicSources(query, options = {}) {
     }
 
     const combined = [
+        // Gemini Grounding first: cloud-IP-safe, grounded against live Google Search.
+        ...geminiGroundingResults,
         ...governmentRoleResults,
         ...wikidata,
         ...wiki,
-        ...geminiGroundingResults,
         ...searxngWeb,
         ...ddgWeb,
         ...liveWeb,
