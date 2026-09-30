@@ -345,6 +345,19 @@ export default async function handler(req, res) {
         });
     }
 
+    if (req.body?.action === 'list_gemini_models') {
+        const apiKey = getGeminiApiKey();
+        if (!apiKey) return res.status(200).json({ success: false, error: 'No GEMINI_API_KEY configured' });
+        try {
+            const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+            const data = await r.json();
+            const models = Array.isArray(data.models) ? data.models.map(m => m.name.replace(/^models\//, '')) : [];
+            return res.status(200).json({ success: true, models, rawError: data.error || undefined });
+        } catch (e) {
+            return res.status(200).json({ success: false, error: String(e?.message || e) });
+        }
+    }
+
     const originalQuery = normalizeSearchQuery(req.body?.query || req.body?.q || req.body?.url || '');
     const rewrite = buildSearchQueryRewrite(originalQuery);
     const query = rewrite.query;
@@ -3974,7 +3987,8 @@ export async function searchGeminiGrounding(query, options = {}) {
 
                 if (!response.ok) {
                     const errBody = await response.text().catch(() => '');
-                    lastGroundingError = `${response.status}_${errBody.slice(0, 150)}`;
+                    const entry = `${model}[${Object.keys(toolDef)[0]}]:${response.status}_${errBody.slice(0, 80).replace(/\s+/g, ' ')}`;
+                    lastGroundingError = lastGroundingError ? `${lastGroundingError} | ${entry}` : entry;
                     console.error(`[searchGeminiGrounding] API error ${response.status} for model "${model}":`, errBody.slice(0, 300));
                     continue;
                 }
@@ -3985,7 +3999,8 @@ export async function searchGeminiGrounding(query, options = {}) {
                     return parsed;
                 }
             } catch (err) {
-                lastGroundingError = `fetch_error:${String(err?.message || err).slice(0, 100)}`;
+                const entry = `${model}[${Object.keys(toolDef)[0]}]:err_${String(err?.message || err).slice(0, 60)}`;
+                lastGroundingError = lastGroundingError ? `${lastGroundingError} | ${entry}` : entry;
                 console.error('[searchGeminiGrounding] fetch error:', String(err?.message || err).slice(0, 200));
             }
         }
