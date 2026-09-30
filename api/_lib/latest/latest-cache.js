@@ -50,17 +50,22 @@ function normalizeItem(item) {
 }
 
 function scoreItem(item, terms) {
-    if (!terms.length) return 1;
+    if (!terms.length) return 0;
     const title = String(item.title || '').toLowerCase();
     const summary = String(item.summary || '').toLowerCase();
     const source = String(item.source || '').toLowerCase();
-    let score = Math.max(0, 20 - ageDays(item.publishedAt)) / 4;
+    let termScore = 0;
+    let matches = 0;
     for (const term of terms) {
-        if (title.includes(term)) score += 8;
-        if (source.includes(term)) score += 5;
-        if (summary.includes(term)) score += 2;
+        let termMatched = false;
+        if (title.includes(term)) { termScore += 8; termMatched = true; }
+        if (source.includes(term)) { termScore += 5; termMatched = true; }
+        if (summary.includes(term)) { termScore += 2; termMatched = true; }
+        if (termMatched) matches += 1;
     }
-    return score;
+    if (matches === 0) return 0;
+    const recencyBonus = Math.max(0, 20 - ageDays(item.publishedAt)) / 4;
+    return termScore + recencyBonus;
 }
 
 function trimCache() {
