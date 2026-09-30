@@ -107,109 +107,168 @@ const TRUSTED_SOURCE_HOSTS = Object.freeze([
     'archive.is'
 ]);
 
-// Government domain patterns — matches ANY country's official government site.
-// Covers: .gov (US), .gov.xx (most countries), .gouv.xx (Francophone),
-// .go.xx (Asia-Pacific), .gob.xx (LatAm/Spain), .gc.ca (Canada),
-// .admin.ch (Switzerland), .govt.xx (NZ/others), .gv.at (Austria).
+// International treaty organization domains (.int is strictly reserved by IANA/UN for treaty bodies)
+const OFFICIAL_INTERNATIONAL_ORG_PATTERNS = Object.freeze([
+    /\.int$/i
+]);
+
+// Government domain patterns — matches ANY country's official government site worldwide.
+// Covers:
+// - Standard ccTLD government prefixes/suffixes: .gov, .gov.xx, .gouv.xx, .go.xx, .gob.xx, .govt.xx, .gv.at
+// - Sovereign sub-networks: .nic.in (India National Informatics Centre / courts / ministries), .fgov.be (Belgium)
+// - National federal domain names: canada.ca / gc.ca, admin.ch, bund.de / bundesregierung.de,
+//   overheid.nl / rijksoverheid.nl, regeringen.se / regeringen.dk, regjeringen.no, valtioneuvosto.fi,
+//   parliament.uk, governo.it, governo.pt, lamoncloa.gob.es, europa.eu, un.org
 const OFFICIAL_GOVERNMENT_DOMAIN_PATTERNS = Object.freeze([
     /\.gov$/i,
     /\.gov\.[a-z]{2,3}$/i,
     /\.gouv(?:\.[a-z]{2,3})?$/i,
     /\.go\.[a-z]{2,3}$/i,
     /^gov\.[a-z]{2,3}$/i,
-    /\.gob(?:\.[a-z]{2,3})?$/i,      // Spanish-speaking: gob.mx, gob.ar, gob.es
-    /\.govt\.[a-z]{2,3}$/i,           // NZ: govt.nz, others
+    /\.gob(?:\.[a-z]{2,3})?$/i,      // Spanish-speaking Americas & Spain: gob.mx, gob.ar, gob.es, gob.cl, gob.pe
+    /\.govt\.[a-z]{2,3}$/i,           // New Zealand and commonwealth: govt.nz
     /\.gv\.[a-z]{2,3}$/i,             // Austria: gv.at
-    /^gc\.ca$/i,                       // Canadian federal
-    /\.admin\.ch$/i,                   // Swiss federal
-    /^europa\.eu$/i,
-    /^un\.org$/i
+    /\.nic\.in$/i,                    // India National Informatics Centre (Supreme Court, ministries, states)
+    /\.fgov\.be$/i,                   // Belgium Federal Public Services
+    /(?:^|\.)canada\.ca$/i,           // Canadian Federal Portal
+    /(?:^|\.)gc\.ca$/i,               // Government of Canada
+    /(?:^|\.)admin\.ch$/i,            // Swiss Federal Administration
+    /(?:^|\.)bund\.de$/i,             // German Federal Portal
+    /(?:^|\.)bundesregierung\.de$/i,  // German Federal Cabinet
+    /(?:^|\.)overheid\.nl$/i,         // Netherlands Central Government
+    /(?:^|\.)rijksoverheid\.nl$/i,    // Netherlands National Ministries
+    /(?:^|\.)regeringen\.(?:se|dk)$/i,// Sweden & Denmark Governments
+    /(?:^|\.)regjeringen\.no$/i,      // Norway Government
+    /(?:^|\.)valtioneuvosto\.fi$/i,   // Finland Government
+    /(?:^|\.)parliament\.uk$/i,       // UK Parliament
+    /(?:^|\.)governo\.(?:it|pt)$/i,   // Italy & Portugal Central Governments
+    /(?:^|\.)lamoncloa\.gob\.es$/i,   // Spain Prime Minister / Cabinet
+    /(?:^|\.)europa\.eu$/i,           // European Union Official Portal
+    /(?:^|\.)un\.org$/i               // United Nations
 ]);
 
 // Academic domain patterns — universities and research institutions worldwide.
-// .edu (US), .ac.xx (UK/Australia/Japan/etc.), .edu.xx (international variants).
+// .edu (US & international), .ac.xx (UK, Japan, South Africa, India, NZ, Israel, etc.),
+// .uni-*.de, .tu-*.de, .univ-*.fr, ETH Zurich, EPFL Lausanne.
 const OFFICIAL_ACADEMIC_DOMAIN_PATTERNS = Object.freeze([
     /\.edu$/i,
     /\.edu\.[a-z]{2,3}$/i,
-    /\.ac\.[a-z]{2,3}$/i,             // ac.uk, ac.jp, ac.in, ac.za, ac.nz, etc.
-    /\.uni-[a-z]+\.[a-z]{2,3}$/i,     // German: uni-bonn.de, uni-berlin.de
-    /\.univ-[a-z]+\.[a-z]{2,3}$/i     // French: univ-paris.fr
+    /\.ac\.[a-z]{2,3}$/i,
+    /\.uni-[a-z0-9-]+\.[a-z]{2,3}$/i,
+    /\.tu-[a-z0-9-]+\.[a-z]{2,3}$/i,
+    /\.univ-[a-z0-9-]+\.[a-z]{2,3}$/i,
+    /(?:^|\.)(?:ethz\.ch|epfl\.ch)$/i
 ]);
 
 // Topic-aware authority registry. Maps classifier topic categories to
 // structural domain signals that are GLOBALLY authoritative for that field.
 // Only intergovernmental bodies and pattern-based structural signals — no
-// named national publications. Bonus is +15 (enough to tip ties, not override
-// Gemini grounding +20 or structured_claim +45).
+// named national publications.
 const TOPIC_AUTHORITY_REGISTRY = Object.freeze({
-    // World politics, diplomacy, international law
+    // World politics, diplomacy, international law & sovereignty
     conflicts_geopolitics: {
         bonus: 15,
-        hosts: ['un.org', 'icrc.org', 'icc-cpi.int', 'icj-cij.org', 'crisisgroup.org'],
-        patterns: [OFFICIAL_GOVERNMENT_DOMAIN_PATTERNS]
+        hosts: ['un.org', 'icrc.org', 'icc-cpi.int', 'icj-cij.org', 'crisisgroup.org', 'osce.org', 'africanunion.org', 'asean.org', 'nato.int'],
+        patterns: [OFFICIAL_GOVERNMENT_DOMAIN_PATTERNS, OFFICIAL_INTERNATIONAL_ORG_PATTERNS]
     },
     government: {
         bonus: 15,
         hosts: ['un.org', 'oecd.org', 'worldbank.org'],
         patterns: [OFFICIAL_GOVERNMENT_DOMAIN_PATTERNS]
     },
+    // Law, Human Rights & Constitutional Justice
+    law_human_rights: {
+        bonus: 15,
+        hosts: ['ohchr.org', 'icc-cpi.int', 'icj-cij.org', 'echr.coe.int', 'curia.europa.eu', 'un.org', 'amnesty.org', 'hrw.org'],
+        patterns: [OFFICIAL_GOVERNMENT_DOMAIN_PATTERNS, OFFICIAL_INTERNATIONAL_ORG_PATTERNS]
+    },
     // Health and medicine
     health_medicine: {
         bonus: 15,
-        hosts: ['who.int', 'nih.gov', 'cdc.gov', 'unicef.org', 'ilo.org', 'fao.org'],
-        patterns: [OFFICIAL_GOVERNMENT_DOMAIN_PATTERNS, OFFICIAL_ACADEMIC_DOMAIN_PATTERNS]
+        hosts: ['who.int', 'nih.gov', 'cdc.gov', 'unicef.org', 'ilo.org', 'fao.org', 'ema.europa.eu'],
+        patterns: [OFFICIAL_GOVERNMENT_DOMAIN_PATTERNS, OFFICIAL_ACADEMIC_DOMAIN_PATTERNS, OFFICIAL_INTERNATIONAL_ORG_PATTERNS]
     },
-    // Economics, trade, finance
+    // Economics, trade, finance & central banking
     economics_finance: {
         bonus: 15,
-        hosts: ['imf.org', 'worldbank.org', 'wto.org', 'oecd.org', 'bis.org', 'ilo.org', 'unctad.org'],
-        patterns: [OFFICIAL_GOVERNMENT_DOMAIN_PATTERNS]
+        hosts: ['imf.org', 'worldbank.org', 'wto.org', 'oecd.org', 'bis.org', 'ilo.org', 'unctad.org', 'ecb.europa.eu'],
+        patterns: [OFFICIAL_GOVERNMENT_DOMAIN_PATTERNS, OFFICIAL_INTERNATIONAL_ORG_PATTERNS]
     },
-    // Environment, climate, energy
+    // Environment, climate, energy & conservation
     environment_climate: {
         bonus: 15,
-        hosts: ['unfccc.int', 'unep.org', 'ipcc.ch', 'iea.org', 'fao.org', 'worldbank.org'],
-        patterns: [OFFICIAL_GOVERNMENT_DOMAIN_PATTERNS]
+        hosts: ['unfccc.int', 'unep.org', 'ipcc.ch', 'iea.org', 'fao.org', 'worldbank.org', 'irena.org', 'iucn.org'],
+        patterns: [OFFICIAL_GOVERNMENT_DOMAIN_PATTERNS, OFFICIAL_INTERNATIONAL_ORG_PATTERNS]
     },
-    // Science, space, research
+    // Agriculture, Food Security & Nutrition
+    agriculture_food: {
+        bonus: 15,
+        hosts: ['fao.org', 'wfp.org', 'cgiar.org', 'ifad.org', 'efsa.europa.eu'],
+        patterns: [OFFICIAL_GOVERNMENT_DOMAIN_PATTERNS, OFFICIAL_INTERNATIONAL_ORG_PATTERNS]
+    },
+    // Science, space, physics & academic research
     space_science: {
         bonus: 15,
-        hosts: ['nasa.gov', 'esa.int', 'esa.europa.eu', 'isro.gov.in', 'jaxa.jp', 'cnes.fr'],
+        hosts: ['nasa.gov', 'esa.int', 'esa.europa.eu', 'isro.gov.in', 'jaxa.jp', 'cnes.fr', 'cern.ch', 'home.cern'],
+        patterns: [OFFICIAL_GOVERNMENT_DOMAIN_PATTERNS, OFFICIAL_ACADEMIC_DOMAIN_PATTERNS, OFFICIAL_INTERNATIONAL_ORG_PATTERNS]
+    },
+    // Transportation, Aviation & Maritime Safety
+    transport_aviation_maritime: {
+        bonus: 15,
+        hosts: ['icao.int', 'imo.org', 'easa.europa.eu', 'ntsb.gov'],
+        patterns: [OFFICIAL_GOVERNMENT_DOMAIN_PATTERNS, OFFICIAL_INTERNATIONAL_ORG_PATTERNS]
+    },
+    // Labor, Employment, Worker Rights & Social Protection
+    labor_employment: {
+        bonus: 15,
+        hosts: ['ilo.org', 'oecd.org'],
+        patterns: [OFFICIAL_GOVERNMENT_DOMAIN_PATTERNS, OFFICIAL_INTERNATIONAL_ORG_PATTERNS]
+    },
+    // Intellectual Property, Patents, Trademarks & Copyright
+    ip_patents: {
+        bonus: 15,
+        hosts: ['wipo.int', 'epo.org', 'uspto.gov'],
+        patterns: [OFFICIAL_GOVERNMENT_DOMAIN_PATTERNS, OFFICIAL_INTERNATIONAL_ORG_PATTERNS]
+    },
+    // Education, Culture, Heritage, History & Archives
+    education_culture: {
+        bonus: 15,
+        hosts: ['unesco.org', 'archive.org', 'loc.gov', 'bl.uk'],
         patterns: [OFFICIAL_GOVERNMENT_DOMAIN_PATTERNS, OFFICIAL_ACADEMIC_DOMAIN_PATTERNS]
     },
-    // Disasters, humanitarian crises
+    // Disasters, humanitarian crises & emergency relief
     disasters: {
         bonus: 15,
         hosts: ['un.org', 'icrc.org', 'unhcr.org', 'wfp.org', 'reliefweb.int', 'unocha.org'],
-        patterns: [OFFICIAL_GOVERNMENT_DOMAIN_PATTERNS]
+        patterns: [OFFICIAL_GOVERNMENT_DOMAIN_PATTERNS, OFFICIAL_INTERNATIONAL_ORG_PATTERNS]
     },
     // Technology, standards, internet governance
     technology: {
         bonus: 15,
-        hosts: ['w3.org', 'ietf.org', 'ieee.org', 'iso.org'],
-        patterns: [OFFICIAL_ACADEMIC_DOMAIN_PATTERNS]
+        hosts: ['w3.org', 'ietf.org', 'ieee.org', 'iso.org', 'itu.int', 'acm.org'],
+        patterns: [OFFICIAL_ACADEMIC_DOMAIN_PATTERNS, OFFICIAL_INTERNATIONAL_ORG_PATTERNS]
     },
     technical_documentation: {
         bonus: 15,
         hosts: ['w3.org', 'ietf.org', 'ieee.org', 'iso.org'],
         patterns: [OFFICIAL_ACADEMIC_DOMAIN_PATTERNS]
     },
-    // Sports — no structural intergovernmental authority; rely on wire services
+    // Sports — global governing bodies & Olympic movement
     sports: {
         bonus: 10,
-        hosts: ['olympics.com', 'fifa.com', 'ioc.org', 'worldathletics.org', 'fivb.com'],
+        hosts: ['olympics.com', 'fifa.com', 'ioc.org', 'worldathletics.org', 'fivb.com', 'uefa.com'],
         patterns: []
     },
-    // Crypto — only official regulators qualify for structural trust
+    // Crypto & Digital Assets — official regulators and financial standard-setters
     crypto: {
         bonus: 12,
         hosts: ['bis.org', 'fsb.org', 'iosco.org'],
         patterns: [OFFICIAL_GOVERNMENT_DOMAIN_PATTERNS]
     },
-    // News / general current events
+    // News / general current events — global reporting networks with multi-region bureaus
     news: {
         bonus: 10,
-        hosts: ['apnews.com', 'reuters.com', 'afp.com', 'un.org'],
+        hosts: ['apnews.com', 'reuters.com', 'afp.com', 'bbc.com', 'bbc.co.uk', 'un.org'],
         patterns: []
     }
 });
@@ -1911,12 +1970,15 @@ export function isTrustedLiveSource(urlOrDomain) {
     if (!domain) return false;
     // Named international orgs and wire services
     if (TRUSTED_SOURCE_HOSTS.some(host => domain === host || domain.endsWith(`.${host}`))) return true;
+    // Any international treaty organization (.int TLD)
+    if (isInternationalOrgDomain(domain)) return true;
     // Any country's government domain (gov.br, gouv.fr, go.jp, gob.mx, gc.ca, etc.)
     if (isGovernmentDomain(domain)) return true;
     // Any academic institution worldwide (.edu, .ac.uk, .ac.jp, .edu.br, etc.)
     if (isAcademicDomain(domain)) return true;
     return false;
 }
+
 
 async function fetchWikipediaSummary(title, options = {}) {
     const timeoutMs = Math.min(Number(options.timeoutMs) || PUBLIC_SOURCE_TIMEOUT_MS, PUBLIC_SOURCE_TIMEOUT_MS);
@@ -4003,6 +4065,13 @@ function rankSearchResults(query, results) {
     return rankSources(query, results);
 }
 
+// Returns true if domain matches an international treaty organization pattern (.int TLD).
+function isInternationalOrgDomain(domain) {
+    if (!domain) return false;
+    const d = String(domain).toLowerCase().replace(/^www\./, '');
+    return OFFICIAL_INTERNATIONAL_ORG_PATTERNS.some(pat => pat.test(d));
+}
+
 // Returns true if domain matches any country's official government pattern.
 function isGovernmentDomain(domain) {
     if (!domain) return false;
@@ -4018,23 +4087,48 @@ function isAcademicDomain(domain) {
 }
 
 // Infers the authoritative topic category from a free-text query.
-// Uses keyword patterns aligned with the classifier — no imports needed.
+// Uses keyword patterns covering all fields of knowledge — no imports needed.
 function detectQueryTopic(query) {
     const q = String(query || '').toLowerCase();
-    if (/\b(?:war|conflict|ceasefire|invasion|sanctions|treaty|geopolit|hostilities|diplomatic|sovereignty|nato|un\s+security|peacekeeping)\b/.test(q)) return 'conflicts_geopolitics';
+    // Geopolitics, conflict, diplomacy & international sovereignty
+    if (/\b(?:war|conflict|ceasefire|invasion|sanctions|treaty|geopolit|hostilities|diplomatic|sovereignty|nato|un\s+security|peacekeeping|territorial)\b/.test(q)) return 'conflicts_geopolitics';
+    // Law, courts, human rights & constitutional justice
+    if (/\b(?:law|statute|court|tribunal|human\s+rights|jurisdiction|extradition|prosecution|judiciary|legal\s+case|constitution|bill\s+of\s+rights|unhrc|amnesty|verdict|ruling)\b/.test(q)) return 'law_human_rights';
+    // Civil governance, elections & official administration
     if (/\b(?:president|prime\s+minister|minister|parliament|election|cabinet|mayor|governor|government|administration|referendum|policy|legislation|senate|congress|assembly)\b/.test(q)) return 'government';
-    if (/\b(?:health|disease|virus|pandemic|vaccine|hospital|medicine|medical|cancer|malaria|hiv|aids|who\s+|outbreak|epidemic|pathogen|clinical)\b/.test(q)) return 'health_medicine';
+    // Health, disease, medicine & clinical science
+    if (/\b(?:health|disease|virus|pandemic|vaccine|hospital|medicine|medical|cancer|malaria|hiv|aids|who\s+|outbreak|epidemic|pathogen|clinical|pharmaceutic)\b/.test(q)) return 'health_medicine';
+    // Economics, trade, fiscal policy & central banking
     if (/\b(?:economy|gdp|inflation|trade|tariff|export|import|central\s+bank|monetary|fiscal|recession|unemployment|stock|bond|currency|exchange\s+rate|imf|world\s+bank|wto)\b/.test(q)) return 'economics_finance';
+    // Climate, environment, energy & conservation
     if (/\b(?:climate|carbon|emission|greenhouse|fossil|renewable|solar|wind|energy\s+transition|net\s+zero|cop\d|deforestation|biodiversity|ecosystem|pollution)\b/.test(q)) return 'environment_climate';
-    if (/\b(?:nasa|spacex|rocket|satellite|astronomy|telescope|orbit|spacecraft|iss|moon|mars|planet|esa|isro|jaxa|launch)\b/.test(q)) return 'space_science';
+    // Agriculture, food systems & nutrition
+    if (/\b(?:agriculture|crop|harvest|fao|food\s+security|famine|livestock|fisheries|aquaculture|soil|agronomy|fertilizer|irrigation|food\s+safety)\b/.test(q)) return 'agriculture_food';
+    // Science, astronomy, space exploration & physics
+    if (/\b(?:nasa|spacex|rocket|satellite|astronomy|telescope|orbit|spacecraft|iss|moon|mars|planet|esa|isro|jaxa|launch|cern|particle\s+physics|quantum)\b/.test(q)) return 'space_science';
+    // Transportation, aviation & maritime safety
+    if (/\b(?:aviation|airline|icao|flight\s+safety|maritime|imo|shipping|cargo|vessel|freight|transit|railway|seaport|air\s+traffic|navigation)\b/.test(q)) return 'transport_aviation_maritime';
+    // Labor, employment & workplace protection
+    if (/\b(?:labor|labour|ilo|workplace|employment|minimum\s+wage|trade\s+union|worker\s+rights|occupational\s+safety|child\s+labor|forced\s+labor)\b/.test(q)) return 'labor_employment';
+    // Intellectual property, patents & standards
+    if (/\b(?:patent|trademark|copyright|wipo|intellectual\s+property|infringement|epo|uspto|prior\s+art|licensing)\b/.test(q)) return 'ip_patents';
+    // Education, culture, heritage, history & archives
+    if (/\b(?:unesco|heritage|monument|museum|archaeol|civilization|historical\s+archive|literary|tradition|indigenous|culture|folklore|ancient\s+history)\b/.test(q)) return 'education_culture';
+    // Disasters, humanitarian crises & emergency relief
     if (/\b(?:earthquake|wildfire|flood|cyclone|hurricane|typhoon|tsunami|volcano|disaster|famine|refugee|humanitarian|displaced)\b/.test(q)) return 'disasters';
+    // Computing, hardware, semiconductors, AI & internet architecture
     if (/\b(?:hardware|processor|semiconductor|ai\s+model|llm|machine\s+learning|open\s+source|chip|internet\s+governance|broadband|5g|cybersecurity|data\s+privacy)\b/.test(q)) return 'technology';
+    // Technical software releases, changelogs & developer documentation
     if (/\b(?:release\s+notes|changelog|api\s+docs?|documentation|version\s+changes?|what(?:'s|\s+is)\s+new|official\s+docs?)\b/.test(q)) return 'technical_documentation';
+    // Athletics, tournaments, fixtures & championships
     if (/\b(?:score|match|fixture|standings|tournament|championship|league|ipl|cricket|football|soccer|tennis|olympics|world\s+cup)\b/.test(q)) return 'sports';
+    // Cryptocurrencies, tokens & decentralized finance
     if (/\b(?:crypto|bitcoin|ethereum|blockchain|token|defi|nft|stablecoin)\b/.test(q)) return 'crypto';
+    // General breaking headlines & journalistic reporting
     if (/\b(?:news|headline|breaking|latest\s+update|current\s+event|press\s+release|bulletin)\b/.test(q)) return 'news';
     return null;
 }
+
 
 // Returns a scoring bonus when a result's domain is structurally authoritative
 // for the detected topic of the query. Works for ANY country — no named
