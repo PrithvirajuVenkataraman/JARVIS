@@ -800,6 +800,7 @@ function parseGoogleNewsRssXml(xml, query, limit = 8) {
         let link = decodeHtmlEntities(linkMatch?.[1] || '').trim();
         const pubDate = cleanSnippetText(pubDateMatch?.[1] || '');
         let desc = cleanSnippetText(descMatch?.[1] || '');
+        const sourceUrl = decodeHtmlEntities(sourceMatch?.[1] || '').trim();
         const sourceName = cleanSnippetText(sourceMatch?.[2] || '');
 
         let publisher = sourceName;
@@ -811,12 +812,20 @@ function parseGoogleNewsRssXml(xml, query, limit = 8) {
         }
 
         if (rawTitle && link) {
-            const domain = getDomainFromUrl(link) || 'news.google.com';
+            const sourceDomain = sourceUrl ? getDomainFromUrl(sourceUrl) : '';
+            const linkDomain = getDomainFromUrl(link);
+            const domain = (sourceDomain && !sourceDomain.includes('google.com'))
+                ? sourceDomain
+                : (linkDomain || 'news.google.com');
+
             items.push({
                 title: rawTitle,
                 description: desc || rawTitle,
+                snippet: desc || rawTitle,
                 url: link,
                 domain: domain,
+                publisher: publisher || domain,
+                source: publisher ? `${publisher} (Google News)` : 'Google News',
                 sourceType: 'trusted_news',
                 sourceLabel: publisher ? `Google News / ${publisher}` : 'Google News',
                 date: pubDate,
