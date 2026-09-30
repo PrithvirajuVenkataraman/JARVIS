@@ -112,9 +112,10 @@ export function isAuthoritativeResearchSource(source, query = '') {
     if (!source) return false;
     const domain = String(source.domain || '').toLowerCase();
     const url = String(source.url || '').toLowerCase();
-    if (source.sourceType === 'official_source' || source.trusted === true) {
-        if (!/\b(?:news\.google\.com|yahoo\.com|msn\.com)\b/i.test(domain)) return true;
+    if (source.sourceType === 'trusted_news' || /\b(?:news\.google\.com|yahoo\.com|msn\.com)\b/i.test(domain)) {
+        return false;
     }
+    if (source.sourceType === 'official_source') return true;
     const isDocDomain = /\b(?:docs\.python\.org|python\.org|github\.com|developer\.mozilla\.org|go\.dev|rust-lang\.org|kernel\.org)\b/i.test(domain)
         || domain.startsWith('docs.')
         || domain.startsWith('developer.')
@@ -205,6 +206,14 @@ export function generateSnippetFallback(query, sources = []) {
     const subject = subjectMatch ? subjectMatch[1].toLowerCase() : null;
     if (isTechDoc && subject && !facts.some(f => f.toLowerCase().includes(subject))) {
         return `Verified live web sources were retrieved regarding "${cleanQ}", but real-time AI synthesis could not be completed. Please review the verified source references in the carousel above.`;
+    }
+
+    // Requirement 5: Never concatenate disjointed headline snippets into a fake answer paragraph.
+    // If facts are merely brief headline titles or if sources are news aggregators without substantive body prose:
+    const hasSubstantiveProse = facts.some(f => f.length >= 45 && !f.toLowerCase().includes(' - '));
+    const isPureNewsFeed = sources.length > 0 && sources.every(s => s.sourceType === 'trusted_news' || s.domain === 'news.google.com' || s.qualitySignals?.includes('google_news_rss'));
+    if (isPureNewsFeed && !hasSubstantiveProse) {
+        return `Verified live news sources were retrieved regarding "${cleanQ}", but real-time AI synthesis could not be completed. Please explore the verified articles directly in the source carousel above.`;
     }
 
     return facts.slice(0, 4).join(' ');
