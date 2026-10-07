@@ -110,7 +110,7 @@ const INTENT_PROTOTYPES = [
         exemplars: [
             'current live weather forecast and temperature today conditions',
             'weather forecast for tomorrow temperature and rainfall humidity precipitation',
-            'climate rain forecast in region current conditions meteorology'
+            'rain forecast in city current weather conditions humidity precipitation'
         ]
     },
     {
@@ -181,6 +181,8 @@ const INTENT_PROTOTYPES = [
         isLiveRequired: false,
         exemplars: [
             'Newton third law of motion speed of light vacuum physics gravity kinematics dynamics',
+            'direct current alternating current electricity voltage resistance circuit electric current physics electromagnetism',
+            'ocean currents marine biology atmospheric circulation global climate system ecology thermodynamics physics',
             'formula for kinetic energy in physics equation E=mc^2 velocity mass work',
             'speed of sound in dry air physics acoustics velocity constant decibel',
             'speed of light in vacuum constant physics relativity optics',
@@ -328,13 +330,25 @@ export function classifyUniversalEntityIntent(rawQuery = '', context = {}) {
         return res;
     }
 
-    if (context.explicitWeb || context.webMode === 'on') {
+    if (context.explicitWeb || context.webMode === 'on' || context.webMode === 'force') {
         const res = {
             isLiveRequired: true,
             isStableKnowledge: false,
             entityTarget: null,
             category: 'explicit_search',
             reason: 'user_requested_search'
+        };
+        INTENT_CACHE.set(cacheKey, res);
+        return res;
+    }
+
+    if (/\b(?:tell\s+me\s+a\s+joke|make\s+me\s+laugh|funny\s+joke|how\s+are\s+you|what's\s+up|hi|hello|hey|thank\s+you|thanks|bye|goodbye)\b/i.test(query.toLowerCase())) {
+        const res = {
+            isLiveRequired: false,
+            isStableKnowledge: true,
+            entityTarget: null,
+            category: 'casual_conversation',
+            reason: 'casual_conversation'
         };
         INTENT_CACHE.set(cacheKey, res);
         return res;
@@ -366,12 +380,12 @@ export function classifyUniversalEntityIntent(rawQuery = '', context = {}) {
     }
 
     const entityTarget = extractEntityTarget(query);
-    const isHistorical = query.toLowerCase().includes('first') || query.toLowerCase().includes('former') || query.toLowerCase().includes('past') || query.toLowerCase().includes('history') || /\b\d{4}\b/.test(query);
+    const isHistorical = query.toLowerCase().includes('first') || query.toLowerCase().includes('former') || query.toLowerCase().includes('past') || query.toLowerCase().includes('history') || /\b(who\s+was|what\s+was|when\s+was|where\s+was|why\s+was|how\s+was|who\s+founded|who\s+built|who\s+invented|who\s+discovered)\b/i.test(query) || /\b\d{4}\b/.test(query);
 
     let isLive = bestMatch.isLiveRequired;
     if (entityTarget && !isHistorical) {
         isLive = true;
-    } else if (isHistorical && bestMatch.type === 'temporal_fact') {
+    } else if (isHistorical) {
         isLive = false;
     }
 
