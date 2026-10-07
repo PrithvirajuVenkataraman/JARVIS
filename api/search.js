@@ -727,7 +727,8 @@ export default async function handler(req, res) {
         }
         if (route.route === 'live_required') {
             if (route.category === 'government' || route.category === 'news' || route.category === 'web_search' || route.category === 'technical_documentation') {
-                const search = await runVerifiedWebSearch(query, { limit });
+                const searchTarget = rewrite.dateContext ? `${query} ${rewrite.dateContext}` : query;
+                const search = await runVerifiedWebSearch(searchTarget, { limit });
                 return res.status(200).json({
                     success: true,
                     query,
@@ -988,7 +989,7 @@ export async function resolveRetrievalRoute(message, fallbackRoute = {}, options
         };
     }
 
-    if (route.route === 'cached_latest' || route.category === 'latest') {
+    if (route.route === 'cached_latest' || route.category === 'latest' || (/\b(?:latest|recent|newest|release)\b/i.test(message) && searchItems(message, { limit: 1 }).length > 0)) {
         return {
             route: 'cached_latest',
             category: 'latest',
