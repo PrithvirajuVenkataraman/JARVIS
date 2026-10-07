@@ -13,20 +13,15 @@
  */
 
 export const DEFAULT_SYNTAX_STOP_WORDS = new Set([
-    'a', 'an', 'the', 'and', 'or', 'but', 'if', 'because', 'as', 'until', 'while',
+    'a', 'an', 'the', 'and', 'or', 'but', 'if', 'as',
     'of', 'at', 'by', 'for', 'with', 'about', 'against', 'between', 'into', 'through',
     'during', 'before', 'after', 'above', 'below', 'to', 'from', 'up', 'down', 'in',
     'out', 'on', 'off', 'over', 'under', 'again', 'further', 'then', 'once',
-    'what', 'when', 'where', 'who', 'whom', 'whose', 'why', 'how', 'which',
-    'it', 'its', 'this', 'that', 'these', 'those', 'they', 'them', 'their', 'he', 'she', 'him', 'her', 'we', 'us', 'our', 'you', 'your', 'me', 'my',
-    'is', 'are', 'was', 'were', 'be', 'been', 'being',
-    'have', 'has', 'had', 'having',
-    'do', 'does', 'did', 'doing',
-    'can', 'could', 'should', 'would', 'may', 'might', 'must', 'shall', 'will'
+    'it', 'its', 'this', 'that', 'these', 'those', 'they', 'them', 'their', 'he', 'she', 'him', 'her', 'we', 'us', 'our', 'you', 'your', 'me', 'my'
 ]);
 
 /**
- * Enterprise tokenization with optional stop-word filtering
+ * Enterprise tokenization with semantic preservation (all question words, verbs, and domain entities retained)
  * @param {string} text - Input raw text
  * @param {Object} [options] - Options
  * @param {boolean} [options.filterStopWords=true] - Whether to strip grammatical syntax words
