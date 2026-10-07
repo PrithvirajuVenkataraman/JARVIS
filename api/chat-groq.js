@@ -2203,6 +2203,49 @@ const edgeResponseCache = new EdgeSemanticLruCache();
         });
     }
 
+    function formatGeminiDialogContents(dialogMsgs, images = [], hasImages = false) {
+        if (!Array.isArray(dialogMsgs) || dialogMsgs.length === 0) return null;
+        const msgs = dialogMsgs.filter(m => m.role !== 'system');
+        if (!msgs.length) return null;
+
+        const normalized = [];
+        for (const m of msgs) {
+            const role = m.role === 'assistant' ? 'model' : 'user';
+            const text = String(m.content || m.text || '').trim();
+            if (!text) continue;
+            if (normalized.length === 0 && role === 'model') {
+                // Gemini API multi-turn dialogue cannot start with model turn
+                continue;
+            }
+            if (normalized.length > 0 && normalized[normalized.length - 1].role === role) {
+                // Merge consecutive identical roles to adhere to Gemini alternating requirement
+                normalized[normalized.length - 1].parts[0].text += `\n\n${text}`;
+            } else {
+                normalized.push({ role, parts: [{ text }] });
+            }
+        }
+
+        if (!normalized.length) return null;
+
+        if (hasImages && Array.isArray(images) && images.length > 0) {
+            const lastUserIdx = [...normalized].reverse().findIndex(m => m.role === 'user');
+            const targetIdx = lastUserIdx >= 0 ? normalized.length - 1 - lastUserIdx : normalized.length - 1;
+            if (targetIdx >= 0 && normalized[targetIdx]) {
+                for (const img of images) {
+                    if (img?.base64) {
+                        normalized[targetIdx].parts.push({
+                            inline_data: {
+                                mime_type: normalizeImageMimeType(img.mimeType),
+                                data: img.base64
+                            }
+                        });
+                    }
+                }
+            }
+        }
+        return normalized;
+    }
+
     async function runModelWithFallback(finalPrompt, lengthPolicy = {}, userSelectedModel = null, images = undefined, options = {}) {
         const temp = Number.isFinite(Number(lengthPolicy?.temperature)) ? Number(lengthPolicy.temperature) : 0.7;
         const effectiveMsg = options?.effectiveMessage || options?.message || finalPrompt;
@@ -2326,21 +2369,9 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                     if (sysMsg?.content) {
                         systemInstruction = { parts: [{ text: sysMsg.content }] };
                     }
-                    const dialogMsgs = structured.filter(m => m.role !== 'system');
-                    if (dialogMsgs.length > 0) {
-                        contents = dialogMsgs.map((m, idx) => {
-                            const isLast = idx === dialogMsgs.length - 1;
-                            const role = m.role === 'assistant' ? 'model' : 'user';
-                            const mParts = [{ text: m.content }];
-                            if (isLast && hasImages) {
-                                for (const img of images) {
-                                    if (img?.base64) {
-                                        mParts.push({ inline_data: { mime_type: normalizeImageMimeType(img.mimeType), data: img.base64 } });
-                                    }
-                                }
-                            }
-                            return { role, parts: mParts };
-                        });
+                    const formatted = formatGeminiDialogContents(structured, images, hasImages);
+                    if (formatted && formatted.length > 0) {
+                        contents = formatted;
                     }
                 }
                 const shouldSuppressGeminiReasoning = options?.minimalThinking === true ||
@@ -2793,21 +2824,9 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 if (sysMsg?.content) {
                     systemInstruction = { parts: [{ text: sysMsg.content }] };
                 }
-                const dialogMsgs = structured.filter(m => m.role !== 'system');
-                if (dialogMsgs.length > 0) {
-                    contents = dialogMsgs.map((m, idx) => {
-                        const isLast = idx === dialogMsgs.length - 1;
-                        const role = m.role === 'assistant' ? 'model' : 'user';
-                        const mParts = [{ text: m.content }];
-                        if (isLast && Array.isArray(images)) {
-                            for (const img of images) {
-                                if (img?.base64) {
-                                    mParts.push({ inline_data: { mime_type: normalizeImageMimeType(img.mimeType), data: img.base64 } });
-                                }
-                            }
-                        }
-                        return { role, parts: mParts };
-                    });
+                const formatted = formatGeminiDialogContents(structured, images, Array.isArray(images) && images.length > 0);
+                if (formatted && formatted.length > 0) {
+                    contents = formatted;
                 }
             }
             const isUserChosenR1 = String(options?.userSelectedModel || '').toLowerCase().includes('r1');
@@ -3984,15 +4003,47 @@ const edgeResponseCache = new EdgeSemanticLruCache();
         ));
     }
 
-    function buildTopicAnchor(contextTurns) {
-        const userTurns = (Array.isArray(contextTurns) ? contextTurns : [])
-            .filter(turn => String(turn?.role || '').toLowerCase() === 'user')
-            .slice(-8)
-            .map(turn => String(turn?.text || '').trim())
-            .filter(Boolean);
+    function extractAssistantKeyEntitiesFromText(text = '') {
+        const raw = String(text || '');
+        const entities = [];
+        const boldMatches = raw.matchAll(/\*\*([A-Za-z0-9][A-Za-z0-9\s,'’\.\-–—]{2,60})\*\*/g);
+        for (const m of boldMatches) {
+            const val = m[1].replace(/[:–—\-\.]+$/, '').trim();
+            if (val && val.length >= 3 && !entities.includes(val) && !/^(?:note|tip|important|key|summary|overview|pros|cons)\b/i.test(val)) {
+                entities.push(val);
+            }
+        }
+        if (!entities.length) {
+            const propMatches = raw.matchAll(/\b([A-Z][a-z0-9]{2,}(?:\s+[A-Z][a-z0-9]{2,}){1,3})\b/g);
+            for (const m of propMatches) {
+                const val = m[1].trim();
+                if (val && !entities.includes(val)) {
+                    entities.push(val);
+                }
+            }
+        }
+        return entities;
+    }
 
-        for (let i = userTurns.length - 1; i >= 0; i--) {
-            const candidate = userTurns[i];
+    function buildTopicAnchor(contextTurns) {
+        const turns = (Array.isArray(contextTurns) ? contextTurns : [])
+            .slice(-10)
+            .map(turn => ({
+                role: String(turn?.role || '').toLowerCase(),
+                text: String(turn?.text || '').trim()
+            }))
+            .filter(t => Boolean(t.text));
+
+        const lastTurn = turns[turns.length - 1];
+        if (lastTurn && lastTurn.role === 'assistant') {
+            const asstEntities = extractAssistantKeyEntitiesFromText(lastTurn.text);
+            if (asstEntities.length > 0) {
+                return asstEntities.slice(0, 4).join(' ');
+            }
+        }
+
+        for (let i = turns.length - 1; i >= 0; i--) {
+            const candidate = turns[i].text;
             const terms = tokenizeTopicTerms(candidate);
             const strongSingleTerm = terms.length === 1 && hasStrongSingleTermAnchor(candidate, terms[0]);
             const explicitTopicIntroduction = terms.length > 0 && hasExplicitTopicIntroduction(candidate);
@@ -4565,14 +4616,14 @@ Respond conversationally and naturally.`;
         let contextChars = 0;
         const context = Array.isArray(body.context)
             ? body.context
-                .slice(-12)
+                .slice(-16)
                 .map(item => ({
                     role: item?.role === 'assistant' ? 'assistant' : 'user',
                     text: String(item?.text || '').trim().slice(0, 3000)
                 }))
                 .filter(item => {
-                    if (!item.text || contextChars >= 9000) return false;
-                    const remaining = 9000 - contextChars;
+                    if (!item.text || contextChars >= 12000) return false;
+                    const remaining = 12000 - contextChars;
                     item.text = item.text.slice(0, remaining);
                     contextChars += item.text.length;
                     return Boolean(item.text);
