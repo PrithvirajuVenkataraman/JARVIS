@@ -17,7 +17,10 @@ export const DEFAULT_SYNTAX_STOP_WORDS = new Set([
     'of', 'at', 'by', 'for', 'with', 'about', 'against', 'between', 'into', 'through',
     'during', 'before', 'after', 'above', 'below', 'to', 'from', 'up', 'down', 'in',
     'out', 'on', 'off', 'over', 'under', 'again', 'further', 'then', 'once',
-    'it', 'its', 'this', 'that', 'these', 'those', 'they', 'them', 'their', 'he', 'she', 'him', 'her', 'we', 'us', 'our', 'you', 'your', 'me', 'my'
+    'it', 'its', 'this', 'that', 'these', 'those', 'they', 'them', 'their', 'he', 'she', 'him', 'her', 'we', 'us', 'our', 'you', 'your', 'me', 'my',
+    'what', 'when', 'where', 'which', 'who', 'whom', 'whose', 'why', 'how',
+    'is', 'are', 'was', 'were', 'be', 'been', 'being',
+    'do', 'does', 'did', 'have', 'has', 'had'
 ]);
 
 /**
