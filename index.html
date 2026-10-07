@@ -20997,12 +20997,77 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                         provenance: 'web_grounded'
                     });
                 },
-                onComplete: ({ content, sources, provenance, telemetry }) => {
+                onComplete: async ({ content, sources, provenance, telemetry }) => {
                     if (window.JarvisLiveResearch?.activeController !== controller && !controller.isTerminal) return;
                     hideThinkingIndicator();
                     const row = getRow();
                     const hasSources = Array.isArray(sources) && sources.length > 0;
                     const isWebGrounded = provenance === 'web_grounded' && hasSources;
+
+                    // Seamless Model Fallback: If live web search returned 0 sources or failed,
+                    // NEVER leave the user with a dead-end "Please try rephrasing" rejection.
+                    // Immediately stream the full answer using model knowledge.
+                    if (!hasSources && (provenance === 'no_sources' || provenance === 'synthesis_fallback')) {
+                        try {
+                            const currentModel = typeof getSelectedModel === 'function' ? getSelectedModel() : 'auto';
+                            const selectedModel = currentModel && currentModel !== 'auto' ? currentModel : undefined;
+                            let streamedFallbackText = '';
+                            const fallbackPrompt = `You are a helpful AI assistant. The live web search did not return additional external records for this request. Please answer the user's question directly, comprehensively, and accurately using your knowledge. Fulfill all requested formatting (such as Markdown tables, columns, or structured points) completely.`;
+
+                            const streamPromise = streamChatCompletion({
+                                message: rawUserText || query,
+                                context: window.JarvisConversation?.buildContext?.({ maxTurns: 6 }) || [],
+                                preferences: {
+                                    userName: typeof userName !== 'undefined' ? userName : '',
+                                    responseLength: typeof responseMode !== 'undefined' ? responseMode : 'normal',
+                                    customSystemPrompt: fallbackPrompt,
+                                    selectedModel
+                                },
+                                selectedModel,
+                                sources: [],
+                                intent: 'chat'
+                            }, {
+                                assistantMessageId,
+                                userMessage: rawUserText || query,
+                                sources: [],
+                                onToken: (token) => {
+                                    streamedFallbackText += token;
+                                    updateStreamingAssistantMessage(assistantMessageId, streamedFallbackText, {
+                                        turnId: controller.turnId,
+                                        streaming: true,
+                                        sources: [],
+                                        sourceType: 'model',
+                                        provenance: 'model_fallback'
+                                    });
+                                },
+                                preserveMessageOnAbort: true
+                            });
+
+                            if (streamPromise && typeof streamPromise.then === 'function') {
+                                await streamPromise;
+                            }
+
+                            if (streamedFallbackText.trim()) {
+                                updateStreamingAssistantMessage(assistantMessageId, streamedFallbackText, {
+                                    turnId: controller.turnId,
+                                    streaming: false,
+                                    sources: [],
+                                    sourceType: 'model',
+                                    sourceLabel: 'Model knowledge',
+                                    provenance: 'model_fallback',
+                                    isFallback: true
+                                });
+                                window.JarvisInteractionState?.transition?.('IDLE');
+                                saveToHistory(rawUserText || query, streamedFallbackText);
+                                if (typeof setWebSearchMode === 'function') setWebSearchMode('off');
+                                resolve(true);
+                                return;
+                            }
+                        } catch (fallbackErr) {
+                            console.warn('[Bounded Live Research] Model fallback error:', fallbackErr);
+                        }
+                    }
+
                     if (row) {
                         row.style.display = '';
                         if (provenance !== 'web_grounded') {
