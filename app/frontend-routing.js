@@ -92,9 +92,28 @@ export function isMediaOrPopCultureQuery(_text) {
     return false;
 }
 
+export function isComplexTechnicalQuery(text) {
+    const raw = String(text || '').trim();
+    if (!raw) return false;
+    const lower = raw.toLowerCase();
+
+    // Deep technical & architectural keyword patterns
+    const techPattern = /\b(?:round[- ]robin|load\s+balanc(?:ing|er)?|concurrent(?:ly|\s+users)?|concurrency|worker\s+pool|thread\s+pool|mutex|semaphore|distributed\s+systems?|failover|fault[- ]toleran(?:ce|t)|deadlock|race\s+condition|bottleneck|high\s+availability|throughput|microservices?|system\s+design|software\s+architecture|system\s+architecture|backend\s+architecture|how\s+did\s+we\s+implement|how\s+do\s+we\s+implement|implementation\s+of\s+(?:the\s+)?(?:round[- ]robin|algorithm|load\s+balanc|queue|worker|cache|concurrency|software|feature|system|service|protocol))\b/i;
+    if (techPattern.test(lower)) return true;
+
+    // Length-based: detailed technical texts or pasted code/explanations (> 200 chars or > 35 words)
+    const words = raw.split(/\s+/).filter(Boolean);
+    if ((raw.length > 200 || words.length > 35) && /\b(?:technique|algorithm|process|pattern|mechanism|implementation|architecture|system|service|server|database|network|protocol|pipeline|function|code|method)\b/i.test(lower)) {
+        return true;
+    }
+
+    return false;
+}
+
 export function isStableGeographyOrGeneralFactQuery(text, context = {}) {
     const raw = String(text || '').trim();
     if (!raw) return false;
+    if (isComplexTechnicalQuery(raw)) return false;
     const lower = raw.toLowerCase().replace(/[?!.,;:]+$/g, '').trim();
 
     // 1. If entity classifier or live signals indicate live data is required, not a stable fact
@@ -371,6 +390,7 @@ export function classifyUniversalEntityIntent(text = '', context = {}) {
 export function isSimpleStableQuestion(text, context = {}) {
     const raw = String(text || '').trim();
     if (!raw || raw.length > 200) return false;
+    if (isComplexTechnicalQuery(raw)) return false;
     return isStableGeographyOrGeneralFactQuery(raw, context);
 }
 
@@ -543,7 +563,7 @@ export function classifyLiveVsNormal(text, context = {}) {
     if (isLiveSports) { score += 0.60; matchedReasons.push('live_sports'); }
     if (isLiveNews) { score += 0.60; matchedReasons.push('breaking_news'); }
     if (isTechRelease) { score += 0.40; matchedReasons.push('tech_release'); }
-    if (isCurrentLeadership) { score += 0.45; matchedReasons.push('mutable_leadership'); }
+    if (isCurrentLeadership) { score += 0.65; matchedReasons.push('mutable_leadership'); }
     if (isLocalLiveQuery) { score += 0.60; matchedReasons.push('local_live_query'); }
     if (hasContemporaryYear) { score += 0.35; matchedReasons.push('contemporary_year'); }
     if (hasUnneutralizedFreshness) { score += 0.25; matchedReasons.push('freshness_cue'); }
@@ -1008,8 +1028,11 @@ export function decideFrontendRoute(text, context = {}) {
         return res;
     }
 
+    const isFollowUp = Boolean(context?.isFollowUp || context?.contextResolution?.isFollowUp || (context?.activeThread?.lastAssistantText && raw.length < 120));
+    const isComplex = isComplexTechnicalQuery(raw);
+
     if (isWebOff) {
-        if (isStableGeographyOrGeneralFactQuery(raw) || isSimpleStableQuestion(raw, { ...context, webMode: 'off' })) {
+        if (!isComplex && !isFollowUp && (isStableGeographyOrGeneralFactQuery(raw) || isSimpleStableQuestion(raw, { ...context, webMode: 'off' }))) {
             const res = {
                 ...base,
                 route: 'fast_simple',
@@ -1055,7 +1078,7 @@ export function decideFrontendRoute(text, context = {}) {
         return res;
     }
 
-    if (isStableGeographyOrGeneralFactQuery(raw, context) || isSimpleStableQuestion(raw, context)) {
+    if (!isComplex && !isFollowUp && (isStableGeographyOrGeneralFactQuery(raw, context) || isSimpleStableQuestion(raw, context))) {
         const res = {
             ...base,
             route: 'fast_simple',
