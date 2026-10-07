@@ -322,6 +322,240 @@ const TOPIC_AUTHORITY_REGISTRY = Object.freeze({
     }
 });
 
+export const MCP_TOOL_DEFINITIONS = Object.freeze([
+    {
+        name: 'web_search',
+        description: 'Searches the live web for verified facts, up-to-date documentation, official policies, and fresh information.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                query: {
+                    type: 'string',
+                    description: 'The search query to look up on the live web.'
+                },
+                limit: {
+                    type: 'integer',
+                    description: 'Maximum number of verified results to return (1-20, default 8).'
+                }
+            },
+            required: ['query']
+        }
+    },
+    {
+        name: 'web_fetch',
+        description: 'Fetches and converts a web page or article into clean markdown text using web crawler extraction.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                url: {
+                    type: 'string',
+                    description: 'The target URL to fetch and convert to markdown.'
+                }
+            },
+            required: ['url']
+        }
+    }
+]);
+
+export function getGroqApiKey() {
+    return String(process.env.GROQ_API_KEYS || process.env.GROQ_API_KEY || process.env.GROQ_KEY || '').trim();
+}
+
+async function readSseStream(body, onPayload) {
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    const processText = (text) => {
+        buffer += text;
+        const events = buffer.split(/\r?\n\r?\n/);
+        buffer = events.pop() || '';
+        for (const eventText of events) {
+            const dataLines = eventText
+                .split(/\r?\n/)
+                .filter(line => line.startsWith('data:'))
+                .map(line => line.slice(5).trim());
+            if (!dataLines.length) continue;
+            const dataText = dataLines.join('\n');
+            if (!dataText || dataText === '[DONE]') continue;
+            try {
+                const payload = JSON.parse(dataText);
+                onPayload(payload);
+            } catch (_) {}
+        }
+    };
+
+    if (body && typeof body.getReader === 'function') {
+        const reader = body.getReader();
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            processText(decoder.decode(value, { stream: true }));
+        }
+    } else if (body && typeof body[Symbol.asyncIterator] === 'function') {
+        for await (const chunk of body) {
+            processText(typeof chunk === 'string' ? chunk : decoder.decode(chunk, { stream: true }));
+        }
+    }
+}
+
+export async function planDynamicSearchQueries(rawQuery) {
+    const cleanQ = normalizeSearchQuery(rawQuery);
+    if (!cleanQ) return [];
+
+    const prompt = `You are an expert search engine query planner. Decompose the following user question into 1 to 4 focused web search queries to locate official first-party policies, documentation, and current factual records.\n\nUser Question:\n"${cleanQ}"\n\nReturn pure JSON with format: {"queries": ["query 1", "query 2"]}`;
+
+    try {
+        const parsed = await callGeminiJson(prompt, { maxOutputTokens: 300 });
+        if (parsed && Array.isArray(parsed.queries) && parsed.queries.length > 0) {
+            const planned = parsed.queries
+                .map(q => normalizeSearchQuery(q))
+                .filter(Boolean);
+            if (planned.length > 0) {
+                return Array.from(new Set(planned)).slice(0, 4);
+            }
+        }
+    } catch (_) {}
+
+    return buildDeterministicSearchQueries(cleanQ);
+}
+
+export async function handleStreamingWebRag(req, res, { rawQuery, limit = 8 }) {
+    res.writeHead(200, {
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-cache, no-transform',
+        'Connection': 'keep-alive'
+    });
+
+    const sendEvent = (event, data) => {
+        try {
+            res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        } catch (_) {}
+    };
+
+    sendEvent('status', { status: 'searching', message: 'Searching live sources...' });
+
+    let searchRes = null;
+    try {
+        searchRes = await runEvidenceFirstWebRag(rawQuery, {
+            limit,
+            answer: false,
+            timeoutMs: 4500
+        });
+    } catch (_) {}
+
+    if (!searchRes || !Array.isArray(searchRes.results) || searchRes.results.length === 0) {
+        try {
+            searchRes = await runVerifiedWebSearch(rawQuery, { limit });
+        } catch (_) {}
+    }
+
+    const sources = Array.isArray(searchRes?.results) ? searchRes.results : [];
+
+    if (sources.length > 0) {
+        sendEvent('sources', { sources });
+        sendEvent('status', { status: 'synthesizing', message: 'Synthesizing response from verified sources...' });
+    } else {
+        sendEvent('sources', { sources: [] });
+        sendEvent('status', { status: 'fallback', message: 'Answering from comprehensive model knowledge...' });
+    }
+
+    let systemPrompt = '';
+    let userPrompt = '';
+
+    if (sources.length > 0) {
+        const sourcesContext = sources.map((s, idx) => {
+            const snippet = cleanSnippetText(s.snippet || s.description || '');
+            return `[${idx + 1}] Title: ${s.title}\nURL: ${s.url}\nDomain: ${s.domain || ''}\nExcerpt: ${snippet}`;
+        }).join('\n\n');
+
+        systemPrompt = 'You are an expert AI research assistant. Provide an exhaustive, accurate, and beautifully structured response to the user prompt grounded directly in the provided live sources. If comparison tables, columns, or specific sections were requested, follow every instruction precisely. Cite sources using [1], [2], etc., corresponding to the provided sources list.';
+        userPrompt = `User Prompt:\n${rawQuery}\n\nLive Sources:\n${sourcesContext}`;
+    } else {
+        systemPrompt = 'You are an expert AI assistant. Provide an exhaustive, accurate, and beautifully structured response to the user prompt using your comprehensive knowledge base. Fulfill all formatting, tables, columns, and detailed breakdowns thoroughly.';
+        userPrompt = rawQuery;
+    }
+
+    let streamedAny = false;
+    const groqKey = getGroqApiKey();
+    if (groqKey) {
+        const models = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'];
+        for (const model of models) {
+            try {
+                const response = await fetchWithTimeout('https://api.groq.com/openai/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${groqKey}`
+                    },
+                    body: JSON.stringify({
+                        model,
+                        messages: [
+                            { role: 'system', content: systemPrompt },
+                            { role: 'user', content: userPrompt }
+                        ],
+                        temperature: 0.3,
+                        max_tokens: 3000,
+                        stream: true
+                    })
+                }, 15000);
+
+                if (response.ok && response.body) {
+                    await readSseStream(response.body, payload => {
+                        const delta = payload?.choices?.[0]?.delta?.content;
+                        if (delta) {
+                            streamedAny = true;
+                            sendEvent('token', { token: delta });
+                        }
+                    });
+                    if (streamedAny) break;
+                }
+            } catch (_) {}
+        }
+    }
+
+    if (!streamedAny) {
+        const geminiKey = getGeminiApiKey();
+        if (geminiKey) {
+            try {
+                const response = await fetchWithTimeout(
+                    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse&key=${geminiKey}`,
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            contents: [{ parts: [{ text: userPrompt }] }],
+                            system_instruction: { parts: [{ text: systemPrompt }] },
+                            generationConfig: { maxOutputTokens: 3000, temperature: 0.3 }
+                        })
+                    },
+                    15000
+                );
+                if (response.ok && response.body) {
+                    await readSseStream(response.body, payload => {
+                        const parts = payload?.candidates?.[0]?.content?.parts || [];
+                        for (const part of parts) {
+                            if (part?.text) {
+                                streamedAny = true;
+                                sendEvent('token', { token: part.text });
+                            }
+                        }
+                    });
+                }
+            } catch (_) {}
+        }
+    }
+
+    if (!streamedAny) {
+        const summary = sources.length > 0
+            ? sources.map((s, idx) => `### [${idx + 1}] [${s.title}](${s.url})\n${cleanSnippetText(s.snippet || s.description || '')}`).join('\n\n')
+            : 'No live records or streaming model keys were available to generate an online answer for this query.';
+        sendEvent('token', { token: summary });
+    }
+
+    sendEvent('done', {});
+    res.end();
+}
+
 export default async function handler(req, res) {
     const guard = applyApiSecurity(req, res, {
         methods: ['POST'],
@@ -330,6 +564,65 @@ export default async function handler(req, res) {
         rateLimit: { max: 60, windowMs: 60 * 1000 }
     });
     if (guard.handled) return;
+
+    // MCP: tools/list discovery endpoint
+    if (req.body?.method === 'tools/list' || req.body?.action === 'mcp_list_tools' || req.body?.type === 'tools/list') {
+        return res.status(200).json({
+            tools: MCP_TOOL_DEFINITIONS
+        });
+    }
+
+    // MCP: tools/call execution endpoint
+    if (req.body?.method === 'tools/call' || req.body?.action === 'mcp_call_tool' || req.body?.type === 'tools/call') {
+        const toolName = String(req.body?.params?.name || req.body?.name || '').trim();
+        const args = req.body?.params?.arguments || req.body?.args || req.body?.arguments || {};
+        if (toolName === 'web_search') {
+            const q = String(args.query || args.q || '').trim();
+            const lim = clampInt(args.limit, 8, 1, 20);
+            try {
+                const search = await runVerifiedWebSearch(q, { limit: lim });
+                return res.status(200).json({
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify(search?.results || [], null, 2)
+                        }
+                    ],
+                    isError: false
+                });
+            } catch (err) {
+                return res.status(200).json({
+                    content: [{ type: 'text', text: String(err?.message || err) }],
+                    isError: true
+                });
+            }
+        }
+        if (toolName === 'web_fetch') {
+            const fetchUrl = String(args.url || args.query || '').trim();
+            const extracted = await extractWithCrawl4Ai(fetchUrl).catch(e => ({ success: false, error: String(e?.message || e) }));
+            const textContent = extracted?.content || extracted?.markdown || extracted?.text || extracted?.error || '';
+            return res.status(200).json({
+                content: [
+                    {
+                        type: 'text',
+                        text: textContent
+                    }
+                ],
+                isError: Boolean(extracted?.error)
+            });
+        }
+        return res.status(400).json({
+            content: [{ type: 'text', text: `Unknown tool: ${toolName}` }],
+            isError: true
+        });
+    }
+
+    // ChatGPT-Style Streaming RAG endpoint
+    if (req.body?.stream === true) {
+        const rawQ = String(req.body?.query || req.body?.q || req.body?.url || '').trim();
+        const limit = clampInt(req.body?.limit || req.body?.maxResults, 8, 1, 20);
+        return handleStreamingWebRag(req, res, { rawQuery: rawQ, limit });
+    }
 
     if (req.body?.task === 'web_fetch' || req.body?.action === 'web_fetch') {
         const fetchUrl = String(req.body?.url || req.body?.query || '').trim();
@@ -624,7 +917,7 @@ export async function classifyRetrievalDecision(query, options = {}) {
     }
 
     // 2. Model-assisted intent reasoning (Gemini / Groq with temperature 0)
-    if (hasGeminiKey() || Boolean(process.env.GROQ_API_KEY)) {
+    if (hasGeminiKey() || Boolean(getGroqApiKey())) {
         try {
             const todayStr = new Date().toISOString().slice(0, 10);
             const currentYear = new Date().getFullYear();
@@ -3654,7 +3947,7 @@ async function buildGroundedRagAnswer(query, results, gate, options = {}) {
         ? [...currentEvidence, ...historicalContext]
         : evidence;
 
-    if (getGeminiApiKey() || process.env.GROQ_API_KEY) {
+    if (getGeminiApiKey() || getGroqApiKey()) {
         if (options?.allowDeepCrawl === true) {
             await enrichSearchResultsWithDeepCrawl(orderedEvidence, 2).catch(() => {});
         }
@@ -3855,9 +4148,9 @@ async function callGeminiJson(prompt, options = {}) {
         }
     }
 
-    const groqKey = String(process.env.GROQ_API_KEY || '').trim();
+    const groqKey = getGroqApiKey();
     if (groqKey) {
-        const groqModels = ['qwen-2.5-coder-32b', 'qwen/qwen3.6-27b', 'openai/gpt-oss-120b', 'openai/gpt-oss-20b'];
+        const groqModels = ['llama-3.1-8b-instant', 'llama-3.3-70b-versatile', 'qwen-2.5-coder-32b', 'openai/gpt-oss-120b'];
         for (const model of groqModels) {
             try {
                 const response = await fetchWithTimeout('https://api.groq.com/openai/v1/chat/completions', {
@@ -5101,5 +5394,8 @@ export const __test = {
     isTechnicalDocumentationQuery,
     scoreSearchResult,
     distillSearchQuery,
-    extractComparisonEntities
+    extractComparisonEntities,
+    MCP_TOOL_DEFINITIONS,
+    planDynamicSearchQueries,
+    handleStreamingWebRag
 };
