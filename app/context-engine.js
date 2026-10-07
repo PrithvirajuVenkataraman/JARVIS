@@ -75,6 +75,81 @@ const ENTITY_PATTERNS = Object.freeze([
     /\b(?:in|to|for)\s+([A-Z][A-Za-z .'-]{1,50})/
 ]);
 
+export function extractAssistantListItems(text = '') {
+    const raw = String(text || '');
+    const items = [];
+    const lines = raw.split(/\r?\n/);
+    for (const line of lines) {
+        const trimmed = line.trim();
+        const numMatch = trimmed.match(/^(?:(?:\d{1,2}|[a-e])[\.\)]|\-|\*)\s+(?:\*\*)?([A-Za-z0-9][A-Za-z0-9\s,'’\.\-–—:]{2,80})(?:\*\*)?/i);
+        if (numMatch) {
+            const item = numMatch[1].replace(/[:–—\-\*\.]+$/, '').trim();
+            if (item && item.length >= 3 && !/^(?:step|note|tip|here|these|first|second|third)\b/i.test(item)) {
+                items.push(item);
+            }
+        }
+    }
+    return items.slice(0, 10);
+}
+
+export function extractAssistantKeyEntities(text = '') {
+    const raw = String(text || '');
+    const entities = [];
+    const boldMatches = raw.matchAll(/\*\*([A-Za-z0-9][A-Za-z0-9\s,'’\.\-–—]{2,60})\*\*/g);
+    for (const m of boldMatches) {
+        const val = m[1].replace(/[:–—\-\.]+$/, '').trim();
+        if (val && val.length >= 3 && !entities.includes(val) && !/^(?:note|tip|important|key|summary|overview|pros|cons)\b/i.test(val)) {
+            entities.push(val);
+        }
+    }
+    const propMatches = raw.matchAll(/\b([A-Z][a-z0-9]{2,}(?:\s+[A-Z][a-z0-9]{2,}){1,3})\b/g);
+    for (const m of propMatches) {
+        const val = m[1].trim();
+        if (val && !entities.includes(val) && !STOP_WORDS.has(val.toLowerCase())) {
+            entities.push(val);
+        }
+    }
+    return entities.slice(0, 12);
+}
+
+export function resolveOrdinalOrAnaphoricAntecedent(text = '', thread = null) {
+    if (!thread) return null;
+    const lower = String(text || '').toLowerCase().trim();
+    const listItems = Array.isArray(thread.assistantListItems) ? thread.assistantListItems : [];
+    const entities = Array.isArray(thread.assistantEntities) ? thread.assistantEntities : [];
+
+    if (/\b(?:first(?:\s+(?:one|option|item|park|place|book|suggestion))?|option\s*1|number\s*1|#1|former)\b/i.test(lower)) {
+        if (listItems.length >= 1) return listItems[0];
+        if (entities.length >= 1) return entities[0];
+    }
+    if (/\b(?:second(?:\s+(?:one|option|item|park|place|book|suggestion))?|option\s*2|number\s*2|#2|latter)\b/i.test(lower)) {
+        if (listItems.length >= 2) return listItems[1];
+        if (entities.length >= 2) return entities[1];
+    }
+    if (/\b(?:third(?:\s+(?:one|option|item|park|place|book|suggestion))?|option\s*3|number\s*3|#3)\b/i.test(lower)) {
+        if (listItems.length >= 3) return listItems[2];
+        if (entities.length >= 3) return entities[2];
+    }
+    if (/\b(?:fourth(?:\s+(?:one|option|item|park|place|book|suggestion))?|option\s*4|number\s*4|#4)\b/i.test(lower)) {
+        if (listItems.length >= 4) return listItems[3];
+    }
+    if (/\b(?:fifth(?:\s+(?:one|option|item|park|place|book|suggestion))?|option\s*5|number\s*5|#5)\b/i.test(lower)) {
+        if (listItems.length >= 5) return listItems[4];
+    }
+    if (/\b(?:last(?:\s+(?:one|option|item))?|final\s+(?:one|option|item))\b/i.test(lower)) {
+        if (listItems.length > 0) return listItems[listItems.length - 1];
+        if (entities.length > 0) return entities[entities.length - 1];
+    }
+
+    if (/\b(?:it|its|that|this|there)\b/i.test(lower)) {
+        if (thread.entity) return thread.entity;
+        if (entities.length > 0) return entities[0];
+        if (thread.topic) return thread.topic;
+    }
+
+    return null;
+}
+
 export function createConversationEngine(options = {}) {
     const maxTurns = clamp(options.maxTurns, 12, 4, 60);
     const maxTurnHistory = clamp(options.maxTurnHistory, 160, 40, 400);
@@ -145,19 +220,28 @@ export function classifyInput(message, pending = null, activeThread = null) {
     const hasFollowUpLead = /^(?:show examples?|examples?|more(?: details| info)?|continue(?: speaking| reading)?|explain (?:further|more|simply|it)|tell (?:me )?more|expand(?: on that)?|elaborate|what about|how about|then what|what next|what else|pros and cons|difference|differences|compare|cost|price|details|break that down|go deeper|give (?:some |an? )?(?:examples?|use cases?|code|sample)|can you (?:give|show|explain|elaborate))\b/i.test(lower);
     const hasDefiniteAspect = /\b(?:the|its|their)\s+[a-z]{3,}\b/i.test(lower);
     const isUltraShortFollowUp = /^(?:why|how|when|where|who|what next|what else|and then|how so|what about that|what about it|why so|who was it|who is it|what was it|what is that|how come)\??$/i.test(lower.trim());
+    const hasOrdinalReference = /\b(?:first(?:\s+(?:one|option|item))?|second(?:\s+(?:one|option|item))?|third(?:\s+(?:one|option|item))?|fourth(?:\s+(?:one|option|item))?|fifth(?:\s+(?:one|option|item))?|last(?:\s+(?:one|option|item))?|former|latter|option\s+[1-9]|number\s+[1-9]|#\s*[1-9])\b/i.test(lower);
+    const assistantEntitiesText = activeThread && Array.isArray(activeThread.assistantEntities) ? activeThread.assistantEntities.join(' ') : '';
+    const assistantListText = activeThread && Array.isArray(activeThread.assistantListItems) ? activeThread.assistantListItems.join(' ') : '';
+    const assistantOverlap = (assistantEntitiesText || assistantListText)
+        ? countOverlap(tokens, tokenize(`${assistantEntitiesText} ${assistantListText}`))
+        : 0;
+    const referencesAssistantOutput = Boolean(activeThread) && (hasOrdinalReference || assistantOverlap > 0);
+
     const isContinuationOfActiveThread = Boolean(activeThread) && (
         /\b(?:use cases?|real world|applications?|alternatives?|examples?|pros and cons|tradeoffs?|benefits?|drawbacks?|how to implement|why is that|can you explain|walk me through|in practice|code sample)\b/i.test(lower) ||
         (hasAnaphoricReference) ||
+        referencesAssistantOutput ||
         (/^(?:how|why|can|what|where|which|do|does)\b/i.test(lower) && tokens.length <= 10 && !looksLikeStandaloneNamedTopic(originalMessage, tokens) && !isStandaloneLiveRequest)
     );
-    const isFollowUp = isCorrection || isModification || isPlaceRelativeFollowUp || hasFollowUpLead || isUltraShortFollowUp || isContinuationOfActiveThread || (hasAnaphoricReference && (vectorCosineSimilarity(vec, FOLLOWUP_VECTOR) >= 0.28 || tokens.length <= 8)) || (hasDefiniteAspect && Boolean(activeThread) && tokens.length <= 8) || vectorCosineSimilarity(vec, FOLLOWUP_VECTOR) >= 0.35;
+    const isFollowUp = isCorrection || isModification || isPlaceRelativeFollowUp || hasFollowUpLead || isUltraShortFollowUp || isContinuationOfActiveThread || referencesAssistantOutput || (hasAnaphoricReference && (vectorCosineSimilarity(vec, FOLLOWUP_VECTOR) >= 0.28 || tokens.length <= 8)) || (hasDefiniteAspect && Boolean(activeThread) && tokens.length <= 8) || vectorCosineSimilarity(vec, FOLLOWUP_VECTOR) >= 0.35;
     const pendingMatch = pending ? matchesPending(originalMessage, pending) : false;
     const hasSubstantiveIntent = tokens.length >= 1 && !isAcknowledgement;
     const startsClearRequest = /^(?:who|what|when|where|why|how|do|can|are|will|explain|tell|give|show|plan|create|write|compare|calculate|translate|remember|open|start)\b/i.test(originalMessage);
     const isStandaloneCapabilityQuestion = !isFollowUp && STANDALONE_CAPABILITY_QUESTION.test(originalMessage);
     const topic = deriveTopic(originalMessage);
     const topicOverlap = activeThread
-        ? countOverlap(tokens, tokenize(`${activeThread.topic || ''} ${activeThread.entity || ''}`))
+        ? countOverlap(tokens, tokenize(`${activeThread.topic || ''} ${activeThread.entity || ''} ${assistantEntitiesText} ${assistantListText}`))
         : 0;
     const looksLikeNamedTopic = looksLikeStandaloneNamedTopic(originalMessage, tokens);
     const ambiguousShortContext = false;
@@ -165,6 +249,7 @@ export function classifyInput(message, pending = null, activeThread = null) {
         !isSetting &&
         hasSubstantiveIntent &&
         !isUltraShortFollowUp &&
+        !referencesAssistantOutput &&
         (
             isExplicitSwitch ||
             isFeatureCommand ||
@@ -332,6 +417,19 @@ function recordTurn(state, turn, limits) {
                 thread.topic = topic;
             }
         }
+    } else if (role === 'assistant') {
+        thread.lastAssistantText = text;
+        const listItems = extractAssistantListItems(text);
+        if (listItems.length > 0) {
+            thread.assistantListItems = listItems;
+        }
+        const entities = extractAssistantKeyEntities(text);
+        if (entities.length > 0) {
+            thread.assistantEntities = entities;
+            if (!thread.entity) {
+                thread.entity = entities[0];
+            }
+        }
     }
     return { ...record };
 }
@@ -494,8 +592,9 @@ function restoreState(state, snapshot, limits) {
 function resolution(originalMessage, resolvedMessage, thread, decisionReason, confidence, cancelledPendingState) {
     const verbatim = cleanText(originalMessage);
     let searchQuery = verbatim;
-    if (decisionReason === 'contextual_follow_up' && thread) {
-        const anchor = cleanText(thread.entity || thread.topic || '');
+    const resolvedAntecedent = resolveOrdinalOrAnaphoricAntecedent(verbatim, thread);
+    if ((decisionReason === 'contextual_follow_up' || decisionReason === 'conversation_repair') && thread) {
+        const anchor = cleanText(resolvedAntecedent || thread.entity || thread.topic || '');
         if (anchor && !verbatim.toLowerCase().includes(anchor.toLowerCase())) {
             searchQuery = `${anchor} ${verbatim}`;
         }
@@ -504,6 +603,7 @@ function resolution(originalMessage, resolvedMessage, thread, decisionReason, co
         originalMessage: verbatim,
         verbatimMessage: verbatim,
         resolvedMessage: verbatim,
+        resolvedAntecedent: resolvedAntecedent || '',
         searchQuery,
         activeThread: thread ? { ...thread } : null,
         decisionReason,
@@ -624,11 +724,16 @@ function findRecentEntityFromState(state) {
     if (state.activeThreadId && state.threads?.has(state.activeThreadId)) {
         const t = state.threads.get(state.activeThreadId);
         if (t.entity) return t.entity;
+        if (Array.isArray(t.assistantEntities) && t.assistantEntities.length) return t.assistantEntities[0];
         if (t.topic) return t.topic;
     }
     const turns = Array.isArray(state.turns) ? state.turns : [];
     for (let i = turns.length - 1; i >= 0 && i >= turns.length - 8; i--) {
         const turn = turns[i];
+        if (turn.role === 'assistant') {
+            const entities = extractAssistantKeyEntities(turn.text);
+            if (entities.length > 0) return entities[0];
+        }
         const entity = deriveEntity(turn.text);
         if (entity && !PLACE_RELATIVE_FOLLOWUP.test(entity)) return entity;
     }
@@ -680,6 +785,15 @@ function shouldResolveAgainstActiveThread(message, classification, activeThread)
 
     if (classification?.isStandaloneLiveRequest && overlap === 0) return false;
     if (hasExplicitPlaceMention(raw) && overlap === 0) return false;
+    
+    const assistantEntitiesText = activeThread && Array.isArray(activeThread.assistantEntities) ? activeThread.assistantEntities.join(' ') : '';
+    const assistantListText = activeThread && Array.isArray(activeThread.assistantListItems) ? activeThread.assistantListItems.join(' ') : '';
+    const assistantOverlap = (assistantEntitiesText || assistantListText)
+        ? countOverlap(tokens, tokenize(`${assistantEntitiesText} ${assistantListText}`))
+        : 0;
+    const hasOrdinal = /\b(?:first(?:\s+(?:one|option|item))?|second(?:\s+(?:one|option|item))?|third(?:\s+(?:one|option|item))?|fourth(?:\s+(?:one|option|item))?|fifth(?:\s+(?:one|option|item))?|last(?:\s+(?:one|option|item))?|former|latter|option\s+[1-9]|number\s+[1-9]|#\s*[1-9])\b/i.test(lower);
+    if (assistantOverlap > 0 || hasOrdinal) return true;
+
     if (hasNewNamedEntity || namedLikeNewTopic || bareShortQuestion || explicitNewObject) return false;
     if (overlap > 0) return true;
     if (explicitReference && hasTopicAnchor) return true;
@@ -949,14 +1063,16 @@ export function retrievePastTurns(turns = [], query = '', options = {}) {
 export function buildMultiTierContext(state, options = {}) {
     const currentMessage = cleanText(options.message || '');
     const maxRecentTurns = clamp(options.maxRecentTurns || options.maxVerbatimTurns, 8, 2, 20);
-    const maxContextChars = clamp(options.maxContextChars, 9000, 1000, 24000);
+    const maxContextChars = clamp(options.maxContextChars, 12000, 1000, 24000);
 
     const allTurns = Array.isArray(state?.turns) ? state.turns : [];
     const threadId = cleanText(options.threadId) || state?.activeThreadId || '';
     
     // Select turns for conversation: prioritize active thread for verbatim window, search all session turns for retrieval
     let verbatimTurnsSource = (threadId ? allTurns.filter(t => t.threadId === threadId) : allTurns);
-    if (verbatimTurnsSource.length < 4 && allTurns.length >= 4) {
+    if (verbatimTurnsSource.length < 2 && allTurns.length > 0) {
+        verbatimTurnsSource = allTurns;
+    } else if (verbatimTurnsSource.length < 4 && allTurns.length > verbatimTurnsSource.length) {
         verbatimTurnsSource = allTurns;
     }
 
