@@ -541,14 +541,31 @@ async function createPendingAttachment(file) {
         const ext = file.type ? (file.type.split('/')[1]?.replace('jpeg', 'jpg') || 'png') : 'png';
         fileName = `pasted-media-${Date.now()}.${ext}`;
     }
-    const base64 = isImage
-        ? await compressImageFileToBase64(file).catch(() => fileToBase64(file))
-        : await fileToBase64(file);
+    let base64 = '';
+    let storedMimeType = isImage ? (file.type || 'image/jpeg') : (file.type || guessMimeFromName(fileName));
+    if (isImage) {
+        base64 = await compressImageFileToBase64(file).catch(() => fileToBase64(file));
+        // After canvas re-encoding, base64 is always JPEG — normalize the stored MIME type
+        // to match what was actually encoded. This prevents MIME mismatch when passing to AI models.
+        const rawMime = String(file.type || '').toLowerCase().trim();
+        if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(rawMime)) {
+            // Non-standard MIME (HEIC, HEIF, AVIF, DNG, TIFF, BMP, etc.) — canvas re-encoded to JPEG
+            storedMimeType = 'image/jpeg';
+        } else if (rawMime === 'image/jpeg' || rawMime === '') {
+            storedMimeType = 'image/jpeg';
+        }
+        // PNG/WebP/GIF: canvas.toDataURL('image/jpeg') is always used, so normalize to jpeg
+        // unless file is already PNG/WebP/GIF and no orientation correction was needed
+        // (we always use 'image/jpeg' quality compression for size reasons)
+        storedMimeType = 'image/jpeg';
+    } else {
+        base64 = await fileToBase64(file);
+    }
     const previewUrl = isImage ? URL.createObjectURL(file) : '';
     return {
         id: `att_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         name: fileName,
-        mimeType: isImage ? (file.type || 'image/jpeg') : (file.type || guessMimeFromName(fileName)),
+        mimeType: storedMimeType,
         size: file.size || 0,
         file,
         base64,
@@ -556,31 +573,125 @@ async function createPendingAttachment(file) {
     };
 }
 
+/**
+ * Reads the EXIF orientation tag from the raw binary of a JPEG file.
+ * Returns 1 (normal) if not found or not a JPEG.
+ * Orientation values: 1=normal, 3=180°, 6=90°CW, 8=90°CCW
+ */
+async function readExifOrientation(file) {
+    try {
+        // Only JPEG files have EXIF — skip for PNG/GIF/WebP
+        const header = await file.slice(0, 3).arrayBuffer();
+        const headerBytes = new Uint8Array(header);
+        // JPEG starts with FF D8
+        if (headerBytes[0] !== 0xFF || headerBytes[1] !== 0xD8) return 1;
+
+        const buffer = await file.slice(0, 64 * 1024).arrayBuffer();
+        const view = new DataView(buffer);
+        let offset = 2;
+        while (offset < view.byteLength - 4) {
+            const marker = view.getUint16(offset);
+            offset += 2;
+            if (marker === 0xFFE1) {
+                // APP1 segment — check for Exif header
+                const segLen = view.getUint16(offset);
+                offset += 2;
+                const exifHeader = view.getUint32(offset);
+                if (exifHeader !== 0x45786966) return 1; // 'Exif'
+                offset += 6; // skip 'Exif\0\0'
+                const tiffStart = offset;
+                const byteOrder = view.getUint16(tiffStart);
+                const littleEndian = byteOrder === 0x4949;
+                const getUint16 = (o) => view.getUint16(tiffStart + o, littleEndian);
+                const getUint32 = (o) => view.getUint32(tiffStart + o, littleEndian);
+                const ifdOffset = getUint32(4);
+                const numEntries = getUint16(ifdOffset);
+                for (let i = 0; i < numEntries; i++) {
+                    const entryOffset = ifdOffset + 2 + (i * 12);
+                    if (entryOffset + 12 > view.byteLength - tiffStart) break;
+                    const tag = getUint16(entryOffset);
+                    if (tag === 0x0112) { // Orientation tag
+                        return getUint16(entryOffset + 8);
+                    }
+                }
+                return 1;
+            } else if ((marker & 0xFF00) === 0xFF00) {
+                offset += view.getUint16(offset);
+            } else {
+                break;
+            }
+        }
+    } catch (_) {}
+    return 1;
+}
+
+/**
+ * Applies canvas rotation transform for EXIF orientation.
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {number} orientation - EXIF orientation (1-8)
+ * @param {number} width - original image width
+ * @param {number} height - original image height
+ * @returns {{ canvasWidth: number, canvasHeight: number }}
+ */
+function applyExifOrientationTransform(ctx, orientation, width, height) {
+    switch (orientation) {
+        case 2: ctx.transform(-1, 0, 0, 1, width, 0); return { canvasWidth: width, canvasHeight: height };
+        case 3: ctx.transform(-1, 0, 0, -1, width, height); return { canvasWidth: width, canvasHeight: height };
+        case 4: ctx.transform(1, 0, 0, -1, 0, height); return { canvasWidth: width, canvasHeight: height };
+        case 5: ctx.transform(0, 1, 1, 0, 0, 0); return { canvasWidth: height, canvasHeight: width };
+        case 6: ctx.transform(0, 1, -1, 0, height, 0); return { canvasWidth: height, canvasHeight: width };
+        case 7: ctx.transform(0, -1, -1, 0, height, width); return { canvasWidth: height, canvasHeight: width };
+        case 8: ctx.transform(0, -1, 1, 0, 0, width); return { canvasWidth: height, canvasHeight: width };
+        default: return { canvasWidth: width, canvasHeight: height };
+    }
+}
+
 async function compressImageFileToBase64(file, maxDimension = 1536, quality = 0.82) {
     if (typeof document === 'undefined') {
         return fileToBase64(file);
     }
 
-    // Modern memory-efficient decoding via createImageBitmap (supported in modern mobile browsers)
+    // Read EXIF orientation FIRST (before any decode) for phone camera photos
+    const exifOrientation = await readExifOrientation(file).catch(() => 1);
+    const needsRotation = exifOrientation >= 5 && exifOrientation <= 8; // 90° or 270° rotations swap W/H
+
+    // Modern memory-efficient decoding via createImageBitmap
+    // NOTE: createImageBitmap does NOT reliably apply EXIF orientation on iOS Safari / older Android
+    // We always apply orientation manually via canvas transform to guarantee correctness.
     if (typeof createImageBitmap === 'function') {
         try {
-            const bitmap = await createImageBitmap(file);
-            let width = bitmap.width;
-            let height = bitmap.height;
-            if (width > maxDimension || height > maxDimension) {
-                if (width > height) {
-                    height = Math.round((height * maxDimension) / width);
-                    width = maxDimension;
+            // imageOrientation: 'none' forces raw pixel data without browser auto-rotation
+            // so our manual EXIF transform is always authoritative
+            const bitmap = await createImageBitmap(file, { imageOrientation: 'none' }).catch(() => createImageBitmap(file));
+            let srcWidth = bitmap.width;
+            let srcHeight = bitmap.height;
+
+            // Apply dimension scaling BEFORE rotation for proper aspect ratio
+            let drawWidth = srcWidth;
+            let drawHeight = srcHeight;
+            const maxDim = needsRotation ? maxDimension : maxDimension;
+            if (srcWidth > maxDim || srcHeight > maxDim) {
+                if (srcWidth > srcHeight) {
+                    drawHeight = Math.round((srcHeight * maxDim) / srcWidth);
+                    drawWidth = maxDim;
                 } else {
-                    width = Math.round((width * maxDimension) / height);
-                    height = maxDimension;
+                    drawWidth = Math.round((srcWidth * maxDim) / srcHeight);
+                    drawHeight = maxDim;
                 }
             }
+
+            // Calculate canvas dimensions accounting for rotation
             const canvas = document.createElement('canvas');
-            canvas.width = width;
-            canvas.height = height;
             const ctx = canvas.getContext('2d');
-            ctx.drawImage(bitmap, 0, 0, width, height);
+            const { canvasWidth, canvasHeight } = applyExifOrientationTransform(
+                ctx, exifOrientation, drawWidth, drawHeight
+            );
+            canvas.width = canvasWidth;
+            canvas.height = canvasHeight;
+            // Re-apply because applyExifOrientationTransform mutates ctx but we need correct canvas size set first
+            const ctx2 = canvas.getContext('2d');
+            applyExifOrientationTransform(ctx2, exifOrientation, drawWidth, drawHeight);
+            ctx2.drawImage(bitmap, 0, 0, drawWidth, drawHeight);
             bitmap.close?.();
             const dataUrl = canvas.toDataURL('image/jpeg', quality);
             const comma = dataUrl.indexOf(',');
@@ -589,7 +700,7 @@ async function compressImageFileToBase64(file, maxDimension = 1536, quality = 0.
         } catch (_) {}
     }
 
-    // Fallback using URL.createObjectURL (avoids multi-MB FileReader base64 string in JS memory)
+    // Fallback using URL.createObjectURL + <img> element
     return new Promise((resolve, reject) => {
         let objectUrl = '';
         try {
@@ -601,22 +712,30 @@ async function compressImageFileToBase64(file, maxDimension = 1536, quality = 0.
         const img = new Image();
         img.onload = () => {
             try {
-                let width = img.naturalWidth || img.width;
-                let height = img.naturalHeight || img.height;
-                if (width > maxDimension || height > maxDimension) {
-                    if (width > height) {
-                        height = Math.round((height * maxDimension) / width);
-                        width = maxDimension;
+                let srcWidth = img.naturalWidth || img.width;
+                let srcHeight = img.naturalHeight || img.height;
+                let drawWidth = srcWidth;
+                let drawHeight = srcHeight;
+                if (srcWidth > maxDimension || srcHeight > maxDimension) {
+                    if (srcWidth > srcHeight) {
+                        drawHeight = Math.round((srcHeight * maxDimension) / srcWidth);
+                        drawWidth = maxDimension;
                     } else {
-                        width = Math.round((width * maxDimension) / height);
-                        height = maxDimension;
+                        drawWidth = Math.round((srcWidth * maxDimension) / srcHeight);
+                        drawHeight = maxDimension;
                     }
                 }
+
                 const canvas = document.createElement('canvas');
-                canvas.width = width;
-                canvas.height = height;
                 const ctx = canvas.getContext('2d');
-                ctx.drawImage(img, 0, 0, width, height);
+                const { canvasWidth, canvasHeight } = applyExifOrientationTransform(
+                    ctx, exifOrientation, drawWidth, drawHeight
+                );
+                canvas.width = canvasWidth;
+                canvas.height = canvasHeight;
+                const ctx2 = canvas.getContext('2d');
+                applyExifOrientationTransform(ctx2, exifOrientation, drawWidth, drawHeight);
+                ctx2.drawImage(img, 0, 0, drawWidth, drawHeight);
                 const dataUrl = canvas.toDataURL('image/jpeg', quality);
                 const comma = dataUrl.indexOf(',');
                 const base64 = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
