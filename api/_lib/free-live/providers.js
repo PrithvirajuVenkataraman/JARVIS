@@ -21,11 +21,36 @@ const CRYPTO_IDS = Object.freeze({
     doge: 'dogecoin'
 });
 
+export function resolveDateFilter(options = {}, query = '') {
+    if (options.dateFilter) {
+        const df = String(options.dateFilter).toLowerCase();
+        if (df === 'day' || df === 'd') return { ddg: 'd', searx: 'day' };
+        if (df === 'week' || df === 'w') return { ddg: 'w', searx: 'week' };
+        if (df === 'month' || df === 'm') return { ddg: 'm', searx: 'month' };
+        if (df === 'year' || df === 'y') return { ddg: 'y', searx: 'year' };
+    }
+    const q = String(query).toLowerCase();
+    if (/\b(?:today|tonight|this\s+morning|past\s+24\s+hours?|last\s+24\s+hours?)\b/.test(q)) {
+        return { ddg: 'd', searx: 'day' };
+    }
+    if (/\b(?:this\s+week|past\s+week|last\s+week|current\s+week|past\s+7\s+days)\b/.test(q)) {
+        return { ddg: 'w', searx: 'week' };
+    }
+    if (/\b(?:this\s+month|past\s+month|last\s+month|current\s+month|past\s+30\s+days)\b/.test(q)) {
+        return { ddg: 'm', searx: 'month' };
+    }
+    return null;
+}
+
 export async function searchDuckDuckGoHtml(query, options = {}) {
     const limit = options.limit || 8;
     const timeoutMs = Math.min(Number(options.timeoutMs) || 2500, 3500);
+    const dateFilter = resolveDateFilter(options, query);
 
-    const tryDdgLite = async () => {
+    const tryDdgLite = async (dfParam = dateFilter?.ddg) => {
+        const body = dfParam
+            ? `q=${encodeURIComponent(query)}&df=${encodeURIComponent(dfParam)}`
+            : `q=${encodeURIComponent(query)}`;
         const response = await fetchWithTimeout('https://lite.duckduckgo.com/lite/', {
             method: 'POST',
             signal: options.signal,
@@ -37,7 +62,7 @@ export async function searchDuckDuckGoHtml(query, options = {}) {
                 'Accept-Encoding': 'gzip, deflate, br',
                 'Cookie': 'kl=-1; k5=1; k1=-1'
             },
-            body: `q=${encodeURIComponent(query)}`
+            body
         }, timeoutMs);
         if (!response.ok) return [];
         const html = await response.text();
@@ -84,8 +109,10 @@ export async function searchDuckDuckGoHtml(query, options = {}) {
         return results;
     };
 
-    const tryDdgHtml = async () => {
-        const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+    const tryDdgHtml = async (dfParam = dateFilter?.ddg) => {
+        const url = dfParam
+            ? `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}&df=${encodeURIComponent(dfParam)}`
+            : `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
         const response = await fetchWithTimeout(url, {
             signal: options.signal,
             headers: {
@@ -153,6 +180,15 @@ export async function searchDuckDuckGoHtml(query, options = {}) {
         ]);
         return results;
     } catch (_) {
+        if (dateFilter?.ddg) {
+            try {
+                const unconstrainedResults = await Promise.any([
+                    tryDdgLite(null).then(r => r && r.length ? r : Promise.reject()),
+                    tryDdgHtml(null).then(r => r && r.length ? r : Promise.reject())
+                ]);
+                return unconstrainedResults;
+            } catch (_) {}
+        }
         return [];
     }
 }
@@ -191,6 +227,7 @@ export async function searchSearXNGRacer(query, options = {}) {
     if (!rawQ) return [];
     const limit = clampInt(options.limit, 8, 1, 20);
     const timeoutMs = Math.min(options.timeoutMs || 2000, 2400);
+    const dateFilter = resolveDateFilter(options, rawQ);
     const configuredUrl = String(process.env.SEARXNG_URL || process.env.SEARX_URL || '').trim().replace(/\/+$/, '');
     const endpoints = configuredUrl 
         ? [configuredUrl.endsWith('/search') ? configuredUrl : `${configuredUrl}/search`]
@@ -206,11 +243,14 @@ export async function searchSearXNGRacer(query, options = {}) {
             'https://paulgo.io/search'
         ];
 
-    const fetchSingleEndpoint = async (baseEndpoint) => {
+    const fetchSingleEndpoint = async (baseEndpoint, useDateFilter = true) => {
         const url = new URL(baseEndpoint);
         url.searchParams.set('q', rawQ);
         url.searchParams.set('format', 'json');
         url.searchParams.set('categories', 'general');
+        if (useDateFilter && dateFilter?.searx) {
+            url.searchParams.set('time_range', dateFilter.searx);
+        }
 
         const response = await fetchWithTimeout(url.toString(), {
             headers: {
@@ -230,8 +270,13 @@ export async function searchSearXNGRacer(query, options = {}) {
     };
 
     try {
-        return await Promise.any(endpoints.map(ep => fetchSingleEndpoint(ep)));
+        return await Promise.any(endpoints.map(ep => fetchSingleEndpoint(ep, true)));
     } catch (_) {
+        if (dateFilter?.searx) {
+            try {
+                return await Promise.any(endpoints.map(ep => fetchSingleEndpoint(ep, false)));
+            } catch (_) {}
+        }
         return [];
     }
 }
