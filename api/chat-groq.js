@@ -557,22 +557,21 @@ async function getInstantFactHelper() {
         if (options?.tier === 'deep' || options?.forceReasoning === true || intent === 'deep_reasoning') {
             return { tier: 'deep', preferSpeed: false, reason: 'explicit_deep_tier_request' };
         }
-        if (['fast_simple', 'casual_chat', 'chat_title', 'fast_explainer', 'internal_summary'].includes(intent) || options?.minimalThinking === true) {
-            return { tier: 'instant', preferSpeed: true, reason: 'fast_intent_policy' };
-        }
+
         const query = String(rawQuery || '').trim();
         const words = query.split(/\s+/).filter(Boolean);
         const wordCount = words.length;
         const lower = query.toLowerCase();
 
-        // 1. Complex Reasoning / Deep Architecture Signals -> Strict Route to Groq GPT-OSS-120B
+        // 1. Complex Reasoning / Deep Architecture Signals -> Strict Route to Groq Deep Tier
         const deepSignals = [
-            /\b(?:architecture|system\s+design|distributed|microservices?|scalability|fault\s+tolerance|concurrency|database\s+schema|erd\b|erd\s+diagram)/i,
+            /\b(?:architecture|system\s+design|distributed|microservices?|scalability|fault\s+tolerance|concurrency|concurrent(?:ly| users)?|database\s+schema|erd\b|erd\s+diagram)/i,
+            /\b(?:round[- ]robin|load\s+balanc(?:ing|er)?|worker\s+pool|thread\s+pool|mutex|semaphore|failover|bottleneck|high\s+availability|throughput)/i,
             /\b(?:refactor|implement\s+(?:full|complete|entire)|build\s+(?:a|an)\s+(?:end-to-end|full-stack|compiler|interpreter|framework|parser|dag|lexer))/i,
             /\b(?:algorithm\s+proof|mathematical\s+proof|formal\s+verification|time\s+complexity\s+analysis|space\s+complexity\s+proof)/i,
             /\b(?:comparative\s+analysis|tradeoffs?|deep\s+dive|comprehensive\s+evaluation|in-depth\s+comparison|strategic\s+roadmap)/i,
             /\b(?:debug\s+this\s+memory\s+leak|deadlock|race\s+condition|profiling|heap\s+dump|segfault|core\s+dump)/i,
-            /\b(?:step-by-step\s+(?:guide|walkthrough|strategy|plan|roadmap|architecture))\b/i
+            /\b(?:step-by-step\s+(?:guide|walkthrough|strategy|plan|roadmap|architecture)|how\s+did\s+we\s+implement|how\s+do\s+we\s+implement|implementation\s+of)\b/i
         ];
 
         for (const pat of deepSignals) {
@@ -581,8 +580,12 @@ async function getInstantFactHelper() {
             }
         }
 
-        if (wordCount > 90) {
+        if (wordCount > 70) {
             return { tier: 'deep', preferSpeed: false, reason: 'long_detailed_prompt' };
+        }
+
+        if (['fast_simple', 'casual_chat', 'chat_title', 'fast_explainer', 'internal_summary'].includes(intent) || options?.minimalThinking === true) {
+            return { tier: 'instant', preferSpeed: true, reason: 'fast_intent_policy' };
         }
 
         // 2. Instant / Fast Tier Signals -> Ultra-fast sub-200ms TTFT strictly for trivial greetings, basic calculator math, or ultra-short lookups
@@ -1570,6 +1573,15 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             }
         }
 
+        // Ensure first dialogue message after system prompt is not an orphaned assistant turn
+        const firstNonSystemIdx = messages.findIndex(m => m.role !== 'system');
+        if (firstNonSystemIdx >= 0 && messages[firstNonSystemIdx].role === 'assistant') {
+            messages.splice(firstNonSystemIdx, 0, {
+                role: 'user',
+                content: '[Prior conversation context]'
+            });
+        }
+
         if (message) {
             messages.push({ role: 'user', content: String(message).trim() });
         }
@@ -2214,7 +2226,9 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             const text = String(m.content || m.text || '').trim();
             if (!text) continue;
             if (normalized.length === 0 && role === 'model') {
-                // Gemini API multi-turn dialogue cannot start with model turn
+                // Gemini API multi-turn dialogue cannot start with model turn. Prepend prior context prompt instead of dropping model turn.
+                normalized.push({ role: 'user', parts: [{ text: '[Prior conversation context]' }] });
+                normalized.push({ role: 'model', parts: [{ text }] });
                 continue;
             }
             if (normalized.length > 0 && normalized[normalized.length - 1].role === role) {
@@ -2253,7 +2267,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
         const routingTier = options?.tier || queryComplexity.tier;
         const speedPreferred = options?.preferSpeed !== undefined ? options.preferSpeed : queryComplexity.preferSpeed;
         const isReasoningQuery = isExplicitReasoningIntent(options?.intent, effectiveMsg);
-        const isFastSimple = options?.intent === 'fast_simple' || routingTier === 'instant';
+        const isFastSimple = (options?.intent === 'fast_simple' && routingTier !== 'deep') || (routingTier === 'instant' && routingTier !== 'deep');
         const reasoningAllowance = isFastSimple ? 0 : REASONING_TOKEN_ALLOWANCE;
         const targetMaxTokens = isFastSimple
             ? Math.min(512, clampInt(lengthPolicy?.maxTokens, 512, 64, 1024))
