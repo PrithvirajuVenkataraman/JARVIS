@@ -4271,6 +4271,8 @@ function isLowSignalModelAnswer(text) {
 function sanitizeWeakModelAnswer(answerText, userMessage) {
     const raw = String(answerText || '').trim();
     if (!raw) return '';
+    const normUser = String(userMessage || '').trim().toLowerCase();
+    if (raw.toLowerCase() === normUser) return '';
     const rawLower = raw.toLowerCase();
     const directQuery = isDirectExplainerQuery(userMessage) || isConciseDirectFactQuery(userMessage);
     const freshnessQuery = hasExplicitFreshnessLanguage(userMessage) ||
@@ -4349,20 +4351,25 @@ function asksUserToProvideSources(text) {
 
 async function resolveFinalAssistantAnswer(userMessage, answerText) {
     const raw = String(answerText || '').trim();
-    if (raw && !asksUserToProvideSources(raw)) return raw;
+    const normUser = String(userMessage || '').trim().toLowerCase();
+    const isEcho = Boolean(raw && raw.toLowerCase() === normUser);
+    if (raw && !isEcho && !asksUserToProvideSources(raw)) return raw;
 
     const safeAnswer = sanitizeWeakModelAnswer(answerText, userMessage);
-    if (safeAnswer) return safeAnswer;
+    if (safeAnswer && safeAnswer.toLowerCase() !== normUser) return safeAnswer;
 
     if (isFactSearchEnabled()) {
         const searchFallback = await buildSearchFallbackAnswer(userMessage);
-        if (searchFallback) return searchFallback;
+        if (searchFallback && searchFallback.toLowerCase() !== normUser) return searchFallback;
     }
 
     const strictApiFallback = await buildStrictApiKnowledgeFallback(userMessage);
-    if (strictApiFallback) return strictApiFallback;
+    if (strictApiFallback && strictApiFallback.toLowerCase() !== normUser) return strictApiFallback;
 
-    return raw || (await buildUniversalSoftFallback(userMessage));
+    const softFallback = await buildUniversalSoftFallback(userMessage);
+    if (softFallback && softFallback.toLowerCase() !== normUser) return softFallback;
+
+    return "I couldn't retrieve an authoritative answer for that request. Please try again or rephrase.";
 }
 
 async function publishResolvedModelMessage(userMessage, answerText, options = {}) {
@@ -22003,9 +22010,13 @@ function isWakeGreetingText(text) {
             if (await handlePlaceRelativeTouristQuery(text, boundPlace)) {
                 return;
             }
+            const _activeWebMode = typeof getWebSearchMode === 'function' ? getWebSearchMode() : 'off';
+            const isWebForced = _activeWebMode === 'force';
             const frontendRoute = decideFrontendRoute(text, {
                 turnSource: activeResponseRenderContext?.source || 'text',
-                contextResolution
+                contextResolution,
+                webMode: _activeWebMode,
+                explicitWeb: isWebForced
             });
             logRoutingDebug('processCommand route_decision', text, { frontendRoute, contextResolution });
             if (frontendRoute.route === 'live_required' || frontendRoute.requiresSources) {
@@ -22211,10 +22222,9 @@ function isWakeGreetingText(text) {
                 if (handled) return;
             }
 
-            // Authoritative bounded live research dispatch — strictly when user toggled Live Web Search ON
-            const _activeWebMode = typeof getWebSearchMode === 'function' ? getWebSearchMode() : 'off';
-            if (_activeWebMode === 'force' && isFactSearchEnabled()) {
-                logRoutingDebug('processCommand -> bounded live research (user-forced)', cleanText, {
+            // Authoritative bounded live research dispatch — when user toggled Live Web Search ON or route requires live sources
+            if ((_activeWebMode === 'force' || frontendRoute?.route === 'live_required' || frontendRoute?.requiresSources) && isFactSearchEnabled()) {
+                logRoutingDebug('processCommand -> bounded live research', cleanText, {
                     selectedHandler: 'handleBoundedLiveResearchQuery',
                     frontendRoute
                 });
@@ -25572,7 +25582,7 @@ function buildFrontendRouteContext(text, options = {}) {
         liveIntent,
         entityIntent,
         risk,
-        explicitWeb: !isWebOff && isExplicitWebSearchRequest(value),
+        explicitWeb: !isWebOff && (webMode === 'force' || isExplicitWebSearchRequest(value)),
         strictLatest: !isWebOff && isStrictLatestQuery(value),
         currentInfo: !isWebOff && isCurrentInfoQuery(value),
         liveRetrieval: !isWebOff && isLiveRetrievalQuery(value),
