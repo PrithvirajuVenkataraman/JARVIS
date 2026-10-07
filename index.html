@@ -4209,11 +4209,14 @@ async function buildLocalAssistantFallback(userMessage, error) {
 async function buildUniversalSoftFallback(userMessage) {
     const text = String(userMessage || '').trim();
     const normalized = text.toLowerCase();
+    const isDetailedOrTechnical = text.length > 120 ||
+        /\b(?:round[- ]robin|concurrent|concurrency|load\s+balanc|thread|process|algorithm|technique|implement|architecture|distributed|system|database|protocol|explain|details)\b/i.test(normalized);
+    const replyOptions = isDetailedOrTechnical ? { style: 'detailed' } : {};
 
     if (isDirectExplainerQuery(text) || isConciseDirectFactQuery(text)) {
         return await composeApiReply('direct_fact_retry', {
             userMessage: text
-        });
+        }, replyOptions);
     }
 
     if (!text) {
@@ -4225,12 +4228,12 @@ async function buildUniversalSoftFallback(userMessage) {
     if (/\?$/.test(text) || /^(what|why|how|who|when|where|which|can|could|would|do|does|did|is|are|should)\b/.test(normalized)) {
         return await composeApiReply('clarify_or_retry', {
             userMessage: text
-        });
+        }, replyOptions);
     }
 
     return await composeApiReply('generic_retry', {
         userMessage: text
-    });
+    }, replyOptions);
 }
 
 function isDirectExplainerQuery(text) {
@@ -4421,13 +4424,14 @@ async function publishResolvedModelMessage(userMessage, answerText, options = {}
 
 async function composeApiReply(intent, data = {}, options = {}) {
     const style = options?.style || 'short';
+    const isDetailed = style === 'detailed';
     const systemPrompt = `You are JARVIS, a helpful text-first assistant.
 
 Turn structured app events into natural assistant replies.
 
 Rules:
 - Respond directly and naturally.
-- Keep it concise unless the payload clearly needs more detail.
+- ${isDetailed ? 'Provide a thorough, comprehensive, and detailed explanation covering technical architecture, mechanisms, and implementation details.' : 'Keep it concise unless the payload clearly needs more detail.'}
 - Do not invent facts beyond the provided data.
 - If the payload is an error or limitation, say that plainly.
 - Do not add generic follow-up questions unless the payload asks for one.
@@ -5398,7 +5402,7 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
 
         // Multi-tier conversational context (Tier 1 verbatim window, Tier 2 semantic retrieval, Tier 3 rolling milestone summary)
         let multiTierContext = null;
-        if (!isFastSimpleRequest && typeof window.JarvisConversation?.buildMultiTierContext === 'function') {
+        if (typeof window.JarvisConversation?.buildMultiTierContext === 'function') {
             multiTierContext = window.JarvisConversation.buildMultiTierContext({
                 message: normalizedUserMessage,
                 maxRecentTurns: 10,
@@ -5408,8 +5412,8 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
         }
 
         let engineContext = multiTierContext?.context || window.JarvisConversation?.buildContext({
-            maxTurns: isFastSimpleRequest ? 4 : 12,
-            maxContextChars: isFastSimpleRequest ? 2000 : 12000
+            maxTurns: 12,
+            maxContextChars: 12000
         }) || [];
 
         const hasAssistantInContext = engineContext.some(t => t && t.role === 'assistant');
@@ -5422,6 +5426,11 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
             if (!engineContext.length || historyTurns.length > engineContext.length) {
                 engineContext = historyTurns;
             }
+        }
+
+        // Context pairing integrity: If engineContext begins with an assistant turn, prepend user context
+        if (engineContext.length > 0 && engineContext[0].role === 'assistant') {
+            engineContext.unshift({ role: 'user', text: '[Prior conversation context]' });
         }
 
         // Clean user message without prompt pollution
