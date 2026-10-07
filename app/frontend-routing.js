@@ -33,11 +33,14 @@ class FastLRU {
 const FRONTEND_ROUTE_CACHE = new FastLRU(1000);
 const FRONTEND_UNIVERSAL_CACHE = new FastLRU(1000);
 
+const STOP_WORDS = new Set(['a', 'an', 'the', 'is', 'are', 'was', 'were', 'of', 'in', 'to', 'for', 'on', 'with', 'at', 'by', 'from', 'about', 'what', 'when', 'where', 'who', 'why', 'how', 'which', 'did', 'do', 'does', 'can', 'could', 'would', 'should']);
+
 export function textToEmbeddingVector(text, dim = 512) {
     const v = new Float32Array(dim);
     const tokens = String(text || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').trim().split(/\s+/).filter(Boolean);
     if (!tokens.length) return v;
     for (const token of tokens) {
+        const weight = STOP_WORDS.has(token) ? 0.05 : 1.0;
         let h1 = 0x811c9dc5;
         let h2 = 0x5bd1e995;
         for (let i = 0; i < token.length; i++) {
@@ -49,14 +52,14 @@ export function textToEmbeddingVector(text, dim = 512) {
         }
         const idx1 = Math.abs(h1) % dim;
         const idx2 = Math.abs(h2) % dim;
-        v[idx1] += 1.0;
-        v[idx2] += 0.5;
+        v[idx1] += 1.0 * weight;
+        v[idx2] += 0.5 * weight;
         if (token.length >= 4) {
             for (let i = 0; i < token.length - 2; i++) {
                 const trigram = token.slice(i, i + 3);
                 let th = 0;
                 for (let j = 0; j < trigram.length; j++) th = (th * 31 + trigram.charCodeAt(j)) | 0;
-                v[Math.abs(th) % dim] += 0.2;
+                v[Math.abs(th) % dim] += 0.2 * weight;
             }
         }
     }
@@ -343,6 +346,197 @@ export function extractEntityTarget(text) {
     return null;
 }
 
+const INTENT_PROTOTYPES = [
+    {
+        type: 'explicit_search',
+        category: 'web_search',
+        isLiveRequired: true,
+        exemplars: [
+            'search the web online articles sources references google lookup information',
+            'google search online web articles links references internet lookup'
+        ]
+    },
+    {
+        type: 'domain_specific',
+        category: 'actionable_or_freshness',
+        isLiveRequired: true,
+        exemplars: [
+            'museum near me harbor landmark location city center driving directions',
+            'hotels and restaurants near harbor beach downtown lodging stay booking',
+            'hotels near Central Park stay lodging booking reservations accommodation',
+            'best restaurants open now in Paris food dining cafe meals',
+            'places to visit in Mysore during summer tourism sightseeing attractions',
+            'things to do in Tokyo activities attractions trip itinerary vacation',
+            'directions to destination navigation route driving map transit',
+            'directions to landmark navigation route map commute travel',
+            'pizza restaurant food places near me dining cafe takeout delivery',
+            'places open now and navigation directions route to nearby',
+            'things to do in city this weekend activities attractions guide',
+            'changelog and release notes of latest software version update features',
+            'release notes and patch features in current version upgrade download',
+            'new feature in Python 3.12 software version release update changelog',
+            'new feature updates in React 19 framework version release changelog',
+            'framework version release notes updates patches changelog'
+        ]
+    },
+    {
+        type: 'domain_specific',
+        category: 'weather',
+        isLiveRequired: true,
+        exemplars: [
+            'current live weather forecast and temperature today conditions',
+            'weather forecast for tomorrow temperature and rainfall humidity precipitation',
+            'rain forecast in city current weather conditions humidity precipitation'
+        ]
+    },
+    {
+        type: 'domain_specific',
+        category: 'finance_crypto',
+        isLiveRequired: true,
+        exemplars: [
+            'current live price of bitcoin crypto stock rate market price quote',
+            'tesla stock price today and market cap trading volume valuation',
+            'price of ethereum crypto rate today ticker quote exchange rate',
+            'live score of cricket football match today sports scores results',
+            'latest news updates and breaking events today world news headlines'
+        ]
+    },
+    {
+        type: 'temporal_fact',
+        category: 'political_leadership',
+        isLiveRequired: true,
+        exemplars: [
+            'active prime minister government president in office administration',
+            'chief minister state leader active cm in office jurisdiction',
+            'current pm president minister of country state leadership',
+            'active ceo corporate company executive leadership managing director',
+            'active chief minister governor in office administration cabinet'
+        ]
+    },
+    {
+        type: 'static_reasoning',
+        category: 'coding',
+        isLiveRequired: false,
+        exemplars: [
+            'python programming function quicksort algorithm sorting implementation syntax',
+            'array initialization in Python programming data structures code',
+            'class or function in javascript c++ code syntax implementation',
+            'binary search tree algorithm data structures computer science implementation',
+            'Red-Black Tree in C++ data structures algorithms tree rotation',
+            'binary search in computer science algorithms time complexity',
+            'hash table and collision resolution hash map chaining bucket',
+            'TCP vs UDP protocols computer networking socket packet transmission',
+            'new keyword in C++ memory allocation heap pointer constructor',
+            'new operator overloading in C++ syntax memory allocation',
+            'asynchronous event loop in JavaScript promises callbacks microtasks',
+            'NLP natural language processing machine learning deep learning neural networks',
+            'neural networks deep learning computer vision AI convolutional networks',
+            'transformers in NLP self attention models multi head attention',
+            'mechanism of self-attention in Transformer models neural networks',
+            'backpropagation with gradient descent optimize weights machine learning AI loss'
+        ]
+    },
+    {
+        type: 'static_reasoning',
+        category: 'mathematics',
+        isLiveRequired: false,
+        exemplars: [
+            'integral of mathematical equation calculus integration antiderivative',
+            'integral of e^(2x) dx calculus derivatives exponential integration',
+            'derivative and matrix solve equation algebra linear systems',
+            'solve algebraic formula arithmetic problem geometry equation',
+            'Pythagorean theorem geometry triangle hypotenuse proof right angle',
+            'derivative of sin(x) cosine calculus differentiation trigonometric',
+            'prime number number theory primes divisibility factors integers',
+            'Euler identity in complex analysis exponential imaginary formula'
+        ]
+    },
+    {
+        type: 'static_reasoning',
+        category: 'science',
+        isLiveRequired: false,
+        exemplars: [
+            'Newton third law of motion speed of light vacuum physics gravity kinematics dynamics',
+            'direct current alternating current electricity voltage resistance circuit electric current physics electromagnetism',
+            'ocean currents marine biology atmospheric circulation global climate system ecology thermodynamics physics',
+            'formula for kinetic energy in physics equation E=mc^2 velocity mass work',
+            'speed of sound in dry air physics acoustics velocity constant decibel',
+            'speed of light in vacuum constant physics relativity optics',
+            'theory of general relativity and equation E=mc^2 Einstein spacetime physics gravity',
+            'quantum entanglement particle physics superposition wave function',
+            'neutron stars and black holes after supernova astronomy astrophysics physics',
+            'penicillin discovered discovery science history biology medicine Fleming antibiotic',
+            'law of conservation of energy thermodynamics physics closed system entropy',
+            'atomic number of Gold chemical element periodic table protons mass',
+            'boiling point of nitrogen water melting point chemistry Celsius Kelvin',
+            'chemical formula for water and methane glucose molecule covalent bond chemistry',
+            'covalent vs ionic bonding chemical bonds valence electrons chemistry electronegativity',
+            'pH of pure neutral water acidity alkalinity chemistry logarithmic scale',
+            'photosynthesis in plants chloroplast sunlight glucose biology chemical equation',
+            'photosynthesis chemical equation plants Calvin cycle C4 botany glucose chloroplast',
+            'definition of photosynthesis biology botany autotroph chlorophyll',
+            'mitochondria cell organelle ATP powerhouse cellular respiration biology',
+            'double helix structure of DNA genetics nucleotides Watson Crick biology',
+            'natural selection in evolution Darwin species adaptation survival biology'
+        ]
+    },
+    {
+        type: 'static_reasoning',
+        category: 'general_reasoning',
+        isLiveRequired: false,
+        exemplars: [
+            'subject concept definition meaning explanation theory principles encyclopedic',
+            'concept definition meaning explanation theory principles utilitarianism epistemology',
+            'capital city world capitals country national capital government seat',
+            'capital of Canada Japan Brazil Germany France Peru Australia New York New Zealand',
+            'longest river in the world seven continents geography oceans countries landmasses',
+            'seven continents of the world geography landmasses Asia Africa Europe Americas',
+            'currency of country money economics national capital legal tender exchange',
+            'currency of Papua New Guinea economics capital money kina tender',
+            'landmark monument temple palace tower castle located geography world heritage',
+            'reef ocean sea canyon mountain river lake located geography continent country',
+            'Great Barrier Reef ocean coral sea located geography Queensland Australia',
+            'Machu Picchu ancient ruins located geography South America Andes Peru',
+            'Grand Canyon rock formation valley located geography Arizona Colorado',
+            'Mount Everest height elevation mountain peaks geography Himalayas Nepal',
+            'Brihadeeswarar Temple architecture history ancient monuments Chola dynasty',
+            'Sun Temple Konark architecture history monuments Odisha sculptural style',
+            'Taj Mahal architecture history monument Mughal emperor Shah Jahan Agra',
+            'engineering and architecture of Eiffel Tower building construction iron Paris',
+            'Pyramids of Giza ancient monument construction Pharaohs Egypt Pharaoh Khufu',
+            'history and architectural significance of Angkor Wat temple monuments Cambodia',
+            'Grand Canyon formed by erosion geology rock formation sedimentary river',
+            'height and geological composition of Mount Everest peaks geology tectonics',
+            'formation of Niagara Falls geology waterfall erosion river Great Lakes',
+            'geological formation of Yosemite National Park granite glaciation Central Park',
+            'Central Park in New York landscape architecture Olmsted Vaux design history',
+            'World War II timeline historical dates history Allies Axis treaties',
+            'Roman Empire fall French Revolution causes history timeline republic empire',
+            'Julius Caesar ancient history Roman empire emperor ruler senate crossing Rubicon',
+            'first President of the United States George Washington founding fathers history constitution',
+            'Magna Carta signed in 1215 medieval history charter feudal England barons',
+            'New Deal policies of FDR Franklin Roosevelt Great Depression history reforms banking',
+            'Industrial Revolution steam engine mechanization history factories manufacturing',
+            'utilitarianism in moral philosophy ethics Bentham Mill greatest happiness principle',
+            'epistemology core questions philosophy knowledge belief justified truth',
+            'monetary policy macroeconomic inflation GDP economics central banking interest rates',
+            'constitutional differences between parliamentary and presidential systems political theory'
+        ]
+    }
+];
+
+const COMPILED_INTENTS = INTENT_PROTOTYPES.map(proto => {
+    const exemplarVectors = proto.exemplars.map(e => textToEmbeddingVector(e, 512));
+    return { ...proto, exemplarVectors };
+});
+
+const INTENT_BM25_INDEX = new BM25Index({ k1: 1.2, b: 0.75, filterStopWords: true });
+INTENT_PROTOTYPES.forEach((proto, pIndex) => {
+    proto.exemplars.forEach(exemplar => {
+        INTENT_BM25_INDEX.addDocument(pIndex, exemplar, proto);
+    });
+});
+
 export function classifyUniversalEntityIntent(text = '', context = {}) {
     const raw = String(text || '').trim();
     if (!raw) {
@@ -371,7 +565,7 @@ export function classifyUniversalEntityIntent(text = '', context = {}) {
         return res;
     }
 
-    if (context.explicitWeb || context.webMode === 'on') {
+    if (context.explicitWeb || context.webMode === 'on' || context.webMode === 'force') {
         const res = {
             isLiveRequired: true,
             isStableKnowledge: false,
@@ -383,35 +577,60 @@ export function classifyUniversalEntityIntent(text = '', context = {}) {
         return res;
     }
 
-    // Check dynamic live query signals
-    if (/\b(?:latest\s+news|breaking\s+news|live\s+(?:[a-z]+\s+){0,2}scores?|match\s+scores?|cricket\s+scores?|(?:stock|bitcoin|crypto|btc|eth|ethereum|gold|silver)\s+price|price\s+of\s+(?:bitcoin|crypto|btc|eth|ethereum|gold|silver|stock)|weather|forecast|temperature\s+in|market\s+cap|changelog|release\s+notes|what'?s\s+new\s+in|new\s+features?\s+in|near\s+me|nearby|directions\s+to|places\s+to\s+visit\s+in|things\s+to\s+do\s+in|attractions\s+in|places\s+open\s+now|open\s+now|hotels?\s+near|restaurants?\s+near|museums?\s+near|best\s+restaurants\s+in|restaurants?\s+open|search\s+the\s+web|google\s+search|search\s+online|with\s+sources)\b/i.test(raw)) {
+    if (isCasualConversationQuery(raw) || isJokeFastQuery(raw)) {
         const res = {
-            isLiveRequired: true,
-            isStableKnowledge: false,
+            isLiveRequired: false,
+            isStableKnowledge: true,
             entityTarget: null,
-            category: 'live_query',
-            reason: 'live_data_requested'
+            category: 'casual_conversation',
+            reason: 'casual_conversation'
         };
         FRONTEND_UNIVERSAL_CACHE.set(cacheKey, res);
         return res;
     }
 
+    const qVec = textToEmbeddingVector(raw, 512);
+    let bestScore = -1;
+    let bestMatch = COMPILED_INTENTS[COMPILED_INTENTS.length - 1];
+
+    for (const proto of COMPILED_INTENTS) {
+        for (const vec of proto.exemplarVectors) {
+            const score = vectorCosineSimilarity(qVec, vec);
+            if (score > bestScore) {
+                bestScore = score;
+                bestMatch = proto;
+            }
+        }
+    }
+
+    const bm25Matches = INTENT_BM25_INDEX.search(raw, { topK: 1, minScore: 0.2 });
+    if (bm25Matches.length > 0) {
+        const topBm25Doc = bm25Matches[0].doc;
+        const protoIndex = topBm25Doc.id;
+        const bm25Score = bm25Matches[0].score;
+        const bm25Proto = COMPILED_INTENTS[protoIndex];
+        if (bm25Proto && bm25Score >= 1.2 && bestScore < 0.65) {
+            bestMatch = bm25Proto;
+        }
+    }
+
     // Universal entity & leadership classifier
     const entityTarget = extractEntityTarget(raw);
-    const isHistorical = /\b(?:first|former|past|in\s+\d{4}|during\s+\d{4}|who\s+was|history\s+of)\b/i.test(raw);
+    const isHistorical = raw.toLowerCase().includes('first') || raw.toLowerCase().includes('former') || raw.toLowerCase().includes('past') || raw.toLowerCase().includes('history') || /\b(who\s+was|what\s+was|when\s+was|where\s+was|why\s+was|how\s+was|who\s+founded|who\s+built|who\s+invented|who\s+discovered)\b/i.test(raw) || /\b\d{4}\b/.test(raw);
 
-    const res = (entityTarget && !isHistorical) ? {
-        isLiveRequired: true,
-        isStableKnowledge: false,
-        entityTarget,
-        category: 'entity_leadership',
-        reason: 'mutable_officeholder'
-    } : {
-        isLiveRequired: false,
-        isStableKnowledge: true,
+    let isLive = bestMatch.isLiveRequired;
+    if (entityTarget && !isHistorical) {
+        isLive = true;
+    } else if (isHistorical) {
+        isLive = false;
+    }
+
+    const res = {
+        isLiveRequired: isLive,
+        isStableKnowledge: !isLive,
         entityTarget: isHistorical ? null : entityTarget,
-        category: 'stable_general_knowledge',
-        reason: 'stable_general_knowledge'
+        category: bestMatch.category,
+        reason: bestMatch.type
     };
 
     FRONTEND_UNIVERSAL_CACHE.set(cacheKey, res);
@@ -914,6 +1133,20 @@ export function decideFrontendRoute(text, context = {}) {
     const cached = FRONTEND_ROUTE_CACHE.get(cacheKey);
     if (cached) return cached;
 
+    const isWebForced = context.explicitWeb === true || context.webMode === 'force' || context.webMode === 'on';
+    if (isWebForced) {
+        const res = {
+            ...base,
+            route: 'live_required',
+            reason: 'user_requested_search',
+            risk: 'low_risk',
+            requiresSources: true,
+            sourcePolicy: 'required'
+        };
+        FRONTEND_ROUTE_CACHE.set(cacheKey, res);
+        return res;
+    }
+
     if (context.toolAction) {
         return {
             ...base,
@@ -1094,6 +1327,20 @@ export function decideFrontendRoute(text, context = {}) {
             reason: 'ambiguous_context',
             minimalThinking: true
         };
+    }
+
+    if (isFollowUp || isComplex) {
+        const res = {
+            ...base,
+            route: 'chat_direct',
+            reason: isFollowUp ? 'conversational_follow_up' : 'complex_technical_query',
+            risk: 'low_risk',
+            minimalThinking: false,
+            requiresSources: false,
+            sourcePolicy: 'none'
+        };
+        FRONTEND_ROUTE_CACHE.set(cacheKey, res);
+        return res;
     }
 
     const entityIntent = classifyUniversalEntityIntent(raw, context);
