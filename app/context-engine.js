@@ -83,9 +83,13 @@ export function extractAssistantListItems(text = '') {
         const trimmed = line.trim();
         const numMatch = trimmed.match(/^(?:(?:\d{1,2}|[a-e])[\.\)]|\-|\*)\s+(?:\*\*)?([A-Za-z0-9][A-Za-z0-9\s,'’\.\-–—:]{2,80})(?:\*\*)?/i);
         if (numMatch) {
-            const item = numMatch[1].replace(/[:–—\-\*\.]+$/, '').trim();
-            if (item && item.length >= 3 && !/^(?:step|note|tip|here|these|first|second|third)\b/i.test(item)) {
-                items.push(item);
+            let item = numMatch[1].replace(/[:–—\-\*\.]+$/, '').trim();
+            if (item && item.length >= 3) {
+                const stripped = item.replace(/^(?:step|point|number|item)\s*[0-9]+[:–—\-\s]*/i, '').trim();
+                const cleanItem = stripped.length >= 3 ? stripped : item;
+                if (!/^(?:note|tip|here|these)\b/i.test(cleanItem)) {
+                    items.push(cleanItem);
+                }
             }
         }
     }
@@ -118,22 +122,22 @@ export function resolveOrdinalOrAnaphoricAntecedent(text = '', thread = null) {
     const listItems = Array.isArray(thread.assistantListItems) ? thread.assistantListItems : [];
     const entities = Array.isArray(thread.assistantEntities) ? thread.assistantEntities : [];
 
-    if (/\b(?:first(?:\s+(?:one|option|item|park|place|book|suggestion))?|option\s*1|number\s*1|#1|former)\b/i.test(lower)) {
+    if (/\b(?:first(?:\s+(?:one|option|item|park|place|book|suggestion))?|option\s*1|number\s*1|step\s*1|point\s*1|item\s*1|#1|former)\b/i.test(lower)) {
         if (listItems.length >= 1) return listItems[0];
         if (entities.length >= 1) return entities[0];
     }
-    if (/\b(?:second(?:\s+(?:one|option|item|park|place|book|suggestion))?|option\s*2|number\s*2|#2|latter)\b/i.test(lower)) {
+    if (/\b(?:second(?:\s+(?:one|option|item|park|place|book|suggestion))?|option\s*2|number\s*2|step\s*2|point\s*2|item\s*2|#2|latter)\b/i.test(lower)) {
         if (listItems.length >= 2) return listItems[1];
         if (entities.length >= 2) return entities[1];
     }
-    if (/\b(?:third(?:\s+(?:one|option|item|park|place|book|suggestion))?|option\s*3|number\s*3|#3)\b/i.test(lower)) {
+    if (/\b(?:third(?:\s+(?:one|option|item|park|place|book|suggestion))?|option\s*3|number\s*3|step\s*3|point\s*3|item\s*3|#3)\b/i.test(lower)) {
         if (listItems.length >= 3) return listItems[2];
         if (entities.length >= 3) return entities[2];
     }
-    if (/\b(?:fourth(?:\s+(?:one|option|item|park|place|book|suggestion))?|option\s*4|number\s*4|#4)\b/i.test(lower)) {
+    if (/\b(?:fourth(?:\s+(?:one|option|item|park|place|book|suggestion))?|option\s*4|number\s*4|step\s*4|point\s*4|item\s*4|#4)\b/i.test(lower)) {
         if (listItems.length >= 4) return listItems[3];
     }
-    if (/\b(?:fifth(?:\s+(?:one|option|item|park|place|book|suggestion))?|option\s*5|number\s*5|#5)\b/i.test(lower)) {
+    if (/\b(?:fifth(?:\s+(?:one|option|item|park|place|book|suggestion))?|option\s*5|number\s*5|step\s*5|point\s*5|item\s*5|#5)\b/i.test(lower)) {
         if (listItems.length >= 5) return listItems[4];
     }
     if (/\b(?:last(?:\s+(?:one|option|item))?|final\s+(?:one|option|item))\b/i.test(lower)) {
@@ -220,7 +224,7 @@ export function classifyInput(message, pending = null, activeThread = null) {
     const hasFollowUpLead = /^(?:show examples?|examples?|more(?: details| info)?|continue(?: speaking| reading)?|explain (?:further|more|simply|it)|tell (?:me )?more|expand(?: on that)?|elaborate|what about|how about|then what|what next|what else|pros and cons|difference|differences|compare|cost|price|details|break that down|go deeper|give (?:some |an? )?(?:examples?|use cases?|code|sample)|can you (?:give|show|explain|elaborate))\b/i.test(lower);
     const hasDefiniteAspect = /\b(?:the|its|their)\s+[a-z]{3,}\b/i.test(lower);
     const isUltraShortFollowUp = /^(?:why|how|when|where|who|what next|what else|and then|how so|what about that|what about it|why so|who was it|who is it|what was it|what is that|how come)\??$/i.test(lower.trim());
-    const hasOrdinalReference = /\b(?:first(?:\s+(?:one|option|item))?|second(?:\s+(?:one|option|item))?|third(?:\s+(?:one|option|item))?|fourth(?:\s+(?:one|option|item))?|fifth(?:\s+(?:one|option|item))?|last(?:\s+(?:one|option|item))?|former|latter|option\s+[1-9]|number\s+[1-9]|#\s*[1-9])\b/i.test(lower);
+    const hasOrdinalReference = /\b(?:first(?:\s+(?:one|option|item))?|second(?:\s+(?:one|option|item))?|third(?:\s+(?:one|option|item))?|fourth(?:\s+(?:one|option|item))?|fifth(?:\s+(?:one|option|item))?|last(?:\s+(?:one|option|item))?|former|latter|option\s+[1-9]|number\s+[1-9]|step\s+[1-9]|point\s+[1-9]|item\s+[1-9]|#\s*[1-9])\b/i.test(lower);
     const assistantEntitiesText = activeThread && Array.isArray(activeThread.assistantEntities) ? activeThread.assistantEntities.join(' ') : '';
     const assistantListText = activeThread && Array.isArray(activeThread.assistantListItems) ? activeThread.assistantListItems.join(' ') : '';
     const assistantOverlap = (assistantEntitiesText || assistantListText)
@@ -437,7 +441,7 @@ function recordTurn(state, turn, limits) {
 function buildContext(state, options = {}) {
     const threadId = cleanText(options.threadId) || state.activeThreadId;
     const maxTurns = clamp(options.maxTurns, 12, 2, 30);
-    const maxChars = clamp(options.maxContextChars, 9000, 500, 24000);
+    const maxChars = clamp(options.maxContextChars, 12000, 500, 24000);
     let selected = threadId ? state.turns.filter(turn => turn.threadId === threadId) : [];
     // If active thread has no turns or very few, fall back to recent turns from state.turns
     if (selected.length === 0 && state.turns.length > 0) {
@@ -459,6 +463,15 @@ function buildContext(state, options = {}) {
         if (out.length && chars + cost > maxChars) break;
         chars += cost;
         out.unshift({ role: turn.role, text: turn.text });
+    }
+    // Context pairing integrity: If out starts with an assistant turn, and there is a preceding user turn in selected,
+    // ensure we include the user prompt or don't leave an orphaned assistant turn alone without context
+    if (out.length > 0 && out[0].role === 'assistant') {
+        const firstSelectedIdx = selected.findIndex(t => t.text === out[0].text);
+        if (firstSelectedIdx > 0 && selected[firstSelectedIdx - 1]?.role === 'user') {
+            const userTurn = selected[firstSelectedIdx - 1];
+            out.unshift({ role: userTurn.role, text: userTurn.text });
+        }
     }
     return out;
 }
@@ -791,7 +804,7 @@ function shouldResolveAgainstActiveThread(message, classification, activeThread)
     const assistantOverlap = (assistantEntitiesText || assistantListText)
         ? countOverlap(tokens, tokenize(`${assistantEntitiesText} ${assistantListText}`))
         : 0;
-    const hasOrdinal = /\b(?:first(?:\s+(?:one|option|item))?|second(?:\s+(?:one|option|item))?|third(?:\s+(?:one|option|item))?|fourth(?:\s+(?:one|option|item))?|fifth(?:\s+(?:one|option|item))?|last(?:\s+(?:one|option|item))?|former|latter|option\s+[1-9]|number\s+[1-9]|#\s*[1-9])\b/i.test(lower);
+    const hasOrdinal = /\b(?:first(?:\s+(?:one|option|item))?|second(?:\s+(?:one|option|item))?|third(?:\s+(?:one|option|item))?|fourth(?:\s+(?:one|option|item))?|fifth(?:\s+(?:one|option|item))?|last(?:\s+(?:one|option|item))?|former|latter|option\s+[1-9]|number\s+[1-9]|step\s+[1-9]|point\s+[1-9]|item\s+[1-9]|#\s*[1-9])\b/i.test(lower);
     if (assistantOverlap > 0 || hasOrdinal) return true;
 
     if (hasNewNamedEntity || namedLikeNewTopic || bareShortQuestion || explicitNewObject) return false;
