@@ -11,13 +11,15 @@ console.log('--- Testing Agentic Tool Dispatcher ---');
 
 // 1. Tool Definitions schema validation
 assert.ok(Array.isArray(AGENTIC_TOOL_DEFINITIONS));
-assert.equal(AGENTIC_TOOL_DEFINITIONS.length, 5);
+assert.equal(AGENTIC_TOOL_DEFINITIONS.length, 7);
 const toolNames = AGENTIC_TOOL_DEFINITIONS.map(t => t.function.name);
 assert.ok(toolNames.includes('code_interpreter'));
 assert.ok(toolNames.includes('knowledge_lookup'));
 assert.ok(toolNames.includes('datetime_context'));
 assert.ok(toolNames.includes('session_memory'));
 assert.ok(toolNames.includes('generate_image'));
+assert.ok(toolNames.includes('web_search'));
+assert.ok(toolNames.includes('web_fetch'));
 
 // 2. Code Interpreter
 const mathRes = executeCodeInterpreter('Math.sqrt(144) + 8 * 2');
