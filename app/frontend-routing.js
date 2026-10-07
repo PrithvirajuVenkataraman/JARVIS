@@ -6,7 +6,187 @@
  */
 
 import { callLLM } from './api-client.js';
-import { BM25Index } from './bm25.js';
+
+export const DEFAULT_SYNTAX_STOP_WORDS = new Set([
+    'a', 'an', 'the', 'and', 'or', 'but', 'if', 'as',
+    'of', 'at', 'by', 'for', 'with', 'about', 'against', 'between', 'into', 'through',
+    'during', 'before', 'after', 'above', 'below', 'to', 'from', 'up', 'down', 'in',
+    'out', 'on', 'off', 'over', 'under', 'again', 'further', 'then', 'once',
+    'it', 'its', 'this', 'that', 'these', 'those', 'they', 'them', 'their', 'he', 'she', 'him', 'her', 'we', 'us', 'our', 'you', 'your', 'me', 'my',
+    'what', 'when', 'where', 'which', 'who', 'whom', 'whose', 'why', 'how',
+    'is', 'are', 'was', 'were', 'be', 'been', 'being',
+    'do', 'does', 'did', 'have', 'has', 'had'
+]);
+
+export function tokenizeText(text = '', options = {}) {
+    const filterStopWords = options.filterStopWords !== false;
+    const stopWords = options.stopWords || DEFAULT_SYNTAX_STOP_WORDS;
+    const minLen = typeof options.minTokenLength === 'number' ? options.minTokenLength : 2;
+
+    const raw = String(text || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ');
+    const matches = raw.match(/[\p{L}\p{N}]+/gu) || [];
+    
+    const tokens = [];
+    for (const match of matches) {
+        if (match.length >= minLen && (!filterStopWords || !stopWords.has(match))) {
+            tokens.push(match);
+        }
+    }
+    return tokens;
+}
+
+export class BM25Index {
+    constructor(options = {}) {
+        this.k1 = typeof options.k1 === 'number' ? options.k1 : 1.2;
+        this.b = typeof options.b === 'number' ? options.b : 0.75;
+        this.filterStopWords = options.filterStopWords !== false;
+        this.stopWords = options.stopWords || DEFAULT_SYNTAX_STOP_WORDS;
+        
+        this.documents = [];
+        this.docLengths = [];
+        this.totalDocLength = 0;
+        this.avgDocLength = 0;
+        
+        this.invertedIndex = new Map();
+        this.docFreqs = new Map();
+        this.idfCache = new Map();
+    }
+
+    tokenize(text) {
+        return tokenizeText(text, {
+            filterStopWords: this.filterStopWords,
+            stopWords: this.stopWords
+        });
+    }
+
+    addDocument(id, text, metadata = {}) {
+        const docIndex = this.documents.length;
+        const tokens = this.tokenize(text);
+        
+        const termFreqs = new Map();
+        for (const token of tokens) {
+            termFreqs.set(token, (termFreqs.get(token) || 0) + 1);
+        }
+
+        this.documents.push({ id, text, metadata, index: docIndex });
+        this.docLengths.push(tokens.length);
+        this.totalDocLength += tokens.length;
+        this.avgDocLength = this.totalDocLength / Math.max(1, this.documents.length);
+
+        for (const [term, freq] of termFreqs.entries()) {
+            if (!this.invertedIndex.has(term)) {
+                this.invertedIndex.set(term, new Map());
+                this.docFreqs.set(term, 0);
+            }
+            this.invertedIndex.get(term).set(docIndex, freq);
+            this.docFreqs.set(term, this.docFreqs.get(term) + 1);
+        }
+
+        this.idfCache.clear();
+        return docIndex;
+    }
+
+    getIdf(term) {
+        if (this.idfCache.has(term)) return this.idfCache.get(term);
+        const df = this.docFreqs.get(term) || 0;
+        const n = this.documents.length;
+        if (n === 0 || df === 0) {
+            this.idfCache.set(term, 0);
+            return 0;
+        }
+        const idf = Math.max(0, Math.log(1 + (n - df + 0.5) / (df + 0.5)));
+        this.idfCache.set(term, idf);
+        return idf;
+    }
+
+    search(query, options = {}) {
+        const topK = options.topK || 10;
+        const minScore = typeof options.minScore === 'number' ? options.minScore : 0.001;
+        const queryTokens = this.tokenize(query);
+
+        if (!queryTokens.length || !this.documents.length) return [];
+
+        const scores = new Float32Array(this.documents.length);
+        const k1 = this.k1;
+        const b = this.b;
+        const avgdl = Math.max(1, this.avgDocLength);
+
+        for (const term of queryTokens) {
+            const postings = this.invertedIndex.get(term);
+            if (!postings) continue;
+            const idf = this.getIdf(term);
+            if (idf <= 0) continue;
+
+            for (const [docIndex, tf] of postings.entries()) {
+                const docLength = this.docLengths[docIndex];
+                const num = tf * (k1 + 1);
+                const denom = tf + k1 * (1 - b + b * (docLength / avgdl));
+                scores[docIndex] += idf * (num / Math.max(0.001, denom));
+            }
+        }
+
+        const ranked = [];
+        for (let i = 0; i < scores.length; i++) {
+            if (scores[i] >= minScore) {
+                ranked.push({
+                    doc: this.documents[i],
+                    score: Number(scores[i].toFixed(4)),
+                    index: i
+                });
+            }
+        }
+
+        return ranked.sort((a, b) => b.score - a.score).slice(0, topK);
+    }
+
+    scoreAll(query) {
+        const queryTokens = this.tokenize(query);
+        if (!queryTokens.length || !this.documents.length) {
+            return this.documents.map(() => 0);
+        }
+
+        const scores = new Float32Array(this.documents.length);
+        const k1 = this.k1;
+        const b = this.b;
+        const avgdl = Math.max(1, this.avgDocLength);
+
+        for (const term of queryTokens) {
+            const postings = this.invertedIndex.get(term);
+            if (!postings) continue;
+            const idf = this.getIdf(term);
+            if (idf <= 0) continue;
+
+            for (const [docIndex, tf] of postings.entries()) {
+                const docLength = this.docLengths[docIndex];
+                const num = tf * (k1 + 1);
+                const denom = tf + k1 * (1 - b + b * (docLength / avgdl));
+                scores[docIndex] += idf * (num / Math.max(0.001, denom));
+            }
+        }
+
+        const out = new Array(scores.length);
+        for (let i = 0; i < scores.length; i++) {
+            out[i] = Number(scores[i].toFixed(4));
+        }
+        return out;
+    }
+}
+
+export function computeBM25Scores(query, documents = [], options = {}) {
+    const list = Array.isArray(documents) ? documents : [];
+    if (!list.length) return [];
+
+    const index = new BM25Index(options);
+    for (let i = 0; i < list.length; i++) {
+        const doc = list[i];
+        const text = typeof doc === 'string'
+            ? doc
+            : `${doc.title || ''} ${doc.description || ''} ${doc.text || ''} ${doc.fullArticleText || ''}`;
+        index.addDocument(i, text, doc);
+    }
+
+    return index.scoreAll(query);
+}
 
 class FastLRU {
     constructor(maxSize = 1000) {
