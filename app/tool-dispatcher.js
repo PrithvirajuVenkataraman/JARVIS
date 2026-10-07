@@ -96,6 +96,40 @@ export const AGENTIC_TOOL_DEFINITIONS = [
                 required: ['prompt']
             }
         }
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'web_search',
+            description: 'Searches the live web for verified facts, up-to-date documentation, official policies, and fresh information.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    query: {
+                        type: 'string',
+                        description: 'The search query to look up on the live web.'
+                    }
+                },
+                required: ['query']
+            }
+        }
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'web_fetch',
+            description: 'Fetches and converts a web page or article into clean markdown text using web crawler extraction.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    url: {
+                        type: 'string',
+                        description: 'The target URL to fetch and convert to markdown.'
+                    }
+                },
+                required: ['url']
+            }
+        }
     }
 ];
 
@@ -334,6 +368,40 @@ export async function dispatchToolCall(name, args = {}, context = {}) {
                 success: true,
                 output: { prompt, aspectRatio, action: 'image_generation_requested' }
             };
+        }
+        case 'web_search': {
+            const query = parsedArgs?.query || parsedArgs?.raw || '';
+            try {
+                const searchRes = await fetch('/api/search', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query, limit: 8, answer: false, mode: 'rag' })
+                }).then(r => r.json()).catch(e => ({ success: false, error: String(e?.message || e) }));
+                return {
+                    tool: 'web_search',
+                    success: Boolean(searchRes.success !== false),
+                    output: searchRes.results || []
+                };
+            } catch (err) {
+                return { tool: 'web_search', success: false, output: String(err?.message || err) };
+            }
+        }
+        case 'web_fetch': {
+            const url = parsedArgs?.url || parsedArgs?.raw || '';
+            try {
+                const fetchRes = await fetch('/api/search', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'web_fetch', url })
+                }).then(r => r.json()).catch(e => ({ success: false, error: String(e?.message || e) }));
+                return {
+                    tool: 'web_fetch',
+                    success: Boolean(fetchRes.success),
+                    output: fetchRes.content || fetchRes.markdown || fetchRes.error || ''
+                };
+            } catch (err) {
+                return { tool: 'web_fetch', success: false, output: String(err?.message || err) };
+            }
         }
         default:
             return {
