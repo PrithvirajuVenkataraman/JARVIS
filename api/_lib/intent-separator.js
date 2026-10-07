@@ -344,9 +344,28 @@ export function isMediaOrPopCultureQuery(_text) {
     return false;
 }
 
+export function isComplexTechnicalQuery(text) {
+    const raw = String(text || '').trim();
+    if (!raw) return false;
+    const lower = raw.toLowerCase();
+
+    // Deep technical & architectural keyword patterns
+    const techPattern = /\b(?:round[- ]robin|load\s+balanc(?:ing|er)?|concurrent(?:ly|\s+users)?|concurrency|worker\s+pool|thread\s+pool|mutex|semaphore|distributed\s+systems?|failover|fault[- ]toleran(?:ce|t)|deadlock|race\s+condition|bottleneck|high\s+availability|throughput|microservices?|system\s+design|software\s+architecture|system\s+architecture|backend\s+architecture|how\s+did\s+we\s+implement|how\s+do\s+we\s+implement|implementation\s+of\s+(?:the\s+)?(?:round[- ]robin|algorithm|load\s+balanc|queue|worker|cache|concurrency|software|feature|system|service|protocol))\b/i;
+    if (techPattern.test(lower)) return true;
+
+    // Length-based: detailed technical texts or pasted code/explanations (> 200 chars or > 35 words)
+    const words = raw.split(/\s+/).filter(Boolean);
+    if ((raw.length > 200 || words.length > 35) && /\b(?:technique|algorithm|process|pattern|mechanism|implementation|architecture|system|service|server|database|network|protocol|pipeline|function|code|method)\b/i.test(lower)) {
+        return true;
+    }
+
+    return false;
+}
+
 export function isStableGeographyOrGeneralFactQuery(rawQuery = '', context = {}) {
     const query = String(rawQuery || '').trim();
     if (!query) return false;
+    if (isComplexTechnicalQuery(query)) return false;
     const lower = query.toLowerCase().replace(/[?!.,;:]+$/g, '').trim();
 
     // 1. If entity classifier or live signals indicate live data is required, not a stable fact
