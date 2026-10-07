@@ -5409,15 +5409,19 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
 
         let engineContext = multiTierContext?.context || window.JarvisConversation?.buildContext({
             maxTurns: isFastSimpleRequest ? 4 : 12,
-            maxContextChars: isFastSimpleRequest ? 2000 : 9000
+            maxContextChars: isFastSimpleRequest ? 2000 : 12000
         }) || [];
 
-        if (!engineContext.length && Array.isArray(conversationHistory) && conversationHistory.length) {
+        const hasAssistantInContext = engineContext.some(t => t && t.role === 'assistant');
+        if ((!engineContext.length || !hasAssistantInContext) && Array.isArray(conversationHistory) && conversationHistory.length) {
             const recentHistory = conversationHistory.slice(-8);
-            engineContext = recentHistory.flatMap(item => [
+            const historyTurns = recentHistory.flatMap(item => [
                 item.user ? { role: 'user', text: String(item.user).trim() } : null,
                 item.ai ? { role: 'assistant', text: String(item.ai).trim() } : null
             ]).filter(Boolean);
+            if (!engineContext.length || historyTurns.length > engineContext.length) {
+                engineContext = historyTurns;
+            }
         }
 
         // Clean user message without prompt pollution
@@ -14692,9 +14696,8 @@ function getLocationFromRecentContext() {
     }
 
     const recent = (conversationContext || []) 
-        .filter(m => m && m.role === 'user') 
-        .slice(-10) 
-        .map(m => m.text || '') 
+        .slice(-12) 
+        .map(m => m?.text || '') 
         .join(' '); 
     const matches = recent.match(/\b(?:in|at|near|to|about)\s+([A-Za-z][A-Za-z\s,.-]{1,80})/ig) || [];
     for (let i = matches.length - 1; i >= 0; i--) {
@@ -23555,9 +23558,8 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
                                 cityName = sanitizeExtractedLocation(ctxLoc.split(',')[0]);
                             } else {
                                 const contextText = (conversationContext || []) 
-                                    .filter(m => m && m.role === 'user') 
-                                    .slice(-8) 
-                                    .map(m => m.text || '') 
+                                    .slice(-12) 
+                                    .map(m => m?.text || '') 
                                     .join(' '); 
                                 const contextMatch = contextText.match(/(?:hotels?|trip|itinerary|visit)\s+(?:in|to|at|near)\s+([A-Za-z][a-z]+(?:[\s,]+[A-Za-z][a-z]+)*)/i) ||
                                                      contextText.match(/\b(?:in|at|near|to)\s+([A-Za-z][a-z]+(?:,\s*[A-Za-z][a-z]+)*)/i);
@@ -28385,13 +28387,21 @@ function sanitizeConversationHistoryRecords(historyItems) {
 
 function saveToHistory(userMessage, aiResponse, options = {}) {
     const turnId = String(activeResponseRenderContext?.turnId || '');
+    const cleanUser = normalizeHistoryUserMessage(userMessage);
+    const cleanAi = normalizeHistoryAssistantMessage(aiResponse);
     conversationHistory.push({
         timestamp: new Date().toISOString(),
-        user: normalizeHistoryUserMessage(userMessage),
-        ai: normalizeHistoryAssistantMessage(aiResponse),
+        user: cleanUser,
+        ai: cleanAi,
         date: new Date().toLocaleDateString(),
         turnId
     });
+
+    if (cleanUser) conversationContext.push({ role: 'user', text: cleanUser, turnId });
+    if (cleanAi) conversationContext.push({ role: 'assistant', text: cleanAi, turnId });
+    if (conversationContext.length > 30) {
+        conversationContext = conversationContext.slice(-30);
+    }
 
     const engine = window.JarvisConversation;
     let threadId = engine?.getState?.().activeThreadId || '';
@@ -28399,9 +28409,9 @@ function saveToHistory(userMessage, aiResponse, options = {}) {
         const initialRes = engine.resolve({ message: userMessage });
         threadId = initialRes?.activeThread?.id || '';
     }
-    if (threadId && options?.recordContext !== false) {
-        engine.recordTurn({ role: 'user', text: userMessage, threadId, turnId });
-        engine.recordTurn({ role: 'assistant', text: aiResponse, threadId, turnId });
+    if (options?.recordContext !== false && engine?.recordTurn) {
+        engine.recordTurn({ role: 'user', text: cleanUser || userMessage, threadId, turnId });
+        engine.recordTurn({ role: 'assistant', text: cleanAi || aiResponse, threadId, turnId });
     }
     
     saveConversationHistory();
@@ -28414,14 +28424,20 @@ function loadHistory() {
     if (saved) {
         try {
             conversationHistory = JSON.parse(saved);
-            if (Array.isArray(conversationHistory) && conversationHistory.length && window.JarvisConversation) {
-                const session = {
-                    messages: conversationHistory.flatMap(item => [
-                        item.user ? { role: 'user', text: item.user, turnId: item.turnId || '' } : null,
-                        item.ai ? { role: 'assistant', text: item.ai, turnId: item.turnId || '' } : null
-                    ]).filter(Boolean)
-                };
-                restoreConversationEngineForSession(session);
+            if (Array.isArray(conversationHistory) && conversationHistory.length) {
+                conversationContext = conversationHistory.slice(-16).flatMap(item => [
+                    item.user ? { role: 'user', text: item.user, turnId: item.turnId || '' } : null,
+                    item.ai ? { role: 'assistant', text: item.ai, turnId: item.turnId || '' } : null
+                ]).filter(Boolean);
+                if (window.JarvisConversation) {
+                    const session = {
+                        messages: conversationHistory.flatMap(item => [
+                            item.user ? { role: 'user', text: item.user, turnId: item.turnId || '' } : null,
+                            item.ai ? { role: 'assistant', text: item.ai, turnId: item.turnId || '' } : null
+                        ]).filter(Boolean)
+                    };
+                    restoreConversationEngineForSession(session);
+                }
             }
         } catch (_) {}
     }
