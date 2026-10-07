@@ -1160,12 +1160,24 @@ export async function searchPublicSources(query, options = {}) {
     // General web search (DuckDuckGo & SearXNG) given full 2800ms individual budget
     const webSearchTimeoutMs = Math.min(boundedTimeoutMs, 2800);
     const webParallelCount = Math.min(targetQueries.length, Math.max(2, compEntities.length));
-    const taskDdg = Promise.allSettled(targetQueries.slice(0, webParallelCount).map(candidate => searchDuckDuckGoHtml(candidate, { limit, timeoutMs: webSearchTimeoutMs, signal: options.signal })))
+    const targetDateMetadata = extractQueryTargetMetadata(normalizedQuery);
+    const dateContextText = `${targetDateMetadata?.dateContext || ''} ${normalizedQuery}`.toLowerCase();
+    let effectiveDateFilter = options.dateFilter || null;
+    if (!effectiveDateFilter) {
+        if (/\b(?:today|tonight|this\s+morning|past\s+24\s+hours?|last\s+24\s+hours?)\b/.test(dateContextText)) {
+            effectiveDateFilter = 'day';
+        } else if (/\b(?:this\s+week|past\s+week|last\s+week|current\s+week|past\s+7\s+days)\b/.test(dateContextText)) {
+            effectiveDateFilter = 'week';
+        } else if (/\b(?:this\s+month|past\s+month|last\s+month|current\s+month|past\s+30\s+days)\b/.test(dateContextText)) {
+            effectiveDateFilter = 'month';
+        }
+    }
+    const taskDdg = Promise.allSettled(targetQueries.slice(0, webParallelCount).map(candidate => searchDuckDuckGoHtml(candidate, { limit, timeoutMs: webSearchTimeoutMs, signal: options.signal, dateFilter: effectiveDateFilter })))
         .then(s => { ddgWeb = s.flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []); });
     // SearXNG: zero-config metasearch (aggregates Google, Bing, Brave, DuckDuckGo, 70+ engines).
     // Uses SEARXNG_URL env if configured (own/hosted instance); otherwise races 4 public fallback instances.
     // No API key required. Works on Vercel free tier out of the box.
-    const taskSearXNG = Promise.allSettled(targetQueries.slice(0, webParallelCount).map(candidate => searchSearXNGRacer(candidate, { limit: 6, timeoutMs: webSearchTimeoutMs, signal: options.signal })))
+    const taskSearXNG = Promise.allSettled(targetQueries.slice(0, webParallelCount).map(candidate => searchSearXNGRacer(candidate, { limit: 6, timeoutMs: webSearchTimeoutMs, signal: options.signal, dateFilter: effectiveDateFilter })))
         .then(s => { searxngWeb = s.flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []); });
     const taskWiki = Promise.allSettled(targetQueries.slice(0, 2).map(candidate => searchWikipedia(candidate, { limit: 2, timeoutMs: Math.min(boundedTimeoutMs, 2000) })))
         .then(s => { wiki = s.flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []).slice(0, 3); });
@@ -4514,7 +4526,10 @@ function extractQueryEntityStems(query) {
         'guide', 'tutorial', 'documentation', 'docs', 'manual', 'features', 'changelog', 'update',
         'updates', 'latest', 'new', 'release', 'notes', 'version', 'error', 'issue', 'fix', 'problem',
         'solved', 'help', 'support', 'customer', 'service', 'phone', 'number', 'address', 'hours',
-        'today', 'now', 'current', 'news', 'headline', 'headlines', 'tell', 'show', 'search', 'find'
+        'today', 'now', 'current', 'news', 'headline', 'headlines', 'tell', 'show', 'search', 'find',
+        'there', 'here', 'this', 'that', 'these', 'those', 'any', 'some', 'all', 'every', 'each',
+        'many', 'much', 'more', 'most', 'such', 'major', 'minor', 'affecting', 'currently', 'week',
+        'month', 'year', 'days', 'time', 'like', 'good', 'well', 'going', 'doing'
     ]);
     const words = String(query).toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter(Boolean);
     return words.filter(w => w.length >= 3 && !stopWords.has(w));
@@ -4545,33 +4560,52 @@ export function isDirectPrimarySource(query, domain, title = '') {
     }
 
     // Direct domain stem match against entity keywords
+    let stemMatched = false;
     for (const stem of stems) {
-        if (dStem === stem) return true;
+        if (dStem === stem) { stemMatched = true; break; }
         // Known canonical multi-brand entity extensions (e.g. "steam" in query -> "steampowered")
-        if (stem === 'steam' && (dStem === 'steampowered' || dStem === 'steamcommunity')) return true;
-        if (stem === 'playstation' && (dStem === 'playstation' || dStem === 'sony')) return true;
-        if (stem === 'xbox' && (dStem === 'xbox' || dStem === 'microsoft')) return true;
-        if (dStem === `${stem}official` || dStem === `${stem}app` || dStem === `get${stem}`) return true;
+        if (stem === 'steam' && (dStem === 'steampowered' || dStem === 'steamcommunity')) { stemMatched = true; break; }
+        if (stem === 'playstation' && (dStem === 'playstation' || dStem === 'sony')) { stemMatched = true; break; }
+        if (stem === 'xbox' && (dStem === 'xbox' || dStem === 'microsoft')) { stemMatched = true; break; }
+        if (dStem === `${stem}official` || dStem === `${stem}app` || dStem === `get${stem}`) { stemMatched = true; break; }
         // e.g. "playstation" in query -> "sony" (or stem longer than dStem where dStem is the root corporate parent)
         if (stem.length >= dStem.length && stem.startsWith(dStem) && dStem.length >= 4) {
-            return true;
+            stemMatched = true; break;
         }
     }
 
     // Compound stem match (e.g. "epic games" in query -> "epicgames.com", "stack overflow" -> "stackoverflow.com")
-    for (let i = 0; i < stems.length - 1; i++) {
-        if (`${stems[i]}${stems[i + 1]}` === dStem) return true;
-        if (i < stems.length - 2 && `${stems[i]}${stems[i + 1]}${stems[i + 2]}` === dStem) return true;
+    if (!stemMatched) {
+        for (let i = 0; i < stems.length - 1; i++) {
+            if (`${stems[i]}${stems[i + 1]}` === dStem) { stemMatched = true; break; }
+            if (i < stems.length - 2 && `${stems[i]}${stems[i + 1]}${stems[i + 2]}` === dStem) { stemMatched = true; break; }
+        }
     }
 
     // Title matches official canonical presence
-    const t = String(title || '').toLowerCase();
-    if (/\b(?:official\s+(?:site|website|page|portal|home)|welcome\s+to\s+the\s+official)\b/i.test(t)) {
-        for (const stem of stems) {
-            if (t.includes(stem)) return true;
+    if (!stemMatched) {
+        const t = String(title || '').toLowerCase();
+        if (/\b(?:official\s+(?:site|website|page|portal|home)|welcome\s+to\s+the\s+official)\b/i.test(t)) {
+            for (const stem of stems) {
+                if (t.includes(stem)) { stemMatched = true; break; }
+            }
         }
     }
-    return false;
+
+    if (!stemMatched) return false;
+
+    // RELEVANCE INVARIANT: A domain can NEVER be a direct primary source if the snippet/title
+    // has ZERO topical relevance to the substantive query keywords.
+    const nonStemStems = stems.filter(s => s !== dStem && !dStem.includes(s));
+    if (title && nonStemStems.length >= 2) {
+        const tLower = `${domain} ${title}`.toLowerCase();
+        const hasTopicalOverlap = nonStemStems.some(s => tLower.includes(s));
+        if (!hasTopicalOverlap && !/\b(?:official\s+(?:site|website|portal|home))\b/i.test(title)) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 // Identifies low-quality clickbait, content mills, and scraper blogs
@@ -5028,6 +5062,12 @@ export function distillSearchQuery(rawQuery) {
         .replace(/\b(?:in\s+\d+\s+words|concise\s+summary|step\s+by\s+step|briefly|in\s+detail)\b/gi, '')
         .replace(/\s+/g, ' ')
         .trim();
+
+    // 3. Strip conversational question scaffolding from query beginnings so search indexers receive topical keywords
+    text = text.replace(/^(?:(?:can|could|would)\s+you\s+(?:please\s+)?(?:tell\s+me|show\s+me|find(?:\s+me)?|search(?:\s+(?:the\s+web|the\s+internet))?(?:\s+for)?|look\s+up|check|give\s+me)\s+(?:if\s+there\s+are\s+|whether\s+there\s+are\s+|about\s+|for\s+)?|(?:please\s+)?(?:tell\s+me|find(?:\s+me)?|search(?:\s+(?:the\s+web|the\s+internet))?(?:\s+for)?|web\s+search(?:\s+for)?|look\s+up|check)\s+(?:if\s+there\s+are\s+|whether\s+there\s+are\s+|about\s+|for\s+)?|(?:i\s+(?:want|would\s+like)\s+to\s+know\s+(?:if\s+there\s+are\s+|whether\s+there\s+are\s+|about\s+)?)|(?:do\s+you\s+know\s+(?:if\s+there\s+are\s+|about\s+)?)|(?:are|is)\s+there\s+(?:any\s+)?)/i, '');
+
+    text = text.replace(/[?.!]+$/g, '').trim();
+
     return text.trim() || rawQuery;
 }
 
@@ -5146,14 +5186,20 @@ export function buildDeterministicSearchQueries(query) {
     }
     const intent = extractSearchIntentTerm(normalized);
     const currentYear = new Date().getFullYear();
-    const hasRelativeTime = /\b(?:this\s+(?:month|year|week)|latest|recent|newest|current|today)\b/i.test(normalized);
+    const hasRelativeTime = /\b(?:this\s+(?:month|year|week)|latest|recent|newest|current|today|currently)\b/i.test(normalized);
     const candidates = [
         `${subject} ${intent}`.trim(),
         `${subject} recent ${intent}`.trim(),
         `${subject} latest ${intent}`.trim()
     ];
-    if (hasRelativeTime && !normalized.includes(String(currentYear))) {
-        candidates.push(`${subject} ${currentYear} ${intent}`.trim());
+    if (hasRelativeTime) {
+        const now = new Date();
+        const currentMonthName = now.toLocaleString('en-US', { month: 'long' });
+        candidates.push(`${subject} ${currentMonthName} ${currentYear}`.trim());
+        candidates.push(`${subject} ${currentMonthName} ${currentYear} ${intent}`.trim());
+        if (!normalized.includes(String(currentYear))) {
+            candidates.push(`${subject} ${currentYear} ${intent}`.trim());
+        }
     }
     return Array.from(new Set(candidates.map(s => s.replace(/\b(\w+)\s+\1\b/gi, '$1')).map(normalizeSearchQuery).filter(Boolean)));
 }
@@ -5178,12 +5224,13 @@ function extractSearchSubject(query) {
     }
     const universal = parseUniversalEntityQuery(query);
     if (universal?.jurisdiction && isLeadershipOrRoleTerm(universal?.role)) return cleanQueryTarget(universal.jurisdiction);
-    const text = normalized
+    const cleanedTarget = cleanQueryTarget(normalized);
+    const text = (cleanedTarget || normalized)
         .replace(/\s+(?:compared with|compared to|difference between|versus|vs\.?).*$/i, '')
         .replace(/\b(?:changes?\s+in|updates?\s+in|new\s+in)\b/gi, ' ')
         .replace(/\b(?:latest|recent|current|newest|reviews?|review|hands-on|worth\s+it|good|best|price|available|availability|launched|released?|winner|won|champion|rankings?|standings?|compare|comparison|vs|movies?|films?|songs?|albums?|releases?|facts?|info(?:rmation)?|background|overview|details?)\b/gi, ' ')
         .replace(/\b(?:in|during|as of|by|before|after)\s+\d{4}\b/gi, ' ')
-        .replace(/\b(?:of|for|about|on|the|is|are|should|i|buy|get|now|today|live|exact|rate)\b/gi, ' ')
+        .replace(/\b(?:of|for|about|on|the|is|are|should|i|buy|get|now|today|live|exact|rate|there|here|this|that|these|those|any|some|all)\b/gi, ' ')
         .replace(/\s+/g, ' ')
         .trim();
     return cleanQueryTarget(normalizeSearchQuery(text).replace(/\s*\(\s*/g, ' ').replace(/\s*\)\s*/g, '').trim());
