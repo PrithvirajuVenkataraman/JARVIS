@@ -33,14 +33,11 @@ class FastLRU {
 const FRONTEND_ROUTE_CACHE = new FastLRU(1000);
 const FRONTEND_UNIVERSAL_CACHE = new FastLRU(1000);
 
-const STOP_WORDS = new Set(['a', 'an', 'the', 'is', 'are', 'was', 'were', 'of', 'in', 'to', 'for', 'on', 'with', 'at', 'by', 'from', 'about', 'what', 'when', 'where', 'who', 'why', 'how', 'which', 'did', 'do', 'does', 'can', 'could', 'would', 'should']);
-
 export function textToEmbeddingVector(text, dim = 512) {
     const v = new Float32Array(dim);
     const tokens = String(text || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').trim().split(/\s+/).filter(Boolean);
     if (!tokens.length) return v;
     for (const token of tokens) {
-        const weight = STOP_WORDS.has(token) ? 0.05 : 1.0;
         let h1 = 0x811c9dc5;
         let h2 = 0x5bd1e995;
         for (let i = 0; i < token.length; i++) {
@@ -52,14 +49,14 @@ export function textToEmbeddingVector(text, dim = 512) {
         }
         const idx1 = Math.abs(h1) % dim;
         const idx2 = Math.abs(h2) % dim;
-        v[idx1] += 1.0 * weight;
-        v[idx2] += 0.5 * weight;
+        v[idx1] += 1.0;
+        v[idx2] += 0.5;
         if (token.length >= 4) {
             for (let i = 0; i < token.length - 2; i++) {
                 const trigram = token.slice(i, i + 3);
                 let th = 0;
                 for (let j = 0; j < trigram.length; j++) th = (th * 31 + trigram.charCodeAt(j)) | 0;
-                v[Math.abs(th) % dim] += 0.2 * weight;
+                v[Math.abs(th) % dim] += 0.2;
             }
         }
     }
@@ -129,7 +126,7 @@ export const STATIC_KNOWLEDGE_CATEGORIES = Object.freeze([
     },
     {
         id: 'science_physics_chem_bio',
-        text: 'physics chemistry biology astronomy quantum gravity relativity thermodynamics photosynthesis dna genetics periodic table atomic number chemical element gold nitrogen water methane bonding covalent ionic valence electrons mitochondria cellular organelle atp energy natural selection evolution darwin species adaptation penicillin discovered discovery science history medicine antibiotic equations formula e=mc^2 speed of light vacuum acoustics newton newtons third law motion'
+        text: 'physics chemistry biology astronomy quantum gravity relativity thermodynamics photosynthesis dna genetics periodic table atomic number chemical element gold nitrogen water methane bonding covalent ionic valence electrons mitochondria cellular organelle atp energy natural selection evolution darwin species adaptation penicillin discovered discovery science history medicine antibiotic equations formula e=mc^2 speed of light vacuum acoustics newton newtons third law motion electrical circuit voltage current divider ohms law electromagnetism'
     },
     {
         id: 'math_calculus_algebra',
@@ -142,6 +139,10 @@ export const STATIC_KNOWLEDGE_CATEGORIES = Object.freeze([
     {
         id: 'philosophy_definitions_economics',
         text: 'definition meaning explain concept utilitarianism epistemology moral philosophy ethics metaphysics stoicism economics macroeconomics inflation gdp monetary policy photosynthesis definition botany autotroph'
+    },
+    {
+        id: 'literature_arts_humanities',
+        text: 'literature author wrote novel play poem poetry hamlet shakespeare macbeth dante homer odyssey iliad drama tragedy comedy writer publication classic books novel book author playwright dramatist written'
     }
 ]);
 
@@ -352,7 +353,7 @@ const INTENT_PROTOTYPES = [
         category: 'web_search',
         isLiveRequired: true,
         exemplars: [
-            'search the web online articles sources references google lookup information',
+            'search web online articles sources references google lookup information',
             'google search online web articles links references internet lookup'
         ]
     },
@@ -520,7 +521,8 @@ const INTENT_PROTOTYPES = [
             'utilitarianism in moral philosophy ethics Bentham Mill greatest happiness principle',
             'epistemology core questions philosophy knowledge belief justified truth',
             'monetary policy macroeconomic inflation GDP economics central banking interest rates',
-            'constitutional differences between parliamentary and presidential systems political theory'
+            'constitutional differences between parliamentary and presidential systems political theory',
+            'author playwright wrote book novel play Hamlet Shakespeare poetry literature classic tragedy'
         ]
     }
 ];
@@ -618,9 +620,23 @@ export function classifyUniversalEntityIntent(text = '', context = {}) {
     const entityTarget = extractEntityTarget(raw);
     const isHistorical = raw.toLowerCase().includes('first') || raw.toLowerCase().includes('former') || raw.toLowerCase().includes('past') || raw.toLowerCase().includes('history') || /\b(who\s+was|what\s+was|when\s+was|where\s+was|why\s+was|how\s+was|who\s+founded|who\s+built|who\s+invented|who\s+discovered)\b/i.test(raw) || /\b\d{4}\b/.test(raw);
 
-    let isLive = bestMatch.isLiveRequired;
+    let isLive = false;
+    let category = 'stable_knowledge';
+    let reason = 'stable_llm_knowledge';
+
+    if (bestMatch && bestMatch.isLiveRequired && (bestScore >= 0.28 || (bm25Matches.length > 0 && bm25Matches[0].score >= 0.8))) {
+        isLive = true;
+        category = bestMatch.category;
+        reason = bestMatch.type;
+    } else if (bestMatch && !bestMatch.isLiveRequired && bestScore >= 0.28) {
+        category = bestMatch.category;
+        reason = bestMatch.type;
+    }
+
     if (entityTarget && !isHistorical) {
         isLive = true;
+        category = 'political_leadership';
+        reason = 'temporal_fact';
     } else if (isHistorical) {
         isLive = false;
     }
@@ -629,8 +645,8 @@ export function classifyUniversalEntityIntent(text = '', context = {}) {
         isLiveRequired: isLive,
         isStableKnowledge: !isLive,
         entityTarget: isHistorical ? null : entityTarget,
-        category: bestMatch.category,
-        reason: bestMatch.type
+        category,
+        reason
     };
 
     FRONTEND_UNIVERSAL_CACHE.set(cacheKey, res);
