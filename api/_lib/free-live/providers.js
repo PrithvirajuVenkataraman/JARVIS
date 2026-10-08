@@ -1,6 +1,7 @@
 import { FREE_LIVE_SOURCES } from './source-registry.js';
 import { cleanQueryTarget, extractQueryTargetMetadata } from '../query-target-cleanup.js';
 import { cleanSnippetText, decodeHtmlEntities } from '../snippet-sanitizer.js';
+import { classifyTemporalScope } from '../temporal-query-planner.js';
 
 const OPEN_METEO_GEOCODE_URL = 'https://geocoding-api.open-meteo.com/v1/search';
 const OPEN_METEO_FORECAST_URL = 'https://api.open-meteo.com/v1/forecast';
@@ -29,15 +30,9 @@ export function resolveDateFilter(options = {}, query = '') {
         if (df === 'month' || df === 'm') return { ddg: 'm', searx: 'month' };
         if (df === 'year' || df === 'y') return { ddg: 'y', searx: 'year' };
     }
-    const q = String(query).toLowerCase();
-    if (/\b(?:today|tonight|this\s+morning|past\s+24\s+hours?|last\s+24\s+hours?)\b/.test(q)) {
-        return { ddg: 'd', searx: 'day' };
-    }
-    if (/\b(?:this\s+week|past\s+week|last\s+week|current\s+week|past\s+7\s+days)\b/.test(q)) {
-        return { ddg: 'w', searx: 'week' };
-    }
-    if (/\b(?:this\s+month|past\s+month|last\s+month|current\s+month|past\s+30\s+days)\b/.test(q)) {
-        return { ddg: 'm', searx: 'month' };
+    const scope = classifyTemporalScope(query);
+    if (scope.isTimeSensitive && scope.filter) {
+        return { ddg: scope.filter.ddg, searx: scope.filter.searx };
     }
     return null;
 }
