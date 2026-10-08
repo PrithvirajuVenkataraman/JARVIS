@@ -12,41 +12,28 @@
  * - Inverted index acceleration for sub-millisecond scoring (<0.1ms per query)
  */
 
-export const DEFAULT_SYNTAX_STOP_WORDS = new Set([
-    'a', 'an', 'the', 'and', 'or', 'but', 'if', 'as',
-    'of', 'at', 'by', 'for', 'with', 'about', 'against', 'between', 'into', 'through',
-    'during', 'before', 'after', 'above', 'below', 'to', 'from', 'up', 'down', 'in',
-    'out', 'on', 'off', 'over', 'under', 'again', 'further', 'then', 'once',
-    'it', 'its', 'this', 'that', 'these', 'those', 'they', 'them', 'their', 'he', 'she', 'him', 'her', 'we', 'us', 'our', 'you', 'your', 'me', 'my',
-    'what', 'when', 'where', 'which', 'who', 'whom', 'whose', 'why', 'how',
-    'is', 'are', 'was', 'were', 'be', 'been', 'being',
-    'do', 'does', 'did', 'have', 'has', 'had'
-]);
+// Language-agnostic IR stop-words set (kept as empty Set for API backwards compatibility)
+export const DEFAULT_SYNTAX_STOP_WORDS = new Set();
 
 /**
- * Enterprise tokenization with semantic preservation (all question words, verbs, and domain entities retained)
+ * Enterprise Language-Agnostic Tokenization
+ * Normalizes Unicode, removes non-alphanumeric punctuation, and extracts word tokens.
+ * Common/structural words are naturally attenuated by mathematical IDF rather than static word lists.
  * @param {string} text - Input raw text
  * @param {Object} [options] - Options
- * @param {boolean} [options.filterStopWords=true] - Whether to strip grammatical syntax words
- * @param {Set<string>} [options.stopWords] - Custom stop words set
  * @param {number} [options.minTokenLength=2] - Minimum token length
+ * @param {Set<string>} [options.stopWords] - Optional caller-supplied stop words set
  * @returns {string[]} Normalized tokens
  */
 export function tokenizeText(text = '', options = {}) {
-    const filterStopWords = options.filterStopWords !== false;
-    const stopWords = options.stopWords || DEFAULT_SYNTAX_STOP_WORDS;
     const minLen = typeof options.minTokenLength === 'number' ? options.minTokenLength : 2;
-
-    const raw = String(text || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ');
+    const raw = String(text || '').toLowerCase().normalize('NFKC').replace(/[^\p{L}\p{N}\s]/gu, ' ');
     const matches = raw.match(/[\p{L}\p{N}]+/gu) || [];
     
-    const tokens = [];
-    for (const match of matches) {
-        if (match.length >= minLen && (!filterStopWords || !stopWords.has(match))) {
-            tokens.push(match);
-        }
+    if (options.stopWords instanceof Set && options.stopWords.size > 0) {
+        return matches.filter(match => match.length >= minLen && !options.stopWords.has(match));
     }
-    return tokens;
+    return matches.filter(match => match.length >= minLen);
 }
 
 /**
@@ -56,8 +43,11 @@ export class BM25Index {
     constructor(options = {}) {
         this.k1 = typeof options.k1 === 'number' ? options.k1 : 1.2;
         this.b = typeof options.b === 'number' ? options.b : 0.75;
-        this.filterStopWords = options.filterStopWords !== false;
-        this.stopWords = options.stopWords || DEFAULT_SYNTAX_STOP_WORDS;
+        // Dynamic statistical threshold: terms appearing across >= maxDocFreqRatio (default 90%)
+        // of documents in the index are statistically ubiquitous and receive zero IDF.
+        this.maxDocFreqRatio = typeof options.maxDocFreqRatio === 'number' ? options.maxDocFreqRatio : 0.90;
+        this.minDocCountForRatio = typeof options.minDocCountForRatio === 'number' ? options.minDocCountForRatio : 5;
+        this.stopWords = options.stopWords instanceof Set ? options.stopWords : null;
         
         this.documents = [];
         this.docLengths = [];
@@ -74,7 +64,6 @@ export class BM25Index {
 
     tokenize(text) {
         return tokenizeText(text, {
-            filterStopWords: this.filterStopWords,
             stopWords: this.stopWords
         });
     }
@@ -124,6 +113,11 @@ export class BM25Index {
         const df = this.docFreqs.get(term) || 0;
         const n = this.documents.length;
         if (n === 0 || df === 0) {
+            this.idfCache.set(term, 0);
+            return 0;
+        }
+        // Statistically ubiquitous terms across the corpus receive 0 IDF (dynamic stop-term dampening)
+        if (n >= this.minDocCountForRatio && (df / n) >= this.maxDocFreqRatio) {
             this.idfCache.set(term, 0);
             return 0;
         }
