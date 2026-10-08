@@ -15,6 +15,8 @@ import { buildParentChildChunks, expandChildMatchesToParentContext } from './_li
 import { computeRagTriadEvaluation } from './_lib/rag-triad-evaluator.js';
 import { cleanSnippetText, decodeHtmlEntities } from './_lib/snippet-sanitizer.js';
 import { planTemporalSearchQueries, classifyTemporalScope } from './_lib/temporal-query-planner.js';
+import { classifyDomainTrustTier, getDomainTrustDelta, isScraperOrContentFarm, normaliseDomain } from './_lib/domain-trust-registry.js';
+import { annotateCorroboration, shouldCorroborate, corroborationScoreDelta } from './_lib/multi-source-corroboration.js';
 
 const SERPER_SEARCH_URL = 'https://google.serper.dev/search';
 const WIKIPEDIA_SEARCH_URL = 'https://en.wikipedia.org/w/api.php';
@@ -4705,8 +4707,28 @@ export function getTopicAuthorityBonus(domain, query) {
 }
 
 export function rankSources(query, results) {
+    const list = Array.isArray(results) ? results : [];
+    if (!list.length) return list;
     const terms = tokenize(query);
-    return [...(Array.isArray(results) ? results : [])].sort((a, b) => scoreSearchResult(b, terms, query) - scoreSearchResult(a, terms, query));
+
+    // Run multi-source corroboration annotation for breaking/live queries.
+    // Mutates each result in-place to add corroborationScore, corroborationSources,
+    // corroborationCluster, and syndicatedContent fields.  Skips for stable queries.
+    if (shouldCorroborate(query)) {
+        annotateCorroboration(list, query);
+    } else {
+        // Ensure fields exist even when corroboration is skipped
+        for (const item of list) {
+            if (item.corroborationScore === undefined) {
+                item.corroborationScore = 0;
+                item.corroborationSources = 1;
+                item.corroborationCluster = -1;
+                item.syndicatedContent = false;
+            }
+        }
+    }
+
+    return [...list].sort((a, b) => scoreSearchResult(b, terms, query) - scoreSearchResult(a, terms, query));
 }
 
 export function scoreSearchResult(item, terms, query = '') {
@@ -4742,40 +4764,37 @@ export function scoreSearchResult(item, terms, query = '') {
         }
     }
 
-    // Scraper, content-farm & clickbait penalty (-30)
-    if (domain && isLowQualityOrScraperDomain(domain, title)) {
-        score -= 30;
-        item.authorityTier = 3;
+    // ── Domain Trust Tier (T0–T4) ─────────────────────────────────────────────
+    // Unified structural authority evaluation via the domain trust registry.
+    // Replaces the legacy per-function checks (isGovernmentDomain, isAcademicDomain,
+    // isLowQualityOrScraperDomain) with a single, testable, globally-consistent call.
+    //
+    // Note: Direct-Primary-Source (T0) is handled above by isDirectPrimarySource().
+    // The registry handles T1 (gov/IGO), T2 (academic/wire), T3 (general), T4 (farm).
+    if (domain && !isPrimary) {
+        const trustMeta = classifyDomainTrustTier(normaliseDomain(domain), String(item?.url || ''));
+        score += trustMeta.delta;
+        if (item.authorityTier === undefined) item.authorityTier = trustMeta.tier;
+        if (trustMeta.signals?.length) {
+            if (!item.qualitySignals) item.qualitySignals = [];
+            for (const sig of trustMeta.signals) {
+                if (!item.qualitySignals.includes(sig)) item.qualitySignals.push(sig);
+            }
+        }
     }
 
-    // Third-party blog or article penalty on non-primary sources
-    const urlStr = String(item?.url || '').toLowerCase();
-    if (/\/blog\/|\/article\/|\/posts?\//i.test(urlStr) && !isPrimary) {
-        score -= 10;
-    }
-
-    // Structural domain trust — works for EVERY country, no named publications.
-    // Any government site (.gov, .gob.mx, .gouv.fr, .gov.br, .go.jp, etc.) +25.
-    if (domain && isGovernmentDomain(domain)) {
-        score += 25;
-        if (item.authorityTier === undefined) item.authorityTier = 1;
-    }
-    // Any international organization (.int, un.org, etc.) +25.
-    if (domain && isInternationalOrgDomain(domain)) {
-        score += 25;
-        if (item.authorityTier === undefined) item.authorityTier = 1;
-    }
-    // Any academic institution worldwide (.edu, .ac.uk, .ac.jp, .edu.br, etc.) +15.
-    if (domain && isAcademicDomain(domain)) {
-        score += 15;
-        if (item.authorityTier === undefined) item.authorityTier = 1;
-    }
-    // Topic-aware intergovernmental authority bonus (WHO for health, WTO for trade, etc.)
+    // Backward-compatibility: also run topic-authority bonus from TOPIC_AUTHORITY_REGISTRY.
+    // This covers specialised IGO/topic-domain signals (WHO for health, WTO for trade…)
+    // that are outside the tier system's scope.
     const topicBonus = getTopicAuthorityBonus(domain, query);
     if (topicBonus > 0) {
         score += topicBonus;
         if (item.authorityTier === undefined) item.authorityTier = 2;
     }
+
+    // ── Multi-Source Corroboration Delta ─────────────────────────────────────
+    // Applied when rankSources has already annotated corroborationScore.
+    score += corroborationScoreDelta(item);
 
     for (const term of terms) {
         if (title.includes(term)) score += 5;
