@@ -1,12 +1,17 @@
 /**
- * In-Process Hybrid Reranker (BM25 + Semantic + Reciprocal Rank Fusion + Date-Aware Temporal Boost)
- * - Computes lexical BM25 relevance scores in-process (<0.2ms overhead)
- * - Computes date-aware temporal decay & query-date proximity matching (<0.1ms overhead)
- * - Merges lexical rankings, dense semantic embeddings, and temporal freshness using Reciprocal Rank Fusion (RRF)
- * - Enhances with NVIDIA cross-encoder ranking when configured
+ * In-Process Hybrid Reranker
+ * ──────────────────────────
+ * Combines four independent ranking signals via Reciprocal Rank Fusion (RRF):
+ *  1. BM25 Lexical Relevance       – TF-IDF approximation, <0.2 ms
+ *  2. Dense Semantic Embedding     – NVIDIA NIM cosine similarity (optional)
+ *  3. Date-Aware Temporal Decay    – Exponential half-life decay per query intent
+ *  4. Domain Trust Tier Delta      – Structural T0–T4 authority score
+ *
+ * Optionally post-reranked by an NVIDIA NIM cross-encoder when configured.
  */
 
 import { rankTextsByEmbedding, rerankTexts, hasNvidiaEmbeddingKey, isNvidiaRerankEnabled } from './embeddings.js';
+import { classifyDomainTrustTier, normaliseDomain } from './domain-trust-registry.js';
 
 const RRF_K = 60; // Standard reciprocal rank fusion damping factor
 const BM25_K1 = 1.2;
@@ -125,7 +130,6 @@ export function computeBM25Scores(query, documents = []) {
 export async function hybridRerank(query, documents = [], options = {}) {
     const list = Array.isArray(documents) ? documents : [];
     if (!list.length) return [];
-    if (list.length === 1) return list;
 
     const queryText = String(query || '').trim();
     const dateIntent = options.dateIntent || extractQueryDateIntent(queryText);
@@ -173,32 +177,53 @@ export async function hybridRerank(query, documents = [], options = {}) {
         }
     }
 
-    // 4. Reciprocal Rank Fusion (RRF) with Temporal Balancing
+    // 4. Reciprocal Rank Fusion (RRF) with Temporal + Domain Trust Balancing
     const hasSemanticRank = semanticRankMap.size > 0;
     const temporalWeight = Math.max(0.3, Math.min(1.5, (dateIntent.weight || 0.5) * 1.2));
+
+    // Pre-compute domain trust tier metadata for each document (O(n), <0.05ms)
+    const domainTrustMeta = list.map(doc => {
+        const rawDomain = String(doc?.domain || '');
+        let hostname = rawDomain;
+        if (!hostname) {
+            try { hostname = new URL(String(doc?.url || '')).hostname; } catch (_) {}
+        }
+        return classifyDomainTrustTier(normaliseDomain(hostname), String(doc?.url || ''));
+    });
+
+    // Normalise trust delta to RRF scale:
+    // RRF scores are typically 0.007–0.016 for ~60 docs.
+    // We map delta (−35..+35) so max trust contribution ≈ one rank position.
+    const TRUST_SCALE = 1 / (35 * RRF_K * 20);
 
     const fused = list.map((doc, index) => {
         const bm25Rank = bm25RankMap.get(index) || list.length;
         const semanticRank = hasSemanticRank ? (semanticRankMap.get(index) || list.length) : bm25Rank;
         const temporalRank = temporalRankMap.get(index) || list.length;
         const tScore = temporalScores[index] ?? 0.5;
+        const trustMeta = domainTrustMeta[index];
 
         // Base reciprocal rank across lexical + dense
-        const baseRrfScore = hasSemanticRank 
+        const baseRrfScore = hasSemanticRank
             ? (1 / (RRF_K + bm25Rank)) + (1 / (RRF_K + semanticRank))
             : (1 / (RRF_K + bm25Rank));
 
         // Temporal rank contribution
         const temporalRrf = (temporalWeight / (RRF_K + temporalRank));
 
+        // Domain trust additive term (+ve for T1/T2, −ve for T4, 0 for T3)
+        const trustRrf = trustMeta.delta * TRUST_SCALE;
+
         // Multiplicative temporal scale (boosts relevant dates, softens stale dates)
         const temporalMultiplier = Math.max(0.3, 1.0 + (temporalWeight * (tScore - 0.5)));
-        const totalRrfScore = (baseRrfScore + temporalRrf) * temporalMultiplier;
+        const totalRrfScore = (baseRrfScore + temporalRrf + trustRrf) * temporalMultiplier;
 
         return {
             ...doc,
             bm25Score: bm25Scores[index] || 0,
             temporalScore: tScore,
+            domainTrustTier: trustMeta.tier,
+            domainTrustSignals: trustMeta.signals,
             rrfScore: totalRrfScore
         };
     });
@@ -206,7 +231,7 @@ export async function hybridRerank(query, documents = [], options = {}) {
     fused.sort((a, b) => b.rrfScore - a.rrfScore);
 
     // 5. Cross-Encoder Rerank if enabled (NVIDIA NIM)
-    if (isNvidiaRerankEnabled() && options.useRerank !== false) {
+    if (fused.length > 1 && isNvidiaRerankEnabled() && options.useRerank !== false) {
         try {
             const topCandidates = fused.slice(0, Math.min(12, fused.length));
             const reranked = await rerankTexts(queryText, topCandidates, options);
