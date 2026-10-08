@@ -82,21 +82,21 @@ const INTENT_PROTOTYPES = [
         category: 'actionable_or_freshness',
         isLiveRequired: true,
         exemplars: [
-            'museum near me harbor landmark location city center driving directions',
-            'hotels and restaurants near harbor beach downtown lodging stay booking',
+            'nearby museum harbor landmark location city center driving directions',
+            'hotels restaurants near harbor beach downtown lodging stay booking',
             'hotels near Central Park stay lodging booking reservations accommodation',
-            'best restaurants open now in Paris food dining cafe meals',
-            'places to visit in Mysore during summer tourism sightseeing attractions',
-            'things to do in Tokyo activities attractions trip itinerary vacation',
-            'directions to destination navigation route driving map transit',
-            'directions to landmark navigation route map commute travel',
-            'pizza restaurant food places near me dining cafe takeout delivery',
-            'places open now and navigation directions route to nearby',
-            'things to do in city this weekend activities attractions guide',
-            'changelog and release notes of latest software version update features',
-            'release notes and patch features in current version upgrade download',
-            'new feature in Python 3.12 software version release update changelog',
-            'new feature updates in React 19 framework version release changelog',
+            'best restaurants open now Paris food dining cafe meals',
+            'places visit Mysore summer tourism sightseeing attractions',
+            'things do Tokyo activities attractions trip itinerary vacation',
+            'directions destination navigation route driving map transit',
+            'directions landmark navigation route map commute travel',
+            'nearby pizza restaurant food dining cafe takeout delivery',
+            'places open now navigation directions route nearby',
+            'things do city weekend activities attractions guide',
+            'changelog release notes latest software version update features',
+            'release notes patch features version upgrade download',
+            'new features Python 3.12 software version release update changelog',
+            'new features React 19 framework version release changelog',
             'framework version release notes updates patches changelog'
         ]
     },
@@ -105,9 +105,9 @@ const INTENT_PROTOTYPES = [
         category: 'weather',
         isLiveRequired: true,
         exemplars: [
-            'current live weather forecast and temperature today conditions',
-            'weather forecast for tomorrow temperature and rainfall humidity precipitation',
-            'rain forecast in city current weather conditions humidity precipitation'
+            'current live weather forecast temperature today conditions',
+            'weather forecast tomorrow temperature rainfall humidity precipitation',
+            'rain forecast city weather conditions humidity precipitation'
         ]
     },
     {
@@ -115,11 +115,11 @@ const INTENT_PROTOTYPES = [
         category: 'finance_crypto',
         isLiveRequired: true,
         exemplars: [
-            'current live price of bitcoin crypto stock rate market price quote',
-            'tesla stock price today and market cap trading volume valuation',
-            'price of ethereum crypto rate today ticker quote exchange rate',
-            'live score of cricket football match today sports scores results',
-            'latest news updates and breaking events today world news headlines'
+            'current live price bitcoin crypto stock rate market price quote',
+            'tesla stock price today market cap trading volume valuation',
+            'price ethereum crypto rate today ticker quote exchange rate',
+            'live score cricket football match today sports scores results',
+            'latest news updates breaking events today world news headlines'
         ]
     },
     {
@@ -129,7 +129,7 @@ const INTENT_PROTOTYPES = [
         exemplars: [
             'active prime minister government president in office administration',
             'chief minister state leader active cm in office jurisdiction',
-            'current pm president minister of country state leadership',
+            'current pm president minister country state leadership',
             'active ceo corporate company executive leadership managing director',
             'active chief minister governor in office administration cabinet'
         ]
@@ -140,21 +140,23 @@ const INTENT_PROTOTYPES = [
         isLiveRequired: false,
         exemplars: [
             'python programming function quicksort algorithm sorting implementation syntax',
-            'array initialization in Python programming data structures code',
-            'class or function in javascript c++ code syntax implementation',
+            'array initialization Python programming data structures code',
+            'class or function javascript c++ code syntax implementation',
             'binary search tree algorithm data structures computer science implementation',
-            'Red-Black Tree in C++ data structures algorithms tree rotation',
-            'binary search in computer science algorithms time complexity',
-            'hash table and collision resolution hash map chaining bucket',
+            'Red-Black Tree C++ data structures algorithms tree rotation',
+            'binary search computer science algorithms time complexity',
+            'hash table collision resolution hash map chaining bucket',
             'TCP vs UDP protocols computer networking socket packet transmission',
-            'new keyword in C++ memory allocation heap pointer constructor',
-            'new operator overloading in C++ syntax memory allocation',
-            'asynchronous event loop in JavaScript promises callbacks microtasks',
+            'new keyword C++ memory allocation heap pointer constructor',
+            'new operator overloading C++ syntax memory allocation',
+            'asynchronous event loop JavaScript promises callbacks microtasks',
+            'write code function unit test script debugging implementation software programming',
+            'coding problem write algorithm test function script debugging refactor implementation',
             'NLP natural language processing machine learning deep learning neural networks',
             'neural networks deep learning computer vision AI convolutional networks',
-            'transformers in NLP self attention models multi head attention',
-            'mechanism of self-attention in Transformer models neural networks',
-            'backpropagation with gradient descent optimize weights machine learning AI loss'
+            'transformers NLP self attention models multi head attention',
+            'mechanism of self-attention Transformer models neural networks',
+            'backpropagation gradient descent optimize weights machine learning AI loss'
         ]
     },
     {
@@ -178,9 +180,9 @@ const INTENT_PROTOTYPES = [
         isLiveRequired: false,
         exemplars: [
             'Newton third law of motion speed of light vacuum physics gravity kinematics dynamics',
-            'direct current alternating current electricity voltage resistance circuit electric current physics electromagnetism',
+            'direct current alternating current electricity voltage resistance circuit electric current divider electrical engineering physics electromagnetism',
             'ocean currents marine biology atmospheric circulation global climate system ecology thermodynamics physics',
-            'formula for kinetic energy in physics equation E=mc^2 velocity mass work',
+            'formula kinetic energy physics equation E=mc^2 velocity mass work',
             'speed of sound in dry air physics acoustics velocity constant decibel',
             'speed of light in vacuum constant physics relativity optics',
             'theory of general relativity and equation E=mc^2 Einstein spacetime physics gravity',
@@ -190,7 +192,7 @@ const INTENT_PROTOTYPES = [
             'law of conservation of energy thermodynamics physics closed system entropy',
             'atomic number of Gold chemical element periodic table protons mass',
             'boiling point of nitrogen water melting point chemistry Celsius Kelvin',
-            'chemical formula for water and methane glucose molecule covalent bond chemistry',
+            'chemical formula water methane glucose molecule covalent bond chemistry',
             'covalent vs ionic bonding chemical bonds valence electrons chemistry electronegativity',
             'pH of pure neutral water acidity alkalinity chemistry logarithmic scale',
             'photosynthesis in plants chloroplast sunlight glucose biology chemical equation',
@@ -252,7 +254,7 @@ const COMPILED_INTENTS = INTENT_PROTOTYPES.map(proto => {
     return { ...proto, exemplarVectors };
 });
 
-const INTENT_BM25_INDEX = new BM25Index({ k1: 1.2, b: 0.75, filterStopWords: true });
+const INTENT_BM25_INDEX = new BM25Index({ k1: 1.2, b: 0.75 });
 INTENT_PROTOTYPES.forEach((proto, pIndex) => {
     proto.exemplars.forEach(exemplar => {
         INTENT_BM25_INDEX.addDocument(pIndex, exemplar, proto);
@@ -294,7 +296,7 @@ export const STATIC_KNOWLEDGE_CATEGORIES = Object.freeze([
     }
 ]);
 
-const STATIC_BM25_INDEX = new BM25Index({ k1: 1.2, b: 0.75, filterStopWords: true });
+const STATIC_BM25_INDEX = new BM25Index({ k1: 1.2, b: 0.75 });
 STATIC_KNOWLEDGE_CATEGORIES.forEach(cat => {
     STATIC_BM25_INDEX.addDocument(cat.id, cat.text, cat);
 });
@@ -384,17 +386,28 @@ export function classifyUniversalEntityIntent(rawQuery = '', context = {}) {
     const entityTarget = extractEntityTarget(query);
     const isHistorical = query.toLowerCase().includes('first') || query.toLowerCase().includes('former') || query.toLowerCase().includes('past') || query.toLowerCase().includes('history') || /\b(who\s+was|what\s+was|when\s+was|where\s+was|why\s+was|how\s+was|who\s+founded|who\s+built|who\s+invented|who\s+discovered)\b/i.test(query) || /\b\d{4}\b/.test(query);
 
+    // Disambiguate technical homonyms: physical current, common ancestor, new operator
+    const isPhysicalCurrent = /\b(?:alternating|direct|electric|electrical|ocean|water|eddy|convection|thermal|displacement|bias|leakage|dark|drift|fault|inrush|reverse|saturation|steady|transient|surface|rip|tidal|gulf\s+stream|deep\s+sea)\s+currents?\b|\bcurrents?\s+(?:divider|density|gain|ratio|flow|meter|loop|source|mirror|regulator|transformer|transducer|collector|limiting|sensor|switch|clamp|rating|waveform|pulse|vector|algebra)\b|\b(?:ac|dc)\s+currents?\b/i.test(query);
+    const isProgrammingNew = /\b(?:new\s+(?:keyword|operator|instance|object|array|class|promise|map|set|date|error|allocation)|operator\s+new)\b/i.test(query);
+    const isCommonAncestor = /\b(?:most\s+recent|latest|last)\s+common\s+ancestor\b/i.test(query);
+
     let isLive = false;
     let category = 'stable_knowledge';
     let reason = 'stable_llm_knowledge';
 
-    if (bestMatch && bestMatch.isLiveRequired && (bestScore >= 0.28 || (bm25Matches.length > 0 && bm25Matches[0].score >= 0.8))) {
+    if (bestMatch && bestMatch.isLiveRequired && !isPhysicalCurrent && !isProgrammingNew && !isCommonAncestor && (bestScore >= 0.28 || (bm25Matches.length > 0 && bm25Matches[0].score >= 0.8))) {
         isLive = true;
         category = bestMatch.category;
         reason = bestMatch.type;
     } else if (bestMatch && !bestMatch.isLiveRequired && bestScore >= 0.28) {
         category = bestMatch.category;
         reason = bestMatch.type;
+    } else if (isPhysicalCurrent || isCommonAncestor) {
+        category = 'science';
+        reason = 'static_reasoning';
+    } else if (isProgrammingNew) {
+        category = 'coding';
+        reason = 'static_reasoning';
     }
 
     if (entityTarget && !isHistorical) {
