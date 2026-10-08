@@ -14,6 +14,7 @@ import { hybridRerank } from './_lib/hybrid-reranker.js';
 import { buildParentChildChunks, expandChildMatchesToParentContext } from './_lib/parent-child-chunker.js';
 import { computeRagTriadEvaluation } from './_lib/rag-triad-evaluator.js';
 import { cleanSnippetText, decodeHtmlEntities } from './_lib/snippet-sanitizer.js';
+import { planTemporalSearchQueries, classifyTemporalScope } from './_lib/temporal-query-planner.js';
 
 const SERPER_SEARCH_URL = 'https://google.serper.dev/search';
 const WIKIPEDIA_SEARCH_URL = 'https://en.wikipedia.org/w/api.php';
@@ -402,6 +403,9 @@ export async function planDynamicSearchQueries(rawQuery) {
     const cleanQ = normalizeSearchQuery(rawQuery);
     if (!cleanQ) return [];
 
+    const temporalPlan = planTemporalSearchQueries(cleanQ);
+    const deterministic = buildDeterministicSearchQueries(cleanQ);
+
     const prompt = `You are an expert search engine query planner. Decompose the following user question into 1 to 4 focused web search queries to locate official first-party policies, documentation, and current factual records.\n\nUser Question:\n"${cleanQ}"\n\nReturn pure JSON with format: {"queries": ["query 1", "query 2"]}`;
 
     try {
@@ -411,12 +415,15 @@ export async function planDynamicSearchQueries(rawQuery) {
                 .map(q => normalizeSearchQuery(q))
                 .filter(Boolean);
             if (planned.length > 0) {
-                return Array.from(new Set(planned)).slice(0, 4);
+                const merged = temporalPlan.isTimeSensitive && temporalPlan.queries.length > 0
+                    ? [temporalPlan.queries[0], ...planned, ...temporalPlan.queries.slice(1)]
+                    : planned;
+                return Array.from(new Set(merged)).slice(0, 4);
             }
         }
     } catch (_) {}
 
-    return buildDeterministicSearchQueries(cleanQ);
+    return deterministic;
 }
 
 export async function handleStreamingWebRag(req, res, { rawQuery, limit = 8 }) {
@@ -1164,12 +1171,9 @@ export async function searchPublicSources(query, options = {}) {
     const dateContextText = `${targetDateMetadata?.dateContext || ''} ${normalizedQuery}`.toLowerCase();
     let effectiveDateFilter = options.dateFilter || null;
     if (!effectiveDateFilter) {
-        if (/\b(?:today|tonight|this\s+morning|past\s+24\s+hours?|last\s+24\s+hours?)\b/.test(dateContextText)) {
-            effectiveDateFilter = 'day';
-        } else if (/\b(?:this\s+week|past\s+week|last\s+week|current\s+week|past\s+7\s+days)\b/.test(dateContextText)) {
-            effectiveDateFilter = 'week';
-        } else if (/\b(?:this\s+month|past\s+month|last\s+month|current\s+month|past\s+30\s+days)\b/.test(dateContextText)) {
-            effectiveDateFilter = 'month';
+        const temporalScope = classifyTemporalScope(normalizedQuery);
+        if (temporalScope.isTimeSensitive && temporalScope.filter) {
+            effectiveDateFilter = temporalScope.filter.ddg === 'd' ? 'day' : (temporalScope.filter.ddg === 'w' ? 'week' : (temporalScope.filter.ddg === 'm' ? 'month' : 'year'));
         }
     }
     const taskDdg = Promise.allSettled(targetQueries.slice(0, webParallelCount).map(candidate => searchDuckDuckGoHtml(candidate, { limit, timeoutMs: webSearchTimeoutMs, signal: options.signal, dateFilter: effectiveDateFilter })))
@@ -5185,20 +5189,20 @@ export function buildDeterministicSearchQueries(query) {
         ].map(s => s.replace(/\b(\w+)\s+\1\b/gi, '$1')).map(normalizeSearchQuery).filter(Boolean)));
     }
     const intent = extractSearchIntentTerm(normalized);
-    const currentYear = new Date().getFullYear();
-    const hasRelativeTime = /\b(?:this\s+(?:month|year|week)|latest|recent|newest|current|today|currently)\b/i.test(normalized);
+    const temporalPlan = planTemporalSearchQueries(normalized);
     const candidates = [
+        ...temporalPlan.queries,
         `${subject} ${intent}`.trim(),
         `${subject} recent ${intent}`.trim(),
         `${subject} latest ${intent}`.trim()
     ];
-    if (hasRelativeTime) {
-        const now = new Date();
-        const currentMonthName = now.toLocaleString('en-US', { month: 'long' });
-        candidates.push(`${subject} ${currentMonthName} ${currentYear}`.trim());
-        candidates.push(`${subject} ${currentMonthName} ${currentYear} ${intent}`.trim());
-        if (!normalized.includes(String(currentYear))) {
-            candidates.push(`${subject} ${currentYear} ${intent}`.trim());
+    if (temporalPlan.isTimeSensitive) {
+        const frame = temporalPlan.temporalFrame;
+        candidates.push(`${subject} ${frame.monthName} ${frame.year}`.trim());
+        candidates.push(`${subject} ${frame.isoYearMonth}`.trim());
+        candidates.push(`${subject} ${frame.monthName} ${frame.year} ${intent}`.trim());
+        if (!normalized.includes(String(frame.year))) {
+            candidates.push(`${subject} ${frame.year} ${intent}`.trim());
         }
     }
     return Array.from(new Set(candidates.map(s => s.replace(/\b(\w+)\s+\1\b/gi, '$1')).map(normalizeSearchQuery).filter(Boolean)));
