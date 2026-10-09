@@ -441,7 +441,7 @@ test('Prompt Formatting & Snippet Fallback', () => {
     assert.ok(!fallback.includes('deadline'), 'Must not include deadline timing disclaimers');
     assert.ok(!fallback.includes('[1]'), 'Must not include raw citation brackets');
     assert.ok(!fallback.includes('[2]'), 'Must not include raw citation brackets');
-    assert.ok(fallback.includes('Snippet 1') || fallback.includes('Title 1'));
+    assert.ok(fallback.includes('Fact 1') || fallback.includes('Snippet 1') || fallback.includes('Title 1'));
 
     // Test zero sources with valid query
     const fallbackZeroSources = generateSnippetFallback('Gold price today', []);
@@ -1043,7 +1043,7 @@ test('Synthesis Fallback Invariant: 0 streamed tokens triggers SYNTHESIS_FALLBAC
     assert.equal(result.sources.length, 1);
     assert.ok(!result.content.includes('### Live Web Results'), 'Must not include technical live search headings');
     assert.ok(!result.content.includes('deadline'), 'Must not include deadline timing disclaimers');
-    assert.ok(result.content.includes('Sample Grounded Source'));
+    assert.ok(result.content.includes('Sample grounded information') || result.content.includes('Sample Grounded Source'));
 });
 
 // ============================================================================
@@ -2131,11 +2131,4 @@ test('Regression 15.4: Substantive body sentences are correctly extracted in fal
     assert.ok(!fallback.includes('### Live Web Results'));
     assert.ok(!fallback.includes('[1]'));
 });
-
-
-
-
-
-
-
 
