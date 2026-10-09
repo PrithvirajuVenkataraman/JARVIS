@@ -87,7 +87,7 @@ export function distillSearchQuery(rawQuery) {
 /**
  * Normalizes, deduplicates, ranks, and assigns stable numeric IDs (1..N) to sources.
  */
-export function normalizeResearchSources(results = [], query = '', limit = 6) {
+export function normalizeResearchSources(results = [], query = '', limit = 8) {
     if (!Array.isArray(results)) return [];
     const seenUrls = new Set();
     const normalized = [];
@@ -413,8 +413,13 @@ export function renderOrUpdateSourcesCarousel(rowElement, sources = []) {
         </div>
     `;
 
+    const textEl = bubble.querySelector('.assistant-message-text');
+
     if (carousel) {
         carousel.innerHTML = newCarouselHtml;
+        if (textEl && textEl.nextSibling !== carousel) {
+            textEl.after(carousel);
+        }
     } else {
         const newCarousel = document.createElement('div');
         newCarousel.className = 'chat-source-carousel';
@@ -422,11 +427,10 @@ export function renderOrUpdateSourcesCarousel(rowElement, sources = []) {
         newCarousel.setAttribute('aria-label', 'Web Sources');
         newCarousel.innerHTML = newCarouselHtml;
 
-        const textEl = bubble.querySelector('.assistant-message-text');
         if (textEl) {
-            bubble.insertBefore(newCarousel, textEl);
+            textEl.after(newCarousel);
         } else {
-            bubble.prepend(newCarousel);
+            bubble.appendChild(newCarousel);
         }
     }
 }
@@ -905,17 +909,19 @@ export class BoundedLiveResearchController {
                     month: 'long',
                     day: 'numeric'
                 });
-                const prompt = `You are a real-time research assistant. Answer the user's question directly, comprehensively, and factually using ONLY the verified web content below.
+                const effectiveUserPrompt = String(userText || query || '').trim();
+                const prompt = `You are an expert real-time research assistant. Answer the user's question directly, comprehensively, and factually using ONLY the verified web content below.
 TEMPORAL ANCHOR:
 Today's Date: ${currentDateStr}. Use this exact date as your reference point for phrases like 'today', 'this month', 'recently', 'latest', 'current', or 'this year'.
 
 RULES:
-1. Deliver a natural, fluent, and well-structured answer. Do not insert bracketed citation numbers like [1] or [1, 2] into the text sentences — all verified sources are showcased in the Sources Carousel directly above.
-2. If evidence is contradictory or insufficient, state it clearly.
-3. Structure with a direct answer first, followed by essential verified details.
-4. Base your answer strictly on the provided evidence. Never fabricate information.
+1. COMPLETE COVERAGE: Answer every part and sub-question of the user prompt directly and thoroughly. Extract all relevant facts, names, figures, and entity lists contained in the sources. If multiple entities, companies, or criteria are affected or mentioned across the sources, enumerate all of them explicitly in a structured list.
+2. SUBSTANTIVE DETAILS: Do not return only headlines, source titles, or vague high-level summaries. Extract and explain the substantive facts, operational impacts, and policy specifics from the excerpts.
+3. DISTINGUISH CONFIRMED FACTS VS. UNCERTAINTY: Clearly differentiate confirmed/official actions (e.g. audits, investigations, PERM labor certification freezes) from ongoing/unaffected status or speculation (e.g. clarify whether existing visas remain valid or are suspended). If evidence is contradictory, evolving, or insufficient on a point, state the exact scope and limitations clearly.
+4. GROUNDED CITATIONS: Ground key statements and extracted facts with source citations using [1], [2], etc., matching the numbered verified sources below.
+5. STRUCTURE: Provide a direct answer first, followed by clear explanations, enumerated lists, and impact analyses.
 
-User question: "${query}"
+User question: "${effectiveUserPrompt}"
 
 Verified Sources:
 ${sourcesContext}`;
