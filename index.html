@@ -10225,8 +10225,8 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                         <div class="min-w-0 flex-1 overflow-hidden ${hasMap ? 'map-message' : ''}"> 
                             <div class="${hasMap ? '' : 'chat-bubble-assistant'}"> 
                                 ${thinkingHtml}
-                                ${topSourcesCarouselHtml}
                                 <div class="assistant-message-text typewriter-text text-sm leading-relaxed text-left" data-message-id="${messageId}"></div>
+                                ${topSourcesCarouselHtml}
                                 ${selfCritiqueHtml}
                                 ${sourceFooterHtml}
                             </div> 
@@ -10441,7 +10441,10 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 : 'text-indigo-700 hover:text-indigo-900 underline font-medium';
             const presentation = prepareAssistantSourcePresentation(text, options?.meta || {});
             const rawAnswer = String(presentation.answerText || '');
-            const cleanTextForDisplay = stripInlineCitationMarkers(stripStreamedImageTags(rawAnswer));
+            const hasSources = (Array.isArray(presentation.sources) && presentation.sources.length > 0) ||
+                               (Array.isArray(options?.meta?.sources) && options.meta.sources.length > 0);
+            const rawAnswerNoImages = stripStreamedImageTags(rawAnswer);
+            const cleanTextForDisplay = hasSources ? rawAnswerNoImages : stripInlineCitationMarkers(rawAnswerNoImages);
             const readableText = formatAssistantTextForReadability(normalizeAssistantTextStyle(cleanTextForDisplay));
             const formatted = sanitizeAssistantMarkup(renderAssistantMarkdown(readableText, linkClass, options));
             textElement.classList.toggle('is-streaming', options?.streaming === true);
@@ -13399,6 +13402,11 @@ ${code}
         function autoResizeComposerTextarea() {
             const input = document.getElementById('text-input');
             if (!input) return;
+            if (!input.value) {
+                input.style.height = '';
+                input.style.overflowY = 'hidden';
+                return;
+            }
             input.style.height = 'auto';
             const maxHeight = 180;
             const next = Math.min(maxHeight, Math.max(40, input.scrollHeight));
@@ -13567,6 +13575,7 @@ ${code}
             if (!current || submitted.includes(current)) {
                 input.value = '';
                 delete input.dataset.inputSource;
+                input.style.height = '';
                 window.JarvisSessionRecovery?.clearComposerDraft?.();
                 globalThis.resetSpeechInputCommittedText?.();
                 input.placeholder = 'Ask Jarvis...';
@@ -13670,7 +13679,11 @@ async function sendTextInput(submission = {}) {
                 stopActiveGeneration('superseded');
             }
             if (!hasText && !pendingAttachments.length) {
-                if (input) input.value = '';
+                if (input) {
+                    input.value = '';
+                    input.style.height = '';
+                    autoResizeComposerTextarea();
+                }
                 toggleSendButton();
                 return;
             }
@@ -13678,6 +13691,8 @@ async function sendTextInput(submission = {}) {
                 if (hasText && handleLocalVoiceCommand(text, inputSource)) {
                     input.value = '';
                     delete input.dataset.inputSource;
+                    input.style.height = '';
+                    autoResizeComposerTextarea();
                     globalThis.resetSpeechInputCommittedText?.();
                     toggleSendButton();
                     return;
@@ -13711,6 +13726,8 @@ async function sendTextInput(submission = {}) {
                     // Ignore rapid duplicate submit (double Enter/click).
                     input.value = '';
                     delete input.dataset.inputSource;
+                    input.style.height = '';
+                    autoResizeComposerTextarea();
                     globalThis.resetSpeechInputCommittedText?.();
                     toggleSendButton();
                     return;
@@ -13760,6 +13777,8 @@ async function sendTextInput(submission = {}) {
                 try {
                     input.value = '';
                     delete input.dataset.inputSource;
+                    input.style.height = '';
+                    autoResizeComposerTextarea();
                     globalThis.resetSpeechInputCommittedText?.();
                     input.placeholder = 'Ask Jarvis...';
                     toggleSendButton();
@@ -20961,7 +20980,7 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                 const currentModel = typeof getSelectedModel === 'function' ? getSelectedModel() : 'auto';
                 const selectedModel = currentModel && currentModel !== 'auto' ? currentModel : undefined;
                 return streamChatCompletion({
-                    message: query,
+                    message: rawUserText || query,
                     context: window.JarvisConversation?.buildContext?.({ maxTurns: 6 }) || [],
                     preferences: {
                         userName: typeof userName !== 'undefined' ? userName : '',
@@ -20994,13 +21013,10 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                 },
                 onSourcesValidated: ({ sources, provenance }) => {
                     // Do not hide progress indicator here; keep active continuously until first token
+                    // Do not display source links or source cards before the answer
                     const row = getRow();
                     if (row) {
                         row.style.display = '';
-                        if (sources && sources.length > 0 && window.JarvisLiveResearch?.renderOrUpdateSourcesCarousel) {
-                            window.JarvisLiveResearch.renderOrUpdateSourcesCarousel(row, sources);
-                        }
-                        maybeAutoScroll(document.getElementById('chat-container'));
                     }
                 },
                 onToken: ({ streamedText }) => {
