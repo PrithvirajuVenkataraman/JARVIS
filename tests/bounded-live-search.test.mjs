@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import {
     LIVE_RESEARCH_BUDGETS,
     RESEARCH_STATES,
@@ -13,7 +15,8 @@ import {
     normalizeUserQuery,
     hasSearchableContent,
     isAuthoritativeResearchSource,
-    evaluateSourceQualityForEarlySynthesis
+    evaluateSourceQualityForEarlySynthesis,
+    renderOrUpdateSourcesCarousel
 } from '../app/bounded-live-research.js';
 import { parseGoogleNewsRssXml, searchDuckDuckGoHtml } from '../api/_lib/free-live/providers.js';
 import { buildSourceTransparencyHtml } from '../app/source-transparency.js';
@@ -1331,8 +1334,227 @@ test('Regression 8: Hard Deadline Invariant - 9000ms remains absolute safety cei
     assert.equal(controller.hardDeadlineMs, 9000, 'Controller default hardDeadlineMs must be exactly 9000ms');
 });
 
+test('Regression 9: Answer-First Streaming & Carousel Placement Below Text', () => {
+    function createMockNode(className = '') {
+        const node = {
+            className,
+            attributes: {},
+            children: [],
+            parentNode: null,
+            _innerHTML: '',
+            get innerHTML() { return this._innerHTML; },
+            set innerHTML(val) { this._innerHTML = val; },
+            setAttribute(k, v) { this.attributes[k] = v; },
+            querySelector(sel) {
+                if (sel === '.chat-bubble-assistant' && this.className.includes('chat-bubble-assistant')) return this;
+                if (sel === '.assistant-message-text' && this.className.includes('assistant-message-text')) return this;
+                if (sel === '.chat-source-carousel' && this.className.includes('chat-source-carousel')) return this;
+                for (const child of this.children) {
+                    const match = child.querySelector?.(sel);
+                    if (match) return match;
+                }
+                return null;
+            },
+            appendChild(child) {
+                child.parentNode = this;
+                this.children.push(child);
+            },
+            after(newNode) {
+                if (this.parentNode) {
+                    const idx = this.parentNode.children.indexOf(this);
+                    if (idx !== -1) {
+                        if (newNode.parentNode) {
+                            const prevIdx = newNode.parentNode.children.indexOf(newNode);
+                            if (prevIdx !== -1) newNode.parentNode.children.splice(prevIdx, 1);
+                        }
+                        newNode.parentNode = this.parentNode;
+                        this.parentNode.children.splice(idx + 1, 0, newNode);
+                    }
+                }
+            },
+            get nextSibling() {
+                if (!this.parentNode) return null;
+                const idx = this.parentNode.children.indexOf(this);
+                return (idx !== -1 && idx < this.parentNode.children.length - 1) ? this.parentNode.children[idx + 1] : null;
+            }
+        };
+        return node;
+    }
 
+    const prevDoc = globalThis.document;
+    try {
+        globalThis.document = {
+            createElement: (tag) => createMockNode()
+        };
 
+        const row = createMockNode('chat-row-assistant');
+        const bubble = createMockNode('chat-bubble-assistant');
+        const textEl = createMockNode('assistant-message-text');
+        textEl.innerHTML = 'Answer streams directly first.';
+        bubble.appendChild(textEl);
+        row.appendChild(bubble);
 
+        const sources = [
+            { id: 1, title: 'Department of Labor Audit Notice', domain: 'dol.gov', url: 'https://dol.gov/notice' }
+        ];
 
+        // 1. Initial render of carousel: placed strictly AFTER textEl
+        renderOrUpdateSourcesCarousel(row, sources);
+
+        assert.equal(bubble.children.length, 2);
+        assert.equal(bubble.children[0], textEl, 'Answer text element must be FIRST child in bubble');
+        assert.equal(bubble.children[1].className, 'chat-source-carousel', 'Carousel element must be placed AFTER textEl');
+        assert.equal(textEl.nextSibling, bubble.children[1], 'textEl.nextSibling must be the carousel');
+
+        // 2. Updated sources keeps carousel placed AFTER textEl
+        const updatedSources = [
+            { id: 1, title: 'Department of Labor Audit Notice', domain: 'dol.gov', url: 'https://dol.gov/notice' },
+            { id: 2, title: 'PERM Audit Details', domain: 'reuters.com', url: 'https://reuters.com/news' }
+        ];
+        renderOrUpdateSourcesCarousel(row, updatedSources);
+        assert.equal(bubble.children[0], textEl, 'Answer text remains FIRST child');
+        assert.equal(bubble.children[1].className, 'chat-source-carousel', 'Carousel remains AFTER text element');
+        assert.ok(bubble.children[1].innerHTML.includes('2 verified'));
+
+        // 3. Misplaced carousel is corrected to be strictly AFTER textEl
+        const misplacedCarousel = bubble.children[1];
+        bubble.children = [misplacedCarousel, textEl];
+        misplacedCarousel.parentNode = bubble;
+        textEl.parentNode = bubble;
+        assert.equal(bubble.children[0], misplacedCarousel);
+
+        renderOrUpdateSourcesCarousel(row, updatedSources);
+        assert.equal(bubble.children[0], textEl, 'Misplaced carousel must be moved AFTER textEl');
+        assert.equal(bubble.children[1], misplacedCarousel, 'Carousel is now AFTER textEl');
+
+        // 4. Calling with empty sources is a no-op
+        const emptyRow = createMockNode('chat-row-assistant');
+        const emptyBubble = createMockNode('chat-bubble-assistant');
+        emptyRow.appendChild(emptyBubble);
+        renderOrUpdateSourcesCarousel(emptyRow, []);
+        assert.equal(emptyBubble.children.length, 0, 'Must not render carousel for empty sources');
+    } finally {
+        globalThis.document = prevDoc;
+    }
+});
+
+test('Regression 10: Prompt Box Resizing & Textarea Reset Invariant', () => {
+    const indexHtml = fs.readFileSync(path.resolve('index.html'), 'utf8');
+
+    // 1. autoResizeComposerTextarea must immediately collapse when value is empty
+    assert.ok(
+        indexHtml.includes("if (!input.value) {\n                input.style.height = '';\n                input.style.overflowY = 'hidden';\n                return;\n            }"),
+        'autoResizeComposerTextarea must clear inline height and hide overflow when value is empty'
+    );
+
+    // 2. All input clear locations in sendTextInput must reset height and call autoResizeComposerTextarea
+    assert.ok(
+        indexHtml.includes("input.value = '';\n                    input.style.height = '';\n                    autoResizeComposerTextarea();"),
+        'sendTextInput clearing paths must reset input.style.height and invoke autoResizeComposerTextarea'
+    );
+
+    // 3. Functional behavior test of the auto-resize logic
+    function simulateAutoResize(input) {
+        if (!input.value) {
+            input.style.height = '';
+            input.style.overflowY = 'hidden';
+            return;
+        }
+        input.style.height = 'auto';
+        const maxHeight = 180;
+        const next = Math.min(maxHeight, Math.max(40, input.scrollHeight));
+        input.style.height = `${next}px`;
+        input.style.overflowY = input.scrollHeight > maxHeight ? 'auto' : 'hidden';
+    }
+
+    const mockTextarea = {
+        value: '',
+        scrollHeight: 40,
+        style: { height: '', overflowY: 'hidden' }
+    };
+
+    // Initially empty: height is empty string (defaults to CSS min-height: 40px)
+    simulateAutoResize(mockTextarea);
+    assert.equal(mockTextarea.style.height, '');
+    assert.equal(mockTextarea.style.overflowY, 'hidden');
+
+    // User types multi-line long prompt (scrollHeight expands to 120px)
+    mockTextarea.value = 'Line 1\nLine 2\nLine 3\nLine 4\nLine 5';
+    mockTextarea.scrollHeight = 120;
+    simulateAutoResize(mockTextarea);
+    assert.equal(mockTextarea.style.height, '120px');
+    assert.equal(mockTextarea.style.overflowY, 'hidden');
+
+    // User submits prompt: textarea value is cleared
+    mockTextarea.value = '';
+    mockTextarea.scrollHeight = 40;
+    mockTextarea.style.height = '';
+    simulateAutoResize(mockTextarea);
+    assert.equal(mockTextarea.style.height, '', 'Textarea height must collapse to empty/default upon clearing');
+    assert.equal(mockTextarea.style.overflowY, 'hidden');
+
+    // Subsequent short prompt expands correctly without being stuck
+    mockTextarea.value = 'Short prompt';
+    mockTextarea.scrollHeight = 40;
+    simulateAutoResize(mockTextarea);
+    assert.equal(mockTextarea.style.height, '40px', 'Textarea must adapt cleanly to next keystrokes');
+});
+
+test('Regression 11: Multi-Part Query Synthesis Prompt & Grounded Coverage', async () => {
+    // 1. Non-tech query with "recent" or "updates" does NOT trigger software changelog release notes queries
+    const multiPartQuery = 'Recent updates on H-1B and PERM labor certification audits';
+    assert.equal(isTechnicalDocumentationQuery(multiPartQuery), false, 'H-1B query must not be classified as technical documentation');
+    const plannedQueries = buildDeterministicSearchQueries(multiPartQuery);
+    for (const q of plannedQueries) {
+        assert.ok(!q.includes('changelog'), `Planned query "${q}" must not include "changelog" for policy/regulatory topics`);
+        assert.ok(!q.includes('release notes'), `Planned query "${q}" must not include "release notes" for non-tech topics`);
+    }
+
+    // 2. Controller preserves full multi-part user prompt in synthesis prompt and enforces coverage rules
+    const fullPrompt = 'What are the recent updates on H-1B and PERM labor certification audits? Which companies are affected, what is the impact on Indian professionals, and are existing H-1B visas suspended?';
+    const controller = new BoundedLiveResearchController({
+        searchCutoffMs: 2000,
+        fallbackWarningMs: 4000,
+        hardDeadlineMs: 6000
+    });
+
+    let capturedSynthesisPrompt = '';
+    const sampleSources = [
+        {
+            title: 'US DOL Initiates Audit on PERM Applications for Multiple Tech Companies',
+            url: 'https://news.example.com/dol-perm-audit',
+            snippet: 'The Department of Labor flagged PERM applications at eight major firms including tech consultancies. Existing H-1B status remains valid and unaffected.'
+        },
+        {
+            title: 'Impact on Indian Tech Professionals and PERM Processing',
+            url: 'https://news.example.com/indian-tech-perm',
+            snippet: 'Indian professionals face delays in permanent residency pipelines, but existing H-1B visa holders are not subject to visa suspension.'
+        }
+    ];
+
+    await controller.execute({
+        query: multiPartQuery,
+        userText: fullPrompt,
+        assistantMessageId: 'msg_multipart_test',
+        fetchSearchFn: async () => ({ results: sampleSources }),
+        streamSynthesisFn: async ({ prompt, onToken }) => {
+            capturedSynthesisPrompt = prompt;
+            onToken('Direct answer addressing all parts of the question [1].');
+        }
+    });
+
+    // Verify effectiveUserPrompt preserved full user prompt
+    assert.ok(capturedSynthesisPrompt.includes(fullPrompt), 'Synthesis prompt must contain the complete multi-part user prompt');
+
+    // Verify rules are embedded in the synthesis prompt
+    assert.ok(capturedSynthesisPrompt.includes('COMPLETE COVERAGE'), 'Must enforce rule: COMPLETE COVERAGE');
+    assert.ok(capturedSynthesisPrompt.includes('SUBSTANTIVE DETAILS'), 'Must enforce rule: SUBSTANTIVE DETAILS');
+    assert.ok(capturedSynthesisPrompt.includes('DISTINGUISH CONFIRMED FACTS VS. UNCERTAINTY'), 'Must enforce rule: DISTINGUISH CONFIRMED FACTS VS. UNCERTAINTY');
+    assert.ok(capturedSynthesisPrompt.includes('GROUNDED CITATIONS'), 'Must enforce rule: GROUNDED CITATIONS');
+    assert.ok(capturedSynthesisPrompt.includes('Provide a direct answer first'), 'Must enforce rule: Direct answer first');
+
+    // Verify sources formatted with [1] and [2]
+    assert.ok(capturedSynthesisPrompt.includes('[1] Title: US DOL Initiates Audit'), 'Must include source [1]');
+    assert.ok(capturedSynthesisPrompt.includes('[2] Title: Impact on Indian Tech Professionals'), 'Must include source [2]');
+});
 
