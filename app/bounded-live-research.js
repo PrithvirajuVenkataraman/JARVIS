@@ -103,18 +103,31 @@ export function normalizeResearchSources(results = [], query = '', limit = 8) {
 
         const domain = (r.domain || getDomainFromUrl(cleanUrl)).toLowerCase();
         const title = cleanTextSnippet(r.title || domain || 'Web Result');
-        const snippet = cleanTextSnippet(r.snippet || r.description || r.fullArticleText || r.extract || title);
+        
+        // Pick the most substantive body content available:
+        // Prioritize full article text / deep extracts over brief or echoed headlines
+        const fullArticle = cleanTextSnippet(r.fullArticleText || r.extract || '');
+        const rawSnippet = cleanTextSnippet(r.snippet || r.description || '');
+        let snippet = rawSnippet;
+        if (fullArticle && (rawSnippet === title || rawSnippet.length < 60 || fullArticle.length > rawSnippet.length)) {
+            snippet = fullArticle;
+        } else if (!snippet || snippet === title) {
+            snippet = fullArticle || rawSnippet || '';
+        }
 
         normalized.push({
             id: normalized.length + 1,
             title,
             snippet,
+            fullArticleText: fullArticle || snippet,
+            extract: fullArticle || snippet,
             url: cleanUrl,
             domain,
             favicon: `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`,
             sourceLabel: r.sourceLabel || r.source || domain,
             date: r.date || '',
-            trusted: Boolean(r.trusted)
+            trusted: Boolean(r.trusted),
+            accessible: r.accessible !== false
         });
 
         if (normalized.length >= limit) break;
@@ -128,9 +141,11 @@ export function normalizeResearchSources(results = [], query = '', limit = 8) {
 export function formatSourcesForPrompt(sources = []) {
     if (!Array.isArray(sources) || !sources.length) return '';
     return sources.map(s => {
-        const textContent = String(s.snippet || s.description || s.text || '').trim();
+        const substantive = String(s.fullArticleText || s.extract || s.snippet || s.description || s.text || '').trim();
+        const excerpt = (substantive && substantive !== s.title) ? substantive : (s.snippet || 'No excerpt available.');
         const publisherStr = s.publisher || s.source ? ` (${s.publisher || s.source})` : '';
-        return `[${s.id}] Title: ${s.title}${publisherStr}\nDomain: ${s.domain}\nURL: ${s.url}\nSnippet: ${textContent || 'No snippet available.'}${s.date ? `\nDate: ${s.date}` : ''}`;
+        const accessibilityNote = s.accessible === false ? ' [Note: Web page was inaccessible; excerpt from index metadata]' : '';
+        return `[${s.id}] Title: ${s.title}${publisherStr}${accessibilityNote}\nDomain: ${s.domain}\nURL: ${s.url}\nExcerpt: ${excerpt}${s.date ? `\nDate: ${s.date}` : ''}`;
     }).join('\n\n');
 }
 
@@ -167,12 +182,13 @@ export function evaluateSourceQualityForEarlySynthesis(sources = [], query = '')
         return matchedSources.length >= 3;
     }
     // General queries require at least 2 sources with descriptive content
-    return sources.length >= 2 && sources.some(s => (s.snippet || s.description || '').length >= 20);
+    return sources.length >= 2 && sources.some(s => (s.snippet || s.description || s.fullArticleText || '').length >= 20);
 }
 
 /**
  * Synthesizes a structured bounded fallback answer strictly from verified source snippets.
  * Produces clean natural-language prose without raw bullets, technical headings, or timing disclaimers.
+ * Never stitches disjointed headline titles into a fake answer.
  */
 export function generateSnippetFallback(query, sources = []) {
     const cleanQ = normalizeUserQuery(distillSearchQuery(query));
@@ -187,6 +203,15 @@ export function generateSnippetFallback(query, sources = []) {
     const authSources = sources.filter(s => isAuthoritativeResearchSource(s, cleanQ));
     const effectiveSources = (isTechDoc && authSources.length) ? authSources : sources;
 
+    const hasAnySubstantiveBody = sources.some(s => {
+        const body = cleanTextSnippet(s.fullArticleText || s.extract || s.snippet || s.description || '');
+        return body && body !== s.title && body.replace(/[^a-zA-Z0-9]/g, '').length >= 3;
+    });
+
+    if (!hasAnySubstantiveBody) {
+        return `Verified live sources were retrieved regarding "${cleanQ}", but the available records contain only headline references without sufficient substantive detail to construct a verified answer. Please review the verified source references in the carousel above.`;
+    }
+
     const facts = [];
     const seenSentences = new Set();
 
@@ -195,8 +220,9 @@ export function generateSnippetFallback(query, sources = []) {
         if (s.title && !/^https?:\/\//i.test(s.title)) {
             textParts.push(s.title);
         }
-        if (s.snippet || s.description) {
-            textParts.push(s.snippet || s.description);
+        const substantiveBody = s.fullArticleText || s.extract || s.snippet || s.description;
+        if (substantiveBody) {
+            textParts.push(substantiveBody);
         }
         const fullText = textParts.join('. ');
 
@@ -915,11 +941,11 @@ TEMPORAL ANCHOR:
 Today's Date: ${currentDateStr}. Use this exact date as your reference point for phrases like 'today', 'this month', 'recently', 'latest', 'current', or 'this year'.
 
 RULES:
-1. COMPLETE COVERAGE: Answer every part and sub-question of the user prompt directly and thoroughly. Extract all relevant facts, names, figures, dates, and entity enumerations contained in the sources. If multiple entities, components, or criteria are affected or mentioned across the sources, enumerate all of them explicitly in a structured list.
-2. SUBSTANTIVE DETAILS: Do not return only headlines, source titles, or vague high-level summaries. Extract and explain substantive facts, operational impacts, context, and concrete details from the source excerpts.
-3. DISTINGUISH CONFIRMED FACTS VS. UNCERTAINTY: Clearly differentiate verified facts and confirmed official actions from unconfirmed claims, ongoing status, unaffected entities, or speculation. If evidence is conflicting, incomplete, or evolving, state the exact scope, consensus, and limitations clearly.
+1. COMPLETE COVERAGE: Identify and answer every distinct question, sub-question, and requested detail in the user prompt using the retrieved evidence. If the prompt contains multiple parts (such as status, affected entities, requirements, comparisons, or timelines), address each part thoroughly in a dedicated explanation or structured breakdown.
+2. SUBSTANTIVE DETAILS: Never return only headlines, source titles, or a list of links as an answer. Extract and explain substantive facts, operational impacts, context, and concrete details from the source excerpts.
+3. DISTINGUISH CONFIRMED FACTS VS. UNCERTAINTY: Clearly differentiate verified facts and confirmed actions from unconfirmed claims, ongoing status, or speculation. If different sources report conflicting claims, explain the divergence and cite each source. If evidence for any specific part of the user question is missing, inaccessible, or unverified in the excerpts, explicitly state what could not be verified rather than fabricating or omitting it.
 4. GROUNDED CITATIONS: Ground key statements and extracted facts with source citations using [1], [2], etc., matching the numbered verified sources below.
-5. STRUCTURE: Provide a direct answer first, followed by clear explanations, enumerated lists, and impact analyses.
+5. STRUCTURE: Provide a direct answer first, followed by clear explanations, requested lists, and impact analyses.
 
 User question: "${effectiveUserPrompt}"
 
