@@ -203,9 +203,11 @@ export function generateSnippetFallback(query, sources = []) {
     const authSources = sources.filter(s => isAuthoritativeResearchSource(s, cleanQ));
     const effectiveSources = (isTechDoc && authSources.length) ? authSources : sources;
 
+    // Check if any source provides substantive body text distinct from its title
     const hasAnySubstantiveBody = sources.some(s => {
         const body = cleanTextSnippet(s.fullArticleText || s.extract || s.snippet || s.description || '');
-        return body && body !== s.title && body.replace(/[^a-zA-Z0-9]/g, '').length >= 3;
+        const title = cleanTextSnippet(s.title || '');
+        return body && body.toLowerCase() !== title.toLowerCase() && body.replace(/[^a-zA-Z0-9]/g, '').length >= 5;
     });
 
     if (!hasAnySubstantiveBody) {
@@ -217,15 +219,22 @@ export function generateSnippetFallback(query, sources = []) {
 
     for (const s of effectiveSources.slice(0, 6)) {
         const textParts = [];
-        if (s.title && !/^https?:\/\//i.test(s.title)) {
-            textParts.push(s.title);
-        }
-        const substantiveBody = s.fullArticleText || s.extract || s.snippet || s.description;
-        if (substantiveBody) {
+        const substantiveBody = cleanTextSnippet(s.fullArticleText || s.extract || s.snippet || s.description || '');
+        const sTitle = cleanTextSnippet(s.title || '');
+        const hasBody = substantiveBody && substantiveBody.toLowerCase() !== sTitle.toLowerCase() && substantiveBody.replace(/[^a-zA-Z0-9]/g, '').length >= 5;
+
+        // If this source has a substantive body, include title and body prose
+        if (hasBody) {
+            if (sTitle && !/^https?:\/\//i.test(sTitle)) {
+                textParts.push(sTitle);
+            }
+            textParts.push(substantiveBody);
+        } else if (substantiveBody) {
             textParts.push(substantiveBody);
         }
-        const fullText = textParts.join('. ');
+        if (!textParts.length) continue;
 
+        const fullText = textParts.join('. ');
         const rawSentences = fullText.split(/(?<=[.!?])\s+/);
         for (let sentence of rawSentences) {
             if (/\b(?:404|500|502|503)\b/.test(sentence)) continue;
@@ -239,7 +248,7 @@ export function generateSnippetFallback(query, sources = []) {
             if (sentence.length < 5 || sentence.length > 400) continue;
             if (/\b(?:404|500|502|503)\b/.test(sentence)) continue;
             if (sentence.replace(/[^a-zA-Z0-9]/g, '').length < 3) continue;
-            
+
             const normalized = sentence.toLowerCase().replace(/[^a-z0-9]/g, '');
             if (seenSentences.has(normalized)) continue;
             seenSentences.add(normalized);
@@ -249,8 +258,14 @@ export function generateSnippetFallback(query, sources = []) {
         if (facts.length >= 6) break;
     }
 
-    if (!facts.length) {
-        return `Verified live sources were gathered regarding "${cleanQ}", but they did not contain sufficient detail to construct a confident answer. Please review the verified source references above.`;
+    // Disjointed headline defense: At least one fact must be substantive body prose distinct from all source titles.
+    const hasAnyDistinctBodyFact = facts.some(f => {
+        const cleanF = f.replace(/\.$/, '').toLowerCase().trim();
+        return !sources.some(s => cleanF === cleanTextSnippet(s.title || '').toLowerCase().trim());
+    });
+
+    if (!facts.length || !hasAnyDistinctBodyFact) {
+        return `Verified live sources were gathered regarding "${cleanQ}", but they did not contain sufficient substantive detail to construct an answer. Please review the verified source references in the carousel above.`;
     }
 
     // Subject relevance validation for technical documentation queries:
@@ -262,7 +277,6 @@ export function generateSnippetFallback(query, sources = []) {
     }
 
     // Requirement 5: Never concatenate disjointed headline snippets into a fake answer paragraph.
-    // If facts are merely brief headline titles or if sources are news aggregators without substantive body prose:
     const hasSubstantiveProse = facts.some(f => f.length >= 45 && !f.toLowerCase().includes(' - '));
     const isPureNewsFeed = sources.length > 0 && sources.every(s => s.sourceType === 'trusted_news' || s.domain === 'news.google.com' || s.qualitySignals?.includes('google_news_rss'));
     if (isPureNewsFeed && !hasSubstantiveProse) {
@@ -303,16 +317,70 @@ export function generateRelatedResearchQuestions(optionsOrQuery, sourcesArg = []
     const candidates = [];
     const seen = new Set();
 
+    // Comprehensive blocklist of publisher names, domain labels, and news brands
+    const publisherBlocklist = new Set([
+        'the times of india', 'times of india', 'indiatimes', 'indianeagle', 'reuters',
+        'associated press', 'ap news', 'bloomberg', 'cnn', 'bbc', 'bbc news', 'cnbc',
+        'forbes', 'the wall street journal', 'wsj', 'the new york times', 'nyt',
+        'the guardian', 'the verge', 'techcrunch', 'axios', 'politico', 'news', 'google news'
+    ]);
+    for (const s of sources) {
+        if (!s) continue;
+        if (s.domain) {
+            const dom = s.domain.toLowerCase().replace(/^www\./, '');
+            publisherBlocklist.add(dom);
+            const noTld = dom.replace(/\.[a-z]{2,}$/i, '');
+            if (noTld.length >= 3) publisherBlocklist.add(noTld);
+        }
+        if (s.sourceLabel) publisherBlocklist.add(s.sourceLabel.toLowerCase());
+        if (s.source) publisherBlocklist.add(String(s.source).toLowerCase());
+    }
+
+    // Clickbait and headline fragment prefixes/patterns to strictly reject
+    const clickbaitFragmentRegex = /^(?:full\s+list(?:\s+and\s+what\s+it\s+means)?|what\s+(?:it\s+means|you\s+need\s+to\s+know|we\s+know|is\s+next)|here'?s\s+(?:why|what|how|everything)|everything\s+you\s+need|all\s+you\s+need|read\s+more|live\s+updates|breaking\s+news|explained|analysis|opinion|photos|video|watch|in\s+photos)\b/i;
+
+    const isInvalidQuestion = (text) => {
+        if (!text || typeof text !== 'string') return true;
+        const lower = text.toLowerCase().replace(/[?.!]+$/g, '').trim();
+        if (lower.length < 15 || lower.length > 120) return true;
+        if (lower === normalizedQuery) return true;
+        if (/^https?:\/\//i.test(text) || /^[a-z0-9-]+\.[a-z]{2,}(?:\/|$)/i.test(text)) return true;
+
+        // Check against publisher blocklist
+        for (const pub of publisherBlocklist) {
+            if (lower === pub || lower.startsWith(`${pub} `) || lower.endsWith(` ${pub}`)) return true;
+            if (lower.includes(pub) && lower.length < pub.length + 12) return true;
+        }
+
+        // Check clickbait fragments
+        if (clickbaitFragmentRegex.test(lower)) return true;
+
+        // Must have at least 3 words
+        const words = lower.split(/\s+/).filter(Boolean);
+        if (words.length < 3) return true;
+
+        // Must not contain repetitive 2-word phrase
+        for (let i = 0; i < words.length - 2; i++) {
+            const phrase = words.slice(i, i + 2).join(' ');
+            const remainder = words.slice(i + 2).join(' ');
+            if (remainder.includes(phrase)) return true;
+        }
+
+        return false;
+    };
+
     const addCandidate = (text) => {
         if (!text || typeof text !== 'string') return;
-        const clean = cleanTextSnippet(text)
+        let clean = cleanTextSnippet(text)
             .replace(/^[-*•\s\d.)\][]+/, '')
             .replace(/[?.!]+$/g, '')
+            .replace(/\s+/g, ' ')
             .trim();
-        if (clean.length < 4 || clean.length > 120) return;
-        const lower = clean.toLowerCase();
-        if (lower === normalizedQuery) return;
-        if (/^https?:\/\//i.test(clean) || /^[a-z0-9-]+\.[a-z]{2,}(?:\/|$)/i.test(clean)) return;
+
+        // Strip trailing publisher tags (e.g. "... - The Times of India", "... | Reuters")
+        clean = clean.replace(/\s*[-–|—:·]\s*[^-–|—:·]{2,40}$/, '').trim();
+
+        if (isInvalidQuestion(clean)) return;
 
         const formatted = `${clean}?`;
         const key = formatted.toLowerCase();
@@ -322,18 +390,16 @@ export function generateRelatedResearchQuestions(optionsOrQuery, sourcesArg = []
         }
     };
 
-    // 1. Extract from verified source titles and headline segments
+    // 1. Extract from verified source main titles (after stripping publisher branding and subtitle fragments)
     for (const s of sources) {
         if (!s || !s.title) continue;
         const rawTitle = cleanTextSnippet(s.title);
-        const mainTitle = rawTitle.replace(/\s*[-–|—:·].*$/, '').trim();
-        addCandidate(mainTitle);
-
-        const segments = rawTitle.split(/\s*[-–|—:·]\s*/);
-        for (const seg of segments) {
-            addCandidate(seg);
-            if (candidates.length >= 6) break;
+        const strippedTitle = rawTitle.replace(/\s*[-–|—:·]\s*[^-–|—:·]{2,40}$/, '').trim();
+        const preColon = strippedTitle.replace(/\s*:\s*.*$/, '').trim();
+        if (preColon.length >= 20) {
+            addCandidate(preColon);
         }
+        addCandidate(strippedTitle);
         if (candidates.length >= 6) break;
     }
 
@@ -349,25 +415,28 @@ export function generateRelatedResearchQuestions(optionsOrQuery, sourcesArg = []
         }
     }
 
-    // 3. If still fewer than 3 candidates, derive sub-phrases from source titles
-    if (candidates.length < 3) {
-        for (const s of sources) {
-            if (!s || !s.title) continue;
-            const words = cleanTextSnippet(s.title).replace(/\s*[-–|—:·].*$/, '').trim().split(/\s+/).filter(Boolean);
-            if (words.length >= 4) {
-                const mid = Math.ceil(words.length / 2);
-                addCandidate(words.slice(mid).join(' '));
-                addCandidate(words.slice(0, mid).join(' '));
-            }
+    // 3. Extract from substantive answer text sentences if provided
+    if (candidates.length < 3 && answer && typeof answer === 'string') {
+        const cleanAnswer = cleanTextSnippet(answer);
+        const sentences = cleanAnswer.split(/(?<=[.!?])\s+/);
+        for (const sentence of sentences) {
+            addCandidate(sentence);
             if (candidates.length >= 3) break;
         }
     }
 
-    // 4. Fallback combination if still fewer than 3 candidates
-    if (candidates.length < 3 && sources[0]?.title) {
-        const titleRef = cleanTextSnippet(sources[0].title).replace(/\s*[-–|—:·].*$/, '').trim();
-        if (titleRef && !titleRef.toLowerCase().includes(normalizedQuery)) {
-            addCandidate(`${titleRef} (${cleanQ})`);
+    // 4. Derive contextual research angles from the user query's core topic if still under 3 candidates
+    if (candidates.length < 3) {
+        const coreTopic = cleanQ
+            .replace(/^(?:what\s+(?:are|is|were|was)|tell\s+me|show\s+me|how\s+(?:does|do|can|is)|why\s+(?:is|did)|who\s+(?:is|was)|can\s+you\s+tell\s+me|latest\s+(?:news|updates?|status|developments?)|current\s+status\s+of|updates?\s+(?:on|for|about))\s+/i, '')
+            .replace(/\b(?:latest\s+updates?|latest\s+news|current\s+status)\b/gi, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+
+        if (coreTopic.length >= 3) {
+            addCandidate(`What is the timeline and next milestones for ${coreTopic}`);
+            addCandidate(`What are the key implications and requirements of ${coreTopic}`);
+            addCandidate(`What official guidance has been released regarding ${coreTopic}`);
         }
     }
 
