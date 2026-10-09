@@ -915,9 +915,9 @@ TEMPORAL ANCHOR:
 Today's Date: ${currentDateStr}. Use this exact date as your reference point for phrases like 'today', 'this month', 'recently', 'latest', 'current', or 'this year'.
 
 RULES:
-1. COMPLETE COVERAGE: Answer every part and sub-question of the user prompt directly and thoroughly. Extract all relevant facts, names, figures, and entity lists contained in the sources. If multiple entities, companies, or criteria are affected or mentioned across the sources, enumerate all of them explicitly in a structured list.
-2. SUBSTANTIVE DETAILS: Do not return only headlines, source titles, or vague high-level summaries. Extract and explain the substantive facts, operational impacts, and policy specifics from the excerpts.
-3. DISTINGUISH CONFIRMED FACTS VS. UNCERTAINTY: Clearly differentiate confirmed/official actions (e.g. audits, investigations, PERM labor certification freezes) from ongoing/unaffected status or speculation (e.g. clarify whether existing visas remain valid or are suspended). If evidence is contradictory, evolving, or insufficient on a point, state the exact scope and limitations clearly.
+1. COMPLETE COVERAGE: Answer every part and sub-question of the user prompt directly and thoroughly. Extract all relevant facts, names, figures, dates, and entity enumerations contained in the sources. If multiple entities, components, or criteria are affected or mentioned across the sources, enumerate all of them explicitly in a structured list.
+2. SUBSTANTIVE DETAILS: Do not return only headlines, source titles, or vague high-level summaries. Extract and explain substantive facts, operational impacts, context, and concrete details from the source excerpts.
+3. DISTINGUISH CONFIRMED FACTS VS. UNCERTAINTY: Clearly differentiate verified facts and confirmed official actions from unconfirmed claims, ongoing status, unaffected entities, or speculation. If evidence is conflicting, incomplete, or evolving, state the exact scope, consensus, and limitations clearly.
 4. GROUNDED CITATIONS: Ground key statements and extracted facts with source citations using [1], [2], etc., matching the numbered verified sources below.
 5. STRUCTURE: Provide a direct answer first, followed by clear explanations, enumerated lists, and impact analyses.
 
