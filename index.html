@@ -21061,6 +21061,8 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                     maxResults: 8,
                     answer: false,
                     mode: 'rag',
+                    allowDeepCrawl: true,
+                    skipAutoDeepCrawl: false,
                     timeoutMs: timeoutMs || controller.searchTimeoutMs || 4500
                 });
             },
