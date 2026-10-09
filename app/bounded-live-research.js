@@ -223,13 +223,8 @@ export function generateSnippetFallback(query, sources = []) {
         const sTitle = cleanTextSnippet(s.title || '');
         const hasBody = substantiveBody && substantiveBody.toLowerCase() !== sTitle.toLowerCase() && substantiveBody.replace(/[^a-zA-Z0-9]/g, '').length >= 5;
 
-        // If this source has a substantive body, include title and body prose
+        // Substantive body only — NEVER push source titles into answer text
         if (hasBody) {
-            if (sTitle && !/^https?:\/\//i.test(sTitle)) {
-                textParts.push(sTitle);
-            }
-            textParts.push(substantiveBody);
-        } else if (substantiveBody) {
             textParts.push(substantiveBody);
         }
         if (!textParts.length) continue;
@@ -249,9 +244,15 @@ export function generateSnippetFallback(query, sources = []) {
             if (/\b(?:404|500|502|503)\b/.test(sentence)) continue;
             if (sentence.replace(/[^a-zA-Z0-9]/g, '').length < 3) continue;
 
-            const normalized = sentence.toLowerCase().replace(/[^a-z0-9]/g, '');
-            if (seenSentences.has(normalized)) continue;
-            seenSentences.add(normalized);
+            // Reject any sentence that matches or closely resembles a source title
+            const normalizedSentence = sentence.toLowerCase().replace(/[^a-z0-9]/g, '');
+            if (sources.some(s => {
+                const normTitle = cleanTextSnippet(s.title || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+                return normTitle && (normalizedSentence === normTitle || normalizedSentence.includes(normTitle));
+            })) continue;
+
+            if (seenSentences.has(normalizedSentence)) continue;
+            seenSentences.add(normalizedSentence);
             facts.push(sentence.endsWith('.') ? sentence : `${sentence}.`);
             if (facts.length >= 6) break;
         }
@@ -288,7 +289,8 @@ export function generateSnippetFallback(query, sources = []) {
 
 /**
  * Generates 3 contextual follow-up research questions.
- * Strictly non-blocking. Derived dynamically with zero hardcoding.
+ * Derived dynamically from user query intent and conversation context with zero hardcoding.
+ * Strictly non-blocking. Never copies raw headlines, source names, or fragments.
  */
 export function generateRelatedResearchQuestions(optionsOrQuery, sourcesArg = [], answerArg = '') {
     let query = '';
@@ -322,7 +324,8 @@ export function generateRelatedResearchQuestions(optionsOrQuery, sourcesArg = []
         'the times of india', 'times of india', 'indiatimes', 'indianeagle', 'reuters',
         'associated press', 'ap news', 'bloomberg', 'cnn', 'bbc', 'bbc news', 'cnbc',
         'forbes', 'the wall street journal', 'wsj', 'the new york times', 'nyt',
-        'the guardian', 'the verge', 'techcrunch', 'axios', 'politico', 'news', 'google news'
+        'the guardian', 'the verge', 'techcrunch', 'axios', 'politico', 'news', 'google news',
+        'hindustan times', 'ndtv', 'indian express', 'the hindu', 'al jazeera'
     ]);
     for (const s of sources) {
         if (!s) continue;
@@ -334,7 +337,13 @@ export function generateRelatedResearchQuestions(optionsOrQuery, sourcesArg = []
         }
         if (s.sourceLabel) publisherBlocklist.add(s.sourceLabel.toLowerCase());
         if (s.source) publisherBlocklist.add(String(s.source).toLowerCase());
+        if (s.publisher) publisherBlocklist.add(String(s.publisher).toLowerCase());
     }
+
+    // Normalized titles of all sources for strict anti-copying check
+    const normalizedSourceTitles = sources
+        .map(s => cleanTextSnippet(s?.title || '').toLowerCase().replace(/[^a-z0-9]/g, ''))
+        .filter(t => t.length >= 10);
 
     // Clickbait and headline fragment prefixes/patterns to strictly reject
     const clickbaitFragmentRegex = /^(?:full\s+list(?:\s+and\s+what\s+it\s+means)?|what\s+(?:it\s+means|you\s+need\s+to\s+know|we\s+know|is\s+next)|here'?s\s+(?:why|what|how|everything)|everything\s+you\s+need|all\s+you\s+need|read\s+more|live\s+updates|breaking\s+news|explained|analysis|opinion|photos|video|watch|in\s+photos)\b/i;
@@ -342,28 +351,41 @@ export function generateRelatedResearchQuestions(optionsOrQuery, sourcesArg = []
     const isInvalidQuestion = (text) => {
         if (!text || typeof text !== 'string') return true;
         const lower = text.toLowerCase().replace(/[?.!]+$/g, '').trim();
-        if (lower.length < 15 || lower.length > 120) return true;
+        if (lower.length < 15 || lower.length > 150) return true;
         if (lower === normalizedQuery) return true;
         if (/^https?:\/\//i.test(text) || /^[a-z0-9-]+\.[a-z]{2,}(?:\/|$)/i.test(text)) return true;
 
         // Check against publisher blocklist
         for (const pub of publisherBlocklist) {
             if (lower === pub || lower.startsWith(`${pub} `) || lower.endsWith(` ${pub}`)) return true;
-            if (lower.includes(pub) && lower.length < pub.length + 12) return true;
+            if (lower.includes(pub) && lower.length < pub.length + 15) return true;
         }
 
         // Check clickbait fragments
         if (clickbaitFragmentRegex.test(lower)) return true;
 
-        // Must have at least 3 words
-        const words = lower.split(/\s+/).filter(Boolean);
-        if (words.length < 3) return true;
+        // Must start with an interrogative question word
+        if (!/^(?:what|how|why|who|when|where|which|can|could|does|do|will|is|are|should)\b/i.test(lower)) {
+            return true;
+        }
 
-        // Must not contain repetitive 2-word phrase
+        // Must have at least 4 words
+        const words = lower.split(/\s+/).filter(Boolean);
+        if (words.length < 4) return true;
+
+        // Must not repeat any 2-word phrase
         for (let i = 0; i < words.length - 2; i++) {
             const phrase = words.slice(i, i + 2).join(' ');
             const remainder = words.slice(i + 2).join(' ');
             if (remainder.includes(phrase)) return true;
+        }
+
+        // Must NOT match or heavily copy any source title
+        const cleanNoPunct = lower.replace(/[^a-z0-9]/g, '');
+        for (const titleNorm of normalizedSourceTitles) {
+            if (cleanNoPunct === titleNorm) return true;
+            if (titleNorm.length >= 20 && cleanNoPunct.includes(titleNorm)) return true;
+            if (cleanNoPunct.length >= 20 && titleNorm.includes(cleanNoPunct)) return true;
         }
 
         return false;
@@ -377,7 +399,7 @@ export function generateRelatedResearchQuestions(optionsOrQuery, sourcesArg = []
             .replace(/\s+/g, ' ')
             .trim();
 
-        // Strip trailing publisher tags (e.g. "... - The Times of India", "... | Reuters")
+        // Strip trailing publisher tags
         clean = clean.replace(/\s*[-–|—:·]\s*[^-–|—:·]{2,40}$/, '').trim();
 
         if (isInvalidQuestion(clean)) return;
@@ -390,53 +412,63 @@ export function generateRelatedResearchQuestions(optionsOrQuery, sourcesArg = []
         }
     };
 
-    // 1. Extract from verified source main titles (after stripping publisher branding and subtitle fragments)
-    for (const s of sources) {
-        if (!s || !s.title) continue;
-        const rawTitle = cleanTextSnippet(s.title);
-        const strippedTitle = rawTitle.replace(/\s*[-–|—:·]\s*[^-–|—:·]{2,40}$/, '').trim();
-        const preColon = strippedTitle.replace(/\s*:\s*.*$/, '').trim();
-        if (preColon.length >= 20) {
-            addCandidate(preColon);
+    // Extract core subject/topic from the user query
+    let coreTopic = cleanQ
+        .replace(/^(?:please\s+)?(?:can you\s+)?(?:tell me|explain|find|search|lookup|what (?:is|are|was|were|do|does)|how (?:does|do|can|is|are|will)|why (?:is|are|did|does)|who (?:is|was)|when (?:is|will|did)|where (?:is|are)|which (?:is|are)|latest (?:news|updates?|developments?|status)(?:\s+(?:on|about|for|regarding))?|updates?\s+(?:on|about|for|regarding)|news\s+(?:on|about|for|regarding)|status\s+(?:of|on|for)|current\s+(?:status|details?|information)(?:\s+(?:of|on|for))?)\s+/i, '')
+        .replace(/\b(?:latest\s+updates?|latest\s+news|current\s+status|in\s+detail|right\s+now)\b/gi, '')
+        .replace(/[?.!]+$/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    // Strip compound secondary clauses (e.g. "and how does it affect...") to keep core topic concise
+    const strippedClause = coreTopic.replace(/\s+(?:and\s+)?(?:how\s+(?:does|do|can|is|will|it)|what\s+(?:is|are|will)|why\s+(?:is|does)|who\s+(?:is|are)).*$/i, '').trim();
+    if (strippedClause.length >= 3) {
+        coreTopic = strippedClause;
+    }
+    // Remove leading 'the ', 'a ', 'an '
+    coreTopic = coreTopic.replace(/^(?:the|a|an)\s+/i, '').trim();
+
+    // 1. Domain-aware follow-up question formulation derived from the user query & topic
+    if (coreTopic.length >= 3) {
+        const isPolicyOrRule = /\b(?:rule|policy|guideline|luggage|baggage|requirement|compliance|regulation|mandate|standard|ban|restriction|law|suspension|audit)\b/i.test(cleanQ);
+        const isTechnicalOrRelease = /\b(?:release|version|feature|api|library|framework|model|architecture|python|javascript|rust|go)\b/i.test(cleanQ);
+        const isEventOrMission = /\b(?:mission|launch|landing|flight|test|project|summit|conference|election|trial)\b/i.test(cleanQ);
+
+        if (isPolicyOrRule) {
+            addCandidate(`What are the specific requirements and compliance guidelines for ${coreTopic}`);
+            addCandidate(`What is the official implementation timeline and effective date for ${coreTopic}`);
+            addCandidate(`What exemptions or special allowances apply under ${coreTopic}`);
+        } else if (isTechnicalOrRelease) {
+            addCandidate(`What are the major new features and breaking changes in ${coreTopic}`);
+            addCandidate(`What is the migration path and compatibility requirements for ${coreTopic}`);
+            addCandidate(`What performance improvements or benchmarks are reported for ${coreTopic}`);
+        } else if (isEventOrMission) {
+            addCandidate(`What is the timeline and upcoming milestones for ${coreTopic}`);
+            addCandidate(`What are the primary objectives and mission parameters for ${coreTopic}`);
+            addCandidate(`What technical challenges or next steps have been identified for ${coreTopic}`);
+        } else {
+            addCandidate(`What is the timeline and next milestones for ${coreTopic}`);
+            addCandidate(`What are the key implications and requirements of ${coreTopic}`);
+            addCandidate(`What official guidance or announcements have been released regarding ${coreTopic}`);
         }
-        addCandidate(strippedTitle);
-        if (candidates.length >= 6) break;
+
+        // Additional fallback angles if needed
+        if (candidates.length < 3) {
+            addCandidate(`How does ${coreTopic} affect the impacted organizations and individuals`);
+            addCandidate(`What background factors and context led to ${coreTopic}`);
+            addCandidate(`What next steps or actions are expected for ${coreTopic}`);
+        }
     }
 
-    // 2. Extract from verified source snippets / answer sentences
-    for (const s of sources) {
-        if (candidates.length >= 6) break;
-        const text = cleanTextSnippet(s?.snippet || s?.description || '');
-        if (!text) continue;
-        const sentences = text.split(/(?<=[.!?])\s+/);
-        for (const sentence of sentences) {
-            addCandidate(sentence);
-            if (candidates.length >= 6) break;
-        }
-    }
-
-    // 3. Extract from substantive answer text sentences if provided
+    // 2. Derive follow-ups from substantive sentences in the generated answer if available
     if (candidates.length < 3 && answer && typeof answer === 'string') {
         const cleanAnswer = cleanTextSnippet(answer);
         const sentences = cleanAnswer.split(/(?<=[.!?])\s+/);
         for (const sentence of sentences) {
-            addCandidate(sentence);
             if (candidates.length >= 3) break;
-        }
-    }
-
-    // 4. Derive contextual research angles from the user query's core topic if still under 3 candidates
-    if (candidates.length < 3) {
-        const coreTopic = cleanQ
-            .replace(/^(?:what\s+(?:are|is|were|was)|tell\s+me|show\s+me|how\s+(?:does|do|can|is)|why\s+(?:is|did)|who\s+(?:is|was)|can\s+you\s+tell\s+me|latest\s+(?:news|updates?|status|developments?)|current\s+status\s+of|updates?\s+(?:on|for|about))\s+/i, '')
-            .replace(/\b(?:latest\s+updates?|latest\s+news|current\s+status)\b/gi, '')
-            .replace(/\s+/g, ' ')
-            .trim();
-
-        if (coreTopic.length >= 3) {
-            addCandidate(`What is the timeline and next milestones for ${coreTopic}`);
-            addCandidate(`What are the key implications and requirements of ${coreTopic}`);
-            addCandidate(`What official guidance has been released regarding ${coreTopic}`);
+            if (/^(?:what|how|why|who|when|where|which|can|does|is|are|will)\b/i.test(sentence)) {
+                addCandidate(sentence);
+            }
         }
     }
 
@@ -1021,73 +1053,88 @@ User question: "${effectiveUserPrompt}"
 Verified Sources:
 ${sourcesContext}`;
 
-                // Dynamic remaining synthesis budget: hard deadline - elapsed so far - 300ms buffer
-                const elapsedSoFar = performance.now() - this.telemetry.t_start;
-                const remainingBudgetMs = Math.max(1000, Math.round(this.hardDeadlineMs - elapsedSoFar - 300));
+                // Dynamic remaining synthesis budget with controlled retry support
+                let synthesisSucceeded = false;
+                const maxAttempts = 2;
 
-                try {
-                    if (typeof streamSynthesisFn === 'function') {
-                        await streamSynthesisFn({
-                            prompt,
-                            rawQuery: query,
-                            sources: this.sources,
-                            signal: this.streamAbortController.signal,
-                            timeoutMs: remainingBudgetMs,
-                            onToken: (token) => {
-                                // Invariant: drop tokens if terminal or no longer in synthesis state
-                                if (this.isTerminal || this.state !== RESEARCH_STATES.SOURCE_GROUNDED_SYNTHESIS) return;
-                                if (this.telemetry.t_first_token === 0) {
-                                    this.telemetry.t_first_token = performance.now();
-                                }
-                                this.streamedText += token;
-                                if (typeof uiCallbacks.onToken === 'function') {
-                                    try {
-                                        uiCallbacks.onToken({
-                                            turnId: this.turnId,
-                                            token,
-                                            streamedText: this.streamedText,
-                                            assistantMessageId
-                                        });
-                                    } catch (_) {}
-                                }
-                            }
-                        });
+                for (let attempt = 0; attempt < maxAttempts; attempt++) {
+                    if (this.isTerminal) return;
+                    const elapsed = performance.now() - this.telemetry.t_start;
+                    const attemptBudgetMs = Math.max(800, Math.round(this.hardDeadlineMs - elapsed - 250));
+
+                    if (attempt > 0 && attemptBudgetMs < 1000) {
+                        break;
                     }
 
-                    if (!this.isTerminal) {
+                    try {
+                        if (typeof streamSynthesisFn === 'function') {
+                            await streamSynthesisFn({
+                                prompt,
+                                rawQuery: query,
+                                sources: this.sources,
+                                signal: this.streamAbortController.signal,
+                                timeoutMs: attemptBudgetMs,
+                                isRetry: attempt > 0,
+                                onToken: (token) => {
+                                    // Invariant: drop tokens if terminal or no longer in synthesis state
+                                    if (this.isTerminal || this.state !== RESEARCH_STATES.SOURCE_GROUNDED_SYNTHESIS) return;
+                                    if (this.telemetry.t_first_token === 0) {
+                                        this.telemetry.t_first_token = performance.now();
+                                    }
+                                    this.streamedText += token;
+                                    if (typeof uiCallbacks.onToken === 'function') {
+                                        try {
+                                            uiCallbacks.onToken({
+                                                turnId: this.turnId,
+                                                token,
+                                                streamedText: this.streamedText,
+                                                assistantMessageId
+                                            });
+                                        } catch (_) {}
+                                    }
+                                }
+                            });
+                        }
+
                         const cleanStreamed = (this.streamedText || '').trim();
                         // Invariant: empty/trivial output protection — 10 chars minimum to distinguish real output from blank
                         if (cleanStreamed.length >= 10) {
-                            completeExecution({
-                                success: true,
-                                fallback: false,
-                                provenance: PROVENANCE_MODES.WEB_GROUNDED,
-                                content: cleanStreamed,
-                                sources: this.sources
-                            });
+                            synthesisSucceeded = true;
+                            break;
+                        }
+                    } catch (err) {
+                        if (this.isTerminal) return;
+                        this.telemetry.synthesisError = err?.message || String(err);
+                        if (attempt === 0) {
+                            console.warn(`[BoundedLiveResearch:${this.turnId}] Synthesis attempt 1 failed (${err?.message || err}), attempting controlled retry...`);
+                            this.streamedText = '';
+                            await new Promise(r => setTimeout(r, 80));
                         } else {
-                            const snippetFallback = generateSnippetFallback(query, this.sources);
-                            completeExecution({
-                                success: false,
-                                fallback: true,
-                                provenance: PROVENANCE_MODES.SYNTHESIS_FALLBACK,
-                                content: snippetFallback,
-                                sources: this.sources
-                            });
+                            console.error(`[BoundedLiveResearch:${this.turnId}] Synthesis retry failed:`, err);
                         }
                     }
-                } catch (err) {
-                    if (this.isTerminal) return;
-                    this.telemetry.synthesisError = err?.message || String(err);
-                    console.error(`[BoundedLiveResearch:${this.turnId}] Synthesis failed:`, err);
-                    const snippetFallback = generateSnippetFallback(query, this.sources);
-                    completeExecution({
-                        success: false,
-                        fallback: true,
-                        provenance: PROVENANCE_MODES.SYNTHESIS_FALLBACK,
-                        content: snippetFallback,
-                        sources: this.sources
-                    });
+                }
+
+                if (!this.isTerminal) {
+                    const cleanStreamed = (this.streamedText || '').trim();
+                    if (synthesisSucceeded && cleanStreamed.length >= 10) {
+                        completeExecution({
+                            success: true,
+                            fallback: false,
+                            provenance: PROVENANCE_MODES.WEB_GROUNDED,
+                            content: cleanStreamed,
+                            sources: this.sources
+                        });
+                    } else {
+                        const snippetFallback = generateSnippetFallback(query, this.sources);
+                        completeExecution({
+                            success: false,
+                            fallback: true,
+                            provenance: PROVENANCE_MODES.SYNTHESIS_FALLBACK,
+                            content: snippetFallback,
+                            sources: this.sources
+                        });
+                    }
                 }
             };
 
