@@ -3813,19 +3813,25 @@ const edgeResponseCache = new EdgeSemanticLruCache();
     }
 
     function isMetaTalkAnswer(text) {
-        const t = String(text || '').toLowerCase();
-        if (!t.trim()) return true;
-        // Catch LLM meta-commentary about search snippets/retrieved context
-        return /\b(provided snippets?|supplied snippets?|provided text|retrieved context|search results?|top live snippets?|available snippets?|given snippets?|above snippets?)\b[\s\S]{0,100}\b(do not|does not|don't|doesn't|do not state|do not name|do not mention|contain no|no information|do not specify|could not confirm|could not find|do not include|do not provide|only state|only mention)\b/.test(t) ||
-            /^(the provided|based on the provided|according to the provided|the search results?|from the provided|the available|the retrieved|the supplied)\b/.test(t) ||
+        const t = String(text || '').toLowerCase().trim();
+        if (!t) return true;
+        // Catch LLM meta-commentary about search snippets/retrieved context being evasive or missing
+        const isEvasiveRefusal = /\b(provided snippets?|supplied snippets?|provided text|retrieved context|search results?|top live snippets?|available snippets?|given snippets?|above snippets?)\b[\s\S]{0,100}\b(do not|does not|don't|doesn't|do not state|do not name|do not mention|contain no|no information|do not specify|could not confirm|could not find|do not include|do not provide|only state|only mention|unclear)\b/.test(t) ||
             /\b(snippets?|search results?) (do not|don't|only)\b/.test(t);
+        if (isEvasiveRefusal) return true;
+
+        // If it starts with meta-preamble but is brief and lacks substantive content (< 120 chars)
+        if (t.length < 120 && /^(the provided|based on the provided|according to the provided|the search results?|from the provided|the available|the retrieved|the supplied)\b/.test(t)) {
+            return true;
+        }
+        return false;
     }
 
     function stripMetaTalkPrefixes(text) {
         let t = String(text || '').trim();
         if (!t) return t;
-        // Remove leading meta-talk sentences that reference snippets/search results
-        t = t.replace(/^(?:The provided snippets?|Based on the provided snippets?|According to the provided snippets?|The search results?|Based on the search results?|From the (?:provided|available|retrieved) (?:snippets?|context|text))[\s\S]*?(?:\.|\n)\s*/i, '');
+        // Remove leading meta-talk sentences that reference snippets/search results/sources
+        t = t.replace(/^(?:The provided (?:snippets?|sources?|reports?|articles?|context|text)|Based on the (?:provided|retrieved|available) (?:snippets?|sources?|reports?|articles?|context|text)|According to the (?:provided|retrieved|available) (?:snippets?|sources?|reports?|articles?)|The search results?|Based on the search results?|From the (?:provided|available|retrieved) (?:snippets?|sources?|context|text))[\s\S]*?(?:\.|\n)\s*/i, '');
         // Remove "However, ..." transitional prefixes after meta-talk removal
         t = t.replace(/^(?:However|That said|Nevertheless|Nonetheless),?\s*/i, '');
         return t.trim();
@@ -3850,10 +3856,11 @@ const edgeResponseCache = new EdgeSemanticLruCache();
         }
 
         let body = stripMetaTalkPrefixes(cleanExisting);
-        if (!body || isMetaTalkAnswer(body)) {
+        const hasSubstantiveExisting = cleanExisting.length >= 60 && !/\b(could not verify|cannot verify|no information)\b/i.test(cleanExisting);
+        if (!hasSubstantiveExisting && (!body || isMetaTalkAnswer(body))) {
             const lead = top[0] || {};
             const title = normalizeLeadTitle(message, lead);
-            const description = String(lead?.description || '').trim();
+            const description = String(lead?.description || lead?.extract || lead?.fullArticleText || lead?.snippet || '').trim();
             body = normalizeUpdateLine(message, title, description, liveSources);
             if (isMetaTalkAnswer(body)) {
                 const fallback = getDirectKnowledgeFallback(message);
@@ -4235,7 +4242,8 @@ const edgeResponseCache = new EdgeSemanticLruCache();
     function normalizeUpdateLine(message, title, description, sources) {
         const msg = String(message || '').toLowerCase();
         const cleanTitle = String(title || '').replace(/[.\s]+$/g, '').trim();
-        const descFirst = String(description || '').split(/[.!?]\s/)[0].trim();
+        const cleanDesc = String(description || '').trim();
+        const descFirst = cleanDesc.split(/[.!?]\s/)[0].trim();
         const combined = `${cleanTitle} ${descFirst}`.trim();
         const date = extractDateCandidate(combined) || findDateAcrossSources(sources);
 
@@ -4248,7 +4256,10 @@ const edgeResponseCache = new EdgeSemanticLruCache();
         if (descFirst && descFirst.length >= 25 && !/^https?:\/\//i.test(descFirst)) {
             return `${cleanTitle}. ${descFirst}.`;
         }
-        return `the latest update is: ${cleanTitle}.`;
+        if (cleanDesc && cleanDesc.length >= 40 && cleanDesc !== cleanTitle) {
+            return `${cleanTitle}. ${cleanDesc.slice(0, 300)}.`;
+        }
+        return `Regarding ${cleanTitle}, substantive details could not be fully extracted from the available sources.`;
     }
 
     function extractDateCandidate(text) {
@@ -5117,6 +5128,8 @@ Respond conversationally and naturally.`;
         asksUserToProvideSources,
         enforceLiveAnswerStyle,
         buildLiveUpdateResponse,
+        isMetaTalkAnswer,
+        isStableGeographyOrGeneralFactQuery,
         isAnswerEvidenceSource,
         shouldUseAsFinalSource,
         rankLiveSources,
