@@ -473,8 +473,8 @@ export async function handleStreamingWebRag(req, res, { rawQuery, limit = 8 }) {
 
     if (sources.length > 0) {
         const sourcesContext = sources.map((s, idx) => {
-            const snippet = cleanSnippetText(s.snippet || s.description || '');
-            return `[${idx + 1}] Title: ${s.title}\nURL: ${s.url}\nDomain: ${s.domain || ''}\nExcerpt: ${snippet}`;
+            const excerpt = cleanSnippetText(s.fullArticleText || s.extract || s.snippet || s.description || '');
+            return `[${idx + 1}] Title: ${s.title}\nURL: ${s.url}\nDomain: ${s.domain || ''}\nExcerpt: ${excerpt || 'No excerpt available.'}`;
         }).join('\n\n');
 
         systemPrompt = 'You are an expert AI research assistant. Answer every part and sub-question of the user prompt thoroughly and factually, grounded directly in the provided live sources. Extract all relevant facts, names, figures, and entity lists explicitly rather than returning high-level summaries or headlines. Clearly distinguish confirmed actions and facts from unconfirmed claims, ongoing status, or uncertainty. Provide requested lists and detailed explanations. Cite sources using [1], [2], etc., corresponding to the provided sources list.';
@@ -555,10 +555,20 @@ export async function handleStreamingWebRag(req, res, { rawQuery, limit = 8 }) {
     }
 
     if (!streamedAny) {
-        const summary = sources.length > 0
-            ? sources.map((s, idx) => `### [${idx + 1}] [${s.title}](${s.url})\n${cleanSnippetText(s.snippet || s.description || '')}`).join('\n\n')
-            : 'No live records or streaming model keys were available to generate an online answer for this query.';
-        sendEvent('token', { token: summary });
+        let fallbackMessage = '';
+        if (sources.length > 0) {
+            const substantiveSnippets = sources
+                .map(s => cleanSnippetText(s.fullArticleText || s.extract || s.snippet || s.description || ''))
+                .filter(t => t.length >= 45 && t !== s.title);
+            if (substantiveSnippets.length > 0) {
+                fallbackMessage = `Based on retrieved records regarding "${rawQuery}":\n\n${substantiveSnippets.slice(0, 3).map((snip, i) => `[${i + 1}] ${snip}`).join('\n\n')}`;
+            } else {
+                fallbackMessage = `Verified live sources were retrieved regarding "${rawQuery}", but the available records contain only headline references without substantive details to answer all parts of the question. Please refer to the verified source links for full coverage.`;
+            }
+        } else {
+            fallbackMessage = 'No live records or streaming model keys were available to generate an online answer for this query.';
+        }
+        sendEvent('token', { token: fallbackMessage });
     }
 
     sendEvent('done', {});
@@ -1263,8 +1273,9 @@ export async function searchPublicSources(query, options = {}) {
         });
         if (deduped.length >= Math.max(limit, 8)) break;
     }
-    if (options.skipAutoDeepCrawl !== true && options.allowDeepCrawl === true && deduped.length < 3) {
-        await enrichSearchResultsWithDeepCrawl(deduped, 2).catch(() => {});
+    const hasInsufficientEvidence = deduped.slice(0, 3).some(item => !item.fullArticleText && (!item.snippet || item.snippet === item.title || item.snippet.length < 60));
+    if (options.skipAutoDeepCrawl !== true && (options.allowDeepCrawl === true || hasInsufficientEvidence)) {
+        await enrichSearchResultsWithDeepCrawl(deduped, 3).catch(() => {});
     }
     return deduped;
 }
@@ -1502,10 +1513,18 @@ export async function enrichSearchResultsWithDeepCrawl(results, limit = 3) {
     settled.forEach((res, i) => {
         if (res.status === 'fulfilled' && res.value?.bodyText) {
             candidates[i].fullArticleText = res.value.bodyText;
+            candidates[i].extract = res.value.bodyText;
+            if (!candidates[i].snippet || candidates[i].snippet === candidates[i].title || candidates[i].snippet.length < 60) {
+                candidates[i].snippet = res.value.bodyText.slice(0, 1000);
+                candidates[i].description = res.value.bodyText.slice(0, 1000);
+            }
             if (res.value.pubDate && !candidates[i].date) {
                 candidates[i].date = res.value.pubDate;
             }
             candidates[i].deepCrawled = true;
+            candidates[i].accessible = true;
+        } else if (res.status === 'rejected' || (res.status === 'fulfilled' && !res.value)) {
+            candidates[i].accessible = false;
         }
     });
 
@@ -1987,7 +2006,8 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
         limit,
         plannedQueries: phase1Queries,
         skipStructuredRoles: true,
-        skipAutoDeepCrawl: true,
+        skipAutoDeepCrawl: options.answer === false,
+        allowDeepCrawl: options.answer !== false,
         answer: options.answer,
         timeoutMs: serverTimeoutMs
     }).then(r => {
