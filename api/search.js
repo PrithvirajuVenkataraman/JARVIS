@@ -477,7 +477,7 @@ export async function handleStreamingWebRag(req, res, { rawQuery, limit = 8 }) {
             return `[${idx + 1}] Title: ${s.title}\nURL: ${s.url}\nDomain: ${s.domain || ''}\nExcerpt: ${snippet}`;
         }).join('\n\n');
 
-        systemPrompt = 'You are an expert AI research assistant. Provide an exhaustive, accurate, and beautifully structured response to the user prompt grounded directly in the provided live sources. If comparison tables, columns, or specific sections were requested, follow every instruction precisely. Cite sources using [1], [2], etc., corresponding to the provided sources list.';
+        systemPrompt = 'You are an expert AI research assistant. Answer every part and sub-question of the user prompt thoroughly and factually, grounded directly in the provided live sources. Extract all relevant facts, names, figures, and entity lists explicitly rather than returning high-level summaries or headlines. Clearly distinguish confirmed actions from ongoing status or uncertainty (such as clarifying whether existing visas or policies remain unaffected). Provide requested lists and detailed explanations. Cite sources using [1], [2], etc., corresponding to the provided sources list.';
         userPrompt = `User Prompt:\n${rawQuery}\n\nLive Sources:\n${sourcesContext}`;
     } else {
         systemPrompt = 'You are an expert AI assistant. Provide an exhaustive, accurate, and beautifully structured response to the user prompt using your comprehensive knowledge base. Fulfill all formatting, tables, columns, and detailed breakdowns thoroughly.';
@@ -5193,8 +5193,7 @@ export function buildDeterministicSearchQueries(query) {
     const subject = extractSearchSubject(normalized);
     if (!subject) return [];
     const isTechDoc = isTechnicalDocumentationQuery(normalized);
-    const isRecencyOrVersionQuery = isTechDoc || /\b(?:latest|current|newest|recent|stable|release|version|changelog|changes?|updates?)\b/i.test(normalized);
-    if (isRecencyOrVersionQuery) {
+    if (isTechDoc) {
         const cleanSubject = subject.replace(/\b(?:latest|recent|current|newest|release|version|changelog|changes?|updates?)\b/gi, '').replace(/\s+/g, ' ').trim() || subject;
         const currentYear = new Date().getFullYear();
         return Array.from(new Set([
