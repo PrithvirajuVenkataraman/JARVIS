@@ -29,6 +29,7 @@ import {
     scoreSearchResult
 } from '../api/search.js';
 import { classifyFreeLiveIntent } from '../api/_lib/free-live/classifier.js';
+import { __test as chatGroqTest } from '../api/chat-groq.js';
 
 // ============================================================================
 // ARCHITECTURE-LEVEL TESTS (Section 8 Requirements)
@@ -1728,8 +1729,269 @@ test('Regression 13: Dynamic Multi-Topic Synthesis & Answer-First Streaming Orde
     }
 });
 
+// ============================================================================
+// REGRESSION 14: Comprehensive Source-to-Answer Synthesis & Headline-Only Defense
+// Validates:
+// 1. Multi-part current-events questions produce substantive answers, not titles
+// 2. Technical questions requiring version comparisons preserve substantive details
+// 3. Queries with multiple sources and conflicting claims preserve divergence
+// 4. Queries where only headlines are initially available trigger deep extraction or safe limitations
+// 5. Queries with inaccessible sources handle them gracefully without hallucination
+// 6. Ordinary questions not requiring live search remain untouched
+// ============================================================================
+test('Regression 14.1: Multi-part current-events query synthesizes substantive answers rather than article titles', async () => {
+    const controller = new BoundedLiveResearchController({
+        searchCutoffMs: 2500,
+        hardDeadlineMs: 8000
+    });
 
+    const userPrompt = 'What is the current status of the global maritime carbon tax proposal, which nations voted against it, and when will enforcement start?';
+    let capturedPrompt = '';
+    const streamedChunks = [];
 
+    const rawSources = [
+        {
+            title: 'IMO Delegates Debate Global Maritime Carbon Levy',
+            url: 'https://maritime-news.org/carbon-levy-status',
+            snippet: 'IMO Delegates Debate Global Maritime Carbon Levy', // Headline-only snippet
+            fullArticleText: 'The International Maritime Organization delegates reached a preliminary agreement on a universal carbon levy of $100 per metric ton. However, voting records show that Saudi Arabia, China, and Brazil submitted formal dissents citing economic impact on developing trade. If the treaty is ratified at the autumn assembly, mandatory enforcement will commence in January 2027.',
+            sourceLabel: 'Maritime News'
+        },
+        {
+            title: 'Developing Nations Voice Concerns on Shipping Emission Rules',
+            url: 'https://global-trade-review.com/shipping-emissions-vote',
+            snippet: 'Developing Nations Voice Concerns on Shipping Emission Rules',
+            fullArticleText: 'Delegates from major export economies including China and Brazil opposed the flat-rate maritime levy structure, arguing for regional exemptions. The current compromise roadmap sets an enforcement baseline starting in early 2027 with revenue redistribution mechanisms.',
+            sourceLabel: 'Global Trade Review'
+        }
+    ];
 
+    const result = await controller.execute({
+        query: userPrompt,
+        userText: userPrompt,
+        assistantMessageId: 'msg_reg14_multipart',
+        fetchSearchFn: async () => ({ results: rawSources }),
+        streamSynthesisFn: async ({ prompt, onToken }) => {
+            capturedPrompt = prompt;
+            const fullAnswer = '### Maritime Carbon Tax Status\n' +
+                'The International Maritime Organization (IMO) has reached a preliminary agreement to implement a universal carbon levy of $100 per metric ton on commercial vessels [1].\n\n' +
+                '### Opposing Nations\n' +
+                'Formal dissents and opposition votes were recorded from Saudi Arabia, China, and Brazil, who raised concerns over disparate economic burdens on developing export trade [1][2].\n\n' +
+                '### Enforcement Timeline\n' +
+                'Following final ratification at the upcoming autumn assembly, mandatory enforcement is scheduled to commence in January 2027 [1][2].';
+            
+            for (const chunk of fullAnswer.match(/.{1,40}/g) || [fullAnswer]) {
+                onToken(chunk);
+            }
+        }
+    });
 
+    // 1. Controller delivered substantive answer, not headlines
+    assert.equal(result.success, true);
+    assert.equal(result.fallback, false);
+    assert.ok(result.content.length > 200, 'Final response must be substantive, not just titles');
+    assert.ok(result.content.includes('$100 per metric ton'), 'Must address status and levy rate');
+    assert.ok(result.content.includes('Saudi Arabia, China, and Brazil'), 'Must enumerate opposing nations');
+    assert.ok(result.content.includes('January 2027'), 'Must specify enforcement timeline');
+    assert.ok(!result.content.startsWith('the latest update is:'), 'Must not collapse into single headline line');
+
+    // 2. Verified that prompt carried fullArticleText, not just headline snippets
+    assert.ok(capturedPrompt.includes('Saudi Arabia, China, and Brazil'), 'Prompt must carry substantive article text');
+    assert.ok(capturedPrompt.includes('mandatory enforcement will commence in January 2027'), 'Prompt must carry timeline evidence');
+
+    // 3. buildLiveUpdateResponse must protect this substantive answer and never overwrite it with a title
+    const liveUpdateOutput = chatGroqTest.buildLiveUpdateResponse(userPrompt, result.sources, result.content);
+    assert.ok(liveUpdateOutput.includes('$100 per metric ton'), 'buildLiveUpdateResponse must preserve full multi-part answer');
+    assert.ok(!liveUpdateOutput.startsWith('the latest update is:'), 'Must not overwrite with lead headline');
+});
+
+test('Regression 14.2: Technical version comparisons preserve substantive differences without collapsing to headlines', async () => {
+    const controller = new BoundedLiveResearchController({
+        searchCutoffMs: 2500,
+        hardDeadlineMs: 8000
+    });
+
+    const userPrompt = 'Compare Node.js 22 and Node.js 20 regarding native WebSocket support, V8 engine version, and the built-in test runner.';
+    let capturedPrompt = '';
+
+    const rawSources = [
+        {
+            title: 'Node.js 22 Feature Matrix and Changelog',
+            url: 'https://nodejs.org/en/blog/release/v22.0.0',
+            domain: 'nodejs.org',
+            snippet: 'Node.js 22 Feature Matrix',
+            fullArticleText: 'Node.js 22 upgrades the V8 engine to version 12.4. Native WebSocket client support is now enabled by default without flags. The built-in test runner adds support for glob patterns and improved coverage reporting.',
+            sourceType: 'official_source'
+        },
+        {
+            title: 'Node.js 20 Release Highlights',
+            url: 'https://nodejs.org/en/blog/release/v20.0.0',
+            domain: 'nodejs.org',
+            snippet: 'Node.js 20 Highlights',
+            fullArticleText: 'Node.js 20 features V8 engine 11.3. Native WebSocket support was experimental and required the --experimental-websocket flag. The built-in test runner was marked stable but lacked glob pattern filtering.',
+            sourceType: 'official_source'
+        }
+    ];
+
+    const result = await controller.execute({
+        query: userPrompt,
+        userText: userPrompt,
+        assistantMessageId: 'msg_reg14_tech',
+        fetchSearchFn: async () => ({ results: rawSources }),
+        streamSynthesisFn: async ({ prompt, onToken }) => {
+            capturedPrompt = prompt;
+            onToken('Here is the technical comparison between Node.js 22 and Node.js 20:\n\n' +
+                '- **V8 Engine**: Node.js 22 runs V8 12.4, whereas Node.js 20 shipped with V8 11.3 [1][2].\n' +
+                '- **Native WebSocket**: In Node.js 22, the WebSocket client is enabled by default. In Node.js 20, it was experimental and required the `--experimental-websocket` flag [1][2].\n' +
+                '- **Built-in Test Runner**: Node.js 22 adds glob pattern test execution and native coverage enhancements, whereas Node.js 20 provided stable execution without glob filtering [1][2].');
+        }
+    });
+
+    assert.equal(result.success, true);
+    assert.ok(result.content.includes('V8 12.4'), 'Must explain Node 22 V8 engine version');
+    assert.ok(result.content.includes('--experimental-websocket'), 'Must explain Node 20 flag difference');
+    assert.ok(result.content.includes('glob pattern'), 'Must explain test runner enhancements');
+
+    // Verify isMetaTalkAnswer does not mistake this technical answer for meta-talk
+    assert.equal(chatGroqTest.isMetaTalkAnswer(result.content), false, 'Technical comparison must not be flagged as meta-talk');
+});
+
+test('Regression 14.3: Conflicting source claims are preserved and cited under rule 3 divergence requirements', async () => {
+    const controller = new BoundedLiveResearchController({
+        searchCutoffMs: 2500,
+        hardDeadlineMs: 8000
+    });
+
+    const userPrompt = 'What was the approved budget and targeted completion year for the metropolitan high-speed rail link?';
+    let capturedPrompt = '';
+
+    const rawSources = [
+        {
+            title: 'Transit Authority Approves Initial Rail Link Financing',
+            url: 'https://transit-authority.gov/press/rail-link-budget',
+            snippet: 'Transit Authority Approves Initial Rail Link Financing',
+            fullArticleText: 'The Regional Transit Authority officially approved an initial financing package of €12.5 billion, targeting completion in late 2029.',
+            sourceLabel: 'Transit Authority'
+        },
+        {
+            title: 'Parliamentary Audit Projects Budget Expansion and Geotechnical Delays',
+            url: 'https://parliamentary-watch.org/reports/rail-audit',
+            snippet: 'Parliamentary Audit Projects Budget Expansion and Geotechnical Delays',
+            fullArticleText: 'An independent parliamentary committee audit revised the total expected expenditure to €14.8 billion, projecting commercial launch will be pushed back to mid-2031 due to tunneling complications.',
+            sourceLabel: 'Parliamentary Audit'
+        }
+    ];
+
+    const result = await controller.execute({
+        query: userPrompt,
+        userText: userPrompt,
+        assistantMessageId: 'msg_reg14_conflicts',
+        fetchSearchFn: async () => ({ results: rawSources }),
+        streamSynthesisFn: async ({ prompt, onToken }) => {
+            capturedPrompt = prompt;
+            onToken('Official reports indicate divergent estimates for the high-speed rail project:\n\n' +
+                '1. **Initial Authority Baseline**: The Regional Transit Authority approved an initial budget of €12.5 billion with targeted completion by late 2029 [1].\n' +
+                '2. **Independent Audit Revision**: A subsequent parliamentary oversight audit reported expected costs rising to €14.8 billion with opening delayed to mid-2031 due to tunneling delays [2].');
+        }
+    });
+
+    // 1. Prompt explicitly mandates resolving conflicts & citing each source
+    assert.ok(capturedPrompt.includes('DISTINGUISH CONFIRMED FACTS VS. UNCERTAINTY'), 'Must mandate distinguishing facts vs uncertainty');
+    assert.ok(capturedPrompt.includes('conflicting claims'), 'Must instruct handling conflicting claims');
+
+    // 2. Both divergent claims are represented with their citations
+    assert.ok(result.content.includes('€12.5 billion') && result.content.includes('2029'), 'Must represent source 1 budget and date');
+    assert.ok(result.content.includes('€14.8 billion') && result.content.includes('2031'), 'Must represent source 2 audit projection');
+    assert.ok(result.content.includes('[1]') && result.content.includes('[2]'), 'Must cite both divergent sources');
+});
+
+test('Regression 14.4: Headline-only sources reject title-stringing and state clear limitations', () => {
+    // Sources that only contain headline titles and no substantive excerpts
+    const headlineOnlySources = [
+        {
+            id: 1,
+            title: 'Global Semiconductor Subsidies Shift',
+            domain: 'techwire.com',
+            url: 'https://techwire.com/article1',
+            snippet: 'Global Semiconductor Subsidies Shift'
+        },
+        {
+            id: 2,
+            title: 'Automakers Face Production Delays',
+            domain: 'autonews.com',
+            url: 'https://autonews.com/article2',
+            snippet: 'Automakers Face Production Delays'
+        }
+    ];
+
+    const fallback = generateSnippetFallback('Global Semiconductor Subsidies', headlineOnlySources);
+
+    // Negative assertions: MUST NEVER concatenate headlines as an answer
+    assert.ok(!fallback.includes('Global Semiconductor Subsidies Shift. Automakers Face Production Delays.'),
+        'Must never concatenate disjointed headlines into a fake answer');
+    assert.ok(!fallback.includes('### Live Web Results'), 'Must not have raw technical headings');
+
+    // Positive assertion: clearly states what could not be verified
+    assert.ok(fallback.includes('only headline references') || fallback.includes('could not be completed') || fallback.includes('carousel above'),
+        'Must inform user that available records are headline-only');
+});
+
+test('Regression 14.5: Inaccessible sources are explicitly annotated without breaking prompt grounding', () => {
+    const sources = [
+        {
+            id: 1,
+            title: 'Open Source Policy Changes Announced',
+            url: 'https://tech-portal.org/policy-update',
+            domain: 'tech-portal.org',
+            snippet: 'New license terms require dual-licensing for enterprise hosting.',
+            fullArticleText: 'New license terms require dual-licensing for enterprise hosting.',
+            accessible: true
+        },
+        {
+            id: 2,
+            title: 'Paywalled Analysis on Cloud Providers',
+            url: 'https://restricted-analysis.com/cloud-report',
+            domain: 'restricted-analysis.com',
+            snippet: 'Index metadata snippet only.',
+            accessible: false // Deep crawl encountered 403 or paywall
+        }
+    ];
+
+    const formattedPrompt = formatSourcesForPrompt(sources);
+
+    // Source 2 must carry explicit note informing LLM of inaccessible status
+    assert.ok(formattedPrompt.includes('[Note: Web page was inaccessible; excerpt from index metadata]'),
+        'Inaccessible sources must be marked with accessibility note in prompt');
+    assert.ok(formattedPrompt.includes('[1] Title: Open Source Policy Changes Announced'),
+        'Accessible source must be formatted normally');
+});
+
+test('Regression 14.6: Ordinary questions not requiring live search remain completely unaffected', () => {
+    const stableQueries = [
+        'What is the capital of Australia?',
+        'Write a Python function to check if a string is a palindrome',
+        'Explain Newton\'s second law of motion',
+        'How many continents are there on Earth?'
+    ];
+
+    for (const q of stableQueries) {
+        // 1. Recognized as stable general fact / geography query
+        assert.equal(chatGroqTest.isStableGeographyOrGeneralFactQuery(q), true,
+            `Query "${q}" must be recognized as stable general fact query`);
+
+        // 2. enforceLiveAnswerStyle does not corrupt standard model responses
+        const mockModelResponse = {
+            intent: 'general_qa',
+            response: `The answer to "${q}" is well-established in general knowledge. Here is the full explanation with complete steps and principles.`
+        };
+        const styled = chatGroqTest.enforceLiveAnswerStyle(mockModelResponse, q, []);
+        assert.equal(styled.intent, 'general_qa', 'Intent must not be altered to live_update');
+        assert.equal(styled.response, mockModelResponse.response, 'Response body must not be rewritten');
+        assert.ok(!styled.response.includes('Sources:'), 'Must not inject sourceless sections');
+
+        // 3. isMetaTalkAnswer does not reject valid answers starting with direct statements
+        assert.equal(chatGroqTest.isMetaTalkAnswer(mockModelResponse.response), false,
+            'Model response must not be flagged as meta-talk');
+    }
+});
 
