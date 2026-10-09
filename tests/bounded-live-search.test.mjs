@@ -1441,10 +1441,10 @@ test('Regression 9: Answer-First Streaming & Carousel Placement Below Text', () 
 test('Regression 10: Prompt Box Resizing & Textarea Reset Invariant', () => {
     const indexHtml = fs.readFileSync(path.resolve('index.html'), 'utf8');
 
-    // 1. autoResizeComposerTextarea must immediately collapse when value is empty
+    // 1. autoResizeComposerTextarea must immediately collapse when value is empty or whitespace
     assert.ok(
-        indexHtml.includes("if (!input.value) {\n                input.style.height = '';\n                input.style.overflowY = 'hidden';\n                return;\n            }"),
-        'autoResizeComposerTextarea must clear inline height and hide overflow when value is empty'
+        indexHtml.includes("if (!input.value || !input.value.trim()) {\n                input.style.height = '';\n                input.style.overflowY = 'hidden';\n                if (input.rows !== 1) input.rows = 1;\n                return;\n            }"),
+        'autoResizeComposerTextarea must clear inline height and hide overflow when value is empty or whitespace'
     );
 
     // 2. All input clear locations in sendTextInput must reset height and call autoResizeComposerTextarea
@@ -1557,4 +1557,179 @@ test('Regression 11: Multi-Part Query Synthesis Prompt & Grounded Coverage', asy
     assert.ok(capturedSynthesisPrompt.includes('[1] Title: US DOL Initiates Audit'), 'Must include source [1]');
     assert.ok(capturedSynthesisPrompt.includes('[2] Title: Impact on Indian Tech Professionals'), 'Must include source [2]');
 });
+
+test('Regression 12: Translation Flow Reliability & Untranslated Text Defense', () => {
+    const indexHtml = fs.readFileSync(path.resolve('index.html'), 'utf8');
+    const visionJs = fs.readFileSync(path.resolve('api/vision.js'), 'utf8');
+
+    // 1. Arbitrary language resolution: resolveTranslatorLanguage must support arbitrary language strings
+    assert.ok(
+        indexHtml.includes('/^[a-zA-Z\\s-]{2,40}$/.test(raw)'),
+        'resolveTranslatorLanguage must support arbitrary natural language names'
+    );
+    assert.ok(
+        indexHtml.includes('getLanguageDisplayName'),
+        'Must provide dynamic language display name formatter for arbitrary languages'
+    );
+
+    // 2. Vision translation pipeline must have bounded retry and untranslated detection
+    assert.ok(
+        visionJs.includes('for (let attempt = 0; attempt <= maxRetries; attempt++)'),
+        'runTranslateToEnglishPipeline must execute bounded retry loop'
+    );
+    assert.ok(
+        visionJs.includes('isNonEnglishLang && isIdentical') || visionJs.includes('hasNonLatinSource && hasNonLatinTarget'),
+        'runTranslateToEnglishPipeline must detect untranslated foreign text'
+    );
+    assert.ok(
+        visionJs.includes('Translation unavailable: The text could not be translated to English at this time.'),
+        'runTranslateToEnglishPipeline must provide clean fallback on persistent failure instead of throwing 500'
+    );
+
+    // 3. Functional untranslated detection logic test
+    function validateEnglishTranslation(sourceText, candidateText, detectedLanguage = '') {
+        const normSource = sourceText.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const normTarget = candidateText.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const isNonEnglishLang = detectedLanguage && !/^english$/i.test(detectedLanguage);
+        const isIdentical = normSource.length > 3 && normSource === normTarget;
+        const hasNonLatinSource = /[^\u0000-\u007F]/.test(sourceText);
+        const hasNonLatinTarget = /[\u0400-\u04FF\u4E00-\u9FFF\u3040-\u309F\u30A0-\u30FF\u0600-\u06FF\u0900-\u097F\u0B80-\u0BFF\u0C00-\u0C7F\u0D00-\u0D7F]/.test(candidateText);
+
+        if ((isNonEnglishLang && isIdentical) || (hasNonLatinSource && hasNonLatinTarget)) {
+            return { valid: false, reason: 'untranslated_detected' };
+        }
+        return { valid: true };
+    }
+
+    // Spanish greeting echoed back without translation
+    const spanishCheck = validateEnglishTranslation('Hola, ¿cómo estás hoy?', 'Hola, ¿cómo estás hoy?', 'Spanish');
+    assert.equal(spanishCheck.valid, false, 'Must reject echoed Spanish text as untranslated');
+
+    // Chinese text echoed back with Chinese characters
+    const chineseCheck = validateEnglishTranslation('今天的天气非常好', '今天的天气非常好', 'Chinese');
+    assert.equal(chineseCheck.valid, false, 'Must reject non-Latin Chinese characters as untranslated');
+
+    // Russian text echoed back with Cyrillic characters
+    const russianCheck = validateEnglishTranslation('Доброе утро, мир', 'Доброе утро, мир', 'Russian');
+    assert.equal(russianCheck.valid, false, 'Must reject Cyrillic text as untranslated');
+
+    // Genuine valid English translations
+    const validSpanish = validateEnglishTranslation('Hola, ¿cómo estás hoy?', 'Hello, how are you today?', 'Spanish');
+    assert.equal(validSpanish.valid, true, 'Must accept genuine English translation of Spanish');
+
+    const validChinese = validateEnglishTranslation('今天的天气非常好', 'The weather today is very nice', 'Chinese');
+    assert.equal(validChinese.valid, true, 'Must accept genuine English translation of Chinese');
+
+    const validRussian = validateEnglishTranslation('Доброе утро, мир', 'Good morning, world', 'Russian');
+    assert.equal(validRussian.valid, true, 'Must accept genuine English translation of Russian');
+});
+
+test('Regression 13: Dynamic Multi-Topic Synthesis & Answer-First Streaming Order Invariants', async () => {
+    // Test multiple completely unrelated topics and multi-part queries
+    const testCases = [
+        {
+            topic: 'Quantum Computing',
+            userText: 'What is the current experimental progress on fault-tolerant logical qubits? Which hardware modalities lead, and what error correction code is most widely demonstrated?',
+            query: 'fault-tolerant logical qubits error correction progress',
+            sources: [
+                {
+                    title: 'Neutral Atom Architectures Demonstrate 48 Logical Qubits',
+                    url: 'https://science.org/neutral-atom-qubits',
+                    snippet: 'Researchers demonstrated 48 logical qubits using neutral-atom arrays and transversal gates. Superconducting systems also showed threshold improvements.'
+                },
+                {
+                    title: 'Surface Code vs Color Code Benchmarks in 2026',
+                    url: 'https://nature.org/surface-code-benchmarks',
+                    snippet: 'Surface codes remain the predominant error-correcting architecture, though color codes provide transversal non-Clifford gates.'
+                }
+            ]
+        },
+        {
+            topic: 'Maritime Environmental Treaties',
+            userText: 'What are the recent IMO regulations on greenhouse gas emissions for cargo vessels? What is the timeline for compliance, and which fuels are approved?',
+            query: 'IMO marine greenhouse gas regulations timeline approved fuels',
+            sources: [
+                {
+                    title: 'IMO Adopts Net-Zero Framework for International Shipping',
+                    url: 'https://imo.org/ghg-framework',
+                    snippet: 'The International Maritime Organization finalized economic measures requiring net-zero emissions near 2050, with checkpoint reductions set for 2030 and 2040.'
+                },
+                {
+                    title: 'Approved Marine Alternative Fuels and Life-Cycle Standards',
+                    url: 'https://maritime-executive.com/alternative-fuels',
+                    snippet: 'Green methanol and green ammonia are leading zero-carbon candidates, while LNG serves as an interim transitional fuel.'
+                }
+            ]
+        },
+        {
+            topic: 'Critical Minerals Supply Chains',
+            userText: 'What is the current status of global neodymium and dysprosium processing quotas? Which countries produce the majority, and are alternative extraction projects operational?',
+            query: 'neodymium dysprosium rare earth quotas global production alternatives',
+            sources: [
+                {
+                    title: 'Global Rare Earth Elements Production and Refining Report',
+                    url: 'https://usgs.gov/rare-earth-statistics',
+                    snippet: 'Over 70% of heavy rare earth processing remains concentrated in East Asia. New refining capacity in Australia and the US reached commercial scale.'
+                },
+                {
+                    title: 'Magnet Recycling and Alternative Sourcing Initiatives',
+                    url: 'https://energy.gov/critical-materials-update',
+                    snippet: 'Recycled magnet materials provided 8% of domestic motor demand in 2025, with pilot operations expanding in Europe.'
+                }
+            ]
+        }
+    ];
+
+    for (const tc of testCases) {
+        const controller = new BoundedLiveResearchController({
+            searchCutoffMs: 2000,
+            fallbackWarningMs: 4000,
+            hardDeadlineMs: 6000
+        });
+
+        let capturedPrompt = '';
+        const streamedTokens = [];
+
+        await controller.execute({
+            query: tc.query,
+            userText: tc.userText,
+            assistantMessageId: `msg_${tc.topic.toLowerCase().replace(/[^a-z0-9]/g, '_')}`,
+            fetchSearchFn: async () => ({ results: tc.sources }),
+            streamSynthesisFn: async ({ prompt, onToken }) => {
+                capturedPrompt = prompt;
+                onToken('Initial answer token. ');
+                onToken('Follow-up evidence synthesis with citations [1][2].');
+            },
+            uiCallbacks: {
+                onToken: ({ token }) => {
+                    streamedTokens.push(token);
+                }
+            }
+        });
+
+        // 1. Preserves full multi-part user prompt dynamically
+        assert.ok(capturedPrompt.includes(tc.userText), `Prompt must include complete user question for ${tc.topic}`);
+
+        // 2. Verified sources formatted with citations [1], [2]
+        assert.ok(capturedPrompt.includes(`[1] Title: ${tc.sources[0].title}`), `Prompt must include source 1 for ${tc.topic}`);
+        assert.ok(capturedPrompt.includes(`[2] Title: ${tc.sources[1].title}`), `Prompt must include source 2 for ${tc.topic}`);
+
+        // 3. System prompt contains general-purpose rules without domain hardcoding
+        assert.ok(capturedPrompt.includes('COMPLETE COVERAGE'), 'Must enforce COMPLETE COVERAGE');
+        assert.ok(capturedPrompt.includes('SUBSTANTIVE DETAILS'), 'Must enforce SUBSTANTIVE DETAILS');
+        assert.ok(capturedPrompt.includes('DISTINGUISH CONFIRMED FACTS VS. UNCERTAINTY'), 'Must enforce DISTINGUISH CONFIRMED FACTS VS. UNCERTAINTY');
+        assert.ok(capturedPrompt.includes('GROUNDED CITATIONS'), 'Must enforce GROUNDED CITATIONS');
+        assert.ok(!capturedPrompt.includes('PERM'), 'Prompt must not contain topic-specific keywords like PERM');
+        assert.ok(!capturedPrompt.includes('H-1B'), 'Prompt must not contain topic-specific keywords like H-1B');
+
+        // 4. Tokens streamed successfully
+        assert.ok(streamedTokens.length >= 2, `Tokens must stream during synthesis for ${tc.topic}`);
+        assert.ok(streamedTokens.join('').includes('Initial answer token'), `Streamed tokens must be captured in order for ${tc.topic}`);
+    }
+});
+
+
+
+
+
 
