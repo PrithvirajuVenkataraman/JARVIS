@@ -21332,10 +21332,10 @@ async function handleLiveRetrievalQuery(userText, options = {}) {
                 }
             }).filter(Boolean)
         ));
-        const isRefusalAnswer = /could not verify|cannot verify|sources conflict|no reliable/i.test(directAnswer);
+        const isTitleOnlyAnswer = answerResults.some(r => r.title && cleanLiveAnswerText(r.title).toLowerCase() === directAnswer.toLowerCase());
 
         // If direct answer is already verified from high-confidence RAG with verified flag and multi-source consensus
-        if (answerData?.verified === true && directAnswer && !isRefusalAnswer && answerEvidenceCount > 0 && answerResults.length) {
+        if (answerData?.verified === true && directAnswer && !isTitleOnlyAnswer && !isRefusalAnswer && answerEvidenceCount > 0 && answerResults.length) {
             showThinkingIndicator('Verifying sources...');
             const sourceLines = answerResults
                 .slice(0, 5)
