@@ -3668,7 +3668,10 @@ async function buildDirectLiveAnswer(question, items, signal) {
     if (!sourcePool.length) return '';
 
     const snippets = sourcePool
-        .map((r, i) => `${i + 1}. ${r.title}\nSnippet: ${r.description}\nURL: ${r.url}`)
+        .map((r, i) => {
+            const body = String(r.fullArticleText || r.extract || r.snippet || r.description || '').trim();
+            return `${i + 1}. ${r.title}\nContent: ${body || r.title}\nURL: ${r.url}`;
+        })
         .join('\n\n');
 
     const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
@@ -3708,9 +3711,15 @@ ${snippets}`
     const cleaned = cleanLiveAnswerText(String(data?.response || data?.text || ''));
     // Guardrail: if model gives weak/non-anchored text, fallback to snippets.
     if (!cleaned || /\b(i think|likely|probably|maybe)\b/i.test(cleaned)) {
-        const top = sourcePool[0];
-        const fallback = String(top?.description || top?.title || '').trim();
-        return fallback ? `Based on current snippets: ${fallback}` : '';
+        const topWithContent = sourcePool.find(s => {
+            const body = String(s?.fullArticleText || s?.extract || s?.snippet || s?.description || '').trim();
+            return body.length >= 40 && body !== String(s?.title || '').trim();
+        }) || sourcePool[0];
+        const body = String(topWithContent?.fullArticleText || topWithContent?.extract || topWithContent?.snippet || topWithContent?.description || '').trim();
+        if (body && body.length >= 40 && body !== String(topWithContent?.title || '').trim()) {
+            return `Based on reported coverage: ${body.slice(0, 400)}`;
+        }
+        return '';
     }
     return cleaned;
 }
@@ -3742,7 +3751,12 @@ async function buildNewsSearchFallback(query, signal) {
 
     showThinkingIndicator('Generating answer...');
     const directAnswer = await buildDirectLiveAnswer(query, sourcePool, signal);
-    const answer = directAnswer || cleanLiveAnswerText(String(sourcePool[0]?.description || sourcePool[0]?.title || '').trim());
+    const fallbackLead = sourcePool.find(s => {
+        const body = String(s?.fullArticleText || s?.extract || s?.snippet || s?.description || '').trim();
+        return body.length >= 40 && body !== String(s?.title || '').trim();
+    });
+    const fallbackText = fallbackLead ? String(fallbackLead.fullArticleText || fallbackLead.extract || fallbackLead.snippet || fallbackLead.description || '').trim() : '';
+    const answer = directAnswer || (fallbackText ? cleanLiveAnswerText(fallbackText.slice(0, 400)) : '');
     if (!answer) return null;
 
     return {
@@ -21413,6 +21427,7 @@ ${snippets}`;
                 await prepareApiReply('live_summary_ready', {}, 'I checked current sources and verified the answer.');
                 saveToHistory(userText, finalMsg);
                 hideThinkingIndicator();
+                return true;
             }
         }
 
