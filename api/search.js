@@ -1999,15 +1999,22 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
     const phase1Queries = phases[0] || [normalizedQuery];
     const searchStart = performance.now();
     const serverTimeoutMs = options.answer === false
-        ? Math.min(Number(options.timeoutMs) || 2200, 2200)
+        ? Math.min(Number(options.timeoutMs) || 2000, 2000)
         : Math.min(Number(options.timeoutMs) || 4000, 4000);
+
+    const skipAutoDeepCrawl = options.skipAutoDeepCrawl !== undefined
+        ? options.skipAutoDeepCrawl === true
+        : (options.allowDeepCrawl === true ? false : (options.answer === false));
+    const allowDeepCrawl = options.allowDeepCrawl !== undefined
+        ? options.allowDeepCrawl === true
+        : (options.answer !== false);
 
     const publicSearchPromise = searchPublicSources(normalizedQuery, {
         limit,
         plannedQueries: phase1Queries,
         skipStructuredRoles: true,
-        skipAutoDeepCrawl: options.answer === false,
-        allowDeepCrawl: options.answer !== false,
+        skipAutoDeepCrawl,
+        allowDeepCrawl,
         answer: options.answer,
         timeoutMs: serverTimeoutMs
     }).then(r => {
@@ -3238,7 +3245,12 @@ function buildSourceDerivedAnswer(results, metadata = {}) {
         if (!isSpecificEntityQuestion || /^(official_source|encyclopedia)$/.test(sourceType)) {
             const cleanTitle = cleanXmlEntities(title);
             const cleanDesc = cleanXmlEntities(description);
-            return sourceAnswer(`${cleanTitle}${cleanDesc ? `: ${cleanDesc}` : ''}`, 'public_source_result');
+            // Source titles alone must never be returned as a valid answer.
+            // Substantive content (description distinct from title and >= 25 chars) is strictly required.
+            if (!cleanDesc || cleanDesc.toLowerCase() === cleanTitle.toLowerCase() || cleanDesc.length < 25) {
+                return {};
+            }
+            return sourceAnswer(`${cleanTitle}: ${cleanDesc}`, 'public_source_result');
         }
     }
     return {};
@@ -3933,10 +3945,12 @@ function extractDeterministicLiveFactAnswer(query, evidence = []) {
         // Strictly allow early-exit ONLY for structured knowledge graph claims (e.g. Wikidata direct statements)
         if (item.evidenceLevel === 'structured_claim') {
             const derived = buildSourceDerivedAnswer([item], { query });
+            const directAnswer = derived?.answer || (item.description && item.description !== item.title && item.description.length >= 25 ? item.description : null);
+            if (!directAnswer) continue;
             return {
                 verified: true,
                 confidence: 0.95,
-                answer: derived?.answer || item.description || item.title,
+                answer: directAnswer,
                 evidenceIndexes: [i],
                 modelAssisted: false,
                 reason: `Extracted from structured reference data: ${item.sourceLabel || item.domain}`
@@ -3946,17 +3960,21 @@ function extractDeterministicLiveFactAnswer(query, evidence = []) {
 
     const isNewsQuery = /\b(latest news|news|headlines|updates?|recent developments?)\b/i.test(query);
     if (isNewsQuery) {
-        const validNews = sorted.filter(item => item.title && (item.sourceType === 'trusted_news' || item.sourceType === 'public_news' || (item.sourceLabel && item.sourceLabel.includes('News'))));
+        // News queries must NEVER return concatenated headline titles. Only substantive reporting bodies qualify.
+        const validNews = sorted.filter(item => {
+            const hasSubstantiveBody = item.description && item.description !== item.title && item.description.length >= 40;
+            return hasSubstantiveBody && (item.sourceType === 'trusted_news' || item.sourceType === 'public_news' || (item.sourceLabel && item.sourceLabel.includes('News')));
+        });
         if (validNews.length >= 2) {
-            const headlines = validNews.slice(0, 3).map(n => n.title.replace(/\s*[-–—|]\s*[^-–—|]+$/, '').trim()).filter(Boolean);
-            if (headlines.length) {
+            const facts = validNews.slice(0, 3).map(n => n.description.trim()).filter(Boolean);
+            if (facts.length) {
                 return {
                     verified: true,
                     confidence: 0.9,
-                    answer: `Recent reports highlight the following developments: ${headlines.join('; ')}.`,
+                    answer: facts.join(' '),
                     evidenceIndexes: [0, 1].slice(0, validNews.length),
                     modelAssisted: false,
-                    reason: 'Synthesized from top verified news sources.'
+                    reason: 'Synthesized from verified news reports.'
                 };
             }
         }
