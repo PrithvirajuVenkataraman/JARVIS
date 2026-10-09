@@ -4696,7 +4696,7 @@ Respond conversationally and naturally.`;
         return String(value || '')
             .replace(/\s+/g, ' ')
             .trim()
-            .slice(0, 1200);
+            .slice(0, 4000);
     }
 
     function normalizeSelectedModel(value) {
