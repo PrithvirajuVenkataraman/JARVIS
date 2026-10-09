@@ -1995,3 +1995,147 @@ test('Regression 14.6: Ordinary questions not requiring live search remain compl
     }
 });
 
+test('Regression 15.1: generateRelatedResearchQuestions filters publisher names and clickbait headline fragments', () => {
+    const sources = [
+        {
+            id: 1,
+            title: 'Government Suspends Work Authorization Processing: Full list and what it means - The Times of India',
+            domain: 'timesofindia.indiatimes.com',
+            sourceLabel: 'The Times of India',
+            snippet: 'The Department of Labor initiated an audit suspension affecting multi-tiered application queues.'
+        },
+        {
+            id: 2,
+            title: 'Immigration Visa Suspension 2026: Worker Impact - IndianEagle',
+            domain: 'indianeagle.com',
+            sourceLabel: 'IndianEagle',
+            snippet: 'Affected foreign workers will face processing delays pending compliance audits.'
+        }
+    ];
+
+    const questions = generateRelatedResearchQuestions({
+        query: 'What is the work authorization suspension and how does it affect foreign workers?',
+        sources,
+        answer: 'The Department of Labor suspended processing for select employment certifications while conducting compliance audits.'
+    });
+
+    assert.equal(questions.length, 3, 'Must return exactly 3 follow-up research questions');
+
+    for (const q of questions) {
+        assert.ok(q.endsWith('?'), `Question must end with ?: ${q}`);
+        const lower = q.toLowerCase();
+
+        // Must never include publisher branding
+        assert.ok(!lower.includes('the times of india'), `Must not include publisher name: ${q}`);
+        assert.ok(!lower.includes('indiatimes'), `Must not include publisher domain: ${q}`);
+        assert.ok(!lower.includes('indianeagle'), `Must not include publisher name: ${q}`);
+
+        // Must never include clickbait fragments
+        assert.ok(!lower.includes('full list and what it means'), `Must not include clickbait fragment: ${q}`);
+        assert.ok(!lower.startsWith('what it means'), `Must not be headline fragment: ${q}`);
+        assert.ok(!lower.startsWith("here's why"), `Must not be headline fragment: ${q}`);
+
+        // Must be grammatically complete and distinct from query
+        assert.ok(q.length >= 18, `Question must be substantial (> 18 chars): ${q}`);
+    }
+});
+
+test('Regression 15.2: Multi-part query zero-token fallback never concatenates source titles', () => {
+    const headlineOnlySources = [
+        {
+            id: 1,
+            title: 'Tech Regulatory Processing Freeze Declared - Major News Network',
+            domain: 'newsnet.com',
+            url: 'https://newsnet.com/story1',
+            snippet: 'Tech Regulatory Processing Freeze Declared - Major News Network'
+        },
+        {
+            id: 2,
+            title: 'Specialized Visa Audit Timeline Detailed - Global Daily',
+            domain: 'globaldaily.com',
+            url: 'https://globaldaily.com/story2',
+            snippet: 'Specialized Visa Audit Timeline Detailed - Global Daily'
+        },
+        {
+            id: 3,
+            title: 'Foreign Worker Certification Rules Enforced - Daily Herald',
+            domain: 'dailyherald.com',
+            url: 'https://dailyherald.com/story3',
+            snippet: 'Foreign Worker Certification Rules Enforced - Daily Herald'
+        }
+    ];
+
+    const fallback = generateSnippetFallback(
+        'Which employers are subject to the certification freeze and how are visa holders impacted?',
+        headlineOnlySources
+    );
+
+    // Negative assertions: Must NEVER concatenate the 3 titles
+    assert.ok(
+        !fallback.includes('Tech Regulatory Processing Freeze Declared. Specialized Visa Audit Timeline Detailed.'),
+        'Must never concatenate disjointed source titles into an answer'
+    );
+    assert.ok(
+        !fallback.includes('Major News Network. Global Daily.'),
+        'Must not string together publisher titles'
+    );
+
+    // Positive assertion: Explicit limitation statement informing user of headline-only records
+    assert.ok(
+        fallback.includes('only headline references') || fallback.includes('carousel above'),
+        'Must explicitly state limitation when only headlines exist'
+    );
+});
+
+test('Regression 15.3: Backend buildSourceDerivedAnswer rejects standalone titles without substantive descriptions', async () => {
+    const { __test: searchTest } = await import('../api/search.js');
+
+    const titleOnlyItem = [
+        {
+            title: 'Government Declares New Environmental Standard',
+            description: '',
+            sourceType: 'trusted_news',
+            domain: 'enviro-news.org'
+        }
+    ];
+
+    const res = searchTest.buildSourceDerivedAnswer(titleOnlyItem, { query: 'What is the new environmental standard?' });
+    assert.equal(res.answer, undefined, 'Must not return headline alone as verified answer');
+});
+
+test('Regression 15.4: Substantive body sentences are correctly extracted in fallback when distinct from titles', () => {
+    const sourcesWithBody = [
+        {
+            id: 1,
+            title: 'Comprehensive Energy Grid Modernization Plan',
+            domain: 'energy.gov',
+            url: 'https://energy.gov/grid',
+            snippet: 'Federal regulators allocated twelve billion dollars to reinforce transmission capacity across regional networks.'
+        },
+        {
+            id: 2,
+            title: 'Renewable Storage Mandate Guidelines Released',
+            domain: 'gridtech.org',
+            url: 'https://gridtech.org/mandate',
+            snippet: 'Battery installations must provide four hours of continuous discharge capacity by twenty thirty.'
+        }
+    ];
+
+    const fallback = generateSnippetFallback('What are the energy grid modernization requirements?', sourcesWithBody);
+
+    // Positive assertions: substantive sentences from body are preserved
+    assert.ok(fallback.includes('Federal regulators allocated') || fallback.includes('reinforce transmission capacity'));
+    assert.ok(fallback.includes('Battery installations must provide') || fallback.includes('continuous discharge capacity'));
+
+    // Negative assertions: no technical headers or citation artifacts
+    assert.ok(!fallback.includes('### Live Web Results'));
+    assert.ok(!fallback.includes('[1]'));
+});
+
+
+
+
+
+
+
+
