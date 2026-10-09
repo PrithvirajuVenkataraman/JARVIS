@@ -5832,7 +5832,7 @@ body:not(.dark) .web-search-toggle-btn.is-web-disabled {
     display: flex;
     flex-direction: column;
     gap: 0.4rem;
-    margin: 0.4rem 0 0.8rem 0;
+    margin: 0.75rem 0 0.4rem 0;
     padding: 0.5rem 0.65rem;
     border-radius: 0.75rem;
     background: rgba(255, 255, 255, 0.03);
