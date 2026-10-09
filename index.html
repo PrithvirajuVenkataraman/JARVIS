@@ -2727,8 +2727,19 @@ function normalizeTranslatorLanguageKey(language) {
     return key;
 }
 
+function getLanguageDisplayName(languageKey) {
+    if (!languageKey) return 'English';
+    const normalized = normalizeTranslatorLanguageKey(languageKey);
+    if (supportedLanguages[normalized]) return supportedLanguages[normalized].name;
+    return String(languageKey)
+        .split(/[\s-]+/)
+        .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+        .join(' ');
+}
+
 function getSupportedLanguageNamesText() {
-    return Object.values(supportedLanguages || {}).map(lang => lang.name).join(', ');
+    const list = Object.values(supportedLanguages || {}).map(lang => lang.name);
+    return list.join(', ');
 }
 
 function resolveTranslatorLanguage(language) {
@@ -2741,13 +2752,18 @@ function resolveTranslatorLanguage(language) {
             String(info.name || '').toLowerCase() === raw ||
             String(info.nativeName || '').toLowerCase() === raw;
     });
-    return match?.[0] || '';
+    if (match?.[0]) return match[0];
+    if (/^[a-zA-Z\s-]{2,40}$/.test(raw)) {
+        return normalized;
+    }
+    return '';
 }
 
 function parseOneShotTranslationRequest(text) {
     const raw = String(text || '').trim();
     if (!raw) return null;
-    let match = raw.match(/^translate\s+["“]?(.+?)["”]?\s+(?:to|into)\s+([a-zA-Z]+)\s*$/i);
+
+    let match = raw.match(/^translate\s+["“]?(.+?)["”]?\s+(?:to|into)\s+([a-zA-Z\s-]+)$/i);
     if (match) {
         return {
             sourceText: match[1].trim(),
@@ -2755,7 +2771,7 @@ function parseOneShotTranslationRequest(text) {
             rawTargetLanguage: match[2].trim()
         };
     }
-    match = raw.match(/^say\s+this\s+in\s+([a-zA-Z]+)\s*:\s*(.+)$/i);
+    match = raw.match(/^(?:say|translate)\s+(?:this\s+)?(?:in|to|into)\s+([a-zA-Z\s-]+)\s*:\s*(.+)$/i);
     if (match) {
         return {
             sourceText: match[2].trim(),
@@ -2763,8 +2779,24 @@ function parseOneShotTranslationRequest(text) {
             rawTargetLanguage: match[1].trim()
         };
     }
-    match = raw.match(/^what\s+does\s+["“]?(.+?)["”]?\s+mean\s+in\s+english\s*\??$/i);
+    match = raw.match(/^translate\s+to\s+([a-zA-Z\s-]+)\s*:\s*(.+)$/i);
     if (match) {
+        return {
+            sourceText: match[2].trim(),
+            targetLanguage: resolveTranslatorLanguage(match[1]),
+            rawTargetLanguage: match[1].trim()
+        };
+    }
+    match = raw.match(/^what\s+does\s+["“]?(.+?)["”]?\s+mean\s+in\s+([a-zA-Z\s-]+)\s*\??$/i);
+    if (match) {
+        return {
+            sourceText: match[1].trim(),
+            targetLanguage: resolveTranslatorLanguage(match[2]),
+            rawTargetLanguage: match[2].trim()
+        };
+    }
+    match = raw.match(/^translate\s+(?:the\s+following(?:\s+text)?(?:\s+accurately)?:\s*)?["“]?(.+?)["”]?$/i);
+    if (match && match[1] && !/\b(to|into)\s+[a-zA-Z\s-]+$/i.test(match[1])) {
         return {
             sourceText: match[1].trim(),
             targetLanguage: 'english',
@@ -2775,20 +2807,51 @@ function parseOneShotTranslationRequest(text) {
 }
 
 async function translateTextToEnglish(sourceText) {
+    const text = String(sourceText || '').trim();
+    if (!text) return '';
     showThinkingIndicator('Translating to English...');
-    try {
-        const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                message: `Translate this text to clear natural English. Return only the translation.\n\nText:\n"${sourceText}"`
-            })
-        });
-        const data = await response.json();
-        return String(data.response || '').trim();
-    } catch (_) {
-        return '';
+    const maxRetries = 2;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 12000);
+            const prompt = attempt > 0
+                ? `You are an expert translator. Translate the following text accurately into natural, clear English. Do not echo the original foreign text untranslated. Return only the English translation.\n\nText:\n"${text}"`
+                : `Translate this text to clear natural English. Return only the translation.\n\nText:\n"${text}"`;
+            const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                signal: controller.signal,
+                body: JSON.stringify({ message: prompt })
+            });
+            clearTimeout(timeoutId);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const data = await response.json();
+            const translated = String(data.response || '').trim();
+            if (!translated) throw new Error('Empty response');
+
+            const normSource = text.toLowerCase().replace(/[^a-z0-9]/g, '');
+            const normTarget = translated.toLowerCase().replace(/[^a-z0-9]/g, '');
+            const hasNonLatinSource = /[^\u0000-\u007F]/.test(text);
+            const hasNonLatinTarget = /[\u0400-\u04FF\u4E00-\u9FFF\u3040-\u309F\u30A0-\u30FF\u0600-\u06FF\u0900-\u097F\u0B80-\u0BFF\u0C00-\u0C7F\u0D00-\u0D7F]/.test(translated);
+
+            if (hasNonLatinSource && hasNonLatinTarget) {
+                throw new Error('Model returned untranslated non-Latin script');
+            }
+            if (normSource.length > 5 && normSource === normTarget && !/^[a-z0-9\s.,!?'"-]+$/i.test(text)) {
+                throw new Error('Model echoed untranslated foreign text');
+            }
+
+            hideThinkingIndicator();
+            return translated;
+        } catch (err) {
+            if (attempt < maxRetries) {
+                await new Promise(r => setTimeout(r, 300 * (attempt + 1)));
+            }
+        }
     }
+    hideThinkingIndicator();
+    return '';
 }
 
 async function handleOneShotTranslation(text) {
@@ -2799,22 +2862,23 @@ async function handleOneShotTranslation(text) {
         return true;
     }
     if (!request.targetLanguage) {
-        addChatMessage(`I can translate to these languages: ${getSupportedLanguageNamesText()}.`, false);
+        addChatMessage('Please specify a target language for translation.', false);
         return true;
     }
     if (request.targetLanguage === 'english') {
         const english = await translateTextToEnglish(request.sourceText);
         const reply = english
             ? `Translation to English:\n\n${english}`
-            : 'I could not translate that right now. Please try again.';
+            : 'I could not translate that text to English at this time. Please check the text or try again.';
         addChatMessage(reply, false);
         saveToHistory(text, reply);
         return true;
     }
     const result = await translateText(request.sourceText, request.targetLanguage);
+    const targetName = getLanguageDisplayName(request.targetLanguage);
     const reply = result?.translation
         ? `Translation to ${result.language.name}:\n\n${result.translation}`
-        : `I could not translate to ${request.rawTargetLanguage || 'that language'} right now.`;
+        : `I could not translate to ${targetName} right now. Please check the text or try again.`;
     addChatMessage(reply, false);
     saveToHistory(text, reply);
     return true;
@@ -2915,50 +2979,59 @@ function hideTranslatorModeUI() {
 }
 
 // Translate text using AI
-async function translateText(englishText, targetLang) {
-    const langInfo = supportedLanguages[targetLang];
-    if (!langInfo) return null;
+async function translateText(sourceText, targetLang) {
+    const text = String(sourceText || '').trim();
+    if (!text || !targetLang) return null;
+    const targetName = getLanguageDisplayName(targetLang);
+    const langInfo = supportedLanguages[targetLang] || { name: targetName, nativeName: targetName };
 
-    showThinkingIndicator(`Translating to ${langInfo.name}...`);
-
-    try {
-        const translationPrompt = `You are a translator. Translate the following English text to ${langInfo.name} (${langInfo.nativeName}).
+    showThinkingIndicator(`Translating to ${targetName}...`);
+    const maxRetries = 2;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 12000);
+            const translationPrompt = `You are a translator. Translate the following text to ${targetName} (${langInfo.nativeName || targetName}).
 
 IMPORTANT RULES:
 1. Provide ONLY the translation, nothing else
-2. Use natural, conversational ${langInfo.name} that locals would understand
-3. For common phrases, use the most commonly spoken version
-4. Include the script (${langInfo.nativeName} script)
-5. After the translation, on a new line, provide a phonetic pronunciation guide in English letters
+2. Use natural, conversational ${targetName} that native speakers understand
+3. Include the authentic script and spelling
+4. After the translation, if the target language uses non-Latin script, on a new line provide a phonetic pronunciation guide in English letters: (Pronunciation: [phonetic guide])
 
-English text to translate:
-"${englishText}"
+Text to translate:
+"${text}"
 
-Format your response EXACTLY like this:
-[${langInfo.name} script translation]
+Format your response like this:
+[${targetName} translation]
 (Pronunciation: [phonetic guide])`;
 
-        const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                message: translationPrompt,
-            })
-        });
+            const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                signal: controller.signal,
+                body: JSON.stringify({
+                    message: translationPrompt
+                })
+            });
+            clearTimeout(timeoutId);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const data = await response.json();
+            const translated = String(data.response || '').trim();
+            if (!translated) throw new Error('Empty response');
 
-        const data = await response.json();
-        hideThinkingIndicator();
-
-        if (data.response) {
+            hideThinkingIndicator();
             return {
-                translation: data.response,
+                translation: translated,
                 language: langInfo
             };
+        } catch (_) {
+            if (attempt < maxRetries) {
+                await new Promise(r => setTimeout(r, 300 * (attempt + 1)));
+            }
         }
-    } catch (error) {
-        hideThinkingIndicator();
     }
-
+    hideThinkingIndicator();
     return null;
 }
 
@@ -13399,12 +13472,13 @@ ${code}
             }
         }
 
-        function autoResizeComposerTextarea() {
-            const input = document.getElementById('text-input');
+        function autoResizeComposerTextarea(element) {
+            const input = element || document.getElementById('text-input');
             if (!input) return;
-            if (!input.value) {
+            if (!input.value || !input.value.trim()) {
                 input.style.height = '';
                 input.style.overflowY = 'hidden';
+                if (input.rows !== 1) input.rows = 1;
                 return;
             }
             input.style.height = 'auto';
