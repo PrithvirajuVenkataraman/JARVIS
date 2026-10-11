@@ -84,32 +84,142 @@ export function distillSearchQuery(rawQuery) {
     return text.trim() || rawQuery;
 }
 
+const SOURCE_MONTH_NAMES_MAP = Object.freeze({
+    jan: 0, january: 0, feb: 1, february: 1, mar: 2, march: 2, apr: 3, april: 3,
+    may: 4, jun: 5, june: 5, jul: 6, july: 6, aug: 7, august: 7,
+    sep: 8, sept: 8, september: 8, oct: 9, october: 9, nov: 10, november: 10, dec: 11, december: 11
+});
+
+const KNOWN_TODAY_BRANDS = /\b(?:usa\s+today|india\s+today|medical\s+news\s+today|psychology\s+today|today's\s+parent|today\s+show|today\.com|the\s+today\s+show|today\s+fm)\b/gi;
+const CASUAL_TODAY_PHRASES = /\b(?:in\s+today's\s+(?:world|society|market|digital\s+age|economy)|available\s+today|join\s+today|call\s+(?:us\s+)?today|apply\s+today|start\s+today|order\s+today|buy\s+today|sign\s+up\s+today|shop\s+today|visit\s+today|book\s+today)\b/gi;
+
 export function parseSourceDate(item, now = Date.now()) {
     if (!item || typeof item !== 'object') return null;
     const directDate = item.date || item.publishedAt || item.pubDate || item.timestamp;
     if (directDate) {
         if (typeof directDate === 'number' && Number.isFinite(directDate) && directDate > 0) return directDate;
-        const parsed = Date.parse(directDate);
-        if (!Number.isNaN(parsed) && parsed > 0) return parsed;
+        if (typeof directDate === 'string') {
+            const trimmed = directDate.trim();
+            if (/^\d{10,13}$/.test(trimmed)) {
+                const num = parseInt(trimmed, 10);
+                return num < 10000000000 ? num * 1000 : num;
+            }
+            const parsed = Date.parse(trimmed);
+            if (!Number.isNaN(parsed) && parsed > 0) return parsed;
+        }
     }
     const url = String(item.url || '');
     if (url) {
         const urlDateMatch = url.match(/(?:^|\/)((?:19|20)\d\d)[/-](0?[1-9]|1[0-2])[/-](0?[1-9]|[12]\d|3[01])(?:\/|$|\?|\.)/);
         if (urlDateMatch) {
-            const parsed = Date.parse(`${urlDateMatch[1]}-${urlDateMatch[2].padStart(2, '0')}-${urlDateMatch[3].padStart(2, '0')}`);
+            const parsed = Date.UTC(parseInt(urlDateMatch[1], 10), parseInt(urlDateMatch[2], 10) - 1, parseInt(urlDateMatch[3], 10));
             if (!Number.isNaN(parsed)) return parsed;
         }
     }
-    const text = `${item.title || ''} ${item.description || ''} ${item.snippet || ''}`.trim();
-    if (!text) return null;
-    let m = text.match(/\b(\d+)\s*(?:hours?|hrs?)\s*ago\b/i);
+    const rawText = `${item.title || ''} ${item.description || ''} ${item.snippet || ''}`.trim();
+    if (!rawText) {
+        if (url) {
+            const urlYearMatch = url.match(/(?:^|\/)((?:19|20)\d\d)(?:\/|$|\?|\.)/);
+            if (urlYearMatch) {
+                const parsed = Date.parse(`${urlYearMatch[1]}-01-01`);
+                if (!Number.isNaN(parsed)) return parsed;
+            }
+        }
+        return null;
+    }
+
+    const currentYear = new Date(now).getUTCFullYear();
+    const currentMonth = new Date(now).getUTCMonth();
+
+    // 1. Explicit Calendar Dates FIRST (American Month DD YYYY, UK DD Month YYYY, ISO, Numeric)
+    // American Format: Month DD, YYYY or Month DD (e.g. "October 11, 2026", "Oct 11 2026", "Oct 11")
+    let m = rawText.match(/\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+((?:19|20)\d\d))?\b/i);
+    if (m) {
+        const mo = SOURCE_MONTH_NAMES_MAP[m[1].toLowerCase().replace('.', '')];
+        const day = parseInt(m[2], 10);
+        let yr = m[3] ? parseInt(m[3], 10) : currentYear;
+        if (!m[3] && mo > currentMonth) yr = currentYear - 1;
+        if (mo != null && day >= 1 && day <= 31) return Date.UTC(yr, mo, day);
+    }
+
+    // UK / International Format: DD Month YYYY or DD Month (e.g. "11 October 2026", "11th Oct 2026", "11 Oct")
+    m = rawText.match(/\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?(?:,?\s+((?:19|20)\d\d))?\b/i);
+    if (m) {
+        const day = parseInt(m[1], 10);
+        const mo = SOURCE_MONTH_NAMES_MAP[m[2].toLowerCase().replace('.', '')];
+        let yr = m[3] ? parseInt(m[3], 10) : currentYear;
+        if (!m[3] && mo > currentMonth) yr = currentYear - 1;
+        if (mo != null && day >= 1 && day <= 31) return Date.UTC(yr, mo, day);
+    }
+
+    // ISO Format: YYYY-MM-DD or YYYY/MM/DD
+    m = rawText.match(/\b((?:19|20)\d\d)[/-](0?[1-9]|1[0-2])[/-](0?[1-9]|[12]\d|3[01])\b/);
+    if (m) {
+        return Date.UTC(parseInt(m[1], 10), parseInt(m[2], 10) - 1, parseInt(m[3], 10));
+    }
+
+    // Numeric US & UK Formats: MM/DD/YYYY or DD/MM/YYYY
+    m = rawText.match(/\b(\d{1,2})[/-](\d{1,2})[/-]((?:19|20)\d\d)\b/);
+    if (m) {
+        const n1 = parseInt(m[1], 10);
+        const n2 = parseInt(m[2], 10);
+        const yr = parseInt(m[3], 10);
+        const domainStr = String(item.domain || item.url || '').toLowerCase();
+        const isUkOrIntl = /\.(?:uk|au|nz|za|ie|in)\b/i.test(domainStr);
+        if (n1 > 12 && n2 <= 12) {
+            // Unambiguous UK: DD/MM/YYYY
+            return Date.UTC(yr, n2 - 1, n1);
+        } else if (n2 > 12 && n1 <= 12) {
+            // Unambiguous US: MM/DD/YYYY
+            return Date.UTC(yr, n1 - 1, n2);
+        } else if (n1 <= 12 && n2 <= 31) {
+            if (isUkOrIntl) {
+                return Date.UTC(yr, n2 - 1, n1);
+            }
+            return Date.UTC(yr, n1 - 1, n2);
+        }
+    }
+
+    // 2. Relative timestamps (Search snippets: "2 hours ago", "yesterday", "3 days ago")
+    // Sanitize known publisher brand names and casual marketing phrases containing "today"
+    const sanitizedText = rawText
+        .replace(KNOWN_TODAY_BRANDS, ' ')
+        .replace(CASUAL_TODAY_PHRASES, ' ');
+
+    m = sanitizedText.match(/\b(\d+)\s*(?:seconds?|secs?)\s*ago\b/i);
+    if (m) return now - parseInt(m[1], 10) * 1000;
+    m = sanitizedText.match(/\b(\d+)\s*(?:minutes?|mins?)\s*ago\b/i);
+    if (m) return now - parseInt(m[1], 10) * 60 * 1000;
+    m = sanitizedText.match(/\b(\d+)\s*(?:hours?|hrs?)\s*ago\b/i);
     if (m) return now - parseInt(m[1], 10) * 3600 * 1000;
-    if (/\b(?:just\s+now|today)\b/i.test(text)) return now;
-    if (/\b(?:yesterday|yesterday's)\b/i.test(text)) return now - 24 * 3600 * 1000;
-    m = text.match(/\b(\d+)\s*days?\s*ago\b/i);
+    m = sanitizedText.match(/\b(\d+)\s*days?\s*ago\b/i);
     if (m) return now - parseInt(m[1], 10) * 24 * 3600 * 1000;
-    const isoM = text.match(/\b((?:19|20)\d\d)[/-](0?[1-9]|1[0-2])[/-](0?[1-9]|[12]\d|3[01])\b/);
-    if (isoM) return Date.UTC(parseInt(isoM[1], 10), parseInt(isoM[2], 10) - 1, parseInt(isoM[3], 10));
+    m = sanitizedText.match(/\b(\d+)\s*weeks?\s*ago\b/i);
+    if (m) return now - parseInt(m[1], 10) * 7 * 24 * 3600 * 1000;
+    m = sanitizedText.match(/\b(\d+)\s*months?\s*ago\b/i);
+    if (m) return now - parseInt(m[1], 10) * 30 * 24 * 3600 * 1000;
+
+    // Publication-prefixed or explicit marker relative dates
+    const snippetText = String(item.snippet || item.description || '').replace(KNOWN_TODAY_BRANDS, ' ').replace(CASUAL_TODAY_PHRASES, ' ').trim();
+    if (/(?:^|[|•·—–\-\n])\s*(?:just\s+now|moments?\s+ago|right\s+now|today)\b/i.test(sanitizedText) ||
+        /(?:^|[|•·—–\-\n])\s*(?:just\s+now|moments?\s+ago|right\s+now|today)\b/i.test(snippetText) ||
+        /\b(?:published|updated|posted|date:?|released)\s+(?:just\s+now|moments?\s+ago|right\s+now|today)\b/i.test(sanitizedText) ||
+        /\btoday\s*[-—–:•·|]/i.test(sanitizedText)) {
+        return now;
+    }
+    if (/\b(?:yesterday|yesterday's)\b/i.test(sanitizedText)) {
+        return now - 24 * 3600 * 1000;
+    }
+
+    // 3. Fallback to URL year if present
+    if (url) {
+        const urlYearMatch = url.match(/(?:^|\/)((?:19|20)\d\d)(?:\/|$|\?|\.)/);
+        if (urlYearMatch) {
+            const parsed = Date.parse(`${urlYearMatch[1]}-01-01`);
+            if (!Number.isNaN(parsed)) return parsed;
+        }
+    }
+
     return null;
 }
 
@@ -131,7 +241,7 @@ export function formatSourceDate(parsedMs, now = Date.now()) {
 export function normalizeResearchSources(results = [], query = '', limit = 8) {
     if (!Array.isArray(results)) return [];
     const seenUrls = new Set();
-    const isFreshnessQuery = /\b(?:today|tonight|yesterday|yesterday's|today's|latest|current|recently|recent|breaking|newest|what('?s|\s+is)\s+new|updates?|hours?\s+ago|days?\s+ago|past\s+24\s+hours?)\b/i.test(String(query || ''));
+    const isFreshnessQuery = /\b(?:today|tonight|yesterday|yesterday's|today's|latest|current|recently|recent|breaking|newest|what('?s|\s+is)\s+new|updates?|hours?\s+ago|days?\s+ago|past\s+24\s+hours?|past\s+48\s+hours?|this\s+week|past\s+week|last\s+week|this\s+month|past\s+month|this\s+year|news)\b/i.test(String(query || ''));
     const candidates = [];
 
     for (const r of results) {
@@ -176,14 +286,17 @@ export function normalizeResearchSources(results = [], query = '', limit = 8) {
         });
     }
 
-    if (isFreshnessQuery) {
+    if (isFreshnessQuery || candidates.some(c => c.parsedDateMs)) {
         candidates.sort((a, b) => {
             const timeA = a.parsedDateMs || 0;
             const timeB = b.parsedDateMs || 0;
-            if (timeA && timeB) return timeB - timeA;
+            if (timeA && timeB) {
+                if (timeB !== timeA) return timeB - timeA;
+                return (b.trusted ? 1 : 0) - (a.trusted ? 1 : 0);
+            }
             if (timeA && !timeB) return -1;
             if (!timeA && timeB) return 1;
-            return 0;
+            return (b.trusted ? 1 : 0) - (a.trusted ? 1 : 0);
         });
     }
 
@@ -1116,6 +1229,7 @@ RULES:
 3. DISTINGUISH CONFIRMED FACTS VS. UNCERTAINTY: Clearly differentiate verified facts and confirmed actions from unconfirmed claims, ongoing status, or speculation. If different sources report conflicting claims, explain the divergence and cite each source. If evidence for any specific part of the user question is missing, inaccessible, or unverified in the excerpts, explicitly state what could not be verified rather than fabricating or omitting it.
 4. GROUNDED CITATIONS: Ground key statements and extracted facts with source citations using [1], [2], etc., matching the numbered verified sources below.
 5. STRUCTURE: Provide a direct answer first, followed by clear explanations, requested lists, and impact analyses.
+6. CHRONOLOGICAL PRIORITY: Sources are ordered chronologically with the newest/most recent updates listed first ([1], [2], ...). For questions about current status, updates, or recent developments, prioritize the latest sources over older sources.
 
 User question: "${effectiveUserPrompt}"
 
