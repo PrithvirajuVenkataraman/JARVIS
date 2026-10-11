@@ -874,7 +874,7 @@ export function classifyDeterministicRetrievalIntent(query = '') {
     // 1. Definite stable patterns (definitions, concepts, cultural meanings, math, science, code, history)
     const isExplicitDefinitionOrConcept = /^(?:what is|what are|define|meaning of|what does .+ mean|explain|tell me about the concept of)\s+/i.test(text);
     const isForeignCulturalOrConcept = /\b(serbian culture|concept of|meaning in|etymology|cultural meaning)\b/i.test(text);
-    const isScienceOrMathOrCode = /\b(photosynthesis|mitochondria|pythagorean|gravity|calculus|fibonacci|recursion|binary search|sorting algorithm|regex|regular expression|quicksort|new deal|constitution of)\b/i.test(text);
+    const isScienceOrMathOrCode = /\b(photosynthesis|mitochondria|theorem|gravity|calculus|fibonacci|recursion|binary search|sorting algorithm|regex|regular expression|quicksort|constitution of)\b/i.test(text);
     const isTimelessGeographyOrFact = /^(?:what is the capital of|where is|who wrote|who painted|who composed|when was .+ (?:born|founded|built|written))\b/i.test(text);
 
     // If query has clear stable signals and NO temporal/live triggers
