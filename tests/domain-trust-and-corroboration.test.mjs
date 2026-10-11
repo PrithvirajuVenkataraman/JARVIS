@@ -31,7 +31,15 @@ import {
     corroborationScoreDelta
 } from '../api/_lib/multi-source-corroboration.js';
 
-import { hybridRerank } from '../api/_lib/hybrid-reranker.js';
+import {
+    hybridRerank,
+    parseDocumentDate,
+    formatDocumentDate,
+    extractQueryDateIntent
+} from '../api/_lib/hybrid-reranker.js';
+
+import { rankSources } from '../api/search.js';
+import { parseSourceDate, normalizeResearchSources } from '../app/bounded-live-research.js';
 
 // ─── Fixture helpers ──────────────────────────────────────────────────────────
 
@@ -361,6 +369,187 @@ describe('§5 Hybrid Reranker — domain trust tier surfaced in output', () => {
         const ranked = await hybridRerank(QUERY, docs);
         assert.ok(Array.isArray(ranked[0].domainTrustSignals), 'domainTrustSignals must be an array');
         assert.ok(ranked[0].domainTrustSignals.length > 0, 'domainTrustSignals must contain at least one signal for who.int');
+    });
+
+});
+
+// ─── § 6  Strict Chronological Reranking & Multi-Locale Date Invariants ─────────
+
+describe('§6 Strict Chronological Reranking & Multi-Locale Date Invariants', () => {
+
+    const fixedNow = Date.UTC(2026, 9, 12, 12, 0, 0); // October 12, 2026 12:00 UTC
+
+    it('parseDocumentDate parses American date format correctly (Month DD, YYYY)', () => {
+        const doc = { title: 'Report', snippet: 'Published October 11, 2026 by economics team.' };
+        const parsed = parseDocumentDate(doc, fixedNow);
+        assert.equal(parsed, Date.UTC(2026, 9, 11), 'October 11, 2026 must be parsed accurately');
+    });
+
+    it('parseDocumentDate parses UK date format correctly (DD Month YYYY)', () => {
+        const doc = { title: 'Report', snippet: '11 October 2026 - Official statement released.' };
+        const parsed = parseDocumentDate(doc, fixedNow);
+        assert.equal(parsed, Date.UTC(2026, 9, 11), '11 October 2026 must be parsed accurately');
+    });
+
+    it('parseDocumentDate parses ISO date format correctly (YYYY-MM-DD)', () => {
+        const doc = { title: 'Update', snippet: 'Update posted 2026-10-11 for system status.' };
+        const parsed = parseDocumentDate(doc, fixedNow);
+        assert.equal(parsed, Date.UTC(2026, 9, 11), '2026-10-11 must be parsed accurately');
+    });
+
+    it('parseDocumentDate parses relative timestamps accurately (hours ago, yesterday)', () => {
+        const docHours = { title: 'Breaking', snippet: '2 hours ago - Urgent summit concludes.' };
+        const parsedHours = parseDocumentDate(docHours, fixedNow);
+        assert.equal(parsedHours, fixedNow - 2 * 3600 * 1000, '2 hours ago must resolve to fixedNow - 2h');
+
+        const docYesterday = { title: 'Recap', snippet: 'Yesterday - Market indices fell.' };
+        const parsedYesterday = parseDocumentDate(docYesterday, fixedNow);
+        assert.equal(parsedYesterday, fixedNow - 24 * 3600 * 1000, 'Yesterday must resolve to fixedNow - 24h');
+    });
+
+    it('parseDocumentDate does NOT treat publisher brand names as "today"', () => {
+        // USA Today article published in May must NOT be parsed as today in October
+        const usaTodayDoc = {
+            title: 'USA TODAY: Latest financial trends',
+            snippet: 'May 14, 2026 - Central bank interest rate deliberations continue.'
+        };
+        const parsed = parseDocumentDate(usaTodayDoc, fixedNow);
+        assert.equal(parsed, Date.UTC(2026, 4, 14), 'USA Today article from May must parse as May 14, 2026 and not today');
+        assert.notEqual(parsed, fixedNow, 'Must not match brand name USA Today as published right now');
+    });
+
+    it('parseDocumentDate ignores casual non-date "today" marketing phrases', () => {
+        const casualDoc = {
+            title: 'General Guide',
+            snippet: 'Join our platform today to explore cutting-edge tools.'
+        };
+        const parsed = parseDocumentDate(casualDoc, fixedNow);
+        assert.equal(parsed, null, 'Casual marketing phrase "join today" must not be parsed as publication date');
+    });
+
+    it('parseSourceDate client-side mirrors American, UK, and brand exclusion', () => {
+        const usDoc = { title: 'US', snippet: 'Oct 11, 2026 - Mission launch.' };
+        assert.equal(parseSourceDate(usDoc, fixedNow), Date.UTC(2026, 9, 11));
+
+        const ukDoc = { title: 'UK', snippet: '11 Oct 2026 - Mission launch.' };
+        assert.equal(parseSourceDate(ukDoc, fixedNow), Date.UTC(2026, 9, 11));
+
+        const brandDoc = { title: 'India Today News', snippet: 'May 14, 2026 - Technological progress.' };
+        assert.equal(parseSourceDate(brandDoc, fixedNow), Date.UTC(2026, 4, 14));
+    });
+
+    it('hybridRerank enforces strict chronological ordering (October ranks above May regardless of BM25)', async () => {
+        const query = 'what are the latest breaking updates on the policy today';
+        const docs = [
+            // Doc A has exact keyword matches everywhere (high BM25) but is older (May 14, 2026)
+            {
+                title: 'latest breaking updates on the policy today',
+                description: 'latest breaking updates on the policy today announced by department May 14, 2026',
+                url: 'https://example.com/may-policy',
+                domain: 'example.com'
+            },
+            // Doc B has fewer keyword matches but is recent (October 11, 2026)
+            {
+                title: 'Department brief',
+                description: 'October 11, 2026 - New regulatory directives enacted.',
+                url: 'https://example.com/oct-policy',
+                domain: 'example.com'
+            }
+        ];
+
+        const ranked = await hybridRerank(query, docs, { now: fixedNow });
+        assert.equal(ranked.length, 2);
+        // The recent October document MUST be ranked at #1, overriding the high-BM25 May document
+        assert.equal(ranked[0].url, 'https://example.com/oct-policy', 'October 2026 document must rank #1 over May 2026 document');
+        assert.equal(ranked[1].url, 'https://example.com/may-policy', 'May 2026 document must rank #2');
+    });
+
+    it('hybridRerank strictly orders breaking timestamps: 2 hours ago > yesterday > older', async () => {
+        const query = 'breaking news updates today';
+        const docs = [
+            {
+                title: 'Stale News',
+                description: 'May 14, 2026 - Historical briefing.',
+                url: 'https://news.org/stale'
+            },
+            {
+                title: 'Yesterday News',
+                description: 'Yesterday - Evening developments unfold.',
+                url: 'https://news.org/yesterday'
+            },
+            {
+                title: 'Breaking Just In',
+                description: '2 hours ago - Urgent announcements just delivered.',
+                url: 'https://news.org/2h'
+            }
+        ];
+
+        const ranked = await hybridRerank(query, docs, { now: fixedNow });
+        assert.equal(ranked[0].url, 'https://news.org/2h', '2 hours ago must be rank #1');
+        assert.equal(ranked[1].url, 'https://news.org/yesterday', 'Yesterday must be rank #2');
+        assert.equal(ranked[2].url, 'https://news.org/stale', 'May article must be rank #3');
+    });
+
+    it('hybridRerank places dated sources strictly above undated sources for time-sensitive queries', async () => {
+        const query = 'what is the current status of the mission today';
+        const docs = [
+            {
+                title: 'Undated general encyclopedia article',
+                description: 'Mission overview and technical hardware specifications without date.',
+                url: 'https://wiki.org/mission'
+            },
+            {
+                title: 'Dated Mission Status',
+                description: 'October 11, 2026 - Spacecraft enters destination orbit.',
+                url: 'https://space.org/update'
+            }
+        ];
+
+        const ranked = await hybridRerank(query, docs, { now: fixedNow });
+        assert.equal(ranked[0].url, 'https://space.org/update', 'Dated recent document must rank above undated document');
+    });
+
+    it('rankSources in api/search.js enforces strict chronological sorting on freshness queries', () => {
+        const query = 'latest updates today';
+        const results = [
+            {
+                title: 'May Article',
+                description: 'May 14, 2026 - Old report',
+                url: 'https://news.com/may',
+                domain: 'news.com'
+            },
+            {
+                title: 'October Article',
+                description: 'October 11, 2026 - Breaking bulletin',
+                url: 'https://news.com/oct',
+                domain: 'news.com'
+            }
+        ];
+
+        const ranked = rankSources(query, results);
+        assert.equal(ranked[0].url, 'https://news.com/oct', 'rankSources must place October at #1');
+        assert.equal(ranked[1].url, 'https://news.com/may', 'rankSources must place May at #2');
+    });
+
+    it('normalizeResearchSources in app/bounded-live-research.js assigns ID 1 to newest source', () => {
+        const raw = [
+            {
+                title: 'May Article',
+                snippet: 'May 14, 2026 - Older context',
+                url: 'https://site.org/may'
+            },
+            {
+                title: 'October Article',
+                snippet: 'October 11, 2026 - Breaking update',
+                url: 'https://site.org/oct'
+            }
+        ];
+
+        const normalized = normalizeResearchSources(raw, 'what are the latest updates today', 5);
+        assert.equal(normalized[0].id, 1);
+        assert.equal(normalized[0].url, 'https://site.org/oct', 'Newest October source must have ID 1');
+        assert.equal(normalized[1].id, 2);
+        assert.equal(normalized[1].url, 'https://site.org/may', 'Older May source must have ID 2');
     });
 
 });
