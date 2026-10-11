@@ -26,6 +26,7 @@ import {
     searchPublicSources,
     isTechnicalDocumentationQuery,
     buildDeterministicSearchQueries,
+    decomposeMultiPartQuery,
     scoreSearchResult
 } from '../api/search.js';
 import { classifyFreeLiveIntent } from '../api/_lib/free-live/classifier.js';
@@ -2130,5 +2131,167 @@ test('Regression 15.4: Substantive body sentences are correctly extracted in fal
     // Negative assertions: no technical headers or citation artifacts
     assert.ok(!fallback.includes('### Live Web Results'));
     assert.ok(!fallback.includes('[1]'));
+});
+
+test('Regression 16.1: Multi-part query decomposition cleanly extracts focused sub-queries with anchored context', () => {
+    const multiPartPrompt = 'What changes did the U.S. government announce on October 8, 2026, regarding H-1B workers and employment-based green cards? Which eight technology companies were affected, how does the suspension of the PERM labor certification process affect Indian professionals, and does the action directly suspend existing H-1B visas?';
+    const decomposed = decomposeMultiPartQuery(multiPartPrompt);
+
+    // Must return at least 3 distinct sub-queries
+    assert.ok(Array.isArray(decomposed));
+    assert.ok(decomposed.length >= 3, `Expected >= 3 decomposed queries, got ${decomposed.length}`);
+
+    // Positive assertions: distinct aspects are isolated and preserved
+    assert.ok(decomposed.some(q => q.toLowerCase().includes('green cards') || q.toLowerCase().includes('h-1b')));
+    assert.ok(decomposed.some(q => q.toLowerCase().includes('eight technology') || q.toLowerCase().includes('affected')));
+    assert.ok(decomposed.some(q => q.toLowerCase().includes('perm') || q.toLowerCase().includes('indian professionals')));
+
+    // Negative assertions: sub-queries must not retain leading conversational question scaffolding
+    assert.ok(!decomposed.some(q => /^what changes did /i.test(q)));
+    assert.ok(!decomposed.some(q => /^how does the /i.test(q)));
+    assert.ok(!decomposed.some(q => /^which eight /i.test(q)));
+
+    // Deterministic search queries must leverage the decomposition
+    const deterministic = buildDeterministicSearchQueries(multiPartPrompt);
+    assert.ok(deterministic.length >= 3);
+    assert.deepEqual(deterministic, decomposed);
+});
+
+test('Regression 16.2: Single-part concise queries do not decompose into spurious sub-queries', () => {
+    const singleQuery = 'France population 2026';
+    const decomposed = decomposeMultiPartQuery(singleQuery);
+    assert.deepEqual(decomposed, [], 'Single part query must return empty decomposed list');
+
+    const singleQuestion = 'Who is the Prime Minister of Canada?';
+    const decomposedQuestion = decomposeMultiPartQuery(singleQuestion);
+    assert.deepEqual(decomposedQuestion, [], 'Single question query must return empty decomposed list');
+});
+
+test('Regression 16.3: Related research questions from multi-part queries generate valid distinct questions without headline copies', () => {
+    const multiPartQuery = 'What changes did the U.S. government announce on October 8, 2026, regarding H-1B workers and employment-based green cards? Which eight technology companies were affected, how does the suspension of the PERM labor certification process affect Indian professionals, and does the action directly suspend existing H-1B visas?';
+    const mockSources = [
+        {
+            id: 1,
+            title: 'US suspends 8 tech firms from PERM process: Full list and what it means - The Times of India',
+            domain: 'timesofindia.indiatimes.com',
+            publisher: 'The Times of India',
+            url: 'https://timesofindia.indiatimes.com/tech-perm'
+        },
+        {
+            id: 2,
+            title: 'US Green Card PERM Suspension 2026: H-1B Impact - IndianEagle',
+            domain: 'indianeagle.com',
+            publisher: 'IndianEagle',
+            url: 'https://indianeagle.com/perm-2026'
+        }
+    ];
+
+    const questions = generateRelatedResearchQuestions({
+        query: multiPartQuery,
+        sources: mockSources,
+        answer: 'The U.S. Department of Labor announced the suspension of PERM processing for eight companies.'
+    });
+
+    assert.ok(Array.isArray(questions));
+    assert.ok(questions.length >= 2, `Expected >= 2 related questions, got ${questions.length}`);
+
+    // Positive assertions: each question starts with an interrogative and ends with '?'
+    for (const q of questions) {
+        assert.ok(/^(?:what|how|why|who|when|where|which|can|could|does|do|will|is|are|should)\b/i.test(q), `Must start with interrogative: "${q}"`);
+        assert.ok(q.endsWith('?'), `Must end with question mark: "${q}"`);
+        assert.ok(q.length >= 20 && q.length <= 150, `Length must be reasonable: ${q.length}`);
+
+        // Negative assertions: never copies publisher names or headline fragments
+        assert.ok(!q.toLowerCase().includes('times of india'), `Must not include publisher name in "${q}"`);
+        assert.ok(!q.toLowerCase().includes('indianeagle'), `Must not include publisher name in "${q}"`);
+        assert.ok(!q.toLowerCase().includes('full list and what it means'), `Must not include clickbait fragment in "${q}"`);
+    }
+});
+
+test('Regression 16.4: Multi-part query zero-token fallback produces substantive evidence paragraphs rather than headlines', () => {
+    const multiPartQuery = 'What changes did the U.S. government announce on October 8, 2026, regarding H-1B workers and employment-based green cards? Which eight technology companies were affected, how does the suspension of the PERM labor certification process affect Indian professionals, and does the action directly suspend existing H-1B visas?';
+    const sourcesWithRichBody = [
+        {
+            id: 1,
+            title: 'US green card suspension: What it means for Indian IT workers on H-1B visas',
+            domain: 'business-standard.com',
+            url: 'https://business-standard.com/article1',
+            snippet: 'However, the suspension concerns the PERM route to permanent residency; it is not an announcement cancelling the H-1B visa programme or automatically revoking valid visas.'
+        },
+        {
+            id: 2,
+            title: 'DOL Suspends PERM Filings for Major Tech Companies',
+            domain: 'laborless.io',
+            url: 'https://laborless.io/article2',
+            snippet: 'On October 8, 2026, federal labor authorities announced the suspension of participation in the PERM labor certification program for eight named technology employers.'
+        }
+    ];
+
+    const fallback = generateSnippetFallback(multiPartQuery, sourcesWithRichBody);
+
+    // Positive assertions: substantive facts answering specific query parts are present
+    assert.ok(fallback.includes('suspension concerns the PERM route') || fallback.includes('permanent residency'));
+    assert.ok(fallback.includes('not an announcement cancelling the H-1B visa programme') || fallback.includes('revoking valid visas'));
+    assert.ok(fallback.includes('eight named technology employers') || fallback.includes('federal labor authorities'));
+
+    // Negative assertions: never strings together article titles
+    assert.ok(!fallback.includes('US green card suspension: What it means for Indian IT workers on H-1B visas. DOL Suspends PERM Filings'));
+    assert.ok(!fallback.includes('business-standard.com'));
+});
+
+test('Regression 16.5: End-to-end BoundedLiveResearchController handles multi-part query streaming synthesis and source cards', async () => {
+    const controller = new BoundedLiveResearchController({
+        searchCutoffMs: 400,
+        fallbackWarningMs: 800,
+        hardDeadlineMs: 1200
+    });
+
+    const multiPartQuery = 'What changes were announced regarding the PERM suspension? Which companies are affected?';
+    let synthesizedPrompt = '';
+    const streamedTokens = [];
+
+    const result = await controller.execute({
+        query: multiPartQuery,
+        userText: multiPartQuery,
+        assistantMessageId: 'msg_regression_16_5',
+        fetchSearchFn: async () => {
+            return {
+                results: [
+                    {
+                        title: 'Federal PERM Certification Update',
+                        url: 'https://policy.gov/perm-update',
+                        domain: 'policy.gov',
+                        snippet: 'Federal labor authorities temporarily paused new PERM filings for eight designated corporate entities pending compliance review.'
+                    },
+                    {
+                        title: 'Workforce Impact Assessment',
+                        url: 'https://workforce.org/impact',
+                        domain: 'workforce.org',
+                        snippet: 'Existing visa holders remain unaffected by the filing pause while employers review compliance procedures.'
+                    }
+                ]
+            };
+        },
+        streamSynthesisFn: async ({ prompt, onToken }) => {
+            synthesizedPrompt = prompt;
+            onToken('On October 8, federal labor authorities paused new PERM filings for eight designated entities [1]. ');
+            streamedTokens.push('token1');
+            onToken('Existing visa holders remain unaffected by this action [2].');
+            streamedTokens.push('token2');
+        }
+    });
+
+    // Positive assertions: streaming succeeds with WEB_GROUNDED provenance
+    assert.equal(result.success, true);
+    assert.equal(result.fallback, false);
+    assert.equal(result.provenance, PROVENANCE_MODES.WEB_GROUNDED);
+    assert.ok(result.content.includes('paused new PERM filings for eight designated entities [1]'));
+    assert.ok(result.content.includes('Existing visa holders remain unaffected by this action [2]'));
+    assert.equal(result.sources.length, 2);
+
+    // Synthesis prompt must contain instructions for complete coverage and substantive details
+    assert.ok(synthesizedPrompt.includes('COMPLETE COVERAGE'));
+    assert.ok(synthesizedPrompt.includes('SUBSTANTIVE DETAILS'));
+    assert.ok(synthesizedPrompt.includes('User question: "What changes were announced regarding the PERM suspension? Which companies are affected?"'));
 });
 
