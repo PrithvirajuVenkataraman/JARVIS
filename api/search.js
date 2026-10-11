@@ -487,7 +487,7 @@ export async function handleStreamingWebRag(req, res, { rawQuery, limit = 8 }) {
     let streamedAny = false;
     const groqKey = getGroqApiKey();
     if (groqKey) {
-        const models = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'];
+        const models = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b'];
         for (const model of models) {
             try {
                 const response = await fetchWithTimeout('https://api.groq.com/openai/v1/chat/completions', {
@@ -4225,7 +4225,7 @@ async function callGeminiJson(prompt, options = {}) {
 
     const groqKey = getGroqApiKey();
     if (groqKey) {
-        const groqModels = ['llama-3.1-8b-instant', 'llama-3.3-70b-versatile', 'qwen-2.5-coder-32b', 'openai/gpt-oss-120b'];
+        const groqModels = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b'];
         for (const model of groqModels) {
             try {
                 const response = await fetchWithTimeout('https://api.groq.com/openai/v1/chat/completions', {
