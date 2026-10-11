@@ -100,7 +100,7 @@ export default async function handler(req, res) {
         const data = await response.json();
         const text = String(data.text || '').trim();
 
-        return res.status(200).json({
+        return res.status(200).json({ 
             success: true,
             text,
             language: data.language || language || 'en',
