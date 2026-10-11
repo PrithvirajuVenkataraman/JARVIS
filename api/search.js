@@ -896,13 +896,13 @@ export function classifyDeterministicRetrievalIntent(query = '') {
         || /\b(?:current|latest|present|incumbent)\s+(?:cm|pm|prime minister|chief minister|president|governor|mayor|ceo|cfo|cto|coo|chairman|chairperson|captain|coach|leader|head of state|head of government)\b/i.test(text)
         || /\b(?:cm|pm|prime minister|chief minister|president|governor|mayor|ceo|cfo|cto|coo|chairman|chairperson|captain|coach|leader|head of state|head of government)\s+(?:of|for|in)\s+[a-z0-9\s.-]+/i.test(text)
         || /^[a-z0-9\s.-]+\s+(?:cm|pm|ceo|cfo|cto|coo|governor|mayor|president|prime minister|chief minister|captain|coach)$/i.test(text)
-        || /\b(?:current captain of|who is captain of|who is the captain of|captain of csk|csk captain)\b/i.test(text)
+        || /\b(?:current\s+captain\s+of|who\s+is\s+(?:the\s+)?captain\s+of|captain\s+of)\b/i.test(text)
     );
 
     const isLiveMarketOrWeather = /\b(weather|temperature|forecast|exchange rate|conversion rate|live score|match score|game score|standings)\b/i.test(text)
-        || /\b(?:price of\s+[a-z0-9-]+|(?:bitcoin|btc|crypto|eth|ethereum|solana|stock|share|gold|oil|crude)\s+price|crypto price|stock price)\b/i.test(text);
+        || /\b(?:price of\s+[a-z0-9-]+|(?:bitcoin|btc|crypto|eth|ethereum|stock|share|gold|oil|crude|commodity)\s+price|crypto price|stock price)\b/i.test(text);
 
-    const isRecentTournamentOrEvent = /\b(?:who won (?:the )?(?:latest|last|recent|\d{4})?|winner of (?:the )?(?:latest|last|recent|\d{4})?|latest fifa|fifa world cup winner|ipl winner|super bowl winner|election results?|breaking news|live news)\b/i.test(text);
+    const isRecentTournamentOrEvent = /\b(?:who won (?:the )?(?:latest|last|recent|\d{4})?|winner of (?:the )?(?:latest|last|recent|\d{4})?|(?:championship|tournament|cup|league|series)\s+winner|election results?|breaking news|live news)\b/i.test(text);
 
     const isRecommendationsOrPlaces = /\b(places to visit|attractions in|things to do in|recommendations|reviews of|best restaurants in|hotels in)\b/i.test(text);
 
@@ -3625,7 +3625,7 @@ function isStrongRagEvidenceSource(item) {
     if (item?.evidenceLevel === 'structured_claim') return true;
     if (sourceType === 'official_source' && item?.pageFetched) return true;
     if (item?.trusted && !/reddit|archive\.(today|ph|is)/i.test(domain)) return true;
-    return /(?:\.gov$|\.gov\.|\.go\.|gov\.|wikipedia\.org$|wikidata\.org$|bbc\.com$|reuters\.com$|apnews\.com$|thehindu\.com$)/i.test(domain);
+    return isTrustedDomain(domain) || /wikipedia\.org$|wikidata\.org$/i.test(domain);
 }
 
 export function hasObviousRagConflict(evidence = [], query = '') {
@@ -3688,8 +3688,8 @@ function cleanExtractedPersonName(raw) {
     if (!name || name.length < 2 || name.length > 50) return null;
     const words = name.split(/\s+/);
     if (words.length < 1 || words.length > 4) return null;
-    const invalidWords = new Set(['and', 'or', 'the', 'is', 'who', 'racing', 'driver', 'executive', 'team', 'company', 'security', 'management', 'platform', 'service', 'inc', 'corp', 'limited', 'ltd', 'vacant', 'none', 'n/a', 'tbd']);
-    if (words.some(w => invalidWords.has(w.toLowerCase()))) return null;
+    if (/\b(?:inc|corp|ltd|limited|vacant|none|n\/a|tbd)\b/i.test(name)) return null;
+    if (words.some(w => w.length < 2 || /^(?:and|or|the|is|who)$/i.test(w))) return null;
     return name;
 }
 
@@ -4577,24 +4577,14 @@ export function isAcademicDomain(domain) {
 // Extracts core brand/entity/subject keywords from query to identify canonical primary sources
 function extractQueryEntityStems(query) {
     if (!query) return [];
-    const stopWords = new Set([
-        'what', 'whats', 'what\'s', 'is', 'the', 'a', 'an', 'of', 'in', 'for', 'to', 'and', 'or', 'on',
-        'at', 'by', 'from', 'with', 'about', 'how', 'when', 'where', 'who', 'why', 'can', 'does',
-        'do', 'did', 'will', 'would', 'could', 'should', 'are', 'was', 'were', 'been', 'being',
-        'have', 'has', 'had', 'price', 'pricing', 'cost', 'specs', 'specifications', 'review',
-        'reviews', 'versus', 'vs', 'difference', 'between', 'best', 'top', 'cheap', 'free',
-        'download', 'buy', 'online', 'store', 'return', 'policy', 'refund', 'official', 'website',
-        'site', 'portal', 'login', 'signup', 'requirements', 'admission', 'tuition', 'fee', 'fees',
-        'guide', 'tutorial', 'documentation', 'docs', 'manual', 'features', 'changelog', 'update',
-        'updates', 'latest', 'new', 'release', 'notes', 'version', 'error', 'issue', 'fix', 'problem',
-        'solved', 'help', 'support', 'customer', 'service', 'phone', 'number', 'address', 'hours',
-        'today', 'now', 'current', 'news', 'headline', 'headlines', 'tell', 'show', 'search', 'find',
-        'there', 'here', 'this', 'that', 'these', 'those', 'any', 'some', 'all', 'every', 'each',
-        'many', 'much', 'more', 'most', 'such', 'major', 'minor', 'affecting', 'currently', 'week',
-        'month', 'year', 'days', 'time', 'like', 'good', 'well', 'going', 'doing'
-    ]);
-    const words = String(query).toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter(Boolean);
-    return words.filter(w => w.length >= 3 && !stopWords.has(w));
+    const distilled = distillSearchQuery(query);
+    const cleaned = cleanSubQueryClause(distilled);
+    const words = String(cleaned)
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+        .split(/\s+/)
+        .filter(w => w.length >= 3 && !/^(?:what|whats|how|when|where|who|why|which|can|could|would|should|does|did|will|are|was|were|been|being|have|has|had|the|for|from|with|about|into|onto|than|then|that|this|these|those|official|policy|guide|requirements|documentation|docs|manual|notes|version|review|reviews)$/.test(w));
+    return words;
 }
 
 // Extracts clean domain stem (e.g., store.steampowered.com -> steampowered, docs.python.org -> python)
@@ -4625,13 +4615,8 @@ export function isDirectPrimarySource(query, domain, title = '') {
     let stemMatched = false;
     for (const stem of stems) {
         if (dStem === stem) { stemMatched = true; break; }
-        // Known canonical multi-brand entity extensions (e.g. "steam" in query -> "steampowered")
-        if (stem === 'steam' && (dStem === 'steampowered' || dStem === 'steamcommunity')) { stemMatched = true; break; }
-        if (stem === 'playstation' && (dStem === 'playstation' || dStem === 'sony')) { stemMatched = true; break; }
-        if (stem === 'xbox' && (dStem === 'xbox' || dStem === 'microsoft')) { stemMatched = true; break; }
         if (dStem === `${stem}official` || dStem === `${stem}app` || dStem === `get${stem}`) { stemMatched = true; break; }
-        // e.g. "playstation" in query -> "sony" (or stem longer than dStem where dStem is the root corporate parent)
-        if (stem.length >= dStem.length && stem.startsWith(dStem) && dStem.length >= 4) {
+        if ((dStem.startsWith(stem) || stem.startsWith(dStem)) && Math.min(stem.length, dStem.length) >= 4) {
             stemMatched = true; break;
         }
     }
@@ -4731,7 +4716,7 @@ export function detectQueryTopic(query) {
     // Technical software releases, changelogs & developer documentation
     if (/\b(?:release\s+notes|changelog|api\s+docs?|documentation|version\s+changes?|what(?:'s|\s+is)\s+new|official\s+docs?)\b/.test(q)) return 'technical_documentation';
     // Athletics, tournaments, fixtures & championships
-    if (/\b(?:score|match|fixture|standings|tournament|championship|league|ipl|cricket|football|soccer|tennis|olympics|world\s+cup)\b/.test(q)) return 'sports';
+    if (/\b(?:score|match|fixture|standings|tournament|championship|league|cricket|football|soccer|tennis|olympics|world\s+cup)\b/.test(q)) return 'sports';
     // Cryptocurrencies, tokens & decentralized finance
     if (/\b(?:crypto|bitcoin|ethereum|blockchain|tokens?|defi|nft|stablecoins?)\b/.test(q)) return 'crypto';
     // General breaking headlines & journalistic reporting
@@ -5038,12 +5023,7 @@ function isStrongGenericQuerySourceMatch(query, haystack) {
     const rawTerms = subjectTerms.length ? subjectTerms : queryTerms;
     if (!rawTerms.length) return false;
 
-    const QUERY_FUNCTION_WORDS = new Set([
-        'how', 'many', 'much', 'who', 'what', 'where', 'when', 'why', 'which',
-        'did', 'do', 'does', 'done', 'doing', 'is', 'are', 'was', 'were',
-        'the', 'a', 'an', 'in', 'on', 'at', 'of', 'for', 'to', 'from', 'with', 'by'
-    ]);
-    const meaningfulTerms = rawTerms.filter(term => !QUERY_FUNCTION_WORDS.has(term));
+    const meaningfulTerms = rawTerms.filter(term => !/^(?:how|many|much|who|what|where|when|why|which|did|do|does|done|doing|the|and|for|from|with|are|was|were)$/i.test(term) && (/^\d+$/.test(term) || term.length >= 3));
     const terms = meaningfulTerms.length ? meaningfulTerms : rawTerms;
 
     const matched = terms.filter(term => text.includes(term));
@@ -5213,12 +5193,12 @@ export function extractTopicAnchors(query) {
     const anchors = [];
     const dateMatch = text.match(/\b(?:(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4}|\d{4})\b/i);
     if (dateMatch) anchors.push(dateMatch[0]);
-    const months = new Set(['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december']);
-    const prominent = text.match(/\b(?:[A-Z0-9]+(?:-[A-Z0-9]+)+|[A-Z]{2,}|[A-Z][a-z0-9]+)\b/g) || [];
-    const stopWords = new Set(['what', 'which', 'how', 'does', 'why', 'did', 'the', 'and', 'or', 'on', 'in', 'at', 'to', 'for', 'with', 'us', 'new']);
+    const distilled = distillSearchQuery(text);
+    const prominent = distilled.match(/\b(?:[A-Z0-9]+(?:-[A-Z0-9]+)+|[A-Z]{2,}|[A-Z][a-z0-9]+)\b/g) || [];
     for (const token of prominent) {
         const lower = token.toLowerCase();
-        if (!stopWords.has(lower) && !months.has(lower) && token.length >= 2 && !anchors.some(a => a.toLowerCase().includes(lower))) {
+        const isMonth = /^(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)$/i.test(lower);
+        if (!isMonth && token.length >= 3 && !/^(?:what|which|how|why|does|did|the|and|for|with|new|can)$/i.test(lower) && !anchors.some(a => a.toLowerCase().includes(lower))) {
             anchors.push(token);
         }
     }
@@ -5350,14 +5330,14 @@ export function buildDeterministicSearchQueries(query) {
 
 function isCurrentTopicSearchQuery(query) {
     const text = String(query || '').toLowerCase();
-    const hasFreshOrReviewSignal = /\b(reviews?|hands-on|worth\s+it|vs|compare|comparison|price|available|availability|launched)\b/.test(text);
+    const hasFreshOrReviewSignal = /\b(?:compare|comparison|vs\.?|reviews?|price|availability)\b/i.test(text);
     return (hasFreshOrReviewSignal || isDatedChangingFactSearchQuery(query)) && extractSearchSubject(query).split(/\s+/).filter(Boolean).length >= 2;
 }
 
 function isDatedChangingFactSearchQuery(query) {
     const text = String(query || '').toLowerCase();
     if (!parseStructuredDateWindow(text).hasDate) return false;
-    return /\b(won|winner|champion|champions|rankings?|standings?|captain|coach|ceo|chair(?:person|man)?|president|prime minister|chief minister|mayor|governor|latest|newest|last|movie|film|song|album|release|released|launched|price|value)\b/.test(text);
+    return isLeadershipOrRoleTerm(text) || /\b(?:win(?:ner|s)?|champions?|rankings?|standings?|releases?|launched|price|results?)\b/i.test(text);
 }
 
 function extractSearchSubject(query) {
@@ -5368,26 +5348,27 @@ function extractSearchSubject(query) {
     }
     const universal = parseUniversalEntityQuery(query);
     if (universal?.jurisdiction && isLeadershipOrRoleTerm(universal?.role)) return cleanQueryTarget(universal.jurisdiction);
-    const cleanedTarget = cleanQueryTarget(normalized);
-    const text = (cleanedTarget || normalized)
-        .replace(/\s+(?:compared with|compared to|difference between|versus|vs\.?).*$/i, '')
+    const distilled = cleanSubQueryClause(distillSearchQuery(normalized));
+    const cleanedTarget = cleanQueryTarget(distilled);
+    const text = (cleanedTarget || distilled)
+        .replace(/\s+(?:compared\s+(?:with|to)|difference\s+between|versus|vs\.?).*$/i, '')
+        .replace(/^(?:(?:recent|latest|current|newest)?\s*(?:reviews?|price|specs?|status|overview|details?|news|facts?|info(?:rmation)?)?\s*(?:of|for|about|on)\s+(?:the\s+)?)/i, '')
         .replace(/\b(?:changes?\s+in|updates?\s+in|new\s+in)\b/gi, ' ')
-        .replace(/\b(?:latest|recent|current|newest|reviews?|review|hands-on|worth\s+it|good|best|price|available|availability|launched|released?|winner|won|champion|rankings?|standings?|compare|comparison|vs|movies?|films?|songs?|albums?|releases?|facts?|info(?:rmation)?|background|overview|details?)\b/gi, ' ')
-        .replace(/\b(?:in|during|as of|by|before|after)\s+\d{4}\b/gi, ' ')
-        .replace(/\b(?:of|for|about|on|the|is|are|should|i|buy|get|now|today|live|exact|rate|there|here|this|that|these|those|any|some|all)\b/gi, ' ')
+        .replace(/\b(?:in|during|as\s+of|by|before|after)\s+\d{4}\b/gi, ' ')
+        .replace(/\s+(?:facts?|info(?:rmation)?|background|overview|details?|reviews?|price|specs?|status|latest|updates?)$/i, '')
         .replace(/\s+/g, ' ')
         .trim();
     return cleanQueryTarget(normalizeSearchQuery(text).replace(/\s*\(\s*/g, ' ').replace(/\s*\)\s*/g, '').trim());
 }
 
 function extractSearchIntentTerm(query) {
+    const universal = parseUniversalEntityQuery(query);
+    if (universal?.role) return universal.role.toLowerCase();
     const text = String(query || '').toLowerCase();
-    const roleMatch = text.match(/\b(ceo|chief executive officer|managing director|chairman|chairperson|president|prime minister|pm|chief minister|cm|governor|mayor|founder|captain|coach|leader)\b/i);
-    if (roleMatch) return roleMatch[1].toLowerCase();
-    if (/\b(?:news|update|updates|breaking|developments?|government|policy|election)\b/.test(text)) return 'news';
-    if (/\b(?:price|available|availability|launched|released?)\b/.test(text)) return 'latest';
+    if (/\b(?:news|updates?|breaking|policy|election)\b/.test(text)) return 'news';
+    if (/\b(?:price|availability|launch|release)\b/.test(text)) return 'latest';
     if (/\b(?:vs|compare|comparison)\b/.test(text)) return 'comparison';
-    if (/\b(?:worth\s+it|review|reviews|best)\b/.test(text)) return 'reviews';
+    if (/\b(?:reviews?|hands-on)\b/.test(text)) return 'reviews';
     return 'updates';
 }
 
