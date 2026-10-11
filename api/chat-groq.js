@@ -16,433 +16,31 @@ function normalizeImageMimeType(mimeType) {
     return 'image/jpeg'; // jpeg, jpg, heic, heif, avif, bmp, tiff → jpeg
 }
 
-/* ── Cost Controls (Inlined for 0-dep cold boot) ────────── */
-function readCostBool(name, fallback = false) {
-    const raw = String(process.env[name] || '').trim().toLowerCase();
-    if (!raw) return fallback;
-    return ['1', 'true', 'yes', 'on'].includes(raw);
-}
+import {
+    getCostControls,
+    applyCostCapToLengthPolicy
+} from './_lib/cost-controls.js';
 
-function clampCostInt(value, fallback, min, max) {
-    const number = Number(value);
-    if (!Number.isFinite(number)) return fallback;
-    return Math.min(max, Math.max(min, Math.round(number)));
-}
+import {
+    extractHostname as extractEntityHostname,
+    isTrustedDomain as isTrustedEntityDomain,
+    extractEntityTarget,
+    validateEntityResponse
+} from './_lib/entity-verifier.js';
 
-function getCostControls() {
-    return {
-        qualityCriticEnabled: readCostBool('JARVIS_QUALITY_CRITIC_ENABLED', true),
-        streamQualityReviewEnabled: readCostBool('JARVIS_STREAM_QUALITY_REVIEW', false),
-        defaultMaxTokens: clampCostInt(process.env.JARVIS_DEFAULT_MAX_TOKENS, 16000, 256, 16000),
-        fastMaxTokens: clampCostInt(process.env.JARVIS_FAST_MAX_TOKENS, 8000, 256, 16000),
-        streamMaxTokens: clampCostInt(process.env.JARVIS_STREAM_MAX_TOKENS, 16000, 256, 16000)
-    };
-}
+import {
+    isStableGeographyOrGeneralFactQuery,
+    classifyQueryIntent
+} from './_lib/intent-separator.js';
 
-function applyCostCapToLengthPolicy(lengthPolicy = {}, options = {}) {
-    const controls = getCostControls();
-    const intent = String(options.intent || '');
-    const isFast = ['fast_simple', 'fast_explainer', 'casual_chat', 'chat_title'].includes(intent);
-    const cap = isFast ? controls.fastMaxTokens : (options.stream ? controls.streamMaxTokens : controls.defaultMaxTokens);
-    const maxTokens = clampCostInt(lengthPolicy?.maxTokens, cap, 256, 16000);
-    return {
-        ...lengthPolicy,
-        maxTokens: Math.min(maxTokens, cap)
-    };
-}
-
-/* ── Entity Verifier Helpers (Inlined for 0-dep cold boot) ── */
-function extractEntityHostname(rawUrl) {
-    if (!rawUrl || typeof rawUrl !== 'string') return '';
-    try {
-        const parsed = new URL(rawUrl.startsWith('http') ? rawUrl : `https://${rawUrl}`);
-        return parsed.hostname.replace(/^www\./i, '').toLowerCase();
-    } catch (_) {
-        return '';
-    }
-}
-
-function isTrustedEntityDomain(domain) {
-    const d = String(domain || '').toLowerCase().trim();
-    if (!d) return false;
-    if (/(?:\.gov(?:\.[a-z]{2})?|\.edu(?:\.[a-z]{2})?|\.ac\.[a-z]{2}|\.nic\.[a-z]{2}|\.org|\.int)$/i.test(d)) return true;
-    if (d === 'wikipedia.org' || d.endsWith('.wikipedia.org')) return true;
-    return false;
-}
-
-function formatEntityTitle(str) {
-    return String(str || '').trim().split(/\s+/).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
-}
-
-function extractEntityTarget(text) {
-    const raw = String(text || '').trim().replace(/[?!.,;:]+$/g, '');
-    if (!raw || raw.length < 4) return null;
-    if (/^(?:explain|describe|how|why|calculate|solve|list|compare|summarize|write)\b/i.test(raw)) return null;
-
-    const match = raw.match(/^(?:who\s+is|who's|tell\s+me\s+who\s+is|who\s+serves\s+as|what\s+is|who\s+was|who)?\s*(?:the\s+)?(?:current|latest|present|today|now)?\s*([a-zA-Z\s]{2,30}?)\s+(?:of|for)\s+([a-zA-Z0-9_\s]{2,40})$/i);
-    if (match && match[1] && match[2]) {
-        const rawRole = match[1].trim();
-        const rawPlace = match[2].replace(/\b(?:today|right now|currently|is|who)\b/gi, '').trim().replace(/^the\s+/i, '');
-        const isRoleTitle = /\b(?:cm|pm|minister|president|governor|mayor|ceo|chairperson|chairman|director|chancellor|secretary|head|leader|chief|ruler|premier|ambassador|king|queen|founder|captain)\b/i.test(rawRole);
-
-        if (rawRole && rawPlace && isRoleTitle && !/^(capital|weather|temperature|history|definition|meaning|source|origin|formula|equation|speed|laws?)\b/i.test(rawRole)) {
-            let roleNorm = formatEntityTitle(rawRole);
-            if (rawRole.toLowerCase() === 'cm') roleNorm = 'Chief Minister';
-            else if (rawRole.toLowerCase() === 'pm') roleNorm = 'Prime Minister';
-            else if (rawRole.toLowerCase() === 'ceo') roleNorm = 'CEO';
-            return {
-                role: roleNorm,
-                jurisdiction: formatEntityTitle(rawPlace)
-            };
-        }
-    }
-    return null;
-}
-
-function validateEntityResponse(message, answerText, sources = []) {
-    const target = extractEntityTarget(message);
-    if (!target) return { valid: true, issues: [] };
-    const trustedSources = (Array.isArray(sources) ? sources : []).filter(s => {
-        const domain = extractEntityHostname(s?.url || s?.domain || '');
-        return isTrustedEntityDomain(domain) || Boolean(s?.trusted);
-    });
-    return { valid: true, issues: [], target, trustedSourceCount: trustedSources.length };
-}
-
-/* ── Intent Separator Helpers (Inlined for 0-dep cold boot) ── */
-const INTENT_CODING_PATTERNS = [
-    /\b(?:function|def|class|const|let|var|import|export|return|async|await|console\.log|print\(|public\s+static|void\s+main)\b/,
-    /\b(?:javascript|python|typescript|java|c\+\+|c#|golang|rust|php|ruby|swift|kotlin|html|css|sql|dockerfile|yaml|json|regex)\b/i,
-    /\b(?:write|create|debug|fix|refactor|optimize|implement|explain)\s+(?:a\s+)?(?:code|function|script|algorithm|regex|query|component|loop|array|regex|endpoint)\b/i,
-    /\b(?:how\s+to\s+sort|binary\s+search|linked\s+list|dynamic\s+programming|tree\s+traversal|recursion|memoization|merge\s+sort|quick\s+sort)\b/i,
-    /\b(?:new\s+(?:keyword|operator|array|object|instance|class|promise|map|set|vector)|delete\s+operator|malloc|free|garbage\s+collection|memory\s+management)\b/i
-];
-
-function isStableGeographyOrGeneralFactQuery(rawQuery = '') {
-    const query = String(rawQuery || '').trim();
-    if (!query) return false;
-    const lower = query.toLowerCase().replace(/[?!.,;:]+$/g, '').trim();
-
-    const liveOfficeholderSignals = /\b(?:who\s+is\s+(?:the\s+)?(?:current|present|latest)\s+(?:chief\s+minister|prime\s+minister|president|governor|mayor|chancellor|ceo|chairman|leader|head\s+of\s+state))\b/i;
-    const liveCmPmSignals = /\b(?:who\s+is\s+(?:the\s+)?(?:cm|pm)\s+of)\b/i;
-    const liveDomainSignals = /\b(?:weather\s+in|forecast\s+for|temperature\s+in|stock\s+price|price\s+of\s+(?:bitcoin|btc|eth|solana|crypto|gold|silver|crude|shares?)|market\s+cap\s+of|live\s+score|ipl\s+(?:score|schedule|match|table)|breaking\s+news|today'?s\s+news|earthquake\s+today|election\s+results?\s+today)\b/i;
-    const explicitFreshnessSignals = /\b(?:as\s+of\s+today|right\s+now|open\s+now|near\s+me|with\s+sources?|source\s+links?)\b/i;
-    const explicitFreshnessUpdate = /\b(?:what'?s\s+new|new\s+(?:update|updates|release|version|announcement|news|development|features?))\b/i;
-    const actionableTravelSignals = /\b(?:directions\s+to|route\s+to|how\s+to\s+(?:reach|get\s+to)|hotels?\s+(?:near|around|in)|restaurants?\s+(?:near|around|in)|ticket\s+price|tickets?\s+for|entry\s+fee|visiting\s+hours|timings?\s+of|places\s+to\s+visit|things\s+to\s+do\s+in|sightseeing\s+in|near\s+me|nearby|near\s+[a-z]+)\b/i;
-
-    if (
-        liveOfficeholderSignals.test(lower) ||
-        liveCmPmSignals.test(lower) ||
-        liveDomainSignals.test(lower) ||
-        explicitFreshnessSignals.test(lower) ||
-        explicitFreshnessUpdate.test(lower) ||
-        actionableTravelSignals.test(lower)
-    ) {
-        return false;
-    }
-
-    if (/\b(?:what\s+(?:is|was)|which\s+city\s+is|name)\s+(?:the\s+)?capital\s+(?:city\s+)?of\s+[a-z\s.'-]+/i.test(lower) ||
-        /\b(?:capital\s+(?:city\s+)?of\s+[a-z\s.'-]+)/i.test(lower) ||
-        /\b[a-z\s.'-]+\s+capital\b/i.test(lower)) {
-        return true;
-    }
-
-    const geographySignals = /\b(?:continent|continents|ocean|oceans|sea|seas|river|rivers|mountain|mountains|mountain\s+range|plateau|desert|island|islands|valley|gulf|bay|strait|peninsula|archipelago|hemisphere|equator|latitude|longitude|tropic\s+of\s+(?:cancer|capricorn)|longest\s+river|highest\s+mountain|deepest\s+ocean|largest\s+desert|largest\s+country|smallest\s+country|currency\s+of|official\s+language\s+of|national\s+animal|national\s+bird|national\s+flower|national\s+anthem|population\s+of|area\s+of|located\s+in|location\s+of|where\s+is\s+.+\s+located|where\s+are\s+.+\s+located)\b/i;
-    if (geographySignals.test(lower)) return true;
-
-    const isLandmarkTopic = (
-        /\b(?:architecture|sculptural\s+style|engineering|construction|geological\s+formation|formation\s+of|erosion|composition\s+of|architectural\s+significance)\b/i.test(lower)
-    ) || /^(?:why\s+was|who\s+(?:built|designed|created|founded)|how\s+(?:was|were))\s+[a-z0-9\s.'-]{2,80}\??$/i.test(lower);
-    if (isLandmarkTopic) return true;
-
-    const historySignals = /\b(?:history|ancient|medieval|century|empire|dynasty|civilization|battle\s+of|treaty\s+of|revolution|renaissance|archaeology|historical|cold\s+war|world\s+war|bronze\s+age|iron\s+age|first\s+president\s+of|former\s+president|declaration\s+of\s+independence|constitution)\b/i;
-    if (historySignals.test(lower)) return true;
-
-    const scienceMathSignals = /\b(?:physics|chemistry|biology|astronomy|cosmology|quantum|gravity|relativity|thermodynamics|optics|evolution|photosynthesis|mitosis|meiosis|dna|rna|gene|protein|cell|atom|molecule|neutron\s+star|black\s+hole|supernova|galaxy|planet|orbit|solar\s+system|exoplanet|speed\s+of\s+light|periodic\s+table|atomic\s+number|who\s+discovered|who\s+invented|calculate|compute|solve|integrate|integral|derivative|differentiate|equation|formula|theorem|factorial|matrix|matrices|determinant|eigenvalue)\b/i;
-    if (scienceMathSignals.test(lower) || /^\s*[\d\s+\-*/^().=xXyYzZ]+\s*$/.test(query)) return true;
-
-    for (const pattern of INTENT_CODING_PATTERNS) {
-        if (pattern.test(query)) return true;
-    }
-
-    const definitionalSignals = /\b(?:definition\s+of|meaning\s+of|what\s+is\s+the\s+definition\s+of|what\s+is\s+the\s+meaning\s+of|define\s+|explain\s+(?:the\s+concept\s+of|what|how|why)|difference\s+between|philosophy|philosophical|ethics|ethical|epistemology|metaphysics|economic|economics|macroeconomics|microeconomics|inflation|gdp)\b/i;
-    if (definitionalSignals.test(lower)) return true;
-
-    if (/^(?:where\s+is|where\s+was|where\s+are|what\s+is|what\s+was|what\s+are|what'?s|who\s+was|how\s+does|how\s+do|explain|define|tell\s+me\s+about)\s+[\w\s.'-]{2,80}\??$/i.test(query)) {
-        return true;
-    }
-
-    return false;
-}
-
-function classifyQueryIntent(rawQuery = '') {
-    const query = String(rawQuery || '').trim();
-    if (!query) {
-        return { type: 'static_reasoning', category: 'empty_query', requiresLiveGrounding: false };
-    }
-
-    const lower = query.toLowerCase();
-
-    if (/\b(?:search\s+(?:for|the\s+web\s+for|google\s+for)|find\s+(?:articles|news|web\s+pages)\s+about|look\s+up\s+online)\b/i.test(lower)) {
-        return { type: 'explicit_search', category: 'explicit_search', requiresLiveGrounding: true };
-    }
-
-    if (/\b(?:weather|forecast|temperature|humidity|rain|rainfall|precipitation|sunny|cloudy|wind\s+speed)\b/i.test(lower)) {
-        return { type: 'domain_specific', category: 'weather', requiresLiveGrounding: true };
-    }
-
-    if (/\b(?:price\s+of\s+(?:bitcoin|btc|ethereum|eth|solana|crypto|gold|silver|crude\s+oil)|stock\s+price\s+of|market\s+cap\s+of)\b/i.test(lower)) {
-        return { type: 'domain_specific', category: 'finance_crypto', requiresLiveGrounding: true };
-    }
-
-    const isHistorical = /\b(?:first|former|past|in\s+\d{4}|during\s+\d{4}|who\s+was\s+the|history\s+of)\b/i.test(lower);
-    const entityTarget = extractEntityTarget(query);
-    if (entityTarget && !isHistorical) {
-        return { type: 'temporal_fact', category: 'political_leadership', requiresLiveGrounding: true, entityTarget };
-    }
-
-    if (!isHistorical && (
-        /\b(?:current|latest|present|today|now)\s+(?:governor|pm|cm|president|chancellor|minister|mayor|ceo|chairman|leader|head\s+of\s+state)\b/i.test(lower) ||
-        /\b(?:who\s+is\s+(?:the\s+)?(?:current|present|latest)?\s*(?:chief\s+minister|prime\s+minister|president|governor|mayor|chancellor|ceo|chairman))\b/i.test(lower) ||
-        /\b(?:who\s+is\s+(?:the\s+)?(?:cm|pm)\s+of)\b/i.test(lower)
-    )) {
-        return { type: 'temporal_fact', category: 'political_leadership', requiresLiveGrounding: true, entityTarget: entityTarget || extractEntityTarget(query) };
-    }
-
-    if (isStableGeographyOrGeneralFactQuery(query)) {
-        return { type: 'static_reasoning', category: 'stable_general_knowledge', requiresLiveGrounding: false };
-    }
-
-    for (const pattern of INTENT_CODING_PATTERNS) {
-        if (pattern.test(query)) return { type: 'static_reasoning', category: 'coding_cs', requiresLiveGrounding: false };
-    }
-
-    return { type: 'static_reasoning', category: 'general_reasoning', requiresLiveGrounding: false };
-}
-
-/* ── Autonomous Self-Critique & Refinement Loop (Inlined for 0-dep cold boot) ── */
-function critiqueTokenize(text = '') {
-    return Array.from(new Set(String(text || '').toLowerCase().match(/[a-z0-9_]{2,}/g) || []));
-}
-
-function critiqueCountWords(text = '') {
-    return String(text || '').trim().split(/\s+/).filter(Boolean).length;
-}
-
-function extractQueryConstraints(query = '') {
-    const raw = String(query || '').trim();
-    const constraints = [];
-
-    const negMatch = raw.matchAll(/\b(?:don'?t|do\s+not|never|avoid|without|no)\s+(?:use|using|include|including|have|having|mention|mentioning)\s+([^,.;!?\n]{3,60})/gi);
-    for (const m of negMatch) {
-        const item = m[1].trim().replace(/\b(?:please|any|the)\b/gi, '').trim();
-        if (item.length > 2) {
-            constraints.push({ type: 'negative_constraint', target: item.toLowerCase() });
-        }
-    }
-
-    if (/\b(?:json\s+only|valid\s+json|format\s+(?:as|in)\s+json)\b/i.test(raw)) {
-        constraints.push({ type: 'required_format', target: 'json' });
-    }
-    if (/\b(?:code\s+only|only\s+code|no\s+explanation)\b/i.test(raw)) {
-        constraints.push({ type: 'required_format', target: 'code_only' });
-    }
-    if (/\b(?:step-by-step|show\s+all\s+steps|break\s+down\s+step\s+by\s+step)\b/i.test(raw)) {
-        constraints.push({ type: 'required_format', target: 'step_by_step' });
-    }
-
-    const maxWordsMatch = raw.match(/\b(?:under|less\s+than|max(?:imum)?(?:\s+of)?)\s+(\d{1,4})\s+words\b/i);
-    if (maxWordsMatch) {
-        constraints.push({ type: 'max_words', target: parseInt(maxWordsMatch[1], 10) });
-    }
-
-    return constraints;
-}
-
-function detectLogicalContradictions(text = '') {
-    const flaws = [];
-    const lower = String(text || '').toLowerCase();
-
-    if (/\b(?:knight|knave)\b/i.test(lower)) {
-        const lines = lower.split('\n');
-        let knightConfirmed = false;
-        let knaveConfirmed = false;
-        for (const line of lines) {
-            if (/\b(?:is\s+a\s+knight|must\s+be\s+a\s+knight)\b/.test(line)) knightConfirmed = true;
-            if (/\b(?:is\s+a\s+knave|must\s+be\s+a\s+knave)\b/.test(line)) knaveConfirmed = true;
-        }
-        if (/\btherefore\b/.test(lower) && /\bcannot\s+be\s+determined\b/.test(lower) && (knightConfirmed || knaveConfirmed)) {
-            flaws.push({
-                type: 'contradictory_conclusion',
-                description: 'The deduction derives concrete roles but also asserts the outcome cannot be determined.',
-                severity: 'critical'
-            });
-        }
-    }
-
-    const fenceCount = (text.match(/```/g) || []).length;
-    if (fenceCount % 2 !== 0) {
-        flaws.push({
-            type: 'unclosed_code_fence',
-            description: 'The response contains an unclosed Markdown code fence (```).',
-            severity: 'critical'
-        });
-    }
-
-    if (critiqueCountWords(text) > 80 && /^(?:i\s+cannot\s+assist|i\s+do\s+not\s+have\s+access|as\s+an\s+ai\s+language\s+model,\s+i\s+cannot)\b/i.test(lower)) {
-        flaws.push({
-            type: 'refusal_body_conflict',
-            description: 'The answer opens with a generic canned refusal preamble despite containing generated solution content.',
-            severity: 'critical'
-        });
-    }
-
-    const mathEqRegex = /\b(\d+(?:\.\d+)?)\s*([\+\-\*\/])\s*(\d+(?:\.\d+)?)\s*=\s*(\d+(?:\.\d+)?)\b/g;
-    let eqMatch;
-    while ((eqMatch = mathEqRegex.exec(text)) !== null) {
-        const n1 = parseFloat(eqMatch[1]);
-        const op = eqMatch[2];
-        const n2 = parseFloat(eqMatch[3]);
-        const declared = parseFloat(eqMatch[4]);
-        let expected = null;
-        if (op === '+') expected = n1 + n2;
-        else if (op === '-') expected = n1 - n2;
-        else if (op === '*') expected = n1 * n2;
-        else if (op === '/' && n2 !== 0) expected = n1 / n2;
-
-        if (expected !== null && Math.abs(expected - declared) > 0.001) {
-            flaws.push({
-                type: 'arithmetic_inconsistency',
-                description: `Arithmetic expression ${eqMatch[0]} is incorrect (computed ${expected}).`,
-                severity: 'warning'
-            });
-            break;
-        }
-    }
-
-    return flaws;
-}
-
-function evaluateDraftSolution(query = '', draftAnswer = '', context = {}) {
-    const flaws = [];
-    const repairDirectives = [];
-    const draftText = String(draftAnswer || '').trim();
-
-    if (!draftText) {
-        return {
-            verified: false,
-            score: 0.0,
-            flaws: [{ type: 'empty_solution', description: 'Candidate solution is empty.', severity: 'critical' }],
-            repairDirectives: ['Generate a complete solution addressing the prompt.']
-        };
-    }
-
-    const constraints = extractQueryConstraints(query);
-    const draftLower = draftText.toLowerCase();
-
-    for (const c of constraints) {
-        if (c.type === 'negative_constraint') {
-            if (draftLower.includes(c.target)) {
-                flaws.push({
-                    type: 'constraint_violation',
-                    description: `Violated explicit negative constraint: included '${c.target}'.`,
-                    severity: 'critical'
-                });
-                repairDirectives.push(`Remove all occurrences of '${c.target}' as explicitly requested.`);
-            }
-        } else if (c.type === 'required_format') {
-            if (c.target === 'json') {
-                const hasJsonFence = /```(?:json)?\s*[\{\[][\s\S]*?[\}\]]\s*```/.test(draftText) || (/^[\{\[][\s\S]*?[\}\]]$/.test(draftText));
-                if (!hasJsonFence) {
-                    flaws.push({
-                        type: 'format_violation',
-                        description: 'Output was required to be JSON, but valid JSON block was missing.',
-                        severity: 'critical'
-                    });
-                    repairDirectives.push('Format the entire response as valid, parseable JSON.');
-                }
-            } else if (c.target === 'code_only') {
-                const wordsOutsideFences = draftText.replace(/```[\s\S]*?```/g, '').trim();
-                if (critiqueCountWords(wordsOutsideFences) > 40) {
-                    flaws.push({
-                        type: 'format_violation',
-                        description: 'User requested code only without conversational explanation.',
-                        severity: 'warning'
-                    });
-                    repairDirectives.push('Output only the code without conversational narrative.');
-                }
-            }
-        } else if (c.type === 'max_words') {
-            const actualWords = critiqueCountWords(draftText);
-            if (actualWords > c.target * 1.25) {
-                flaws.push({
-                    type: 'length_violation',
-                    description: `Answer exceeds requested word limit (expected <= ${c.target} words, got ~${actualWords}).`,
-                    severity: 'warning'
-                });
-                repairDirectives.push(`Condense the answer to strictly under ${c.target} words.`);
-            }
-        }
-    }
-
-    const logicalFlaws = detectLogicalContradictions(draftText);
-    for (const lf of logicalFlaws) {
-        flaws.push(lf);
-        repairDirectives.push(lf.description);
-    }
-
-    let score = 1.0;
-    for (const f of flaws) {
-        if (f.severity === 'critical') score -= 0.45;
-        else score -= 0.15;
-    }
-    score = Math.max(0.0, Math.min(1.0, Number(score.toFixed(2))));
-
-    const verified = score >= 0.70 && !flaws.some(f => f.severity === 'critical');
-
-    return {
-        verified,
-        score,
-        flaws,
-        repairDirectives
-    };
-}
-
-function needsRefinement(critiqueResult) {
-    if (!critiqueResult) return false;
-    return critiqueResult.verified === false || (critiqueResult.flaws && critiqueResult.flaws.some(f => f.severity === 'critical'));
-}
-
-function buildRefinementPrompt(query = '', draftAnswer = '', critiqueResult = {}, originalSystemPrompt = '') {
-    const flawsList = (critiqueResult?.repairDirectives || critiqueResult?.flaws?.map(f => f.description) || [])
-        .map(d => `- ${d}`)
-        .join('\n');
-
-    return [
-        (originalSystemPrompt || '').trim(),
-        '',
-        '=== AUTONOMOUS SELF-CORRECTION & RECURSIVE REFINEMENT ===',
-        'Your initial draft response was evaluated by internal self-critique and the following issues were flagged:',
-        flawsList || '- Please review step-by-step for correctness and consistency.',
-        '',
-        'TASK: Re-evaluate and refine the solution. Provide the definitive, corrected answer satisfying all constraints and eliminating all flagged contradictions. Do not reference internal system critique in your final output.',
-        '========================================================'
-    ].join('\n');
-}
-
-function synthesizeSelfCritiqueMetadata(critiqueResult = {}, refined = false) {
-    const flaws = critiqueResult?.flaws || [];
-    return {
-        performed: true,
-        verified: Boolean(critiqueResult?.verified),
-        score: critiqueResult?.score ?? 1.0,
-        flawsDetected: flaws.length,
-        refined: Boolean(refined),
-        auditSummary: flaws.length
-            ? `Self-Critique detected ${flaws.length} issue(s) and applied recursive correction.`
-            : 'Self-Critique verified solution consistency and constraint adherence.'
-    };
-}
+import {
+    extractQueryConstraints,
+    detectLogicalContradictions,
+    evaluateDraftSolution,
+    needsRefinement,
+    buildRefinementPrompt,
+    synthesizeSelfCritiqueMetadata
+} from './_lib/self-critique-loop.js';
 
 async function getSearchHelpers() {
     try {
@@ -3327,6 +2925,37 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 intentClassification
             };
         }
+        if (/\b(lyrics|song lyrics|lyrics of)\b/i.test(query)) {
+            if (!isFactSearchConfigured()) {
+                return {
+                    strategy: 'direct',
+                    reason: 'live_retrieval_disabled',
+                    webEligible: false
+                };
+            }
+            return {
+                strategy: 'live_first',
+                reason: 'lyrics_retrieval_grounding',
+                webEligible: true
+            };
+        }
+
+        const asksSources = /\b(with sources?|source links?)\b/i.test(query);
+        if (asksSources) {
+            if (!isFactSearchConfigured()) {
+                return {
+                    strategy: 'direct',
+                    reason: 'live_retrieval_disabled',
+                    webEligible: false
+                };
+            }
+            return {
+                strategy: 'live_first',
+                reason: 'user_requested_sources',
+                webEligible: true
+            };
+        }
+
         if (intentClassification.type === 'static_reasoning' && intentClassification.category !== 'general_reasoning') {
             return {
                 strategy: 'direct',
@@ -3348,23 +2977,6 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 strategy: 'direct',
                 reason: 'live_retrieval_disabled',
                 webEligible: false
-            };
-        }
-
-        const asksSources = /\b(with sources?|source links?)\b/i.test(query);
-        if (asksSources) {
-            return {
-                strategy: 'live_first',
-                reason: 'user_requested_sources',
-                webEligible: true
-            };
-        }
-
-        if (/\b(lyrics|song lyrics|lyrics of)\b/i.test(query)) {
-            return {
-                strategy: 'live_first',
-                reason: 'lyrics_retrieval_grounding',
-                webEligible: true
             };
         }
 
