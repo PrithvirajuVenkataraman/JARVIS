@@ -57,8 +57,17 @@ export function extractQueryDateIntent(query = '') {
         return { type: 'recent_week', weight: 1.5 };
     }
 
-    // 3. General Recency / Current updates
-    if (/\b(?:latest|current|recently|recent|breaking|newest|what('?s|\s+is)\s+new|updates?|this\s+month|news|active|present)\b/.test(raw)) {
+    // 3. Named month detection (e.g. "october updates", "in may")
+    const monthMatch = raw.match(/\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b/);
+    if (monthMatch) {
+        const mo = MONTH_NAMES_MAP[monthMatch[1]];
+        if (mo !== undefined) {
+            return { type: 'target_month', targetMonth: mo, weight: 1.5 };
+        }
+    }
+
+    // 4. General Recency / Current updates
+    if (/\b(?:latest|current|recently|recent|breaking|newest|what('?s|\s+is)\s+new|updates?|this\s+month|past\s+month|news|active|present)\b/.test(raw)) {
         return { type: 'current', weight: 1.2 };
     }
 
@@ -70,6 +79,9 @@ export function extractQueryDateIntent(query = '') {
     return { type: 'neutral', weight: 0.3 };
 }
 
+const KNOWN_TODAY_BRANDS = /\b(?:usa\s+today|india\s+today|medical\s+news\s+today|psychology\s+today|today's\s+parent|today\s+show|today\.com|the\s+today\s+show|today\s+fm)\b/gi;
+const CASUAL_TODAY_PHRASES = /\b(?:in\s+today's\s+(?:world|society|market|digital\s+age|economy)|available\s+today|join\s+today|call\s+(?:us\s+)?today|apply\s+today|start\s+today|order\s+today|buy\s+today|sign\s+up\s+today|shop\s+today|visit\s+today|book\s+today)\b/gi;
+
 /**
  * Robustly parses publication/update timestamp from document metadata, URL paths, or snippets
  * Supports ISO, US formats (Month DD, YYYY & MM/DD/YYYY), UK formats (DD Month YYYY & DD/MM/YYYY), and relative times.
@@ -78,13 +90,20 @@ export function parseDocumentDate(doc = {}, now = Date.now()) {
     if (!doc || typeof doc !== 'object') return null;
 
     // 1. Check explicit structured date fields
-    const directDate = doc.date || doc.publishedAt || doc.pubDate || doc.timestamp || doc.startDate || doc.endDate || doc.time || doc.datetime;
+    const directDate = doc.date || doc.publishedAt || doc.pubDate || doc.timestamp || doc.published_date || doc.time || doc.datetime;
     if (directDate) {
         if (typeof directDate === 'number' && Number.isFinite(directDate) && directDate > 0) {
             return directDate;
         }
-        const parsed = Date.parse(directDate);
-        if (!Number.isNaN(parsed) && parsed > 0) return parsed;
+        if (typeof directDate === 'string') {
+            const trimmed = directDate.trim();
+            if (/^\d{10,13}$/.test(trimmed)) {
+                const num = parseInt(trimmed, 10);
+                return num < 10000000000 ? num * 1000 : num;
+            }
+            const parsed = Date.parse(trimmed);
+            if (!Number.isNaN(parsed) && parsed > 0) return parsed;
+        }
     }
 
     // 2. Check URL path patterns (e.g., /2026/10/11/ or /2026-10-11/)
@@ -92,68 +111,62 @@ export function parseDocumentDate(doc = {}, now = Date.now()) {
     if (url) {
         const urlDateMatch = url.match(/(?:^|\/)((?:19|20)\d\d)[/-](0?[1-9]|1[0-2])[/-](0?[1-9]|[12]\d|3[01])(?:\/|$|\?|\.)/);
         if (urlDateMatch) {
-            const parsed = Date.parse(`${urlDateMatch[1]}-${urlDateMatch[2].padStart(2, '0')}-${urlDateMatch[3].padStart(2, '0')}`);
-            if (!Number.isNaN(parsed)) return parsed;
-        }
-        const urlYearMatch = url.match(/(?:^|\/)((?:19|20)\d\d)(?:\/|$|\?|\.)/);
-        if (urlYearMatch) {
-            const parsed = Date.parse(`${urlYearMatch[1]}-01-01`);
+            const parsed = Date.UTC(parseInt(urlDateMatch[1], 10), parseInt(urlDateMatch[2], 10) - 1, parseInt(urlDateMatch[3], 10));
             if (!Number.isNaN(parsed)) return parsed;
         }
     }
 
     // 3. Check snippet / title / description for leading date patterns (American, UK, ISO & Relative)
-    const text = `${doc.title || ''} ${doc.description || ''} ${doc.snippet || ''} ${doc.text || ''}`.trim();
-    if (!text) return null;
+    const rawText = `${doc.title || ''} ${doc.description || ''} ${doc.snippet || ''} ${doc.text || ''}`.trim();
+    if (!rawText) {
+        if (url) {
+            const urlYearMatch = url.match(/(?:^|\/)((?:19|20)\d\d)(?:\/|$|\?|\.)/);
+            if (urlYearMatch) {
+                const parsed = Date.parse(`${urlYearMatch[1]}-01-01`);
+                if (!Number.isNaN(parsed)) return parsed;
+            }
+        }
+        return null;
+    }
 
     const currentYear = new Date(now).getUTCFullYear();
+    const currentMonth = new Date(now).getUTCMonth();
 
-    // 3a. Relative timestamps (Search snippets: "2 hours ago", "yesterday", "3 days ago")
-    let m = text.match(/\b(\d+)\s*(?:seconds?|secs?)\s*ago\b/i);
-    if (m) return now - parseInt(m[1], 10) * 1000;
-    m = text.match(/\b(\d+)\s*(?:minutes?|mins?)\s*ago\b/i);
-    if (m) return now - parseInt(m[1], 10) * 60 * 1000;
-    m = text.match(/\b(\d+)\s*(?:hours?|hrs?)\s*ago\b/i);
-    if (m) return now - parseInt(m[1], 10) * 3600 * 1000;
-    if (/\b(?:just\s+now|moments?\s+ago|right\s+now|today)\b/i.test(text)) return now;
-    if (/\b(?:yesterday|yesterday's)\b/i.test(text)) return now - 24 * 3600 * 1000;
-    m = text.match(/\b(\d+)\s*days?\s*ago\b/i);
-    if (m) return now - parseInt(m[1], 10) * 24 * 3600 * 1000;
-    m = text.match(/\b(\d+)\s*weeks?\s*ago\b/i);
-    if (m) return now - parseInt(m[1], 10) * 7 * 24 * 3600 * 1000;
-    m = text.match(/\b(\d+)\s*months?\s*ago\b/i);
-    if (m) return now - parseInt(m[1], 10) * 30 * 24 * 3600 * 1000;
-
-    // 3b. American Format: Month DD, YYYY or Month DD (e.g. "October 11, 2026", "Oct 11 2026", "Oct 11")
-    m = text.match(/\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+((?:19|20)\d\d))?\b/i);
+    // 3a. Explicit Calendar Dates FIRST (American Month DD YYYY, UK DD Month YYYY, ISO, Numeric)
+    // American Format: Month DD, YYYY or Month DD (e.g. "October 11, 2026", "Oct 11 2026", "Oct 11")
+    let m = rawText.match(/\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+((?:19|20)\d\d))?\b/i);
     if (m) {
         const mo = MONTH_NAMES_MAP[m[1].toLowerCase().replace('.', '')];
         const day = parseInt(m[2], 10);
-        const yr = m[3] ? parseInt(m[3], 10) : currentYear;
+        let yr = m[3] ? parseInt(m[3], 10) : currentYear;
+        if (!m[3] && mo > currentMonth) yr = currentYear - 1;
         if (mo != null && day >= 1 && day <= 31) return Date.UTC(yr, mo, day);
     }
 
-    // 3c. UK / International Format: DD Month YYYY or DD Month (e.g. "11 October 2026", "11th Oct 2026", "11 Oct")
-    m = text.match(/\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?(?:,?\s+((?:19|20)\d\d))?\b/i);
+    // UK / International Format: DD Month YYYY or DD Month (e.g. "11 October 2026", "11th Oct 2026", "11 Oct")
+    m = rawText.match(/\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?(?:,?\s+((?:19|20)\d\d))?\b/i);
     if (m) {
         const day = parseInt(m[1], 10);
         const mo = MONTH_NAMES_MAP[m[2].toLowerCase().replace('.', '')];
-        const yr = m[3] ? parseInt(m[3], 10) : currentYear;
+        let yr = m[3] ? parseInt(m[3], 10) : currentYear;
+        if (!m[3] && mo > currentMonth) yr = currentYear - 1;
         if (mo != null && day >= 1 && day <= 31) return Date.UTC(yr, mo, day);
     }
 
-    // 3d. ISO Format: YYYY-MM-DD or YYYY/MM/DD
-    m = text.match(/\b((?:19|20)\d\d)[/-](0?[1-9]|1[0-2])[/-](0?[1-9]|[12]\d|3[01])\b/);
+    // ISO Format: YYYY-MM-DD or YYYY/MM/DD
+    m = rawText.match(/\b((?:19|20)\d\d)[/-](0?[1-9]|1[0-2])[/-](0?[1-9]|[12]\d|3[01])\b/);
     if (m) {
         return Date.UTC(parseInt(m[1], 10), parseInt(m[2], 10) - 1, parseInt(m[3], 10));
     }
 
-    // 3e. Numeric US & UK Formats: MM/DD/YYYY or DD/MM/YYYY
-    m = text.match(/\b(\d{1,2})[/-](\d{1,2})[/-]((?:19|20)\d\d)\b/);
+    // Numeric US & UK Formats: MM/DD/YYYY or DD/MM/YYYY
+    m = rawText.match(/\b(\d{1,2})[/-](\d{1,2})[/-]((?:19|20)\d\d)\b/);
     if (m) {
         const n1 = parseInt(m[1], 10);
         const n2 = parseInt(m[2], 10);
         const yr = parseInt(m[3], 10);
+        const domainStr = String(doc.domain || doc.url || '').toLowerCase();
+        const isUkOrIntl = /\.(?:uk|au|nz|za|ie|in)\b/i.test(domainStr);
         if (n1 > 12 && n2 <= 12) {
             // Unambiguous UK: DD/MM/YYYY
             return Date.UTC(yr, n2 - 1, n1);
@@ -161,8 +174,50 @@ export function parseDocumentDate(doc = {}, now = Date.now()) {
             // Unambiguous US: MM/DD/YYYY
             return Date.UTC(yr, n1 - 1, n2);
         } else if (n1 <= 12 && n2 <= 31) {
-            // Default to US MM/DD/YYYY
+            if (isUkOrIntl) {
+                return Date.UTC(yr, n2 - 1, n1);
+            }
             return Date.UTC(yr, n1 - 1, n2);
+        }
+    }
+
+    // 3b. Relative timestamps (Search snippets: "2 hours ago", "yesterday", "3 days ago")
+    // Sanitize known publisher brand names and casual marketing phrases containing "today"
+    const sanitizedText = rawText
+        .replace(KNOWN_TODAY_BRANDS, ' ')
+        .replace(CASUAL_TODAY_PHRASES, ' ');
+
+    m = sanitizedText.match(/\b(\d+)\s*(?:seconds?|secs?)\s*ago\b/i);
+    if (m) return now - parseInt(m[1], 10) * 1000;
+    m = sanitizedText.match(/\b(\d+)\s*(?:minutes?|mins?)\s*ago\b/i);
+    if (m) return now - parseInt(m[1], 10) * 60 * 1000;
+    m = sanitizedText.match(/\b(\d+)\s*(?:hours?|hrs?)\s*ago\b/i);
+    if (m) return now - parseInt(m[1], 10) * 3600 * 1000;
+    m = sanitizedText.match(/\b(\d+)\s*days?\s*ago\b/i);
+    if (m) return now - parseInt(m[1], 10) * 24 * 3600 * 1000;
+    m = sanitizedText.match(/\b(\d+)\s*weeks?\s*ago\b/i);
+    if (m) return now - parseInt(m[1], 10) * 7 * 24 * 3600 * 1000;
+    m = sanitizedText.match(/\b(\d+)\s*months?\s*ago\b/i);
+    if (m) return now - parseInt(m[1], 10) * 30 * 24 * 3600 * 1000;
+
+    // Publication-prefixed or explicit marker relative dates
+    const snippetText = String(doc.snippet || doc.description || '').replace(KNOWN_TODAY_BRANDS, ' ').replace(CASUAL_TODAY_PHRASES, ' ').trim();
+    if (/(?:^|[|•·—–\-\n])\s*(?:just\s+now|moments?\s+ago|right\s+now|today)\b/i.test(sanitizedText) ||
+        /(?:^|[|•·—–\-\n])\s*(?:just\s+now|moments?\s+ago|right\s+now|today)\b/i.test(snippetText) ||
+        /\b(?:published|updated|posted|date:?|released)\s+(?:just\s+now|moments?\s+ago|right\s+now|today)\b/i.test(sanitizedText) ||
+        /\btoday\s*[-—–:•·|]/i.test(sanitizedText)) {
+        return now;
+    }
+    if (/\b(?:yesterday|yesterday's)\b/i.test(sanitizedText)) {
+        return now - 24 * 3600 * 1000;
+    }
+
+    // 3c. Fallback to URL year if present
+    if (url) {
+        const urlYearMatch = url.match(/(?:^|\/)((?:19|20)\d\d)(?:\/|$|\?|\.)/);
+        if (urlYearMatch) {
+            const parsed = Date.parse(`${urlYearMatch[1]}-01-01`);
+            if (!Number.isNaN(parsed)) return parsed;
         }
     }
 
@@ -188,6 +243,7 @@ export function computeTemporalScore(docDateMs, dateIntent = { type: 'neutral' }
     if (!docDateMs || Number.isNaN(docDateMs)) {
         if (dateIntent.type === 'immediate') return 0.25;
         if (dateIntent.type === 'recent_week') return 0.35;
+        if (dateIntent.type === 'target_month') return 0.25;
         return 0.5;
     }
 
@@ -195,6 +251,12 @@ export function computeTemporalScore(docDateMs, dateIntent = { type: 'neutral' }
         const docYear = new Date(docDateMs).getUTCFullYear();
         const diffYears = Math.abs(docYear - dateIntent.targetYear);
         return Number((1.0 / (1.0 + diffYears * 0.5)).toFixed(3));
+    }
+
+    if (dateIntent.type === 'target_month' && dateIntent.targetMonth !== undefined) {
+        const docMonth = new Date(docDateMs).getUTCMonth();
+        const diffMonths = Math.abs(docMonth - dateIntent.targetMonth);
+        return Number((1.0 / (1.0 + diffMonths * 0.8)).toFixed(3));
     }
 
     const ageDays = Math.max(0, (now - docDateMs) / (1000 * 60 * 60 * 24));
@@ -233,10 +295,10 @@ export async function hybridRerank(query, documents = [], options = {}) {
         bm25RankMap.set(item.origIndex, rank + 1);
     });
 
-    // 2. Compute Temporal Scores & Temporal Ranking
-    const temporalScores = list.map(doc => {
-        const docDateMs = parseDocumentDate(doc);
-        return computeTemporalScore(docDateMs, dateIntent, now);
+    // 2. Parse Document Dates & Compute Temporal Scores & Temporal Ranking
+    const parsedDates = list.map(doc => parseDocumentDate(doc, now));
+    const temporalScores = list.map((doc, index) => {
+        return computeTemporalScore(parsedDates[index], dateIntent, now);
     });
 
     const temporalRanked = list
@@ -305,17 +367,59 @@ export async function hybridRerank(query, documents = [], options = {}) {
         const temporalMultiplier = Math.max(0.3, 1.0 + (temporalWeight * (tScore - 0.5)));
         const totalRrfScore = (baseRrfScore + temporalRrf + trustRrf) * temporalMultiplier;
 
+        const docDate = parsedDates[index];
         return {
             ...doc,
             bm25Score: bm25Scores[index] || 0,
             temporalScore: tScore,
+            publishedMs: docDate || doc.publishedMs || 0,
+            date: doc.date || (docDate ? formatDocumentDate(docDate, now) : ''),
             domainTrustTier: trustMeta.tier,
             domainTrustSignals: trustMeta.signals,
             rrfScore: totalRrfScore
         };
     });
 
-    fused.sort((a, b) => b.rrfScore - a.rrfScore);
+    // Determine if query warrants strict chronological ordering
+    const isChronological = Boolean(
+        options.chronological === true ||
+        options.forceChronological === true ||
+        (dateIntent && (dateIntent.type === 'immediate' || dateIntent.type === 'recent_week' || dateIntent.type === 'current' || dateIntent.type === 'target_month')) ||
+        /\b(?:today|tonight|yesterday|yesterday's|today's|latest|current|recently|recent|breaking|newest|what('?s|\s+is)\s+new|updates?|hours?\s+ago|days?\s+ago|past\s+24\s+hours?|past\s+48\s+hours?|this\s+week|past\s+week|last\s+week|this\s+month|past\s+month|this\s+year|news)\b/i.test(queryText)
+    );
+
+    if (isChronological) {
+        if (dateIntent.type === 'target_month' && dateIntent.targetMonth !== undefined) {
+            fused.sort((a, b) => {
+                const moA = a.publishedMs ? new Date(a.publishedMs).getUTCMonth() : null;
+                const moB = b.publishedMs ? new Date(b.publishedMs).getUTCMonth() : null;
+                if (moA != null && moB != null) {
+                    const diffA = Math.abs(moA - dateIntent.targetMonth);
+                    const diffB = Math.abs(moB - dateIntent.targetMonth);
+                    if (diffA !== diffB) return diffA - diffB;
+                    return b.rrfScore - a.rrfScore;
+                }
+                if (moA != null && moB == null) return -1;
+                if (moA == null && moB != null) return 1;
+                return b.rrfScore - a.rrfScore;
+            });
+        } else {
+            // Strict Chronological Ordering: newest published date first at #1 descending
+            fused.sort((a, b) => {
+                const timeA = a.publishedMs || 0;
+                const timeB = b.publishedMs || 0;
+                if (timeA && timeB) {
+                    if (timeA !== timeB) return timeB - timeA;
+                    return b.rrfScore - a.rrfScore;
+                }
+                if (timeA && !timeB) return -1;
+                if (!timeA && timeB) return 1;
+                return b.rrfScore - a.rrfScore;
+            });
+        }
+    } else {
+        fused.sort((a, b) => b.rrfScore - a.rrfScore);
+    }
 
     // 5. Cross-Encoder Rerank if enabled (NVIDIA NIM)
     if (fused.length > 1 && isNvidiaRerankEnabled() && options.useRerank !== false) {
@@ -323,8 +427,22 @@ export async function hybridRerank(query, documents = [], options = {}) {
             const topCandidates = fused.slice(0, Math.min(12, fused.length));
             const reranked = await rerankTexts(queryText, topCandidates, options);
             if (reranked.available && Array.isArray(reranked.ranked)) {
-                const rest = fused.slice(topCandidates.length);
-                return [...reranked.ranked, ...rest];
+                const candidatePool = [...reranked.ranked, ...fused.slice(topCandidates.length)];
+                if (isChronological) {
+                    // Re-enforce strict chronological ordering invariant so cross-encoder does not promote stale dates
+                    candidatePool.sort((a, b) => {
+                        const timeA = a.publishedMs || 0;
+                        const timeB = b.publishedMs || 0;
+                        if (timeA && timeB) {
+                            if (timeA !== timeB) return timeB - timeA;
+                            return (b.score ?? b.rrfScore ?? 0) - (a.score ?? a.rrfScore ?? 0);
+                        }
+                        if (timeA && !timeB) return -1;
+                        if (!timeA && timeB) return 1;
+                        return (b.score ?? b.rrfScore ?? 0) - (a.score ?? a.rrfScore ?? 0);
+                    });
+                }
+                return candidatePool;
             }
         } catch (_) {
             // Keep RRF ranking if cross-encoder fails
