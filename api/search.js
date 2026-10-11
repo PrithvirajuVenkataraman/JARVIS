@@ -892,11 +892,11 @@ export function classifyDeterministicRetrievalIntent(query = '') {
     // 2. Definite live/changing patterns (current leadership, prices, weather, live sports, tournament winners)
     const isHistorical = /\b(was|were|former|previous|past|first|ex-|history|historical|ancient|mythological)\b/i.test(text) || /\b(?:in|during)\s+(?:19|20)\d{2}\b/i.test(text);
     const isLeadershipOrOffice = !isHistorical && (
-        /\b(?:who is|who are|what is|tell me|who's)\s+(?:the\s+)?(?:current\s+|latest\s+|present\s+|incumbent\s+)?(?:cm|pm|prime minister|chief minister|president|governor|mayor|ceo|cfo|cto|coo|chairman|chairperson|captain|coach|leader|head of state|head of government)\b/i.test(text)
-        || /\b(?:current|latest|present|incumbent)\s+(?:cm|pm|prime minister|chief minister|president|governor|mayor|ceo|cfo|cto|coo|chairman|chairperson|captain|coach|leader|head of state|head of government)\b/i.test(text)
-        || /\b(?:cm|pm|prime minister|chief minister|president|governor|mayor|ceo|cfo|cto|coo|chairman|chairperson|captain|coach|leader|head of state|head of government)\s+(?:of|for|in)\s+[a-z0-9\s.-]+/i.test(text)
-        || /^[a-z0-9\s.-]+\s+(?:cm|pm|ceo|cfo|cto|coo|governor|mayor|president|prime minister|chief minister|captain|coach)$/i.test(text)
-        || /\b(?:current\s+captain\s+of|who\s+is\s+(?:the\s+)?captain\s+of|captain\s+of)\b/i.test(text)
+        isLeadershipOrRoleTerm(text) && (
+            /\b(?:who\s+(?:is|are)|what\s+is|tell\s+me|who's|current|latest|present|incumbent)\b/i.test(text)
+            || /\b(?:of|for|in)\b/i.test(text)
+            || Boolean(parseUniversalEntityQuery(text))
+        )
     );
 
     const isLiveMarketOrWeather = /\b(weather|temperature|forecast|exchange rate|conversion rate|live score|match score|game score|standings)\b/i.test(text)
@@ -2540,7 +2540,8 @@ export function parseGovernmentRoleQuery(query) {
         const words = withoutLead.split(/\s+/);
         if (words.length >= 2) {
             const lastTwo = words.slice(-2).join(' ');
-            if (words.length >= 3 && /^(?:prime minister|chief minister|head of state|head of government|god of war|god of underworld)$/i.test(lastTwo)) {
+            const isCompoundRole = /^(?:prime\s+minister|chief\s+minister|head\s+of\s+(?:state|government)|managing\s+director|secretary\s+general|civic\s+leader)$/i.test(lastTwo);
+            if (words.length >= 3 && isCompoundRole) {
                 predicate = cleanPredicateText(lastTwo);
                 subject = cleanSubjectText(words.slice(0, -2).join(' '));
                 roleText = lastTwo;
@@ -3177,21 +3178,37 @@ function buildSearchSummary(results, metadata = {}) {
     };
 }
 
+export function isSpeculativeOrUnconfirmedClaim(text) {
+    if (!text || typeof text !== 'string') return false;
+    // 1. Explicit future predictions or forward-looking projections
+    if (/\b(?:predicted|predicts|predicting|projected|projecting|forecasts?|forecasting|poised\s+to|slated\s+to|tipped\s+to|expected\s+to|likely\s+to|anticipate[ds]?)\b/i.test(text)) {
+        return true;
+    }
+    // 2. Rumors, speculation, opinions, and poll forecasts
+    if (/\b(?:rumou?rs?|speculation|alleged|purported|unconfirmed|opinion\s+polls?|exit\s+polls?|straw\s+polls?|bold\s+claims?)\b/i.test(text)) {
+        return true;
+    }
+    // 3. Conditional or hypothetical claims
+    if (/\b(?:if\s+elected|if\s+appointed|if\s+approved|hopes\s+to\s+be|vows\s+to\s+be|aims\s+to\s+become|promises\s+to\s+be)\b/i.test(text)) {
+        return true;
+    }
+    return false;
+}
+
 function filterSearchResultsForAnswerQuery(query, results) {
     const list = Array.isArray(results) ? results : [];
-    const isLeadershipQuery = /\b(who\s+is\s+the\s+)?(cm|chief minister|prime minister|pm|president|governor|mayor|ceo|leader|head of state|head of government)\b/i.test(query);
-    const isExplicitElectionQuery = /\b(election|polls?|candidates?|voting)\b/i.test(query);
+    const isLeadershipQuery = isLeadershipOrRoleTerm(query);
+    const isExplicitElectionQuery = /\b(?:election|polls?|candidates?|voting)\b/i.test(query);
 
     let candidates = list;
     if (isLeadershipQuery && !isExplicitElectionQuery) {
         // Exclude future/speculative election predictions or party campaign promotional spam from current office holder queries
         candidates = list.filter(item => {
-            const title = String(item?.title || '').toLowerCase();
-            const desc = String(item?.description || '').toLowerCase();
-            if (/\b(?:\d{4}|upcoming|next|future)\s+(?:assembly\s+)?(?:election|legislative assembly election|opinion poll|exit poll|candidates?\s+list)\b/i.test(title)) {
+            const text = `${item?.title || ''} ${item?.description || ''}`;
+            if (/\b(?:upcoming|next|future)\s+(?:elections?|polls?)\b/i.test(text)) {
                 return false;
             }
-            if (/\b(?:all set to swear in|will swear in|predicted to win|landslide victory|claims?\s+to\s+form|vows\s+to\s+become|if\s+elected)\b/i.test(desc)) {
+            if (isSpeculativeOrUnconfirmedClaim(text)) {
                 return false;
             }
             return true;
@@ -3680,11 +3697,21 @@ export function hasObviousRagConflict(evidence = [], query = '') {
 function cleanExtractedPersonName(raw) {
     if (!raw) return null;
     let name = String(raw).trim()
-        .replace(/^(?:and|or|the|a|an|who|which|is|was|are|were|also|now|current|former|co-founder|founder|executive|businessman|businesswoman|driver|engineer|officer|leader)\s+/gi, '')
-        .replace(/\s+(?:ministry|cabinet|government|administration)$/gi, '')
+        .replace(/^(?:and|or|the|a|an|who|which|is|was|are|were|also|now|current|former|hon'?ble|honorable|shri|smt|mr|ms|mrs|dr|prof|sir|lord|lady)\b\.?\s+/gi, '')
         .replace(/['’]s$/g, '')
         .replace(/[,:;.]$/, '')
         .trim();
+    if (!name) return null;
+
+    // If the leading word is a leadership/role title, strip it
+    const initialWords = name.split(/\s+/);
+    if (initialWords.length > 1 && isLeadershipOrRoleTerm(initialWords[0])) {
+        name = initialWords.slice(1).join(' ').trim();
+    }
+
+    // Strip trailing institutional or corporate entities
+    name = name.replace(/\s+(?:ministry|cabinet|government|administration|inc|corp|ltd|llc)$/gi, '').trim();
+
     if (!name || name.length < 2 || name.length > 50) return null;
     const words = name.split(/\s+/);
     if (words.length < 1 || words.length > 4) return null;
@@ -3695,31 +3722,26 @@ function cleanExtractedPersonName(raw) {
 
 function buildStrictRoleRegexPattern(role) {
     const r = String(role || '').toLowerCase().trim();
-    if (r === 'ceo' || r === 'chief executive officer') {
-        return '(?:co-founder\\s+(?:and|&)\\s+)?(?:co-)?(?:chief\\s+executive\\s+officer|ceo)';
+    if (!r) return '';
+    const forms = new Set([r]);
+    // Extract acronym for multi-word roles (e.g. "chief minister" -> "cm", "prime minister" -> "pm")
+    const cleanTokens = r.replace(/[^a-z\s]/g, '').trim().split(/\s+/);
+    if (cleanTokens.length >= 2) {
+        forms.add(cleanTokens.map(w => w[0]).join(''));
     }
-    if (r === 'cm' || r === 'chief minister') {
-        return '(?:chief\\s+minister|cm)';
+    // Reverse expansions for common leadership acronyms
+    if (r === 'cm') forms.add('chief minister');
+    if (r === 'pm') forms.add('prime minister');
+    if (r === 'ceo') {
+        forms.add('chief executive officer');
+        forms.add('co-founder');
     }
-    if (r === 'pm' || r === 'prime minister') {
-        return '(?:prime\\s+minister|pm)';
-    }
-    if (r === 'president' || r === 'head of state') {
-        return '(?:president|head\\s+of\\s+state)';
-    }
-    if (r === 'governor') {
-        return 'governor';
-    }
-    if (r === 'mayor') {
-        return 'mayor';
-    }
-    if (r === 'captain' || r === 'skipper') {
-        return '(?:captain|skipper)';
-    }
-    if (r === 'coach' || r === 'manager') {
-        return '(?:head\\s+coach|coach|manager)';
-    }
-    return escapeRegex(r);
+    if (r === 'cfo') forms.add('chief financial officer');
+    if (r === 'cto') forms.add('chief technology officer');
+    if (r === 'coo') forms.add('chief operating officer');
+
+    const patterns = Array.from(forms).map(f => escapeRegex(f).replace(/\s+/g, '\\s+'));
+    return `(?:${patterns.join('|')})`;
 }
 
 export function extractVerifiedLeadershipClaim(query, evidence = []) {
@@ -3743,23 +3765,15 @@ export function extractVerifiedLeadershipClaim(query, evidence = []) {
 
         // Structured Infobox check (e.g. Wikipedia infobox incumbent, government head, elected after election)
         if (item.infobox && typeof item.infobox === 'object') {
-            const infoboxCandidates = [
-                item.infobox.incumbent,
-                item.infobox.government_head,
-                item.infobox.after_election,
-                item.infobox.chief_minister,
-                item.infobox.prime_minister,
-                item.infobox.president,
-                item.infobox.governor,
-                item.infobox.mayor,
-                item.infobox.ceo,
-                item.infobox.leader,
-                item.infobox.leader1,
-                item.infobox.leader_name
-            ];
-            for (const candidate of infoboxCandidates) {
-                if (candidate && typeof candidate === 'string') {
-                    const person = cleanExtractedPersonName(candidate);
+            const roleRegexForInfobox = new RegExp(`\\b${rolePattern}\\b`, 'i');
+            for (const [key, val] of Object.entries(item.infobox)) {
+                if (!val || typeof val !== 'string') continue;
+                const cleanKey = key.toLowerCase().replace(/_/g, ' ');
+                const isMatchingField = roleRegexForInfobox.test(cleanKey)
+                    || /\b(?:incumbent|leader|government_head|after_election)\b/i.test(key)
+                    || isLeadershipOrRoleTerm(cleanKey);
+                if (isMatchingField) {
+                    const person = cleanExtractedPersonName(val);
                     if (person && !/^(vacant|none|n\/a|tbd)$/i.test(person)) {
                         return {
                             person,
@@ -3925,7 +3939,7 @@ export function extractVerifiedLeadershipClaim(query, evidence = []) {
 function extractDeterministicLiveFactAnswer(query, evidence = []) {
     if (!Array.isArray(evidence) || !evidence.length) return null;
     const isCurrent = isCurrentStateQuery(query);
-    const isRoleQuery = /\b(cm|chief minister|president|prime minister|pm|governor|mayor|leader|head of state|head of government|ceo|captain|skipper|coach|managing director)\b/i.test(query);
+    const isRoleQuery = isLeadershipOrRoleTerm(query) || Boolean(parseUniversalEntityQuery(query)?.role);
 
     const sorted = [...evidence].sort((a, b) => {
         if (isCurrent) {
@@ -4480,7 +4494,7 @@ function normalizeCandidateUrl(value) {
 function isOfficialGovernmentUrl(url) {
     const domain = getDomainFromUrl(url);
     if (!domain) return false;
-    if (isTrustedLiveSource(domain) && /(?:who\.int|nasa\.gov|isro\.gov\.in|rbi\.org\.in|sec\.gov|imf\.org|worldbank\.org|noaa\.gov|europa\.eu|gov\.uk|usa\.gov)$/i.test(domain)) {
+    if (isTrustedLiveSource(domain) || OFFICIAL_INTERNATIONAL_ORG_PATTERNS.some(p => p.test(domain))) {
         return true;
     }
     return OFFICIAL_GOVERNMENT_DOMAIN_PATTERNS.some(pattern => pattern.test(domain));
@@ -4861,11 +4875,12 @@ export function scoreSearchResult(item, terms, query = '') {
         if (isVersionOrRecencyQuery) {
             const urlStr = String(item?.url || '').toLowerCase();
             const isDocOrRelease = /\b(release|documentation|changelog|what's new|whats new|whatsnew|notes|downloads?)\b/i.test(`${title} ${urlStr} ${description}`);
-            const isOfficialDocDomain = /\b(?:docs\.python\.org|python\.org|developer\.mozilla\.org|go\.dev|rust-lang\.org|kernel\.org|github\.com)\b/i.test(domain)
+            const isOfficialDocDomain = /\b(?:github\.com)\b/i.test(domain)
                 || domain.startsWith('docs.')
                 || domain.startsWith('developer.')
                 || domain.startsWith('api.')
-                || item?.sourceType === 'official_source';
+                || item?.sourceType === 'official_source'
+                || isDirectPrimarySource(query, domain, title);
             if (isOfficialDocDomain && isDocOrRelease) {
                 score += 65;
             } else if (isOfficialDocDomain) {
@@ -4892,6 +4907,16 @@ export function scoreSearchResult(item, terms, query = '') {
                 score -= 40;
             } else if (temporalStatus === 'future') {
                 score -= 30;
+            }
+        }
+
+        // Soft penalty for speculative, unconfirmed, or rumor claims
+        const fullSnippet = `${title} ${description}`;
+        if (isSpeculativeOrUnconfirmedClaim(fullSnippet)) {
+            score -= 15;
+            if (!item.qualitySignals) item.qualitySignals = [];
+            if (!item.qualitySignals.includes('speculative_claim')) {
+                item.qualitySignals.push('speculative_claim');
             }
         }
     }
@@ -4939,16 +4964,13 @@ export function isValidCitationSource(source, query = '') {
     if (domain && isDirectPrimarySource(query, domain, title)) return true;
 
     if (query) {
-        const isLeadership = /\b(?:who\s+is\s+the\s+)?(?:cm|chief minister|prime minister|pm|president|governor|mayor|ceo|leader|head of state|head of government|captain|skipper|coach|manager)\b/i.test(query);
+        const isLeadership = isLeadershipOrRoleTerm(query);
         const isExplicitElection = /\b(?:election|polls?|voting)\b/i.test(query);
         if (isLeadership) {
-            if (!isExplicitElection && /\b(?:\d{4}|upcoming|next|future)\s+(?:assembly\s+)?(?:election|legislative assembly election|opinion poll|exit poll|candidates?\s+list)\b/i.test(fullContent)) {
+            if (!isExplicitElection && /\b(?:upcoming|next|future)\s+(?:elections?|polls?)\b/i.test(fullContent)) {
                 return false;
             }
-            if (/\b(?:all set to swear in|will swear in|predicted to win|landslide victory|stakes?\s+claim|claims?\s+to\s+form|to\s+form\s+(?:the\s+)?gov(?:t|ernment)|eyes\s+(?:the\s+)?(?:cm|pm|captain)|future\s+(?:cm|pm)|vows\s+to\s+become|promises\s+to\s+be|if\s+elected|manifesto|election\s+campaign|political\s+rally|party\s+(?:chief|president)\s+vows|opinion\s+poll\s+predicts)\b/i.test(fullContent)) {
-                return false;
-            }
-            if (/\b(?:makes bold claim|bold claim|will captain|could captain|predicted to captain|maybe|rumou?r|opinion|suggests|urges|WATCH|net practice)\b/i.test(fullContent)) {
+            if (isSpeculativeOrUnconfirmedClaim(fullContent)) {
                 return false;
             }
         }
@@ -5173,17 +5195,16 @@ export function buildSearchQueryRewrite(query) {
 }
 
 export function isLeadershipOrRoleTerm(term = '') {
-    return /\b(ceo|chief executive officer|cfo|cto|coo|managing director|chairman|chairperson|president|prime minister|pm|chief minister|cm|governor|mayor|founder|co-founder|captain|coach|leader|civic leader|premier|chancellor|minister|head of state|head of government|monarch|director|commander|secretary general|pope|king|queen|emperor|viceroy|god of war|god of underworld)\b/i.test(term);
+    return /\b(?:c[efot]o|chief\s+(?:executive|financial|operating|technology)\s+officer|managing\s+director|chair(?:person|man)?|(?:prime|chief)\s+minister|[cp]m|president|governor|mayor|chancellor|premier|minister|director|head\s+of\s+(?:state|government)|leader|civic\s+leader|captain|coach|commander|founder|co-founder|secretary\s+general|monarch|king|queen|emperor|pope)\b/i.test(term);
 }
 
 export function cleanSubQueryClause(clause) {
     if (!clause) return '';
     let text = String(clause).trim();
-    text = text.replace(/^(?:(?:can|could|would)\s+you\s+(?:please\s+)?(?:tell\s+me|show\s+me|find|explain)|please\s+(?:tell\s+me|find|explain))\s+/i, '');
-    text = text.replace(/^(?:what\s+(?:changes\s+did|features\s+did|new\s+features\s+did|are\s+the|is\s+the|did|was|were)|which\s+(?:are|were|was|is)?|how\s+(?:does|do|did|can|will|is|are)\s+(?:the\s+)?|why\s+(?:is|are|did|does)\s+(?:the\s+)?|does\s+(?:the\s+action\s+directly|the\s+policy\s+directly|it\s+directly|the\s+action|this|it)\s+|tell\s+me\s+about|explain\s+how|explain\s+what|describe\s+how|describe)\s+/i, '');
-    text = text.replace(/^(?:which|what|how|why|when|where|does|do|did|is|are|can|could|will|would)\s+(?:the\s+)?/i, '');
+    text = text.replace(/^(?:(?:can|could|would)\s+you\s+(?:please\s+)?(?:tell\s+me|show\s+me|find|explain)|please\s+(?:tell\s+me|find|explain)|tell\s+me\s+about|explain\s+how|explain\s+what|describe\s+how|describe)\s+/i, '');
+    text = text.replace(/^(?:(?:and|or)\s+)?(?:what|which|how|why|when|where)\s+(?:(?:\w+)\s+)?(?:did|do|does|is|are|was|were|can|will|would|could)\s+(?:the\s+)?/i, '');
+    text = text.replace(/^(?:(?:and|or)\s+)?(?:which|what|how|why|when|where|does|do|did|is|are|was|were|can|could|will|would)\s+(?:the\s+)?/i, '');
     text = text.replace(/^(?:the\s+|a\s+|an\s+)/i, '');
-    text = text.replace(/\b(?:were|was|are|is)\s+affected\b/i, 'affected');
     text = text.replace(/[?.!,:;]+$/g, '').trim();
     return text.replace(/\s+/g, ' ').trim();
 }
@@ -5267,7 +5288,7 @@ export function buildDeterministicSearchQueries(query) {
         const subj = universal.jurisdiction;
         const role = universal.role;
         const roleText = universal.roleText || role;
-        const isCompanyRole = /\b(ceo|cfo|cto|coo|founder|co-founder|managing director|executive)\b/i.test(role);
+        const isCompanyRole = /\b(c[efot]o|founder|director|executive)\b/i.test(role);
 
         const roleTitle = formatRoleDisplayTitle(roleText || role);
         if (isCompanyRole) {
@@ -5277,7 +5298,7 @@ export function buildDeterministicSearchQueries(query) {
                 `${subj} ${role}`.trim(),
                 `${subj} current ${role}`.trim(),
                 `${subj} leadership executive team`.trim(),
-                `${subj} CEO founder`.trim(),
+                `${subj} ${roleText} founder`.trim(),
                 `${role} of ${subj}`.trim(),
                 `${subj} management team`.trim()
             ].map(normalizeSearchQuery).filter(Boolean)));
