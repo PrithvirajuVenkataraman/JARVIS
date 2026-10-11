@@ -264,7 +264,7 @@ INTENT_PROTOTYPES.forEach((proto, pIndex) => {
 export const STATIC_KNOWLEDGE_CATEGORIES = Object.freeze([
     {
         id: 'geography',
-        text: 'capital city continent ocean river sea lake reef coral barrier island mountain valley canyon plateau desert hill volcano hemisphere equator latitude longitude country location world map national currency money legal tender world capitals great barrier reef machu picchu amazon sahara nile tall height elevation'
+        text: 'capital city continent continents ocean oceans river rivers sea lake lakes reef coral barrier island mountain valley canyon plateau desert hill volcano hemisphere equator latitude longitude country countries location world map earth planet landmass landmasses national currency money legal tender world capitals great barrier reef machu picchu amazon sahara nile tall height elevation seven continents'
     },
     {
         id: 'landmarks_architecture',
