@@ -228,16 +228,14 @@ const GEMINI_MODEL_FALLBACKS = [
     'gemini-flash-latest'
 ];
 const GROQ_VISION_MODEL_FALLBACKS = [
-    'qwen/qwen3.6-27b',
     'qwen/qwen3.8-27b',
-    'qwen-3.6-27b',
     'qwen-3.8-27b'
 ];
 const GROQ_TEXT_MODEL_FALLBACKS = [
-    'qwen-2.5-coder-32b',
-    'qwen/qwen3.6-27b',
     'openai/gpt-oss-120b',
-    'openai/gpt-oss-20b'
+    'openai/gpt-oss-20b',
+    'qwen/qwen3.8-27b',
+    'qwen-3.8-27b'
 ];
 
 function getVisionProviders() {
