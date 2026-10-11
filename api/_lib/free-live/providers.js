@@ -51,15 +51,14 @@ export async function searchDuckDuckGoHtml(query, options = {}) {
             signal: options.signal,
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
                 'Accept-Language': 'en-US,en;q=0.9',
-                'Accept-Encoding': 'gzip, deflate, br',
-                'Cookie': 'kl=-1; k5=1; k1=-1'
+                'Accept-Encoding': 'gzip, deflate, br'
             },
             body
         }, timeoutMs);
-        if (!response.ok) return [];
+        if (!response.ok || response.status === 202) return [];
         const html = await response.text();
         const linkRegex = /<a\s+[^>]*class=['"]result-link['"][^>]*>([\s\S]*?)<\/a>/gi;
         const snippetRegex = /<td\s+[^>]*class=['"]result-snippet['"][^>]*>([\s\S]*?)<\/td>/gi;
@@ -111,11 +110,10 @@ export async function searchDuckDuckGoHtml(query, options = {}) {
         const response = await fetchWithTimeout(url, {
             signal: options.signal,
             headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.5',
-                'Accept-Encoding': 'gzip, deflate, br',
-                'Referer': 'https://duckduckgo.com/'
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept-Encoding': 'gzip, deflate, br'
             }
         }, timeoutMs);
 
@@ -168,6 +166,59 @@ export async function searchDuckDuckGoHtml(query, options = {}) {
         return results;
     };
 
+    const tryDdgApi = async () => {
+        const cleaned = query.replace(/\b(?:latest findings|latest updates|news|today|2024|2025|2026)\b/gi, '').trim();
+        const apiTarget = cleaned.length >= 3 ? cleaned : query;
+        const res = await fetchWithTimeout(`https://api.duckduckgo.com/?q=${encodeURIComponent(apiTarget)}&format=json`, {
+            signal: options.signal,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+                Accept: 'application/json'
+            }
+        }, timeoutMs).catch(() => null);
+        if (!res || !res.ok) return [];
+        const data = await res.json().catch(() => null);
+        if (!data) return [];
+        const results = [];
+        if (data.AbstractURL && (data.Heading || data.AbstractText)) {
+            results.push({
+                title: data.Heading || cleanSnippetText(data.AbstractText),
+                description: cleanSnippetText(data.AbstractText || data.Heading),
+                snippet: cleanSnippetText(data.AbstractText || data.Heading),
+                url: data.AbstractURL,
+                domain: getDomainFromUrl(data.AbstractURL),
+                source: 'DuckDuckGo Web',
+                sourceType: 'live_web',
+                trusted: true,
+                freshness: 'live_web_index',
+                qualitySignals: ['live_search_index', 'ddg_api'],
+                query
+            });
+        }
+        const topics = Array.isArray(data.RelatedTopics) ? data.RelatedTopics : [];
+        for (const topic of topics) {
+            if (results.length >= limit) break;
+            const topicUrl = topic.FirstURL || (topic.Topics?.[0]?.FirstURL);
+            const topicText = topic.Text || (topic.Topics?.[0]?.Text);
+            if (topicUrl && topicText && topicUrl.startsWith('http')) {
+                results.push({
+                    title: cleanSnippetText(topicText.split(' - ')[0] || topicText),
+                    description: cleanSnippetText(topicText),
+                    snippet: cleanSnippetText(topicText),
+                    url: topicUrl,
+                    domain: getDomainFromUrl(topicUrl),
+                    source: 'DuckDuckGo Web',
+                    sourceType: 'live_web',
+                    trusted: true,
+                    freshness: 'live_web_index',
+                    qualitySignals: ['live_search_index', 'ddg_api'],
+                    query
+                });
+            }
+        }
+        return results;
+    };
+
     try {
         const results = await Promise.any([
             tryDdgLite().then(r => r && r.length ? r : Promise.reject()),
@@ -184,6 +235,8 @@ export async function searchDuckDuckGoHtml(query, options = {}) {
                 return unconstrainedResults;
             } catch (_) {}
         }
+        const apiResults = await tryDdgApi().catch(() => []);
+        if (apiResults.length > 0) return apiResults;
         return [];
     }
 }
