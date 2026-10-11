@@ -17889,9 +17889,18 @@ function isStableGeographyOrGeneralFactQuery(text) {
     return stableSignals.test(lower);
 }
 
+function isMultipleChoiceQuestion(text = '') {
+    const raw = String(text || '').trim();
+    if (!raw) return false;
+    const hasOptions = /(?:^|\n|\s)\(?[A-Da-d]\)[.:\s]|(?:^|\n|\s)[A-Da-d][.:]\s+[^\n]+/m.test(raw);
+    const hasMcqPhrases = /\b(?:which of the following|choose the (?:correct|best|appropriate)|select the (?:correct|best|appropriate)|multiple choice|mcq|options?:)\b/i.test(raw);
+    return hasOptions || (hasMcqPhrases && /\b[A-Da-d]\b/.test(raw));
+}
+
 function isBroadFactualWebQuery(text, entityIntent = null, liveIntent = null) {
     const raw = String(text || '').trim();
     if (!raw) return false;
+    if (isMultipleChoiceQuestion(raw)) return false;
     if (isPureHowToOrCodingConcept(raw)) return false;
     if (isStableGeographyOrGeneralFactQuery(raw)) return false;
 
@@ -18008,6 +18017,7 @@ function classifyUserMessage(text) {
 
 function decideAnswerPath(classification) {
     if (!classification || !classification.raw) return 'default_model';
+    if (isMultipleChoiceQuestion(classification.raw)) return 'default_model';
 
     const flags = classification.flags || {};
 
@@ -25668,15 +25678,17 @@ function shouldUseMinimalThinking(text, intent = '') {
     if (globalThis.JarvisFrontendRouting?.shouldUseMinimalThinking) {
         return globalThis.JarvisFrontendRouting.shouldUseMinimalThinking(text, intent, buildFrontendRouteContext(text));
     }
-    return isFastSimpleQuery(text) || ['fast_simple', 'casual_conversation', 'fast_explainer'].includes(String(intent || ''));
+    return isMultipleChoiceQuestion(text) || isFastSimpleQuery(text) || ['fast_simple', 'casual_conversation', 'fast_explainer'].includes(String(intent || ''));
 }
 
 function buildFrontendRouteContext(text, options = {}) {
     const value = String(text || '').trim();
+    const isMcq = isMultipleChoiceQuestion(value);
     const webMode = typeof getWebSearchMode === 'function' ? getWebSearchMode() : (options?.webMode || 'auto');
     const isWebOff = webMode === 'off';
-    const liveIntent = isWebOff ? { requiresLive: false } : extractLiveQueryIntent(value);
-    const entityIntent = isWebOff ? { isLiveRequired: false } : extractUniversalEntityIntent(value, liveIntent);
+    const isExplicitWeb = !isWebOff && (webMode === 'force' || isExplicitWebSearchRequest(value));
+    const liveIntent = (isWebOff || (isMcq && !isExplicitWeb)) ? { requiresLive: false } : extractLiveQueryIntent(value);
+    const entityIntent = (isWebOff || (isMcq && !isExplicitWeb)) ? { isLiveRequired: false } : extractUniversalEntityIntent(value, liveIntent);
     const risk = getRiskTierForQuery(value, liveIntent, entityIntent);
     return {
         webMode,
@@ -25684,13 +25696,13 @@ function buildFrontendRouteContext(text, options = {}) {
         liveIntent,
         entityIntent,
         risk,
-        explicitWeb: !isWebOff && (webMode === 'force' || isExplicitWebSearchRequest(value)),
-        strictLatest: !isWebOff && isStrictLatestQuery(value),
-        currentInfo: !isWebOff && isCurrentInfoQuery(value),
-        liveRetrieval: !isWebOff && isLiveRetrievalQuery(value),
-        requiresSources: !isWebOff && (isExplicitWebSearchRequest(value) || isStrictLatestQuery(value) || isCurrentInfoQuery(value) || isEntityAttributionQuery(value) || requiresLiveSourceAnswer(value, liveIntent, entityIntent)),
+        explicitWeb: isExplicitWeb,
+        strictLatest: !isWebOff && !isMcq && isStrictLatestQuery(value),
+        currentInfo: !isWebOff && !isMcq && isCurrentInfoQuery(value),
+        liveRetrieval: !isWebOff && !isMcq && isLiveRetrievalQuery(value),
+        requiresSources: isExplicitWeb || (!isWebOff && !isMcq && (isStrictLatestQuery(value) || isCurrentInfoQuery(value) || isEntityAttributionQuery(value) || requiresLiveSourceAnswer(value, liveIntent, entityIntent))),
         safetySensitive: isMedicalAdviceIntent(value) || isMedicalEmergencyIntent(value),
-        placeGrounded: !isWebOff && (isLikelyLocationOrTravelQuery(value) || /\b(museum|museums|landmark|attraction|restaurant|hotel|nearby|near me|open now|places to visit)\b/i.test(value)),
+        placeGrounded: !isWebOff && !isMcq && (isLikelyLocationOrTravelQuery(value) || /\b(museum|museums|landmark|attraction|restaurant|hotel|nearby|near me|open now|places to visit)\b/i.test(value)),
         toolAction: !!options?.toolAction,
         toolReason: options?.toolReason || '',
         ambiguousContext: !!options?.ambiguousContext
@@ -25723,6 +25735,17 @@ function decideFrontendRoute(text, context = {}) {
             return { route: 'fast_simple', reason: 'web_off_stable_fact', risk: 'low_risk', requiresSources: false, minimalThinking: true, speakResponse, sourcePolicy: 'none' };
         }
         return { route: 'chat_direct', reason: 'web_off_direct_chat', risk: 'low_risk', requiresSources: false, minimalThinking: false, speakResponse, sourcePolicy: 'none' };
+    }
+    if (isMultipleChoiceQuestion(text) && !routeContext.explicitWeb) {
+        return {
+            route: 'chat_direct',
+            reason: 'multiple_choice_question',
+            risk: 'low_risk',
+            requiresSources: false,
+            minimalThinking: true,
+            speakResponse,
+            sourcePolicy: 'none'
+        };
     }
     if (routeContext.requiresSources || routeContext.liveRetrieval || routeContext.placeGrounded) {
         return { route: 'live_required', reason: 'source_or_freshness_required', risk: routeContext.risk || 'medium_risk', requiresSources: true, minimalThinking: false, speakResponse, sourcePolicy: 'required' };
