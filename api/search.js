@@ -2144,6 +2144,17 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
             rerankUsed = true;
             rerankModel = rerankResult.model || rerankModel;
             allResults = rerankResult.ranked.slice(0, Math.max(limit, 8));
+            const queryDateIntent = extractQueryDateIntent(normalizedQuery);
+            if (queryDateIntent.type !== 'neutral' || /\b(?:today|tonight|yesterday|yesterday's|today's|latest|current|recently|recent|breaking|newest|what('?s|\s+is)\s+new|updates?|hours?\s+ago|days?\s+ago|past\s+24\s+hours?|past\s+48\s+hours?|this\s+week|past\s+week|last\s+week|this\s+month|past\s+month|news)\b/i.test(normalizedQuery)) {
+                allResults.sort((a, b) => {
+                    const timeA = a.publishedMs || parseDocumentDate(a) || 0;
+                    const timeB = b.publishedMs || parseDocumentDate(b) || 0;
+                    if (timeA && timeB) return timeB - timeA;
+                    if (timeA && !timeB) return -1;
+                    if (!timeA && timeB) return 1;
+                    return 0;
+                });
+            }
         }
         timing.rerankMs = Number((performance.now() - rerankStart).toFixed(1));
         timing.rerankingMs = timing.rerankMs;
@@ -2240,6 +2251,17 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
                 rerankUsed = true;
                 rerankModel = rerankResult.model || rerankModel;
                 allResults = rerankResult.ranked.slice(0, Math.max(limit, 8));
+                const queryDateIntent = extractQueryDateIntent(normalizedQuery);
+                if (queryDateIntent.type !== 'neutral' || /\b(?:today|tonight|yesterday|yesterday's|today's|latest|current|recently|recent|breaking|newest|what('?s|\s+is)\s+new|updates?|hours?\s+ago|days?\s+ago|past\s+24\s+hours?|past\s+48\s+hours?|this\s+week|past\s+week|last\s+week|this\s+month|past\s+month|news)\b/i.test(normalizedQuery)) {
+                    allResults.sort((a, b) => {
+                        const timeA = a.publishedMs || parseDocumentDate(a) || 0;
+                        const timeB = b.publishedMs || parseDocumentDate(b) || 0;
+                        if (timeA && timeB) return timeB - timeA;
+                        if (timeA && !timeB) return -1;
+                        if (!timeA && timeB) return 1;
+                        return 0;
+                    });
+                }
             }
             timing.rerankMs = Number((performance.now() - rerankStart).toFixed(1));
             timing.rerankingMs = timing.rerankMs;
@@ -4031,9 +4053,27 @@ async function buildGroundedRagAnswer(query, results, gate, options = {}) {
         }
     }
 
-    const orderedEvidence = isCurrent && currentEvidence.length
+    const dateIntent = extractQueryDateIntent(query);
+    const isChronological = Boolean(
+        isCurrent ||
+        (dateIntent && dateIntent.type !== 'neutral') ||
+        /\b(?:today|tonight|yesterday|yesterday's|today's|latest|current|recently|recent|breaking|newest|what('?s|\s+is)\s+new|updates?|hours?\s+ago|days?\s+ago|past\s+24\s+hours?|past\s+48\s+hours?|this\s+week|past\s+week|last\s+week|this\s+month|past\s+month|news)\b/i.test(query)
+    );
+
+    let orderedEvidence = isCurrent && currentEvidence.length
         ? [...currentEvidence, ...historicalContext]
         : evidence;
+
+    if (isChronological) {
+        orderedEvidence = [...orderedEvidence].sort((a, b) => {
+            const timeA = a.publishedMs || parseDocumentDate(a) || 0;
+            const timeB = b.publishedMs || parseDocumentDate(b) || 0;
+            if (timeA && timeB) return timeB - timeA;
+            if (timeA && !timeB) return -1;
+            if (!timeA && timeB) return 1;
+            return 0;
+        });
+    }
 
     if (getGeminiApiKey() || getGroqApiKey()) {
         if (options?.allowDeepCrawl === true) {
@@ -4067,6 +4107,7 @@ STRICT ANTI-HEDGING & DIRECT FACT GROUNDING RULES:
 5. TEMPORAL & SPECULATIVE INTEGRITY: For current/status queries, rely strictly on confirmed active facts. Distinguish confirmed facts from speculative projections, rumors, or unconfirmed claims. For historical queries with dates, respect the specified time window.
 6. EVIDENCE GAPS & CONFLICTS: If the retrieved evidence does not contain the specific answer, is contradictory, or is insufficient, set "verified": false, "confidence": 0.0, "answer": "". When sources disagree, report the conflicting figures or claims objectively with their sources, or set "conflict": true.
 7. CITATION GROUNDING: Return evidenceIndexes citing which evidence blocks directly support the answer.
+8. CHRONOLOGICAL CITATION ORDER: Evidence sources are ordered chronologically by publication date (Evidence block [0] is the newest/most recent update). When answering current status, breaking news, or latest updates, prioritize the newest evidence blocks over older historical reports.
 
 User question: ${JSON.stringify(query)}
 Evidence JSON:
@@ -4789,7 +4830,52 @@ export function rankSources(query, results) {
         }
     }
 
-    return [...list].sort((a, b) => scoreSearchResult(b, terms, query) - scoreSearchResult(a, terms, query));
+    const scored = list.map(item => {
+        const score = scoreSearchResult(item, terms, query);
+        const publishedMs = item.publishedMs || parseDocumentDate(item) || 0;
+        return { item, score, publishedMs };
+    });
+
+    const dateIntent = extractQueryDateIntent(query);
+    const isChronological = Boolean(
+        (dateIntent && (dateIntent.type === 'immediate' || dateIntent.type === 'recent_week' || dateIntent.type === 'current' || dateIntent.type === 'target_month')) ||
+        /\b(?:today|tonight|yesterday|yesterday's|today's|latest|current|recently|recent|breaking|newest|what('?s|\s+is)\s+new|updates?|hours?\s+ago|days?\s+ago|past\s+24\s+hours?|past\s+48\s+hours?|this\s+week|past\s+week|last\s+week|this\s+month|past\s+month|news)\b/i.test(query)
+    );
+
+    if (isChronological) {
+        if (dateIntent.type === 'target_month' && dateIntent.targetMonth !== undefined) {
+            scored.sort((a, b) => {
+                const moA = a.publishedMs ? new Date(a.publishedMs).getUTCMonth() : null;
+                const moB = b.publishedMs ? new Date(b.publishedMs).getUTCMonth() : null;
+                if (moA != null && moB != null) {
+                    const diffA = Math.abs(moA - dateIntent.targetMonth);
+                    const diffB = Math.abs(moB - dateIntent.targetMonth);
+                    if (diffA !== diffB) return diffA - diffB;
+                    return b.score - a.score;
+                }
+                if (moA != null && moB == null) return -1;
+                if (moA == null && moB != null) return 1;
+                return b.score - a.score;
+            });
+        } else {
+            // Strict Chronological Ordering: newest published date first at #1 descending
+            scored.sort((a, b) => {
+                const timeA = a.publishedMs;
+                const timeB = b.publishedMs;
+                if (timeA && timeB) {
+                    if (timeA !== timeB) return timeB - timeA;
+                    return b.score - a.score;
+                }
+                if (timeA && !timeB) return -1;
+                if (!timeA && timeB) return 1;
+                return b.score - a.score;
+            });
+        }
+    } else {
+        scored.sort((a, b) => b.score - a.score);
+    }
+
+    return scored.map(s => s.item);
 }
 
 export function scoreSearchResult(item, terms, query = '') {
