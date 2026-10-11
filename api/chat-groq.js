@@ -556,6 +556,14 @@ async function getInstantFactHelper() {
         }
     }
 
+    function isMultipleChoiceQuestion(text = '') {
+        const raw = String(text || '').trim();
+        if (!raw) return false;
+        const hasOptions = /(?:^|\n|\s)\(?[A-Da-d]\)[.:\s]|(?:^|\n|\s)[A-Da-d][.:]\s+[^\n]+/m.test(raw);
+        const hasMcqPhrases = /\b(?:which of the following|choose the (?:correct|best|appropriate)|select the (?:correct|best|appropriate)|multiple choice|mcq|options?:)\b/i.test(raw);
+        return hasOptions || (hasMcqPhrases && /\b[A-Da-d]\b/.test(raw));
+    }
+
     function classifyQueryComplexity(rawQuery = '', options = {}) {
         const intent = String(options?.intent || '');
         if (options?.tier === 'deep' || options?.forceReasoning === true || intent === 'deep_reasoning') {
@@ -566,6 +574,12 @@ async function getInstantFactHelper() {
         const words = query.split(/\s+/).filter(Boolean);
         const wordCount = words.length;
         const lower = query.toLowerCase();
+
+        // MCQ fast-path: Multiple choice questions should respond quickly without deep CoT deliberation
+        const isMcq = isMultipleChoiceQuestion(query);
+        if (isMcq) {
+            return { tier: 'standard', preferSpeed: true, reason: 'multiple_choice_fast_path' };
+        }
 
         // 1. Complex Reasoning / Deep Architecture Signals -> Strict Route to Groq Deep Tier
         const deepSignals = [
@@ -584,7 +598,7 @@ async function getInstantFactHelper() {
             }
         }
 
-        if (wordCount > 70) {
+        if (wordCount > 180) {
             return { tier: 'deep', preferSpeed: false, reason: 'long_detailed_prompt' };
         }
 
@@ -998,8 +1012,12 @@ const edgeResponseCache = new EdgeSemanticLruCache();
         try {
             const timing = {
                 startedAt: Date.now(),
+                safetyMs: 0,
+                searchMs: 0,
+                ttftMs: 0,
                 modelMs: 0,
                 qualityMs: 0,
+                refinementMs: 0,
                 totalMs: 0
             };
             const requestId = `cg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -1111,21 +1129,34 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 });
             }
 
-            const safetyDecision = await classifySafetyWithGroq(routingMessage, { isInternalSummary });
-            if (safetyDecision.blocked) {
-                return res.status(200).json({
-                    success: true,
-                    requestId,
-                    intent: 'moderation_refusal',
-                    response: safetyDecision.response,
-                    action: null,
-                    provider: 'groq',
-                    modelUsed: safetyDecision.modelUsed,
-                    safety: {
-                        model: safetyDecision.modelUsed,
-                        reason: safetyDecision.reason
-                    }
-                });
+            let safetyDecision = { blocked: false };
+            let safetyPromise = null;
+            if (needsPreStreamSafetyReview(routingMessage)) {
+                const safetyStart = Date.now();
+                safetyDecision = await classifySafetyWithGroq(routingMessage, { isInternalSummary });
+                timing.safetyMs = Date.now() - safetyStart;
+                if (safetyDecision.blocked) {
+                    return res.status(200).json({
+                        success: true,
+                        requestId,
+                        intent: 'moderation_refusal',
+                        response: safetyDecision.response || 'I cannot assist with that request.',
+                        action: null,
+                        provider: 'groq',
+                        modelUsed: safetyDecision.modelUsed,
+                        safety: {
+                            model: safetyDecision.modelUsed,
+                            reason: safetyDecision.reason
+                        }
+                    });
+                }
+            } else if (!isInternalSummary) {
+                safetyPromise = (async () => {
+                    const safetyStart = Date.now();
+                    const decision = await classifySafetyWithGroq(routingMessage, { isInternalSummary });
+                    timing.safetyMs = Date.now() - safetyStart;
+                    return decision;
+                })();
             }
 
             // Route path: live_first can pre-load web context before the first model call.
@@ -1141,7 +1172,9 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                     ragText: grounding.sources.map((s, idx) => `[${s.id || idx + 1}] ${s.title || ''}: ${s.snippet || s.text || s.description || ''} (${s.url || ''})`).join('\n\n')
                 };
             } else if (routeDecision.strategy === 'live_first' && !isAttachmentGrounding) {
+                const searchStart = Date.now();
                 preloadedLiveRag = await buildLiveRagContext(effectiveMessage, req, context);
+                timing.searchMs = Date.now() - searchStart;
             }
 
             // Pass 1: model-only (no live search) for speed and cost.
@@ -1178,11 +1211,30 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 intent,
                 tier: req.body?.tier || preferences?.tier,
                 forceReasoning: req.body?.forceReasoning === true || preferences?.forceReasoning === true,
-                minimalThinking: req.body?.minimalThinking === true || preferences?.minimalThinking === true || ['fast_simple', 'casual_chat', 'chat_title'].includes(String(intent || '')),
+                minimalThinking: req.body?.minimalThinking === true || preferences?.minimalThinking === true || isMultipleChoiceQuestion(effectiveMessage) || ['fast_simple', 'casual_chat', 'chat_title'].includes(String(intent || '')),
                 isAttachmentGrounding,
                 structuredMessages: firstStructured
             });
             timing.modelMs += Date.now() - modelStartedAt;
+
+            if (safetyPromise) {
+                safetyDecision = await safetyPromise;
+                if (safetyDecision?.blocked) {
+                    return res.status(200).json({
+                        success: true,
+                        requestId,
+                        intent: 'moderation_refusal',
+                        response: safetyDecision.response || 'I cannot assist with that request.',
+                        action: null,
+                        provider: 'groq',
+                        modelUsed: safetyDecision.modelUsed,
+                        safety: {
+                            model: safetyDecision.modelUsed,
+                            reason: safetyDecision.reason
+                        }
+                    });
+                }
+            }
             if (!firstPass.ok) {
                 return res.status(503).json({
                     success: false,
@@ -1304,7 +1356,9 @@ const edgeResponseCache = new EdgeSemanticLruCache();
 
             // Recursive In-Flight Self-Critique & Refinement Loop
             let selfCritiqueMetadata = null;
-            if (intent === 'deep_reasoning' || routeDecision?.tier === 'deep' || Boolean(req.body?.forceReasoning)) {
+            const isMcqQuery = isMultipleChoiceQuestion(effectiveMessage);
+            if (!isMcqQuery && (intent === 'deep_reasoning' || routeDecision?.tier === 'deep' || Boolean(req.body?.forceReasoning))) {
+                const refinementStart = Date.now();
                 try {
                     const critiqueResult = evaluateDraftSolution(effectiveMessage, finalParsed?.response);
                     let refined = false;
@@ -1322,8 +1376,10 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                             refined = true;
                         }
                     }
+                    timing.refinementMs = Date.now() - refinementStart;
                     selfCritiqueMetadata = synthesizeSelfCritiqueMetadata(critiqueResult, refined);
                 } catch (critiqueErr) {
+                    timing.refinementMs = Date.now() - refinementStart;
                     console.warn('[chat-groq] self-critique loop error', critiqueErr?.message);
                 }
             }
@@ -1359,8 +1415,11 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 },
                 quality: qualityResult.metadata,
                 timing: {
+                    safetyMs: timing.safetyMs || 0,
+                    searchMs: timing.searchMs || 0,
                     modelMs: timing.modelMs,
                     qualityMs: timing.qualityMs,
+                    refinementMs: timing.refinementMs || 0,
                     totalMs: timing.totalMs
                 }
             });
@@ -1454,10 +1513,10 @@ const edgeResponseCache = new EdgeSemanticLruCache();
         if (isStreamPreferredGenerationRequest(routingProbe) || isStreamPreferredGenerationRequest(generationMessage)) {
             return true;
         }
-        if (routeDecision?.strategy && routeDecision.strategy !== 'direct') return false;
-        // Time-sensitive or source-needed queries must use the grounded non-stream path.
-        if (isTimeSensitiveInfoRequest(routingProbe) || isMutableEntityFactQuery(routingProbe)) return false;
-        if (/\b(with sources?|source links?|cite|citation)\b/i.test(routingProbe)) return false;
+        // Direct-answer, fast-path, and factual queries (including direct_then_live_if_needed) are eligible to stream
+        const allowedStrategies = new Set(['direct', 'direct_then_live_if_needed']);
+        if (routeDecision?.strategy && !allowedStrategies.has(routeDecision.strategy)) return false;
+
         return true;
     }
 
@@ -1666,14 +1725,27 @@ const edgeResponseCache = new EdgeSemanticLruCache();
         }
 
         let liveRag = { ragText: '', sources: [] };
+        const requiresLiveRetrievalBeforeStream = !isAttachmentGroundingPayload(grounding, intent) && (
+            routeDecision.strategy === 'search' ||
+            routeDecision.strategy === 'live_first' ||
+            Boolean(options?.forceLiveSearch) ||
+            options?.webMode === 'force' ||
+            (routeDecision.webEligible && (
+                isTimeSensitiveInfoRequest(effectiveMessage) ||
+                isMutableEntityFactQuery(effectiveMessage) ||
+                /\b(with sources?|source links?|cite|citations?)\b/i.test(effectiveMessage)
+            ))
+        );
         if (Array.isArray(options?.sources) && options.sources.length > 0) {
             liveRag = {
                 sources: options.sources,
                 ragText: options.ragText || options.sources.map((s, idx) => `[${s.id || idx + 1}] ${s.title || ''}: ${s.snippet || s.text || s.description || ''} (${s.url || ''})`).join('\n\n')
             };
-        } else if ((routeDecision.strategy === 'search' || routeDecision.strategy === 'live_first' || routeDecision.webEligible) && !isAttachmentGroundingPayload(grounding, intent)) {
+        } else if (requiresLiveRetrievalBeforeStream) {
+            const searchStartedAt = Date.now();
             writeSse(res, 'status', { state: 'SEARCHING', label: 'Searching...' });
             liveRag = await buildLiveRagContext(effectiveMessage, null, context);
+            timing.searchMs = Date.now() - searchStartedAt;
             writeSse(res, 'status', { state: 'ANALYZING', label: 'Analyzing...' });
         }
 
@@ -1698,11 +1770,16 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                     userSelectedModel: selectedModel
                 });
             const modelStartedAt = Date.now();
+            let firstTokenReceivedAt = null;
             const streamImages = Array.isArray(images)
                 ? images
                 : (Array.isArray(grounding?.images) ? grounding.images : undefined);
             const streamResult = await streamModelWithFallback(prompt, lengthPolicy, delta => {
                 if (!delta) return;
+                if (!firstTokenReceivedAt) {
+                    firstTokenReceivedAt = Date.now();
+                    timing.ttftMs = firstTokenReceivedAt - (timing.startedAt || modelStartedAt);
+                }
                 streamedText += delta;
                 writeSse(res, 'delta', { text: delta });
             }, selectedModel, streamImages, {
@@ -1713,9 +1790,10 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 tier: options?.tier,
                 forceReasoning: options?.forceReasoning,
                 userSelectedModel: selectedModel,
-                minimalThinking: options?.minimalThinking === true || (!options?.forceReasoning && options?.tier !== 'deep' && !isExplicitReasoningIntent(intent, effectiveMessage) && !String(selectedModel || '').toLowerCase().includes('r1')),
+                minimalThinking: options?.minimalThinking === true || isMultipleChoiceQuestion(effectiveMessage) || (!options?.forceReasoning && options?.tier !== 'deep' && !isExplicitReasoningIntent(intent, effectiveMessage) && !String(selectedModel || '').toLowerCase().includes('r1')),
                 onReset: () => {
                     streamedText = '';
+                    firstTokenReceivedAt = null;
                     writeSse(res, 'reset', { reason: 'failover' });
                 }
             });
@@ -1782,7 +1860,8 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 : evaluationText;
 
             let streamCritiqueMetadata = null;
-            if (intent === 'deep_reasoning' || routeDecision?.tier === 'deep' || Boolean(options?.forceReasoning)) {
+            const isMcqStreamQuery = isMultipleChoiceQuestion(effectiveMessage);
+            if (!isMcqStreamQuery && (intent === 'deep_reasoning' || routeDecision?.tier === 'deep' || Boolean(options?.forceReasoning))) {
                 try {
                     const critiqueResult = evaluateDraftSolution(effectiveMessage, evaluationText);
                     streamCritiqueMetadata = synthesizeSelfCritiqueMetadata(critiqueResult, false);
@@ -1819,6 +1898,8 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 },
                 quality: qualityResult.metadata,
                 timing: {
+                    ttftMs: timing.ttftMs || 0,
+                    searchMs: timing.searchMs || 0,
                     modelMs: timing.modelMs,
                     qualityMs: timing.qualityMs,
                     totalMs: timing.totalMs
@@ -4320,6 +4401,27 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             return { correctedResponse: '', metadata: baseMetadata };
         }
 
+        // Selective verification policy: Skip expensive second LLM critic pass for routine confidence
+        const isRoutineConfidence = ['chat', 'fast_simple', 'casual_chat', 'pop_culture_reference'].includes(normalizedIntent) &&
+            !riskReasons.includes('always_on_review') &&
+            !riskReasons.includes('explicit_verification') &&
+            !riskReasons.includes('challenged_or_uncertain') &&
+            !riskReasons.includes('high_stakes') &&
+            !riskReasons.includes('model_uncertainty') &&
+            !forceReview;
+
+        if (isRoutineConfidence && (isMultipleChoiceQuestion(message) || !riskReasons.includes('source_like_claim_without_source'))) {
+            return {
+                correctedResponse: '',
+                metadata: {
+                    ...baseMetadata,
+                    performed: false,
+                    verdict: 'passed_routine_confidence',
+                    reasons: ['routine_direct_confidence']
+                }
+            };
+        }
+
         // Only request a corrected rewrite for high-stakes / clear error classes.
         // Named-entity presence alone must not trigger a second model pass.
         const requestCorrection = riskReasons.some(reason => [
@@ -4450,7 +4552,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
         if (/```|\b(code|function|script|program|debug|algorithm|sql|javascript|python)\b/.test(input)) {
             reasons.push('code');
         }
-        if (/\b(calculate|equation|formula|percent|probability|equals?)\b|(?:\d+\s*[-+*/]\s*\d+)/.test(input)) {
+        if (/\b(calculate|comput|equation|formula|percent(?:age)?|probability|equals?)\b|%|(?:\d+\s*[-+*/%]\s*\d+)/i.test(input)) {
             reasons.push('calculation');
         }
         return [...new Set(reasons)].slice(0, 5);
@@ -5128,7 +5230,8 @@ Respond conversationally and naturally.`;
         evaluateDraftSolution,
         needsRefinement,
         buildRefinementPrompt,
-        synthesizeSelfCritiqueMetadata
+        synthesizeSelfCritiqueMetadata,
+        isMultipleChoiceQuestion
     };
 
     function applyResponseLengthPostCheck(parsedResponse, lengthPolicy, message, clientSystemPrompt) {
