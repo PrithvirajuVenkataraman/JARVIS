@@ -232,7 +232,7 @@ export function generateSnippetFallback(query, sources = []) {
         const fullText = textParts.join('. ');
         const rawSentences = fullText.split(/(?<=[.!?])\s+/);
         for (let sentence of rawSentences) {
-            if (/\b(?:404|500|502|503)\b/.test(sentence)) continue;
+            if (/\b(?:404|500|502|503|telegram\s+channel|photo:\s*shutterstock|first published|published:\s*\w+\s+\d+|subscribe|newsletter|sign up for)\b/i.test(sentence)) continue;
             sentence = cleanTextSnippet(sentence)
                 .replace(/^[-*•\s\d.)\][]+/, '')
                 .replace(/^[^\s:]{2,20}:\s*/, '')
@@ -399,8 +399,8 @@ export function generateRelatedResearchQuestions(optionsOrQuery, sourcesArg = []
             .replace(/\s+/g, ' ')
             .trim();
 
-        // Strip trailing publisher tags
-        clean = clean.replace(/\s*[-–|—:·]\s*[^-–|—:·]{2,40}$/, '').trim();
+        // Strip trailing publisher tags (require whitespace around hyphens/colons to protect hyphenated words)
+        clean = clean.replace(/(?:\s+[-–—:]\s+|\s*[|·]\s*)[^-–—:|·]{2,40}$/, '').trim();
 
         if (isInvalidQuestion(clean)) return;
 
@@ -413,12 +413,19 @@ export function generateRelatedResearchQuestions(optionsOrQuery, sourcesArg = []
     };
 
     // Extract core subject/topic from the user query
-    let coreTopic = cleanQ
-        .replace(/^(?:please\s+)?(?:can you\s+)?(?:tell me|explain|find|search|lookup|what (?:is|are|was|were|do|does)|how (?:does|do|can|is|are|will)|why (?:is|are|did|does)|who (?:is|was)|when (?:is|will|did)|where (?:is|are)|which (?:is|are)|latest (?:news|updates?|developments?|status)(?:\s+(?:on|about|for|regarding))?|updates?\s+(?:on|about|for|regarding)|news\s+(?:on|about|for|regarding)|status\s+(?:of|on|for)|current\s+(?:status|details?|information)(?:\s+(?:of|on|for))?)\s+/i, '')
+    // If the query has multiple sub-questions or sentences, isolate the primary topic clause
+    const primaryClause = cleanQ.split(/[?!;]|\n+/)[0].trim();
+    let coreTopic = primaryClause
+        .replace(/^(?:please\s+)?(?:can you\s+)?(?:tell me|explain|find|search|lookup|what\s+(?:changes\s+did|features\s+did|new\s+features\s+did|is|are|was|were|do|does|did)|which\s+(?:are|were|was|is)?|how\s+(?:does|do|can|is|are|will)|why\s+(?:is|are|did|does)|who\s+(?:is|was)|when\s+(?:is|will|did)|where\s+(?:is|are)|latest\s+(?:news|updates?|developments?|status)(?:\s+(?:on|about|for|regarding))?|updates?\s+(?:on|about|for|regarding)|news\s+(?:on|about|for|regarding)|status\s+(?:of|on|for)|current\s+(?:status|details?|information)(?:\s+(?:of|on|for))?)\s+/i, '')
         .replace(/\b(?:latest\s+updates?|latest\s+news|current\s+status|in\s+detail|right\s+now)\b/gi, '')
         .replace(/[?.!]+$/g, '')
         .replace(/\s+/g, ' ')
         .trim();
+
+    const regardingMatch = coreTopic.match(/\b(?:regarding|about|concerning)\s+(.+)$/i);
+    if (regardingMatch && regardingMatch[1].trim().length >= 5) {
+        coreTopic = regardingMatch[1].trim();
+    }
 
     // Strip compound secondary clauses (e.g. "and how does it affect...") to keep core topic concise
     const strippedClause = coreTopic.replace(/\s+(?:and\s+)?(?:how\s+(?:does|do|can|is|will|it)|what\s+(?:is|are|will)|why\s+(?:is|does)|who\s+(?:is|are)).*$/i, '').trim();
@@ -427,6 +434,9 @@ export function generateRelatedResearchQuestions(optionsOrQuery, sourcesArg = []
     }
     // Remove leading 'the ', 'a ', 'an '
     coreTopic = coreTopic.replace(/^(?:the|a|an)\s+/i, '').trim();
+    if (coreTopic.length > 50) {
+        coreTopic = coreTopic.slice(0, 50).replace(/\s+\S*$/, '').trim();
+    }
 
     // 1. Domain-aware follow-up question formulation derived from the user query & topic
     if (coreTopic.length >= 3) {
