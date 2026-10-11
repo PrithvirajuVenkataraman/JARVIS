@@ -688,11 +688,13 @@ export default async function handler(req, res) {
         const mode = normalizeSearchMode(req.body?.mode || req.body?.searchMode || '');
         if (mode === 'rag') {
             const answer = req.body?.answer !== false;
-            const maxBudget = answer ? 4000 : 3000;
+            const maxBudget = answer ? 4000 : 3500;
             const search = await runEvidenceFirstWebRag(query, {
                 limit,
                 answer,
-                timeoutMs: Math.min(Number(req.body?.timeoutMs) || maxBudget, maxBudget)
+                timeoutMs: Math.min(Number(req.body?.timeoutMs) || maxBudget, maxBudget),
+                allowDeepCrawl: req.body?.allowDeepCrawl !== false,
+                skipAutoDeepCrawl: req.body?.skipAutoDeepCrawl === true
             });
             return res.status(200).json({
                 success: true,
@@ -1145,7 +1147,7 @@ export async function searchPublicSources(query, options = {}) {
         ])).slice(0, 7);
 
     const compEntities = extractComparisonEntities(normalizedQuery);
-    const targetSliceCount = Math.min(querySet.length, Math.max(3, compEntities.length));
+    const targetSliceCount = Math.min(querySet.length, Math.max(4, compEntities.length, plannedQueries.length));
     const targetQueries = querySet.slice(0, targetSliceCount);
 
     // GDELT is a news index — use the user's original query first so article titles
@@ -1157,7 +1159,7 @@ export async function searchPublicSources(query, options = {}) {
         ...targetQueries
     ])).slice(0, 2);
 
-    const maxCeiling = options.answer === false ? 3000 : 4000;
+    const maxCeiling = options.answer === false ? 3500 : 4000;
     const boundedTimeoutMs = Math.min(Number(options.timeoutMs) || maxCeiling, maxCeiling);
 
     let liveNews = [];
@@ -1173,12 +1175,12 @@ export async function searchPublicSources(query, options = {}) {
     // Technical documentation & software release queries must NEVER query Google News RSS
     const taskNews = isTechDocs
         ? Promise.resolve()
-        : Promise.allSettled(targetQueries.slice(0, 1).map(candidate => searchGoogleNewsRss(candidate, { limit: Math.min(limit, 4), timeoutMs: Math.min(boundedTimeoutMs, 2000) })))
+        : Promise.allSettled(targetQueries.slice(0, 2).map(candidate => searchGoogleNewsRss(candidate, { limit: Math.min(limit, 4), timeoutMs: Math.min(boundedTimeoutMs, 2000) })))
             .then(s => { liveNews = s.flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []); });
     
     // General web search (DuckDuckGo & SearXNG) given full 2800ms individual budget
     const webSearchTimeoutMs = Math.min(boundedTimeoutMs, 2800);
-    const webParallelCount = Math.min(targetQueries.length, Math.max(2, compEntities.length));
+    const webParallelCount = Math.min(targetQueries.length, Math.max(3, compEntities.length, plannedQueries.length));
     const targetDateMetadata = extractQueryTargetMetadata(normalizedQuery);
     const dateContextText = `${targetDateMetadata?.dateContext || ''} ${normalizedQuery}`.toLowerCase();
     let effectiveDateFilter = options.dateFilter || null;
@@ -1967,7 +1969,9 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
 
     // Stage 1: Deterministic Query Generation (skip Gemini on fast path)
     const queryGenStart = performance.now();
-    let plannedQueries = buildDeterministicSearchQueries(normalizedQuery);
+    let plannedQueries = (Array.isArray(options.plannedQueries) && options.plannedQueries.length > 0)
+        ? options.plannedQueries
+        : buildDeterministicSearchQueries(normalizedQuery);
     let planningWarning = '';
     if (!isFastFactual && !plannedQueries.length && options.forceGeminiPlanning === true) {
         const planning = await buildGeminiSearchPlan(normalizedQuery).catch(error => ({
@@ -1998,9 +2002,12 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
     // GDELT, Reddit, deep crawl, embeddings, reranking = fallback only
     const phase1Queries = phases[0] || [normalizedQuery];
     const searchStart = performance.now();
+    const maxTotalTimeout = options.answer === false
+        ? Math.min(Number(options.timeoutMs) || 2800, 3000)
+        : Math.min(Number(options.timeoutMs) || 4000, 4500);
     const serverTimeoutMs = options.answer === false
-        ? Math.min(Number(options.timeoutMs) || 2000, 2000)
-        : Math.min(Number(options.timeoutMs) || 4000, 4000);
+        ? Math.max(500, maxTotalTimeout - 250)
+        : maxTotalTimeout;
 
     const skipAutoDeepCrawl = options.skipAutoDeepCrawl !== undefined
         ? options.skipAutoDeepCrawl === true
@@ -2029,7 +2036,7 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
     let roleAbortController = null;
     if (roleIntent) {
         roleAbortController = new AbortController();
-        const roleTimeout = Math.min(serverTimeoutMs, 1500);
+        const roleTimeout = Math.min(serverTimeoutMs, 1200);
         rolePromise = searchGovernmentRole(normalizedQuery, {
             limit: Math.min(3, limit),
             timeoutMs: roleTimeout,
@@ -2045,32 +2052,43 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
 
     let structRoleResults = [];
     if (rolePromise) {
+        const elapsed = performance.now() - totalStart;
+        const remainingBudget = Math.max(0, maxTotalTimeout - elapsed - 60);
         const verifiedPublicCount = publicResults.filter(item => isValidCitationSource(item, normalizedQuery)).length;
         if (verifiedPublicCount >= 2) {
-            // Once public search produces >= 2 verified sources, give role lookup only a 300ms grace window
-            const roleRace = await Promise.race([
-                rolePromise,
-                new Promise(resolve => setTimeout(() => resolve('GRACE_EXPIRED'), 300))
-            ]);
-            if (roleRace === 'GRACE_EXPIRED') {
+            // Once public search produces >= 2 verified sources, give role lookup only a small grace window within remaining budget
+            const graceWindow = Math.min(150, remainingBudget);
+            if (graceWindow > 0) {
+                const roleRace = await Promise.race([
+                    rolePromise,
+                    new Promise(resolve => setTimeout(() => resolve('GRACE_EXPIRED'), graceWindow))
+                ]);
+                if (roleRace === 'GRACE_EXPIRED') {
+                    try { roleAbortController.abort(); } catch (_) {}
+                    structRoleResults = [];
+                } else if (Array.isArray(roleRace)) {
+                    structRoleResults = roleRace;
+                }
+            } else {
                 try { roleAbortController.abort(); } catch (_) {}
                 structRoleResults = [];
-            } else if (Array.isArray(roleRace)) {
-                structRoleResults = roleRace;
             }
         } else {
             // Slower public search (<2 verified sources): give role lookup the remaining server budget
-            const elapsed = performance.now() - searchStart;
-            const remainingBudget = Math.max(50, serverTimeoutMs - elapsed);
-            const roleRace = await Promise.race([
-                rolePromise,
-                new Promise(resolve => setTimeout(() => resolve('BUDGET_EXPIRED'), remainingBudget))
-            ]);
-            if (roleRace === 'BUDGET_EXPIRED') {
+            if (remainingBudget > 0) {
+                const roleRace = await Promise.race([
+                    rolePromise,
+                    new Promise(resolve => setTimeout(() => resolve('BUDGET_EXPIRED'), remainingBudget))
+                ]);
+                if (roleRace === 'BUDGET_EXPIRED') {
+                    try { roleAbortController.abort(); } catch (_) {}
+                    structRoleResults = [];
+                } else if (Array.isArray(roleRace)) {
+                    structRoleResults = roleRace;
+                }
+            } else {
                 try { roleAbortController.abort(); } catch (_) {}
                 structRoleResults = [];
-            } else if (Array.isArray(roleRace)) {
-                structRoleResults = roleRace;
             }
         }
     }
@@ -3412,7 +3430,7 @@ function buildWebRagQueryPhases(query, plannedQueries = []) {
     const targeted = isLeadership ? [
         `${subject} ${role}`.trim(),
         `${subject} current ${role}`.trim()
-    ] : [normalized];
+    ] : (Array.isArray(plannedQueries) && plannedQueries.length > 0 ? plannedQueries.slice(0, 4) : [normalized]);
 
     const fallbackReformulation = isLeadership ? [
         `${subject} leadership ${role}`.trim(),
@@ -5178,9 +5196,75 @@ export function isLeadershipOrRoleTerm(term = '') {
     return /\b(ceo|chief executive officer|cfo|cto|coo|managing director|chairman|chairperson|president|prime minister|pm|chief minister|cm|governor|mayor|founder|co-founder|captain|coach|leader|civic leader|premier|chancellor|minister|head of state|head of government|monarch|director|commander|secretary general|pope|king|queen|emperor|viceroy|god of war|god of underworld)\b/i.test(term);
 }
 
+export function cleanSubQueryClause(clause) {
+    if (!clause) return '';
+    let text = String(clause).trim();
+    text = text.replace(/^(?:(?:can|could|would)\s+you\s+(?:please\s+)?(?:tell\s+me|show\s+me|find|explain)|please\s+(?:tell\s+me|find|explain))\s+/i, '');
+    text = text.replace(/^(?:what\s+(?:changes\s+did|features\s+did|new\s+features\s+did|are\s+the|is\s+the|did|was|were)|which\s+(?:are|were|was|is)?|how\s+(?:does|do|did|can|will|is|are)\s+(?:the\s+)?|why\s+(?:is|are|did|does)\s+(?:the\s+)?|does\s+(?:the\s+action\s+directly|the\s+policy\s+directly|it\s+directly|the\s+action|this|it)\s+|tell\s+me\s+about|explain\s+how|explain\s+what|describe\s+how|describe)\s+/i, '');
+    text = text.replace(/^(?:which|what|how|why|when|where|does|do|did|is|are|can|could|will|would)\s+(?:the\s+)?/i, '');
+    text = text.replace(/^(?:the\s+|a\s+|an\s+)/i, '');
+    text = text.replace(/\b(?:were|was|are|is)\s+affected\b/i, 'affected');
+    text = text.replace(/[?.!,:;]+$/g, '').trim();
+    return text.replace(/\s+/g, ' ').trim();
+}
+
+export function extractTopicAnchors(query) {
+    const text = String(query || '');
+    const anchors = [];
+    const dateMatch = text.match(/\b(?:(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4}|\d{4})\b/i);
+    if (dateMatch) anchors.push(dateMatch[0]);
+    const months = new Set(['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december']);
+    const prominent = text.match(/\b(?:[A-Z0-9]+(?:-[A-Z0-9]+)+|[A-Z]{2,}|[A-Z][a-z0-9]+)\b/g) || [];
+    const stopWords = new Set(['what', 'which', 'how', 'does', 'why', 'did', 'the', 'and', 'or', 'on', 'in', 'at', 'to', 'for', 'with', 'us', 'new']);
+    for (const token of prominent) {
+        const lower = token.toLowerCase();
+        if (!stopWords.has(lower) && !months.has(lower) && token.length >= 2 && !anchors.some(a => a.toLowerCase().includes(lower))) {
+            anchors.push(token);
+        }
+    }
+    return anchors;
+}
+
+export function decomposeMultiPartQuery(rawQuery) {
+    if (!rawQuery || typeof rawQuery !== 'string') return [];
+    const text = String(rawQuery).trim();
+    const protectedText = text
+        .replace(/([A-Za-z]\.[A-Za-z]\.)/g, m => m.replace(/\./g, '@@DOT@@'))
+        .replace(/\b([A-Za-z]\.)(?=\s+[a-z])/g, m => m.replace(/\./g, '@@DOT@@'));
+    const rawSegments = protectedText
+        .split(/(?:[?!;]|\n+|(?:(?<!\b[A-Za-z])\.(?=\s+[A-Z]))|,\s+(?:and\s+)?(?=(?:which|what|how|why|when|where|does|is|are|can)\b))/i)
+        .map(p => p.replace(/@@DOT@@/g, '.').trim())
+        .filter(p => p.length >= 8);
+    if (rawSegments.length <= 1) return [];
+
+    const anchors = extractTopicAnchors(rawQuery);
+    const decomposed = [];
+    for (let i = 0; i < rawSegments.length; i++) {
+        const seg = rawSegments[i];
+        let cleaned = cleanSubQueryClause(seg);
+        if (!cleaned || cleaned.split(/\s+/).length < 2) continue;
+
+        if (i > 0 && anchors.length > 0) {
+            const hasAnchor = anchors.some(a => cleaned.toLowerCase().includes(a.toLowerCase()));
+            if (!hasAnchor) {
+                const prefix = anchors.slice(0, 2).join(' ');
+                cleaned = `${prefix} ${cleaned}`;
+            }
+        }
+        decomposed.push(cleaned.replace(/\s+/g, ' ').trim());
+    }
+    return Array.from(new Set(decomposed));
+}
+
 export function buildDeterministicSearchQueries(query) {
     const normalized = normalizeSearchQuery(distillSearchQuery(query));
     if (!normalized) return [];
+
+    // Multi-part query decomposition (multiple sub-questions, clauses, or facets)
+    const multiPartQueries = decomposeMultiPartQuery(query);
+    if (multiPartQueries.length >= 2) {
+        return multiPartQueries;
+    }
 
     // Multi-entity comparison queries (e.g. Compare Steam, Epic Games, PlayStation Network)
     const compEntities = extractComparisonEntities(normalized);
@@ -5503,6 +5587,9 @@ export const __test = {
     scoreSearchResult,
     distillSearchQuery,
     extractComparisonEntities,
+    decomposeMultiPartQuery,
+    cleanSubQueryClause,
+    extractTopicAnchors,
     MCP_TOOL_DEFINITIONS,
     planDynamicSearchQueries,
     handleStreamingWebRag
