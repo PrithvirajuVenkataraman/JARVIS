@@ -873,14 +873,15 @@ export function classifyDeterministicRetrievalIntent(query = '') {
 
     // 1. Definite stable patterns (definitions, concepts, cultural meanings, math, science, code, history)
     const isExplicitDefinitionOrConcept = /^(?:what is|what are|define|meaning of|what does .+ mean|explain|tell me about the concept of)\s+/i.test(text);
-    const isForeignCulturalOrConcept = /\b(serbian culture|concept of|meaning in|etymology|cultural meaning)\b/i.test(text);
-    const isScienceOrMathOrCode = /\b(photosynthesis|mitochondria|theorem|gravity|calculus|fibonacci|recursion|binary search|sorting algorithm|regex|regular expression|quicksort|constitution of)\b/i.test(text);
+    const isForeignCulturalOrConcept = /\b(culture|cultural concept|concept of|meaning in|etymology|cultural meaning|philosophy|tradition)\b/i.test(text);
+    const isScienceOrMathOrCode = /\b(theorem|gravity|calculus|recursion|algorithm|sorting algorithm|regex|regular expression|quicksort|physics|chemistry|biology|astronomy|constitution of)\b/i.test(text);
     const isTimelessGeographyOrFact = /^(?:what is the capital of|where is|who wrote|who painted|who composed|when was .+ (?:born|founded|built|written))\b/i.test(text);
+    const isTextTransformation = /^(?:translate|write|rewrite|summarize|paraphrase|proofread|format)\b/i.test(text);
 
     // If query has clear stable signals and NO temporal/live triggers
     const hasLiveOrChangingSignal = /\b(current|latest|today|now|recently|this week|present|incumbent|price|stock|crypto|bitcoin|weather|temperature|score|standings|who won the latest|who won the last|breaking news|release date|version)\b/i.test(text);
 
-    if ((isExplicitDefinitionOrConcept || isForeignCulturalOrConcept || isScienceOrMathOrCode || isTimelessGeographyOrFact) && !hasLiveOrChangingSignal) {
+    if ((isExplicitDefinitionOrConcept || isForeignCulturalOrConcept || isScienceOrMathOrCode || isTimelessGeographyOrFact || isTextTransformation) && !hasLiveOrChangingSignal) {
         return {
             decision: 'stable_answer',
             confidence: 0.96,
@@ -1112,7 +1113,7 @@ export function isPoliticalOrLeadershipQuery(query) {
 
 export function isTechnicalDocumentationQuery(query) {
     const raw = String(query || '').toLowerCase();
-    return /\b(?:release\s+notes|changelog|what(?:'s|\s+is)\s+new|version\s+changes?|api\s+docs?|documentation|official\s+docs?|whatsnew|what\s+changed\s+in|(?:latest|previous|current|newest|stable)\s+(?:release|version)|(?:release|version)\s+of\s+[a-z0-9_.-]+)\b/i.test(raw);
+    return /\b(?:release\s+notes|changelog|what(?:'s|\s+is)\s+new|version\s+changes?|api\s+docs?|documentation|official\s+docs?|whatsnew|what\s+changed\s+in|(?:latest|previous|current|newest|stable)\s+(?:release|version)|(?:release|version)\s+of\s+[a-z0-9_.-]+|breaking\s+changes?|migration\s+guide|deprecat(?:ed|ions?))\b/i.test(raw);
 }
 
 export async function searchPublicSources(query, options = {}) {
@@ -3181,11 +3182,11 @@ function buildSearchSummary(results, metadata = {}) {
 export function isSpeculativeOrUnconfirmedClaim(text) {
     if (!text || typeof text !== 'string') return false;
     // 1. Explicit future predictions or forward-looking projections
-    if (/\b(?:predicted|predicts|predicting|projected|projecting|forecasts?|forecasting|poised\s+to|slated\s+to|tipped\s+to|expected\s+to|likely\s+to|anticipate[ds]?)\b/i.test(text)) {
+    if (/\b(?:predicted|predicts|predicting|projected|projecting|forecasts?|forecasting|poised\s+to|slated\s+to|tipped\s+to|expected\s+to|likely\s+to|anticipate[ds]?|(?:upcoming|next|future)\s+(?:elections?|polls?|events?|releases?|announcements?|quarters?|years?|months?|weeks?))\b/i.test(text)) {
         return true;
     }
     // 2. Rumors, speculation, opinions, and poll forecasts
-    if (/\b(?:rumou?rs?|speculation|alleged|purported|unconfirmed|opinion\s+polls?|exit\s+polls?|straw\s+polls?|bold\s+claims?)\b/i.test(text)) {
+    if (/\b(?:rumou?r(?:ed|ing|s)?|speculat(?:e|ed|ing|ion|ive)|alleged(?:ly)?|purported(?:ly)?|unconfirmed|opinion\s+polls?|exit\s+polls?|straw\s+polls?|bold\s+claims?)\b/i.test(text)) {
         return true;
     }
     // 3. Conditional or hypothetical claims
@@ -3197,23 +3198,19 @@ export function isSpeculativeOrUnconfirmedClaim(text) {
 
 function filterSearchResultsForAnswerQuery(query, results) {
     const list = Array.isArray(results) ? results : [];
-    const isLeadershipQuery = isLeadershipOrRoleTerm(query);
-    const isExplicitElectionQuery = /\b(?:election|polls?|candidates?|voting)\b/i.test(query);
+    const isExplicitSpeculativeQuery = /\b(?:rumou?rs?|speculation|polls?|predictions?|forecasts?|projected|potential|future|upcoming)\b/i.test(query);
 
     let candidates = list;
-    if (isLeadershipQuery && !isExplicitElectionQuery) {
-        // Exclude future/speculative election predictions or party campaign promotional spam from current office holder queries
-        candidates = list.filter(item => {
+    if (!isExplicitSpeculativeQuery) {
+        // Exclude unconfirmed rumors and speculative predictions from factual verification queries across all domains
+        const nonSpeculative = list.filter(item => {
             const text = `${item?.title || ''} ${item?.description || ''}`;
-            if (/\b(?:upcoming|next|future)\s+(?:elections?|polls?)\b/i.test(text)) {
-                return false;
-            }
             if (isSpeculativeOrUnconfirmedClaim(text)) {
                 return false;
             }
             return true;
         });
-        if (!candidates.length) candidates = list;
+        if (nonSpeculative.length) candidates = nonSpeculative;
     }
 
     const discovery = parseDiscoveryFactQuery(query);
@@ -3441,32 +3438,34 @@ function buildWebRagQueryPhases(query, plannedQueries = []) {
     const roleIntent = parseGovernmentRoleQuery(normalized);
     const rewrite = buildSearchQueryRewrite(normalized);
     const subject = roleIntent?.jurisdiction || rewrite.subject || extractSearchSubject(normalized) || normalized;
-    const role = roleIntent?.role || extractSearchIntentTerm(normalized);
+    const aspect = roleIntent?.role || extractSearchIntentTerm(normalized);
 
-    const isLeadership = roleIntent && isLeadershipOrRoleTerm(role);
-    const targeted = isLeadership ? [
-        `${subject} ${role}`.trim(),
-        `${subject} current ${role}`.trim()
-    ] : (Array.isArray(plannedQueries) && plannedQueries.length > 0 ? plannedQueries.slice(0, 4) : [normalized]);
+    const deterministic = buildDeterministicSearchQueries(normalized);
+    const allPlanned = Array.from(new Set([
+        ...(Array.isArray(plannedQueries) ? plannedQueries : []),
+        ...deterministic
+    ].map(normalizeSearchQuery).filter(Boolean)));
 
-    const fallbackReformulation = isLeadership ? [
-        `${subject} leadership ${role}`.trim(),
-        `${subject} Wikipedia`.trim(),
-        `${subject} executive team`.trim()
-    ] : Array.from(new Set([
-        ...buildDeterministicSearchQueries(normalized),
-        ...plannedQueries.map(item => normalizeSearchQuery(item)).filter(Boolean)
-    ])).slice(0, 4);
+    const targeted = allPlanned.length > 0 ? allPlanned.slice(0, 3) : [normalized];
+
+    const fallbackReformulation = Array.from(new Set([
+        ...allPlanned.slice(3, 6),
+        `${subject} ${aspect}`.trim(),
+        `${subject} official ${aspect}`.trim(),
+        `${subject} ${aspect} verified`.trim(),
+        `${subject} overview`.trim()
+    ].map(normalizeSearchQuery).filter(Boolean))).slice(0, 4);
 
     const officialReference = Array.from(new Set([
         `${normalized} official source`,
+        `${subject} official documentation`,
         `${subject} official`,
         `${normalized} Wikipedia Wikidata`,
         `${subject} current source`
     ].map(normalizeSearchQuery).filter(Boolean))).slice(0, 3);
 
     return [
-        targeted.slice(0, 2),
+        targeted.slice(0, 3),
         fallbackReformulation.slice(0, 3),
         officialReference.slice(0, 2)
     ].filter(phase => phase.length);
@@ -4061,13 +4060,13 @@ Task: Answer the user's question directly and factually using ONLY the retrieved
 Current Date: ${todayStr} (Year ${currentYear}).
 
 STRICT ANTI-HEDGING & DIRECT FACT GROUNDING RULES:
-1. FIRST SENTENCE MUST DIRECTLY AND AUTHORITATIVELY STATE THE SPECIFIC ANSWER (e.g. the specific active person, officeholder, or fact).
-2. STRICT ROLE GROUNDING: If the question asks for a specific corporate or government role (such as CEO or Chief Minister), answer ONLY with the person holding that exact role. NEVER substitute other roles (such as CFO, COO, CTO, or President) as evidence for CEO.
-3. FORBIDDEN: DO NOT write meta-commentary about the search process or snippets (NEVER say "Based on the provided information...", "The verified web content states...", "According to Wikidata...", "is listed by Wikidata as...").
-4. FORBIDDEN: DO NOT output generic civics lessons or definitions explaining what the office or organization means.
-5. FOR CURRENT QUERIES: Base the active leader strictly on 'current' evidence. DO NOT declare future speculative election winners or past office holders as current leaders.
-6. If the provided evidence does not contain the specific answer or is ambiguous, set "verified": false, "confidence": 0.0, "answer": "". Do NOT guess or write an explanatory disclaimer.
-7. Return evidenceIndexes citing which evidence blocks you used.
+1. DIRECT ANSWER FIRST: The first sentence must directly and authoritatively state the specific verified answer, entity, quantity, status, date, or outcome requested.
+2. EXACT ATTRIBUTE & ENTITY GROUNDING: Ground the answer strictly on the exact attribute, metric, role, or property requested (e.g. if the question asks for a specific role, version, date, metric, or policy, answer ONLY with evidence for that exact attribute; never substitute related or adjacent attributes).
+3. FORBIDDEN META-COMMENTARY: DO NOT write meta-commentary about the search process or snippets (NEVER say "Based on the provided information...", "The verified web content states...", "According to Wikidata...", "is listed by Wikidata as..."). State facts directly.
+4. FORBIDDEN FILLER: DO NOT output unsolicited background essays, generic definitions, or introductory filler explaining what the topic or concept means when a specific fact was asked.
+5. TEMPORAL & SPECULATIVE INTEGRITY: For current/status queries, rely strictly on confirmed active facts. Distinguish confirmed facts from speculative projections, rumors, or unconfirmed claims. For historical queries with dates, respect the specified time window.
+6. EVIDENCE GAPS & CONFLICTS: If the retrieved evidence does not contain the specific answer, is contradictory, or is insufficient, set "verified": false, "confidence": 0.0, "answer": "". When sources disagree, report the conflicting figures or claims objectively with their sources, or set "conflict": true.
+7. CITATION GROUNDING: Return evidenceIndexes citing which evidence blocks directly support the answer.
 
 User question: ${JSON.stringify(query)}
 Evidence JSON:
@@ -4125,15 +4124,22 @@ function selectEvidenceByIndexes(results, indexes = []) {
 async function buildGeminiSearchPlan(query) {
     if (!hasGeminiKey()) return { queries: [], enhanced: false };
     const prompt = `Return strict JSON only.
-Task: rewrite this user search query into 2 to 4 concise public-source search queries.
-Prefer official domains, Wikipedia/Wikidata style entity terms, and news phrasing when current.
+Task: Analyze this user search query and decompose it into 2 to 4 concise, focused public-source search queries.
+Identify the core information need, key entities, and specific aspect or constraints (dates, metrics, versions).
+Prefer official domains, primary documentation, and authoritative reference phrasing.
 User query: ${JSON.stringify(query)}
-JSON shape: {"queries":["..."]}`;
-    const json = await callGeminiJson(prompt, { maxOutputTokens: 300, temperature: 0.1 });
+JSON shape: {"informationNeed":"...","entities":["..."],"aspects":["..."],"queries":["..."]}`;
+    const json = await callGeminiJson(prompt, { maxOutputTokens: 350, temperature: 0.1 });
     const queries = Array.isArray(json?.queries)
         ? json.queries.map(item => normalizeSearchQuery(item)).filter(Boolean).slice(0, 4)
         : [];
-    return { queries, enhanced: queries.length > 0 };
+    return {
+        queries,
+        informationNeed: String(json?.informationNeed || '').trim(),
+        entities: Array.isArray(json?.entities) ? json.entities.map(String).filter(Boolean) : [],
+        aspects: Array.isArray(json?.aspects) ? json.aspects.map(String).filter(Boolean) : [],
+        enhanced: queries.length > 0
+    };
 }
 
 async function enhanceResultsWithGemini(query, results, options = {}) {
@@ -5195,7 +5201,7 @@ export function buildSearchQueryRewrite(query) {
 }
 
 export function isLeadershipOrRoleTerm(term = '') {
-    return /\b(?:c[efot]o|chief\s+(?:executive|financial|operating|technology)\s+officer|managing\s+director|chair(?:person|man)?|(?:prime|chief)\s+minister|[cp]m|president|governor|mayor|chancellor|premier|minister|director|head\s+of\s+(?:state|government)|leader|civic\s+leader|captain|coach|commander|founder|co-founder|secretary\s+general|monarch|king|queen|emperor|pope)\b/i.test(term);
+    return /\b(?:c[efot]o|chief\s+(?:executive|financial|operating|technology)\s+officer|managing\s+director|chair(?:person|man)?|(?:prime|chief)\s+minister|[cp]m|president|governor|mayor|chancellor|premier|minister|director|head\s+of\s+(?:state|government)|leader|civic\s+leader|captain|coach|commander|founder|co-founder|secretary[\s-]+general|monarch|king|queen|emperor|pope)\b/i.test(term);
 }
 
 export function cleanSubQueryClause(clause) {
@@ -5261,46 +5267,80 @@ export function buildDeterministicSearchQueries(query) {
     const normalized = normalizeSearchQuery(distillSearchQuery(query));
     if (!normalized) return [];
 
-    // Multi-part query decomposition (multiple sub-questions, clauses, or facets)
+    // 1. Multi-part query decomposition (multiple sub-questions, clauses, or facets)
     const multiPartQueries = decomposeMultiPartQuery(query);
     if (multiPartQueries.length >= 2) {
         return multiPartQueries;
     }
 
-    // Multi-entity comparison queries (e.g. Compare Steam, Epic Games, PlayStation Network)
+    // 2. Multi-entity comparison queries (dynamic extraction of entities and compared facets)
     const compEntities = extractComparisonEntities(normalized);
     if (compEntities.length >= 2) {
-        const topicMatch = normalized.match(/\b(?:compare|comparison of|difference between)\s+(?:the\s+)?(?:official\s+)?([^,]+?)\s+of\b/i);
-        const topic = topicMatch ? topicMatch[1].replace(/\b(?:official|models|policies)\b/gi, '').trim() : '';
+        const topicMatch = normalized.match(/\b(?:compare|comparison of|difference between|versus|vs\.?)\s+(?:the\s+)?(?:official\s+)?(.+?)\s+(?:of|between)\b/i);
+        const rawFacets = topicMatch ? topicMatch[1] : '';
+        const facets = rawFacets
+            ? rawFacets.split(/,\s*(?:and\s+)?|\s+and\s+|\s*&\s*/i)
+                .map(f => f.replace(/\b(?:models?|policies|comparison|official)\b/gi, '').trim())
+                .filter(f => f.length >= 3 && !/^(?:the|of|for|in|a|an|as)$/i.test(f))
+            : [];
+
         const currentYear = new Date().getFullYear();
+        const dateMatch = normalized.match(/\b(?:as of\s+\d{4}|\d{4})\b/i);
+        const dateContext = dateMatch ? dateMatch[0] : '';
         const compQueries = [];
-        for (const ent of compEntities) {
-            compQueries.push(`${ent} ${topic} official refund policy developer revenue split ${currentYear}`.replace(/\s+/g, ' ').trim());
-        }
-        for (const ent of compEntities) {
-            compQueries.push(`${ent} official refund policy requirements`.trim());
-            compQueries.push(`${ent} developer revenue share split percentage`.trim());
+
+        if (facets.length > 0) {
+            for (const ent of compEntities) {
+                for (const facet of facets) {
+                    if (dateContext) {
+                        compQueries.push(`${ent} ${facet} ${dateContext}`.trim());
+                    }
+                    compQueries.push(`${ent} official ${facet}`.trim());
+                    compQueries.push(`${ent} ${facet}`.trim());
+                }
+            }
+            compQueries.push(`${compEntities.join(' vs ')} ${facets.join(' ')} ${dateContext}`.trim());
+        } else {
+            compQueries.push(`${compEntities.join(' vs ')} comparison ${dateContext}`.trim());
+            for (const ent of compEntities) {
+                compQueries.push(`${ent} specifications overview ${dateContext}`.trim());
+                compQueries.push(`${ent} features overview ${dateContext}`.trim());
+            }
         }
         return Array.from(new Set(compQueries.map(normalizeSearchQuery).filter(Boolean)));
     }
+
+    // 3. Universal leadership and organizational role queries
     const universal = parseUniversalEntityQuery(normalized);
     if (universal?.role && universal?.jurisdiction && isLeadershipOrRoleTerm(universal.role)) {
         const subj = universal.jurisdiction;
         const role = universal.role;
         const roleText = universal.roleText || role;
         const isCompanyRole = /\b(c[efot]o|founder|director|executive)\b/i.test(role);
+        const isHistoricalRole = Boolean(universal?.dateIntent?.hasDate);
+        const dateSuffix = isHistoricalRole ? ` ${universal.dateIntent.label || universal.dateIntent.year}` : '';
 
         const roleTitle = formatRoleDisplayTitle(roleText || role);
         if (isCompanyRole) {
             return Array.from(new Set([
-                `${roleTitle} of ${subj}`.trim(),
-                `"${subj}" ${roleText}`.trim(),
-                `${subj} ${role}`.trim(),
-                `${subj} current ${role}`.trim(),
+                `${roleTitle} of ${subj}${dateSuffix}`.trim(),
+                `"${subj}" ${roleText}${dateSuffix}`.trim(),
+                `${subj} ${role}${dateSuffix}`.trim(),
+                isHistoricalRole ? `${subj} ${role}${dateSuffix}`.trim() : `${subj} current ${role}`.trim(),
                 `${subj} leadership executive team`.trim(),
                 `${subj} ${roleText} founder`.trim(),
-                `${role} of ${subj}`.trim(),
+                `${role} of ${subj}${dateSuffix}`.trim(),
                 `${subj} management team`.trim()
+            ].map(normalizeSearchQuery).filter(Boolean)));
+        }
+
+        if (isHistoricalRole) {
+            return Array.from(new Set([
+                `${roleTitle} of ${subj}${dateSuffix}`.trim(),
+                `${subj} ${role}${dateSuffix}`.trim(),
+                `${role} of ${subj}${dateSuffix}`.trim(),
+                `${subj} ${roleText}${dateSuffix}`.trim(),
+                `List of ${role}s of ${subj}`.trim()
             ].map(normalizeSearchQuery).filter(Boolean)));
         }
 
@@ -5313,67 +5353,111 @@ export function buildDeterministicSearchQueries(query) {
             `List of ${role}s of ${subj}`.trim()
         ].map(normalizeSearchQuery).filter(Boolean)));
     }
+
+    // 4. Extract subject and information aspect
     const subject = extractSearchSubject(normalized);
     if (!subject) return [];
+
     const isTechDoc = isTechnicalDocumentationQuery(normalized);
     if (isTechDoc) {
-        const cleanSubject = subject.replace(/\b(?:latest|recent|current|newest|release|version|changelog|changes?|updates?)\b/gi, '').replace(/\s+/g, ' ').trim() || subject;
+        const cleanSubject = subject
+            .replace(/\s+(?:compared\s+(?:with|to)|difference\s+between|versus|vs\.?).*$/i, '')
+            .replace(/\b(?:latest|recent|current|newest|release|version|changelog|changes?|updates?)\b/gi, '')
+            .replace(/\s+/g, ' ')
+            .trim() || subject;
         const currentYear = new Date().getFullYear();
-        return Array.from(new Set([
-            `${cleanSubject} latest release notes official`.trim(),
-            `${cleanSubject} latest changelog what's new`.trim(),
-            `${cleanSubject} latest release changes`.trim(),
-            `${cleanSubject} latest release notes official documentation`.trim(),
-            `${cleanSubject} changelog release notes latest stable release`.trim(),
-            `${cleanSubject} ${currentYear} release notes`.trim(),
-            `${cleanSubject} latest version official release`.trim()
-        ].map(s => s.replace(/\b(\w+)\s+\1\b/gi, '$1')).map(normalizeSearchQuery).filter(Boolean)));
+
+        const techQueries = [];
+        if (/breaking\s+changes?/i.test(normalized)) {
+            techQueries.push(`${cleanSubject} breaking changes official documentation`);
+            techQueries.push(`${cleanSubject} migration guide breaking changes`);
+            techQueries.push(`${cleanSubject} changelog release notes`);
+            techQueries.push(`${cleanSubject} ${currentYear} release notes`);
+        } else if (/deprecat(?:ed|ions?)/i.test(normalized)) {
+            techQueries.push(`${cleanSubject} deprecated features removal changelog`);
+            techQueries.push(`${cleanSubject} changelog release notes`);
+            techQueries.push(`${cleanSubject} official documentation`);
+        } else if (/api\s+(?:docs?|reference)/i.test(normalized)) {
+            techQueries.push(`${cleanSubject} api documentation official reference`);
+            techQueries.push(`${cleanSubject} official docs reference`);
+            techQueries.push(`${cleanSubject} release notes documentation`);
+        } else {
+            // General technical release / changelog queries
+            techQueries.push(`${cleanSubject} latest release notes official`);
+            techQueries.push(`${cleanSubject} latest changelog what's new`);
+            techQueries.push(`${cleanSubject} latest release changes`);
+            techQueries.push(`${cleanSubject} latest release notes official documentation`);
+            techQueries.push(`${cleanSubject} changelog release notes latest stable release`);
+            techQueries.push(`${cleanSubject} ${currentYear} release notes`);
+            techQueries.push(`${cleanSubject} latest version official release`);
+        }
+
+        return Array.from(new Set(techQueries.map(s => s.replace(/\b(\w+)\s+\1\b/gi, '$1')).map(normalizeSearchQuery).filter(Boolean)));
     }
-    const intent = extractSearchIntentTerm(normalized);
-    const temporalPlan = planTemporalSearchQueries(normalized);
+
+    // 5. Dynamic question aspect and temporal queries
+    const aspect = extractQuestionAspect(normalized, subject);
+    const cleanCore = aspect && aspect !== 'overview' ? `${subject} ${aspect}` : subject;
+    const temporalPlan = planTemporalSearchQueries(cleanCore);
+
     const candidates = [
-        ...temporalPlan.queries,
-        `${subject} ${intent}`.trim(),
-        `${subject} recent ${intent}`.trim(),
-        `${subject} latest ${intent}`.trim()
+        `${subject} ${aspect}`.trim(),
+        `${subject} official ${aspect}`.trim(),
+        `${subject} ${aspect} verified`.trim(),
+        ...temporalPlan.queries
     ];
+
+    if (aspect !== 'overview') {
+        candidates.push(`${subject} ${aspect} details`.trim());
+    }
+
     if (temporalPlan.isTimeSensitive) {
         const frame = temporalPlan.temporalFrame;
         candidates.push(`${subject} ${frame.monthName} ${frame.year}`.trim());
         candidates.push(`${subject} ${frame.isoYearMonth}`.trim());
-        candidates.push(`${subject} ${frame.monthName} ${frame.year} ${intent}`.trim());
+        candidates.push(`${subject} ${frame.monthName} ${frame.year} ${aspect}`.trim());
         if (!normalized.includes(String(frame.year))) {
-            candidates.push(`${subject} ${frame.year} ${intent}`.trim());
+            candidates.push(`${subject} ${frame.year} ${aspect}`.trim());
         }
     }
+
     return Array.from(new Set(candidates.map(s => s.replace(/\b(\w+)\s+\1\b/gi, '$1')).map(normalizeSearchQuery).filter(Boolean)));
 }
 
 function isCurrentTopicSearchQuery(query) {
     const text = String(query || '').toLowerCase();
-    const hasFreshOrReviewSignal = /\b(?:compare|comparison|vs\.?|reviews?|price|availability)\b/i.test(text);
-    return (hasFreshOrReviewSignal || isDatedChangingFactSearchQuery(query)) && extractSearchSubject(query).split(/\s+/).filter(Boolean).length >= 2;
+    const hasFreshOrReviewSignal = /\b(?:compare|comparison|vs\.?|reviews?|price|availability|status|specs?|features?)\b/i.test(text);
+    const subject = extractSearchSubject(query);
+    return (hasFreshOrReviewSignal || isDatedChangingFactSearchQuery(query)) && Boolean(subject && subject.trim().length >= 2);
 }
 
 function isDatedChangingFactSearchQuery(query) {
     const text = String(query || '').toLowerCase();
     if (!parseStructuredDateWindow(text).hasDate) return false;
-    return isLeadershipOrRoleTerm(text) || /\b(?:win(?:ner|s)?|champions?|rankings?|standings?|releases?|launched|price|results?)\b/i.test(text);
+    return isLeadershipOrRoleTerm(text) || /\b(?:win(?:ner|s)?|champions?|rankings?|standings?|releases?|launched|price|results?|rates?|gdp|inflation|population|census|sales|revenue|statistics|metrics?|figures?|award|poll|vote|election|verdict|policy|law|amendment|treaty)\b/i.test(text);
 }
 
 function extractSearchSubject(query) {
     const normalized = normalizeSearchQuery(query);
-    const releaseOfMatch = normalized.match(/(?:(?:latest|current|newest|recent|stable)\s+(?:release|version|update|build)\s+of|changes?\s+in\s+(?:the\s+)?(?:latest\s+)?(?:release|version)\s+of)\s+([a-z0-9_.-]+)/i);
+    const releaseOfMatch = normalized.match(/(?:(?:latest|current|newest|recent|stable)\s+(?:release|version|update|build)\s+of|changes?\s+in\s+(?:the\s+)?(?:latest\s+)?(?:release|version)\s+of)\s+([a-z0-9_.-]+(?:\s+[a-z0-9_.-]+){0,3}?)(?=\s+(?:compared|versus|vs\.?|difference|between|as\s+of|in\s+\d{4}|$|[?.!]))/i)
+        || normalized.match(/(?:(?:latest|current|newest|recent|stable)\s+(?:release|version|update|build)\s+of|changes?\s+in\s+(?:the\s+)?(?:latest\s+)?(?:release|version)\s+of)\s+([a-z0-9_.-]+)/i);
     if (releaseOfMatch && releaseOfMatch[1]) {
         return cleanQueryTarget(releaseOfMatch[1]);
     }
     const universal = parseUniversalEntityQuery(query);
     if (universal?.jurisdiction && isLeadershipOrRoleTerm(universal?.role)) return cleanQueryTarget(universal.jurisdiction);
+
+    // Grammatical structural extraction: "What is the [ASPECT] of [SUBJECT]"
+    const whatOfMatch = normalized.match(/^(?:what|which|who)\s+(?:is|are|was|were)\s+(?:the\s+)?[a-z0-9_ -]+?\s+(?:of|for|in|on)\s+(?:the\s+)?(.+?)(?:\s+(?:in|as of)\s+\d{4})?[?.!]*$/i);
+    if (whatOfMatch && whatOfMatch[1]) {
+        return cleanQueryTarget(whatOfMatch[1]);
+    }
+
     const distilled = cleanSubQueryClause(distillSearchQuery(normalized));
     const cleanedTarget = cleanQueryTarget(distilled);
     const text = (cleanedTarget || distilled)
         .replace(/\s+(?:compared\s+(?:with|to)|difference\s+between|versus|vs\.?).*$/i, '')
-        .replace(/^(?:(?:recent|latest|current|newest)?\s*(?:reviews?|price|specs?|status|overview|details?|news|facts?|info(?:rmation)?)?\s*(?:of|for|about|on)\s+(?:the\s+)?)/i, '')
+        .replace(/^(?:(?:recent|latest|current|newest)?\s*(?:reviews?|price|specs?|status|overview|details?|news|facts?|info(?:rmation)?|release\s+notes?|changelog|breaking\s+changes?|battery\s+range|effective\s+date|boiling\s+point|stock\s+price|population|capital|founder)?\s*(?:of|for|about|on)\s+(?:the\s+)?)/i, '')
         .replace(/\b(?:changes?\s+in|updates?\s+in|new\s+in)\b/gi, ' ')
         .replace(/\b(?:in|during|as\s+of|by|before|after)\s+\d{4}\b/gi, ' ')
         .replace(/\s+(?:facts?|info(?:rmation)?|background|overview|details?|reviews?|price|specs?|status|latest|updates?)$/i, '')
@@ -5382,15 +5466,113 @@ function extractSearchSubject(query) {
     return cleanQueryTarget(normalizeSearchQuery(text).replace(/\s*\(\s*/g, ' ').replace(/\s*\)\s*/g, '').trim());
 }
 
+export function extractQuestionAspect(query, subject = null) {
+    const raw = String(query || '').trim();
+    if (!raw) return 'overview';
+
+    // 1. Universal leadership/role entity query
+    const universal = parseUniversalEntityQuery(raw);
+    if (universal?.role) {
+        return universal.role.toLowerCase();
+    }
+
+    const clean = raw.replace(/[?.!]+$/g, '').trim();
+
+    // 2. Technical documentation and release aspect patterns
+    const techMatch = clean.match(/\b(breaking\s+changes?|release\s+notes?|changelog|migration\s+guide|api\s+docs?|api\s+reference|what(?:'s|\s+is)\s+new|version\s+history|deprecat(?:ed|ions?))\b/i);
+    if (techMatch) {
+        return techMatch[1].toLowerCase().replace(/\s+/g, ' ');
+    }
+
+    // 3. Grammatical structural extraction: "What (?:is|are|was|were) (?:the )?([ASPECT]) (?:of|for|in|on) ([SUBJECT])"
+    const whatOfMatch = clean.match(/^(?:what|which|who)\s+(?:is|are|was|were)\s+(?:the\s+)?([a-z0-9_ -]+?)\s+(?:of|for|in|on)\s+(.+)$/i);
+    if (whatOfMatch) {
+        const candidateAspect = whatOfMatch[1].trim().toLowerCase();
+        if (candidateAspect.length >= 2 && !/^(?:a|an|the|this|that|these|those)$/.test(candidateAspect)) {
+            return candidateAspect;
+        }
+    }
+
+    // 4. Quantity / Metric queries: "How (?:much|many) ([ASPECT]) does ([SUBJECT]) have"
+    const howMuchMatch = clean.match(/^how\s+(?:much|many)\s+([a-z0-9_ -]+?)\s+(?:does|do|is|are|can|will)\s+(.+)$/i);
+    if (howMuchMatch) {
+        const candidate = howMuchMatch[1].trim().toLowerCase();
+        if (candidate.length >= 2) return candidate;
+    }
+
+    // 5. Temporal / Historical event queries: "When (?:was|did) ([SUBJECT]) (?:built|founded|created|launched|released|signed)"
+    const whenMatch = clean.match(/^when\s+(?:was|did|is|will)\s+(.+?)\s+(built|founded|created|launched|released|signed|established|invented|discovered|held)\b/i);
+    if (whenMatch) {
+        const verb = whenMatch[2].toLowerCase();
+        if (/built|founded|established|created/.test(verb)) return 'founding date';
+        if (/released|launched/.test(verb)) return 'release date';
+        if (/discovered|invented/.test(verb)) return 'discovery date';
+        return `${verb} date`;
+    }
+
+    // 6. Location queries: "Where (?:is|was) ([SUBJECT]) (?:located|headquartered|based|built)"
+    const whereMatch = clean.match(/^where\s+(?:is|was|are|were)\s+(.+?)\s+(located|headquartered|based|built|held)\b/i);
+    if (whereMatch) {
+        const verb = whereMatch[2].toLowerCase();
+        if (/headquartered|based/.test(verb)) return 'headquarters';
+        return 'location';
+    }
+
+    // 7. Possessive pattern: "([SUBJECT])'s ([ASPECT])"
+    const possessiveMatch = clean.match(/(?:^|\s)([a-z0-9_ -]+?)'s\s+([a-z0-9_ -]+)$/i);
+    if (possessiveMatch) {
+        const candidate = possessiveMatch[2].trim().toLowerCase();
+        if (candidate.length >= 2) return candidate;
+    }
+
+    // 8. Domain-specific aspect patterns
+    if (/\b(?:battery\s+range|range|mileage|charging\s+speed|acceleration|horsepower|top\s+speed)\b/i.test(clean)) {
+        const m = clean.match(/\b(battery\s+range|charging\s+speed|acceleration|horsepower|top\s+speed|range|mileage)\b/i);
+        if (m) return m[1].toLowerCase();
+    }
+    if (/\b(?:effective\s+date|enactment\s+date|compliance\s+deadline|deadline|implementation\s+date)\b/i.test(clean)) {
+        const m = clean.match(/\b(effective\s+date|enactment\s+date|compliance\s+deadline|deadline|implementation\s+date)\b/i);
+        if (m) return m[1].toLowerCase();
+    }
+    if (/\b(?:boiling\s+point|melting\s+point|atomic\s+mass|chemical\s+formula|molar\s+mass|density)\b/i.test(clean)) {
+        const m = clean.match(/\b(boiling\s+point|melting\s+point|atomic\s+mass|chemical\s+formula|molar\s+mass|density)\b/i);
+        if (m) return m[1].toLowerCase();
+    }
+    if (/\b(?:stock\s+price|market\s+cap|valuation|revenue|net\s+income|earnings|dividend)\b/i.test(clean)) {
+        const m = clean.match(/\b(stock\s+price|market\s+cap|valuation|revenue|net\s+income|earnings|dividend)\b/i);
+        if (m) return m[1].toLowerCase();
+    }
+    if (/\b(?:population|census|gdp|inflation\s+rate|unemployment\s+rate)\b/i.test(clean)) {
+        const m = clean.match(/\b(population|census|gdp|inflation\s+rate|unemployment\s+rate)\b/i);
+        if (m) return m[1].toLowerCase();
+    }
+    if (/\b(?:capital|currency|official\s+language|national\s+animal)\b/i.test(clean)) {
+        const m = clean.match(/\b(capital|currency|official\s+language|national\s+animal)\b/i);
+        if (m) return m[1].toLowerCase();
+    }
+    if (/\b(?:founder|co-founder|author|creator|inventor|ceo|director)\b/i.test(clean)) {
+        const m = clean.match(/\b(founder|co-founder|author|creator|inventor|ceo|director)\b/i);
+        if (m) return m[1].toLowerCase();
+    }
+    if (/\b(?:vs|compare|comparison|difference\s+between)\b/i.test(clean)) return 'comparison';
+    if (/\b(?:reviews?|hands-on|benchmark)\b/i.test(clean)) return 'reviews';
+    if (/\b(?:price|pricing|cost|availability)\b/i.test(clean)) return 'price';
+    if (/\b(?:news|headlines|breaking)\b/i.test(clean)) return 'news';
+
+    // 9. If a subject is provided, remove subject from query to find the remainder aspect
+    if (subject && subject.length >= 2) {
+        const remainder = clean.replace(new RegExp(`\\b${escapeRegex(subject)}\\b`, 'gi'), '')
+            .replace(/\b(?:what|which|who|where|when|how|is|are|was|were|the|of|for|in|on|about|a|an)\b/gi, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+        if (remainder.length >= 3) return remainder.toLowerCase();
+    }
+
+    return 'overview';
+}
+
 function extractSearchIntentTerm(query) {
-    const universal = parseUniversalEntityQuery(query);
-    if (universal?.role) return universal.role.toLowerCase();
-    const text = String(query || '').toLowerCase();
-    if (/\b(?:news|updates?|breaking|policy|election)\b/.test(text)) return 'news';
-    if (/\b(?:price|availability|launch|release)\b/.test(text)) return 'latest';
-    if (/\b(?:vs|compare|comparison)\b/.test(text)) return 'comparison';
-    if (/\b(?:reviews?|hands-on)\b/.test(text)) return 'reviews';
-    return 'updates';
+    return extractQuestionAspect(query);
 }
 
 function createSerperStatusError(status, detail = '') {
@@ -5594,5 +5776,6 @@ export const __test = {
     extractTopicAnchors,
     MCP_TOOL_DEFINITIONS,
     planDynamicSearchQueries,
-    handleStreamingWebRag
+    handleStreamingWebRag,
+    extractQuestionAspect
 };
