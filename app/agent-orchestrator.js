@@ -3,8 +3,11 @@
  * Coordinates 4 specialized agents: Planner, Researcher, Coder, and Synthesizer.
  * Supports concurrent parallel branch execution via dynamic event-driven wave scheduling.
  */
-import { isAmbiguous } from './ambiguity.js';
-import { computeIntentConfidence, computeEntityConfidence, computeEvidenceConfidence, computeAnswerGroundingConfidence } from './confidence.js';
+export function isAmbiguous(text) {
+    const raw = String(text || '').trim().toLowerCase();
+    const ambiguousTokens = new Set(['it', 'that', 'this', 'why', 'start', 'that thing', 'what about it', 'how come', 'more info']);
+    return ambiguousTokens.has(raw);
+}
 
 export function textToEmbeddingVector(text, dim = 512) {
     const v = new Float32Array(dim);
