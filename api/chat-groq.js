@@ -483,6 +483,14 @@ async function getInstantFactHelper() {
     const REASONING_TOKEN_ALLOWANCE = 4096;
     const CHAT_ROUTER_MODE = String(process.env.CHAT_ROUTER_MODE || 'strict_single_pass').trim().toLowerCase();
     const USER_SELECTABLE_MODELS = new Set([
+        'openai/gpt-oss-120b',
+        'gpt-oss-120b',
+        'openai/gpt-oss-20b',
+        'gpt-oss-20b',
+        'qwen/qwen3.8-27b',
+        'qwen-3.8-27b',
+        'openai/safety-gpt-oss-20b',
+        'safety-gpt-oss-20b',
         'qwen-2.5-coder-32b',
         'gemma2-9b-it',
         'deepseek-r1-distill-qwen-32b',
@@ -617,31 +625,38 @@ async function getInstantFactHelper() {
         if (tier === 'deep' || includeR1) {
             orderedList = [
                 safeMappedGroq,
-                'deepseek-r1-distill-qwen-32b',
-                'qwen-2.5-coder-32b',
-                'gemma2-9b-it',
+                'openai/gpt-oss-120b',
+                'qwen/qwen3.8-27b',
+                'openai/gpt-oss-20b',
                 safeConfigured
             ];
         } else if (preferSpeed || tier === 'instant') {
             const nonReasoningMapped = isNativeReasoningModel(mappedGroq) ? '' : mappedGroq;
             orderedList = [
                 nonReasoningMapped,
-                'gemma2-9b-it',
-                'qwen-2.5-coder-32b',
+                'openai/gpt-oss-20b',
+                'openai/gpt-oss-120b',
+                'qwen/qwen3.8-27b',
                 safeConfigured
             ];
         } else {
             orderedList = [
                 safeMappedGroq,
-                'qwen-2.5-coder-32b',
-                'gemma2-9b-it',
+                'openai/gpt-oss-120b',
+                'openai/gpt-oss-20b',
+                'qwen/qwen3.8-27b',
                 safeConfigured
             ];
         }
         return [...new Set(orderedList.filter(Boolean).filter(m => !m.toLowerCase().includes('llama')))];
     }
 
-    const KNOWN_GROQ_VISION_MODELS = new Set([]);
+    const KNOWN_GROQ_VISION_MODELS = new Set([
+        'qwen/qwen3.8-27b',
+        'qwen-3.8-27b',
+        'qwen/qwen-3.8-27b',
+        'qwen3.8-27b'
+    ]);
 
     function getPreferredGroqVisionCandidates(configuredModel = '', userSelectedModel = null) {
         const configured = KNOWN_GROQ_VISION_MODELS.has(String(configuredModel || '').trim())
@@ -650,7 +665,7 @@ async function getInstantFactHelper() {
         const userSelected = KNOWN_GROQ_VISION_MODELS.has(String(userSelectedModel || '').trim())
             ? String(userSelectedModel || '').trim()
             : '';
-        const visionModels = [];
+        const visionModels = ['qwen/qwen3.8-27b', 'qwen-3.8-27b'];
         return [...new Set([userSelected, configured, ...visionModels].filter(Boolean).filter(m => !m.toLowerCase().includes('llama')))];
     }
 
@@ -660,10 +675,12 @@ async function getInstantFactHelper() {
         let mappedGemini = '';
         if (userSelected.startsWith('gemini-')) {
             mappedGemini = userSelected;
-        } else if (['deepseek-r1-distill-qwen-32b', 'qwen-2.5-coder-32b'].includes(userSelected)) {
+        } else if (['openai/gpt-oss-120b', 'gpt-oss-120b', 'deepseek-r1-distill-qwen-32b', 'qwen-2.5-coder-32b'].includes(userSelected)) {
             mappedGemini = 'gemini-2.5-pro';
-        } else if (['gemma2-9b-it'].includes(userSelected)) {
+        } else if (['openai/gpt-oss-20b', 'gpt-oss-20b', 'gemma2-9b-it'].includes(userSelected)) {
             mappedGemini = 'gemini-2.5-flash-lite';
+        } else if (['qwen/qwen3.8-27b', 'qwen-3.8-27b'].includes(userSelected)) {
+            mappedGemini = 'gemini-3.7-flash';
         }
 
         let geminiList = [];
@@ -2137,7 +2154,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
         const groqApiKey = process.env.GROQ_API_KEY || process.env.GROQ_KEY;
         if (!groqApiKey) return { blocked: false };
 
-        const model = String(process.env.GROQ_SAFETY_MODEL || 'qwen-2.5-coder-32b').trim();
+        const model = String(process.env.GROQ_SAFETY_MODEL || 'openai/safety-gpt-oss-20b').trim();
         const userMessage = String(message || '').trim();
         if (!userMessage) return { blocked: false };
 
@@ -4504,7 +4521,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
     async function runSingleQualityModel(prompt, maxTokens, timeoutMs) {
         const groqApiKey = process.env.GROQ_API_KEY || process.env.GROQ_KEY;
         if (groqApiKey) {
-            const model = String(process.env.GROQ_QUALITY_MODEL || 'qwen-2.5-coder-32b').trim();
+            const model = String(process.env.GROQ_QUALITY_MODEL || 'openai/gpt-oss-120b').trim();
             const response = await fetchWithTimeoutRetry('https://api.groq.com/openai/v1/chat/completions', {
                 method: 'POST',
                 headers: {
