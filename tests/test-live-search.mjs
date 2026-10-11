@@ -71,7 +71,11 @@ console.log('--- Section 2: Real-Time Crypto Retrieval (CoinGecko) ---');
 // ─── Section 3: General Web Search (DuckDuckGo HTML Engine) ───────────────────
 console.log('--- Section 3: General Web Search (DuckDuckGo HTML) ---');
 {
-    const results = await searchDuckDuckGoHtml('James Webb Space Telescope latest findings 2024');
+    let results = await searchDuckDuckGoHtml('James Webb Space Telescope latest findings 2024');
+    if (!results || results.length === 0) {
+        await new Promise(r => setTimeout(r, 800));
+        results = await searchDuckDuckGoHtml('James Webb Space Telescope latest findings 2024');
+    }
     assert.ok(Array.isArray(results), 'DDG search must return an array');
     assert.ok(results.length > 0, 'DDG should return web results');
 
