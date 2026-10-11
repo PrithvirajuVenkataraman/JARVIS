@@ -52,12 +52,6 @@ function applyCostCapToLengthPolicy(lengthPolicy = {}, options = {}) {
 }
 
 /* ── Entity Verifier Helpers (Inlined for 0-dep cold boot) ── */
-const TRUSTED_ENTITY_DOMAINS = new Set([
-    'wikipedia.org', 'en.wikipedia.org', 'reuters.com', 'apnews.com', 'bbc.com', 'bbc.co.uk',
-    'thehindu.com', 'indianexpress.com', 'ndtv.com', 'timesofindia.indiatimes.com',
-    'gov.in', 'nic.in', 'tn.gov.in', 'india.gov.in', 'whitehouse.gov', 'gov.uk', 'nih.gov', 'cdc.gov', 'who.int'
-]);
-
 function extractEntityHostname(rawUrl) {
     if (!rawUrl || typeof rawUrl !== 'string') return '';
     try {
@@ -71,33 +65,35 @@ function extractEntityHostname(rawUrl) {
 function isTrustedEntityDomain(domain) {
     const d = String(domain || '').toLowerCase().trim();
     if (!d) return false;
-    if (TRUSTED_ENTITY_DOMAINS.has(d)) return true;
-    return d.endsWith('.gov') || d.endsWith('.gov.in') || d.endsWith('.nic.in') || d.endsWith('.edu') || d.endsWith('.org');
+    if (/(?:\.gov(?:\.[a-z]{2})?|\.edu(?:\.[a-z]{2})?|\.ac\.[a-z]{2}|\.nic\.[a-z]{2}|\.org|\.int)$/i.test(d)) return true;
+    if (d === 'wikipedia.org' || d.endsWith('.wikipedia.org')) return true;
+    return false;
+}
+
+function formatEntityTitle(str) {
+    return String(str || '').trim().split(/\s+/).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
 }
 
 function extractEntityTarget(text) {
-    const t = String(text || '').toLowerCase();
-    if (!t) return null;
-    const roleMatches = [
-        { regex: /\b(?:cm|chief minister)\s+(?:of\s+)?([a-z\s]+?)(?:\?|\.|\n|$|,)/i, role: 'Chief Minister' },
-        { regex: /\b(?:pm|prime minister)\s+(?:of\s+)?([a-z\s]+?)(?:\?|\.|\n|$|,)/i, role: 'Prime Minister' },
-        { regex: /\b(?:president)\s+(?:of\s+)?([a-z\s]+?)(?:\?|\.|\n|$|,)/i, role: 'President' },
-        { regex: /\b(?:governor)\s+(?:of\s+)?([a-z\s]+?)(?:\?|\.|\n|$|,)/i, role: 'Governor' },
-        { regex: /\b(?:mayor)\s+(?:of\s+)?([a-z\s]+?)(?:\?|\.|\n|$|,)/i, role: 'Mayor' },
-        { regex: /\b(?:ceo|chief executive officer)\s+(?:of\s+)?([a-z\s]+?)(?:\?|\.|\n|$|,)/i, role: 'CEO' },
-        { regex: /\b(?:chairman|chairperson)\s+(?:of\s+)?([a-z\s]+?)(?:\?|\.|\n|$|,)/i, role: 'Chairperson' },
-        { regex: /\b(?:director|director general)\s+(?:of\s+)?([a-z\s]+?)(?:\?|\.|\n|$|,)/i, role: 'Director' },
-        { regex: /\b(?:chancellor)\s+(?:of\s+)?([a-z\s]+?)(?:\?|\.|\n|$|,)/i, role: 'Chancellor' },
-        { regex: /\b(?:secretary general|secretary)\s+(?:of\s+)?([a-z\s]+?)(?:\?|\.|\n|$|,)/i, role: 'Secretary' },
-        { regex: /\b(?:captain)\s+(?:of\s+)?([a-z\s]+?)(?:\?|\.|\n|$|,)/i, role: 'Captain' }
-    ];
-    for (const item of roleMatches) {
-        const match = t.match(item.regex);
-        if (match && match[1]) {
-            const rawJurisdiction = match[1].trim().replace(/\b(the|current|latest|now|today|is|who)\b/g, '').trim();
-            if (rawJurisdiction.length >= 2 && rawJurisdiction.length <= 40) {
-                return { role: item.role, jurisdiction: rawJurisdiction.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ') };
-            }
+    const raw = String(text || '').trim().replace(/[?!.,;:]+$/g, '');
+    if (!raw || raw.length < 4) return null;
+    if (/^(?:explain|describe|how|why|calculate|solve|list|compare|summarize|write)\b/i.test(raw)) return null;
+
+    const match = raw.match(/^(?:who\s+is|who's|tell\s+me\s+who\s+is|who\s+serves\s+as|what\s+is|who\s+was|who)?\s*(?:the\s+)?(?:current|latest|present|today|now)?\s*([a-zA-Z\s]{2,30}?)\s+(?:of|for)\s+([a-zA-Z0-9_\s]{2,40})$/i);
+    if (match && match[1] && match[2]) {
+        const rawRole = match[1].trim();
+        const rawPlace = match[2].replace(/\b(?:today|right now|currently|is|who)\b/gi, '').trim().replace(/^the\s+/i, '');
+        const isRoleTitle = /\b(?:cm|pm|minister|president|governor|mayor|ceo|chairperson|chairman|director|chancellor|secretary|head|leader|chief|ruler|premier|ambassador|king|queen|founder|captain)\b/i.test(rawRole);
+
+        if (rawRole && rawPlace && isRoleTitle && !/^(capital|weather|temperature|history|definition|meaning|source|origin|formula|equation|speed|laws?)\b/i.test(rawRole)) {
+            let roleNorm = formatEntityTitle(rawRole);
+            if (rawRole.toLowerCase() === 'cm') roleNorm = 'Chief Minister';
+            else if (rawRole.toLowerCase() === 'pm') roleNorm = 'Prime Minister';
+            else if (rawRole.toLowerCase() === 'ceo') roleNorm = 'CEO';
+            return {
+                role: roleNorm,
+                jurisdiction: formatEntityTitle(rawPlace)
+            };
         }
     }
     return null;
@@ -159,17 +155,17 @@ function isStableGeographyOrGeneralFactQuery(rawQuery = '') {
     ) || /^(?:why\s+was|who\s+(?:built|designed|created|founded)|how\s+(?:was|were))\s+[a-z0-9\s.'-]{2,80}\??$/i.test(lower);
     if (isLandmarkTopic) return true;
 
-    const historySignals = /\b(?:history|ancient|medieval|century|empire|dynasty|civilization|battle\s+of|treaty\s+of|revolution|renaissance|archaeology|historical|cold\s+war|french\s+revolution|world\s+war|bronze\s+age|iron\s+age|mesopotamia|byzantine|ottoman|roman\s+empire|indus\s+valley|new\s+deal|new\s+kingdom|fdr|first\s+president\s+of|former\s+president|magna\s+carta|declaration\s+of\s+independence|constitution)\b/i;
+    const historySignals = /\b(?:history|ancient|medieval|century|empire|dynasty|civilization|battle\s+of|treaty\s+of|revolution|renaissance|archaeology|historical|cold\s+war|world\s+war|bronze\s+age|iron\s+age|first\s+president\s+of|former\s+president|declaration\s+of\s+independence|constitution)\b/i;
     if (historySignals.test(lower)) return true;
 
-    const scienceMathSignals = /\b(?:physics|chemistry|biology|astronomy|cosmology|quantum|gravity|relativity|thermodynamics|optics|evolution|photosynthesis|mitosis|meiosis|dna|rna|gene|protein|cell|atom|molecule|neutron\s+star|black\s+hole|supernova|galaxy|planet|orbit|solar\s+system|exoplanet|speed\s+of\s+light|periodic\s+table|atomic\s+number|penicillin|who\s+discovered|who\s+invented|calculate|compute|solve|integrate|integral|derivative|differentiate|equation|formula|pythagorean|factorial|matrix|matrices|determinant|eigenvalue)\b/i;
+    const scienceMathSignals = /\b(?:physics|chemistry|biology|astronomy|cosmology|quantum|gravity|relativity|thermodynamics|optics|evolution|photosynthesis|mitosis|meiosis|dna|rna|gene|protein|cell|atom|molecule|neutron\s+star|black\s+hole|supernova|galaxy|planet|orbit|solar\s+system|exoplanet|speed\s+of\s+light|periodic\s+table|atomic\s+number|who\s+discovered|who\s+invented|calculate|compute|solve|integrate|integral|derivative|differentiate|equation|formula|theorem|factorial|matrix|matrices|determinant|eigenvalue)\b/i;
     if (scienceMathSignals.test(lower) || /^\s*[\d\s+\-*/^().=xXyYzZ]+\s*$/.test(query)) return true;
 
     for (const pattern of INTENT_CODING_PATTERNS) {
         if (pattern.test(query)) return true;
     }
 
-    const definitionalSignals = /\b(?:definition\s+of|meaning\s+of|what\s+is\s+the\s+definition\s+of|what\s+is\s+the\s+meaning\s+of|define\s+|explain\s+(?:the\s+concept\s+of|what|how|why)|difference\s+between|philosophy|ethics|epistemology|metaphysics|stoicism|utilitarianism|existentialism|economics|macroeconomics|microeconomics|inflation|gdp)\b/i;
+    const definitionalSignals = /\b(?:definition\s+of|meaning\s+of|what\s+is\s+the\s+definition\s+of|what\s+is\s+the\s+meaning\s+of|define\s+|explain\s+(?:the\s+concept\s+of|what|how|why)|difference\s+between|philosophy|philosophical|ethics|ethical|epistemology|metaphysics|economic|economics|macroeconomics|microeconomics|inflation|gdp)\b/i;
     if (definitionalSignals.test(lower)) return true;
 
     if (/^(?:where\s+is|where\s+was|where\s+are|what\s+is|what\s+was|what\s+are|what'?s|who\s+was|how\s+does|how\s+do|explain|define|tell\s+me\s+about)\s+[\w\s.'-]{2,80}\??$/i.test(query)) {
@@ -1472,7 +1468,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
         if (/\b(itinerary|itenary|itenarary|travel plan|trip plan|day[- ]by[- ]day|vacation plan)\b/.test(value)) return true;
         if (/\bcreate a rich, engaging, practical itinerary\b/.test(value)) return true;
         if (/\b(write|draft|compose)\b[\s\S]{0,40}\b(email|essay|story|letter|blog|itinerary)\b/.test(value)) return true;
-        if (/\b(detailed|comprehensive|full)\b/.test(value) && /\b(trip|travel|visit|goa|plan)\b/.test(value)) return true;
+        if (/\b(detailed|comprehensive|full)\b/.test(value) && /\b(trip|travel|visit|vacation|tour|journey|destination|plan)\b/.test(value)) return true;
         return false;
     }
 
@@ -1518,7 +1514,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
         const i = String(intent || '').toLowerCase();
         if (['math_proof', 'complex_reasoning', 'logic_puzzle', 'algebraic_derivation', 'math'].includes(i)) return true;
         const msg = String(message || '').toLowerCase();
-        return /\b(prove|mathematical proof|formal proof|step-by-step logic|deductive proof|solve the riddle|logic puzzle|derive the formula|calculate|hypotenuse|pythagorean|theorem)\b/i.test(msg);
+        return /\b(prove|mathematical proof|formal proof|step-by-step logic|deductive proof|solve the riddle|logic puzzle|derive the formula|calculate|theorem|geometric proof|derivation)\b/i.test(msg);
     }
 
     function buildReasoningInstruction(intent, model = '', userSelectedModel = null, message = '') {
@@ -3683,7 +3679,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
         const queries = [
             base,
             isLeadershipOrTemporal ? `who is current ${base} ${currentYear}` : `latest ${base}`,
-            isLeadershipOrTemporal ? `${base} incumbent official ${currentYear}` : `${base} official source Reuters AP BBC`,
+            isLeadershipOrTemporal ? `${base} incumbent official ${currentYear}` : `${base} official source news updates`,
             isLeadershipOrTemporal ? `who is the leader of ${base} ${currentYear}` : `current ${base}`
         ];
         if (recentContext && recentContext.length < 220) {
@@ -3910,7 +3906,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             q,
             `latest ${q}`,
             `${q} official update`,
-            `${q} Reuters OR AP OR BBC`
+            `${q} official source news reporting`
         ];
     }
 
@@ -3947,7 +3943,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             if (item?.sourceType === 'official_source' && !item?.pageFetched) score -= 1;
             if (/\b(latest|today|update|updates|current|now|recent|incumbent|sworn in|assumed office|took oath)\b/.test(hay)) score += 3.0;
             if (/\b(former|ex-|past|previously|retired|resigned|predecessor|stepped down)\b/.test(hay)) score -= 2.0;
-            if (/\b(reuters|the hindu|indian express|bbc|ap news|times of India|ani|pib)\b/.test(hay)) score += 2.5;
+            if (item?.trusted || item?.sourceType === 'trusted_news' || (typeof item?.domainTrustTier === 'number' && item.domainTrustTier <= 2) || isTrustedEntityDomain(domain)) score += 2.5;
 
             const isLeadershipQuery = /\b(ceo|chief executive officer|managing director|cm|chief minister|pm|prime minister|president|governor|founder)\b/i.test(q);
             if (isLeadershipQuery) {
@@ -4021,21 +4017,13 @@ const edgeResponseCache = new EdgeSemanticLruCache();
     }
 
     function tokenizeRelevanceTerms(text) {
-        const stop = new Set([
-            'the', 'a', 'an', 'and', 'or', 'but', 'if', 'then', 'than',
-            'is', 'are', 'was', 'were', 'be', 'been', 'being',
-            'who', 'what', 'when', 'where', 'why', 'how',
-            'in', 'on', 'for', 'to', 'of', 'with', 'by', 'from',
-            'me', 'you', 'your', 'my', 'our', 'their',
-            'latest', 'current', 'today', 'update', 'updates'
-        ]);
-
         return Array.from(new Set(
             String(text || '')
                 .toLowerCase()
-                .replace(/[^a-z0-9\s]/g, ' ')
+                .normalize('NFKC')
+                .replace(/[^\p{L}\p{N}\s]/gu, ' ')
                 .split(/\s+/)
-                .filter(token => token && token.length > 1 && !stop.has(token))
+                .filter(token => token && token.length >= 3)
                 .slice(0, 16)
         ));
     }
@@ -4109,28 +4097,12 @@ const edgeResponseCache = new EdgeSemanticLruCache();
     }
 
     function tokenizeTopicTerms(text) {
-        const stop = new Set([
-            'a', 'an', 'the', 'and', 'or', 'but', 'if', 'then', 'than',
-            'do', 'does', 'did', 'can', 'could', 'would', 'will', 'should',
-            'what', 'which', 'who', 'whom', 'whose', 'when', 'where', 'why', 'how',
-            'is', 'are', 'am', 'was', 'were', 'be', 'been', 'being',
-            'have', 'has', 'had', 'i', 'me', 'my', 'mine', 'you', 'your', 'yours',
-            'we', 'our', 'ours', 'they', 'their', 'theirs', 'he', 'she', 'it',
-            'this', 'that', 'these', 'those', 'there', 'here',
-            'please', 'kindly', 'just', 'about', 'on', 'for', 'to', 'of', 'in',
-            'at', 'by', 'with', 'from', 'into', 'as', 'per',
-            'tell', 'show', 'give', 'find', 'search', 'look', 'lookup', 'check',
-            'explain', 'describe', 'summarize', 'summary',
-            'latest', 'recent', 'current', 'today', 'right', 'now', 'update', 'updates',
-            'sources', 'source', 'link', 'links', 'news', 'headline', 'headlines'
-        ]);
-
+        const raw = String(text || '').toLowerCase().normalize('NFKC').replace(/[^\p{L}\p{N}\s]/gu, ' ');
+        const stripped = raw.replace(/^(?:who|what|when|where|which|why|how|tell\s+me|explain|describe|show\s+me|find|search)\b/i, ' ');
         return Array.from(new Set(
-            String(text || '')
-                .toLowerCase()
-                .replace(/[^a-z0-9\s]/g, ' ')
+            stripped
                 .split(/\s+/)
-                .filter(token => token && token.length > 1 && !stop.has(token))
+                .filter(token => token && token.length >= 3)
                 .slice(0, 16)
         ));
     }
@@ -5081,33 +5053,26 @@ Respond conversationally and naturally.`;
     }
 
     function isRecipeGenerationRequest(message) {
-        const text = String(message || '')
-            .toLowerCase()
-            .replace(/\b(?:tallessery|tallesery|talassery|tellicherry)\b/g, 'thalassery');
+        const text = String(message || '').toLowerCase();
         if (!text.trim()) return false;
-        return /\b(recipe|ingredients|steps|how to make|how do i make|how can i make|cook|prepare)\b/.test(text) &&
-            /\b(biryani|chicken|mutton|rice|curry|masala|pasta|pizza|noodles|soup|cake|bread|dessert|dish|food|aloo|potato|fry|sabzi|poriyal|bhaji|stir fry|thalassery|tellicherry|tallessery|tallesery|talassery|malabar)\b/.test(text);
+        if (/\b(?:recipe|culinary\s+instructions?|cooking\s+instructions?|baking\s+instructions?)\b/i.test(text)) return true;
+        if (/\b(?:ingredients\s+(?:for|needed|required)|how\s+to\s+(?:cook|bake|prepare|make\s+a\s+dish))\b/i.test(text)) return true;
+        return /\b(?:recipe|ingredients|cook|bake|prepare)\b/i.test(text) && /\b(?:how\s+(?:to|do\s+i|can\s+i)\s+make|instructions?|steps?)\b/i.test(text);
     }
 
     function isLongTravelPlanningRequest(message) {
-        const text = String(message || '')
-            .toLowerCase()
-            .replace(/\b(itenary|itenarary)\b/g, 'itinerary');
+        const text = String(message || '').toLowerCase();
         if (!text.trim()) return false;
-        const travelPlan = /\b(itinerary|travel plan|trip plan|plan (?:a|an|my)?\s*trip|day plan|vacation)\b/.test(text) ||
-            (/\b(detailed|comprehensive|full)\b/.test(text) && /\b(trip|travel|visit|plan)\b/.test(text));
+        const travelPlan = /\b(?:itinerary|itenary|itenarary|travel\s+plan|trip\s+plan|plan\s+(?:a|an|my)?\s*trip|day\s+plan|vacation|tour|journey)\b/i.test(text) ||
+            (/\b(?:detailed|comprehensive|full)\b/i.test(text) && /\b(?:trip|travel|visit|plan)\b/i.test(text));
         if (!travelPlan) return false;
-        const detailed = /\b(detailed|comprehensive|full|complete|in depth|deep)\b/.test(text);
-        const dayMatch = text.match(/\b(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+days?\b/);
-        const dateRange = /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{1,2}\s*(?:-|–|to)\s*\d{1,2}\b/.test(text);
-        if (dateRange) return true;
+        const detailed = /\b(?:detailed|comprehensive|full|complete|in\s+depth|deep)\b/i.test(text);
+        const dayMatch = text.match(/\b(\d{1,2})\s+days?\b/i);
+        const isMultiDay = /\b(?:multi[- ]day|week|weekend|[4-9]\s+days?|\d{2,}\s+days?)\b/i.test(text);
+        const dateRange = /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{1,2}\s*(?:-|–|to)\s*\d{1,2}\b/i.test(text);
+        if (dateRange || isMultiDay) return true;
         if (!dayMatch) return detailed;
-        const dayWordMap = {
-            one: 1, two: 2, three: 3, four: 4, five: 5, six: 6,
-            seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12
-        };
-        const rawDay = dayMatch[1];
-        const days = Number.isFinite(Number(rawDay)) ? Number(rawDay) : (dayWordMap[rawDay] || 0);
+        const days = Number(dayMatch[1]);
         return detailed || days >= 4;
     }
 
