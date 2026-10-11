@@ -135,28 +135,6 @@ export function vectorCosineSimilarity(a, b) {
     return dot;
 }
 
-const TRUSTED_DOMAINS = new Set([
-    'wikipedia.org',
-    'en.wikipedia.org',
-    'reuters.com',
-    'apnews.com',
-    'bbc.com',
-    'bbc.co.uk',
-    'thehindu.com',
-    'indianexpress.com',
-    'ndtv.com',
-    'timesofindia.indiatimes.com',
-    'gov.in',
-    'nic.in',
-    'tn.gov.in',
-    'india.gov.in',
-    'whitehouse.gov',
-    'gov.uk',
-    'nih.gov',
-    'cdc.gov',
-    'who.int'
-]);
-
 export function extractHostname(rawUrl) {
     if (!rawUrl || typeof rawUrl !== 'string') return '';
     try {
@@ -170,8 +148,9 @@ export function extractHostname(rawUrl) {
 export function isTrustedDomain(domain) {
     const d = String(domain || '').toLowerCase().trim();
     if (!d) return false;
-    if (TRUSTED_DOMAINS.has(d)) return true;
-    return d.endsWith('.gov') || d.endsWith('.gov.in') || d.endsWith('.nic.in') || d.endsWith('.edu') || d.endsWith('.org');
+    if (/(?:\.gov(?:\.[a-z]{2})?|\.edu(?:\.[a-z]{2})?|\.ac\.[a-z]{2}|\.nic\.[a-z]{2}|\.org|\.int)$/i.test(d)) return true;
+    if (d === 'wikipedia.org' || d.endsWith('.wikipedia.org')) return true;
+    return false;
 }
 
 /**
@@ -290,12 +269,12 @@ export function isStableGeographyOrGeneralFactQuery(rawQuery = '') {
     if (isLandmarkTopic) return true;
 
     // History & historical events
-    if (/\b(?:history|ancient|medieval|century|empire|dynasty|civilization|battle\s+of|treaty\s+of|revolution|renaissance|archaeology|historical|cold\s+war|french\s+revolution|world\s+war|bronze\s+age|iron\s+age|mesopotamia|byzantine|ottoman|roman\s+empire|indus\s+valley|new\s+deal|new\s+kingdom|fdr|first\s+president\s+of|former\s+president|magna\s+carta|declaration\s+of\s+independence|constitution)\b/i.test(lower)) {
+    if (/\b(?:history|ancient|medieval|century|empire|dynasty|civilization|battle\s+of|treaty\s+of|revolution|renaissance|archaeology|historical|cold\s+war|world\s+war|bronze\s+age|iron\s+age|first\s+president\s+of|former\s+president|declaration\s+of\s+independence|constitution)\b/i.test(lower)) {
         return true;
     }
 
     // Science, Mathematics & Physics
-    if (/\b(?:physics|chemistry|biology|astronomy|quantum|gravity|relativity|thermodynamics|evolution|photosynthesis|mitosis|dna|rna|gene|protein|atom|molecule|speed\s+of\s+light|periodic\s+table|atomic\s+number|penicillin|who\s+discovered|who\s+invented|calculate|compute|solve|integrate|integral|derivative|differentiate|equation|formula|pythagorean|factorial|matrix|matrices)\b/i.test(lower) ||
+    if (/\b(?:physics|chemistry|biology|astronomy|quantum|gravity|relativity|thermodynamics|evolution|photosynthesis|mitosis|dna|rna|gene|protein|atom|molecule|speed\s+of\s+light|periodic\s+table|atomic\s+number|who\s+discovered|who\s+invented|calculate|compute|solve|integrate|integral|derivative|differentiate|equation|formula|theorem|factorial|matrix|matrices)\b/i.test(lower) ||
         /^\s*[\d\s+\-*/^().=xXyYzZ]+\s*$/.test(query)) {
         return true;
     }
@@ -306,7 +285,7 @@ export function isStableGeographyOrGeneralFactQuery(rawQuery = '') {
     }
 
     // Definitional & Conceptual topics
-    if (/\b(?:definition\s+of|meaning\s+of|what\s+is\s+the\s+definition\s+of|define\s+|difference\s+between|philosophy|ethics|epistemology|metaphysics|stoicism|economics|macroeconomics|inflation|gdp)\b/i.test(lower) ||
+    if (/\b(?:definition\s+of|meaning\s+of|what\s+is\s+the\s+definition\s+of|define\s+|difference\s+between|philosophy|philosophical|ethics|ethical|epistemology|metaphysics|economic|economics|macroeconomics|inflation|gdp)\b/i.test(lower) ||
         /^(?:where\s+(?:is|was|are|were)|what\s+(?:is|was|are|were|did)|when\s+(?:is|was|are|were|did)|who\s+(?:is|was|are|were|wrote|built|designed|painted|discovered|invented)|how\s+(?:tall|high|deep|far|long|old|big|much|many|does|do|did|is|was|are|were|to)|why\s+(?:is|was|are|were|did)|explain|define|tell\s+me\s+about)\s+[a-z0-9\s.'-]{2,100}\??$/i.test(lower)) {
         return true;
     }
