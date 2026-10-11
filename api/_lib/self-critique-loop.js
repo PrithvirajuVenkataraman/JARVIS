@@ -55,22 +55,16 @@ export function detectLogicalContradictions(text = '') {
     const flaws = [];
     const lower = String(text || '').toLowerCase();
 
-    // 1. Knight & Knave or Truth/Liar contradiction
-    if (/\b(?:knight|knave)\b/i.test(lower)) {
-        const lines = lower.split('\n');
-        let knightConfirmed = false;
-        let knaveConfirmed = false;
-        for (const line of lines) {
-            if (/\b(?:is\s+a\s+knight|must\s+be\s+a\s+knight)\b/.test(line)) knightConfirmed = true;
-            if (/\b(?:is\s+a\s+knave|must\s+be\s+a\s+knave)\b/.test(line)) knaveConfirmed = true;
-        }
-        if (/\btherefore\b/.test(lower) && /\bcannot\s+be\s+determined\b/.test(lower) && (knightConfirmed || knaveConfirmed)) {
-            flaws.push({
-                type: 'contradictory_conclusion',
-                description: 'The deduction derives concrete roles but also asserts the outcome cannot be determined.',
-                severity: 'critical'
-            });
-        }
+    // 1. General deductive contradiction (derives concrete identity/state, but concludes "cannot be determined")
+    const hasDefiniteDeduction = /\b(?:is\s+(?:a|an)\s+\w+|must\s+be\s+(?:a|an)?\s*\w+|concluded\s+that|established\s+that)\b/i.test(lower);
+    const hasIndeterminateConclusion = (/\btherefore\b/i.test(lower) || /\bconsequently\b/i.test(lower) || /\bin\s+conclusion\b/i.test(lower)) &&
+        (/\bcannot\s+be\s+determined\b/i.test(lower) || /\bimpossible\s+to\s+determine\b/i.test(lower));
+    if (hasDefiniteDeduction && hasIndeterminateConclusion) {
+        flaws.push({
+            type: 'contradictory_conclusion',
+            description: 'The deduction derives concrete roles or states but also asserts the outcome cannot be determined.',
+            severity: 'critical'
+        });
     }
 
     // 2. Unbalanced Code Fences
