@@ -66,7 +66,11 @@ export default async function handler(req, res) {
         const form = new FormData();
         const audioBlob = new Blob([audioBuffer], { type: mimeType });
         form.append('file', audioBlob, `audio.${extension}`);
-        form.append('model', DEFAULT_WHISPER_MODEL);
+        const requestedModel = String(body.model || '').trim().toLowerCase();
+        const whisperModel = (requestedModel === 'whisper-large-v3' || requestedModel === 'whisper-large-v3-turbo')
+            ? requestedModel
+            : DEFAULT_WHISPER_MODEL;
+        form.append('model', whisperModel);
         form.append('response_format', 'verbose_json');
         if (language) form.append('language', language.split('-')[0].toLowerCase());
         if (prompt) form.append('prompt', prompt.slice(0, 200));
@@ -103,6 +107,7 @@ export default async function handler(req, res) {
         return res.status(200).json({
             success: true,
             text,
+            model: whisperModel,
             language: data.language || language || 'en',
             duration: Number(data.duration) || 0,
             latencyMs: Math.round(performance.now() - start),
