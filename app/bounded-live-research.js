@@ -287,6 +287,8 @@ export function normalizeResearchSources(results = [], query = '', limit = 8) {
     }
 
     if (isFreshnessQuery || candidates.some(c => c.parsedDateMs)) {
+        const now = Date.now();
+        const NINETY_DAYS_MS = 90 * 24 * 3600 * 1000;
         candidates.sort((a, b) => {
             const timeA = a.parsedDateMs || 0;
             const timeB = b.parsedDateMs || 0;
@@ -294,8 +296,14 @@ export function normalizeResearchSources(results = [], query = '', limit = 8) {
                 if (timeB !== timeA) return timeB - timeA;
                 return (b.trusted ? 1 : 0) - (a.trusted ? 1 : 0);
             }
-            if (timeA && !timeB) return -1;
-            if (!timeA && timeB) return 1;
+            if (timeA && !timeB) {
+                const isRecentA = (now - timeA) < NINETY_DAYS_MS;
+                return isRecentA ? -1 : 1;
+            }
+            if (!timeA && timeB) {
+                const isRecentB = (now - timeB) < NINETY_DAYS_MS;
+                return isRecentB ? 1 : -1;
+            }
             return (b.trusted ? 1 : 0) - (a.trusted ? 1 : 0);
         });
     }
