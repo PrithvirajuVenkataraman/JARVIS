@@ -11,7 +11,18 @@
  */
 
 import { normalizeUserQuery, hasSearchableContent } from './query-normalizer.js';
-export { normalizeUserQuery, hasSearchableContent };
+import { BM25Index, computeBM25Scores, tokenizeText } from './bm25.js';
+import { textToEmbeddingVector, vectorCosineSimilarity } from './frontend-routing.js';
+
+export {
+    normalizeUserQuery,
+    hasSearchableContent,
+    BM25Index,
+    computeBM25Scores,
+    tokenizeText,
+    textToEmbeddingVector,
+    vectorCosineSimilarity
+};
 
 export const LIVE_RESEARCH_BUDGETS = Object.freeze({
     HARD_DEADLINE_MS: 9000,
@@ -38,6 +49,138 @@ export const PROVENANCE_MODES = Object.freeze({
     SYNTHESIS_FALLBACK: 'synthesis_fallback',
     ABORTED: 'aborted'
 });
+
+export const RESEARCH_DOMAINS = Object.freeze([
+    {
+        key: 'leadership',
+        text: 'political governance leadership public office administration election tenure ministry portfolios appointments biography career cabinet minister prime minister chief minister president governor executive mayor official cm pm who is who was who are',
+        generate: (topic) => [
+            `What are the major policies and recent announcements associated with ${topic}`,
+            `What is the political background and administrative tenure of ${topic}`,
+            `What are the key initiatives and public updates regarding ${topic}`
+        ]
+    },
+    {
+        key: 'policy_rules',
+        text: 'statutory regulations compliance requirements guidelines administrative policies official mandate restrictions standards legal guidelines visa baggage allowance luggage work authorization rules audit suspension perm green card h-1b immigration',
+        generate: (topic) => [
+            `What are the specific requirements and compliance guidelines for ${topic}`,
+            `What is the official implementation timeline and effective date for ${topic}`,
+            `What exemptions or special allowances apply under ${topic}`
+        ]
+    },
+    {
+        key: 'technical_release',
+        text: 'software development library runtime language framework release notes version changelog breaking changes api migration performance benchmarks deprecations python rust go javascript typescript',
+        generate: (topic) => [
+            `What are the major new features and breaking changes in ${topic}`,
+            `What is the migration path and compatibility requirements for ${topic}`,
+            `What performance improvements or benchmarks are reported for ${topic}`
+        ]
+    },
+    {
+        key: 'sports',
+        text: 'athletics competition match tournament championship league points table game score fixtures standings trophy medal winner team roster player performance statistics ipl fifa olympics',
+        generate: (topic) => [
+            `What is the upcoming schedule and next fixture for ${topic}`,
+            `What are the key statistics and recent performance records for ${topic}`,
+            `How does this result impact the standings and tournament qualification for ${topic}`
+        ]
+    },
+    {
+        key: 'finance',
+        text: 'financial markets equities stock valuation earnings report quarterly revenue profits fiscal guidance analyst ratings economic indicators price forecast nasdaq dow sensex nifty crypto',
+        generate: (topic) => [
+            `What are the primary market drivers and recent financial results for ${topic}`,
+            `What do analyst ratings and price targets forecast for ${topic}`,
+            `How do macroeconomic trends affect the current performance of ${topic}`
+        ]
+    },
+    {
+        key: 'travel_geography',
+        text: 'geography tourism sightseeing travel destinations cities attractions historical monuments heritage culture climate weather guidance places visit visiting visitor travel vacation trip explore flight itinerary',
+        generate: (topic) => [
+            `What are the top attractions and key highlights in ${topic}`,
+            `What is the best time to visit and travel guidance for ${topic}`,
+            `What is the cultural and historical significance of ${topic}`
+        ]
+    },
+    {
+        key: 'event_mission',
+        text: 'aerospace exploration space mission launch schedule countdown flight test milestone expedition summit conference deployment artemis nasa isro spacex',
+        generate: (topic) => [
+            `What is the timeline and upcoming milestones for ${topic}`,
+            `What are the primary objectives and mission parameters for ${topic}`,
+            `What technical challenges or next steps have been identified for ${topic}`
+        ]
+    },
+    {
+        key: 'concept_mechanism',
+        text: 'scientific mechanism working theory conceptual principles advantages disadvantages trade-offs alternatives fundamental explanation how it works biological medical physics',
+        generate: (topic) => [
+            `How does ${topic} work in practice and real-world applications`,
+            `What are the key advantages and potential drawbacks of ${topic}`,
+            `What are common alternatives or comparable approaches to ${topic}`
+        ]
+    }
+]);
+
+export const COMPILED_DOMAINS = Object.freeze(RESEARCH_DOMAINS.map((domain, index) => ({
+    ...domain,
+    index,
+    vector: textToEmbeddingVector(domain.text, 512)
+})));
+
+export const DOMAIN_BM25_INDEX = new BM25Index({ k1: 1.2, b: 0.75 });
+COMPILED_DOMAINS.forEach((domain) => {
+    DOMAIN_BM25_INDEX.addDocument(domain.index, domain.text, domain);
+});
+
+export function classifyQueryDomainSemantic(query) {
+    const raw = String(query || '').trim();
+    if (!raw) return null;
+    const qVec = textToEmbeddingVector(raw, 512);
+
+    const bm25Results = DOMAIN_BM25_INDEX.search(raw, { minScore: 0.05, topK: 3 });
+    const bm25Scores = new Map();
+    let maxBm25 = 1;
+    for (const r of bm25Results) {
+        maxBm25 = Math.max(maxBm25, r.score);
+        bm25Scores.set(r.doc.id, r.score);
+    }
+
+    let bestDomain = null;
+    let bestScore = -1;
+
+    for (const domain of COMPILED_DOMAINS) {
+        const cosSim = vectorCosineSimilarity(qVec, domain.vector);
+        const normBm25 = (bm25Scores.get(domain.index) || 0) / maxBm25;
+        const hybridScore = 0.5 * cosSim + 0.5 * normBm25;
+        if (hybridScore > bestScore) {
+            bestScore = hybridScore;
+            bestDomain = domain;
+        }
+    }
+
+    if (bestDomain && bestScore >= 0.15) {
+        return bestDomain;
+    }
+    return null;
+}
+
+const FRESHNESS_PROTOTYPE_TEXT = 'today tonight yesterday breaking latest current updates recent newest breaking news hours ago days ago past 24 hours past week this month';
+const FRESHNESS_PROTOTYPE_VECTOR = textToEmbeddingVector(FRESHNESS_PROTOTYPE_TEXT, 512);
+
+export function isFreshnessQuerySemantic(query = '') {
+    const raw = String(query || '').trim();
+    if (!raw) return false;
+    const qVec = textToEmbeddingVector(raw, 512);
+    const cosSim = vectorCosineSimilarity(qVec, FRESHNESS_PROTOTYPE_VECTOR);
+    const tokens = tokenizeText(raw);
+    const freshnessTokens = new Set(['today', 'tonight', 'yesterday', 'latest', 'current', 'recent', 'recently', 'breaking', 'newest', 'news', 'update', 'updates']);
+    const hasFreshnessToken = tokens.some(t => freshnessTokens.has(t));
+    return cosSim >= 0.25 || hasFreshnessToken;
+}
 
 export function getDomainFromUrl(url) {
     try {
@@ -236,12 +379,57 @@ export function formatSourceDate(parsedMs, now = Date.now()) {
 }
 
 /**
+ * Scores candidate research sources using hybrid lexical BM25 and dense semantic cosine similarity.
+ */
+export function scoreSourcesBM25AndSemantic(candidates = [], query = '') {
+    if (!Array.isArray(candidates) || candidates.length === 0 || !query) return candidates;
+
+    // 1. Build in-memory BM25 index over candidate sources
+    const bm25Index = new BM25Index({ k1: 1.2, b: 0.75 });
+    candidates.forEach((c, idx) => {
+        const text = `${c.title || ''} ${c.snippet || ''} ${c.domain || ''}`.trim();
+        bm25Index.addDocument(idx, text, c);
+    });
+
+    const rawBm25Scores = bm25Index.scoreAll(query);
+    let maxBm25 = 1;
+    for (const s of rawBm25Scores) {
+        if (s > maxBm25) maxBm25 = s;
+    }
+
+    // 2. Dense vector embedding for query
+    const queryVector = textToEmbeddingVector(query, 512);
+
+    // 3. Compute hybrid score for each candidate
+    for (let i = 0; i < candidates.length; i++) {
+        const c = candidates[i];
+        const docText = `${c.title || ''} ${c.snippet || ''} ${c.domain || ''}`.trim();
+        const docVector = textToEmbeddingVector(docText, 512);
+        const cosSim = vectorCosineSimilarity(queryVector, docVector);
+        const normBm25 = (rawBm25Scores[i] || 0) / maxBm25;
+        const isAuth = isAuthoritativeResearchSource(c, query);
+
+        // Hybrid formula: lexical BM25 (40%) + dense semantic cosine (40%) + authoritative bonus (15%) + trusted bonus (5%)
+        const hybridRelevance = (0.40 * normBm25) +
+                                (0.40 * Math.max(0, cosSim)) +
+                                (isAuth ? 0.15 : 0) +
+                                (c.trusted ? 0.05 : 0);
+
+        c.bm25Score = Number((rawBm25Scores[i] || 0).toFixed(4));
+        c.semanticSim = Number(cosSim.toFixed(4));
+        c.hybridScore = Number(hybridRelevance.toFixed(4));
+    }
+
+    return candidates;
+}
+
+/**
  * Normalizes, deduplicates, ranks, and assigns stable numeric IDs (1..N) to sources.
  */
 export function normalizeResearchSources(results = [], query = '', limit = 8) {
     if (!Array.isArray(results)) return [];
     const seenUrls = new Set();
-    const isFreshnessQuery = /\b(?:today|tonight|yesterday|yesterday's|today's|latest|current|recently|recent|breaking|newest|what('?s|\s+is)\s+new|updates?|hours?\s+ago|days?\s+ago|past\s+24\s+hours?|past\s+48\s+hours?|this\s+week|past\s+week|last\s+week|this\s+month|past\s+month|this\s+year|news)\b/i.test(String(query || ''));
+    const isFreshnessQuery = isFreshnessQuerySemantic(query);
     const candidates = [];
 
     for (const r of results) {
@@ -282,9 +470,14 @@ export function normalizeResearchSources(results = [], query = '', limit = 8) {
             date: dateStr,
             parsedDateMs,
             trusted: Boolean(r.trusted),
-            accessible: r.accessible !== false
+            accessible: r.accessible !== false,
+            sourceType: r.sourceType,
+            qualitySignals: r.qualitySignals,
+            _initialIndex: candidates.length
         });
     }
+
+    scoreSourcesBM25AndSemantic(candidates, query);
 
     if (isFreshnessQuery || candidates.some(c => c.parsedDateMs)) {
         const now = Date.now();
@@ -294,7 +487,7 @@ export function normalizeResearchSources(results = [], query = '', limit = 8) {
             const timeB = b.parsedDateMs || 0;
             if (timeA && timeB) {
                 if (timeB !== timeA) return timeB - timeA;
-                return (b.trusted ? 1 : 0) - (a.trusted ? 1 : 0);
+                return ((b.hybridScore || 0) - (a.hybridScore || 0)) || (a._initialIndex - b._initialIndex);
             }
             if (timeA && !timeB) {
                 const isRecentA = (now - timeA) < NINETY_DAYS_MS;
@@ -304,7 +497,14 @@ export function normalizeResearchSources(results = [], query = '', limit = 8) {
                 const isRecentB = (now - timeB) < NINETY_DAYS_MS;
                 return isRecentB ? 1 : -1;
             }
-            return (b.trusted ? 1 : 0) - (a.trusted ? 1 : 0);
+            return ((b.hybridScore || 0) - (a.hybridScore || 0)) || (a._initialIndex - b._initialIndex);
+        });
+    } else {
+        candidates.sort((a, b) => {
+            const authA = isAuthoritativeResearchSource(a, query) ? 1 : 0;
+            const authB = isAuthoritativeResearchSource(b, query) ? 1 : 0;
+            if (authA !== authB) return authB - authA;
+            return a._initialIndex - b._initialIndex;
         });
     }
 
@@ -334,30 +534,50 @@ export function isAuthoritativeResearchSource(source, query = '') {
     if (!source) return false;
     const domain = String(source.domain || '').toLowerCase();
     const url = String(source.url || '').toLowerCase();
-    if (source.sourceType === 'trusted_news' || /\b(?:news\.google\.com|yahoo\.com|msn\.com)\b/i.test(domain)) {
+
+    // News aggregators and syndicated feeds are not authoritative primary documentation
+    if (source.sourceType === 'trusted_news' ||
+        domain.startsWith('news.') ||
+        /(?:news\.google\.com|yahoo\.com|msn\.com|feedproxy|rss)/i.test(domain)) {
         return false;
     }
     if (source.sourceType === 'official_source') return true;
-    const isDocDomain = /\b(?:docs\.python\.org|python\.org|github\.com|developer\.mozilla\.org|go\.dev|rust-lang\.org|kernel\.org)\b/i.test(domain)
-        || domain.startsWith('docs.')
-        || domain.startsWith('developer.')
-        || domain.startsWith('api.');
-    if (isDocDomain) return true;
-    if (/\b(?:docs|documentation|changelog|whatsnew|release-notes)\b/i.test(url)) return true;
+
+    // Structural documentation & developer host indicators
+    const isDocSubdomain = /^(?:docs?|developer|developers?|api|dev|reference|spec|standards|manual|guide|help)\./i.test(domain);
+    if (isDocSubdomain) return true;
+
+    // Structural technical URL paths
+    if (/(?:\/)(?:docs?|documentation|changelog|whatsnew|release[-_]?notes?|api|reference|specs?)(?:[\/?#]|$)/i.test(url)) {
+        return true;
+    }
+
+    // Entity-domain matching for technical documentation
+    if (query) {
+        const queryTokens = tokenizeText(query, { minTokenLength: 3 });
+        const domainBase = domain.replace(/^www\./, '').split('.')[0];
+        if (queryTokens.includes(domainBase) && /(?:\.(?:org|dev|io|net|com))$/i.test(domain)) {
+            return true;
+        }
+    }
+
     return false;
 }
 
 export function evaluateSourceQualityForEarlySynthesis(sources = [], query = '') {
     if (!Array.isArray(sources) || sources.length === 0) return false;
-    const isTechDoc = /\b(?:release|version|changelog|docs?|documentation|api|whatsnew|what\s+changed\s+in)\b/i.test(String(query || ''));
+    const domain = classifyQueryDomainSemantic(query);
+    const isTechDoc = domain?.key === 'technical_release';
     if (isTechDoc) {
         // Technical & software release queries require at least 1 authoritative source or strong relevance consensus (>= 3 sources)
         const hasAuthoritative = sources.some(s => isAuthoritativeResearchSource(s, query));
         if (hasAuthoritative) return true;
-        const cleanTerms = String(query).toLowerCase().replace(/[^a-z0-9]+/g, ' ').split(/\s+/).filter(t => t.length >= 3 && !/^(?:what|changed|latest|release|version|previous|stable|with|from|than|does|will|could|should|about|the|and|for)\b/.test(t));
+        const queryTokens = tokenizeText(query, { minTokenLength: 3 });
+        const stopTerms = new Set(['what', 'when', 'where', 'which', 'who', 'how', 'why', 'does', 'will', 'with', 'from', 'than', 'about', 'the', 'and', 'for', 'changed', 'latest', 'release', 'version', 'previous', 'stable']);
+        const discriminativeTokens = queryTokens.filter(t => !stopTerms.has(t));
         const matchedSources = sources.filter(s => {
             const text = `${s.title || ''} ${s.snippet || ''}`.toLowerCase();
-            return cleanTerms.some(t => text.includes(t));
+            return discriminativeTokens.some(t => text.includes(t));
         });
         return matchedSources.length >= 3;
     }
@@ -468,9 +688,130 @@ export function generateSnippetFallback(query, sources = []) {
 }
 
 /**
+ * Dynamically extracts publisher names, domain labels, and title brand tags from candidate sources.
+ * Replaces static hardcoded publisher lists with zero-hardcoding metadata extraction.
+ */
+export function extractDynamicPublisherBlocklist(sources = []) {
+    const publisherBlocklist = new Set();
+    for (const s of sources) {
+        if (!s) continue;
+        if (s.domain) {
+            const dom = s.domain.toLowerCase().replace(/^www\./, '');
+            publisherBlocklist.add(dom);
+            const noTld = dom.replace(/\.[a-z]{2,}$/i, '');
+            if (noTld.length >= 3) publisherBlocklist.add(noTld);
+            const parts = dom.split('.');
+            for (const p of parts) {
+                if (p.length >= 4 && !['com', 'org', 'net', 'gov', 'edu', 'io'].includes(p)) {
+                    publisherBlocklist.add(p);
+                }
+            }
+        }
+        if (s.sourceLabel) publisherBlocklist.add(String(s.sourceLabel).toLowerCase().trim());
+        if (s.source) publisherBlocklist.add(String(s.source).toLowerCase().trim());
+        if (s.publisher) publisherBlocklist.add(String(s.publisher).toLowerCase().trim());
+
+        // Extract publisher suffix from title (e.g. "Title - Brand Name", "Title | Brand Name")
+        const title = String(s.title || '');
+        const brandMatch = title.match(/(?:[-–—|·:]\s*)([A-Za-z0-9\s.]{2,40})$/);
+        if (brandMatch) {
+            const brand = brandMatch[1].toLowerCase().trim();
+            if (brand.length >= 3) publisherBlocklist.add(brand);
+        }
+    }
+    return publisherBlocklist;
+}
+
+/**
+ * Extracts the primary entity or core topic from a user query.
+ */
+export function extractCoreTopicSemantic(cleanQ) {
+    const primaryClause = cleanQ.split(/[?!;]|\n+/)[0].trim();
+    let topic = primaryClause
+        .replace(/^(?:please\s+)?(?:can you\s+)?(?:tell me|explain|find|search|lookup|what|which|how|why|who|when|where)\s+(?:is|are|was|were|do|does|did|can|could|will|would|changes\s+did|features\s+did|new\s+features\s+did)?\s*/i, '')
+        .replace(/\b(?:latest\s+updates?|latest\s+news|current\s+status|in\s+detail|right\s+now)\b/gi, '')
+        .replace(/[?.!]+$/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    const regardingMatch = topic.match(/\b(?:regarding|about|concerning)\s+(.+)$/i);
+    if (regardingMatch && regardingMatch[1].trim().length >= 3) {
+        topic = regardingMatch[1].trim();
+    }
+
+    const strippedClause = topic.replace(/\s+(?:and\s+)?(?:how\s+(?:does|do|can|is|will|it)|what\s+(?:is|are|will)|why\s+(?:is|does)|who\s+(?:is|are)).*$/i, '').trim();
+    if (strippedClause.length >= 3) {
+        topic = strippedClause;
+    }
+    topic = topic.replace(/^(?:the|a|an)\s+/i, '').trim();
+    if (topic.length > 50) {
+        topic = topic.slice(0, 50).replace(/\s+\S*$/, '').trim();
+    }
+    return topic;
+}
+
+/**
+ * Ranks and diversifies follow-up questions using Maximal Marginal Relevance (MMR)
+ * and cosine similarity across 512-dimensional vector embeddings.
+ */
+export function rankAndDiversifyCandidatesSemantic(candidates = [], query = '', limit = 3) {
+    if (!Array.isArray(candidates) || candidates.length === 0) return [];
+    const cleanCand = candidates.filter(c => typeof c === 'string' && c.trim().length > 0);
+    if (cleanCand.length <= limit) return cleanCand;
+
+    const queryVec = textToEmbeddingVector(query, 512);
+    const candidateData = cleanCand.map(c => ({
+        text: c,
+        vec: textToEmbeddingVector(c, 512),
+        simToQuery: vectorCosineSimilarity(queryVec, textToEmbeddingVector(c, 512))
+    }));
+
+    const selected = [];
+    const remaining = [...candidateData];
+
+    while (selected.length < limit && remaining.length > 0) {
+        let bestIdx = -1;
+        let bestScore = -Infinity;
+
+        for (let i = 0; i < remaining.length; i++) {
+            const cand = remaining[i];
+            let maxSimToSelected = 0;
+            for (const sel of selected) {
+                const sim = vectorCosineSimilarity(cand.vec, sel.vec);
+                if (sim > maxSimToSelected) maxSimToSelected = sim;
+            }
+
+            // Redundancy penalty: skip if almost identical (> 0.88 cosine similarity) to an already chosen question
+            if (selected.length > 0 && maxSimToSelected > 0.88) {
+                continue;
+            }
+
+            // MMR score: 70% query relevance, 30% diversity against chosen questions
+            const mmrScore = 0.70 * cand.simToQuery - 0.30 * maxSimToSelected;
+            if (mmrScore > bestScore) {
+                bestScore = mmrScore;
+                bestIdx = i;
+            }
+        }
+
+        if (bestIdx >= 0) {
+            selected.push(remaining[bestIdx]);
+            remaining.splice(bestIdx, 1);
+        } else {
+            if (remaining.length > 0) {
+                selected.push(remaining[0]);
+            }
+            break;
+        }
+    }
+
+    return selected.map(s => s.text);
+}
+
+/**
  * Generates 3 contextual follow-up research questions.
  * Derived dynamically from user query intent and conversation context with zero hardcoding.
- * Strictly non-blocking. Never copies raw headlines, source names, or fragments.
+ * Uses BM25 and 512-dimensional vector semantic search to classify domains and diversify questions.
  */
 export function generateRelatedResearchQuestions(optionsOrQuery, sourcesArg = [], answerArg = '') {
     let query = '';
@@ -499,26 +840,8 @@ export function generateRelatedResearchQuestions(optionsOrQuery, sourcesArg = []
     const candidates = [];
     const seen = new Set();
 
-    // Comprehensive blocklist of publisher names, domain labels, and news brands
-    const publisherBlocklist = new Set([
-        'the times of india', 'times of india', 'indiatimes', 'indianeagle', 'reuters',
-        'associated press', 'ap news', 'bloomberg', 'cnn', 'bbc', 'bbc news', 'cnbc',
-        'forbes', 'the wall street journal', 'wsj', 'the new york times', 'nyt',
-        'the guardian', 'the verge', 'techcrunch', 'axios', 'politico', 'news', 'google news',
-        'hindustan times', 'ndtv', 'indian express', 'the hindu', 'al jazeera'
-    ]);
-    for (const s of sources) {
-        if (!s) continue;
-        if (s.domain) {
-            const dom = s.domain.toLowerCase().replace(/^www\./, '');
-            publisherBlocklist.add(dom);
-            const noTld = dom.replace(/\.[a-z]{2,}$/i, '');
-            if (noTld.length >= 3) publisherBlocklist.add(noTld);
-        }
-        if (s.sourceLabel) publisherBlocklist.add(s.sourceLabel.toLowerCase());
-        if (s.source) publisherBlocklist.add(String(s.source).toLowerCase());
-        if (s.publisher) publisherBlocklist.add(String(s.publisher).toLowerCase());
-    }
+    // Dynamic metadata extraction for publisher blocklisting (zero hardcoding)
+    const publisherBlocklist = extractDynamicPublisherBlocklist(sources);
 
     // Normalized titles of all sources for strict anti-copying check
     const normalizedSourceTitles = sources
@@ -535,7 +858,7 @@ export function generateRelatedResearchQuestions(optionsOrQuery, sourcesArg = []
         if (lower === normalizedQuery) return true;
         if (/^https?:\/\//i.test(text) || /^[a-z0-9-]+\.[a-z]{2,}(?:\/|$)/i.test(text)) return true;
 
-        // Check against publisher blocklist
+        // Check against dynamic publisher blocklist
         for (const pub of publisherBlocklist) {
             if (lower === pub || lower.startsWith(`${pub} `) || lower.endsWith(` ${pub}`)) return true;
             if (lower.includes(pub) && lower.length < pub.length + 15) return true;
@@ -592,87 +915,25 @@ export function generateRelatedResearchQuestions(optionsOrQuery, sourcesArg = []
         }
     };
 
-    // Extract core subject/topic from the user query
-    // If the query has multiple sub-questions or sentences, isolate the primary topic clause
-    const primaryClause = cleanQ.split(/[?!;]|\n+/)[0].trim();
-    let coreTopic = primaryClause
-        .replace(/^(?:please\s+)?(?:can you\s+)?(?:tell me|explain|find|search|lookup|what\s+(?:changes\s+did|features\s+did|new\s+features\s+did|is|are|was|were|do|does|did)|which\s+(?:are|were|was|is)?|how\s+(?:does|do|can|is|are|will)|why\s+(?:is|are|did|does)|who\s+(?:is|was)|when\s+(?:is|will|did)|where\s+(?:is|are)|latest\s+(?:news|updates?|developments?|status)(?:\s+(?:on|about|for|regarding))?|updates?\s+(?:on|about|for|regarding)|news\s+(?:on|about|for|regarding)|status\s+(?:of|on|for)|current\s+(?:status|details?|information)(?:\s+(?:of|on|for))?)\s+/i, '')
-        .replace(/\b(?:latest\s+updates?|latest\s+news|current\s+status|in\s+detail|right\s+now)\b/gi, '')
-        .replace(/[?.!]+$/g, '')
-        .replace(/\s+/g, ' ')
-        .trim();
+    // Extract core subject/topic using semantic token and clause extraction
+    const coreTopic = topicInput.trim() || extractCoreTopicSemantic(cleanQ);
 
-    const regardingMatch = coreTopic.match(/\b(?:regarding|about|concerning)\s+(.+)$/i);
-    if (regardingMatch && regardingMatch[1].trim().length >= 5) {
-        coreTopic = regardingMatch[1].trim();
-    }
-
-    // Strip compound secondary clauses (e.g. "and how does it affect...") to keep core topic concise
-    const strippedClause = coreTopic.replace(/\s+(?:and\s+)?(?:how\s+(?:does|do|can|is|will|it)|what\s+(?:is|are|will)|why\s+(?:is|does)|who\s+(?:is|are)).*$/i, '').trim();
-    if (strippedClause.length >= 3) {
-        coreTopic = strippedClause;
-    }
-    // Remove leading 'the ', 'a ', 'an '
-    coreTopic = coreTopic.replace(/^(?:the|a|an)\s+/i, '').trim();
-    if (coreTopic.length > 50) {
-        coreTopic = coreTopic.slice(0, 50).replace(/\s+\S*$/, '').trim();
-    }
-
-    // 1. Domain-aware follow-up question formulation derived from the user query & topic
+    // 1. Semantic Domain-grounded follow-up question generation via BM25 + Vector Cosine Matching
     if (coreTopic.length >= 3) {
-        const isLeadershipOrOffice = /\b(?:who\s+is|who\s+was|who\s+are|chief\s+minister|cm|prime\s+minister|pm|president|governor|minister|senator|mayor|ceo|chairman|chairperson|director|founder|leader|biography|career|tenure|appointed|elected|cabinet)\b/i.test(cleanQ);
-        const isSports = /\b(?:score|match|game|tournament|cup|trophy|championship|league|ipl|fifa|olympics|medal|winner|champion|team|player|coach|stadium|vs|versus)\b/i.test(cleanQ);
-        const isFinance = /\b(?:stock|share|price|market|nasdaq|dow|sensex|nifty|crypto|bitcoin|revenue|earnings|quarterly|profit|gdp|inflation|valuation)\b/i.test(cleanQ);
-        const isTravelOrPlace = /\b(?:capital|city|country|state|place|visit|travel|tourism|weather|population|geography|attractions|monument|hotel|flight)\b/i.test(cleanQ);
-        const isConceptOrMechanism = /\b(?:how\s+does|how\s+to|what\s+is|why\s+does|mechanism|concept|theory|works|causes|symptoms|treatment|explained)\b/i.test(cleanQ);
-        const isPolicyOrRule = /\b(?:rule|policy|guideline|luggage|baggage|requirement|compliance|regulation|mandate|standard|ban|restriction|law|suspension|audit)\b/i.test(cleanQ);
-        const isTechnicalOrRelease = /\b(?:release|version|feature|api|library|framework|model|architecture|python|javascript|rust|go)\b/i.test(cleanQ);
-        const isEventOrMission = /\b(?:mission|launch|landing|flight|test|project|summit|conference|election|trial)\b/i.test(cleanQ);
-
-        if (isLeadershipOrOffice) {
-            addCandidate(`What are the major policies and recent announcements associated with ${coreTopic}`);
-            addCandidate(`What is the political background and administrative tenure of ${coreTopic}`);
-            addCandidate(`What are the key initiatives and public updates regarding ${coreTopic}`);
-        } else if (isPolicyOrRule) {
-            addCandidate(`What are the specific requirements and compliance guidelines for ${coreTopic}`);
-            addCandidate(`What is the official implementation timeline and effective date for ${coreTopic}`);
-            addCandidate(`What exemptions or special allowances apply under ${coreTopic}`);
-        } else if (isTechnicalOrRelease) {
-            addCandidate(`What are the major new features and breaking changes in ${coreTopic}`);
-            addCandidate(`What is the migration path and compatibility requirements for ${coreTopic}`);
-            addCandidate(`What performance improvements or benchmarks are reported for ${coreTopic}`);
-        } else if (isSports) {
-            addCandidate(`What is the upcoming schedule and next fixture for ${coreTopic}`);
-            addCandidate(`What are the key statistics and recent performance records for ${coreTopic}`);
-            addCandidate(`How does this result impact the standings and tournament qualification for ${coreTopic}`);
-        } else if (isFinance) {
-            addCandidate(`What are the primary market drivers and recent financial results for ${coreTopic}`);
-            addCandidate(`What do analyst ratings and price targets forecast for ${coreTopic}`);
-            addCandidate(`How do macroeconomic trends affect the current performance of ${coreTopic}`);
-        } else if (isTravelOrPlace) {
-            addCandidate(`What are the top attractions and key highlights in ${coreTopic}`);
-            addCandidate(`What is the best time to visit and travel guidance for ${coreTopic}`);
-            addCandidate(`What is the cultural and historical significance of ${coreTopic}`);
-        } else if (isEventOrMission) {
-            addCandidate(`What is the timeline and upcoming milestones for ${coreTopic}`);
-            addCandidate(`What are the primary objectives and mission parameters for ${coreTopic}`);
-            addCandidate(`What technical challenges or next steps have been identified for ${coreTopic}`);
-        } else if (isConceptOrMechanism) {
-            addCandidate(`How does ${coreTopic} work in practice and real-world applications`);
-            addCandidate(`What are the key advantages and potential drawbacks of ${coreTopic}`);
-            addCandidate(`What are common alternatives or comparable approaches to ${coreTopic}`);
+        const domain = classifyQueryDomainSemantic(cleanQ);
+        if (domain && typeof domain.generate === 'function') {
+            const domainCandidates = domain.generate(coreTopic);
+            for (const c of domainCandidates) addCandidate(c);
         } else {
             addCandidate(`What are the key implications and latest developments regarding ${coreTopic}`);
             addCandidate(`What official background or recent announcements exist for ${coreTopic}`);
             addCandidate(`What are the primary perspectives and notable viewpoints on ${coreTopic}`);
         }
 
-        // Additional fallback angles if needed
-        if (candidates.length < 3) {
-            addCandidate(`How does ${coreTopic} affect the impacted organizations and individuals`);
-            addCandidate(`What background factors and context led to ${coreTopic}`);
-            addCandidate(`What next steps or actions are expected for ${coreTopic}`);
-        }
+        // Additional contextual angles
+        addCandidate(`How does ${coreTopic} affect the impacted organizations and individuals`);
+        addCandidate(`What background factors and context led to ${coreTopic}`);
+        addCandidate(`What next steps or actions are expected for ${coreTopic}`);
     }
 
     // 2. Derive follow-ups from substantive sentences in the generated answer if available
@@ -680,14 +941,14 @@ export function generateRelatedResearchQuestions(optionsOrQuery, sourcesArg = []
         const cleanAnswer = cleanTextSnippet(answer);
         const sentences = cleanAnswer.split(/(?<=[.!?])\s+/);
         for (const sentence of sentences) {
-            if (candidates.length >= 3) break;
+            if (candidates.length >= 6) break;
             if (/^(?:what|how|why|who|when|where|which|can|does|is|are|will)\b/i.test(sentence)) {
                 addCandidate(sentence);
             }
         }
     }
 
-    return candidates.slice(0, 3);
+    return rankAndDiversifyCandidatesSemantic(candidates, cleanQ, 3);
 }
 
 /**
@@ -1371,6 +1632,15 @@ if (typeof window !== 'undefined') {
         evaluateSourceQualityForEarlySynthesis,
         generateSnippetFallback,
         generateRelatedResearchQuestions,
+        classifyQueryDomainSemantic,
+        extractCoreTopicSemantic,
+        rankAndDiversifyCandidatesSemantic,
+        scoreSourcesBM25AndSemantic,
+        isFreshnessQuerySemantic,
+        extractDynamicPublisherBlocklist,
+        BM25Index,
+        textToEmbeddingVector,
+        vectorCosineSimilarity,
         parseCitationsInHtml,
         renderOrUpdateSourcesCarousel,
         highlightSource: (id) => highlightSourceCard(id, document),
