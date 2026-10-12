@@ -5521,61 +5521,141 @@ body:not(.dark) .agent-dag-pill.is-completed {
 .synthesizing-blinker-wrapper {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
-    padding: 6px 12px 6px 8px;
-    background: rgba(56, 189, 248, 0.08);
-    border: 1px solid rgba(56, 189, 248, 0.2);
-    border-radius: 9999px;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+    gap: 0;
+    padding: 0;
+    background: transparent !important;
+    border: none !important;
+    border-radius: 0;
+    box-shadow: none !important;
     user-select: none;
-    transition: all 0.2s ease;
+    transition: opacity 0.2s ease;
 }
 
 .synthesizing-blinker-text {
     font-size: 13px;
-    font-weight: 500;
-    letter-spacing: -0.01em;
-    color: rgba(224, 242, 254, 0.9);
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
     line-height: 1;
     white-space: nowrap;
+    background: linear-gradient(
+        90deg,
+        rgba(148, 163, 184, 0.35) 0%,
+        rgba(248, 250, 252, 0.95) 25%,
+        rgba(56, 189, 248, 1) 50%,
+        rgba(248, 250, 252, 0.95) 75%,
+        rgba(148, 163, 184, 0.35) 100%
+    );
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    animation: liveSearchTextShimmer 2.2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    display: inline-block;
 }
 
 .synthesizing-blinker-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background-color: #38bdf8;
-    box-shadow: 0 0 10px rgba(56, 189, 248, 0.85), 0 0 4px rgba(56, 189, 248, 0.5);
-    animation: synthesizingBlinkerPulse 0.85s ease-in-out infinite;
-    display: inline-block;
-    flex-shrink: 0;
+    display: none !important;
 }
 
 body:not(.dark) .synthesizing-blinker-wrapper {
-    background: rgba(2, 132, 199, 0.08);
-    border-color: rgba(2, 132, 199, 0.22);
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
 }
 
 body:not(.dark) .synthesizing-blinker-text {
-    color: #0369a1;
+    background: linear-gradient(
+        90deg,
+        rgba(100, 116, 139, 0.4) 0%,
+        rgba(15, 23, 42, 0.95) 25%,
+        rgba(2, 132, 199, 1) 50%,
+        rgba(15, 23, 42, 0.95) 75%,
+        rgba(100, 116, 139, 0.4) 100%
+    );
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
 }
 
 body:not(.dark) .synthesizing-blinker-dot {
-    background-color: #0284c7;
-    box-shadow: 0 0 8px rgba(2, 132, 199, 0.6);
+    display: none !important;
+}
+
+@keyframes liveSearchTextShimmer {
+    0% {
+        background-position: 100% 0;
+    }
+    100% {
+        background-position: -100% 0;
+    }
 }
 
 @keyframes synthesizingBlinkerPulse {
     0%, 100% {
-        opacity: 0.22;
-        transform: scale(0.75);
-        box-shadow: 0 0 3px rgba(56, 189, 248, 0.25);
+        opacity: 0.2;
+        transform: scale(0.85);
     }
     50% {
         opacity: 1;
-        transform: scale(1.25);
-        box-shadow: 0 0 12px rgba(56, 189, 248, 0.95), 0 0 5px rgba(56, 189, 248, 0.65);
+        transform: scale(1.15);
     }
+}
+
+#chat-thinking-indicator[data-phase="searching"] .thinking-process-card,
+#chat-thinking-indicator[data-phase="searching"] .chat-bubble-assistant {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+}
+
+#chat-thinking-indicator[data-phase="searching"] .thinking-header {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 4px 0 !important;
+}
+
+#chat-thinking-indicator[data-phase="searching"] .thinking-pulse-dot {
+    display: none !important;
+}
+
+#chat-thinking-indicator[data-phase="searching"] .thinking-timer {
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.08em !important;
+    text-transform: uppercase !important;
+    background: linear-gradient(
+        90deg,
+        rgba(148, 163, 184, 0.35) 0%,
+        rgba(248, 250, 252, 0.95) 25%,
+        rgba(56, 189, 248, 1) 50%,
+        rgba(248, 250, 252, 0.95) 75%,
+        rgba(148, 163, 184, 0.35) 100%
+    ) !important;
+    background-size: 200% 100% !important;
+    -webkit-background-clip: text !important;
+    -webkit-text-fill-color: transparent !important;
+    background-clip: text !important;
+    animation: liveSearchTextShimmer 2.2s cubic-bezier(0.4, 0, 0.6, 1) infinite !important;
+    display: inline-block !important;
+}
+
+body:not(.dark) #chat-thinking-indicator[data-phase="searching"] .thinking-timer {
+    background: linear-gradient(
+        90deg,
+        rgba(100, 116, 139, 0.4) 0%,
+        rgba(15, 23, 42, 0.95) 25%,
+        rgba(2, 132, 199, 1) 50%,
+        rgba(15, 23, 42, 0.95) 75%,
+        rgba(100, 116, 139, 0.4) 100%
+    ) !important;
+    background-size: 200% 100% !important;
+    -webkit-background-clip: text !important;
+    -webkit-text-fill-color: transparent !important;
+    background-clip: text !important;
 }
 
 @keyframes assistantBubbleEnter {
