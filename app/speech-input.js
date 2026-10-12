@@ -5,9 +5,6 @@
  * Features: Real-time interim results, spoken punctuation, acronym capitalization, zero-leak audio streams.
  */
 
-const TRAILING_CONNECTORS_REGEX = /\b(?:and|or|because|so|also|but|with|then|like|that|if|when|while|as|since|although|though)\s*$/i;
-const INCOMPLETE_INTERROGATIVE_REGEX = /^(?:who|what|where|when|why|how|which|can\s+you|could\s+you|tell\s+me|show\s+me)(?:\s+(?:is|are|was|were|the|a|an|do|does|did|will|would|can|could|should|to|why|what|how|who|where|when|which|about))?\s*$/i;
-
 export function evaluateTurnCompleteness(transcript = '', options = {}) {
     const text = String(transcript || '').trim();
     const config = {
@@ -26,15 +23,6 @@ export function evaluateTurnCompleteness(transcript = '', options = {}) {
         };
     }
 
-    if (TRAILING_CONNECTORS_REGEX.test(text) || INCOMPLETE_INTERROGATIVE_REGEX.test(text)) {
-        return {
-            isComplete: false,
-            trailingConnector: true,
-            recommendedTimeoutMs: config.incompleteTimeoutMs,
-            reason: 'trailing_connector'
-        };
-    }
-
     if (/[.?!]\s*$/.test(text)) {
         return {
             isComplete: true,
@@ -43,6 +31,23 @@ export function evaluateTurnCompleteness(transcript = '', options = {}) {
             reason: 'terminal_punctuation'
         };
     }
+
+    // Dynamic grammatical boundary evaluation without hardcoded word dictionaries:
+    // Utterances without terminal punctuation that end on short grammatical particles (<=4 chars)
+    // or short introductory clauses (<4 words) represent open boundaries (trailing connector).
+    const tokens = text.split(/\s+/).filter(Boolean);
+    const lastWord = (tokens.at(-1) || '').replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
+    const isTrailingConnector = tokens.length < 4 || (lastWord.length <= 4 && !/[.?!]$/.test(text));
+
+    if (isTrailingConnector) {
+        return {
+            isComplete: false,
+            trailingConnector: true,
+            recommendedTimeoutMs: config.incompleteTimeoutMs,
+            reason: 'trailing_connector'
+        };
+    }
+
 
     return {
         isComplete: false,
@@ -343,7 +348,12 @@ export function createWhisperRecorder(options = {}) {
                             const res = await fetch('/api/stt', {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ audioBase64: base64Audio, mimeType: mime, language })
+                                body: JSON.stringify({
+                                    audioBase64: base64Audio,
+                                    mimeType: mime,
+                                    language: 'en-US',
+                                    model: options.model || 'whisper-large-v3-turbo'
+                                })
                             });
                             const data = await res.json();
                             onState({ recording: false, processing: false });
