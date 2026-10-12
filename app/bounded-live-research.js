@@ -620,11 +620,20 @@ export function generateRelatedResearchQuestions(optionsOrQuery, sourcesArg = []
 
     // 1. Domain-aware follow-up question formulation derived from the user query & topic
     if (coreTopic.length >= 3) {
+        const isLeadershipOrOffice = /\b(?:who\s+is|who\s+was|who\s+are|chief\s+minister|cm|prime\s+minister|pm|president|governor|minister|senator|mayor|ceo|chairman|chairperson|director|founder|leader|biography|career|tenure|appointed|elected|cabinet)\b/i.test(cleanQ);
+        const isSports = /\b(?:score|match|game|tournament|cup|trophy|championship|league|ipl|fifa|olympics|medal|winner|champion|team|player|coach|stadium|vs|versus)\b/i.test(cleanQ);
+        const isFinance = /\b(?:stock|share|price|market|nasdaq|dow|sensex|nifty|crypto|bitcoin|revenue|earnings|quarterly|profit|gdp|inflation|valuation)\b/i.test(cleanQ);
+        const isTravelOrPlace = /\b(?:capital|city|country|state|place|visit|travel|tourism|weather|population|geography|attractions|monument|hotel|flight)\b/i.test(cleanQ);
+        const isConceptOrMechanism = /\b(?:how\s+does|how\s+to|what\s+is|why\s+does|mechanism|concept|theory|works|causes|symptoms|treatment|explained)\b/i.test(cleanQ);
         const isPolicyOrRule = /\b(?:rule|policy|guideline|luggage|baggage|requirement|compliance|regulation|mandate|standard|ban|restriction|law|suspension|audit)\b/i.test(cleanQ);
         const isTechnicalOrRelease = /\b(?:release|version|feature|api|library|framework|model|architecture|python|javascript|rust|go)\b/i.test(cleanQ);
         const isEventOrMission = /\b(?:mission|launch|landing|flight|test|project|summit|conference|election|trial)\b/i.test(cleanQ);
 
-        if (isPolicyOrRule) {
+        if (isLeadershipOrOffice) {
+            addCandidate(`What are the major policies and recent announcements associated with ${coreTopic}`);
+            addCandidate(`What is the political background and administrative tenure of ${coreTopic}`);
+            addCandidate(`What are the key initiatives and public updates regarding ${coreTopic}`);
+        } else if (isPolicyOrRule) {
             addCandidate(`What are the specific requirements and compliance guidelines for ${coreTopic}`);
             addCandidate(`What is the official implementation timeline and effective date for ${coreTopic}`);
             addCandidate(`What exemptions or special allowances apply under ${coreTopic}`);
@@ -632,14 +641,30 @@ export function generateRelatedResearchQuestions(optionsOrQuery, sourcesArg = []
             addCandidate(`What are the major new features and breaking changes in ${coreTopic}`);
             addCandidate(`What is the migration path and compatibility requirements for ${coreTopic}`);
             addCandidate(`What performance improvements or benchmarks are reported for ${coreTopic}`);
+        } else if (isSports) {
+            addCandidate(`What is the upcoming schedule and next fixture for ${coreTopic}`);
+            addCandidate(`What are the key statistics and recent performance records for ${coreTopic}`);
+            addCandidate(`How does this result impact the standings and tournament qualification for ${coreTopic}`);
+        } else if (isFinance) {
+            addCandidate(`What are the primary market drivers and recent financial results for ${coreTopic}`);
+            addCandidate(`What do analyst ratings and price targets forecast for ${coreTopic}`);
+            addCandidate(`How do macroeconomic trends affect the current performance of ${coreTopic}`);
+        } else if (isTravelOrPlace) {
+            addCandidate(`What are the top attractions and key highlights in ${coreTopic}`);
+            addCandidate(`What is the best time to visit and travel guidance for ${coreTopic}`);
+            addCandidate(`What is the cultural and historical significance of ${coreTopic}`);
         } else if (isEventOrMission) {
             addCandidate(`What is the timeline and upcoming milestones for ${coreTopic}`);
             addCandidate(`What are the primary objectives and mission parameters for ${coreTopic}`);
             addCandidate(`What technical challenges or next steps have been identified for ${coreTopic}`);
+        } else if (isConceptOrMechanism) {
+            addCandidate(`How does ${coreTopic} work in practice and real-world applications`);
+            addCandidate(`What are the key advantages and potential drawbacks of ${coreTopic}`);
+            addCandidate(`What are common alternatives or comparable approaches to ${coreTopic}`);
         } else {
-            addCandidate(`What is the timeline and next milestones for ${coreTopic}`);
-            addCandidate(`What are the key implications and requirements of ${coreTopic}`);
-            addCandidate(`What official guidance or announcements have been released regarding ${coreTopic}`);
+            addCandidate(`What are the key implications and latest developments regarding ${coreTopic}`);
+            addCandidate(`What official background or recent announcements exist for ${coreTopic}`);
+            addCandidate(`What are the primary perspectives and notable viewpoints on ${coreTopic}`);
         }
 
         // Additional fallback angles if needed
@@ -794,10 +819,10 @@ export function renderRelatedQuestionsTray(rowElement, questions = [], onSelect 
     }).join('');
 
     slot.innerHTML = `
-        <div class="perplexity-related-tray" role="region" aria-label="Related Research Questions">
+        <div class="perplexity-related-tray" role="region" aria-label="Follow up questions">
             <div class="related-tray-title">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-                <span>Related Research</span>
+                <span>Follow up questions</span>
             </div>
             <div class="related-pills-list">
                 ${pillsHtml}
@@ -1353,13 +1378,13 @@ if (typeof window !== 'undefined') {
         normalizeUserQuery,
         hasSearchableContent,
         askRelatedQuestion: (text) => {
-            const composer = document.getElementById('chat-composer-input') || document.getElementById('user-input');
+            const composer = document.getElementById('text-input') || document.getElementById('chat-composer-input') || document.getElementById('user-input');
             if (composer) {
                 composer.value = text;
                 composer.focus();
-                if (typeof window.sendTextInput === 'function') {
-                    window.sendTextInput({ text, forceWebSearch: true });
-                }
+            }
+            if (typeof window.sendTextInput === 'function') {
+                window.sendTextInput({ text, forceWebSearch: true });
             }
         }
     };
