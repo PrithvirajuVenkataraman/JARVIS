@@ -16,7 +16,8 @@ import {
     hasSearchableContent,
     isAuthoritativeResearchSource,
     evaluateSourceQualityForEarlySynthesis,
-    renderOrUpdateSourcesCarousel
+    renderOrUpdateSourcesCarousel,
+    renderRelatedQuestionsTray
 } from '../app/bounded-live-research.js';
 import { parseGoogleNewsRssXml, searchDuckDuckGoHtml } from '../api/_lib/free-live/providers.js';
 import { buildSourceTransparencyHtml } from '../app/source-transparency.js';
@@ -2303,10 +2304,85 @@ test('Regression 16.5: End-to-end BoundedLiveResearchController handles multi-pa
     assert.ok(synthesizedPrompt.includes('User question: "What changes were announced regarding the PERM suspension? Which companies are affected?"'));
 });
 
+test('Regression 17.1: Leadership and office queries generate natural contextual follow-up questions instead of milestone templates', () => {
+    const mockSources = [
+        {
+            id: 1,
+            title: 'Chief Minister Office Portal - Official Information',
+            domain: 'tn.gov.in',
+            snippet: 'Official profile and ministry portfolios of the Chief Minister of Tamil Nadu.'
+        }
+    ];
 
+    const questions = generateRelatedResearchQuestions({
+        query: 'Who is the CM of Tamil Nadu?',
+        sources: mockSources,
+        answer: 'M. K. Stalin is the current Chief Minister of Tamil Nadu, serving since May 2021.'
+    });
 
+    assert.ok(Array.isArray(questions));
+    assert.equal(questions.length, 3);
+    for (const q of questions) {
+        assert.ok(q.endsWith('?'), 'Every question must end with a question mark');
+        // Must NOT use the nonsensical robotic milestone template for leadership positions
+        assert.ok(!q.toLowerCase().includes('timeline and next milestones for cm of tamil nadu'),
+            `Must not use robotic milestone template: "${q}"`);
+        assert.ok(!q.toLowerCase().includes('implications and requirements of cm of tamil nadu'),
+            `Must not use robotic requirements template: "${q}"`);
+    }
+    // Must contain domain-appropriate inquiries for leadership/offices
+    const joined = questions.join(' ');
+    assert.ok(/major policies|political background|key initiatives/i.test(joined),
+        'Follow-up questions must be contextually appropriate for leadership/office queries');
+});
 
+test('Regression 17.2: Follow-up questions tray renders with "Follow up questions" label and title', () => {
+    // Mock minimal DOM structure
+    let innerHtmlCaptured = '';
+    const mockSlot = {
+        set innerHTML(html) {
+            innerHtmlCaptured = html;
+        }
+    };
+    const mockRow = {
+        querySelector(sel) {
+            if (sel === '.assistant-next-steps-slot') return mockSlot;
+            return null;
+        }
+    };
 
+    renderRelatedQuestionsTray(mockRow, [
+        'What are the major policies associated with the CM?',
+        'What is the political background and administrative tenure?'
+    ]);
 
+    assert.ok(innerHtmlCaptured.includes('aria-label="Follow up questions"'), 'Must have aria-label="Follow up questions"');
+    assert.ok(innerHtmlCaptured.includes('<span>Follow up questions</span>'), 'Must have <span>Follow up questions</span>');
+    assert.ok(!innerHtmlCaptured.includes('Related Research'), 'Must not contain old "Related Research" title');
+    assert.ok(innerHtmlCaptured.includes('related-question-pill'), 'Must render question pills');
+});
 
+test('Regression 17.3: Live search indicator in CSS uses interior text shimmer and eliminates outer box and blinking dot', () => {
+    const cssPath = path.resolve('styles.css');
+    const css = fs.readFileSync(cssPath, 'utf8');
 
+    // Blinker dot must be hidden with display: none !important
+    assert.ok(/\.synthesizing-blinker-dot\s*\{[^}]*display:\s*none\s*!important/i.test(css),
+        'Blinker dot must be hidden');
+
+    // Blinker wrapper must have transparent background and no border/box-shadow
+    assert.ok(/\.synthesizing-blinker-wrapper\s*\{[^}]*background:\s*transparent\s*!important/i.test(css),
+        'Wrapper must have transparent background');
+    assert.ok(/\.synthesizing-blinker-wrapper\s*\{[^}]*border:\s*none\s*!important/i.test(css),
+        'Wrapper must have no border');
+
+    // Text shimmer animation must be applied to text with background-clip: text
+    assert.ok(/\.synthesizing-blinker-text\s*\{[^}]*animation:\s*liveSearchTextShimmer/i.test(css),
+        'Text shimmer animation must be applied to blinker text');
+    assert.ok(/\.synthesizing-blinker-text\s*\{[^}]*background-clip:\s*text/i.test(css),
+        'Blinker text must clip gradient to text');
+
+    // Keyframes for text shimmer must exist
+    assert.ok(/@keyframes\s+liveSearchTextShimmer/i.test(css),
+        'liveSearchTextShimmer keyframe animation must exist');
+});
