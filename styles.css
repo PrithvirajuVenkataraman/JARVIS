@@ -9015,3 +9015,110 @@ table {
     padding-bottom: 0;
     overflow: hidden;
 }
+
+/* ==========================================================================
+   Location Suite Card (Minimalistic, Professional & Cross-Device Responsive)
+   ========================================================================== */
+.location-suite-card {
+    margin: 10px 0;
+    padding: 16px 18px;
+    background: rgba(17, 24, 39, 0.75);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 16px;
+    color: #f8fafc;
+    font-family: inherit;
+    width: 100%;
+    max-width: 680px;
+    box-sizing: border-box;
+    box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.35);
+}
+
+.loc-meta-table-wrap {
+    background: rgba(15, 23, 42, 0.45);
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    overflow: hidden;
+    margin-top: 12px;
+}
+
+.loc-meta-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.loc-meta-table tr:not(:last-child) td {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.loc-meta-label {
+    padding: 7px 12px;
+    color: #94a3b8;
+    font-size: 12px;
+    font-weight: 500;
+    width: 32%;
+    min-width: 110px;
+    max-width: 160px;
+    vertical-align: middle;
+}
+
+.loc-meta-value {
+    padding: 7px 12px;
+    font-weight: 600;
+    font-size: 12.5px;
+    color: #f1f5f9;
+    vertical-align: middle;
+    word-break: break-word;
+}
+
+.loc-map-container {
+    margin-top: 14px;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: radial-gradient(circle at 50% 50%, #1e293b 0%, #0f172a 100%);
+    position: relative;
+    height: 220px;
+}
+
+.loc-map-container iframe {
+    width: 100%;
+    height: 100%;
+    border: 0;
+    display: block;
+}
+
+.loc-map-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 8px;
+    font-size: 12px;
+    color: #94a3b8;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+@media (max-width: 640px) {
+    .location-suite-card {
+        padding: 12px 14px;
+        border-radius: 14px;
+    }
+    .loc-meta-label {
+        padding: 6px 8px;
+        width: 36%;
+        font-size: 11.5px;
+    }
+    .loc-meta-value {
+        padding: 6px 8px;
+        font-size: 12px;
+    }
+    .loc-map-container {
+        height: 190px;
+    }
+    .loc-map-footer {
+        gap: 6px;
+    }
+}
+
