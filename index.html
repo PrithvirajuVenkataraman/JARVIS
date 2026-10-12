@@ -14024,7 +14024,7 @@ async function sendTextInput(submission = {}) {
                                         images: rawImagePayloads,
                                         sourceAnswer: '',
                                         originalRequest: attachmentRequest,
-                                        customInstruction: 'An image is attached. Describe exactly what you see: objects, people (describe appearance only, do not identify individuals), text, scenes, diagrams, colours. Answer the user\'s question directly based on visual content.'
+                                        customInstruction: 'An image is attached. Inspect the image pixels directly. Read all visible text, numbers, labels, diagrams, or objects and execute the user request directly.'
                                     },
                                     combinedText: '',
                                     methods: []
@@ -14070,8 +14070,7 @@ async function sendTextInput(submission = {}) {
                             ? [
                                 attachmentRequest,
                                 '',
-                                'An image is attached to this request. Analyze what is shown in the image based strictly on visible pixels.',
-                                'PEOPLE & PERSONS RULE: Do not attempt facial recognition or guess the names/identities of individuals or groups of people to avoid misidentification. State that you cannot recognize individual people, and provide a clear, respectful description of how the person or people look: visible facial features, hair, expression, attire/clothing, posture/actions, and the surrounding setting. Answer the user prompt directly.',
+                                'An image is attached to this request. Inspect the visible pixels directly and answer the user\'s request based on visual evidence.',
                                 webSearchContext ? `\nUse both the image content and the verified web sources below to answer accurately with citation links [1], [2] where applicable.\n${webSearchContext}` : '',
                                 '',
                                 String(attachmentContext.combinedText || '').slice(0, 28000)
@@ -14089,6 +14088,7 @@ async function sendTextInput(submission = {}) {
                         let result = await askGeminiAI(attachmentPrompt, {
                             intent: 'selection_custom',
                             grounding: attachmentContext.grounding,
+                            images: hasImageAttachments ? attachmentContext.grounding.images : undefined,
                             displayUserMessage: displayOutgoingText,
                             timeoutMs: hasImageAttachments ? 35000 : 20000,
                             stream: true
@@ -14096,20 +14096,31 @@ async function sendTextInput(submission = {}) {
                         if (result?.aborted) return;
                         let answer = String(result?.response || result?.text || '').trim();
                         if (answerAsksForMissingAttachment(answer)) {
-                            showThinkingIndicator('Re-reading the document...');
-                            const retryPrompt = [
-                                'Analyze the attached document now using only the content below.',
-                                'Do not ask for the file, paste, upload, or text again.',
-                                `User request: ${attachmentRequest}`,
-                                '',
-                                String(attachmentContext.combinedText || '').slice(0, 28000)
-                            ].join('\n');
+                            showThinkingIndicator(hasImageAttachments ? 'Analyzing the image directly...' : 'Re-reading the document...');
+                            const retryPrompt = hasImageAttachments
+                                ? [
+                                    `Inspect the attached image to answer: ${attachmentRequest}`,
+                                    'The image data is attached directly to this multimodal request. Analyze what is visible in the image pixels and execute the user\'s task directly.'
+                                ].join('\n')
+                                : [
+                                    'Analyze the attached document now using only the content below.',
+                                    'Do not ask for the file, paste, upload, or text again.',
+                                    `User request: ${attachmentRequest}`,
+                                    '',
+                                    String(attachmentContext.combinedText || '').slice(0, 28000)
+                                ].join('\n');
                             result = await askGeminiAI(retryPrompt, {
                                 intent: 'selection_custom',
-                                grounding: {
-                                    ...attachmentContext.grounding,
-                                    customInstruction: 'The document text is already present. Produce the analysis immediately. Never ask the user to provide the document. Ground all extracted data strictly on the visible text; if text is unreadable or absent, explicitly flag missing items rather than guessing.'
-                                },
+                                grounding: hasImageAttachments
+                                    ? {
+                                        ...attachmentContext.grounding,
+                                        customInstruction: 'Inspect the attached image directly and answer the user question based on visible image evidence.'
+                                    }
+                                    : {
+                                        ...attachmentContext.grounding,
+                                        customInstruction: 'The document text is already present. Produce the analysis immediately. Never ask the user to provide the document. Ground all extracted data strictly on the visible text; if text is unreadable or absent, explicitly flag missing items rather than guessing.'
+                                    },
+                                images: hasImageAttachments ? attachmentContext.grounding.images : undefined,
                                 displayUserMessage: displayOutgoingText,
                                 timeoutMs: 15000,
                                 stream: true
