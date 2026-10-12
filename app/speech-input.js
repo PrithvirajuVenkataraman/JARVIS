@@ -254,6 +254,9 @@ export function createWhisperRecorder(options = {}) {
                     }
                 } else if (speechDetected && avgVolume <= 8) {
                     // Speech was occurring, now silence detected -> natural pause
+                    if (typeof options.shouldAutoStopOnSilence === 'function' && !options.shouldAutoStopOnSilence()) {
+                        return;
+                    }
                     if (!silenceTimer) {
                         silenceTimer = setTimeout(() => {
                             silenceTimer = null;
@@ -452,6 +455,9 @@ export function createSpeechInputController(options = {}) {
     let explicitlyStopped = false;
 
     const whisperRecorder = createWhisperRecorder({
+        shouldAutoStopOnSilence() {
+            return Boolean(converseEnabled);
+        },
         onTranscribed(text) {
             const clean = cleanSpeechFillers(text);
             if (!clean) return;
@@ -483,9 +489,9 @@ export function createSpeechInputController(options = {}) {
         if (!Recognition) return null;
         try {
             const r = new Recognition();
-            r.continuous = converseEnabled;
+            r.continuous = true;
             r.interimResults = true;
-            r.lang = language;
+            r.lang = 'en-US';
             r.maxAlternatives = 1;
 
             r.onresult = event => {
@@ -835,6 +841,17 @@ export function createSpeechInputController(options = {}) {
         if (adaptiveTurnTimer) {
             clearTimeout(adaptiveTurnTimer);
             adaptiveTurnTimer = null;
+        }
+        if (mode === 'dictation' && accumulatedTranscript) {
+            const pendingText = cleanSpeechFillers(accumulatedTranscript);
+            if (pendingText) {
+                callbacks.onFinal(pendingText, {
+                    autoSubmit: false,
+                    source: 'vtt',
+                    transcriptFinal: true,
+                    interrupt: false
+                });
+            }
         }
         accumulatedTranscript = '';
         if (processingTimer) {
@@ -1224,7 +1241,19 @@ export function installSpeechInputUI(options = {}) {
         onState(state) {
             if (!state.listening) {
                 lastInterimText = '';
-                committedText = String(input.value || '').trim();
+                if (input && state.mode === 'idle') {
+                    const cleaned = cleanSpeechFillers(input.value);
+                    if (cleaned) {
+                        input.value = cleaned;
+                    }
+                    try {
+                        input.focus();
+                        if (typeof input.setSelectionRange === 'function') {
+                            input.setSelectionRange(input.value.length, input.value.length);
+                        }
+                    } catch (_) {}
+                }
+                committedText = String(input ? input.value : '').trim();
                 if (!state.processing) {
                     globalThis.clearLiveSpeechTranscriptionOnScreen?.();
                 }
@@ -1287,10 +1316,40 @@ export function installSpeechInputUI(options = {}) {
         }
     });
 
-    globalThis.toggleVoiceToText = () => {
-        committedText = input.value.trim();
-        lastInterimText = '';
-        return controller.toggleDictation();
+    globalThis.toggleVoiceToText = async () => {
+        const isCurrentlyDictating = controller.getState().mode === 'dictation';
+        if (isCurrentlyDictating) {
+            // Second press: user stops dictation (ChatGPT style)
+            const res = await controller.toggleDictation();
+            lastInterimText = '';
+            if (input) {
+                const cleaned = cleanSpeechFillers(input.value);
+                if (cleaned) {
+                    input.value = cleaned;
+                    committedText = cleaned;
+                }
+                try {
+                    input.focus();
+                    if (typeof input.setSelectionRange === 'function') {
+                        input.setSelectionRange(input.value.length, input.value.length);
+                    }
+                    if (typeof input.dispatchEvent === 'function') {
+                        const ev = typeof Event === 'function' ? new Event('input', { bubbles: true }) : { type: 'input', bubbles: true };
+                        input.dispatchEvent(ev);
+                    }
+                } catch (_) {}
+                options.onComposerChanged?.();
+                globalThis.handleComposerInput?.();
+                globalThis.autoResizeComposerTextarea?.();
+                globalThis.toggleSendButton?.();
+            }
+            return res;
+        } else {
+            // First press: user starts dictation
+            committedText = input ? input.value.trim() : '';
+            lastInterimText = '';
+            return controller.toggleDictation();
+        }
     };
 
     globalThis.toggleConverseMode = async () => false;
