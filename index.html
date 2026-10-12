@@ -12462,13 +12462,32 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
         function prepareAssistantSourcePresentation(text, meta = {}) {
             const raw = String(text || '');
             const split = window.JarvisSourceTransparency?.splitAnswerAndSources?.(raw) || { answer: raw, sources: [] };
-            const sources = Array.isArray(meta?.sources) && meta.sources.length
+            const rawSources = Array.isArray(meta?.sources) && meta.sources.length
                 ? meta.sources
                 : (Array.isArray(meta?.evidenceUsed) && meta.evidenceUsed.length
                     ? meta.evidenceUsed
                     : (Array.isArray(meta?.evidenceSources) && meta.evidenceSources.length
                         ? meta.evidenceSources
                         : split.sources));
+            const sources = Array.isArray(rawSources) ? [...rawSources] : [];
+            if (sources.length > 1) {
+                const now = Date.now();
+                const NINETY_DAYS_MS = 90 * 24 * 3600 * 1000;
+                sources.sort((a, b) => {
+                    const timeA = a.publishedMs || a.parsedDateMs || 0;
+                    const timeB = b.publishedMs || b.parsedDateMs || 0;
+                    if (timeA && timeB) {
+                        return timeB - timeA;
+                    }
+                    if (timeA && !timeB) {
+                        return (now - timeA) < NINETY_DAYS_MS ? -1 : 1;
+                    }
+                    if (!timeA && timeB) {
+                        return (now - timeB) < NINETY_DAYS_MS ? 1 : -1;
+                    }
+                    return 0;
+                });
+            }
             const hasTopSources = Array.isArray(sources) && sources.length > 0;
             const footerMeta = {
                 ...meta,
@@ -12508,11 +12527,14 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                             const title = escapeHtml(s.title || domain);
                             const favicon = escapeHtml(s.favicon || `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`);
                             const url = escapeHtml(s.url || '#');
+                            const dateLabel = s.date ? escapeHtml(s.date) : '';
+                            const domainText = dateLabel ? `${domain} • ${dateLabel}` : domain;
+                            const fullTitle = dateLabel ? `[${dateLabel}] ${title}` : title;
                             return `
-                                <a href="${url}" target="_blank" rel="noopener noreferrer" class="source-card-pill" title="${title}">
+                                <a href="${url}" target="_blank" rel="noopener noreferrer" class="source-card-pill" title="${fullTitle}">
                                     <img class="source-card-favicon" src="${favicon}" alt="" loading="lazy" onerror="this.style.display='none'" />
                                     <div class="source-card-info">
-                                        <span class="source-card-domain">${domain}</span>
+                                        <span class="source-card-domain">${domainText}</span>
                                         <span class="source-card-title">${title}</span>
                                     </div>
                                     <span class="source-card-badge">${i + 1}</span>
@@ -14522,6 +14544,10 @@ async function fetchLiveSearchJson(query, options = {}) {
             factType: options.factType || '',
             mode: options.mode || options.searchMode || '',
             mustContain: Array.isArray(options.mustContain) ? options.mustContain : [],
+            forceLive: options.forceLive !== undefined ? Boolean(options.forceLive) : true,
+            chronological: options.chronological !== undefined ? Boolean(options.chronological) : true,
+            dateContext: options.dateContext || undefined,
+            dateFilter: options.dateFilter || undefined,
             timeoutMs: searchTimeout
         })
     });
@@ -21066,6 +21092,8 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                     maxResults: 8,
                     answer: false,
                     mode: 'rag',
+                    forceLive: true,
+                    chronological: true,
                     allowDeepCrawl: true,
                     skipAutoDeepCrawl: false,
                     timeoutMs: timeoutMs || controller.searchTimeoutMs || 4500
@@ -24854,11 +24882,46 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
             return categories;
         }
 
+        function mapAqi(aqi) {
+            const val = Number(aqi);
+            if (!Number.isFinite(val) || val < 0) return { aqi: null, label: 'Unknown', color: '#94a3b8', icon: '🍃' };
+            if (val <= 50) return { aqi: Math.round(val), label: 'Good', color: '#22c55e', icon: '🍃' };
+            if (val <= 100) return { aqi: Math.round(val), label: 'Moderate', color: '#eab308', icon: '🟡' };
+            if (val <= 150) return { aqi: Math.round(val), label: 'Unhealthy for Sensitive Groups', color: '#f97316', icon: '🟠' };
+            if (val <= 200) return { aqi: Math.round(val), label: 'Unhealthy', color: '#ef4444', icon: '🔴' };
+            if (val <= 300) return { aqi: Math.round(val), label: 'Very Unhealthy', color: '#a855f7', icon: '🟣' };
+            return { aqi: Math.round(val), label: 'Hazardous', color: '#7e22ce', icon: '☣️' };
+        }
+
+        async function fetchLiveAirQualityForCoords(lat, lon, fetchFn = globalThis.fetch) {
+            if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+            try {
+                const url = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat.toFixed(4)}&longitude=${lon.toFixed(4)}&current=us_aqi,pm10,pm2_5`;
+                const res = await fetchFn(url, { signal: createTimeoutSignal(3500) });
+                if (!res.ok) return null;
+                const data = await res.json();
+                const current = data?.current || {};
+                const aqiInfo = mapAqi(current.us_aqi);
+                return {
+                    aqi: aqiInfo.aqi,
+                    label: aqiInfo.label,
+                    color: aqiInfo.color,
+                    icon: aqiInfo.icon,
+                    pm2_5: current.pm2_5 != null ? Number(current.pm2_5.toFixed(1)) : null,
+                    pm10: current.pm10 != null ? Number(current.pm10.toFixed(1)) : null
+                };
+            } catch (_) {
+                return null;
+            }
+        }
+
         function buildDynamicLocationSuiteHtml(data = {}) {
             const lat = Number(data.latitude ?? 0);
             const lon = Number(data.longitude ?? 0);
             const addr = data.address || {};
             const weather = data.weather || null;
+            const aqi = data.aqi || null;
+            const showAmenities = data.showAmenities === true;
             const amenities = data.amenities || { atms: [], hospitals: [], police: [], gasStations: [] };
 
             const neighborhood = addr.neighbourhood || addr.suburb || addr.hamlet || addr.village || addr.residential || '';
@@ -24884,8 +24947,20 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
                 aiSummary += ` The current local weather is **${weather.temperatureC}°C** (${escapeHtml(weather.condition)}) with **${weather.humidity}%** humidity and winds at **${weather.windSpeedKmH} km/h**.`;
             }
 
-            const weatherBadgeHtml = weather ? `
+            if (aqi && aqi.aqi !== null) {
+                aiSummary += ` Air Quality Index (AQI) is **${aqi.aqi}** (${escapeHtml(aqi.label)})${aqi.pm2_5 != null ? ` with PM2.5 at **${aqi.pm2_5} µg/m³**` : ''}.`;
+            }
+
+            const aqiBadgeHtml = (aqi && aqi.aqi !== null) ? `
+                <div style="background:rgba(255,255,255,0.06); border:1px solid ${aqi.color}66; border-radius:999px; padding:4px 12px; font-size:13px; font-weight:600; color:${aqi.color}; display:flex; align-items:center; gap:6px;">
+                    <span>${aqi.icon}</span>
+                    <span>AQI ${aqi.aqi} · ${escapeHtml(aqi.label)}</span>
+                </div>
+            ` : '';
+
+            const weatherBadgeHtml = (weather || aqiBadgeHtml) ? `
                 <div class="loc-weather-bar" style="display:flex; flex-wrap:wrap; gap:8px; margin:12px 0 16px;">
+                    ${weather ? `
                     <div style="background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.3); border-radius:999px; padding:4px 12px; font-size:13px; font-weight:600; color:#38bdf8; display:flex; align-items:center; gap:6px;">
                         <span>${weather.icon}</span>
                         <span>${weather.temperatureC}°C · ${escapeHtml(weather.condition)}</span>
@@ -24898,6 +24973,8 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
                         <span>💨</span>
                         <span>${weather.windSpeedKmH} km/h Wind</span>
                     </div>
+                    ` : ''}
+                    ${aqiBadgeHtml}
                 </div>
             ` : '';
 
@@ -24907,6 +24984,7 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
                 state ? `<tr><td style="padding:4px 8px; color:#94a3b8; font-size:12px;">State / Region</td><td style="padding:4px 8px; font-weight:600; font-size:12px;">${escapeHtml(state)}</td></tr>` : '',
                 country ? `<tr><td style="padding:4px 8px; color:#94a3b8; font-size:12px;">Country</td><td style="padding:4px 8px; font-weight:600; font-size:12px;">${escapeHtml(country)}</td></tr>` : '',
                 postcode ? `<tr><td style="padding:4px 8px; color:#94a3b8; font-size:12px;">Postal / ZIP Code</td><td style="padding:4px 8px; font-weight:600; font-size:12px;">${escapeHtml(postcode)}</td></tr>` : '',
+                (aqi && aqi.aqi !== null) ? `<tr><td style="padding:4px 8px; color:#94a3b8; font-size:12px;">Air Quality (AQI)</td><td style="padding:4px 8px; font-weight:600; font-size:12px; color:${aqi.color};">${aqi.aqi} (${escapeHtml(aqi.label)})${aqi.pm2_5 != null ? ` · PM2.5: ${aqi.pm2_5} µg/m³` : ''}</td></tr>` : '',
                 `<tr><td style="padding:4px 8px; color:#94a3b8; font-size:12px;">GPS Coordinates</td><td style="padding:4px 8px; font-weight:600; font-size:12px;"><code>${lat.toFixed(6)}, ${lon.toFixed(6)}</code></td></tr>`
             ].filter(Boolean).join('');
 
@@ -25002,6 +25080,7 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
                             <tbody>${areaRows}</tbody>
                         </table>
                     </div>
+                    ${showAmenities ? amenitiesGridHtml : ''}
                     ${mapHtml}
                 </div>
             `;
@@ -25012,12 +25091,14 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
             formatDistance,
             mapWeatherCode,
             fetchLiveWeatherForCoords,
+            mapAqi,
+            fetchLiveAirQualityForCoords,
             fetchNearbyAmenities,
             buildDynamicLocationSuiteHtml
         };
 
         async function completeCurrentLocationRequest(position, originalText = '') {
-            showThinkingIndicator('Analyzing your location, live weather & nearby essential services...');
+            showThinkingIndicator('Acquiring your location, weather & air quality...');
             try {
                 const lat = position.coords.latitude;
                 const lon = position.coords.longitude;
@@ -25026,25 +25107,24 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
 
                 const suite = globalThis.JarvisLocationSuite || {
                     fetchLiveWeatherForCoords,
+                    fetchLiveAirQualityForCoords,
                     fetchNearbyAmenities,
                     buildDynamicLocationSuiteHtml
                 };
 
-                // Parallel fetch: Reverse Geocoding + Live Weather + Nearby Amenities (ATMs, Hospitals, Police, Gas)
-                const [reverseResult, weatherResult, amenitiesResult] = await Promise.allSettled([
+                // Parallel fetch: Reverse Geocoding + Live Weather + Air Quality (AQI)
+                const [reverseResult, weatherResult, aqiResult] = await Promise.allSettled([
                     fetch(
                         `${(window.APP_CONFIG || APP_CONFIG).externalUrls.nominatimReverse}?lat=${lat}&lon=${lon}&format=json`,
                         { headers: { 'User-Agent': 'JARVISAssistant/1.0' }, signal: createTimeoutSignal(4000) }
                     ).then(r => r.ok ? r.json() : null).catch(() => null),
                     typeof suite.fetchLiveWeatherForCoords === 'function' ? suite.fetchLiveWeatherForCoords(lat, lon) : fetchLiveWeatherForCoords(lat, lon),
-                    typeof suite.fetchNearbyAmenities === 'function' ? suite.fetchNearbyAmenities(lat, lon) : fetchNearbyAmenities(lat, lon)
+                    typeof suite.fetchLiveAirQualityForCoords === 'function' ? suite.fetchLiveAirQualityForCoords(lat, lon) : fetchLiveAirQualityForCoords(lat, lon)
                 ]);
 
                 const reverseData = reverseResult.status === 'fulfilled' ? reverseResult.value : null;
                 const weather = weatherResult.status === 'fulfilled' ? weatherResult.value : null;
-                const amenities = amenitiesResult.status === 'fulfilled' && amenitiesResult.value
-                    ? amenitiesResult.value
-                    : { atms: [], hospitals: [], police: [], gasStations: [] };
+                const aqi = aqiResult.status === 'fulfilled' ? aqiResult.value : null;
 
                 if (reverseData) {
                     addressData = reverseData.address || {};
@@ -25071,6 +25151,7 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
                     exactAddress,
                     address: addressData,
                     weather,
+                    aqi,
                     isApproximate,
                     updatedAt: Date.now()
                 };
@@ -25085,7 +25166,8 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
                     exactAddress,
                     address: addressData,
                     weather,
-                    amenities,
+                    aqi,
+                    showAmenities: false,
                     isApproximate
                 });
 
