@@ -3767,7 +3767,7 @@ async function fetchAndDisplayNews(query) {
     }
 
     window.JarvisInteractionState?.transition?.('SEARCHING', { metadata: { query } });
-    showThinkingIndicator('Searching the web...');
+    showThinkingIndicator('SEARCHING');
     const controller = beginAbortableRequest();
     const budgetTimer = setTimeout(() => {
         try { controller.abort(); } catch (_) {}
@@ -5013,7 +5013,7 @@ async function streamChatCompletion(payload, options = {}) {
         }
         if (event.event === 'status') {
             const nextState = event.data?.state || 'ANALYZING';
-            const label = event.data?.label || (nextState === 'SEARCHING' ? 'Searching...' : 'Analyzing...');
+            const label = event.data?.label || (nextState === 'SEARCHING' ? 'SEARCHING' : 'Analyzing...');
             window.JarvisInteractionState?.transition?.(nextState);
             showThinkingIndicator(label);
             return;
@@ -7342,7 +7342,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             if (!isProc || ['IDLE', 'GENERATING', 'SPEAKING', 'INTERRUPTED', 'CANCELLED', 'ERROR'].includes(state)) {
                 hideThinkingIndicator();
             } else if (state === 'SEARCHING') {
-                showThinkingIndicator('Searching...');
+                showThinkingIndicator('SEARCHING');
             } else if (['ROUTING', 'ANALYZING', 'THINKING'].includes(state)) {
                 showThinkingIndicator('Analyzing...');
             }
@@ -7998,7 +7998,10 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             let blinker = document.getElementById('chat-synthesizing-blinker');
             const existingTextEl = blinker ? blinker.querySelector('.synthesizing-blinker-text') : null;
             const fallback = (existingTextEl && existingTextEl.textContent.trim()) ? existingTextEl.textContent.trim() : 'Thinking...';
-            const label = (typeof customLabel === 'string' && customLabel.trim()) ? customLabel.trim() : fallback;
+            let label = (typeof customLabel === 'string' && customLabel.trim()) ? customLabel.trim() : fallback;
+            if (/\bsearch(?:ing)?\b/i.test(label) || /\b(searching the web|sources?|retriev|web search)\b/i.test(label)) {
+                label = 'SEARCHING';
+            }
             if (blinker) {
                 blinker.classList.remove('chat-synthesizing-blinker-leaving');
                 blinker.style.display = '';
@@ -8017,7 +8020,6 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             const safeLabel = (typeof escapeHtml === 'function') ? escapeHtml(label) : label;
             blinker.innerHTML = `
                 <div class="synthesizing-blinker-wrapper">
-                    <span class="synthesizing-blinker-dot"></span>
                     <span class="synthesizing-blinker-text">${safeLabel}</span>
                 </div>
             `;
@@ -8032,7 +8034,10 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
 
         function updateSynthesizingBlinker(newLabel) {
             if (!newLabel) return;
-            const label = String(newLabel).trim();
+            let label = String(newLabel).trim();
+            if (/\bsearch(?:ing)?\b/i.test(label) || /\b(searching the web|sources?|retriev|web search)\b/i.test(label)) {
+                label = 'SEARCHING';
+            }
             const blinker = document.getElementById('chat-synthesizing-blinker');
             if (!blinker) {
                 showSynthesizingBlinker(label);
@@ -14512,7 +14517,7 @@ function formatLiveSearchFailureMessage(data = {}, status = 0) {
 
 async function fetchLiveSearchJson(query, options = {}) {
     window.JarvisInteractionState?.transition?.('SEARCHING', { metadata: { query } });
-    showThinkingIndicator('Searching...');
+    showThinkingIndicator('SEARCHING');
     const searchTimeout = options.timeoutMs || 4500;
     let signal = options.signal;
     if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
@@ -17392,7 +17397,7 @@ async function handleStrictLatestQuery(userText) {
     }
 
     window.JarvisInteractionState?.transition?.('SEARCHING', { metadata: { userText } });
-    showThinkingIndicator('Searching the web...');
+    showThinkingIndicator('SEARCHING');
     const controller = beginAbortableRequest();
     const budgetMs = TRUST_FIRST_RELIABILITY_POLICY.verificationBudgetMs;
     const summaryTimeoutMs = TRUST_FIRST_RELIABILITY_POLICY.summaryTimeoutMs;
@@ -21074,7 +21079,7 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
     }
 
     window.JarvisInteractionState?.transition?.('SEARCHING', { metadata: { query, turnId: controller.turnId } });
-    showThinkingIndicator('Searching web sources...');
+    showThinkingIndicator('SEARCHING');
 
     const assistantMessageId = addChatMessage('', false, null, {
         allowEmpty: true,
@@ -21139,10 +21144,10 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                 onStateTransition: ({ state, meta }) => {
                     if (state === 'SEARCHING') {
                         window.JarvisInteractionState?.transition?.('SEARCHING', { metadata: { query, turnId: controller.turnId } });
-                        showThinkingIndicator('Searching web sources...');
+                        showThinkingIndicator('SEARCHING');
                     } else if (state === 'SOURCE_GROUNDED_SYNTHESIS') {
                         window.JarvisInteractionState?.transition?.('GENERATING', { metadata: { turnId: controller.turnId } });
-                        // Keep 'Searching web sources...' continuous without intermediate status text transitions
+                        // Keep SEARCHING continuous without intermediate status text transitions
                     }
                 },
                 onSourcesValidated: ({ sources, provenance }) => {
@@ -29224,10 +29229,10 @@ function resolveThinkingPhase(message = '') {
     const raw = String(message || '').trim();
     const lower = raw.toLowerCase();
     if (/\b(searching\s+the\s+web)\b/i.test(lower)) {
-        return { key: 'searching', label: 'Searching the web...' };
+        return { key: 'searching', label: 'SEARCHING' };
     }
     if (/\b(web search|search(?:ing)?|sources?|retriev|fetch|look(?:ing)?\s+up|checking verified|checking reliable|checking current|finding|lookup)\b/i.test(lower)) {
-        return { key: 'searching', label: 'Searching...' };
+        return { key: 'searching', label: 'SEARCHING' };
     }
     if (/\b(generating|drafting|writing)\b/i.test(lower)) {
         return { key: 'generating', label: 'Generating...' };
