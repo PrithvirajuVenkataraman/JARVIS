@@ -89,7 +89,7 @@ export async function ingestAllForMessage(attachments = [], userText = '') {
                 if (base64) {
                     imagePayload = {
                         name: attachment.name,
-                        mimeType: normalizeImageMime(attachment.mimeType, attachment.name),
+                        mimeType: normalizeImageMime(attachment.mimeType, attachment.name, base64),
                         base64
                     };
                 }
@@ -815,7 +815,7 @@ function hasUsefulExtractedText(text) {
 function isMetadataOnlyExtract(text) {
     const value = String(text || '').toLowerCase();
     if (!value) return true;
-    return /no readable text could be extracted|extraction failed|attached file:\s*.+\s*type:\s*|could not extract readable/.test(value) &&
+    return /no readable text could be extracted|extraction failed|attached file:\s*.+\s*type:\s*|could not extract readable|no text was detected|no text detected/i.test(value) &&
         !/\b(experience|education|skills|resume|curriculum|project|internship|objective|summary|email|phone|@)\b/i.test(value);
 }
 
@@ -845,7 +845,7 @@ export function buildChatAttachmentMeta(attachments = []) {
                 : (/\.docx?$/i.test(name) ? 'doc' : (/\.pptx?$/i.test(name) ? 'ppt' : 'file')));
         let previewUrl = '';
         if (isImage) {
-            previewUrl = item.previewUrl || (item.base64 ? `data:${normalizeImageMime(mimeType, name)};base64,${item.base64}` : '');
+            previewUrl = item.previewUrl || (item.base64 ? `data:${normalizeImageMime(mimeType, name, item.base64)};base64,${item.base64}` : '');
         }
         return {
             id: String(item?.id || ''),
@@ -860,7 +860,14 @@ export function buildChatAttachmentMeta(attachments = []) {
     });
 }
 
-function normalizeImageMime(mimeType, filename = '') {
+function normalizeImageMime(mimeType, filename = '', base64 = '') {
+    if (base64 && typeof base64 === 'string') {
+        const clean = base64.trim();
+        if (clean.startsWith('/9j/')) return 'image/jpeg';
+        if (clean.startsWith('iVBOR')) return 'image/png';
+        if (clean.startsWith('R0lGO')) return 'image/gif';
+        if (clean.startsWith('UklGR')) return 'image/webp';
+    }
     const cleanMime = String(mimeType || '').trim().toLowerCase();
     if (['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(cleanMime)) return cleanMime;
     if (/\.(jpe?g)$/i.test(filename)) return 'image/jpeg';
