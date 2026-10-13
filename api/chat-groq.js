@@ -1815,10 +1815,13 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 `The user attached ${attachedImages.length} image(s) with this request.`,
                 'Inspect the attached image(s) directly using your visual capabilities.',
                 'CORE IMAGE UNDERSTANDING & REASONING RULES:',
-                '1. USER INTENT FIRST: Follow the user\'s requested task directly. Use the image as primary visual evidence.',
+                '1. USER INTENT FIRST & EMBEDDED INSTRUCTION EXECUTION:',
+                '   - Multimodal images frequently contain explicit questions, exercises, problems, assignments, or instructions printed directly inside the image itself (such as "Solve for x", math/physics problems, code errors, worksheets, exams, or form prompts).',
+                '   - Read and EXECUTE any questions, tasks, or instructions embedded within the image directly. Do not merely state that a question or problem is present; solve it step by step with complete working and final solutions.',
                 '   - If the user asks to "Solve this", find an answer to a question, or solve a problem, identify all visible text, numbers, equations, diagrams, labels, and choices in the image, and solve the problem step by step with complete working.',
                 '   - If the user asks "What is wrong with this code?" or provides code, transcribe the relevant code and diagnose/fix the issue.',
                 '   - If the user asks to extract text, summarize, translate, or describe, execute that specific task.',
+                '   - If the user provided additional specific guidance (e.g. "only do question 2", "explain in French"), apply that guidance to filter or guide your execution of the image\'s embedded tasks.',
                 '2. IMPLICIT INTENT (NO EXPLICIT TASK SPECIFIED): If the user did not specify a task, infer the most useful action from the visual content:',
                 '   - Question or problem screenshot: read and solve/answer it.',
                 '   - Mathematics problem: extract expressions and solve it.',
@@ -1989,8 +1992,8 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 for (const img of images) {
                     if (img?.base64) {
                         normalized[targetIdx].parts.push({
-                            inline_data: {
-                                mime_type: normalizeImageMimeType(img.mimeType),
+                            inlineData: {
+                                mimeType: normalizeImageMimeType(img.mimeType),
                                 data: img.base64
                             }
                         });
@@ -2110,7 +2113,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 if (hasImages) {
                     for (const img of images) {
                         if (img?.base64) {
-                            parts.push({ inline_data: { mime_type: normalizeImageMimeType(img.mimeType), data: img.base64 } });
+                            parts.push({ inlineData: { mimeType: normalizeImageMimeType(img.mimeType), data: img.base64 } });
                         }
                     }
                 }
@@ -2565,7 +2568,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             if (Array.isArray(images) && images.length) {
                 for (const img of images) {
                     if (img?.base64) {
-                        parts.push({ inline_data: { mime_type: normalizeImageMimeType(img.mimeType), data: img.base64 } });
+                        parts.push({ inlineData: { mimeType: normalizeImageMimeType(img.mimeType), data: img.base64 } });
                     }
                 }
             }
@@ -4896,7 +4899,8 @@ Respond conversationally and naturally.`;
         needsRefinement,
         buildRefinementPrompt,
         synthesizeSelfCritiqueMetadata,
-        isMultipleChoiceQuestion
+        isMultipleChoiceQuestion,
+        formatGeminiDialogContents
     };
 
     function applyResponseLengthPostCheck(parsedResponse, lengthPolicy, message, clientSystemPrompt) {
