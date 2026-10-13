@@ -214,7 +214,7 @@ export function buildEmergencyCardHtml(payload = {}, contact = null) {
                     <span>📞</span>
                     <span>Call SOS</span>
                 </a>
-                <button type="button" onclick="if(navigator.share){navigator.share({title:'EMERGENCY SOS',text:${JSON.stringify(text)}});}else{navigator.clipboard.writeText(${JSON.stringify(text)});alert('Emergency distress message copied to clipboard.');}" style="background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); color:#ffffff; padding:10px 12px; border-radius:8px; font-weight:600; font-size:13px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px;">
+                <button type="button" class="emergency-share-btn" data-share-text="${encodeURIComponent(text)}" onclick="globalThis.shareEmergencySos?.(decodeURIComponent(this.getAttribute('data-share-text')||''))" style="background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); color:#ffffff; padding:10px 12px; border-radius:8px; font-weight:600; font-size:13px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px;">
                     <span>📤</span>
                     <span>Share Location</span>
                 </button>
@@ -240,4 +240,19 @@ export function buildEmergencyCardHtml(payload = {}, contact = null) {
             </div>
         </div>
     `;
+}
+
+export function shareEmergencySos(text) {
+    if (!text) return;
+    if (typeof navigator !== 'undefined' && navigator.share) {
+        navigator.share({ title: 'EMERGENCY SOS', text }).catch(() => {});
+    } else if (typeof navigator !== 'undefined' && navigator.clipboard) {
+        navigator.clipboard.writeText(text).then(() => {
+            alert('Emergency distress message copied to clipboard.');
+        }).catch(() => {});
+    }
+}
+
+if (typeof globalThis !== 'undefined') {
+    globalThis.shareEmergencySos = shareEmergencySos;
 }
