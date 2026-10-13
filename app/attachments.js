@@ -87,9 +87,11 @@ export async function ingestAllForMessage(attachments = [], userText = '') {
             if (isImg) {
                 const base64 = await resolveAttachmentBase64(attachment).catch(() => '');
                 if (base64) {
+                    const finalMime = normalizeImageMime(attachment.mimeType, attachment.name, base64);
+                    attachment.mimeType = finalMime;
                     imagePayload = {
                         name: attachment.name,
-                        mimeType: normalizeImageMime(attachment.mimeType, attachment.name, base64),
+                        mimeType: finalMime,
                         base64
                     };
                 }
@@ -428,10 +430,14 @@ async function ingestOnServer(attachment, localResult = {}) {
     if (!clientText && !base64) {
         throw new Error(`Attachment payload is empty for ${attachment?.name || 'attachment'}. Please reattach the file and try again.`);
     }
+    const finalMime = isImageAttachment(attachment)
+        ? normalizeImageMime(attachment.mimeType, attachment.name, base64)
+        : (attachment.mimeType || guessMimeFromName(attachment.name));
+    attachment.mimeType = finalMime;
     logAttachmentIngestDiagnostics(attachment, { base64, clientText });
     const data = await postJson('/api/ingest-attachment', {
         filename: attachment.name,
-        mimeType: attachment.mimeType,
+        mimeType: finalMime,
         base64,
         clientText,
         clientMethod: String(localResult?.method || '')
@@ -449,7 +455,8 @@ async function ingestOnServer(attachment, localResult = {}) {
 
 async function ingestViaVision(attachment) {
     const base64 = await resolveAttachmentBase64(attachment);
-    const mimeType = normalizeImageMime(attachment.mimeType, attachment.name);
+    const mimeType = normalizeImageMime(attachment.mimeType, attachment.name, base64);
+    attachment.mimeType = mimeType;
     notifyAttachmentProgress(attachment, `Running cloud OCR on ${attachment.name}...`);
     try {
         const data = await postJson('/api/vision', {
@@ -463,8 +470,14 @@ async function ingestViaVision(attachment) {
         const snippets = Array.isArray(details?.textDetected)
             ? details.textDetected.map(item => String(item || '').trim()).filter(Boolean).join('\n').trim()
             : '';
-        const text = fullText || snippets || String(data?.response || '').trim();
-        if (text && text.length >= 10 && !/^no clear readable text/i.test(text)) {
+        let text = fullText || snippets;
+        if (!text && !details?.fullText && (!details?.textDetected || details.textDetected.length === 0)) {
+            const rawCandidate = String(data?.response || '').trim();
+            if (!isMetadataOnlyExtract(rawCandidate) && !isOcrStatusMessage(rawCandidate)) {
+                text = rawCandidate;
+            }
+        }
+        if (text && hasUsefulExtractedText(text)) {
             return {
                 ok: true,
                 text: clipText(text),
@@ -545,19 +558,8 @@ async function createPendingAttachment(file) {
     let storedMimeType = isImage ? (file.type || 'image/jpeg') : (file.type || guessMimeFromName(fileName));
     if (isImage) {
         base64 = await compressImageFileToBase64(file).catch(() => fileToBase64(file));
-        // After canvas re-encoding, base64 is always JPEG — normalize the stored MIME type
-        // to match what was actually encoded. This prevents MIME mismatch when passing to AI models.
-        const rawMime = String(file.type || '').toLowerCase().trim();
-        if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(rawMime)) {
-            // Non-standard MIME (HEIC, HEIF, AVIF, DNG, TIFF, BMP, etc.) — canvas re-encoded to JPEG
-            storedMimeType = 'image/jpeg';
-        } else if (rawMime === 'image/jpeg' || rawMime === '') {
-            storedMimeType = 'image/jpeg';
-        }
-        // PNG/WebP/GIF: canvas.toDataURL('image/jpeg') is always used, so normalize to jpeg
-        // unless file is already PNG/WebP/GIF and no orientation correction was needed
-        // (we always use 'image/jpeg' quality compression for size reasons)
-        storedMimeType = 'image/jpeg';
+        // Derive MIME type strictly from the final encoded data, not the original filename
+        storedMimeType = normalizeImageMime(file.type || 'image/jpeg', fileName, base64);
     } else {
         base64 = await fileToBase64(file);
     }
@@ -804,10 +806,16 @@ function isImageAttachment(attachment) {
     return /^image\//i.test(mimeType) || IMAGE_EXTENSIONS.test(name);
 }
 
+function isOcrStatusMessage(text) {
+    const s = String(text || '').trim().toLowerCase();
+    if (!s) return true;
+    return /\b(?:no (?:clear )?(?:readable )?text|no text (?:was )?detected|no text detected|no visible text|could not (?:find|detect|extract) (?:any )?(?:readable )?text|unable to (?:find|detect|extract) (?:any )?(?:readable )?text|does not contain (?:any )?readable text)\b/i.test(s);
+}
+
 function hasUsefulExtractedText(text) {
     const value = String(text || '').replace(/\s+/g, ' ').trim();
     if (value.length < 40) return false;
-    if (isMetadataOnlyExtract(value)) return false;
+    if (isMetadataOnlyExtract(value) || isOcrStatusMessage(value)) return false;
     const letters = (value.match(/[A-Za-z\u00C0-\u024F]/g) || []).length;
     return letters >= 24;
 }
@@ -815,6 +823,7 @@ function hasUsefulExtractedText(text) {
 function isMetadataOnlyExtract(text) {
     const value = String(text || '').toLowerCase();
     if (!value) return true;
+    if (isOcrStatusMessage(value)) return true;
     return /no readable text could be extracted|extraction failed|attached file:\s*.+\s*type:\s*|could not extract readable|no text was detected|no text detected/i.test(value) &&
         !/\b(experience|education|skills|resume|curriculum|project|internship|objective|summary|email|phone|@)\b/i.test(value);
 }
@@ -1390,3 +1399,10 @@ export function showComposerMenuGroup(menu, groupName) {
         group.classList.toggle('hidden', group.getAttribute('data-composer-group') !== groupName);
     });
 }
+
+export const __test = {
+    normalizeImageMime,
+    hasUsefulExtractedText,
+    isOcrStatusMessage,
+    isMetadataOnlyExtract
+};
