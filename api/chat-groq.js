@@ -42,6 +42,174 @@ import {
 } from './_lib/intent-separator.js';
 
 import {
+    BM25Index,
+    computeBM25Scores,
+    textToEmbeddingVector,
+    vectorCosineSimilarity
+} from './_lib/bm25.js';
+
+/* ── BM25 & Semantic Vector Intent Engine ────────────────────────── */
+const CHAT_INTENT_INDEX = new BM25Index({ k1: 1.2, b: 0.75 });
+const CHAT_INTENT_PROTOTYPES = [
+    {
+        id: 'time_sensitive_freshness',
+        text: 'latest recent current today now update updates news headlines status mission launch price rate score result election breaking ipl match matches fixture fixtures schedule opening match first match live events quote trading rate'
+    },
+    {
+        id: 'timeless_factual',
+        text: 'who what when where which how many how much date founded ceo president prime minister captain winner population capital currency height age released launch date fact facts information question leader creator meaning lyrics composed track album song composer'
+    },
+    {
+        id: 'stable_definition',
+        text: 'what define meaning explain definition concept theory principles overview mechanism algorithm'
+    },
+    {
+        id: 'creative_composition',
+        text: 'write compose draft author invent create poem poetry story screenplay fiction comedy humor joke jokes monologue rhyme'
+    },
+    {
+        id: 'detail_short',
+        text: 'one line one liner brief briefly short tldr in short quickly quick answer concise few words keep it short make it short summary'
+    },
+    {
+        id: 'detail_detailed',
+        text: 'detailed in depth comprehensive thorough elaborate long answer explain fully deep dive extensive complete walkthrough'
+    },
+    {
+        id: 'recipe_generation',
+        text: 'recipe culinary instructions cooking baking ingredients needed required how to cook bake prepare dish meal food steps'
+    },
+    {
+        id: 'travel_planning',
+        text: 'itinerary itenary travel trip plan vacation tour journey destinations visit explore sightseeing schedule multi day holiday booking'
+    },
+    {
+        id: 'ocr_status_diagnostic',
+        text: 'no clear readable text detected visible could not find detect extract any text unable to detect does not contain readable text no text was detected empty image extraction failed no readable text could be extracted attached file type could not extract readable error status notice'
+    },
+    {
+        id: 'substantive_content',
+        text: 'experience education skills resume curriculum project internship objective summary email phone work history employment professional background degree university college certification responsibilities achievements publication research company organization report document data table analysis findings conclusion methodology results discussion section chapter'
+    },
+    {
+        id: 'risk_challenged',
+        text: 'wrong incorrect hallucinated made that up not true check again recheck verify are you sure mistaken false inaccurate check facts verify q'
+    },
+    {
+        id: 'risk_uncertainty',
+        text: 'not sure cannot verify unable to verify not enough information unclear unknown uncertain possibly probably might be inconclusive'
+    },
+    {
+        id: 'risk_source_claim',
+        text: 'according to sources say reported by confirmed by evidence shows research shows study found verified by cited by official reports'
+    },
+    {
+        id: 'risk_high_stakes',
+        text: 'medical medicine symptom diagnosis dose dosing legal lawyer contract financial investment tax self harm suicide emergency clinical'
+    },
+    {
+        id: 'risk_code',
+        text: 'code function script program debug algorithm sql javascript python implementation syntax class method repo bug compile'
+    },
+    {
+        id: 'risk_calculation',
+        text: 'calculate compute equation formula percentage probability equals arithmetic math calculation sum multiply divide algebra 15 percent 80 percent'
+    },
+    {
+        id: 'recency_incumbent',
+        text: 'latest current today now update updates recent incumbent sworn in assumed office took oath active in office presently serving'
+    },
+    {
+        id: 'predecessor_former',
+        text: 'former ex past previously retired resigned predecessor stepped down departed former officeholder previous'
+    },
+    {
+        id: 'asks_sources',
+        text: 'with sources source links cite sources include links provide references verify sources with citations show sources'
+    },
+    {
+        id: 'evasive_generic_advice',
+        text: 'check official website visit website refer to sources search google look it up steps you can follow try searching search online news websites'
+    },
+    {
+        id: 'model_uncertainty_staleness',
+        text: 'i do not know dont know not sure cannot verify cannot confirm might be outdated may be outdated unable to verify not certain knowledge cutoff update no direct information unable to find information i think maybe perhaps hard to say'
+    },
+    {
+        id: 'mutable_office_entity',
+        text: 'president prime minister pm chief minister cm governor mayor chancellor ceo chief executive officer managing director chairman chairperson captain coach ranking standings winner champion score price rate market cap election result tenure holding office leader minister'
+    },
+    {
+        id: 'when_schedule_query',
+        text: 'when date schedule fixture first match opening match tournament start timetable timing dates'
+    },
+    {
+        id: 'snippets_evasive_refusal',
+        text: 'provided snippets search results top live snippets available snippets supplied snippets do not state do not mention contain no information could not confirm could not find do not include only state unclear'
+    },
+    {
+        id: 'topic_switch_intent',
+        text: 'different topic another topic new topic change topic switch topic instead unrelated topic diversion'
+    },
+    {
+        id: 'pronominal_reference',
+        text: 'it its they them that this these those there same above earlier previous first match opening match that match that game who are playing who is playing'
+    },
+    {
+        id: 'explicit_math_logic_proof',
+        text: 'prove proof formal step logic deductive riddle puzzle derive formula calculate theorem geometric derivation irrational equation algebra calculus square root mathematical'
+    },
+    {
+        id: 'song_lyrics',
+        text: 'lyrics songlyrics track verses refrain chorus songwriter lyrical'
+    },
+    {
+        id: 'model_asks_user_for_sources',
+        text: 'provide sources share source links send source url paste references require source citation link verify proof'
+    },
+    {
+        id: 'portfolio_resume_link_advice',
+        text: 'portfolio github linkedin resume cv work samples code repository job application profile bio'
+    },
+    {
+        id: 'sql_query_generation',
+        text: 'write generate create provide show sql query script statement code postgres mysql sqlite database select from where group by join'
+    },
+    {
+        id: 'deep_engineering_reasoning',
+        text: 'architecture system design distributed microservices scalability fault tolerance concurrency database schema erd load balancer worker pool thread mutex semaphore failover bottleneck high availability throughput refactor full stack compiler interpreter framework parser dag lexer algorithm mathematical proof formal verification complexity analysis tradeoffs deep dive comprehensive evaluation in depth comparison roadmap debug memory leak deadlock race condition profiling heap dump segfault'
+    },
+    {
+        id: 'trivial_greeting',
+        text: 'hi hello hey yo greetings good morning afternoon evening night how are you who are you nice to meet you'
+    }
+];
+
+const COMPILED_CHAT_INTENTS = CHAT_INTENT_PROTOTYPES.map(p => {
+    CHAT_INTENT_INDEX.addDocument(p.id, p.text, p);
+    return {
+        ...p,
+        vector: textToEmbeddingVector(p.text, 512)
+    };
+});
+
+function scoreChatIntent(query, categoryId) {
+    const raw = String(query || '').trim();
+    if (!raw) return 0;
+    const proto = COMPILED_CHAT_INTENTS.find(p => p.id === categoryId);
+    if (!proto) return 0;
+
+    const queryVec = textToEmbeddingVector(raw, 512);
+    const semSim = vectorCosineSimilarity(queryVec, proto.vector);
+
+    const bm25Res = CHAT_INTENT_INDEX.search(raw, { topK: 10 });
+    const match = bm25Res.find(r => r.doc.id === categoryId);
+    const bm25Score = match ? Math.min(1.0, match.score / 4.0) : 0;
+
+    return semSim * 0.5 + bm25Score * 0.5;
+}
+
+import {
     extractQueryConstraints,
     detectLogicalContradictions,
     evaluateDraftSolution,
@@ -190,20 +358,8 @@ async function getInstantFactHelper() {
         }
 
         // 1. Complex Reasoning / Deep Architecture Signals -> Strict Route to Groq Deep Tier
-        const deepSignals = [
-            /\b(?:architecture|system\s+design|distributed|microservices?|scalability|fault\s+tolerance|concurrency|concurrent(?:ly| users)?|database\s+schema|erd\b|erd\s+diagram)/i,
-            /\b(?:round[- ]robin|load\s+balanc(?:ing|er)?|worker\s+pool|thread\s+pool|mutex|semaphore|failover|bottleneck|high\s+availability|throughput)/i,
-            /\b(?:refactor|implement\s+(?:full|complete|entire)|build\s+(?:a|an)\s+(?:end-to-end|full-stack|compiler|interpreter|framework|parser|dag|lexer))/i,
-            /\b(?:algorithm\s+proof|mathematical\s+proof|formal\s+verification|time\s+complexity\s+analysis|space\s+complexity\s+proof)/i,
-            /\b(?:comparative\s+analysis|tradeoffs?|deep\s+dive|comprehensive\s+evaluation|in-depth\s+comparison|strategic\s+roadmap)/i,
-            /\b(?:debug\s+this\s+memory\s+leak|deadlock|race\s+condition|profiling|heap\s+dump|segfault|core\s+dump)/i,
-            /\b(?:step-by-step\s+(?:guide|walkthrough|strategy|plan|roadmap|architecture)|how\s+did\s+we\s+implement|how\s+do\s+we\s+implement|implementation\s+of)\b/i
-        ];
-
-        for (const pat of deepSignals) {
-            if (pat.test(lower)) {
-                return { tier: 'deep', preferSpeed: false, reason: 'deep_reasoning_intent' };
-            }
+        if (scoreChatIntent(query, 'deep_engineering_reasoning') >= 0.28 || scoreChatIntent(query, 'explicit_math_logic_proof') >= 0.28) {
+            return { tier: 'deep', preferSpeed: false, reason: 'deep_reasoning_intent' };
         }
 
         if (wordCount > 180) {
@@ -215,11 +371,12 @@ async function getInstantFactHelper() {
         }
 
         // 2. Instant / Fast Tier Signals -> Ultra-fast sub-200ms TTFT strictly for trivial greetings, basic calculator math, or ultra-short lookups
-        const isGreeting = /^(?:hi|hello|hey|yo|greetings|good\s+(?:morning|afternoon|evening|night)|how\s+are\s+you|who\s+are\s+you)\b/i.test(lower);
-        const isSimpleFact = /^(?:what\s+is|what's|where\s+is|who\s+is|capital\s+of|currency\s+of|meaning\s+of|define)\s+[\w\s.'-]{2,40}\??$/i.test(lower);
-        const isSimpleMath = /^\s*[\d\s+\-*/^().=%xXyYzZ]+\s*$/.test(query) || /^(?:what\s+is|calculate|compute)\s+[\d\s+\-*/^().=%]+(?:\?)?$/i.test(lower);
+        const isGreeting = scoreChatIntent(lower, 'trivial_greeting') >= 0.28;
+        const isLeadershipOrTemporal = scoreChatIntent(lower, 'mutable_office_entity') >= 0.25 || scoreChatIntent(lower, 'time_sensitive_freshness') >= 0.25 || scoreChatIntent(lower, 'recency_incumbent') >= 0.25;
+        const isSimpleFact = !isLeadershipOrTemporal && isStableDefinitionQuery(lower) && wordCount < 15;
+        const isSimpleMath = /^\s*[\d\s+\-*/^().=%xXyYzZ]+\s*$/.test(query) || (/\d/.test(query) && scoreChatIntent(lower, 'risk_calculation') >= 0.28 && wordCount < 10);
 
-        if (isGreeting || (isSimpleFact && wordCount < 15) || isSimpleMath) {
+        if (isGreeting || isSimpleFact || isSimpleMath) {
             return { tier: 'instant', preferSpeed: true, reason: 'instant_fast_path' };
         }
 
@@ -369,14 +526,9 @@ async function getInstantFactHelper() {
     };
 
     function isSqlQueryGenerationRequest(text) {
-        const t = String(text || '').toLowerCase();
-        if (/\b(?:write|generate|create|provide|give\s+me|show\s+me)\b.*\b(?:sql\s+query|sql\s+script|sql\s+statement|sql\s+code|postgres\s+query|mysql\s+query|sqlite\s+query|database\s+query)\b/i.test(t)) {
-            return true;
-        }
-        if (/^\s*(?:write|generate|create)\s+(?:an?\s+)?sql\b/i.test(t)) {
-            return true;
-        }
-        return false;
+        const t = String(text || '').trim();
+        if (!t) return false;
+        return scoreChatIntent(t, 'sql_query_generation') >= 0.28;
     }
 
 
@@ -398,48 +550,6 @@ async function getInstantFactHelper() {
 
     function isFactSearchConfigured() {
         return isLiveRetrievalConfigured() || isPublicFactSearchConfigured();
-    }
-
-    function textToEmbeddingVector(text, dim = 512) {
-        const v = new Float32Array(dim);
-        const tokens = String(text || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').trim().split(/\s+/).filter(Boolean);
-        if (!tokens.length) return v;
-        for (const token of tokens) {
-            let h1 = 0x811c9dc5;
-            let h2 = 0x5bd1e995;
-            for (let i = 0; i < token.length; i++) {
-                const code = token.charCodeAt(i);
-                h1 ^= code;
-                h1 = Math.imul(h1, 0x01000193);
-                h2 ^= code;
-                h2 = Math.imul(h2, 0x5bd1e995);
-            }
-            const idx1 = Math.abs(h1) % dim;
-            const idx2 = Math.abs(h2) % dim;
-            v[idx1] += 1.0;
-            v[idx2] += 0.5;
-            if (token.length >= 4) {
-                for (let i = 0; i < token.length - 2; i++) {
-                    const trigram = token.slice(i, i + 3);
-                    let th = 0;
-                    for (let j = 0; j < trigram.length; j++) th = (th * 31 + trigram.charCodeAt(j)) | 0;
-                    v[Math.abs(th) % dim] += 0.2;
-                }
-            }
-        }
-        let norm = 0;
-        for (let i = 0; i < dim; i++) norm += v[i] * v[i];
-        norm = Math.sqrt(norm);
-        if (norm > 0) {
-            for (let i = 0; i < dim; i++) v[i] /= norm;
-        }
-        return v;
-    }
-
-    function vectorCosineSimilarity(a, b) {
-        let dot = 0;
-        for (let i = 0; i < a.length; i++) dot += a[i] * b[i];
-        return dot;
     }
 
     const CONSTRAINT_PROTOTYPE_VECTOR = textToEmbeddingVector('must be strictly required rules constraints format only concise in typescript python no external dependencies');
@@ -571,8 +681,9 @@ class EdgeSemanticLruCache {
 
     shouldBypass(message, images) {
         if (Array.isArray(images) && images.length > 0) return true;
-        const msg = String(message || '').toLowerCase();
-        if (/\b(today|tomorrow|yesterday|now|current|live|time|date|stock|price|weather|random|dice|coin)\b/i.test(msg)) {
+        const msg = String(message || '').trim();
+        if (!msg) return false;
+        if (scoreChatIntent(msg, 'time_sensitive_freshness') >= 0.28) {
             return true;
         }
         return false;
@@ -1129,13 +1240,11 @@ const edgeResponseCache = new EdgeSemanticLruCache();
     }
 
     function isStreamPreferredGenerationRequest(text) {
-        const value = String(text || '').toLowerCase();
-        if (!value.trim()) return false;
+        const value = String(text || '').trim();
+        if (!value) return false;
         if (isLongTravelPlanningRequest(value) || isRecipeGenerationRequest(value)) return true;
-        if (/\b(itinerary|itenary|itenarary|travel plan|trip plan|day[- ]by[- ]day|vacation plan)\b/.test(value)) return true;
-        if (/\bcreate a rich, engaging, practical itinerary\b/.test(value)) return true;
-        if (/\b(write|draft|compose)\b[\s\S]{0,40}\b(email|essay|story|letter|blog|itinerary)\b/.test(value)) return true;
-        if (/\b(detailed|comprehensive|full)\b/.test(value) && /\b(trip|travel|visit|vacation|tour|journey|destination|plan)\b/.test(value)) return true;
+        if (scoreChatIntent(value, 'travel_planning') >= 0.28) return true;
+        if (scoreChatIntent(value, 'creative_composition') >= 0.28) return true;
         return false;
     }
 
@@ -1180,8 +1289,9 @@ const edgeResponseCache = new EdgeSemanticLruCache();
     function isExplicitReasoningIntent(intent = '', message = '') {
         const i = String(intent || '').toLowerCase();
         if (['math_proof', 'complex_reasoning', 'logic_puzzle', 'algebraic_derivation', 'math'].includes(i)) return true;
-        const msg = String(message || '').toLowerCase();
-        return /\b(prove|mathematical proof|formal proof|step-by-step logic|deductive proof|solve the riddle|logic puzzle|derive the formula|calculate|theorem|geometric proof|derivation)\b/i.test(msg);
+        const msg = String(message || '').trim();
+        if (!msg) return false;
+        return scoreChatIntent(msg, 'explicit_math_logic_proof') >= 0.28 || scoreChatIntent(msg, 'risk_calculation') >= 0.30;
     }
 
     function buildReasoningInstruction(intent, model = '', userSelectedModel = null, message = '') {
@@ -1341,7 +1451,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             (routeDecision.webEligible && (
                 isTimeSensitiveInfoRequest(effectiveMessage) ||
                 isMutableEntityFactQuery(effectiveMessage) ||
-                /\b(with sources?|source links?|cite|citations?)\b/i.test(effectiveMessage)
+                scoreChatIntent(effectiveMessage, 'asks_sources') >= 0.25
             ))
         );
         if (Array.isArray(options?.sources) && options.sources.length > 0) {
@@ -1819,9 +1929,10 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             const isMeaningfulOcrText = (t) => {
                 const s = String(t || '').trim();
                 if (!s) return false;
-                if (/^\[Attached Image:[^\]]+\]$/i.test(s)) return false;
-                if (/\b(?:no (?:clear )?(?:readable )?text|no text (?:was )?detected|no text detected|no visible text|could not (?:find|detect|extract) (?:any )?(?:readable )?text|unable to (?:find|detect|extract) (?:any )?(?:readable )?text|does not contain (?:any )?readable text)\b/i.test(s)) return false;
-                if (s.startsWith('###') && /Extraction:\s*[^\n]+\n\s*(?:No (?:clear )?(?:readable )?text|No text (?:was )?detected|No text detected)/i.test(s)) return false;
+                if (s.startsWith('[Attached Image:') && s.endsWith(']')) return false;
+                const statusScore = scoreChatIntent(s, 'ocr_status_diagnostic');
+                const contentScore = scoreChatIntent(s, 'substantive_content');
+                if (statusScore >= 0.25 && statusScore > contentScore) return false;
                 return true;
             };
             const extractedText = String(selectedText || sourceAnswer || '').trim();
@@ -2910,15 +3021,14 @@ const edgeResponseCache = new EdgeSemanticLruCache();
     }
 
     function asksUserToProvideSources(text) {
-        const t = String(text || '').toLowerCase();
+        const t = String(text || '').trim();
+        if (!t) return false;
         // Only treat as "needs live verification" when the model refuses and asks the user for sources.
         // Resume/doc feedback like "share links to your portfolio" must not match.
-        if (/\b(?:share|provide|give)\b[\s\S]{0,40}\b(?:links?|urls?)\b[\s\S]{0,40}\b(?:portfolio|github|linkedin|resume|cv|project)\b/.test(t)) {
+        if (scoreChatIntent(t, 'portfolio_resume_link_advice') >= 0.30) {
             return false;
         }
-        return /\b(?:could you|can you|please)\b[\s\S]{0,40}\b(?:provide|share|give|send|paste)\b[\s\S]{0,60}\b(?:source|sources|link|links|url|urls)\b/.test(t) ||
-            /\bi (?:need|require|don'?t have|do not have)\b[\s\S]{0,40}\b(?:source|sources|link|links|url|urls)\b/.test(t) ||
-            /\b(?:upload|attach)\b[\s\S]{0,40}\b(?:source|sources|link|links|url|urls)\b/.test(t);
+        return scoreChatIntent(t, 'model_asks_user_for_sources') >= 0.30;
     }
 
     function isStrictSinglePassRouter() {
@@ -2957,14 +3067,14 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             };
         }
         if (String(options?.intent || '') === 'pop_culture_reference') {
-            if (/\b(latest|current|news|today|now|with sources?|source links?)\b/i.test(query)) {
+            if (scoreChatIntent(query, 'time_sensitive_freshness') >= 0.28 || scoreChatIntent(query, 'asks_sources') >= 0.25) {
                 return {
                     strategy: 'live_first',
                     reason: 'time_sensitive_query',
                     webEligible: true
                 };
             }
-            if (/\b(lyrics|song lyrics|lyrics of)\b/i.test(query) && isFactSearchConfigured()) {
+            if (scoreChatIntent(query, 'song_lyrics') >= 0.28 && isFactSearchConfigured()) {
                 return {
                     strategy: 'live_first',
                     reason: 'lyrics_retrieval_grounding',
@@ -2994,7 +3104,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 intentClassification
             };
         }
-        if (/\b(lyrics|song lyrics|lyrics of)\b/i.test(query)) {
+        if (scoreChatIntent(query, 'song_lyrics') >= 0.28) {
             if (!isFactSearchConfigured()) {
                 return {
                     strategy: 'direct',
@@ -3009,7 +3119,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             };
         }
 
-        const asksSources = /\b(with sources?|source links?)\b/i.test(query);
+        const asksSources = scoreChatIntent(query, 'asks_sources') >= 0.25;
         if (asksSources) {
             if (!isFactSearchConfigured()) {
                 return {
@@ -3130,14 +3240,13 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             return { escalate: true, reason: 'unknown_general_knowledge_answer', trigger: 'model_requested_sources_from_user' };
         }
 
-        const genericAdvice = /\b(check|visit|see|refer|search|google)\b[\s\S]{0,120}\b(official website|website|site|source|sources|search|google|news websites?)\b/i.test(answer) ||
-            /\b(steps you can follow|you can check|try searching|search online|look it up)\b/i.test(answer);
-        if (genericAdvice) {
+        const genericAdviceScore = scoreChatIntent(answer, 'evasive_generic_advice');
+        if (genericAdviceScore >= 0.28) {
             return { escalate: true, reason: 'unknown_general_knowledge_answer', trigger: 'generic_advice_answer' };
         }
 
-        const uncertain = /\b(i\s+(?:don'?t|do not)\s+know|i\s+(?:don'?t|do not)\s+have\s+(?:enough\s+)?(?:information|context|live|real[- ]?time)|not sure|cannot verify|can't verify|cannot confirm|can't confirm|might be outdated|may be outdated|i(?:'m| am)\s+unable\s+to\s+verify|i(?:'m| am)\s+not\s+certain|knowledge\s+cutoff|as\s+of\s+my\s+last\s+update|no\s+direct\s+information|unable\s+to\s+find\s+information)\b/i.test(answer);
-        if (uncertain) {
+        const uncertainScore = scoreChatIntent(answer, 'model_uncertainty_staleness');
+        if (uncertainScore >= 0.28) {
             return { escalate: true, reason: 'unknown_general_knowledge_answer', trigger: 'uncertain_or_evasive_answer' };
         }
 
@@ -3145,12 +3254,12 @@ const edgeResponseCache = new EdgeSemanticLruCache();
     }
 
     function isMutableEntityFactQuery(text) {
-        const t = String(text || '').toLowerCase();
-        if (!t.trim()) return false;
-        if (isStableGeographyOrGeneralFactQuery(text)) return false;
-        if (/\b(with sources?|source links?)\b/.test(t)) return true;
-        if (/\b(current|latest|today|now|as of)\b/.test(t)) return true;
-        return /\b(president|prime minister|chief minister|cm|governor|mayor|ceo|chairman|chairperson|captain|coach|ranking|standings|winner|score|price|rate|market cap|election result)\b/.test(t);
+        const t = String(text || '').trim();
+        if (!t) return false;
+        if (isStableGeographyOrGeneralFactQuery(t)) return false;
+        if (scoreChatIntent(t, 'asks_sources') >= 0.25) return true;
+        if (scoreChatIntent(t, 'time_sensitive_freshness') >= 0.28) return true;
+        return scoreChatIntent(t, 'mutable_office_entity') >= 0.25;
     }
 
     function isInternalSummarizerPrompt(message, clientSystemPrompt) {
@@ -3168,24 +3277,21 @@ const edgeResponseCache = new EdgeSemanticLruCache();
         const answer = String(firstAnswer || '').trim();
         if (!isWebCheckCandidateQuery(query)) return { escalate: false, reason: 'not_factual_or_time_sensitive' };
         if (!answer) return { escalate: true, reason: 'empty_answer' };
-        if (/\b(with sources?|source links?)\b/i.test(query)) return { escalate: true, reason: 'user_requested_sources' };
+        if (scoreChatIntent(query, 'asks_sources') >= 0.25) return { escalate: true, reason: 'user_requested_sources' };
 
-        const genericAdvice = /\b(check|visit|see|refer)\b[\s\S]{0,120}\b(official website|website|site|news websites?)\b/i.test(answer) ||
-            /\b(steps you can follow|you can check)\b/i.test(answer);
-        if (genericAdvice) return { escalate: true, reason: 'generic_advice_answer' };
+        const genericAdviceScore = scoreChatIntent(answer, 'evasive_generic_advice');
+        if (genericAdviceScore >= 0.28) return { escalate: true, reason: 'generic_advice_answer' };
 
-        const uncertain = /\b(i (?:don'?t|do not) have (?:live|real[- ]?time)|not sure|cannot verify|might be outdated)\b/i.test(answer);
-        if (uncertain) return { escalate: true, reason: 'uncertain_or_stale_answer' };
+        const uncertainScore = scoreChatIntent(answer, 'model_uncertainty_staleness');
+        if (uncertainScore >= 0.28) return { escalate: true, reason: 'uncertain_or_stale_answer' };
         const asksUserForSources = asksUserToProvideSources(answer);
         if (asksUserForSources) return { escalate: true, reason: 'model_requested_sources_from_user' };
 
-        const asksWhenOrDate = /\b(when|date|first match|opening match|schedule|fixture)\b/i.test(query);
+        const asksWhenOrDate = scoreChatIntent(query, 'when_schedule_query') >= 0.28;
         if (asksWhenOrDate && !extractDateCandidate(answer)) return { escalate: true, reason: 'date_missing_in_answer' };
 
         const factualQuery = isFactualQuery(query);
-        const evasiveFactualAnswer =
-            /\b(i think|maybe|perhaps|not sure|cannot confirm|can't confirm|hard to say)\b/i.test(answer) ||
-            /\b(check|visit|refer)\b[\s\S]{0,120}\b(official website|website|site|search|google)\b/i.test(answer);
+        const evasiveFactualAnswer = uncertainScore >= 0.25 || genericAdviceScore >= 0.25;
         if (factualQuery && evasiveFactualAnswer) {
             return { escalate: true, reason: 'weak_factual_answer' };
         }
@@ -3267,7 +3373,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
         if (!sources.length) return { ragText: '', sources: [] };
 
         // Deep Scrape Top 2-3 unique URLs concurrently for full paragraph synthesis (skip for simple leadership queries)
-        const isLeadershipQuery = /\b(ceo|chief executive officer|managing director|cm|chief minister|pm|prime minister|president|governor|mayor)\b/i.test(message);
+        const isLeadershipQuery = scoreChatIntent(message, 'mutable_office_entity') >= 0.25;
         if (!isLeadershipQuery) {
             const deepScrapePromises = sources.slice(0, 3).map(async (src) => {
                 const articleText = await extractReadableArticleText(src.url, 2200);
@@ -3421,7 +3527,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 .join(' ')
             : '';
 
-        const isLeadershipOrTemporal = /\b(cm|chief minister|pm|prime minister|president|governor|mayor|chancellor|ceo|chief executive officer|managing director|leader|minister|who is|current|present|winner|champion|tenure|holding office)\b/i.test(base);
+        const isLeadershipOrTemporal = scoreChatIntent(base, 'mutable_office_entity') >= 0.22 || scoreChatIntent(base, 'time_sensitive_freshness') >= 0.25;
 
         const leadershipMatch = base.match(/^(?:who\s+(?:is|was)\s+(?:the\s+)?(?:current\s+|latest\s+)?)?(.+?)\s+(?:of|for|in)\s+(.+?)[?.!]*$/i);
         if (leadershipMatch && isLeadershipOrTemporal) {
@@ -3479,36 +3585,41 @@ const edgeResponseCache = new EdgeSemanticLruCache();
     }
 
     function isTimeSensitiveInfoRequest(text) {
-        const t = String(text || '').toLowerCase();
-        return /\b(latest|recent|current|today|now|update|updates|news|headlines|status|mission|launch|price|rate|score|result|election|breaking|as of|ipl|match|matches|fixture|fixtures|schedule|opening match|first match)\b/.test(t);
+        const t = String(text || '').trim();
+        if (!t) return false;
+        const freshnessScore = scoreChatIntent(t, 'time_sensitive_freshness');
+        const timelessScore = scoreChatIntent(t, 'stable_definition');
+        return freshnessScore >= 0.28 && freshnessScore >= timelessScore;
     }
 
     function isFactualQuery(text) {
-        const t = String(text || '').toLowerCase().trim();
+        const t = String(text || '').trim();
         if (!t) return false;
-        if (/\b(joke|poem|story|write|compose|roleplay|imagine)\b/.test(t)) return false;
-
-        return /\b(who|what|when|where|which|how many|how much|date of|founded|ceo|president|prime minister|captain|winner|population|capital|currency|height|age|released|launch date)\b/.test(t) ||
-            /\b(is|are|was|were)\b.+\b\?\s*$/.test(t);
+        const creativeScore = scoreChatIntent(t, 'creative_composition');
+        if (creativeScore >= 0.35) return false;
+        const factualScore = scoreChatIntent(t, 'timeless_factual');
+        if (factualScore >= 0.25) return true;
+        return t.endsWith('?') && creativeScore < 0.25;
     }
 
     function isStableDefinitionQuery(text) {
-        const t = String(text || '').toLowerCase().trim();
+        const t = String(text || '').trim();
         if (!t) return false;
-        if (/\b(latest|today|current|right now|breaking|news|update|updates|score|price|rate)\b/.test(t)) return false;
-        if (/\b(medical|medicine|medicines|dosage|dose|dosing|symptom|diagnos|treatment|legal|lawyer|contract|financial|investment|tax|self-harm|suicide|emergency)\b/.test(t)) return false;
-        return /^(what is|what's|define|meaning of|explain)\b/.test(t) ||
-            /^(?:can you\s+)?(?:explain\s+)?how\s+(?:does|do|is|are)?\s*[\w"'.()\- ]{2,90}\s+works?\??$/i.test(t) ||
-            /^(?:can you\s+)?(?:explain\s+)?how\s+(?:does|do)\s+[\w"'.()\- ]{2,90}\s+work\??$/i.test(t) ||
-            /\bdefinition of\b/.test(t);
+        if (isStableGeographyOrGeneralFactQuery(t)) return true;
+        const freshnessScore = scoreChatIntent(t, 'time_sensitive_freshness');
+        if (freshnessScore >= 0.30) return false;
+        const highStakesScore = scoreChatIntent(t, 'risk_high_stakes');
+        if (highStakesScore >= 0.35) return false;
+        const defScore = scoreChatIntent(t, 'stable_definition');
+        return defScore >= 0.28;
     }
 
     function isWebCheckCandidateQuery(text) {
         const q = String(text || '').trim();
         if (!q) return false;
-        if (/\b(with sources?|source links?)\b/i.test(q)) return true;
-        if (/^(tell me about|do you know|give me info on|share details on)\b/i.test(q)) return true;
-        if (isStableDefinitionQuery(q) && !/\b(with sources?|source links?)\b/i.test(q)) {
+        if (scoreChatIntent(q, 'asks_sources') >= 0.25) return true;
+        if (scoreChatIntent(q, 'timeless_factual') >= 0.28) return true;
+        if (isStableDefinitionQuery(q) && scoreChatIntent(q, 'asks_sources') < 0.25) {
             return false;
         }
         return isTimeSensitiveInfoRequest(q) || isFactualQuery(q);
@@ -3519,6 +3630,9 @@ const edgeResponseCache = new EdgeSemanticLruCache();
         const routeStrategy = String(options?.routeDecision?.strategy || '');
         const retrievalAttempted = options?.retrievalAttempted === true;
         const answerText = String(parsedResponse?.response || '').trim();
+        if (options?.provider === 'notice' || parsedResponse?.provider === 'notice' || parsedResponse?.intent === 'missing_credentials') {
+            return parsedResponse;
+        }
 
         // Skip live rewrite on direct routes that never attempted retrieval or for stable general knowledge
         if (isStableGeographyOrGeneralFactQuery(message)) {
@@ -3589,15 +3703,19 @@ const edgeResponseCache = new EdgeSemanticLruCache();
     }
 
     function isMetaTalkAnswer(text) {
-        const t = String(text || '').toLowerCase().trim();
+        const t = String(text || '').trim();
         if (!t) return true;
+        const firstSentence = t.split(/[.\n]/)[0].trim();
+        const firstSentenceScore = scoreChatIntent(firstSentence, 'snippets_evasive_refusal');
+        const overallScore = scoreChatIntent(t, 'snippets_evasive_refusal');
+
         // Catch LLM meta-commentary about search snippets/retrieved context being evasive or missing
-        const isEvasiveRefusal = /\b(provided snippets?|supplied snippets?|provided text|retrieved context|search results?|top live snippets?|available snippets?|given snippets?|above snippets?)\b[\s\S]{0,100}\b(do not|does not|don't|doesn't|do not state|do not name|do not mention|contain no|no information|do not specify|could not confirm|could not find|do not include|do not provide|only state|only mention|unclear)\b/.test(t) ||
-            /\b(snippets?|search results?) (do not|don't|only)\b/.test(t);
-        if (isEvasiveRefusal) return true;
+        if (firstSentenceScore >= 0.35 || overallScore >= 0.55) {
+            return true;
+        }
 
         // If it starts with meta-preamble but is brief and lacks substantive content (< 120 chars)
-        if (t.length < 120 && /^(the provided|based on the provided|according to the provided|the search results?|from the provided|the available|the retrieved|the supplied)\b/.test(t)) {
+        if (t.length < 120 && firstSentenceScore >= 0.25) {
             return true;
         }
         return false;
@@ -3632,7 +3750,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
         }
 
         let body = stripMetaTalkPrefixes(cleanExisting);
-        const hasSubstantiveExisting = cleanExisting.length >= 60 && !/\b(could not verify|cannot verify|no information)\b/i.test(cleanExisting);
+        const hasSubstantiveExisting = cleanExisting.length >= 60 && scoreChatIntent(cleanExisting, 'risk_uncertainty') < 0.30;
         if (!hasSubstantiveExisting && (!body || isMetaTalkAnswer(body))) {
             const lead = top[0] || {};
             const title = normalizeLeadTitle(message, lead);
@@ -3647,7 +3765,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
         body = stripInlineCitationMarkers(body);
         body = stripMetaTalkPrefixes(body);
 
-        const userAsksForSources = /\b(with sources?|source links?|include links?|cite sources?|show sources?)\b/i.test(String(message || ''));
+        const userAsksForSources = scoreChatIntent(message, 'asks_sources') >= 0.25;
         const isRawScraperFallback = !cleanExisting;
         if ((userAsksForSources || isRawScraperFallback) && !/\bSources:\s*/i.test(body) && top.length > 0) {
             const lines = [body, '', 'Sources:'];
@@ -3676,13 +3794,19 @@ const edgeResponseCache = new EdgeSemanticLruCache();
 
     function rankLiveSources(query, results) {
         const list = Array.isArray(results) ? results : [];
-        const q = String(query || '').toLowerCase();
-        const queryTerms = tokenizeRelevanceTerms(q);
+        const q = String(query || '').trim();
+        const queryTerms = tokenizeRelevanceTerms(q.toLowerCase());
         const currentYear = new Date().getUTCFullYear();
         const seen = new Set();
         const scored = [];
 
-        for (const item of list) {
+        // Compute BM25 scores across all snippet texts against the query
+        const docTexts = list.map(item => `${item?.title || ''} ${item?.description || ''} ${item?.domain || ''}`);
+        const bm25Scores = computeBM25Scores(q, docTexts);
+        const queryVec = textToEmbeddingVector(q, 512);
+
+        for (let i = 0; i < list.length; i++) {
+            const item = list[i];
             const url = String(item?.url || '').trim();
             if (!url || seen.has(url)) continue;
             seen.add(url);
@@ -3690,32 +3814,34 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             const title = String(item?.title || '');
             const desc = String(item?.description || '');
             const domain = String(item?.domain || getHost(url) || '').toLowerCase();
-            const hay = `${title} ${desc} ${domain}`.toLowerCase();
-            const overlap = queryTerms.reduce((acc, term) => acc + (hay.includes(term) ? 1 : 0), 0);
+            const hay = `${title} ${desc} ${domain}`;
+            const hayLower = hay.toLowerCase();
+            const overlap = queryTerms.reduce((acc, term) => acc + (hayLower.includes(term) ? 1 : 0), 0);
 
-            // Reciprocal Rank Base
-            let score = 1.0 / (60 + scored.length);
+            // Reciprocal Rank Base + BM25 score
+            let score = (1.0 / (60 + scored.length)) + (bm25Scores[i] || 0) * 1.5;
             if (overlap > 0) {
                 score += overlap * 2.5;
             } else if (queryTerms.length > 0) {
                 score -= 1.5;
             }
 
+            // Semantic Cosine Relevance
+            const docVec = textToEmbeddingVector(hay, 512);
+            const semSim = vectorCosineSimilarity(queryVec, docVec);
+            score += semSim * 4.0;
+
+            // Recency / Predecessor Semantic Discrimination via Embedding Projections
+            const recencyScore = scoreChatIntent(hay, 'recency_incumbent');
+            const predecessorScore = scoreChatIntent(hay, 'predecessor_former');
+            if (recencyScore > 0.25) score += recencyScore * 4.0;
+            if (predecessorScore > 0.25) score -= predecessorScore * 3.0;
+
             if (item?.trusted || item?.sourceType === 'official_source' || item?.sourceType === 'trusted_news') score += 3.5;
             if (item?.sourceType === 'live_web' || item?.evidenceLevel === 'structured_claim') score += 5.0;
             if (item?.pageFetched) score += 2;
             if (item?.sourceType === 'official_source' && !item?.pageFetched) score -= 1;
-            if (/\b(latest|today|update|updates|current|now|recent|incumbent|sworn in|assumed office|took oath)\b/.test(hay)) score += 3.0;
-            if (/\b(former|ex-|past|previously|retired|resigned|predecessor|stepped down)\b/.test(hay)) score -= 2.0;
             if (item?.trusted || item?.sourceType === 'trusted_news' || (typeof item?.domainTrustTier === 'number' && item.domainTrustTier <= 2) || isTrustedEntityDomain(domain)) score += 2.5;
-
-            const isLeadershipQuery = /\b(ceo|chief executive officer|managing director|cm|chief minister|pm|prime minister|president|governor|founder)\b/i.test(q);
-            if (isLeadershipQuery) {
-                const hasRoleInSnippet = /\b(ceo|chief executive officer|managing director|cm|chief minister|pm|prime minister|president|governor|founder|co-founder)\b/i.test(hay);
-                if (hasRoleInSnippet) {
-                    score += 8.0;
-                }
-            }
 
             const yearMatch = hay.match(/\b(20\d{2})\b/);
             if (yearMatch?.[1]) {
@@ -3886,7 +4012,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
         const terms = Array.isArray(pretokenizedTerms) ? pretokenizedTerms : tokenizeTopicTerms(q);
         if (!q) return false;
 
-        const referential = /\b(it|its|they|them|that|this|these|those|there|same|above|earlier|previous|first match|opening match|that match|that game|who are playing|who is playing)\b/.test(q);
+        const referential = scoreChatIntent(q, 'pronominal_reference') >= 0.20;
         const questionLead = /^(who|what|when|where|which|how)\b/.test(q);
         const veryShort = terms.length > 0 && terms.length <= 3;
         const asksFactWithoutEntity = questionLead && terms.length <= 4;
@@ -3912,7 +4038,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
         if (overlap > 0) return false;
 
         const hasNamedLikeSignal = (Array.isArray(currentTerms) ? currentTerms : []).length >= 4;
-        const explicitSwitch = /\b(now|instead|different topic|another topic|new topic|change topic|switch topic)\b/.test(q);
+        const explicitSwitch = scoreChatIntent(q, 'topic_switch_intent') >= 0.32;
         const containsDistinctEntityHint = /\b(who is|what is|tell me about)\s+[a-z0-9][a-z0-9\s-]{2,}/.test(q);
 
         return explicitSwitch || (hasNamedLikeSignal && containsDistinctEntityHint);
@@ -4193,24 +4319,23 @@ const edgeResponseCache = new EdgeSemanticLruCache();
     }
 
     function getQualityRiskReasons(message, answer, intent, options = {}) {
-        const input = `${String(message || '')}\n${String(answer || '')}`.toLowerCase();
-        const answerText = String(answer || '').toLowerCase();
+        const input = `${String(message || '')}\n${String(answer || '')}`;
+        const answerText = String(answer || '').trim();
         const routeDecision = options?.routeDecision || {};
         const webEscalation = options?.webEscalation || {};
         const reasons = [];
         if (String(intent || '') === 'verify_answer' || String(intent || '') === 'selection_verify') reasons.push('explicit_verification');
-        if (/\b(wrong|incorrect|hallucinat|made that up|not true|check again|recheck|verify|are you sure)\b/.test(input)) {
+
+        if (scoreChatIntent(input, 'risk_challenged') > 0.3) {
             reasons.push('challenged_or_uncertain');
         }
-        if (/\b(i'?m not sure|not sure|cannot verify|can't verify|could not verify|unable to verify|not enough information|may be|might be|likely|possibly|probably|unclear|unknown|not certain|uncertain)\b/.test(answerText)) {
+        if (scoreChatIntent(answerText, 'risk_uncertainty') > 0.4) {
             reasons.push('model_uncertainty');
         }
-        if (/\b(according to|sources say|source says|reported by|confirmed by|evidence shows|research shows|study found|verified by|cited by)\b/i.test(answerText) &&
-            !/(https?:\/\/|\[[^\]]+\]\(https?:\/\/)/i.test(String(answer || ''))) {
+        if (scoreChatIntent(answerText, 'risk_source_claim') > 0.4 && !/(https?:\/\/|\[[^\]]+\]\(https?:\/\/)/i.test(String(answer || ''))) {
             reasons.push('source_like_claim_without_source');
         }
-        if (/\b(current|today|now|presently|incumbent|latest|live|as of today|as of now|this year|this month)\b/i.test(String(message || '')) &&
-            /\b(is|are|was|were|has|have|serves|served|released|launched|won|announced|appointed|elected)\b/i.test(answerText)) {
+        if ((scoreChatIntent(String(message || ''), 'time_sensitive_freshness') >= 0.28 || scoreChatIntent(String(message || ''), 'recency_incumbent') >= 0.28) && answerText.length > 0) {
             reasons.push('current_or_date_sensitive_claim');
         }
         if (/\b(?:on|as of|in|during)\s+(?:\d{1,2}\s+[A-Z][a-z]+|[A-Z][a-z]+\s+\d{1,2}|(?:19|20)\d{2})\b/.test(String(message || '')) &&
@@ -4221,21 +4346,20 @@ const edgeResponseCache = new EdgeSemanticLruCache();
         if (
             isMutableEntityFactQuery(message) &&
             /\b[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){1,4}\b/.test(String(answer || '')) &&
-            /\b(is|are|was|were|became|serves|served|founded|created|invented|discovered|won|released|launched|announced|appointed|elected)\b/i.test(answerText) &&
             !/(https?:\/\/|\[[^\]]+\]\(https?:\/\/|Sources:\s*)/i.test(String(answer || ''))
         ) {
             reasons.push('unsupported_named_entity_claim');
         }
-        if (/\b(fallback|service_unavailable|service_error|unknown_general_knowledge_answer|crawl4ai_unavailable|low_confidence)\b/.test(`${String(routeDecision.reason || '')} ${String(webEscalation.reason || '')}`.toLowerCase())) {
+        if (scoreChatIntent(`${String(routeDecision.reason || '')} ${String(webEscalation.reason || '')}`, 'risk_uncertainty') > 0.3) {
             reasons.push('routing_uncertainty');
         }
-        if (/\b(medical|medicine|symptom|diagnos|dose|legal|lawyer|contract|financial|investment|tax|self-harm|suicide|emergency)\b/.test(input)) {
+        if (scoreChatIntent(input, 'risk_high_stakes') > 0.4) {
             reasons.push('high_stakes');
         }
-        if (/```|\b(code|function|script|program|debug|algorithm|sql|javascript|python)\b/.test(input)) {
+        if (scoreChatIntent(input, 'risk_code') > 0.4 || /```/.test(input)) {
             reasons.push('code');
         }
-        if (/\b(calculate|comput|equation|formula|percent(?:age)?|probability|equals?)\b|%|(?:\d+\s*[-+*/%]\s*\d+)/i.test(input)) {
+        if (scoreChatIntent(input, 'risk_calculation') > 0.3 || /%|(?:\d+\s*[-+*/%]\s*\d+)/.test(input)) {
             reasons.push('calculation');
         }
         return [...new Set(reasons)].slice(0, 5);
@@ -4663,35 +4787,36 @@ Respond conversationally and naturally.`;
     }
 
     function inferDetailLevel(message, preferences = {}) {
-        const q = String(message || '').toLowerCase();
+        const q = String(message || '').trim();
         const wordSpec = parseWordCountRequest(message);
         if (wordSpec && wordSpec.maxWords <= 80) return 'short';
         const prefLength = String(preferences?.responseLength || '').toLowerCase();
         if (prefLength === 'short') return 'short';
         if (prefLength === 'detailed') return 'detailed';
         if (!q) return 'detailed';
-        if (/\b(one line|one-liner|brief|briefly|short|tldr|tl;dr|in short|quickly|quick answer|concise|few words|keep it short|make it short)\b/.test(q)) {
+        const shortScore = scoreChatIntent(q, 'detail_short');
+        const detailedScore = scoreChatIntent(q, 'detail_detailed');
+        if (shortScore >= 0.25 && shortScore > detailedScore) {
             return 'short';
-        }
-        if (/\b(detailed|in depth|in-depth|comprehensive|thorough|elaborate|long answer|explain fully|deep dive)\b/.test(q)) {
-            return 'detailed';
         }
         return 'detailed';
     }
 
     function isCreativeAnswerRequest(message) {
-        const q = String(message || '').toLowerCase();
-        // Match active creation / composition requests only, never factual inquiries about songs or lyrics
-        if (/\b(write|compose|generate|create|make up|invent|draft)\b[\s\S]{0,30}\b(poem|poetry|story|lyrics|song|rap|joke|humor|fairy tale|screenplay)\b/.test(q)) {
-            return true;
-        }
-        return /\b(brainstorm|imagine|roleplay|role play|write a scene|short story|tell a joke|tell me a joke|tell a story|tell me a story)\b/.test(q);
+        const q = String(message || '').trim();
+        if (!q) return false;
+        const creativeScore = scoreChatIntent(q, 'creative_composition');
+        if (creativeScore < 0.20) return false;
+        const factualScore = scoreChatIntent(q, 'timeless_factual');
+        return creativeScore > factualScore;
     }
 
     function isFactualAnswerRequest(message, intent = '') {
-        const q = String(message || '').toLowerCase();
+        const q = String(message || '').trim();
         if (['verify_answer', 'chat_title'].includes(String(intent || ''))) return true;
-        return /\b(who is|what is|when did|where is|define|definition|calculate|math|prove|formula|code|debug|fact|facts|capital of|population of|ceo of|composed by|composer of|who composed|who sang|who wrote|meaning of|lyrics of|tell me about the song|about the song|song by|soundtrack)\b/.test(q);
+        const factualScore = scoreChatIntent(q, 'timeless_factual');
+        const creativeScore = scoreChatIntent(q, 'creative_composition');
+        return factualScore >= 0.24 && factualScore >= creativeScore;
     }
 
     function resolveResponseTemperature({ message, intent, responseStyle, detail, structured = false } = {}) {
@@ -4838,27 +4963,22 @@ Respond conversationally and naturally.`;
     }
 
     function isRecipeGenerationRequest(message) {
-        const text = String(message || '').toLowerCase();
-        if (!text.trim()) return false;
-        if (/\b(?:recipe|culinary\s+instructions?|cooking\s+instructions?|baking\s+instructions?)\b/i.test(text)) return true;
-        if (/\b(?:ingredients\s+(?:for|needed|required)|how\s+to\s+(?:cook|bake|prepare|make\s+a\s+dish))\b/i.test(text)) return true;
-        return /\b(?:recipe|ingredients|cook|bake|prepare)\b/i.test(text) && /\b(?:how\s+(?:to|do\s+i|can\s+i)\s+make|instructions?|steps?)\b/i.test(text);
+        const text = String(message || '').trim();
+        if (!text) return false;
+        const recipeScore = scoreChatIntent(text, 'recipe_generation');
+        return recipeScore >= 0.28;
     }
 
     function isLongTravelPlanningRequest(message) {
-        const text = String(message || '').toLowerCase();
-        if (!text.trim()) return false;
-        const travelPlan = /\b(?:itinerary|itenary|itenarary|travel\s+plan|trip\s+plan|plan\s+(?:a|an|my)?\s*trip|day\s+plan|vacation|tour|journey)\b/i.test(text) ||
-            (/\b(?:detailed|comprehensive|full)\b/i.test(text) && /\b(?:trip|travel|visit|plan)\b/i.test(text));
-        if (!travelPlan) return false;
-        const detailed = /\b(?:detailed|comprehensive|full|complete|in\s+depth|deep)\b/i.test(text);
+        const text = String(message || '').trim();
+        if (!text) return false;
+        const travelScore = scoreChatIntent(text, 'travel_planning');
+        if (travelScore < 0.25) return false;
+        const detailedScore = scoreChatIntent(text, 'detail_detailed');
         const dayMatch = text.match(/\b(\d{1,2})\s+days?\b/i);
-        const isMultiDay = /\b(?:multi[- ]day|week|weekend|[4-9]\s+days?|\d{2,}\s+days?)\b/i.test(text);
-        const dateRange = /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{1,2}\s*(?:-|–|to)\s*\d{1,2}\b/i.test(text);
-        if (dateRange || isMultiDay) return true;
-        if (!dayMatch) return detailed;
+        if (!dayMatch) return detailedScore >= 0.25;
         const days = Number(dayMatch[1]);
-        return detailed || days >= 4;
+        return detailedScore >= 0.25 || days >= 4;
     }
 
     export const __test = {
@@ -4918,7 +5038,8 @@ Respond conversationally and naturally.`;
         buildRefinementPrompt,
         synthesizeSelfCritiqueMetadata,
         isMultipleChoiceQuestion,
-        formatGeminiDialogContents
+        formatGeminiDialogContents,
+        scoreChatIntent
     };
 
     function applyResponseLengthPostCheck(parsedResponse, lengthPolicy, message, clientSystemPrompt) {
