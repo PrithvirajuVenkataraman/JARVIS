@@ -184,6 +184,7 @@ export function createConversationEngine(options = {}) {
         buildContext: options => buildContext(state, { maxTurns, maxContextChars, ...options }),
         retrievePastTurns: (query, options) => retrievePastTurns(state.turns, query, options),
         buildMultiTierContext: options => buildMultiTierContext(state, { maxTurns, maxContextChars, ...options }),
+        reformulateSearchQuery: (query, options = {}) => reformulateSearchQuery(query, { state, ...options }),
         resolveFollowUp: message => {
             const activeThread = state.threads.get(state.activeThreadId);
             const entity = activeThread?.entity || activeThread?.topic || findRecentEntityFromState(state) || '';
@@ -372,7 +373,8 @@ function discardTurn(state, turnId) {
 
 function recordTurn(state, turn, limits) {
     const role = turn?.role === 'assistant' ? 'assistant' : 'user';
-    const text = cleanText(turn?.text);
+    const rawText = String(turn?.text || '').trim();
+    const text = role === 'assistant' ? pruneSearchNoiseFromText(rawText) : rawText;
     if (!text || turn?.aborted || turn?.error || turn?.control) return null;
 
     let threadId = cleanText(turn?.threadId) || state.activeThreadId;
@@ -459,10 +461,11 @@ function buildContext(state, options = {}) {
     let chars = 0;
     for (let i = selected.length - 1; i >= 0; i -= 1) {
         const turn = selected[i];
-        const cost = turn.text.length + 20;
+        const cleanedText = turn.role === 'assistant' ? pruneSearchNoiseFromText(turn.text) : turn.text;
+        const cost = cleanedText.length + 20;
         if (out.length && chars + cost > maxChars) break;
         chars += cost;
-        out.unshift({ role: turn.role, text: turn.text });
+        out.unshift({ role: turn.role, text: cleanedText });
     }
     // Context pairing integrity: If out starts with an assistant turn, and there is a preceding user turn in selected,
     // ensure we include the user prompt or don't leave an orphaned assistant turn alone without context
@@ -1089,21 +1092,36 @@ export function buildMultiTierContext(state, options = {}) {
         verbatimTurnsSource = allTurns;
     }
 
-    // Tier 1: Active verbatim window (most recent turns)
+    // Tier 1: Active verbatim window (most recent turns) - prune bulky search noise & budget tokens
     const recentTurnsRaw = verbatimTurnsSource.slice(-maxRecentTurns);
     const recentTurnIds = new Set(recentTurnsRaw.map(t => t.id || t.turnId).filter(Boolean));
-    const recentTurns = recentTurnsRaw.map(t => ({ role: t.role, text: t.text }));
+    const recentTurns = recentTurnsRaw.map((t, idx, arr) => {
+        const isLatest = idx >= arr.length - 2;
+        let text = t.role === 'assistant' ? pruneSearchNoiseFromText(t.text) : String(t.text || '').trim();
+        // Token-aware pruning: older recent turns get capped to 800 chars, preserving core answer without runaways
+        if (!isLatest && text.length > 800) {
+            text = truncateAtWordBoundary(text, 800);
+        }
+        return { role: t.role, text };
+    });
 
     // Older turns outside the verbatim window (searches across all session turns for deep recall)
     const olderTurns = allTurns.filter(t => !recentTurnIds.has(t.id) && !recentTurnIds.has(t.turnId));
 
     // Tier 2: Semantic Turn Retrieval from older turns
-    const retrievedTurns = olderTurns.length > 0 && currentMessage
+    const retrievedTurnsRaw = olderTurns.length > 0 && currentMessage
         ? retrievePastTurns(olderTurns, currentMessage, {
             excludeTurnIds: recentTurnIds,
             topK: clamp(options.topK || 2, 2, 1, 4)
         })
         : [];
+    const retrievedTurns = retrievedTurnsRaw.map(t => {
+        let text = t.role === 'assistant' ? pruneSearchNoiseFromText(t.text) : String(t.text || '').trim();
+        if (text.length > 500) {
+            text = truncateAtWordBoundary(text, 500);
+        }
+        return { role: t.role, text };
+    });
 
     // Tier 3: Rolling Milestone Summary
     const milestones = options.rollingSummary || (olderTurns.length > 0 ? extractRollingExecutiveSummary(olderTurns) : null);
@@ -1140,8 +1158,20 @@ export function buildMultiTierContext(state, options = {}) {
         structuredMessages.push({ role: 'system', content: combinedSystemPrompt });
     }
 
-    // Add verbatim recent dialogue turns
-    for (const t of recentTurns) {
+    // Add verbatim recent dialogue turns, bounded by maxContextChars token budget
+    let accumulatedChars = combinedSystemPrompt.length + (currentMessage.length || 0);
+    const includedRecentTurns = [];
+    for (let i = recentTurns.length - 1; i >= 0; i--) {
+        const t = recentTurns[i];
+        const cost = t.text.length + 20;
+        if (includedRecentTurns.length > 0 && accumulatedChars + cost > maxContextChars) {
+            break;
+        }
+        accumulatedChars += cost;
+        includedRecentTurns.unshift(t);
+    }
+
+    for (const t of includedRecentTurns) {
         structuredMessages.push({
             role: t.role === 'user' ? 'user' : 'assistant',
             content: t.text
@@ -1157,7 +1187,7 @@ export function buildMultiTierContext(state, options = {}) {
     }
 
     return {
-        recentTurns,
+        recentTurns: includedRecentTurns,
         retrievedTurns,
         olderTurnsCount: olderTurns.length,
         milestones,
@@ -1167,8 +1197,297 @@ export function buildMultiTierContext(state, options = {}) {
         // Legacy flat context compatibility
         context: [
             ...(backgroundContextBlock ? [{ role: 'system', text: backgroundContextBlock }] : []),
-            ...recentTurns
+            ...includedRecentTurns
         ]
     };
 }
+
+export function pruneSearchNoiseFromText(text = '') {
+    if (!text) return '';
+    let cleaned = String(text).replace(/\r\n/g, '\n');
+    // Strip verification reports and debug blocks
+    cleaned = cleaned.replace(/(?:\n{2,}|\s{2,}|\s+)===\s*(?:SOURCE METADATA|VERIFICATION REPORT)\s*===[\s\S]*$/i, '');
+    // Strip trailing source sections: Sources:, Verified Sources:, Source Excerpts:, Citations:, References:
+    cleaned = cleaned.replace(/(?:\n{2,}|\s{2,}|\s+)(?:Sources|Verified Sources|Source Excerpts|Citations|References):[\s\S]*$/i, '');
+    // Strip synthesis deadline and provenance footers
+    cleaned = cleaned.replace(/(?:\n{2,}|\s{2,}|\s+)\*(?:Synthesis completed at[\s\S]*?\*|\(Source[s]?:.*?\))/gi, '');
+    // Strip bulleted URL lists
+    cleaned = cleaned.replace(/(?:\n|\s+)(?:\[\d+\]|-|\*)\s+https?:\/\/\S+/gi, '');
+    return cleaned.trim();
+}
+
+export function truncateAtWordBoundary(text, maxChars) {
+    if (!text || text.length <= maxChars) return text;
+    const truncated = text.slice(0, maxChars);
+    const lastSpace = truncated.lastIndexOf(' ');
+    if (lastSpace > maxChars * 0.7) {
+        return truncated.slice(0, lastSpace) + '...';
+    }
+    return truncated + '...';
+}
+
+function escapeRegex(value) {
+    return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+export function isStandaloneQuery(query, turns = []) {
+    const q = String(query || '').trim();
+    if (!q) return true;
+    if (!Array.isArray(turns) || turns.length === 0) return true;
+
+    // Explicit new topic / switch markers
+    if (/^(?:(?:new|different|another)\s+topic[:\s]|switch(?:\s+topic)?\s+to[:\s]|by the way[,:\s]|on another note[,:\s]|let's talk about\s+|moving on to\s+)/i.test(q)) {
+        return true;
+    }
+
+    // MCQ patterns (options A/B/C/D, Question:, etc.)
+    if (/^(?:which of the following|choose the correct|select the best|question:)\b/i.test(q) ||
+        /\b(?:[a-d]\)|\([a-d]\))\s+[A-Za-z0-9]/i.test(q) ||
+        /\boptions?:\s*[a-d]/i.test(q)) {
+        return true;
+    }
+
+    // Multimodal / Image prompts
+    if (/^:::(?:image|vision)\[/i.test(q) || /\b(?:generate|draw|paint|sketch|create)\s+(?:an?\s+)?image\b/i.test(q)) {
+        return true;
+    }
+
+    // Code / syntax / math queries that are self-contained
+    if (/^(?:write|create|implement|code|generate|debug)\s+(?:a|an)?\s*(?:python|javascript|typescript|c\+\+|java|rust|go|html|css|sql|script|function|class|algorithm)\b/i.test(q)) {
+        return true;
+    }
+
+    // Check for referential pronouns, demonstratives, or elliptical markers
+    const hasReferentialPronoun = /\b(?:he|him|his|she|her|hers|they|them|their|theirs|it|its)\b/i.test(q);
+    const hasDemonstrativeReference = /\b(?:this|that|these|those|the two|both|the former|the latter)\b/i.test(q);
+    const hasEllipticalMarker = /^(?:(?:and|what|how)\s+about|and\s+in|what\s+if)\b/i.test(q);
+    const hasComparativeMarker = /\b(?:compare\s+(?:the\s+two|them|both)|difference\s+between|which\s+one\s+is\s+(?:better|faster|cheaper|larger|recommended)|who\s+won|head\s+to\s+head)\b/i.test(q);
+    const isVeryShortFragment = q.split(/\s+/).length <= 3 && /^(?:why|how\s+much|how\s+many|when|where|who|salary|net\s+worth|age|height|founder|price|status|cost|results?)\??$/i.test(q);
+
+    if (hasReferentialPronoun || hasDemonstrativeReference || hasEllipticalMarker || hasComparativeMarker || isVeryShortFragment) {
+        return false;
+    }
+
+    // Standalone live / factual queries (weather, crypto, markets, etc.)
+    if (STANDALONE_LIVE_REQUEST.test(q)) {
+        return true;
+    }
+
+    // Queries with prepositional phrases anchoring the subject (e.g. "Weather in Tokyo", "Capital of France", "Population of India")
+    if (/\b(?:in|of|for|about|at)\s+[A-Za-z0-9]/i.test(q)) {
+        return true;
+    }
+
+    // Has at least one capitalized proper noun (e.g. "Tokyo", "France", "Apple", "Bitcoin", "Photosynthesis")
+    if (/[A-Z][a-z0-9]{2,}/.test(q) && q.split(/\s+/).length >= 2) {
+        return true;
+    }
+
+    // Standalone live / factual queries with question lead
+    // E.g. "Who is the CEO of Apple?", "What is photosynthesis?"
+    const hasQuestionLead = /^(?:who|what|where|when|which|why|how)\s+(?:is|are|was|were|do|does|did|can|will)\b/i.test(q);
+    if (hasQuestionLead && !hasReferentialPronoun && !hasDemonstrativeReference) {
+        const terms = q.replace(/^(?:who|what|where|when|which|why|how)\s+(?:is|are|was|were|do|does|did|can|will)\s+(?:the\s+|a\s+|an\s+)?/i, '')
+            .replace(/[?.!]+$/, '')
+            .trim();
+        if (terms.split(/\s+/).length >= 2) {
+            return true;
+        }
+    }
+
+    // If query has 4+ words and no referential pronouns/demonstratives, treat as standalone
+    if (q.split(/\s+/).length >= 4 && !hasReferentialPronoun && !hasDemonstrativeReference) {
+        return true;
+    }
+
+    return false;
+}
+
+export function extractThreadAntecedents(turns = [], activeThread = null) {
+    const validTurns = (Array.isArray(turns) ? turns : []).filter(t => t && (t.text || t.user || t.ai));
+    if (!validTurns.length) {
+        return {
+            entities: activeThread?.entity ? [activeThread.entity] : [],
+            listItems: activeThread?.assistantListItems || [],
+            lastUserText: '',
+            lastAssistantText: '',
+            primaryEntity: activeThread?.entity || '',
+            primaryTopic: activeThread?.topic || ''
+        };
+    }
+
+    let lastAssistantText = '';
+    let lastUserText = '';
+
+    for (let i = validTurns.length - 1; i >= 0; i--) {
+        const t = validTurns[i];
+        const role = String(t.role || (t.user ? 'user' : (t.ai ? 'assistant' : ''))).toLowerCase();
+        const text = String(t.text || (role === 'user' ? t.user : t.ai) || '').trim();
+        if (!lastAssistantText && role === 'assistant') {
+            lastAssistantText = pruneSearchNoiseFromText(text);
+        } else if (!lastUserText && role === 'user') {
+            lastUserText = text;
+        }
+        if (lastAssistantText && lastUserText) break;
+    }
+
+    const assistantEntities = lastAssistantText ? extractAssistantKeyEntities(lastAssistantText) : [];
+    const assistantListItems = lastAssistantText ? extractAssistantListItems(lastAssistantText) : [];
+    const userEntities = lastUserText ? extractAssistantKeyEntities(lastUserText) : [];
+
+    const entities = Array.from(new Set([
+        ...(activeThread?.entity ? [activeThread.entity] : []),
+        ...assistantEntities,
+        ...userEntities
+    ])).filter(e => e && e.length >= 2 && !STOP_WORDS.has(e.toLowerCase()));
+
+    const listItems = Array.from(new Set([
+        ...(activeThread?.assistantListItems || []),
+        ...assistantListItems
+    ])).filter(item => item && item.length >= 2);
+
+    const primaryEntity = activeThread?.entity || entities[0] || '';
+    const primaryTopic = activeThread?.topic || deriveTopic(lastUserText) || entities[0] || '';
+
+    return {
+        entities,
+        listItems,
+        lastUserText,
+        lastAssistantText,
+        primaryEntity,
+        primaryTopic
+    };
+}
+
+export function reformulateSearchQuery(query, options = {}) {
+    try {
+        const raw = String(query || '').trim();
+        if (!raw) return '';
+
+        // Extract turns from various options patterns (state, turns, conversationHistory)
+        let turns = [];
+        if (Array.isArray(options.turns)) {
+            turns = options.turns;
+        } else if (Array.isArray(options.conversationHistory)) {
+            turns = options.conversationHistory.flatMap(item => {
+                if (item.role && item.text) return [item];
+                return [
+                    item.user ? { role: 'user', text: item.user } : null,
+                    item.ai ? { role: 'assistant', text: item.ai } : null
+                ].filter(Boolean);
+            });
+        } else if (options.state && Array.isArray(options.state.turns)) {
+            turns = options.state.turns;
+        }
+
+        // 1. Fast Standalone Check (0ms): If query is already standalone, preserve it!
+        if (isStandaloneQuery(raw, turns)) {
+            return raw;
+        }
+
+        const activeThread = options.activeThread ||
+            (options.state?.threads && options.state?.activeThreadId ? options.state.threads.get(options.state.activeThreadId) : null);
+
+        // 2. Extract antecedents from recent turns
+        const antecedents = extractThreadAntecedents(turns, activeThread);
+        const { entities, listItems, lastUserText, primaryEntity, primaryTopic } = antecedents;
+
+        if (!primaryEntity && !primaryTopic && !entities.length && !listItems.length) {
+            return raw; // No antecedent context available -> fail-open
+        }
+
+        const cleanQ = raw.replace(/[?.!]+$/, '').trim();
+
+        // 3. Case A: Comparative Reference ("compare the two", "which one is better?", "difference between them")
+        if (/\b(?:compare\s+(?:the\s+two|them|both)|difference\s+between\s+(?:the\s+two|them|both)|which\s+one\s+is\s+(?:better|faster|cheaper|larger|recommended)|who\s+won|head\s+to\s+head)\b/i.test(cleanQ)) {
+            let item1 = '';
+            let item2 = '';
+            if (listItems.length >= 2) {
+                item1 = listItems[0];
+                item2 = listItems[1];
+            } else if (entities.length >= 2) {
+                item1 = entities[0];
+                item2 = entities[1];
+            } else if (lastUserText) {
+                const vsMatch = lastUserText.match(/\b([A-Za-z0-9][A-Za-z0-9\s-]{1,30})\s+(?:vs\.?|versus|and|or)\s+([A-Za-z0-9][A-Za-z0-9\s-]{1,30})\b/i);
+                if (vsMatch) {
+                    item1 = vsMatch[1].trim();
+                    item2 = vsMatch[2].trim();
+                }
+            }
+            if (item1 && item2) {
+                return `${item1} vs ${item2} comparison`;
+            }
+        }
+
+        // 4. Case B: Elliptical Prepositional / Temporal ("what about in 2024?", "in 2020?", "and in Europe?")
+        const ellipticalMatch = cleanQ.match(/^(?:(?:and|what|how)\s+about\s+)?(?:in|at|for|during|since)\s+([0-9]{4}|[A-Za-z\s'-]+)$/i) ||
+                                cleanQ.match(/^(?:what|how)\s+about\s+([0-9]{4}|[A-Za-z\s'-]+)$/i);
+        if (ellipticalMatch && ellipticalMatch[1]) {
+            const modifier = ellipticalMatch[1].trim();
+            let baseTopic = primaryTopic || primaryEntity || '';
+            if (lastUserText) {
+                const topicSubject = lastUserText
+                    .replace(/^(?:who|what|where|when|which|why|how)\s+(?:is|are|was|were|do|does|did|can|will)\s+(?:the\s+|a\s+|an\s+)?/i, '')
+                    .replace(/\b(?:in|at|for|during|since)\s+[0-9]{4}\b/gi, '')
+                    .replace(/[?.!]+$/, '')
+                    .trim();
+                if (topicSubject.length >= 3) {
+                    baseTopic = topicSubject;
+                }
+            }
+            if (baseTopic) {
+                return `${baseTopic} in ${modifier}`.replace(/\bin\s+in\b/gi, 'in').trim();
+            }
+        }
+
+        // 5. Case C: Pronoun Coreference ("his net worth", "what is her salary?", "how old is he?", "what did they announce?")
+        if (/\b(?:he|him|his|she|her|hers|they|them|their|theirs|it|its)\b/i.test(cleanQ)) {
+            const targetEntity = primaryEntity || (entities.length ? entities[0] : '') || primaryTopic;
+            if (targetEntity) {
+                let rewritten = cleanQ;
+                rewritten = rewritten.replace(/\b(?:his|her|their|its)\b/gi, targetEntity);
+                rewritten = rewritten.replace(/\b(?:he|him|she|they|them|it)\b/gi, targetEntity);
+                rewritten = rewritten
+                    .replace(/^(?:what|who|when|where|how)\s+(?:is|are|was|were|do|does|did)\s+/i, '')
+                    .replace(/^(?:tell\s+me\s+about|find\s+out|search\s+for)\s+/i, '')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+                if (rewritten.length >= 3) {
+                    return rewritten;
+                }
+            }
+        }
+
+        // 6. Case D: Demonstrative & Expansion ("tell me more about this", "why did that happen?", "key features")
+        if (/\b(?:this|that|these|those)\b/i.test(cleanQ) || /^(?:tell\s+me\s+more|explain\s+further|details|more\s+info|key\s+features|pros\s+and\s+cons)\b/i.test(cleanQ)) {
+            const target = primaryEntity || primaryTopic || (entities.length ? entities[0] : '');
+            if (target) {
+                let rewritten = cleanQ
+                    .replace(/\b(?:this|that|these|those)\b/gi, target)
+                    .replace(/^(?:tell\s+me\s+more(?:\s+about)?|explain\s+further(?:\s+about)?)\s*/i, `${target} `)
+                    .trim();
+                return rewritten;
+            }
+        }
+
+        // 7. Case E: Short Attribute Follow-Up ("net worth?", "salary?", "headquarters?", "age?")
+        if (cleanQ.split(/\s+/).length <= 3 && (primaryEntity || primaryTopic)) {
+            const target = primaryEntity || primaryTopic;
+            return `${target} ${cleanQ}`;
+        }
+
+        // 8. General Follow-Up Fallback: Append primary anchor if not already present
+        const anchor = primaryEntity || primaryTopic;
+        if (anchor && !new RegExp(`\\b${escapeRegex(anchor)}\\b`, 'i').test(cleanQ)) {
+            return `${cleanQ} ${anchor}`;
+        }
+
+        return raw;
+    } catch (_) {
+        // Fast fail-open fallback
+        return String(query || '').trim();
+    }
+}
+
 
