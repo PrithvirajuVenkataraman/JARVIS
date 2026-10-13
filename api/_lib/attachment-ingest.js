@@ -16,8 +16,11 @@ const IMAGE_MIMES = new Set([
 
 export async function ingestAttachmentPayload(payload = {}) {
     const filename = String(payload.filename || 'attachment').trim() || 'attachment';
-    const mimeType = String(payload.mimeType || '').trim().toLowerCase() || guessMimeFromName(filename);
     const base64 = String(payload.base64 || '').trim();
+    let mimeType = String(payload.mimeType || '').trim().toLowerCase() || guessMimeFromName(filename);
+    if (isImage(mimeType, filename) && base64) {
+        mimeType = normalizeImageMime(mimeType, filename, base64);
+    }
     const clientText = String(payload.clientText || '').trim();
     const clientMethod = String(payload.clientMethod || '').trim();
     const attempts = [];
@@ -140,8 +143,9 @@ export async function ingestAttachmentPayload(payload = {}) {
     }
 
     if (isImage(mimeType, filename)) {
+        const visionMime = normalizeImageMime(mimeType, filename, base64);
         const vision = await extractTextFromImage({
-            mimeType: normalizeImageMime(mimeType, filename),
+            mimeType: visionMime,
             imageBase64: base64,
             prompt: `Extract all readable text from this image for file "${filename}". Preserve line order and numbers exactly.`
         }).catch(error => ({
@@ -149,20 +153,21 @@ export async function ingestAttachmentPayload(payload = {}) {
             text: '',
             error: String(error?.message || error)
         }));
+        const visionText = hasUsefulServerText(vision?.text) ? vision.text : '';
         attempts.push({
             stage: 'vision_ocr',
-            ok: Boolean(vision?.text),
+            ok: Boolean(visionText),
             method: vision?.method || 'vision_ocr',
             error: vision?.error || ''
         });
-        if (vision?.text) {
+        if (visionText) {
             return buildResult({
                 ok: true,
-                text: clipText(vision.text),
+                text: clipText(visionText),
                 method: vision.method || 'vision_ocr',
                 provider: vision.provider || 'vision',
                 filename,
-                mimeType,
+                mimeType: visionMime,
                 attempts
             });
         }
@@ -206,6 +211,9 @@ function clipText(text) {
 function hasUsefulServerText(text) {
     const value = String(text || '').replace(/\s+/g, ' ').trim();
     if (value.length < 40) return false;
+    if (/\b(?:no (?:clear )?(?:readable )?text|no text (?:was )?detected|no text detected|no visible text|could not (?:find|detect|extract) (?:any )?(?:readable )?text|unable to (?:find|detect|extract) (?:any )?(?:readable )?text|does not contain (?:any )?readable text|extraction failed)\b/i.test(value)) {
+        return false;
+    }
     const letters = (value.match(/[A-Za-z\u00C0-\u024F]/g) || []).length;
     return letters >= 24;
 }
@@ -238,8 +246,16 @@ function isImage(mimeType, filename) {
     return /\.(jpe?g|pjpeg|png|gif|webp|bmp|dib|tiff?|heic|heif|heics|heifs|avif|avifs|dng|raw|cr[23]|nef|nrw|arw|srf|sr2|raf|rw2|orf|pef|jp2|j2k|jpf|jpx|jpm|pict?|pct|pic|psd|ico|cur|svgz?)$/i.test(filename);
 }
 
-function normalizeImageMime(mimeType, filename) {
-    if (IMAGE_MIMES.has(mimeType)) return mimeType;
+function normalizeImageMime(mimeType, filename = '', base64 = '') {
+    if (base64 && typeof base64 === 'string') {
+        const clean = base64.trim().slice(0, 32);
+        if (clean.startsWith('/9j/')) return 'image/jpeg';
+        if (clean.startsWith('iVBOR')) return 'image/png';
+        if (clean.startsWith('R0lGO')) return 'image/gif';
+        if (clean.startsWith('UklGR')) return 'image/webp';
+    }
+    const cleanMime = String(mimeType || '').trim().toLowerCase();
+    if (IMAGE_MIMES.has(cleanMime)) return cleanMime;
     if (/\.(jpe?g)$/i.test(filename)) return 'image/jpeg';
     if (/\.png$/i.test(filename)) return 'image/png';
     if (/\.webp$/i.test(filename)) return 'image/webp';
