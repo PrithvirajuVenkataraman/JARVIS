@@ -1069,10 +1069,11 @@ export function renderRelatedQuestionsTray(rowElement, questions = [], onSelect 
         bubble.parentNode.appendChild(slot);
     }
 
-    const pillsHtml = questions.map(q => {
-        const escaped = cleanTextSnippet(q);
+    const pillsHtml = questions.map((q, idx) => {
+        const text = String(q || '').trim();
+        const escaped = cleanTextSnippet(text);
         return `
-            <button type="button" class="related-question-pill" onclick="window.JarvisLiveResearch?.askRelatedQuestion(${JSON.stringify(escaped)})">
+            <button type="button" class="related-question-pill" data-question-idx="${idx}">
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
                 <span>${escaped}</span>
             </button>
@@ -1090,6 +1091,23 @@ export function renderRelatedQuestionsTray(rowElement, questions = [], onSelect 
             </div>
         </div>
     `;
+
+    // Secure event delegation to completely eliminate inline onclick quote-escaping syntax errors
+    if (typeof slot.addEventListener === 'function') {
+        slot.addEventListener('click', (e) => {
+            const btn = e.target?.closest?.('.related-question-pill');
+            if (!btn) return;
+            e.preventDefault();
+            const idx = Number(btn.getAttribute('data-question-idx'));
+            const question = questions[idx] || btn.querySelector('span')?.textContent?.trim();
+            if (!question) return;
+            if (typeof onSelect === 'function') {
+                onSelect(question);
+            } else {
+                window.JarvisLiveResearch?.askRelatedQuestion?.(question);
+            }
+        });
+    }
 }
 
 let _globalGenerationCounter = 0;
