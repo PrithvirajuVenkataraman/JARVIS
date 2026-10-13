@@ -1,12 +1,7 @@
 const PROVIDER_TIMEOUT_MS = 20_000;
 const GEMINI_API_VERSIONS = ['v1beta', 'v1'];
 const GEMINI_MODEL_FALLBACKS = [
-    'gemini-2.0-flash',
-    'gemini-3.7-flash',
-    'gemini-2.5-flash',
-    'gemini-2.5-pro',
-    'gemini-2.0-flash-lite',
-    'gemini-1.5-flash',
+    'gemini-3.8-flash',
     'gemini-flash-latest'
 ];
 const GROQ_VISION_MODEL_FALLBACKS = [
@@ -15,7 +10,14 @@ const GROQ_VISION_MODEL_FALLBACKS = [
 ];
 
 // Normalize any image mime type to one accepted by Gemini/Groq (jpeg/png/webp/gif)
-function normalizeMimeForProvider(mimeType) {
+function normalizeMimeForProvider(mimeType, base64 = '') {
+    if (base64) {
+        const head = String(base64).slice(0, 32);
+        if (head.startsWith('/9j/')) return 'image/jpeg';
+        if (head.startsWith('iVBOR')) return 'image/png';
+        if (head.startsWith('R0lGO')) return 'image/gif';
+        if (head.startsWith('UklGR')) return 'image/webp';
+    }
     const m = String(mimeType || '').trim().toLowerCase();
     if (['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(m)) return m;
     if (m === 'image/jpg') return 'image/jpeg';
@@ -41,15 +43,21 @@ export async function extractTextFromImage({ mimeType = 'image/jpeg', imageBase6
         String(prompt || 'Extract all readable text, tables, and data from this image.').trim()
     ].join('\n');
 
-    const rawText = await callVisionText({ providers, systemPrompt, mimeType: normalizeMimeForProvider(mimeType), imageBase64 });
+    const rawText = await callVisionText({ providers, systemPrompt, mimeType: normalizeMimeForProvider(mimeType, imageBase64), imageBase64 });
     if (!rawText) return { ok: false, text: '', method: 'vision_ocr', provider: 'vision' };
 
-    const parsed = safeParseJson(rawText) || extractJsonFromText(rawText) || {};
+    const parsed = safeParseJson(rawText) || extractJsonFromText(rawText) || null;
     const fullText = String(parsed?.fullText || '').trim();
     const snippets = Array.isArray(parsed?.textDetected)
         ? parsed.textDetected.map(item => String(item || '').trim()).filter(Boolean)
         : [];
-    const text = fullText || snippets.join('\n').trim() || cleanVisionDisplayText(rawText);
+    let text = fullText || snippets.join('\n').trim();
+    if (!text && !parsed) {
+        text = cleanVisionDisplayText(rawText);
+    }
+    if (/^(?:no text (?:was )?detected|no readable text)/i.test(text.trim())) {
+        text = '';
+    }
     return {
         ok: Boolean(text),
         text,
