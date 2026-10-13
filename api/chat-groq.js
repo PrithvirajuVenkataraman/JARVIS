@@ -8,7 +8,14 @@ import { redactSensitiveData } from './_lib/pii-redactor.js';
 // Gemini and Groq only accept jpeg/png/webp/gif.
 // The client re-encodes HEIC/HEIF/AVIF/BMP via canvas → JPEG, but the mimeType
 // property on the attachment object still holds the original type. Normalize here.
-function normalizeImageMimeType(mimeType) {
+function normalizeImageMimeType(mimeType, base64 = '') {
+    if (base64 && typeof base64 === 'string') {
+        const clean = base64.trim();
+        if (clean.startsWith('/9j/')) return 'image/jpeg';
+        if (clean.startsWith('iVBOR')) return 'image/png';
+        if (clean.startsWith('R0lGO')) return 'image/gif';
+        if (clean.startsWith('UklGR')) return 'image/webp';
+    }
     const m = String(mimeType || '').trim().toLowerCase();
     if (m === 'image/png') return 'image/png';
     if (m === 'image/webp') return 'image/webp';
@@ -307,9 +314,9 @@ async function getInstantFactHelper() {
 
     const KNOWN_GEMINI_VISION_MODELS = new Set([
         'gemini-3.7-flash',
-        'gemini-2.5-pro',
         'gemini-2.5-flash',
         'gemini-2.0-flash',
+        'gemini-2.5-pro',
         'gemini-1.5-flash',
         'gemini-2.5-flash-lite'
     ]);
@@ -323,9 +330,9 @@ async function getInstantFactHelper() {
             : (String(userSelectedModel || '').startsWith('gemini-') ? String(userSelectedModel) : '');
         const visionModels = [
             'gemini-3.7-flash',
+            'gemini-2.5-flash',
             'gemini-2.0-flash',
             'gemini-2.5-pro',
-            'gemini-2.5-flash',
             'gemini-1.5-flash',
             'gemini-2.5-flash-lite'
         ];
@@ -1994,7 +2001,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                     if (img?.base64) {
                         normalized[targetIdx].parts.push({
                             inlineData: {
-                                mimeType: normalizeImageMimeType(img.mimeType),
+                                mimeType: normalizeImageMimeType(img.mimeType, img.base64),
                                 data: img.base64
                             }
                         });
@@ -2040,7 +2047,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                         const content = [{ type: 'text', text: targetMsg.content }];
                         for (const img of images) {
                             if (img?.base64) {
-                                content.push({ type: 'image_url', image_url: { url: `data:${normalizeImageMimeType(img.mimeType)};base64,${img.base64}` } });
+                                content.push({ type: 'image_url', image_url: { url: `data:${normalizeImageMimeType(img.mimeType, img.base64)};base64,${img.base64}` } });
                             }
                         }
                         messages[targetIdx] = { ...targetMsg, content };
@@ -2114,7 +2121,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 if (hasImages) {
                     for (const img of images) {
                         if (img?.base64) {
-                            parts.push({ inlineData: { mimeType: normalizeImageMimeType(img.mimeType), data: img.base64 } });
+                            parts.push({ inlineData: { mimeType: normalizeImageMimeType(img.mimeType, img.base64), data: img.base64 } });
                         }
                     }
                 }
@@ -2416,7 +2423,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 const content = [{ type: 'text', text: targetMsg.content }];
                 for (const img of images) {
                     if (img?.base64) {
-                        content.push({ type: 'image_url', image_url: { url: `data:${normalizeImageMimeType(img.mimeType)};base64,${img.base64}` } });
+                        content.push({ type: 'image_url', image_url: { url: `data:${normalizeImageMimeType(img.mimeType, img.base64)};base64,${img.base64}` } });
                     }
                 }
                 messages[targetIdx] = { ...targetMsg, content };
@@ -2569,7 +2576,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             if (Array.isArray(images) && images.length) {
                 for (const img of images) {
                     if (img?.base64) {
-                        parts.push({ inlineData: { mimeType: normalizeImageMimeType(img.mimeType), data: img.base64 } });
+                        parts.push({ inlineData: { mimeType: normalizeImageMimeType(img.mimeType, img.base64), data: img.base64 } });
                     }
                 }
             }
