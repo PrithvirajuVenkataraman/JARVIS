@@ -249,19 +249,6 @@ function getVisionProviders() {
 }
 
 async function callVisionText({ providers, systemPrompt, mimeType, imageBase64 }) {
-    if (providers?.groqApiKey) {
-        try {
-            const text = await callGroqVisionText({
-                apiKey: providers.groqApiKey,
-                configuredModel: providers.groqVisionModel,
-                systemPrompt,
-                mimeType,
-                imageBase64
-            });
-            if (text) return text;
-        } catch (_) {}
-    }
-
     if (providers?.geminiApiKey) {
         try {
             const payload = await callGeminiVision({
@@ -272,6 +259,19 @@ async function callVisionText({ providers, systemPrompt, mimeType, imageBase64 }
                 imageBase64
             });
             const text = extractGeminiText(payload);
+            if (text) return text;
+        } catch (_) {}
+    }
+
+    if (providers?.groqApiKey) {
+        try {
+            const text = await callGroqVisionText({
+                apiKey: providers.groqApiKey,
+                configuredModel: providers.groqVisionModel,
+                systemPrompt,
+                mimeType,
+                imageBase64
+            });
             if (text) return text;
         } catch (_) {}
     }
@@ -1038,7 +1038,7 @@ function getTaskRule(task) {
         case 'object_detect':
             return 'Focus on broad object detection with labels and counts, especially vehicles, devices, furniture, and everyday items. Do not answer with OCR/text-only results.';
         case 'text_extract':
-            return 'Focus on comprehensive OCR text extraction from signs, labels, documents, forms, receipts, and printed or handwritten text. Preserve markdown tables, line breaks, headers, and currency amounts exactly.';
+            return 'Focus on comprehensive OCR text extraction from signs, labels, documents, forms, receipts, worksheets, problems, and printed or handwritten text. Preserve markdown tables, line breaks, headers, equations, questions, instructions, and currency amounts exactly.';
         case 'math_ocr_solve':
             return 'Extract and solve difficult math content using planner, critic, and solver stages.';
         case 'translate_to_english':
