@@ -58,6 +58,53 @@ if (typeof chatTest?.buildLiveUpdateResponse === 'function') {
     console.log('  [INFO] 2.1 chatTest.buildLiveUpdateResponse export check passed');
 }
 
+// -------------------------------------------------------------------------
+// Section 3: Clean Citation Stripping & Prose Refinement
+// -------------------------------------------------------------------------
+console.log('\n--- Section 3: Inline Citation & Phrase Sanitization ---');
+
+const stripFn = chatTest?.stripInlineCitationMarkers || searchTest?.stripInlineCitationMarkers;
+assert.ok(typeof stripFn === 'function', 'stripInlineCitationMarkers must be exported for citation sanitization');
+
+// 3.1 Stripping bullet points ending with bracket citations [1], [2]
+const trailingBracketText = '- Key milestone achieved in Q3 [1].\n- Production capacity doubled [1, 2].\n- Regulatory compliance approved [2]';
+const cleanTrailing = stripFn(trailingBracketText);
+assert.ok(!cleanTrailing.includes('[1]'), 'Trailing [1] must be stripped');
+assert.ok(!cleanTrailing.includes('[2]'), 'Trailing [2] must be stripped');
+assert.ok(!cleanTrailing.includes('[1, 2]'), 'Multi-citation [1, 2] must be stripped');
+assert.ok(cleanTrailing.includes('Key milestone achieved in Q3.'), 'Content preserved with proper punctuation');
+console.log('  [PASS] 3.1 Bullet points ending with bracket citations stripped cleanly');
+
+// 3.2 Stripping awkward phrases like "found in [1]", "as reported in [2]", "according to [1]"
+const leadInText = 'Revenue reached a record high, as found in [1]. According to [2], user growth increased by 30%. Operational details were reported in [1, 2].';
+const cleanLeadIns = stripFn(leadInText);
+assert.ok(!cleanLeadIns.toLowerCase().includes('found in'), '"found in [1]" must be eliminated');
+assert.ok(!cleanLeadIns.toLowerCase().includes('according to'), '"according to [2]" must be eliminated');
+assert.ok(!cleanLeadIns.toLowerCase().includes('reported in'), '"reported in [1, 2]" must be eliminated');
+assert.ok(cleanLeadIns.includes('Revenue reached a record high.'), 'Main sentence preserved cleanly');
+assert.ok(cleanLeadIns.includes('User growth increased by 30%.'), 'Capitalization properly restored after stripping opening clause');
+console.log('  [PASS] 3.2 Awkward lead-in phrases ("found in [1]", "according to [2]") eliminated with capitalization preserved');
+
+// 3.3 Stripping markdown link citations in prose [1](url)
+const markdownLinkText = 'The team published their findings [1](https://example.com/findings) yesterday.';
+const cleanMarkdownLinks = stripFn(markdownLinkText);
+assert.ok(!cleanMarkdownLinks.includes('[1]'), 'Markdown link bracket citation stripped');
+assert.ok(!cleanMarkdownLinks.includes('https://example.com'), 'Markdown citation URL stripped');
+assert.ok(cleanMarkdownLinks.includes('The team published their findings yesterday.'), 'Prose text intact');
+console.log('  [PASS] 3.3 Prose markdown link citations stripped cleanly');
+
+// 3.4 Integration with buildLiveUpdateResponse: bracket citations stripped while keeping clean text
+if (typeof chatTest?.buildLiveUpdateResponse === 'function') {
+    const rawAnswerWithBrackets = 'The tournament concluded with high attendance, found in [1]. Team Alpha secured the trophy [1], [2].';
+    const sampleSources = [{ title: 'Tournament Report', url: 'https://example.com/report', domain: 'example.com' }];
+    const sanitizedAnswer = chatTest.buildLiveUpdateResponse('tournament winners', sampleSources, rawAnswerWithBrackets);
+    assert.ok(!sanitizedAnswer.includes('[1]'), 'buildLiveUpdateResponse must strip [1]');
+    assert.ok(!sanitizedAnswer.includes('[2]'), 'buildLiveUpdateResponse must strip [2]');
+    assert.ok(!sanitizedAnswer.toLowerCase().includes('found in'), 'buildLiveUpdateResponse must strip "found in"');
+    assert.ok(sanitizedAnswer.includes('Team Alpha secured the trophy.'), 'Answer content preserved');
+    console.log('  [PASS] 3.4 buildLiveUpdateResponse sanitizes stray bracket citations and phrases in response body');
+}
+
 console.log('\n================================================================');
 console.log('=== All Leadership Expansion & Citation Cleanup Tests PASSED ===');
 console.log('================================================================\n');
