@@ -1816,8 +1816,16 @@ const edgeResponseCache = new EdgeSemanticLruCache();
 
         if (hasImages) {
             const userRequest = String(originalRequest || msg || '').trim();
+            const isMeaningfulOcrText = (t) => {
+                const s = String(t || '').trim();
+                if (!s) return false;
+                if (/^\[Attached Image:[^\]]+\]$/i.test(s)) return false;
+                if (/\b(?:no (?:clear )?(?:readable )?text|no text (?:was )?detected|no text detected|no visible text|could not (?:find|detect|extract) (?:any )?(?:readable )?text|unable to (?:find|detect|extract) (?:any )?(?:readable )?text|does not contain (?:any )?readable text)\b/i.test(s)) return false;
+                if (s.startsWith('###') && /Extraction:\s*[^\n]+\n\s*(?:No (?:clear )?(?:readable )?text|No text (?:was )?detected|No text detected)/i.test(s)) return false;
+                return true;
+            };
             const extractedText = String(selectedText || sourceAnswer || '').trim();
-            const hasMeaningfulText = extractedText && !/^\[Attached Image:[^\]]+\]$/i.test(extractedText);
+            const hasMeaningfulText = isMeaningfulOcrText(extractedText);
 
             return [
                 `The user attached ${attachedImages.length} image(s) with this request.`,
