@@ -17,7 +17,7 @@ import { cleanSnippetText, decodeHtmlEntities } from './_lib/snippet-sanitizer.j
 import { planTemporalSearchQueries, classifyTemporalScope } from './_lib/temporal-query-planner.js';
 import { classifyDomainTrustTier, getDomainTrustDelta, isScraperOrContentFarm, normaliseDomain } from './_lib/domain-trust-registry.js';
 import { annotateCorroboration, shouldCorroborate, corroborationScoreDelta } from './_lib/multi-source-corroboration.js';
-import { validateAndSanitizeTemporalClaims } from './_lib/entity-verifier.js';
+import { validateAndSanitizeTemporalClaims, stripInlineCitationMarkers } from './_lib/entity-verifier.js';
 
 const SERPER_SEARCH_URL = 'https://google.serper.dev/search';
 const WIKIPEDIA_SEARCH_URL = 'https://en.wikipedia.org/w/api.php';
@@ -475,10 +475,10 @@ export async function handleStreamingWebRag(req, res, { rawQuery, limit = 8 }) {
     if (sources.length > 0) {
         const sourcesContext = sources.map((s, idx) => {
             const excerpt = cleanSnippetText(s.fullArticleText || s.extract || s.snippet || s.description || '');
-            return `[${idx + 1}] Title: ${s.title}\nURL: ${s.url}\nDomain: ${s.domain || ''}\nExcerpt: ${excerpt || 'No excerpt available.'}`;
+            return `Source ${idx + 1}: Title: ${s.title}\nURL: ${s.url}\nDomain: ${s.domain || ''}\nExcerpt: ${excerpt || 'No excerpt available.'}`;
         }).join('\n\n');
 
-        systemPrompt = 'You are an expert AI research assistant. Answer every part and sub-question of the user prompt thoroughly and factually, grounded directly in the provided live sources. Extract all relevant facts, names, figures, and entity lists explicitly rather than returning high-level summaries or headlines. Clearly distinguish confirmed actions and facts from unconfirmed claims, ongoing status, or uncertainty. Provide requested lists and detailed explanations. Cite sources using [1], [2], etc., corresponding to the provided sources list.';
+        systemPrompt = 'You are an expert AI research assistant. Answer every part and sub-question of the user prompt thoroughly and factually, grounded directly in the provided live sources. Extract all relevant facts, names, figures, and entity lists explicitly rather than returning high-level summaries or headlines. Clearly distinguish confirmed actions and facts from unconfirmed claims, ongoing status, or uncertainty. Provide requested lists and detailed explanations. Present the facts naturally and cleanly without inline bracket citations like [1] or [2], and do not use phrases like "found in [1]" or "according to [1]". All verified sources are tracked and displayed separately in the interface.';
         userPrompt = `User Prompt:\n${rawQuery}\n\nLive Sources:\n${sourcesContext}`;
     } else {
         systemPrompt = 'You are an expert AI assistant. Provide an exhaustive, accurate, and beautifully structured response to the user prompt using your comprehensive knowledge base. Fulfill all formatting, tables, columns, and detailed breakdowns thoroughly.';
@@ -562,7 +562,7 @@ export async function handleStreamingWebRag(req, res, { rawQuery, limit = 8 }) {
                 .map(s => cleanSnippetText(s.fullArticleText || s.extract || s.snippet || s.description || ''))
                 .filter(t => t.length >= 45 && t !== s.title);
             if (substantiveSnippets.length > 0) {
-                fallbackMessage = `Based on retrieved records regarding "${rawQuery}":\n\n${substantiveSnippets.slice(0, 3).map((snip, i) => `[${i + 1}] ${snip}`).join('\n\n')}`;
+                fallbackMessage = `Based on retrieved records regarding "${rawQuery}":\n\n${substantiveSnippets.slice(0, 3).map((snip) => `- ${snip}`).join('\n\n')}`;
             } else {
                 fallbackMessage = `Verified live sources were retrieved regarding "${rawQuery}", but the available records contain only headline references without substantive details to answer all parts of the question. Please refer to the verified source links for full coverage.`;
             }
@@ -4203,7 +4203,8 @@ JSON shape: {"verified":true,"confidence":0.0,"answer":"...","evidenceIndexes":[
 }
 
 function sanitizeRagAnswerText(value) {
-    const clean = String(value || '').replace(/\s+/g, ' ').trim();
+    const stripped = stripInlineCitationMarkers(String(value || ''));
+    const clean = stripped.replace(/\s+/g, ' ').trim();
     if (!clean) return '';
     if (/\b(check|consult|look up)\b.{0,40}\b(latest|official|source|news|website)\b/i.test(clean)) return '';
     if (/\b(i am not sure|not certain|cannot verify|can't verify|unable to verify)\b/i.test(clean)) return '';
@@ -5995,5 +5996,6 @@ export const __test = {
     MCP_TOOL_DEFINITIONS,
     planDynamicSearchQueries,
     handleStreamingWebRag,
-    extractQuestionAspect
+    extractQuestionAspect,
+    stripInlineCitationMarkers
 };
