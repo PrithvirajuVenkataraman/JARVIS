@@ -4430,7 +4430,8 @@ function answerAsksForMissingAttachment(answerText) {
     if (!lower) return false;
     return /\b(could you|can you|please)\b[\s\S]{0,40}\b(share|provide|send|paste|upload)\b[\s\S]{0,60}\b(text|content|document|file|pdf|resume|docx)\b/.test(lower) ||
         /\b(share|provide|send|paste|upload)\b[\s\S]{0,40}\b(the )?(text|content|document|file|pdf|resume)\b[\s\S]{0,40}\b(you('d| would)? like me to analyze|to analyze)\b/.test(lower) ||
-        /\bi (do not|don't|cannot|can't) (see|have|access)\b[\s\S]{0,40}\b(attachment|document|file|pdf|resume)\b/.test(lower);
+        /\bi (do not|don't|cannot|can't) (see|have|access)\b[\s\S]{0,40}\b(attachment|document|file|pdf|resume)\b/.test(lower) ||
+        /\b(?:unable to|cannot|can't) (?:view|see|access)\b[\s\S]{0,40}\b(?:image|photo|picture|attachment|file|document)\b/.test(lower);
 }
 
 function isWeakAssistantAnswerForRetry(answerText, userMessage = '') {
