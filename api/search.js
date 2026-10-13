@@ -674,8 +674,12 @@ export default async function handler(req, res) {
 
     const originalQuery = normalizeSearchQuery(req.body?.query || req.body?.q || req.body?.url || '');
     const contextTurns = Array.isArray(req.body?.context) ? req.body.context : (Array.isArray(req.body?.turns) ? req.body.turns : []);
-    const rewrite = buildSearchQueryRewrite(originalQuery, contextTurns);
-    const query = rewrite.query || originalQuery;
+    let resolvedQuery = originalQuery;
+    if (contextTurns.length > 0 && needsContextualReformulation(originalQuery, contextTurns)) {
+        resolvedQuery = await reformulateQueryWithGroq(originalQuery, contextTurns, { timeoutMs: 250 });
+    }
+    const rewrite = buildSearchQueryRewrite(resolvedQuery, contextTurns);
+    const query = rewrite.query || resolvedQuery;
     if (!query) {
         return res.status(400).json({
             success: false,
@@ -5391,31 +5395,132 @@ export function extractComparisonEntities(query) {
     return entities;
 }
 
+export function needsContextualReformulation(query, contextTurns = []) {
+    const raw = String(query || '').trim();
+    if (!raw || !Array.isArray(contextTurns) || !contextTurns.length) return false;
+
+    // Standalone invariants: topic switches, MCQs, image prompts, code blocks
+    if (/^(?:(?:new|different|another)\s+topic[:\s]|switch(?:\s+topic)?\s+to[:\s]|by the way[,:\s]|on another note[,:\s]|let's talk about\s+|moving on to\s+)/i.test(raw)) {
+        return false;
+    }
+    if (/^(?:which of the following|choose the correct|select the best|question:)\b/i.test(raw) || /\boptions?:\s*[a-d]/i.test(raw)) {
+        return false;
+    }
+    if (/^:::(?:image|vision)\[/i.test(raw) || /\b(?:generate|draw|paint|sketch|create)\s+(?:an?\s+)?image\b/i.test(raw)) {
+        return false;
+    }
+    if (/^(?:write|create|implement|code|generate|debug)\s+(?:a|an)?\s*(?:python|javascript|typescript|c\+\+|java|rust|go|html|css|sql|script|function|class|algorithm)\b/i.test(raw)) {
+        return false;
+    }
+
+    // Follow-up signals: pronouns, demonstratives, elliptical modifiers, comparative markers, short attribute fragments
+    const hasReferentialPronoun = /\b(?:he|him|his|she|her|hers|they|them|their|theirs|it|its)\b/i.test(raw);
+    const hasDemonstrative = /\b(?:this|that|these|those|the two|both|the former|the latter)\b/i.test(raw);
+    const hasElliptical = /^(?:(?:and|what|how)\s+about|and\s+in|what\s+if|why|how\s+so)\b/i.test(raw);
+    const hasComparative = /\b(?:compare\s+(?:the\s+two|them|both)|difference\s+between|which\s+one\s+is\s+(?:better|faster|cheaper|larger|recommended)|who\s+won|head\s+to\s+head)\b/i.test(raw);
+    const isFragment = raw.split(/\s+/).length <= 4 && /^(?:why|how\s+much|how\s+many|when|where|who|salary|net\s+worth|age|height|founder|price|status|cost|results?)\??$/i.test(raw);
+
+    return Boolean(hasReferentialPronoun || hasDemonstrative || hasElliptical || hasComparative || isFragment);
+}
+
+export function cleanReformulatedSearchQuery(text = '', originalQuery = '') {
+    if (!text || typeof text !== 'string') return originalQuery;
+    let cleaned = text.trim()
+        .replace(/^["'`]|["'`]$/g, '')
+        .replace(/^(?:search(?:\s+query)?|query|standalone(?:\s+search)?(?:\s+query)?):\s*/i, '')
+        .replace(/^here(?:\s+is|\s+'s)?\s+(?:the\s+)?(?:search\s+query|standalone\s+query):?\s*/i, '')
+        .replace(/[?.!]+$/, '')
+        .trim();
+    if (!cleaned || cleaned.length < 2) return originalQuery;
+    // Security check: reject attempts by search/prompt injection to override instructions
+    if (/\b(?:ignore\s+all\s+previous|system\s+prompt|developer\s+mode|jailbreak)\b/i.test(cleaned)) {
+        return originalQuery;
+    }
+    return cleaned;
+}
+
+export async function reformulateQueryWithGroq(query, contextTurns = [], options = {}) {
+    const raw = String(query || '').trim();
+    if (!raw) return '';
+    if (!needsContextualReformulation(raw, contextTurns)) {
+        return raw;
+    }
+
+    const groqKey = options.apiKey || getGroqApiKey();
+    if (!groqKey) {
+        // Fallback when no API key configured: return baseline anchor or original query
+        return resolveContextualFollowUpQuery(raw, contextTurns);
+    }
+
+    const timeoutMs = options.timeoutMs ?? 250;
+    const model = options.model || 'openai/gpt-oss-20b';
+    const fetchFn = options.fetchFn || fetchWithTimeout;
+
+    // Build compact dialogue history (up to 4 turns, stripping search noise)
+    const validTurns = (Array.isArray(contextTurns) ? contextTurns : [])
+        .filter(t => t && (t.text || t.content || t.user || t.ai))
+        .slice(-4);
+
+    const historyLines = validTurns.map(t => {
+        const isAssistant = t.role === 'assistant' || Boolean(t.ai);
+        const role = isAssistant ? 'Assistant' : 'User';
+        let content = String(t.content || t.text || (isAssistant ? t.ai : t.user) || '').trim();
+        if (isAssistant) {
+            content = content
+                .replace(/(?:\n{2,}|\s{2,}|\s+)===\s*(?:SOURCE METADATA|VERIFICATION REPORT)\s*===[\s\S]*$/i, '')
+                .replace(/(?:\n{2,}|\s{2,}|\s+)(?:Sources|Verified Sources|Source Excerpts|Citations|References):[\s\S]*$/i, '')
+                .replace(/(?:\n{2,}|\s{2,}|\s+)\*(?:Synthesis completed at[\s\S]*?\*|\(Source[s]?:.*?\))/gi, '')
+                .replace(/(?:\n|\s+)(?:\[\d+\]|-|\*)\s+https?:\/\/\S+/gi, '')
+                .trim();
+            if (content.length > 250) content = content.slice(0, 250) + '...';
+        } else if (content.length > 200) {
+            content = content.slice(0, 200);
+        }
+        return `${role}: ${content}`;
+    }).join('\n');
+
+    const systemPrompt = 'You are a search query reformulation engine. Convert the user\'s conversational follow-up into a single, concise, standalone web search query using the conversation context.\nRules:\n- Resolve all pronouns ("he", "she", "it", "they", "his", "her", "their"), demonstratives ("this", "that", "these", "those"), elliptical phrases ("what about in 2024?"), or comparative references ("compare the two") using the conversation history.\n- If the question is already complete and standalone, return it unchanged.\n- Return ONLY the search query text. Do NOT include quotes, explanations, markdown, or punctuation at the end.';
+
+    const userPrompt = `Conversation:\n${historyLines}\n\nUser follow-up: ${raw}\nStandalone search query:`;
+
+    try {
+        const response = await fetchFn('https://api.groq.com/openai/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${groqKey}`
+            },
+            body: JSON.stringify({
+                model,
+                messages: [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: userPrompt }
+                ],
+                temperature: 0.0,
+                max_tokens: 40
+            })
+        }, timeoutMs);
+
+        if (response && response.ok) {
+            const data = await response.json();
+            const text = data?.choices?.[0]?.message?.content;
+            if (text) {
+                const cleaned = cleanReformulatedSearchQuery(text, raw);
+                if (cleaned && cleaned.length >= 2) return cleaned;
+            }
+        }
+    } catch (_) {
+        // Strict 250ms timeout or network failure -> immediately fail-open to original query
+    }
+
+    return resolveContextualFollowUpQuery(raw, contextTurns);
+}
+
 export function resolveContextualFollowUpQuery(query, contextTurns = []) {
     try {
         const raw = String(query || '').trim();
         if (!raw || !Array.isArray(contextTurns) || !contextTurns.length) return raw;
-
-        // Skip standalone queries
-        if (/^(?:(?:new|different|another)\s+topic[:\s]|switch(?:\s+topic)?\s+to[:\s]|by the way[,:\s]|on another note[,:\s]|let's talk about\s+|moving on to\s+)/i.test(raw)) {
-            return raw;
-        }
-        if (/^(?:which of the following|choose the correct|select the best|question:)\b/i.test(raw) || /\boptions?:\s*[a-d]/i.test(raw)) {
-            return raw;
-        }
-        if (/^:::(?:image|vision)\[/i.test(raw) || /\b(?:generate|draw|paint|sketch|create)\s+(?:an?\s+)?image\b/i.test(raw)) {
-            return raw;
-        }
-
-        const hasReferentialPronoun = /\b(?:he|him|his|she|her|hers|they|them|their|theirs|it|its)\b/i.test(raw);
-        const hasDemonstrative = /\b(?:this|that|these|those|the two|both|the former|the latter)\b/i.test(raw);
-        const hasElliptical = /^(?:(?:and|what|how)\s+about|and\s+in|what\s+if)\b/i.test(raw);
-        const hasComparative = /\b(?:compare\s+(?:the\s+two|them|both)|difference\s+between|which\s+one\s+is\s+(?:better|faster|cheaper|larger|recommended)|who\s+won|head\s+to\s+head)\b/i.test(raw);
-        const isFragment = raw.split(/\s+/).length <= 3 && /^(?:why|how\s+much|how\s+many|when|where|who|salary|net\s+worth|age|height|founder|price|status|cost|results?)\??$/i.test(raw);
-
-        if (!hasReferentialPronoun && !hasDemonstrative && !hasElliptical && !hasComparative && !isFragment) {
-            return raw;
-        }
+        if (!needsContextualReformulation(raw, contextTurns)) return raw;
 
         const turns = contextTurns.filter(t => t && (t.text || t.content || t.user || t.ai));
         let lastAsst = '';
@@ -5453,8 +5558,8 @@ export function resolveContextualFollowUpQuery(query, contextTurns = []) {
         const cleanQ = raw.replace(/[?.!]+$/, '').trim();
         const primaryEntity = entities[0] || '';
 
-        // Comparative
-        if (hasComparative) {
+        // Comparative fallback
+        if (/\b(?:compare\s+(?:the\s+two|them|both)|difference\s+between|which\s+one\s+is|who\s+won|head\s+to\s+head)\b/i.test(cleanQ)) {
             let item1 = '';
             let item2 = '';
             if (lastAsst) {
@@ -5481,10 +5586,9 @@ export function resolveContextualFollowUpQuery(query, contextTurns = []) {
             }
         }
 
-        // Elliptical
-        if (hasElliptical) {
-            const ellipticalMatch = cleanQ.match(/^(?:(?:and|what|how)\s+about\s+)?(?:in|at|for|during|since)\s+([0-9]{4}|[A-Za-z\s'-]+)$/i) ||
-                                    cleanQ.match(/^(?:what|how)\s+about\s+([0-9]{4}|[A-Za-z\s'-]+)$/i);
+        // Elliptical fallback
+        if (/^(?:(?:and|what|how)\s+about\s+)?(?:in|at|for|during|since)\s+([0-9]{4}|[A-Za-z\s'-]+)$/i.test(cleanQ)) {
+            const ellipticalMatch = cleanQ.match(/^(?:(?:and|what|how)\s+about\s+)?(?:in|at|for|during|since)\s+([0-9]{4}|[A-Za-z\s'-]+)$/i);
             if (ellipticalMatch && ellipticalMatch[1]) {
                 const modifier = ellipticalMatch[1].trim();
                 let baseTopic = primaryEntity || '';
@@ -5502,8 +5606,8 @@ export function resolveContextualFollowUpQuery(query, contextTurns = []) {
             }
         }
 
-        // Pronoun
-        if (hasReferentialPronoun && primaryEntity) {
+        // Pronoun or fragment fallback
+        if (primaryEntity) {
             let rewritten = cleanQ;
             rewritten = rewritten.replace(/\b(?:his|her|their|its)\b/gi, primaryEntity);
             rewritten = rewritten.replace(/\b(?:he|him|she|they|them|it)\b/gi, primaryEntity);
@@ -5515,15 +5619,6 @@ export function resolveContextualFollowUpQuery(query, contextTurns = []) {
             if (rewritten.length >= 3) {
                 return rewritten;
             }
-        }
-
-        // Demonstrative
-        if (hasDemonstrative && primaryEntity) {
-            return cleanQ.replace(/\b(?:this|that|these|those)\b/gi, primaryEntity).trim();
-        }
-
-        // Fragment
-        if (isFragment && primaryEntity) {
             return `${primaryEntity} ${cleanQ}`;
         }
 
@@ -6142,5 +6237,8 @@ export const __test = {
     handleStreamingWebRag,
     extractQuestionAspect,
     stripInlineCitationMarkers,
-    resolveContextualFollowUpQuery
+    resolveContextualFollowUpQuery,
+    needsContextualReformulation,
+    cleanReformulatedSearchQuery,
+    reformulateQueryWithGroq
 };
