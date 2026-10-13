@@ -8,7 +8,8 @@ const {
     buildGroundedUserMessage,
     getPreferredGeminiVisionCandidates,
     getPreferredGroqVisionCandidates,
-    normalizeImageMimeType
+    normalizeImageMimeType,
+    formatGeminiDialogContents
 } = chatTest;
 
 // =========================================================================
@@ -180,6 +181,63 @@ console.log('6. Verifying MIME type normalization and zero-hallucination local c
     assert.ok(!localMeta.summary.includes('iPad'));
     assert.ok(!localMeta.summary.includes('Smartphone'));
     console.log('  [PASS] 6.1 MIME type normalization and clean local classifier verified.');
+}
+
+// =========================================================================
+// 7. Gemini Multimodal Payload Format (proto3 camelCase inlineData)
+// =========================================================================
+console.log('7. Verifying Gemini multimodal payload formatting (proto3 camelCase inlineData)...');
+{
+    const sampleImage = {
+        name: 'exam_question.png',
+        mimeType: 'image/png',
+        base64: 'mock_base64_data'
+    };
+
+    const dialogMsgs = [
+        { role: 'user', content: 'Solve the question in this image' }
+    ];
+
+    const formatted = formatGeminiDialogContents(dialogMsgs, [sampleImage], true);
+    assert.ok(Array.isArray(formatted) && formatted.length > 0, 'Must produce valid Gemini contents array');
+    const userTurn = formatted.find(turn => turn.role === 'user');
+    assert.ok(userTurn, 'Must include user turn');
+    const imagePart = userTurn.parts.find(p => p.inlineData);
+    assert.ok(imagePart, 'Must format image using proto3 camelCase inlineData');
+    assert.equal(imagePart.inlineData.mimeType, 'image/png', 'Must include camelCase mimeType');
+    assert.equal(imagePart.inlineData.data, 'mock_base64_data', 'Must include image data');
+
+    // Ensure zero snake_case inline_data or mime_type in the payload
+    const serialized = JSON.stringify(formatted);
+    assert.ok(!serialized.includes('"inline_data"'), 'Must never contain snake_case inline_data');
+    assert.ok(!serialized.includes('"mime_type"'), 'Must never contain snake_case mime_type');
+    console.log('  [PASS] 7.1 Proto3 camelCase inlineData and mimeType formatting strictly verified.');
+}
+
+// =========================================================================
+// 8. Embedded Instruction Execution in Multimodal Images
+// =========================================================================
+console.log('8. Verifying embedded instruction execution rules in multimodal prompt...');
+{
+    const sampleImage = {
+        name: 'homework_assignment.png',
+        mimeType: 'image/png',
+        base64: 'mock_data'
+    };
+
+    const promptWithInstructions = buildGroundedUserMessage({
+        message: 'Analyze the attached file (homework_assignment.png).',
+        grounding: {
+            kind: 'attachment',
+            images: [sampleImage]
+        },
+        images: [sampleImage]
+    });
+
+    assert.ok(promptWithInstructions.includes('EMBEDDED INSTRUCTION EXECUTION'), 'Must instruct embedded instruction execution');
+    assert.ok(promptWithInstructions.includes('Read and EXECUTE any questions, tasks, or instructions embedded within the image directly'), 'Must instruct direct execution of image tasks');
+    assert.ok(promptWithInstructions.includes('Do not merely state that a question or problem is present'), 'Must forbid passive description without solving');
+    console.log('  [PASS] 8.1 Embedded instruction execution rules strictly verified.');
 }
 
 console.log('--- ALL JARVIS IMAGE UNDERSTANDING TESTS PASSED ---');
