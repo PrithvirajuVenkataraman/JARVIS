@@ -37,7 +37,14 @@ function detectImageMimeFromBase64(base64 = '') {
 }
 
 // AI providers (Gemini, Groq) only accept jpeg/png/webp/gif — normalize everything else to jpeg
-function normalizeVisionMimeType(raw) {
+function normalizeVisionMimeType(raw, base64 = '') {
+    if (base64) {
+        const head = String(base64).slice(0, 32);
+        if (head.startsWith('/9j/')) return 'image/jpeg';
+        if (head.startsWith('iVBOR')) return 'image/png';
+        if (head.startsWith('R0lGO')) return 'image/gif';
+        if (head.startsWith('UklGR')) return 'image/webp';
+    }
     const m = String(raw || '').trim().toLowerCase();
     if (['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif'].includes(m)) {
         return m === 'image/jpg' ? 'image/jpeg' : m;
@@ -87,7 +94,7 @@ export default async function handler(req, res) {
     if (rawMimeType && !ALLOWED_IMAGE_TYPES.has(rawMimeType) && !rawMimeType.startsWith('image/')) {
         return sendVisionError(res, 415, 'unsupported_media_type', 'Only image files are supported.');
     }
-    const normalizedMimeType = normalizeVisionMimeType(rawMimeType);
+    const normalizedMimeType = normalizeVisionMimeType(rawMimeType, imageBase64);
     if (imageBase64.length > MAX_IMAGE_BASE64_CHARS || !/^[A-Za-z0-9+/]+={0,2}$/.test(imageBase64)) {
         return sendVisionError(res, 413, 'invalid_image', 'Image data is malformed or too large.');
     }
