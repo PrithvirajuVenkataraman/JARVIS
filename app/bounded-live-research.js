@@ -1238,6 +1238,28 @@ export class BoundedLiveResearchController {
             let searchCutoffTriggered = false;
             let synthesisStarted = false;
 
+            const incomingContext = Array.isArray(context) && context.length > 0
+                ? context
+                : (Array.isArray(conversationHistory) ? conversationHistory : []);
+            const effectiveContextTurns = incomingContext
+                .slice(-10)
+                .map(t => {
+                    const role = t?.role === 'assistant' || t?.ai ? 'assistant' : 'user';
+                    let text = String(t?.content || t?.text || (role === 'user' ? t?.user : t?.ai) || '').trim();
+                    if (role === 'assistant') {
+                        text = text.replace(/(?:\n{2,}|\s{2,}|\s+)===\s*(?:SOURCE METADATA|VERIFICATION REPORT)\s*===[\s\S]*$/i, '')
+                                   .replace(/(?:\n{2,}|\s{2,}|\s+)(?:Sources|Verified Sources|Source Excerpts|Citations|References):[\s\S]*$/i, '')
+                                   .replace(/(?:\n{2,}|\s{2,}|\s+)\*(?:Synthesis completed at[\s\S]*?\*|\(Source[s]?:.*?\))/gi, '')
+                                   .replace(/(?:\n|\s+)(?:\[\d+\]|-|\*)\s+https?:\/\/\S+/gi, '')
+                                   .trim();
+                        if (text.length > 800) {
+                            text = text.slice(0, 800) + '...';
+                        }
+                    }
+                    return { role, text, content: text };
+                })
+                .filter(t => t.text.length > 0 && t.text !== '[object Object]');
+
             const completeExecution = ({ success, fallback = false, provenance, content, sources }) => {
                 if (this.state === RESEARCH_STATES.COMPLETE || this.state === RESEARCH_STATES.ABORTED) return;
                 this.provenance = provenance;
@@ -1418,6 +1440,7 @@ export class BoundedLiveResearchController {
                     if (typeof fetchSearchFn === 'function') {
                         const searchRes = await fetchSearchFn({
                             query: distillSearchQuery(query) || query,
+                            context: effectiveContextTurns,
                             signal: this.searchAbortController.signal,
                             timeoutMs: this.searchTimeoutMs
                         });
@@ -1515,28 +1538,6 @@ export class BoundedLiveResearchController {
                     day: 'numeric'
                 });
                 const effectiveUserPrompt = String(userText || query || '').trim();
-
-                const incomingContext = Array.isArray(context) && context.length > 0
-                    ? context
-                    : (Array.isArray(conversationHistory) ? conversationHistory : []);
-                const effectiveContextTurns = incomingContext
-                    .slice(-8)
-                    .map(t => {
-                        const role = t?.role === 'assistant' || t?.ai ? 'assistant' : 'user';
-                        let text = String(t?.text || (role === 'user' ? t?.user : t?.ai) || '').trim();
-                        if (role === 'assistant') {
-                            text = text.replace(/\n{2,}(?:Sources|Verified Sources|Source Excerpts|Citations|References):[\s\S]*$/i, '')
-                                       .replace(/\n{2,}===\s*(?:SOURCE METADATA|VERIFICATION REPORT)\s*===[\s\S]*$/i, '')
-                                       .replace(/\n{2,}\*(?:Synthesis completed at[\s\S]*?\*|\(Source[s]?:.*?\))/gi, '')
-                                       .replace(/\n(?:\[\d+\]|-|\*)\s+https?:\/\/\S+/gi, '')
-                                       .trim();
-                            if (text.length > 800) {
-                                text = text.slice(0, 800) + '...';
-                            }
-                        }
-                        return { role, text };
-                    })
-                    .filter(t => t.text.length > 0 && t.text !== '[object Object]');
 
                 const contextLines = effectiveContextTurns.length > 0
                     ? effectiveContextTurns.map(t => `${t.role === 'user' ? 'User' : 'Assistant'}: ${t.text}`).join('\n')
