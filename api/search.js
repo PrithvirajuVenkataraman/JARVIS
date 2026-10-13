@@ -673,7 +673,8 @@ export default async function handler(req, res) {
     }
 
     const originalQuery = normalizeSearchQuery(req.body?.query || req.body?.q || req.body?.url || '');
-    const rewrite = buildSearchQueryRewrite(originalQuery);
+    const contextTurns = Array.isArray(req.body?.context) ? req.body.context : (Array.isArray(req.body?.turns) ? req.body.turns : []);
+    const rewrite = buildSearchQueryRewrite(originalQuery, contextTurns);
     const query = rewrite.query || originalQuery;
     if (!query) {
         return res.status(400).json({
@@ -5390,9 +5391,152 @@ export function extractComparisonEntities(query) {
     return entities;
 }
 
-export function buildSearchQueryRewrite(query) {
-    const distilled = distillSearchQuery(query);
-    const normalized = normalizeSearchQuery(distilled || query)
+export function resolveContextualFollowUpQuery(query, contextTurns = []) {
+    try {
+        const raw = String(query || '').trim();
+        if (!raw || !Array.isArray(contextTurns) || !contextTurns.length) return raw;
+
+        // Skip standalone queries
+        if (/^(?:(?:new|different|another)\s+topic[:\s]|switch(?:\s+topic)?\s+to[:\s]|by the way[,:\s]|on another note[,:\s]|let's talk about\s+|moving on to\s+)/i.test(raw)) {
+            return raw;
+        }
+        if (/^(?:which of the following|choose the correct|select the best|question:)\b/i.test(raw) || /\boptions?:\s*[a-d]/i.test(raw)) {
+            return raw;
+        }
+        if (/^:::(?:image|vision)\[/i.test(raw) || /\b(?:generate|draw|paint|sketch|create)\s+(?:an?\s+)?image\b/i.test(raw)) {
+            return raw;
+        }
+
+        const hasReferentialPronoun = /\b(?:he|him|his|she|her|hers|they|them|their|theirs|it|its)\b/i.test(raw);
+        const hasDemonstrative = /\b(?:this|that|these|those|the two|both|the former|the latter)\b/i.test(raw);
+        const hasElliptical = /^(?:(?:and|what|how)\s+about|and\s+in|what\s+if)\b/i.test(raw);
+        const hasComparative = /\b(?:compare\s+(?:the\s+two|them|both)|difference\s+between|which\s+one\s+is\s+(?:better|faster|cheaper|larger|recommended)|who\s+won|head\s+to\s+head)\b/i.test(raw);
+        const isFragment = raw.split(/\s+/).length <= 3 && /^(?:why|how\s+much|how\s+many|when|where|who|salary|net\s+worth|age|height|founder|price|status|cost|results?)\??$/i.test(raw);
+
+        if (!hasReferentialPronoun && !hasDemonstrative && !hasElliptical && !hasComparative && !isFragment) {
+            return raw;
+        }
+
+        const turns = contextTurns.filter(t => t && (t.text || t.content || t.user || t.ai));
+        let lastAsst = '';
+        let lastUser = '';
+        for (let i = turns.length - 1; i >= 0; i--) {
+            const t = turns[i];
+            const role = String(t.role || (t.user ? 'user' : (t.ai ? 'assistant' : ''))).toLowerCase();
+            const text = String(t.text || t.content || (role === 'user' ? t.user : t.ai) || '').trim();
+            if (!lastAsst && role === 'assistant') lastAsst = text;
+            else if (!lastUser && role === 'user') lastUser = text;
+            if (lastAsst && lastUser) break;
+        }
+
+        const entities = [];
+        if (lastAsst) {
+            const boldMatches = lastAsst.matchAll(/\*\*([A-Za-z0-9][A-Za-z0-9\s,'’\.\-–—]{2,60})\*\*/g);
+            for (const m of boldMatches) {
+                const val = m[1].replace(/[:–—\-\.]+$/, '').trim();
+                if (val && !entities.includes(val)) entities.push(val);
+            }
+            const propMatches = lastAsst.matchAll(/\b([A-Z][a-z0-9]{2,}(?:\s+[A-Z][a-z0-9]{2,}){1,3})\b/g);
+            for (const m of propMatches) {
+                const val = m[1].trim();
+                if (val && !entities.includes(val)) entities.push(val);
+            }
+        }
+        if (lastUser) {
+            const userProp = lastUser.matchAll(/\b([A-Z][a-z0-9]{2,}(?:\s+[A-Z][a-z0-9]{2,}){1,3})\b/g);
+            for (const m of userProp) {
+                const val = m[1].trim();
+                if (val && !entities.includes(val)) entities.push(val);
+            }
+        }
+
+        const cleanQ = raw.replace(/[?.!]+$/, '').trim();
+        const primaryEntity = entities[0] || '';
+
+        // Comparative
+        if (hasComparative) {
+            let item1 = '';
+            let item2 = '';
+            if (lastAsst) {
+                const listMatches = lastAsst.matchAll(/^(?:(?:\d{1,2}|[a-e])[\.\)]|\-|\*)\s+(?:\*\*)?([A-Za-z0-9][A-Za-z0-9\s,'’\.\-–—:]{2,60})(?:\*\*)?/gim);
+                const items = [];
+                for (const m of listMatches) items.push(m[1].replace(/[:–—\-\*\.]+$/, '').trim());
+                if (items.length >= 2) {
+                    item1 = items[0];
+                    item2 = items[1];
+                }
+            }
+            if (!item1 && entities.length >= 2) {
+                item1 = entities[0];
+                item2 = entities[1];
+            } else if (!item1 && lastUser) {
+                const vsMatch = lastUser.match(/\b([A-Za-z0-9][A-Za-z0-9\s-]{1,30})\s+(?:vs\.?|versus|and|or)\s+([A-Za-z0-9][A-Za-z0-9\s-]{1,30})\b/i);
+                if (vsMatch) {
+                    item1 = vsMatch[1].trim();
+                    item2 = vsMatch[2].trim();
+                }
+            }
+            if (item1 && item2) {
+                return `${item1} vs ${item2} comparison`;
+            }
+        }
+
+        // Elliptical
+        if (hasElliptical) {
+            const ellipticalMatch = cleanQ.match(/^(?:(?:and|what|how)\s+about\s+)?(?:in|at|for|during|since)\s+([0-9]{4}|[A-Za-z\s'-]+)$/i) ||
+                                    cleanQ.match(/^(?:what|how)\s+about\s+([0-9]{4}|[A-Za-z\s'-]+)$/i);
+            if (ellipticalMatch && ellipticalMatch[1]) {
+                const modifier = ellipticalMatch[1].trim();
+                let baseTopic = primaryEntity || '';
+                if (lastUser) {
+                    const topicSubject = lastUser
+                        .replace(/^(?:who|what|where|when|which|why|how)\s+(?:is|are|was|were|do|does|did|can|will)\s+(?:the\s+|a\s+|an\s+)?/i, '')
+                        .replace(/\b(?:in|at|for|during|since)\s+[0-9]{4}\b/gi, '')
+                        .replace(/[?.!]+$/, '')
+                        .trim();
+                    if (topicSubject.length >= 3) baseTopic = topicSubject;
+                }
+                if (baseTopic) {
+                    return `${baseTopic} in ${modifier}`.replace(/\bin\s+in\b/gi, 'in').trim();
+                }
+            }
+        }
+
+        // Pronoun
+        if (hasReferentialPronoun && primaryEntity) {
+            let rewritten = cleanQ;
+            rewritten = rewritten.replace(/\b(?:his|her|their|its)\b/gi, primaryEntity);
+            rewritten = rewritten.replace(/\b(?:he|him|she|they|them|it)\b/gi, primaryEntity);
+            rewritten = rewritten
+                .replace(/^(?:what|who|when|where|how)\s+(?:is|are|was|were|do|does|did)\s+/i, '')
+                .replace(/^(?:tell\s+me\s+about|find\s+out|search\s+for)\s+/i, '')
+                .replace(/\s+/g, ' ')
+                .trim();
+            if (rewritten.length >= 3) {
+                return rewritten;
+            }
+        }
+
+        // Demonstrative
+        if (hasDemonstrative && primaryEntity) {
+            return cleanQ.replace(/\b(?:this|that|these|those)\b/gi, primaryEntity).trim();
+        }
+
+        // Fragment
+        if (isFragment && primaryEntity) {
+            return `${primaryEntity} ${cleanQ}`;
+        }
+
+        return raw;
+    } catch (_) {
+        return query;
+    }
+}
+
+export function buildSearchQueryRewrite(query, contextTurns = []) {
+    const contextual = resolveContextualFollowUpQuery(query, contextTurns);
+    const distilled = distillSearchQuery(contextual);
+    const normalized = normalizeSearchQuery(distilled || contextual)
         .replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, '')
         .trim();
     if (!normalized) {
@@ -5997,5 +6141,6 @@ export const __test = {
     planDynamicSearchQueries,
     handleStreamingWebRag,
     extractQuestionAspect,
-    stripInlineCitationMarkers
+    stripInlineCitationMarkers,
+    resolveContextualFollowUpQuery
 };
