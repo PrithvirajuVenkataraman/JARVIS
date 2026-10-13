@@ -3635,10 +3635,45 @@ function buildVerificationSnapshot(items, domain = 'general', riskLevel = 'mediu
 }
 
 function stripInlineCitationMarkers(text) {
-    return String(text || '')
+    if (!text || typeof text !== 'string') return '';
+    let cleaned = text;
+
+    // 1. Remove markdown citation links like [1](https://...) or [1, 2](https://...)
+    cleaned = cleaned.replace(/\[\d+(?:\s*,\s*\d+)*\]\([^\)]+\)/g, '');
+
+    // 2. Remove lead-in citation phrases like:
+    // "as found in [1]", "found in [1]", "as noted in [1]", "noted in [1]",
+    // "according to [1]", "reported in [1]", "as seen in [1]", "seen in [1]",
+    // "cited in [1]", "documented in [1]", "stated in [1]"
+    cleaned = cleaned.replace(/\b(?:as\s+)?(?:found|noted|stated|reported|seen|detailed|described|documented|cited|shown|referenced|confirmed)\s+(?:in|on|at|by|from)\s*\[\d+(?:\s*,\s*\d+)*\](?:\s*,?\s*\[\d+(?:\s*,\s*\d+)*\])*/gi, '');
+    cleaned = cleaned.replace(/\b(?:according\s+to|based\s+on)\s*\[\d+(?:\s*,\s*\d+)*\](?:\s*,?\s*\[\d+(?:\s*,\s*\d+)*\])*(?:,\s*)?/gi, '');
+    cleaned = cleaned.replace(/\b(?:sources?|references?)\s*\[\d+(?:\s*,\s*\d+)*\](?:\s*,?\s*\[\d+(?:\s*,\s*\d+)*\])*/gi, '');
+
+    // 3. Remove standalone or comma-separated brackets: [1], [2], [1, 2], 【1】, (1)
+    cleaned = cleaned
         .replace(/\s*【\d+(?:\s*,\s*\d+)*】/g, '')
         .replace(/\s*\[\d+(?:\s*,\s*\d+)*\](?=\s|[.,;:!?)]|$)/g, '')
         .replace(/\s+\(\d+(?:\s*,\s*\d+)*\)(?=\s|[.,;:!?]|$)/g, '');
+
+    // 4. Clean up any remaining dangling bracket numbers
+    cleaned = cleaned.replace(/\[\d+(?:\s*,\s*\d+)*\]/g, '');
+
+    // 5. Clean up any dangling prepositions left before punctuation:
+    cleaned = cleaned.replace(/\b(?:as\s+)?(?:found|noted|stated|reported|seen|detailed|documented|cited)\s+(?:in|on|at|by|from)\s*([.,;:!?])/gi, '$1');
+    cleaned = cleaned.replace(/\b(?:according\s+to|based\s+on)\s*([.,;:!?])/gi, '$1');
+
+    // 6. Fix spacing and punctuation
+    cleaned = cleaned
+        .replace(/[ \t]+/g, ' ')
+        .replace(/\s+([.,;:!?])/g, '$1')
+        .replace(/\.\s*\./g, '.')
+        .replace(/\b,\s*\./g, '.')
+        .trim();
+
+    // 7. Sentence-initial capitalization if opening phrase was stripped
+    cleaned = cleaned.replace(/(^|[.!?]\s+)([a-z])/g, (_, p1, p2) => p1 + p2.toUpperCase());
+
+    return cleaned;
 }
 
 function cleanLiveAnswerText(text) {
@@ -10531,7 +10566,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             const hasSources = (Array.isArray(presentation.sources) && presentation.sources.length > 0) ||
                                (Array.isArray(options?.meta?.sources) && options.meta.sources.length > 0);
             const rawAnswerNoImages = stripStreamedImageTags(rawAnswer);
-            const cleanTextForDisplay = hasSources ? rawAnswerNoImages : stripInlineCitationMarkers(rawAnswerNoImages);
+            const cleanTextForDisplay = stripInlineCitationMarkers(rawAnswerNoImages);
             const readableText = formatAssistantTextForReadability(normalizeAssistantTextStyle(cleanTextForDisplay));
             const formatted = sanitizeAssistantMarkup(renderAssistantMarkdown(readableText, linkClass, options));
             textElement.classList.toggle('is-streaming', options?.streaming === true);
@@ -14065,8 +14100,8 @@ async function sendTextInput(submission = {}) {
                                 }).catch(() => null);
                                 clearTimeout(webTimer);
                                 if (Array.isArray(searchRes?.results) && searchRes.results.length) {
-                                    const snippets = searchRes.results.slice(0, 4).map((r, idx) => `[${idx + 1}] ${r.title}: ${r.description || ''} (${r.url})`).join('\n');
-                                    webSearchContext = `\n\nVerified Live Web Sources (use for real-time verification):\n${snippets}\nCite sources with [1], [2] links.`;
+                                    const snippets = searchRes.results.slice(0, 4).map((r, idx) => `Source ${idx + 1}: ${r.title}: ${r.description || ''} (${r.url})`).join('\n');
+                                    webSearchContext = `\n\nVerified Live Web Sources (use for real-time verification):\n${snippets}\nSynthesize external facts cleanly in natural prose without bracket citations ([1], [2]) or citation phrases (e.g. 'found in [1]').`;
                                 }
                             } catch (_) {}
                         }
@@ -14076,7 +14111,7 @@ async function sendTextInput(submission = {}) {
                                 attachmentRequest,
                                 '',
                                 'An image is attached to this request. Inspect the visible pixels directly and answer the user\'s request based on visual evidence.',
-                                webSearchContext ? `\nUse both the image content and the verified web sources below to answer accurately with citation links [1], [2] where applicable.\n${webSearchContext}` : '',
+                                webSearchContext ? `\nUse both the image content and the verified web sources below to answer accurately in clean, natural prose.\n${webSearchContext}` : '',
                                 '',
                                 String(attachmentContext.combinedText || '').slice(0, 28000)
                             ].filter(Boolean).join('\n')
@@ -14085,7 +14120,7 @@ async function sendTextInput(submission = {}) {
                                 '',
                                 'The attached document text is already provided below. Analyze it now. Do not ask me to share, paste, or upload it again.',
                                 'GROUNDING RULE: Base all extracted data strictly on the provided document text. Do not hallucinate line items, amounts, or facts not present in the text.',
-                                webSearchContext ? `\nVerified external facts to compare/verify against:\n${webSearchContext}\nCite external facts with [1], [2] links.` : '',
+                                webSearchContext ? `\nVerified external facts to compare/verify against:\n${webSearchContext}\nSynthesize external facts cleanly in natural prose without bracket citations.` : '',
                                 '',
                                 String(attachmentContext.combinedText || '').slice(0, 28000)
                             ].filter(Boolean).join('\n');
