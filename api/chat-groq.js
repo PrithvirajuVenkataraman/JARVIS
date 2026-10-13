@@ -25,7 +25,8 @@ import {
     extractHostname as extractEntityHostname,
     isTrustedDomain as isTrustedEntityDomain,
     extractEntityTarget,
-    validateEntityResponse
+    validateEntityResponse,
+    stripInlineCitationMarkers
 } from './_lib/entity-verifier.js';
 
 import {
@@ -3296,10 +3297,10 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 ].filter(Boolean).join('\n');
             }),
             '',
-            '=== CITATION DIRECTIVE ===',
+            '=== SYNTHESIS DIRECTIVE ===',
             'Synthesize a comprehensive, fact-grounded answer based strictly on the verified sources above.',
             'CRITICAL INCUMBENCY INSTRUCTION: When answering who currently holds an office, political leadership position, or title, state the current incumbent who took office most recently (or in the current year) and clarify any recent transition. Do NOT state a predecessor or former leader as the current holder.',
-            'When citing a fact, statistic, or quote from a source, append a clickable markdown link like [1](URL) or [2](URL) immediately after the claim.'
+            'Present all verified facts and statistics in clean, natural prose. Do not emit bracket citations like [1], [2] or phrases like "found in [1]" in the body text; verified sources are tracked and displayed separately.'
         ].join('\n\n');
 
         return { ragText, sources };
@@ -3627,7 +3628,8 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 if (fallback) body = fallback;
             }
         }
-        // Final cleanup: strip any remaining meta-talk prefixes
+        // Final cleanup: strip bracket citations and any remaining meta-talk prefixes
+        body = stripInlineCitationMarkers(body);
         body = stripMetaTalkPrefixes(body);
 
         const userAsksForSources = /\b(with sources?|source links?|include links?|cite sources?|show sources?)\b/i.test(String(message || ''));
@@ -4357,7 +4359,7 @@ Style & Language Rules:
 
 ZERO-HALLUCINATION & EPISTEMIC GROUNDING (CRITICAL):
 - Never invent people, dates, prices, statistics, quotes, URLs, citations, code APIs, model versions, or event outcomes. If uncertain, state "I am not sure" rather than guessing.
-- Ground answers strictly in retrieved source text when provided and cite [1], [2] links. When none is supplied, answer from general knowledge only when stable.
+- Ground answers strictly in retrieved source text when provided. Present facts cleanly in natural prose without emitting bracket citations (e.g. [1], [2]) or citation phrases (e.g. 'found in [1]'). When none is supplied, answer from general knowledge only when stable.
 - Music, Songs & Lyrics (CRITICAL):
   * NEVER fabricate or hallucinate song lyrics, lines, or verses. When asked about songs or lyrics, provide verified credits (film/album, composer, singers, lyricist) and brief thematic context. NEVER dump full transliterated verses, line-by-line lyric breakdowns, or stanzas from memory. Instead, embed a clean markdown link [View Full Lyrics](url) using the top verified lyrics URL from retrieved search results or falling back to a structured Google search link (https://www.google.com/search?q=<song>+<artist>+lyrics).
   * Strict music credits & soundtrack attribution: NEVER guess or conflate composers, singers, lyricists, or soundtracks across films or albums. Every music credit must be strictly accurate; if unsure, state uncertainty rather than guessing.
@@ -4878,6 +4880,7 @@ Respond conversationally and naturally.`;
         asksUserToProvideSources,
         enforceLiveAnswerStyle,
         buildLiveUpdateResponse,
+        stripInlineCitationMarkers,
         isMetaTalkAnswer,
         isStableGeographyOrGeneralFactQuery,
         isAnswerEvidenceSource,
