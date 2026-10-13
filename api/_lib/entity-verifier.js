@@ -361,6 +361,48 @@ export function classifyTemporalStatus(entityName, role, snippets = [], calendar
  * - Preserves temporal context (appointment vs election vs oath-taking vs term start).
  * - Removes unnecessary numbers, arbitrary counts, or unsolicited tenure durations.
  */
+export function stripInlineCitationMarkers(text) {
+    if (!text || typeof text !== 'string') return '';
+    let cleaned = text;
+
+    // 1. Remove markdown citation links like [1](https://...) or [1, 2](https://...)
+    cleaned = cleaned.replace(/\[\d+(?:\s*,\s*\d+)*\]\([^\)]+\)/g, '');
+
+    // 2. Remove lead-in citation phrases like:
+    // "as found in [1]", "found in [1]", "as noted in [1]", "noted in [1]",
+    // "according to [1]", "reported in [1]", "as seen in [1]", "seen in [1]",
+    // "cited in [1]", "documented in [1]", "stated in [1]"
+    cleaned = cleaned.replace(/\b(?:as\s+)?(?:found|noted|stated|reported|seen|detailed|described|documented|cited|shown|referenced|confirmed)\s+(?:in|on|at|by|from)\s*\[\d+(?:\s*,\s*\d+)*\](?:\s*,?\s*\[\d+(?:\s*,\s*\d+)*\])*/gi, '');
+    cleaned = cleaned.replace(/\b(?:according\s+to|based\s+on)\s*\[\d+(?:\s*,\s*\d+)*\](?:\s*,?\s*\[\d+(?:\s*,\s*\d+)*\])*(?:,\s*)?/gi, '');
+    cleaned = cleaned.replace(/\b(?:sources?|references?)\s*\[\d+(?:\s*,\s*\d+)*\](?:\s*,?\s*\[\d+(?:\s*,\s*\d+)*\])*/gi, '');
+
+    // 3. Remove standalone or comma-separated brackets: [1], [2], [1, 2], 【1】, (1)
+    cleaned = cleaned
+        .replace(/\s*【\d+(?:\s*,\s*\d+)*】/g, '')
+        .replace(/\s*\[\d+(?:\s*,\s*\d+)*\](?=\s|[.,;:!?)]|$)/g, '')
+        .replace(/\s+\(\d+(?:\s*,\s*\d+)*\)(?=\s|[.,;:!?]|$)/g, '');
+
+    // 4. Clean up any remaining dangling bracket numbers
+    cleaned = cleaned.replace(/\[\d+(?:\s*,\s*\d+)*\]/g, '');
+
+    // 5. Clean up any dangling prepositions left before punctuation:
+    cleaned = cleaned.replace(/\b(?:as\s+)?(?:found|noted|stated|reported|seen|detailed|documented|cited)\s+(?:in|on|at|by|from)\s*([.,;:!?])/gi, '$1');
+    cleaned = cleaned.replace(/\b(?:according\s+to|based\s+on)\s*([.,;:!?])/gi, '$1');
+
+    // 6. Fix spacing and punctuation
+    cleaned = cleaned
+        .replace(/[ \t]+/g, ' ')
+        .replace(/\s+([.,;:!?])/g, '$1')
+        .replace(/\.\s*\./g, '.')
+        .replace(/\b,\s*\./g, '.')
+        .trim();
+
+    // 7. Sentence-initial capitalization if opening phrase was stripped
+    cleaned = cleaned.replace(/(^|[.!?]\s+)([a-z])/g, (_, p1, p2) => p1 + p2.toUpperCase());
+
+    return cleaned;
+}
+
 export function validateAndSanitizeTemporalClaims(answerText, query = '', sources = []) {
     let text = String(answerText || '').trim();
     if (!text) {
@@ -510,6 +552,12 @@ export function validateAndSanitizeTemporalClaims(answerText, query = '', source
                 }
             }
         }
+    }
+
+    const preClean = text;
+    text = stripInlineCitationMarkers(text);
+    if (!numbersRemoved && preClean !== text && /\[\d+\]/.test(preClean)) {
+        numbersRemoved = true;
     }
 
     text = text.replace(/\s+/g, ' ')
