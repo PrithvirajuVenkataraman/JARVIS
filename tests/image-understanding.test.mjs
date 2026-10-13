@@ -240,4 +240,87 @@ console.log('8. Verifying embedded instruction execution rules in multimodal pro
     console.log('  [PASS] 8.1 Embedded instruction execution rules strictly verified.');
 }
 
+// =========================================================================
+// 9. MIME Type Consistency from Final Encoded Bytes
+// =========================================================================
+console.log('9. Verifying MIME type consistency from encoded bytes...');
+{
+    const jpegBytes = '/9j/4AAQSkZJRgABAQEASABIAAD';
+    const pngBytes = 'iVBORw0KGgoAAAANSUhEUgAA';
+    const webpBytes = 'UklGRiQAAABXRUJQVlA4';
+    const gifBytes = 'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+
+    // Canvas JPEG compression on a file named "problem.png" must result in image/jpeg
+    assert.equal(normalizeImageMimeType('image/png', jpegBytes), 'image/jpeg');
+
+    // Real PNG file with PNG bytes must preserve image/png
+    assert.equal(normalizeImageMimeType('image/png', pngBytes), 'image/png');
+
+    // Real WebP file with WebP bytes must preserve image/webp
+    assert.equal(normalizeImageMimeType('image/webp', webpBytes), 'image/webp');
+
+    // Real GIF file with GIF bytes must preserve image/gif
+    assert.equal(normalizeImageMimeType('image/gif', gifBytes), 'image/gif');
+    console.log('  [PASS] 9.1 Encoded data authoritative MIME typing verified across JPEG, PNG, WebP, GIF.');
+}
+
+// =========================================================================
+// 10. OCR Status Message Rejection & Non-Text Visual Analysis
+// =========================================================================
+console.log('10. Verifying OCR status message rejection and non-text visual analysis...');
+{
+    // Geometry math diagram with no text detected:
+    // Prompt must NOT inject "No text was detected..." into Supplementary extracted text
+    const sampleDiagram = {
+        name: 'geometry_diagram.png',
+        mimeType: 'image/jpeg',
+        base64: '/9j/4AAQSkZJRgABAQEASABIAAD'
+    };
+
+    const diagramPrompt = buildGroundedUserMessage({
+        message: 'Calculate angle theta in this triangle',
+        grounding: {
+            kind: 'attachment',
+            selectedText: 'No text was detected in the provided image.',
+            images: [sampleDiagram]
+        },
+        images: [sampleDiagram]
+    });
+
+    assert.ok(!diagramPrompt.includes('Supplementary extracted text (use for reference'), 'Must omit status message from prompt');
+    assert.ok(!diagramPrompt.includes('No text was detected'), 'Must never inject "No text was detected" into model prompt');
+    assert.ok(diagramPrompt.includes('Calculate angle theta in this triangle'));
+    assert.ok(diagramPrompt.includes('Inspect the attached image(s) directly using your visual capabilities'));
+    console.log('  [PASS] 10.1 OCR status messages rejected and clean visual prompt produced for non-text diagrams.');
+}
+
+// =========================================================================
+// 11. Missing-Attachment Refusal Detection & Recovery
+// =========================================================================
+console.log('11. Verifying missing-attachment refusal detection...');
+{
+    // Regex mirroring answerAsksForMissingAttachment in index.html
+    const isRefusal = (text) => {
+        const lower = String(text || '').toLowerCase();
+        if (!lower) return false;
+        return /\b(could you|can you|please)\b[\s\S]{0,40}\b(share|provide|send|paste|upload)\b[\s\S]{0,60}\b(text|content|document|file|pdf|resume|docx|image|photo)\b/.test(lower) ||
+            /\b(share|provide|send|paste|upload)\b[\s\S]{0,40}\b(the )?(text|content|document|file|pdf|resume|image)\b[\s\S]{0,40}\b(you('d| would)? like me to analyze|to analyze)\b/.test(lower) ||
+            /\bi (do not|don't|cannot|can't) (see|have|access|view)\b[\s\S]{0,40}\b(attachment|document|file|pdf|resume|image|photo|picture)\b/.test(lower) ||
+            /\b(?:unable to|cannot|can't|do not have the ability to) (?:view|see|access|open|process)\b[\s\S]{0,40}\b(?:image|photo|picture|attachment|file|document)\b/.test(lower) ||
+            /\b(?:no (?:image|photo|picture|attachment|file|document) (?:was|is|has been) (?:provided|attached|uploaded|sent))\b/.test(lower);
+    };
+
+    assert.ok(isRefusal("I'm unable to view the attached image, so I can't provide a description of its contents."));
+    assert.ok(isRefusal("I cannot view the attached image. Please provide a description."));
+    assert.ok(isRefusal("I cannot see the picture you uploaded. Could you please share the image?"));
+    assert.ok(isRefusal("No image was provided with your request."));
+    assert.ok(isRefusal("I do not have access to the attachment."));
+    assert.ok(isRefusal("Please upload the image you would like me to analyze."));
+
+    // Legitimate responses must NOT be classified as refusals
+    assert.equal(isRefusal("In the provided image, we see a right-angled triangle with angles 30 and 60 degrees."), false);
+    assert.equal(isRefusal("The receipt shows a grand total of $42.50 with items listed below."), false);
+    console.log('  [PASS] 11.1 All model refusal variants accurately detected without false positives.');
+}
+
 console.log('--- ALL JARVIS IMAGE UNDERSTANDING TESTS PASSED ---');
