@@ -4428,10 +4428,11 @@ function sanitizeWeakModelAnswer(answerText, userMessage) {
 function answerAsksForMissingAttachment(answerText) {
     const lower = String(answerText || '').toLowerCase();
     if (!lower) return false;
-    return /\b(could you|can you|please)\b[\s\S]{0,40}\b(share|provide|send|paste|upload)\b[\s\S]{0,60}\b(text|content|document|file|pdf|resume|docx)\b/.test(lower) ||
-        /\b(share|provide|send|paste|upload)\b[\s\S]{0,40}\b(the )?(text|content|document|file|pdf|resume)\b[\s\S]{0,40}\b(you('d| would)? like me to analyze|to analyze)\b/.test(lower) ||
-        /\bi (do not|don't|cannot|can't) (see|have|access)\b[\s\S]{0,40}\b(attachment|document|file|pdf|resume)\b/.test(lower) ||
-        /\b(?:unable to|cannot|can't) (?:view|see|access)\b[\s\S]{0,40}\b(?:image|photo|picture|attachment|file|document)\b/.test(lower);
+    return /\b(could you|can you|please)\b[\s\S]{0,40}\b(share|provide|send|paste|upload)\b[\s\S]{0,60}\b(text|content|document|file|pdf|resume|docx|image|photo)\b/.test(lower) ||
+        /\b(share|provide|send|paste|upload)\b[\s\S]{0,40}\b(the )?(text|content|document|file|pdf|resume|image)\b[\s\S]{0,40}\b(you('d| would)? like me to analyze|to analyze)\b/.test(lower) ||
+        /\bi (do not|don't|cannot|can't) (see|have|access|view)\b[\s\S]{0,40}\b(attachment|document|file|pdf|resume|image|photo|picture)\b/.test(lower) ||
+        /\b(?:unable to|cannot|can't|do not have the ability to) (?:view|see|access|open|process)\b[\s\S]{0,40}\b(?:image|photo|picture|attachment|file|document)\b/.test(lower) ||
+        /\b(?:no (?:image|photo|picture|attachment|file|document) (?:was|is|has been) (?:provided|attached|uploaded|sent))\b/.test(lower);
 }
 
 function isWeakAssistantAnswerForRetry(answerText, userMessage = '') {
@@ -5584,7 +5585,7 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
                     ? JarvisSelfImprovingMemory.findRelevantPreferences(effectiveMessage, 0.15, 6).map(p => p.directive)
                     : [],
                 selectedModel: ((Array.isArray(requestOptions?.images) && requestOptions.images.length > 0) || (Array.isArray(requestOptions?.grounding?.images) && requestOptions.grounding.images.length > 0)) && (window.APP_CONFIG || APP_CONFIG)?.models?.find(m => m.id === selectedModel)?.supportsMedia === false
-                    ? 'gemini-3.7-flash'
+                    ? 'gemini-2.5-flash'
                     : (requestOptions?.selectedModel || (selectedModel !== 'auto' ? selectedModel : undefined))
             },
             intent: requestOptions?.intent || (isDeepReasoningActive ? 'deep_reasoning' : (requestOptions?.fastExplainer === true ? 'fast_explainer' : (isFastSimpleRequest ? 'fast_simple' : 'chat'))),
@@ -14140,38 +14141,46 @@ async function sendTextInput(submission = {}) {
                         if (result?.aborted) return;
                         let answer = String(result?.response || result?.text || '').trim();
                         if (answerAsksForMissingAttachment(answer)) {
-                            showThinkingIndicator(hasImageAttachments ? 'Analyzing the image directly...' : 'Re-reading the document...');
-                            const retryPrompt = hasImageAttachments
-                                ? [
-                                    `Inspect the attached image to answer: ${attachmentRequest}`,
-                                    'The image data is attached directly to this multimodal request. Analyze what is visible in the image pixels and execute the user\'s task directly.'
-                                ].join('\n')
-                                : [
-                                    'Analyze the attached document now using only the content below.',
-                                    'Do not ask for the file, paste, upload, or text again.',
-                                    `User request: ${attachmentRequest}`,
-                                    '',
-                                    String(attachmentContext.combinedText || '').slice(0, 28000)
-                                ].join('\n');
-                            result = await askGeminiAI(retryPrompt, {
-                                intent: 'selection_custom',
-                                grounding: hasImageAttachments
-                                    ? {
-                                        ...attachmentContext.grounding,
-                                        customInstruction: 'Inspect the attached image directly and answer the user question based on visible image evidence.'
-                                    }
-                                    : {
-                                        ...attachmentContext.grounding,
-                                        customInstruction: 'The document text is already present. Produce the analysis immediately. Never ask the user to provide the document. Ground all extracted data strictly on the visible text; if text is unreadable or absent, explicitly flag missing items rather than guessing.'
-                                    },
-                                images: hasImageAttachments ? attachmentContext.grounding.images : undefined,
-                                displayUserMessage: displayOutgoingText,
+                            const hasValidImageData = hasImageAttachments && Array.isArray(attachmentContext?.grounding?.images) &&
+                                attachmentContext.grounding.images.some(img => typeof img?.base64 === 'string' && img.base64.trim().length > 50);
+                            const hasValidTextData = !hasImageAttachments && Boolean(String(attachmentContext?.combinedText || '').trim());
+                            const shouldRetry = hasValidImageData || hasValidTextData;
+                            if (shouldRetry) {
+                                showThinkingIndicator(hasImageAttachments ? 'Analyzing the image directly...' : 'Re-reading the document...');
+                                const retryPrompt = hasImageAttachments
+                                    ? [
+                                        `Inspect the attached image to answer: ${attachmentRequest}`,
+                                        'The image data is attached directly to this multimodal request. Analyze what is visible in the image pixels and execute the user\'s task directly.'
+                                    ].join('\n')
+                                    : [
+                                        'Analyze the attached document now using only the content below.',
+                                        'Do not ask for the file, paste, upload, or text again.',
+                                        `User request: ${attachmentRequest}`,
+                                        '',
+                                        String(attachmentContext.combinedText || '').slice(0, 28000)
+                                    ].join('\n');
+                                result = await askGeminiAI(retryPrompt, {
+                                    intent: 'selection_custom',
+                                    grounding: hasImageAttachments
+                                        ? {
+                                            ...attachmentContext.grounding,
+                                            customInstruction: 'Inspect the attached image directly and answer the user question based on visible image evidence.'
+                                        }
+                                        : {
+                                            ...attachmentContext.grounding,
+                                            customInstruction: 'The document text is already present. Produce the analysis immediately. Never ask the user to provide the document. Ground all extracted data strictly on the visible text; if text is unreadable or absent, explicitly flag missing items rather than guessing.'
+                                        },
+                                    images: hasImageAttachments ? attachmentContext.grounding.images : undefined,
+                                    displayUserMessage: displayOutgoingText,
                                 timeoutMs: 15000,
                                 stream: true
                             });
-                            if (result?.aborted) return;
-                            answer = String(result?.response || result?.text || '').trim();
-                            if (answerAsksForMissingAttachment(answer)) {
+                                if (result?.aborted) return;
+                                answer = String(result?.response || result?.text || '').trim();
+                                if (answerAsksForMissingAttachment(answer)) {
+                                    answer = '';
+                                }
+                            } else {
                                 answer = '';
                             }
                         }
