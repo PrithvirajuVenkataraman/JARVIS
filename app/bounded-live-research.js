@@ -1195,6 +1195,8 @@ export class BoundedLiveResearchController {
     execute({
         query: rawQuery,
         userText,
+        context = [],
+        conversationHistory = [],
         assistantMessageId,
         fetchSearchFn,
         streamSynthesisFn,
@@ -1513,6 +1515,36 @@ export class BoundedLiveResearchController {
                     day: 'numeric'
                 });
                 const effectiveUserPrompt = String(userText || query || '').trim();
+
+                const incomingContext = Array.isArray(context) && context.length > 0
+                    ? context
+                    : (Array.isArray(conversationHistory) ? conversationHistory : []);
+                const effectiveContextTurns = incomingContext
+                    .slice(-8)
+                    .map(t => {
+                        const role = t?.role === 'assistant' || t?.ai ? 'assistant' : 'user';
+                        let text = String(t?.text || (role === 'user' ? t?.user : t?.ai) || '').trim();
+                        if (role === 'assistant') {
+                            text = text.replace(/\n{2,}(?:Sources|Verified Sources|Source Excerpts|Citations|References):[\s\S]*$/i, '')
+                                       .replace(/\n{2,}===\s*(?:SOURCE METADATA|VERIFICATION REPORT)\s*===[\s\S]*$/i, '')
+                                       .replace(/\n{2,}\*(?:Synthesis completed at[\s\S]*?\*|\(Source[s]?:.*?\))/gi, '')
+                                       .replace(/\n(?:\[\d+\]|-|\*)\s+https?:\/\/\S+/gi, '')
+                                       .trim();
+                            if (text.length > 800) {
+                                text = text.slice(0, 800) + '...';
+                            }
+                        }
+                        return { role, text };
+                    })
+                    .filter(t => t.text.length > 0 && t.text !== '[object Object]');
+
+                const contextLines = effectiveContextTurns.length > 0
+                    ? effectiveContextTurns.map(t => `${t.role === 'user' ? 'User' : 'Assistant'}: ${t.text}`).join('\n')
+                    : '';
+                const conversationHistoryBlock = contextLines
+                    ? `\nPRIOR CONVERSATION CONTEXT:\n${contextLines}\n`
+                    : '';
+
                 const prompt = `You are an expert real-time research assistant. Answer the user's question directly, comprehensively, and factually using ONLY the verified web content below.
 TEMPORAL ANCHOR:
 Today's Date: ${currentDateStr}. Use this exact date as your reference point for phrases like 'today', 'this month', 'recently', 'latest', 'current', or 'this year'.
@@ -1524,7 +1556,7 @@ RULES:
 4. GROUNDED CITATIONS & NATURAL SYNTHESIS: Ground key statements and extracted facts thoroughly in the verified sources below. Present the answer in clean, natural prose without emitting bracket citations (like [1], [2]) or citation phrases (like 'found in [1]'). Verified sources are tracked and rendered separately in the interface.
 5. STRUCTURE: Provide a direct answer first, followed by clear explanations, requested lists, and impact analyses.
 6. CHRONOLOGICAL PRIORITY: Sources are ordered chronologically with the newest/most recent updates listed first ([1], [2], ...). For questions about current status, updates, or recent developments, prioritize the latest sources over older sources.
-
+${conversationHistoryBlock}
 User question: "${effectiveUserPrompt}"
 
 Verified Sources:
@@ -1548,7 +1580,9 @@ ${sourcesContext}`;
                             await streamSynthesisFn({
                                 prompt,
                                 rawQuery: query,
+                                userText: effectiveUserPrompt,
                                 sources: this.sources,
+                                context: effectiveContextTurns,
                                 signal: this.streamAbortController.signal,
                                 timeoutMs: attemptBudgetMs,
                                 isRetry: attempt > 0,
