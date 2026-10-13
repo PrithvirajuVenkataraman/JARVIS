@@ -21130,20 +21130,9 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
         return handleLiveRetrievalQuery(userDisplayQuery, options);
     }
 
-    // Thread-aware search query reformulation before /api/search
-    const engine = window.JarvisConversation;
-    const historyTurns = conversationContext || engine?.getState?.().turns || [];
-    const activeThread = engine?.getState?.().threads?.get?.(engine?.getState?.().activeThreadId);
-    let searchEngineQuery = userDisplayQuery;
-
-    if (typeof engine?.reformulateSearchQuery === 'function') {
-        searchEngineQuery = engine.reformulateSearchQuery(userDisplayQuery, {
-            turns: historyTurns,
-            activeThread
-        });
-    }
-
-    const query = normalizeUserQuery(searchEngineQuery || userDisplayQuery);
+    // In production, the client preserves userDisplayQuery verbatim without client-side regex manipulation.
+    // Query reformulation is handled by /api/search via Groq backend model reasoning.
+    const query = userDisplayQuery;
     if (!hasSearchableContent(query)) return false;
 
     const budgets = window.JarvisLiveResearch?.LIVE_RESEARCH_BUDGETS || {};
@@ -21183,7 +21172,8 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
             userText: userDisplayQuery,
             context: conversationContext || window.JarvisConversation?.buildContext?.({ maxTurns: 6 }) || [],
             assistantMessageId,
-            fetchSearchFn: async ({ query: fetchQuery, signal, timeoutMs }) => {
+            fetchSearchFn: async ({ query: fetchQuery, context: searchContext, signal, timeoutMs }) => {
+                const effectiveSearchContext = searchContext || conversationContext || window.JarvisConversation?.buildContext?.({ maxTurns: 6 }) || [];
                 return fetchLiveSearchJson(fetchQuery || query, {
                     signal,
                     maxResults: 8,
@@ -21193,6 +21183,7 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                     chronological: true,
                     allowDeepCrawl: true,
                     skipAutoDeepCrawl: false,
+                    context: effectiveSearchContext,
                     timeoutMs: timeoutMs || controller.searchTimeoutMs || 4500
                 });
             },
