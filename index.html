@@ -14069,7 +14069,7 @@ async function sendTextInput(submission = {}) {
                                         images: rawImagePayloads,
                                         sourceAnswer: '',
                                         originalRequest: attachmentRequest,
-                                        customInstruction: 'An image is attached. Inspect the image pixels directly. Read all visible text, numbers, labels, diagrams, or objects and execute the user request directly.'
+                                        customInstruction: 'An image is attached. Inspect the image pixels directly. Read all visible text, numbers, labels, diagrams, equations, and geometric figures, then execute the user request. For mathematical or quantitative problems: identify all given values and unknowns; define each variable before using it; state the relevant formula or theorem; show every calculation step on its own line; verify the answer; format equations with $...$ (inline) and $$...$$ (display); include units.'
                                     },
                                     combinedText: '',
                                     methods: []
