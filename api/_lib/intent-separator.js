@@ -249,17 +249,21 @@ const INTENT_PROTOTYPES = [
     }
 ];
 
-const COMPILED_INTENTS = INTENT_PROTOTYPES.map(proto => {
-    const exemplarVectors = proto.exemplars.map(e => textToEmbeddingVector(e, 512));
-    return { ...proto, exemplarVectors };
-});
-
-const INTENT_BM25_INDEX = new BM25Index({ k1: 1.2, b: 0.75 });
-INTENT_PROTOTYPES.forEach((proto, pIndex) => {
-    proto.exemplars.forEach(exemplar => {
-        INTENT_BM25_INDEX.addDocument(pIndex, exemplar, proto);
-    });
-});
+let _compiledIntents = null;
+let _intentBm25Index = null;
+function getCompiledIntentsAndIndex() {
+    if (!_compiledIntents) {
+        _intentBm25Index = new BM25Index({ k1: 1.2, b: 0.75 });
+        _compiledIntents = INTENT_PROTOTYPES.map((proto, pIndex) => {
+            const exemplarVectors = proto.exemplars.map(e => textToEmbeddingVector(e, 512));
+            proto.exemplars.forEach(exemplar => {
+                _intentBm25Index.addDocument(pIndex, exemplar, proto);
+            });
+            return { ...proto, exemplarVectors };
+        });
+    }
+    return { compiledIntents: _compiledIntents, intentBm25Index: _intentBm25Index };
+}
 
 export const STATIC_KNOWLEDGE_CATEGORIES = Object.freeze([
     {
@@ -296,15 +300,21 @@ export const STATIC_KNOWLEDGE_CATEGORIES = Object.freeze([
     }
 ]);
 
-const STATIC_BM25_INDEX = new BM25Index({ k1: 1.2, b: 0.75 });
-STATIC_KNOWLEDGE_CATEGORIES.forEach(cat => {
-    STATIC_BM25_INDEX.addDocument(cat.id, cat.text, cat);
-});
-
-const STATIC_CATEGORY_VECTORS = STATIC_KNOWLEDGE_CATEGORIES.map(cat => ({
-    id: cat.id,
-    vector: textToEmbeddingVector(cat.text, 512)
-}));
+let _staticBm25Index = null;
+let _staticCategoryVectors = null;
+function getStaticKnowledgeStructures() {
+    if (!_staticBm25Index) {
+        _staticBm25Index = new BM25Index({ k1: 1.2, b: 0.75 });
+        STATIC_KNOWLEDGE_CATEGORIES.forEach(cat => {
+            _staticBm25Index.addDocument(cat.id, cat.text, cat);
+        });
+        _staticCategoryVectors = STATIC_KNOWLEDGE_CATEGORIES.map(cat => ({
+            id: cat.id,
+            vector: textToEmbeddingVector(cat.text, 512)
+        }));
+    }
+    return { staticBm25Index: _staticBm25Index, staticCategoryVectors: _staticCategoryVectors };
+}
 
 export function classifyUniversalEntityIntent(rawQuery = '', context = {}) {
     const query = String(rawQuery || '').trim();
@@ -358,11 +368,12 @@ export function classifyUniversalEntityIntent(rawQuery = '', context = {}) {
         return res;
     }
 
+    const { compiledIntents, intentBm25Index } = getCompiledIntentsAndIndex();
     const qVec = textToEmbeddingVector(query, 512);
     let bestScore = -1;
-    let bestMatch = COMPILED_INTENTS[COMPILED_INTENTS.length - 1];
+    let bestMatch = compiledIntents[compiledIntents.length - 1];
 
-    for (const proto of COMPILED_INTENTS) {
+    for (const proto of compiledIntents) {
         for (const vec of proto.exemplarVectors) {
             const score = vectorCosineSimilarity(qVec, vec);
             if (score > bestScore) {
@@ -372,12 +383,12 @@ export function classifyUniversalEntityIntent(rawQuery = '', context = {}) {
         }
     }
 
-    const bm25Matches = INTENT_BM25_INDEX.search(query, { topK: 1, minScore: 0.2 });
+    const bm25Matches = intentBm25Index.search(query, { topK: 1, minScore: 0.2 });
     if (bm25Matches.length > 0) {
         const topBm25Doc = bm25Matches[0].doc;
         const protoIndex = topBm25Doc.id;
         const bm25Score = bm25Matches[0].score;
-        const bm25Proto = COMPILED_INTENTS[protoIndex];
+        const bm25Proto = compiledIntents[protoIndex];
         if (bm25Proto && bm25Score >= 1.2 && bestScore < 0.65) {
             bestMatch = bm25Proto;
         }
@@ -483,15 +494,16 @@ export function isStableGeographyOrGeneralFactQuery(rawQuery = '', context = {})
     }
 
     // 6. Enterprise Hybrid Semantic & BM25 Scoring against canonical static knowledge domains
+    const { staticBm25Index, staticCategoryVectors } = getStaticKnowledgeStructures();
     // A. BM25 Lexical Score
-    const bm25Results = STATIC_BM25_INDEX.search(query, { minScore: 0.2, topK: 1 });
+    const bm25Results = staticBm25Index.search(query, { minScore: 0.2, topK: 1 });
     if (bm25Results.length > 0 && bm25Results[0].score >= 0.25) {
         return true;
     }
 
     // B. Dense Semantic Vector Cosine Similarity
     const qVec = textToEmbeddingVector(query, 512);
-    for (const item of STATIC_CATEGORY_VECTORS) {
+    for (const item of staticCategoryVectors) {
         const sim = vectorCosineSimilarity(qVec, item.vector);
         if (sim >= 0.28) {
             return true;
@@ -530,11 +542,12 @@ export function classifyQueryIntent(rawQuery = '', context = {}) {
         };
     }
 
+    const { compiledIntents, intentBm25Index } = getCompiledIntentsAndIndex();
     const qVec = textToEmbeddingVector(query, 512);
     let bestScore = -1;
-    let bestMatch = COMPILED_INTENTS[COMPILED_INTENTS.length - 1];
+    let bestMatch = compiledIntents[compiledIntents.length - 1];
 
-    for (const proto of COMPILED_INTENTS) {
+    for (const proto of compiledIntents) {
         for (const vec of proto.exemplarVectors) {
             const score = vectorCosineSimilarity(qVec, vec);
             if (score > bestScore) {
@@ -544,12 +557,12 @@ export function classifyQueryIntent(rawQuery = '', context = {}) {
         }
     }
 
-    const bm25Matches = INTENT_BM25_INDEX.search(query, { topK: 1, minScore: 0.2 });
+    const bm25Matches = intentBm25Index.search(query, { topK: 1, minScore: 0.2 });
     if (bm25Matches.length > 0) {
         const topBm25Doc = bm25Matches[0].doc;
         const protoIndex = topBm25Doc.id;
         const bm25Score = bm25Matches[0].score;
-        const bm25Proto = COMPILED_INTENTS[protoIndex];
+        const bm25Proto = compiledIntents[protoIndex];
         if (bm25Proto && bm25Score >= 1.2 && bestScore < 0.65) {
             bestMatch = bm25Proto;
         }
