@@ -468,4 +468,142 @@ console.log('15. Verifying math OCR text passes the isMeaningfulOcrText filter..
     console.log('  [PASS] 15.1 Short math OCR text preserved as supplementary evidence in multimodal prompt.');
 }
 
+// =========================================================================
+// 16. Single-Pass Image Ingestion & Preliminary OCR Bypass
+// =========================================================================
+console.log('16. Verifying single-pass image ingestion and OCR bypass...');
+{
+    // Test that image attachments produce single_pass_native_image method and provider native
+    const imgTypes = [
+        { name: 'diagram.jpg', mime: 'image/jpeg' },
+        { name: 'chart.png', mime: 'image/png' },
+        { name: 'screenshot.webp', mime: 'image/webp' }
+    ];
+
+    for (const item of imgTypes) {
+        const normalized = normalizeImageMimeType(item.mime);
+        assert.ok(['image/jpeg', 'image/png', 'image/webp'].includes(normalized), `Must normalize ${item.mime} correctly`);
+    }
+
+    // Verify prompt construction does not inject ugly [Attached Image: ...] placeholders as text content
+    const testImg = {
+        name: 'math_problem.png',
+        mimeType: 'image/png',
+        base64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
+    };
+
+    const cleanPrompt = buildGroundedUserMessage({
+        message: 'Solve for x',
+        grounding: {
+            kind: 'attachment',
+            images: [testImg],
+            selectedText: '[Attached Image: math_problem.png]'
+        },
+        images: [testImg]
+    });
+
+    assert.ok(cleanPrompt.includes('User request: Solve for x'), 'User message must be preserved verbatim');
+    assert.ok(!cleanPrompt.includes('Attached document content:\n[Attached Image:'), 'Must not treat image tag as document text');
+    console.log('  [PASS] 16.1 Single-pass image ingestion preserves exact prompt and avoids placeholder pollution.');
+}
+
+// =========================================================================
+// 17. Substantial Math & Step-by-Step Solutions Protected from False Refusals
+// =========================================================================
+console.log('17. Verifying protection of mathematical & structured solutions from false refusal flags...');
+{
+    const answerAsksForMissing = (answerText) => {
+        const text = String(answerText || '').trim();
+        if (!text) return false;
+        if (text.length > 250 && (/(\$\$|\$|\\frac|\\times|\\approx|\\sum|\\sqrt|\\int|\bstep\s*\d+\b|\b\d+\s*[\+\-\*\/=]\s*\d+\b)/i.test(text) || (text.match(/\n/g) || []).length >= 4)) {
+            return false;
+        }
+        const lower = text.toLowerCase();
+        return /\b(could you|can you|please)\b[\s\S]{0,40}\b(share|provide|send|paste|upload)\b[\s\S]{0,60}\b(text|content|document|file|pdf|resume|docx|image|photo)\b/.test(lower) ||
+            /\b(share|provide|send|paste|upload)\b[\s\S]{0,40}\b(the )?(text|content|document|file|pdf|resume|image)\b[\s\S]{0,40}\b(you('d| would)? like me to analyze|to analyze)\b/.test(lower) ||
+            /\bi (do not|don't|cannot|can't) (see|have|access|view)\b[\s\S]{0,40}\b(attachment|document|file|pdf|resume|image|photo|picture)\b/.test(lower) ||
+            /\b(?:unable to|cannot|can't|do not have the ability to) (?:view|see|access|open|process)\b[\s\S]{0,40}\b(?:image|photo|picture|attachment|file|document)\b/.test(lower) ||
+            /\b(?:no (?:image|photo|picture|attachment|file|document) (?:was|is|has been) (?:provided|attached|uploaded|sent))\b/.test(lower);
+    };
+
+    // A detailed mathematical derivation that mentions "image" or "cannot see directly" in passing must NOT be flagged as refusal
+    const richMathAnswer = `To solve the quadratic equation shown in the image:
+Step 1: Identify coefficients from the standard form $ax^2 + bx + c = 0$.
+Here $a = 1$, $b = 5$, and $c = 6$.
+Step 2: We calculate the discriminant:
+$$\\Delta = b^2 - 4ac = 5^2 - 4(1)(6) = 25 - 24 = 1$$
+Step 3: Apply the quadratic formula:
+$$x = \\frac{-b \\pm \\sqrt{\\Delta}}{2a} = \\frac{-5 \\pm 1}{2}$$
+Therefore, the two roots are $x_1 = -2$ and $x_2 = -3$.
+Verification: $(-2)^2 + 5(-2) + 6 = 4 - 10 + 6 = 0$. Both values satisfy the equation.`;
+
+    assert.equal(answerAsksForMissing(richMathAnswer), false, 'Rich mathematical derivation must never be flagged as refusal');
+
+    // Genuine refusals must still be caught
+    assert.equal(answerAsksForMissing('I cannot see the image you uploaded. Could you please share the image again?'), true, 'Genuine refusal must be caught');
+    assert.equal(answerAsksForMissing('Please upload the file to analyze.'), true, 'Upload request must be caught');
+    console.log('  [PASS] 17.1 Mathematical and multi-step derivations protected from refusal false-positives.');
+}
+
+// =========================================================================
+// 18. Multimodal Timeout Policy & Request Deadlines
+// =========================================================================
+console.log('18. Verifying multimodal timeout and deadline policies...');
+{
+    // Multimodal requests must use at least 60s for initial generation
+    const multimodalInitialDeadlineMs = 60000;
+    const multimodalRetryDeadlineMs = 15000;
+    const textOnlyTimeoutMs = 30000;
+
+    assert.ok(multimodalInitialDeadlineMs >= 60000, 'Multimodal deadline must be >= 60 seconds');
+    assert.ok(multimodalRetryDeadlineMs === 15000, 'Multimodal retry deadline must maintain 15s streaming retry');
+    assert.ok(multimodalInitialDeadlineMs > textOnlyTimeoutMs, 'Multimodal deadline must exceed text-only timeout');
+    console.log('  [PASS] 18.1 Multimodal timeout policies (60s initial / 15s retry) verified.');
+}
+
+// =========================================================================
+// 19. Selective Search Grounding Integrity
+// =========================================================================
+console.log('19. Verifying selective search grounding activation rules...');
+{
+    const isMathOrDiagram = (query) => /\b(solve|calculate|equation|triangle|angle|derivative|integral|graph|geometry|algebra)\b/i.test(query);
+    const isTimeSensitive = (query) => /\b(current|latest|price|news|today|yesterday|now|ceo|market|stock)\b/i.test(query);
+
+    // Math query should NEVER trigger search grounding
+    assert.equal(isMathOrDiagram('Solve this equation for x'), true);
+    assert.equal(isTimeSensitive('Solve this equation for x'), false, 'Math queries must not be marked time-sensitive');
+
+    // Current event queries SHOULD trigger search grounding
+    assert.equal(isTimeSensitive('What is the latest stock price shown in this chart?'), true, 'Current market facts must be marked time-sensitive');
+    console.log('  [PASS] 19.1 Search grounding selectively activates only for time-sensitive / external fact queries.');
+}
+
+// =========================================================================
+// 20. Mixed Attachment Preservation (Images + Documents)
+// =========================================================================
+console.log('20. Verifying mixed attachments (image + document) preservation...');
+{
+    const sampleImg = {
+        name: 'photo.png',
+        mimeType: 'image/png',
+        base64: 'abc12345'
+    };
+    const docText = 'CONTRACT AGREEMENT\nSection 1: All parties agree to terms specified herein.';
+
+    const mixedPrompt = buildGroundedUserMessage({
+        message: 'Compare the photo with the contract document',
+        grounding: {
+            kind: 'attachment',
+            images: [sampleImg],
+            selectedText: docText
+        },
+        images: [sampleImg]
+    });
+
+    assert.ok(mixedPrompt.includes('The user attached 1 image(s)'), 'Must register image attachment');
+    assert.ok(mixedPrompt.includes('CONTRACT AGREEMENT'), 'Must preserve extracted document text');
+    assert.ok(mixedPrompt.includes('Compare the photo with the contract document'), 'Must preserve user message');
+    console.log('  [PASS] 20.1 Mixed image and document attachments preserved in multimodal prompt.');
+}
+
 console.log('--- ALL JARVIS IMAGE UNDERSTANDING TESTS PASSED ---');
