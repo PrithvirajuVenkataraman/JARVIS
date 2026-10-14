@@ -346,6 +346,18 @@ async function getInstantFactHelper() {
             return { tier: 'deep', preferSpeed: false, reason: 'explicit_deep_tier_request' };
         }
 
+        // Image attachments require a vision-capable model with sufficient capacity.
+        // Never downgrade to the instant tier when images are present.
+        const hasImages = options?.hasImages === true || intent === 'selection_custom';
+        if (hasImages) {
+            // Still allow explicit deep-tier upgrades for image math/reasoning; default to standard.
+            if (scoreChatIntent(String(rawQuery || ''), 'explicit_math_logic_proof') >= 0.28 ||
+                scoreChatIntent(String(rawQuery || ''), 'deep_engineering_reasoning') >= 0.28) {
+                return { tier: 'deep', preferSpeed: false, reason: 'image_math_deep_reasoning' };
+            }
+            return { tier: 'standard', preferSpeed: false, reason: 'image_attachment_standard_floor' };
+        }
+
         const query = String(rawQuery || '').trim();
         const words = query.split(/\s+/).filter(Boolean);
         const wordCount = words.length;
@@ -1960,6 +1972,19 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 '3. CONTEXT-AWARE OCR INTEGRATION: Read all visible text, numbers, labels, diagrams, and measurements in the image. Do not require the user to explicitly say "OCR" or "extract text". Incorporate visible text and layout into your reasoning.',
                 '4. VISIBLE EVIDENCE & ZERO HALLUCINATION: Answer strictly from what is visible in the image pixels. Do not invent text, numbers, or labels that are not visible. If details are cropped or illegible, state what is unclear rather than guessing.',
                 '5. DIRECT VISUAL ACCESS: You have direct access to the image pixels in this request. Never claim you cannot view, see, open, or access the attachment.',
+                '6. MATHEMATICAL & QUANTITATIVE REASONING (apply whenever the image contains math, geometry, physics, statistics, or any quantitative problem):',
+                '   a. INTERPRET THE DIAGRAM FIRST: Before computing anything, survey every label, measurement, angle, and geometric relationship visible in the image. Verify which label corresponds to which element (side, angle, arc, variable). Do not assume a label refers to a particular line segment without confirming it in the diagram.',
+                '   b. DEFINE EVERY VARIABLE: Before substituting any value, state what each symbol or variable represents and its unit.',
+                '   c. STATE THE THEOREM OR FORMULA: Identify and name the relevant formula, theorem, or principle before applying it.',
+                '   d. SHOW EVERY STEP: Write each algebraic, arithmetic, or logical step on its own line. Expand expressions, substitute values, simplify, and solve. Do not skip steps.',
+                '   e. VERIFY THE ANSWER: After reaching a result, substitute it back into the original equation or constraint to confirm it satisfies all conditions. State the verification explicitly.',
+                '   f. HANDLE AMBIGUITY HONESTLY: If a label, measurement, or diagram element is unclear or could be read more than one way, state the ambiguity explicitly. Do not invent or assume a value for unclear information; show working under the most reasonable interpretation and note any caveat.',
+                '   g. UNITS & FINAL ANSWER: Always include appropriate units. Clearly label the final answer.',
+                '7. LATEX FORMATTING (apply to all mathematical content in the response):',
+                '   - Display equations (multi-line working, final answers): use $$...$$',
+                '   - Inline mathematical expressions within prose: use $...$',
+                '   - Do NOT use plain-text approximations (e.g. "x^2") when LaTeX delimiters are available.',
+                '8. GEOMETRIC DIAGRAM DISCIPLINE: When working with geometric figures, explicitly identify the type of figure (triangle, circle, polygon, etc.), list all given measurements, and state any geometric properties (parallel lines, perpendicular, congruent, similar) visible in the diagram before computing.',
                 userRequest ? `User request: ${userRequest}` : 'User request: (User provided image without text; infer and execute the appropriate task)',
                 hasMeaningfulText ? `Supplementary extracted text (use for reference, but verify against actual image pixels):\n${extractedText}` : '',
                 customInstruction && customInstruction !== userRequest ? `Extra instruction: ${customInstruction}` : ''
@@ -4523,6 +4548,15 @@ DEEP REASONING & RECURSIVE VERIFICATION DIRECTIVE:
 - Execute rigorous step-by-step deduction.
 - Before reaching conclusions, explicitly verify: (1) all premises and constraint conditions, (2) deductive consistency without inverted assumptions, (3) elimination of false cases with explicit disproofs.
 - For logic puzzles, test every branch exhaustively and show that alternative assignments yield contradictions.` : ''}
+
+MATHEMATICAL & QUANTITATIVE REASONING (applies to all math problems, whether from images or text):
+- Define every variable and its unit before substituting a value.
+- State the relevant theorem, formula, or principle before applying it.
+- Show each algebraic or arithmetic step on its own line; do not skip steps.
+- After reaching a result, verify it by substituting back into the original equation or constraint.
+- Format: use $$...$$ for display equations and $...$ for inline math. Never use plain-text approximations like "x^2" in place of LaTeX when the output supports it.
+- If a measurement, label, or diagram element is ambiguous, state the ambiguity explicitly rather than inventing a value.
+- Always include units and clearly label the final answer.
 
 Respond conversationally and naturally.`;
     }
