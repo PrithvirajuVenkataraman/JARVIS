@@ -53,7 +53,21 @@ function setDefaultSecurityHeaders(res) {
 }
 
 function looksLikeAbusivePayload(body) {
-    const text = JSON.stringify(body || {});
+    let sanitized = body;
+    if (body && typeof body === 'object') {
+        const copy = { ...body };
+        if (Array.isArray(copy.images)) {
+            copy.images = copy.images.map(img => ({ ...img, base64: '', data: '', inlineData: undefined }));
+        }
+        if (copy.grounding && typeof copy.grounding === 'object' && Array.isArray(copy.grounding.images)) {
+            copy.grounding = {
+                ...copy.grounding,
+                images: copy.grounding.images.map(img => ({ ...img, base64: '', data: '', inlineData: undefined }))
+            };
+        }
+        sanitized = copy;
+    }
+    const text = JSON.stringify(sanitized || {});
     if (text.length > 500000) return true;
     if (/(?:\b(?:ignore|forget)\s+(?:all|previous)\s+instructions\b|\bact as\b|\bsystem prompt\b)/i.test(text) && text.length > 12000) {
         return true;
