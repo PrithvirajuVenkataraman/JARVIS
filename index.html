@@ -4444,8 +4444,12 @@ function sanitizeWeakModelAnswer(answerText, userMessage) {
 }
 
 function answerAsksForMissingAttachment(answerText) {
-    const lower = String(answerText || '').toLowerCase();
-    if (!lower) return false;
+    const text = String(answerText || '').trim();
+    if (!text) return false;
+    if (text.length > 250 && (/(\$\$|\$|\\frac|\\times|\\approx|\\sum|\\sqrt|\\int|\bstep\s*\d+\b|\b\d+\s*[\+\-\*\/=]\s*\d+\b)/i.test(text) || (text.match(/\n/g) || []).length >= 4)) {
+        return false;
+    }
+    const lower = text.toLowerCase();
     return /\b(could you|can you|please)\b[\s\S]{0,40}\b(share|provide|send|paste|upload)\b[\s\S]{0,60}\b(text|content|document|file|pdf|resume|docx|image|photo)\b/.test(lower) ||
         /\b(share|provide|send|paste|upload)\b[\s\S]{0,40}\b(the )?(text|content|document|file|pdf|resume|image)\b[\s\S]{0,40}\b(you('d| would)? like me to analyze|to analyze)\b/.test(lower) ||
         /\bi (do not|don't|cannot|can't) (see|have|access|view)\b[\s\S]{0,40}\b(attachment|document|file|pdf|resume|image|photo|picture)\b/.test(lower) ||
@@ -5047,6 +5051,30 @@ async function streamChatCompletion(payload, options = {}) {
         startStreamingConverseSpeech(activeTurnId);
     }
     ensureStreamMessage();
+
+    const overallDeadlineMs = Number(options?.timeoutMs) > 0 ? Number(options.timeoutMs) : 60000;
+    const idleTimeoutMs = 25000;
+    let streamTimedOut = false;
+    let streamTimeoutReason = '';
+    let idleTimer = null;
+    let deadlineTimer = null;
+
+    const resetIdleTimer = () => {
+        if (idleTimer) clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => {
+            streamTimedOut = true;
+            streamTimeoutReason = 'idle_timeout';
+            try { reader.cancel('idle_timeout'); } catch (_) {}
+        }, idleTimeoutMs);
+    };
+
+    deadlineTimer = setTimeout(() => {
+        streamTimedOut = true;
+        streamTimeoutReason = 'deadline_timeout';
+        try { reader.cancel('deadline_timeout'); } catch (_) {}
+    }, overallDeadlineMs);
+
+    resetIdleTimer();
     const handleEvent = event => {
         if (!event?.event) return;
         const targetRow = assistantMessageId ? document.getElementById(assistantMessageId) : null;
@@ -5077,6 +5105,7 @@ async function streamChatCompletion(payload, options = {}) {
             return;
         }
         if (event.event === 'delta') {
+            resetIdleTimer();
             if (latencyTrace.requestId && window.JarvisInteractionState?.isCurrentRequest && !window.JarvisInteractionState.isCurrentRequest(latencyTrace.requestId)) {
                 try { reader.cancel(); } catch (_) {}
                 return;
@@ -5149,6 +5178,8 @@ async function streamChatCompletion(payload, options = {}) {
             return;
         }
         if (event.event === 'done') {
+            if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+            if (deadlineTimer) { clearTimeout(deadlineTimer); deadlineTimer = null; }
             donePayload = event.data || {};
             const rawDone = String(donePayload.response || '').trim();
             const doneResponse = (rawDone && rawDone.length >= accumulated.trim().length)
@@ -5185,6 +5216,8 @@ async function streamChatCompletion(payload, options = {}) {
             return;
         }
         if (event.event === 'error') {
+            if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+            if (deadlineTimer) { clearTimeout(deadlineTimer); deadlineTimer = null; }
             hideThinkingIndicator();
             if (isConverseStream) {
                 stopConverseSpeech('stream_error');
@@ -5216,8 +5249,22 @@ async function streamChatCompletion(payload, options = {}) {
             handleEvent(parseSseClientEvent(buffer));
         }
     } catch (error) {
+        if (streamTimedOut) {
+            error.timedOut = true;
+            error.code = 'timeout';
+            error.reason = streamTimeoutReason;
+        }
         hideThinkingIndicator();
         if (isAbortError(error) && assistantMessageId) {
+            if (streamTimedOut && !accumulated.trim()) {
+                discardStreamingAssistantMessage(assistantMessageId);
+                return {
+                    response: '',
+                    timedOut: true,
+                    code: 'timeout',
+                    error: { code: 'timeout', message: 'Stream timed out' }
+                };
+            }
             const parsed = extractThoughtAndAnswer(accumulated);
             if (parsed.thought || accumulated.includes('<think>') || accumulated.trim()) {
                 updateStreamingAssistantMessage(assistantMessageId, parsed.answer || '', {
@@ -5271,6 +5318,9 @@ async function streamChatCompletion(payload, options = {}) {
             window.__jarvisServiceUnavailable = true;
         }
         throw error;
+    } finally {
+        if (idleTimer) clearTimeout(idleTimer);
+        if (deadlineTimer) clearTimeout(deadlineTimer);
     }
 
     const finalResponse = String(donePayload?.response || accumulated || '').trim();
@@ -5627,7 +5677,8 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
                 signal: controller.signal,
                 latencyTrace,
                 userMessage: requestOptions?.displayUserMessage || normalizedUserMessage,
-                routeDecision: requestOptions?.routeDecision || null
+                routeDecision: requestOptions?.routeDecision || null,
+                timeoutMs: Number(requestOptions?.timeoutMs) > 0 ? Number(requestOptions.timeoutMs) : undefined
             })
             : await window.JarvisApi.postJson((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, requestPayload, {
                 signal: controller.signal,
@@ -14129,14 +14180,17 @@ async function sendTextInput(submission = {}) {
                             } catch (_) {}
                         }
 
+                        const nonImageDocText = (attachmentContext.combinedText && !attachmentContext.combinedText.startsWith('[Attached Image:'))
+                            ? String(attachmentContext.combinedText).slice(0, 28000)
+                            : '';
+
                         const attachmentPrompt = hasImageAttachments
                             ? [
                                 attachmentRequest,
                                 '',
                                 'An image is attached to this request. Inspect the visible pixels directly and answer the user\'s request based on visual evidence.',
                                 webSearchContext ? `\nUse both the image content and the verified web sources below to answer accurately in clean, natural prose.\n${webSearchContext}` : '',
-                                '',
-                                String(attachmentContext.combinedText || '').slice(0, 28000)
+                                nonImageDocText ? `\n${nonImageDocText}` : ''
                             ].filter(Boolean).join('\n')
                             : [
                                 attachmentRequest,
@@ -14153,7 +14207,7 @@ async function sendTextInput(submission = {}) {
                             grounding: attachmentContext.grounding,
                             images: hasImageAttachments ? attachmentContext.grounding.images : undefined,
                             displayUserMessage: displayOutgoingText,
-                            timeoutMs: hasImageAttachments ? 35000 : 20000,
+                            timeoutMs: hasImageAttachments ? 60000 : 30000,
                             stream: true
                         });
                         if (result?.aborted) return;
@@ -14192,7 +14246,7 @@ async function sendTextInput(submission = {}) {
                                     displayUserMessage: displayOutgoingText,
                                 timeoutMs: 15000,
                                 stream: true
-                            });
+                                });
                                 if (result?.aborted) return;
                                 answer = String(result?.response || result?.text || '').trim();
                                 if (answerAsksForMissingAttachment(answer)) {
@@ -14216,7 +14270,15 @@ async function sendTextInput(submission = {}) {
                                 sourceAnswer: answer
                             });
                         } else {
-                            addChatMessage('I could not analyze that attachment. Try another file format or a clearer scan.', false);
+                            if (result?.timedOut || result?.code === 'timeout' || result?.error?.code === 'timeout') {
+                                addChatMessage('The request timed out while analyzing the attachment. Please try again with a clearer prompt or lighter file.', false);
+                            } else if (result?.code === 'unsupported_media' || result?.error?.code === 'unsupported_media') {
+                                addChatMessage('This attachment format is not supported for visual reasoning. Please upload a standard JPG, PNG, or WebP image.', false);
+                            } else if (result?.error?.message) {
+                                addChatMessage(`Attachment analysis failed: ${result.error.message}`, false);
+                            } else {
+                                addChatMessage('I could not analyze that attachment. Please ensure the image is clear or try again in a moment.', false);
+                            }
                         }
                     } else if (waitingForName) {
                         await handleNameInput(outgoingText);
