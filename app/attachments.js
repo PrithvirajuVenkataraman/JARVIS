@@ -200,6 +200,17 @@ export async function ingestAllForMessage(attachments = [], userText = '') {
                         mimeType: finalMime,
                         base64
                     };
+                    // Single-Pass Fast Path: Bypass preliminary server-side OCR for images.
+                    // The native multimodal model receives the raw image directly alongside the user prompt.
+                    attachment.extractedText = '';
+                    attachment.ocrMethod = 'single_pass_native_image';
+                    const result = {
+                        ok: true,
+                        text: '',
+                        method: 'single_pass_native_image',
+                        provider: 'native'
+                    };
+                    return { attachment, isImg: true, imagePayload, result };
                 }
             }
             const result = await ingestAttachmentWithFallback(attachment);
