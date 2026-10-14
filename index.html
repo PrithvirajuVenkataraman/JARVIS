@@ -5567,8 +5567,10 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
         const personaDirective = activePersonaConfig?.directive || '';
 
         const selectedModel = getSelectedModel();
-        const baseSystemPrompt = typeof JarvisSelfImprovingMemory !== 'undefined'
-            ? JarvisSelfImprovingMemory.injectIntoSystemPrompt(customSystemPrompt)
+        const baseMem = (typeof JarvisSelfImprovingMemory !== 'undefined' && JarvisSelfImprovingMemory) ||
+            (typeof globalThis !== 'undefined' && globalThis.JarvisSelfImprovingMemory) || null;
+        const baseSystemPrompt = (baseMem && typeof baseMem.injectIntoSystemPrompt === 'function')
+            ? baseMem.injectIntoSystemPrompt(customSystemPrompt, normalizedUserMessage)
             : customSystemPrompt;
         // Route formatting, style, length, and learned memory into system directives rather than polluting the user prompt
         const systemDirectives = isFastSimpleRequest
@@ -5649,9 +5651,21 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
                 responseFormat: formatMode,
                 responseStyle,
                 customSystemPrompt: systemDirectives,
-                learnedDirectives: typeof JarvisSelfImprovingMemory !== 'undefined'
-                    ? JarvisSelfImprovingMemory.findRelevantPreferences(effectiveMessage, 0.15, 6).map(p => p.directive)
-                    : [],
+                learnedDirectives: (() => {
+                    try {
+                        const mem = (typeof JarvisSelfImprovingMemory !== 'undefined' && JarvisSelfImprovingMemory) ||
+                            (typeof globalThis !== 'undefined' && globalThis.JarvisSelfImprovingMemory) || null;
+                        if (mem && typeof mem.findRelevantPreferences === 'function') {
+                            const list = mem.findRelevantPreferences(effectiveMessage, 0.15, 6);
+                            return Array.isArray(list) ? list.map(p => p?.directive).filter(Boolean) : [];
+                        }
+                        if (mem && typeof mem.getDirectives === 'function') {
+                            const list = mem.getDirectives();
+                            return Array.isArray(list) ? list.filter(Boolean) : [];
+                        }
+                    } catch (_) {}
+                    return [];
+                })(),
                 selectedModel: ((Array.isArray(requestOptions?.images) && requestOptions.images.length > 0) || (Array.isArray(requestOptions?.grounding?.images) && requestOptions.grounding.images.length > 0)) && (window.APP_CONFIG || APP_CONFIG)?.models?.find(m => m.id === selectedModel)?.supportsMedia === false
                     ? 'gemini-2.5-flash'
                     : (requestOptions?.selectedModel || (selectedModel !== 'auto' ? selectedModel : undefined))
@@ -26415,16 +26429,67 @@ const JarvisIndexedDbStorage = {
     }
 };
 
+function textToEmbeddingVector(text, dim = 512) {
+    const v = new Float32Array(dim);
+    const tokens = String(text || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').trim().split(/\s+/).filter(Boolean);
+    if (!tokens.length) return v;
+    for (const token of tokens) {
+        let h1 = 0x811c9dc5;
+        let h2 = 0x5bd1e995;
+        for (let i = 0; i < token.length; i++) {
+            const code = token.charCodeAt(i);
+            h1 ^= code;
+            h1 = Math.imul(h1, 0x01000193);
+            h2 ^= code;
+            h2 = Math.imul(h2, 0x5bd1e995);
+        }
+        const idx1 = Math.abs(h1) % dim;
+        const idx2 = Math.abs(h2) % dim;
+        v[idx1] += 1.0;
+        v[idx2] += 0.5;
+        if (token.length >= 4) {
+            for (let i = 0; i < token.length - 2; i++) {
+                const trigram = token.slice(i, i + 3);
+                let th = 0;
+                for (let j = 0; j < trigram.length; j++) th = (th * 31 + trigram.charCodeAt(j)) | 0;
+                v[Math.abs(th) % dim] += 0.2;
+            }
+        }
+    }
+    let norm = 0;
+    for (let i = 0; i < dim; i++) norm += v[i] * v[i];
+    norm = Math.sqrt(norm);
+    if (norm > 0) {
+        for (let i = 0; i < dim; i++) v[i] /= norm;
+    }
+    return v;
+}
+
+function vectorCosineSimilarity(a, b) {
+    let dot = 0;
+    for (let i = 0; i < a.length; i++) dot += a[i] * b[i];
+    return dot;
+}
+
 const JarvisSelfImprovingMemory = {
     STORAGE_KEY: 'jarvis_learned_preferences',
     preferences: [],
     
     async init() {
+        if (typeof globalThis !== 'undefined' && globalThis.JarvisSelfImprovingMemory && globalThis.JarvisSelfImprovingMemory !== this && typeof globalThis.JarvisSelfImprovingMemory.init === 'function') {
+            await globalThis.JarvisSelfImprovingMemory.init();
+            return;
+        }
         try {
-            const raw = await JarvisIndexedDbStorage.getItem(this.STORAGE_KEY);
+            const raw = typeof JarvisIndexedDbStorage !== 'undefined'
+                ? await JarvisIndexedDbStorage.getItem(this.STORAGE_KEY)
+                : (typeof localStorage !== 'undefined' ? localStorage.getItem(this.STORAGE_KEY) : null);
             const data = typeof raw === 'string' ? JSON.parse(raw) : raw;
             if (Array.isArray(data)) {
-                this.preferences = data.filter(p => p && typeof p.directive === 'string' && p.directive.trim());
+                this.preferences = data.filter(p => p && typeof p.directive === 'string' && p.directive.trim()).map(p => ({
+                    enabled: p.enabled !== false,
+                    ...p
+                }));
             }
         } catch (_) {
             this.preferences = [];
@@ -26432,12 +26497,28 @@ const JarvisSelfImprovingMemory = {
     },
     
     async save() {
+        if (typeof globalThis !== 'undefined' && globalThis.JarvisSelfImprovingMemory && globalThis.JarvisSelfImprovingMemory !== this && typeof globalThis.JarvisSelfImprovingMemory.savePreferences === 'function') {
+            await globalThis.JarvisSelfImprovingMemory.savePreferences();
+            return;
+        }
         try {
-            await JarvisIndexedDbStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.preferences));
+            const payload = JSON.stringify(this.preferences);
+            if (typeof JarvisIndexedDbStorage !== 'undefined' && JarvisIndexedDbStorage.setItem) {
+                await JarvisIndexedDbStorage.setItem(this.STORAGE_KEY, payload);
+            } else if (typeof localStorage !== 'undefined') {
+                localStorage.setItem(this.STORAGE_KEY, payload);
+            }
         } catch (_) {}
     },
+
+    async savePreferences() {
+        return this.save();
+    },
     
-    detectCorrectionOrPreference(userMessage = '') {
+    detectCorrectionOrPreference(userMessage = '', previousAssistantMessage = '') {
+        if (typeof globalThis !== 'undefined' && globalThis.JarvisSelfImprovingMemory && globalThis.JarvisSelfImprovingMemory !== this && typeof globalThis.JarvisSelfImprovingMemory.detectCorrectionOrPreference === 'function') {
+            return globalThis.JarvisSelfImprovingMemory.detectCorrectionOrPreference(userMessage, previousAssistantMessage);
+        }
         const raw = String(userMessage || '').trim();
         if (!raw || raw.length < 4 || raw.length > 500) return null;
         const lower = raw.toLowerCase();
@@ -26445,35 +26526,46 @@ const JarvisSelfImprovingMemory = {
         const negativeMatch = raw.match(/\b(?:don'?t|do\s+not|stop|never|avoid|no\s+more)\s+(?:use|using|include|including|give|giving|make|making|write|writing)\s+([^.!?\n]{3,80})/i);
         if (negativeMatch) {
             const subject = negativeMatch[1].trim().replace(/\b(?:please|from\s+now\s+on|anymore|again)\b/gi, '').trim();
-            if (subject) return { category: 'negative_constraint', directive: `Avoid ${subject}.`, rawPrompt: raw, detectedAt: Date.now() };
+            if (subject) return { category: 'negative_constraint', directive: `Avoid ${subject}.`, rawPrompt: raw, enabled: true, detectedAt: Date.now() };
         }
 
         const positiveMatch = raw.match(/\b(?:always|from\s+now\s+on\s*,?\s*always|prefer|make\s+sure\s+to|please\s+always)\s+(?:use|give|write|respond\s+in|format\s+in|answer\s+in)\s+([^.!?\n]{3,80})/i);
         if (positiveMatch) {
             const subject = positiveMatch[1].trim().replace(/\b(?:please|from\s+now\s+on)\b/gi, '').trim();
-            if (subject) return { category: 'positive_preference', directive: `Prefer ${subject}.`, rawPrompt: raw, detectedAt: Date.now() };
+            if (subject) return { category: 'positive_preference', directive: `Prefer ${subject}.`, rawPrompt: raw, enabled: true, detectedAt: Date.now() };
+        }
+
+        const codeIdiomMatch = raw.match(/\b(?:prefer|use)\s+([a-zA-Z0-9.#+_-]{2,25})\s+(?:over|instead\s+of|for)\s+([^.!?\n]{3,40})/i);
+        if (codeIdiomMatch) {
+            const tool = codeIdiomMatch[1].trim();
+            const alt = codeIdiomMatch[2].trim();
+            return { category: 'code_preference', directive: `Prefer ${tool} instead of ${alt}.`, rawPrompt: raw, enabled: true, detectedAt: Date.now() };
         }
 
         const identityMatch = raw.match(/\b(?:call\s+me|address\s+me\s+as|my\s+name\s+is)\s+([^\r\n!?]+?)(?:[!?\n]|$)/i);
         if (identityMatch) {
             const nameOrTitle = identityMatch[1].trim().replace(/[.,;:!?]+$/, '').trim();
-            if (nameOrTitle) return { category: 'user_identity', directive: `Address the user as ${nameOrTitle}.`, rawPrompt: raw, detectedAt: Date.now() };
+            if (nameOrTitle) return { category: 'user_identity', directive: `Address the user as ${nameOrTitle}.`, rawPrompt: raw, enabled: true, detectedAt: Date.now() };
         }
 
         if (/\b(?:be\s+(?:more\s+)?concise|keep\s+it\s+(?:very\s+)?brief|shorter\s+answers?|no\s+fluff|give\s+direct\s+answers?)\b/i.test(lower)) {
-            return { category: 'conciseness', directive: 'Keep answers direct, concise, and free of conversational filler.', rawPrompt: raw, detectedAt: Date.now() };
+            return { category: 'conciseness', directive: 'Keep answers direct, concise, and free of conversational filler.', rawPrompt: raw, enabled: true, detectedAt: Date.now() };
         }
 
         return null;
     },
     
-    async processUserMessage(userMessage = '') {
-        const detected = this.detectCorrectionOrPreference(userMessage);
+    async processUserMessage(userMessage = '', previousAssistantMessage = '') {
+        if (typeof globalThis !== 'undefined' && globalThis.JarvisSelfImprovingMemory && globalThis.JarvisSelfImprovingMemory !== this && typeof globalThis.JarvisSelfImprovingMemory.processUserMessage === 'function') {
+            return globalThis.JarvisSelfImprovingMemory.processUserMessage(userMessage, previousAssistantMessage);
+        }
+        const detected = this.detectCorrectionOrPreference(userMessage, previousAssistantMessage);
         if (!detected) return null;
         const exists = this.preferences.some(p => p.directive.toLowerCase() === detected.directive.toLowerCase());
         if (!exists) {
             const item = {
                 id: 'pref_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+                enabled: true,
                 ...detected
             };
             this.preferences.push(item);
@@ -26482,27 +26574,123 @@ const JarvisSelfImprovingMemory = {
         }
         return null;
     },
+
+    findRelevantPreferences(query = '', threshold = 0.20, topK = 5) {
+        if (typeof globalThis !== 'undefined' && globalThis.JarvisSelfImprovingMemory && globalThis.JarvisSelfImprovingMemory !== this && typeof globalThis.JarvisSelfImprovingMemory.findRelevantPreferences === 'function') {
+            return globalThis.JarvisSelfImprovingMemory.findRelevantPreferences(query, threshold, topK);
+        }
+        const active = this.preferences.filter(p => p.enabled !== false);
+        const q = String(query || '').trim();
+        if (!q || !active.length) return active.slice(0, topK);
+
+        const queryVec = textToEmbeddingVector(q);
+        return active
+            .map(p => {
+                const text = `${p.directive || ''} ${p.rawPrompt || ''}`.trim();
+                const pVec = textToEmbeddingVector(text);
+                const score = vectorCosineSimilarity(queryVec, pVec);
+                return { preference: p, score };
+            })
+            .filter(item => item.score >= threshold)
+            .sort((a, b) => b.score - a.score)
+            .slice(0, topK)
+            .map(item => item.preference);
+    },
+
+    async distillNegativeFeedback(feedbackReason = '', query = '', previousResponse = '') {
+        if (typeof globalThis !== 'undefined' && globalThis.JarvisSelfImprovingMemory && globalThis.JarvisSelfImprovingMemory !== this && typeof globalThis.JarvisSelfImprovingMemory.distillNegativeFeedback === 'function') {
+            return globalThis.JarvisSelfImprovingMemory.distillNegativeFeedback(feedbackReason, query, previousResponse);
+        }
+        const reason = String(feedbackReason || '').toLowerCase().trim();
+        let directive = '';
+        let category = 'negative_feedback_adaptation';
+
+        if (reason.includes('verbose') || reason.includes('too long') || reason.includes('wordy')) {
+            directive = 'Keep answers direct, concise, and eliminate conversational filler.';
+            category = 'conciseness';
+        } else if (reason.includes('inaccurate') || reason.includes('wrong') || reason.includes('hallucination') || reason.includes('incorrect')) {
+            directive = 'Verify all factual and numerical assertions with extreme scrutiny before outputting.';
+            category = 'accuracy_scrutiny';
+        } else if (reason.includes('format') || reason.includes('structure') || reason.includes('layout')) {
+            directive = 'Strictly adhere to requested output structure without extraneous markdown wrapping.';
+            category = 'formatting';
+        } else if (reason.includes('unhelpful') || reason.includes('generic')) {
+            directive = 'Provide concrete, actionable solutions with specific examples rather than high-level generalizations.';
+            category = 'depth_and_rigor';
+        } else if (reason.length > 5) {
+            directive = `Ensure responses address: ${feedbackReason.slice(0, 80)}.`;
+        }
+
+        if (directive) {
+            const exists = this.preferences.some(p => p.directive.toLowerCase() === directive.toLowerCase());
+            if (!exists) {
+                const item = {
+                    id: 'pref_neg_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+                    category,
+                    directive,
+                    rawPrompt: `Negative feedback: ${feedbackReason}`,
+                    enabled: true,
+                    detectedAt: Date.now()
+                };
+                this.preferences.push(item);
+                await this.save();
+                return item;
+            }
+        }
+        return null;
+    },
+
+    async toggle(id, enabled) {
+        if (typeof globalThis !== 'undefined' && globalThis.JarvisSelfImprovingMemory && globalThis.JarvisSelfImprovingMemory !== this && typeof globalThis.JarvisSelfImprovingMemory.toggle === 'function') {
+            return globalThis.JarvisSelfImprovingMemory.toggle(id, enabled);
+        }
+        const item = this.preferences.find(p => p.id === id);
+        if (item) {
+            item.enabled = Boolean(enabled);
+            await this.save();
+            return true;
+        }
+        return false;
+    },
     
     getDirectives() {
-        return this.preferences.map(p => p.directive).filter(Boolean);
+        if (typeof globalThis !== 'undefined' && globalThis.JarvisSelfImprovingMemory && globalThis.JarvisSelfImprovingMemory !== this && typeof globalThis.JarvisSelfImprovingMemory.getDirectives === 'function') {
+            return globalThis.JarvisSelfImprovingMemory.getDirectives();
+        }
+        return this.preferences.filter(p => p.enabled !== false).map(p => p.directive).filter(Boolean);
     },
     
     getAll() {
+        if (typeof globalThis !== 'undefined' && globalThis.JarvisSelfImprovingMemory && globalThis.JarvisSelfImprovingMemory !== this && typeof globalThis.JarvisSelfImprovingMemory.getAll === 'function') {
+            return globalThis.JarvisSelfImprovingMemory.getAll();
+        }
         return [...this.preferences];
     },
     
     async remove(id) {
+        if (typeof globalThis !== 'undefined' && globalThis.JarvisSelfImprovingMemory && globalThis.JarvisSelfImprovingMemory !== this && typeof globalThis.JarvisSelfImprovingMemory.remove === 'function') {
+            return globalThis.JarvisSelfImprovingMemory.remove(id);
+        }
         this.preferences = this.preferences.filter(p => p.id !== id);
         await this.save();
     },
     
     async clear() {
+        if (typeof globalThis !== 'undefined' && globalThis.JarvisSelfImprovingMemory && globalThis.JarvisSelfImprovingMemory !== this && typeof globalThis.JarvisSelfImprovingMemory.clear === 'function') {
+            return globalThis.JarvisSelfImprovingMemory.clear();
+        }
         this.preferences = [];
         await this.save();
     },
     
-    injectIntoSystemPrompt(baseSystemPrompt = '') {
-        const directives = this.getDirectives();
+    injectIntoSystemPrompt(baseSystemPrompt = '', activeQuery = '') {
+        if (typeof globalThis !== 'undefined' && globalThis.JarvisSelfImprovingMemory && globalThis.JarvisSelfImprovingMemory !== this && typeof globalThis.JarvisSelfImprovingMemory.injectIntoSystemPrompt === 'function') {
+            return globalThis.JarvisSelfImprovingMemory.injectIntoSystemPrompt(baseSystemPrompt, activeQuery);
+        }
+        const relevant = activeQuery
+            ? this.findRelevantPreferences(activeQuery, 0.15)
+            : this.preferences.filter(p => p.enabled !== false);
+        const directives = relevant.map(p => p.directive).filter(Boolean);
         if (!directives.length) return baseSystemPrompt;
         const learnedBlock = [
             '',
@@ -26513,6 +26701,10 @@ const JarvisSelfImprovingMemory = {
         return (baseSystemPrompt || '').trim() + '\n' + learnedBlock;
     }
 };
+
+if (typeof globalThis !== 'undefined') {
+    globalThis.JarvisSelfImprovingMemory = globalThis.JarvisSelfImprovingMemory || JarvisSelfImprovingMemory;
+}
 
 if (typeof window !== 'undefined') {
     setTimeout(() => {
