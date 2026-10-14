@@ -5659,7 +5659,12 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
             intent: requestOptions?.intent || (isDeepReasoningActive ? 'deep_reasoning' : (requestOptions?.fastExplainer === true ? 'fast_explainer' : (isFastSimpleRequest ? 'fast_simple' : 'chat'))),
             tier: effectiveTier,
             forceReasoning: shouldForceReasoning,
-            grounding: requestOptions?.grounding || null,
+            grounding: (requestOptions?.grounding && Array.isArray(requestOptions.grounding.images) && (Array.isArray(requestOptions?.images) || Array.isArray(requestOptions?.grounding?.images)))
+                ? {
+                    ...requestOptions.grounding,
+                    images: requestOptions.grounding.images.map(img => ({ name: img.name, mimeType: img.mimeType }))
+                }
+                : (requestOptions?.grounding || null),
             minimalThinking: shouldForceReasoning ? false : (isFastSimpleRequest ? true : requestOptions?.minimalThinking),
             images: Array.isArray(requestOptions?.images)
                 ? requestOptions.images
@@ -5924,8 +5929,38 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
             }
         }
 
-        const softFallback = await buildUniversalSoftFallback(normalizedUserMessage || userMessage);
+        const isAttachmentQuery = (Array.isArray(requestOptions?.images) && requestOptions.images.length > 0) ||
+            requestOptions?.grounding?.kind === 'attachment';
         const fallbackReason = getFallbackFailureReason(error);
+        if (isAttachmentQuery) {
+            const isTimeout = error?.name === 'AbortError' || /timeout/i.test(String(error?.message || ''));
+            const attachmentFallbackText = isTimeout
+                ? 'The request timed out while analyzing the attachment. Please try again with a clearer prompt or lighter file.'
+                : (error?.message && !/failed to fetch/i.test(error.message) ? `Attachment analysis failed: ${error.message}` : '');
+            if (targetMessageId) {
+                if (targetRow) targetRow.__fallbackCompleted = true;
+                if (attachmentFallbackText) {
+                    updateStreamingAssistantMessage(targetMessageId, attachmentFallbackText, {
+                        userMessage: normalizedUserMessage,
+                        streaming: false,
+                        modelUsed: 'attachment-error',
+                        provider: 'error'
+                    });
+                } else {
+                    discardStreamingAssistantMessage(targetMessageId);
+                }
+            }
+            return {
+                response: attachmentFallbackText,
+                error: { message: error?.message || 'attachment_analysis_failed' },
+                code: isTimeout ? 'timeout' : 'request_failed',
+                fallbackReason,
+                intent: 'attachment_fallback',
+                assistantMessageId: targetMessageId
+            };
+        }
+
+        const softFallback = await buildUniversalSoftFallback(normalizedUserMessage || userMessage);
         if (isLikelyLocationOrTravelQuery(normalizedUserMessage || userMessage)) { 
             showFailureFallbackCard(normalizedUserMessage || userMessage, { reason: fallbackReason }); 
         } 
@@ -14259,7 +14294,8 @@ async function sendTextInput(submission = {}) {
                         if (answer) {
                             await publishResolvedModelMessage(displayOutgoingText, answer, {
                                 label: 'Attachment answer',
-                                routing: result?.routing || null
+                                routing: result?.routing || null,
+                                existingAssistantMessageId: result?.assistantMessageId || null
                             });
                             rememberMultimodalGrounding({
                                 kind: 'attachment',
