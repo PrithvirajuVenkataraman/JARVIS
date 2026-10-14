@@ -75,6 +75,20 @@ await memoryEngine.toggle(itemToToggle.id, true);
 assert.ok(memoryEngine.getDirectives().includes(itemToToggle.directive), 'Re-enabled preference must be injected');
 console.log('  [PASS] 1.5 Preference toggle and activation states cleanly managed');
 
+// Invariant 1.6: Vector Semantic Retrieval Invariant (findRelevantPreferences)
+const relevantItems = memoryEngine.findRelevantPreferences('Please make your response shorter and more concise', 0.15, 3);
+assert.ok(Array.isArray(relevantItems), 'findRelevantPreferences must return an array');
+assert.ok(relevantItems.length >= 1, 'Relevant item must be retrieved for semantic query');
+assert.ok(relevantItems.some(item => item.directive.toLowerCase().includes('concise')), 'Must retrieve conciseness preference for concise query');
+console.log('  [PASS] 1.6 Semantic vector retrieval ranks and extracts relevant preferences');
+
+// Invariant 1.7: Null/Empty Query & Dual-Context Safety Invariant
+const emptyResults = memoryEngine.findRelevantPreferences('', 0.20, 5);
+assert.ok(Array.isArray(emptyResults), 'Empty query must return active array without throwing');
+const nullResults = memoryEngine.findRelevantPreferences(null, 0.20, 5);
+assert.ok(Array.isArray(nullResults), 'Null query must safely resolve to array');
+console.log('  [PASS] 1.7 Semantic retrieval handles empty/null queries safely without exceptions');
+
 // ============================================================================
 // Section 2: Mathematical & Syntactic Invariants for Fast Validator & Speculative Guard
 // ============================================================================
