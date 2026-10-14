@@ -735,15 +735,15 @@ class EdgeSemanticLruCache {
 const edgeResponseCache = new EdgeSemanticLruCache();
 
     export default async function handler(req, res) {
-        const guard = applyApiSecurity(req, res, {
-            methods: ['POST', 'HEAD', 'OPTIONS'],
-            routeKey: 'chat-groq',
-            maxBodyBytes: 8 * 1024 * 1024,
-            rateLimit: { max: 25, windowMs: 60 * 1000 }
-        });
-        if (guard.handled) return;
-
         try {
+            const guard = applyApiSecurity(req, res, {
+                methods: ['POST', 'HEAD', 'OPTIONS'],
+                routeKey: 'chat-groq',
+                maxBodyBytes: 8 * 1024 * 1024,
+                rateLimit: { max: 25, windowMs: 60 * 1000 }
+            });
+            if (guard.handled) return;
+
             const timing = {
                 startedAt: Date.now(),
                 safetyMs: 0,
@@ -1229,9 +1229,16 @@ const edgeResponseCache = new EdgeSemanticLruCache();
 
     function shouldStreamChatRequest(body, intent, grounding, routeDecision, isInternalSummary) {
         if (!body || body.stream !== true) return false;
+        if (isInternalSummary) return false;
+
+        const hasImages = (Array.isArray(body?.images) && body.images.length > 0) ||
+            (Array.isArray(grounding?.images) && grounding.images.length > 0);
+        if (hasImages) {
+            return true;
+        }
+
         if (!['chat', 'pop_culture_reference', 'fast_simple', 'fast_explainer', 'casual_chat', 'deep_reasoning'].includes(String(intent || 'chat'))) return false;
         if (isAttachmentGroundingPayload(grounding, intent)) return false;
-        if (isInternalSummary) return false;
 
         // Pre-grounded live RAG request with verified sources already supplied by caller
         const hasPreloadedSources = (Array.isArray(body?.sources) && body.sources.length > 0) || Boolean(body?.ragText);
