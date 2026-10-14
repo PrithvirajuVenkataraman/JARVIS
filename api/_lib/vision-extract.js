@@ -2,6 +2,12 @@ const PROVIDER_TIMEOUT_MS = 20_000;
 const GEMINI_API_VERSIONS = ['v1beta', 'v1'];
 const GEMINI_MODEL_FALLBACKS = [
     'gemini-3.8-flash',
+    'gemini-3.7-flash',
+    'gemini-2.5-pro',
+    'gemini-2.5-flash',
+    'gemini-2.0-flash',
+    'gemini-2.0-flash-lite',
+    'gemini-1.5-flash',
     'gemini-flash-latest'
 ];
 const GROQ_VISION_MODEL_FALLBACKS = [
