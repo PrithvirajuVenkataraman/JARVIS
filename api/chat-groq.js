@@ -3,6 +3,35 @@ import { applyApiSecurity } from './_lib/security.js';
 import { validateAndRepairCodeAndMath } from './_lib/code-math-validator.js';
 import { inspectPromptSecurity } from './_lib/prompt-guard.js';
 import { redactSensitiveData } from './_lib/pii-redactor.js';
+import {
+    getCostControls,
+    applyCostCapToLengthPolicy
+} from './_lib/cost-controls.js';
+import {
+    extractHostname as extractEntityHostname,
+    isTrustedDomain as isTrustedEntityDomain,
+    extractEntityTarget,
+    validateEntityResponse,
+    stripInlineCitationMarkers
+} from './_lib/entity-verifier.js';
+import {
+    isStableGeographyOrGeneralFactQuery,
+    classifyQueryIntent
+} from './_lib/intent-separator.js';
+import {
+    BM25Index,
+    computeBM25Scores,
+    textToEmbeddingVector,
+    vectorCosineSimilarity
+} from './_lib/bm25.js';
+import {
+    extractQueryConstraints,
+    detectLogicalContradictions,
+    evaluateDraftSolution,
+    needsRefinement,
+    buildRefinementPrompt,
+    synthesizeSelfCritiqueMetadata
+} from './_lib/self-critique-loop.js';
 
 /* ── Image MIME normalizer ────────────────────────────────── */
 // Gemini and Groq only accept jpeg/png/webp/gif.
@@ -23,33 +52,7 @@ function normalizeImageMimeType(mimeType, base64 = '') {
     return 'image/jpeg'; // jpeg, jpg, heic, heif, avif, bmp, tiff → jpeg
 }
 
-import {
-    getCostControls,
-    applyCostCapToLengthPolicy
-} from './_lib/cost-controls.js';
-
-import {
-    extractHostname as extractEntityHostname,
-    isTrustedDomain as isTrustedEntityDomain,
-    extractEntityTarget,
-    validateEntityResponse,
-    stripInlineCitationMarkers
-} from './_lib/entity-verifier.js';
-
-import {
-    isStableGeographyOrGeneralFactQuery,
-    classifyQueryIntent
-} from './_lib/intent-separator.js';
-
-import {
-    BM25Index,
-    computeBM25Scores,
-    textToEmbeddingVector,
-    vectorCosineSimilarity
-} from './_lib/bm25.js';
-
 /* ── BM25 & Semantic Vector Intent Engine ────────────────────────── */
-const CHAT_INTENT_INDEX = new BM25Index({ k1: 1.2, b: 0.75 });
 const CHAT_INTENT_PROTOTYPES = [
     {
         id: 'time_sensitive_freshness',
@@ -185,38 +188,39 @@ const CHAT_INTENT_PROTOTYPES = [
     }
 ];
 
-const COMPILED_CHAT_INTENTS = CHAT_INTENT_PROTOTYPES.map(p => {
-    CHAT_INTENT_INDEX.addDocument(p.id, p.text, p);
-    return {
-        ...p,
-        vector: textToEmbeddingVector(p.text, 512)
-    };
-});
+let _chatIntentIndex = null;
+let _compiledChatIntents = null;
+
+function getCompiledChatIntents() {
+    if (!_compiledChatIntents) {
+        _chatIntentIndex = new BM25Index({ k1: 1.2, b: 0.75 });
+        _compiledChatIntents = CHAT_INTENT_PROTOTYPES.map(p => {
+            _chatIntentIndex.addDocument(p.id, p.text, p);
+            return {
+                ...p,
+                vector: textToEmbeddingVector(p.text, 512)
+            };
+        });
+    }
+    return { intents: _compiledChatIntents, index: _chatIntentIndex };
+}
 
 function scoreChatIntent(query, categoryId) {
     const raw = String(query || '').trim();
     if (!raw) return 0;
-    const proto = COMPILED_CHAT_INTENTS.find(p => p.id === categoryId);
+    const { intents, index } = getCompiledChatIntents();
+    const proto = intents.find(p => p.id === categoryId);
     if (!proto) return 0;
 
     const queryVec = textToEmbeddingVector(raw, 512);
     const semSim = vectorCosineSimilarity(queryVec, proto.vector);
 
-    const bm25Res = CHAT_INTENT_INDEX.search(raw, { topK: 10 });
+    const bm25Res = index.search(raw, { topK: 10 });
     const match = bm25Res.find(r => r.doc.id === categoryId);
     const bm25Score = match ? Math.min(1.0, match.score / 4.0) : 0;
 
     return semSim * 0.5 + bm25Score * 0.5;
 }
-
-import {
-    extractQueryConstraints,
-    detectLogicalContradictions,
-    evaluateDraftSolution,
-    needsRefinement,
-    buildRefinementPrompt,
-    synthesizeSelfCritiqueMetadata
-} from './_lib/self-critique-loop.js';
 
 async function getSearchHelpers() {
     try {
@@ -734,7 +738,7 @@ class EdgeSemanticLruCache {
 
 const edgeResponseCache = new EdgeSemanticLruCache();
 
-    export default async function handler(req, res) {
+export default async function handler(req, res) {
         try {
             const guard = applyApiSecurity(req, res, {
                 methods: ['POST', 'HEAD', 'OPTIONS'],
@@ -4604,8 +4608,11 @@ Respond conversationally and naturally.`;
         if (!body || typeof body !== 'object' || Array.isArray(body)) {
             return { ok: false, error: 'Request body must be a JSON object.' };
         }
+        const rawImages = Array.isArray(body.images) ? body.images : (Array.isArray(body.grounding?.images) ? body.grounding.images : undefined);
+        const images = Array.isArray(rawImages) ? rawImages.filter(img => img && (img.base64 || img.url)) : undefined;
+        const hasImages = Array.isArray(images) && images.length > 0;
         const message = String(body.message || '').trim();
-        if (!message) return { ok: false, error: 'Message is required.' };
+        if (!message && !hasImages) return { ok: false, error: 'Message is required.' };
         if (message.length > 16000) return { ok: false, error: 'Message is too long.' };
 
         let contextChars = 0;
@@ -4657,8 +4664,6 @@ Respond conversationally and naturally.`;
             : {};
         const intent = normalizeIntent(body.intent);
         const grounding = normalizeGrounding(body.grounding, intent);
-        const rawImages = Array.isArray(body.images) ? body.images : (Array.isArray(body.grounding?.images) ? body.grounding.images : undefined);
-        const images = Array.isArray(rawImages) ? rawImages.filter(img => img && (img.base64 || img.url)) : undefined;
         if ((intent.startsWith('selection_') || intent === 'verify_answer') && !grounding) {
             return { ok: false, error: 'Grounded requests require valid grounding data.' };
         }
@@ -5054,7 +5059,7 @@ Respond conversationally and naturally.`;
         return detailedScore >= 0.25 || days >= 4;
     }
 
-    export const __test = {
+export const __test = {
         buildGroundedUserMessage,
         buildServerSystemPrompt,
         composeFinalPrompt,
