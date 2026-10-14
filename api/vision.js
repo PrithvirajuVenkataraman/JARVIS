@@ -553,6 +553,12 @@ async function runFastMathOcrSolvePipeline({ providers, mimeType, imageBase64, u
         '- Preserve symbols, exponents, fractions, and equation structure.',
         '- Keep steps concise unless the user asks for detailed/hard step-by-step solving.',
         '- If a core number, operator, or symbol is unreadable, put it in ambiguities and set ocrConfidence to low.',
+        '- GEOMETRY DIAGRAM DISCIPLINE & SEGMENT ENDPOINT TRACING:',
+        '  * Carefully inspect where each labeled segment begins and ends before forming equations.',
+        '  * Circle centers vs circumference: If a marked circle center lies along a segment of length L that starts at the circumference and ends at a right-angle vertex, the portion from the circumference to the center is the radius R. The remaining leg from the center to the vertex is (L - R), NOT L.',
+        '  * Anti-shortcut rule: Never assume given numbers are right triangle legs (e.g. 9 and 12 yielding hypotenuse 15) without verifying that the legs actually originate from the center.',
+        '  * If the hypotenuse is the radius R from center to circumference, set up the Pythagorean theorem using (L - R) and height H: (L - R)^2 + H^2 = R^2, expand algebraically, and solve for R.',
+        '  * Verify consistency: the computed radius R cannot exceed or contradict the total visible chord or span.',
         `User intent: ${String(userPrompt || 'Solve the problem in the image.').trim()}`
     ].join('\n');
 
@@ -766,6 +772,13 @@ async function runMathOcrSolvePipeline({ providers, mimeType, imageBase64, userP
         '- Accurately preserve all numbers, exponents, symbols, and mathematical notation.',
         '- Provide clean, clear, human-like solution steps.',
         '- Do not include meta-commentary, persona preambles, or prompt regurgitation.',
+        '- GEOMETRY DIAGRAM DISCIPLINE & SEGMENT ENDPOINT TRACING:',
+        '  * Carefully trace every segment from its start to end point. Do not assume numbers written near a right angle are triangle legs without checking where they terminate.',
+        '  * Circle centers vs circumference: If a labeled segment of length L begins at the circle perimeter/circumference and passes through the center dot O, the distance from the perimeter to O is radius R. Therefore, the distance from center O to the perpendicular corner is (L - R), NOT L.',
+        '  * Anti-shortcut rule: Do not fall for standard 3-4-5 or 9-12-15 right triangle traps unless both legs explicitly terminate at the center point.',
+        '  * When connecting the center O to a point on the circle circumference, that segment is the hypotenuse with length R.',
+        '  * Solve the equation (L - R)^2 + H^2 = R^2 by expanding L^2 - 2LR + R^2 + H^2 = R^2, canceling R^2, and solving for R = (L^2 + H^2) / (2L).',
+        '  * Physical sanity check: Ensure the radius R is geometrically consistent with all labeled chords and line segments.',
         `User request: ${String(userPrompt || 'Solve the problem in the image.').trim()}`
     ].join('\n');
 
@@ -971,6 +984,7 @@ function buildVisionPrompt(userPrompt, task) {
         '     * Focus on SOLVING THE PROBLEM itself, rather than describing the smartphone hardware, bezels, fingers, room, or people holding the device.',
         '     * Provide the complete, rigorous step-by-step mathematical working, equations, and exact final numerical/symbolic answer directly in "answer".',
         '     * In "summary", briefly state the problem being solved (e.g. "Calculating the radius of the circle with inscribed right triangle").',
+        '     * In geometric diagrams, trace segment endpoints carefully: if a segment passes through a circle center, determine which portion is the radius R and which is (L - R); do not assume numbers are triangle legs without checking their actual endpoints.',
         '     * If the user prompt is "?", "solve", or empty, execute the solution to the embedded question or problem directly.',
         '- UNCERTAINTY & ZERO-HALLUCINATION RULE: If uncertain about any identity, object, model, brand, or visual detail, state uncertainty clearly rather than guessing. Never invent, assume, or fabricate unseen devices, screens, backgrounds, or contexts.',
         '- PERSONS & PORTRAIT RULE: When a person, portrait, or group of people appears in the image, identify public figures when clearly recognizable from prominent visual features. For unknown or non-public individuals, provide a clear, respectful description of:',
