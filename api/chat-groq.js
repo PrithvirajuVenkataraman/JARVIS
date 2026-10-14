@@ -1608,7 +1608,9 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 intent: 'casual_chat',
                 response: finalText,
                 selfCritique: streamCritiqueMetadata || undefined,
-                sources: Array.isArray(liveRag.sources) && liveRag.sources.length > 0 ? liveRag.sources : undefined,
+                sources: (Array.isArray(liveRag.sources) && liveRag.sources.length > 0)
+                    ? liveRag.sources
+                    : (Array.isArray(streamResult.sources) && streamResult.sources.length > 0 ? streamResult.sources : undefined),
                 action: null,
                 provider: streamResult.provider,
                 modelUsed: streamResult.modelUsed,
@@ -2761,6 +2763,10 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             if (systemInstruction) {
                 reqBody.system_instruction = systemInstruction;
             }
+            const isExplicitSearchQuery = isTimeSensitiveInfoRequest(prompt) || isMutableEntityFactQuery(prompt) || Boolean(options?.needsWebSearch || options?.forceLiveSearch || options?.webMode === 'force');
+            if (isExplicitSearchQuery && !options?.minimalThinking && !generationConfig.thinkingConfig?.thinkingBudget) {
+                reqBody.tools = [{ googleSearch: {} }];
+            }
             const response = await fetch(
                 `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${apiKey}`,
                 {
@@ -2773,6 +2779,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
             if (!response.ok || !response.body) return { ok: false };
             let text = '';
             let inReasoning = false;
+            let groundingSources = [];
             await readSseStream(response.body, payload => {
                 if (initialTimer) {
                     clearTimeout(initialTimer);
@@ -2780,8 +2787,24 @@ const edgeResponseCache = new EdgeSemanticLruCache();
                 }
                 resetIdleTimer();
 
-                const parts = Array.isArray(payload?.candidates?.[0]?.content?.parts)
-                    ? payload.candidates[0].content.parts
+                const candidate = payload?.candidates?.[0];
+                if (candidate?.groundingMetadata?.groundingChunks) {
+                    const chunks = candidate.groundingMetadata.groundingChunks;
+                    if (Array.isArray(chunks)) {
+                        for (const chunk of chunks) {
+                            if (chunk?.web?.uri) {
+                                groundingSources.push({
+                                    url: chunk.web.uri,
+                                    title: chunk.web.title || chunk.web.uri,
+                                    source: 'googleSearch'
+                                });
+                            }
+                        }
+                    }
+                }
+
+                const parts = Array.isArray(candidate?.content?.parts)
+                    ? candidate.content.parts
                     : [];
                 for (const part of parts) {
                     const isThought = Boolean(part?.thought);
@@ -2835,7 +2858,13 @@ const edgeResponseCache = new EdgeSemanticLruCache();
 
             const isUnclosedMarkdownFragment = /^[*#_`"']{1,4}[^*#_`"'\n]+$/.test(cleanContent) && cleanContent.length < 60;
             return (cleanContent.length > 0 && !isUnclosedMarkdownFragment)
-                ? { ok: true, provider: 'gemini', modelUsed: model, text }
+                ? {
+                    ok: true,
+                    provider: 'gemini',
+                    modelUsed: model,
+                    text,
+                    sources: groundingSources.length > 0 ? groundingSources : undefined
+                }
                 : { ok: false };
         } catch (_) {
             return { ok: false };
