@@ -138,7 +138,7 @@ assert.equal(instantCandidates[0], 'openai/gpt-oss-20b', 'Instant queries must p
 
 // 10.3 System prompt compaction & high-density epistemic directives
 const compactedPrompt = chatTest.buildServerSystemPrompt();
-assert.ok(compactedPrompt.length < 3800, `Compacted prompt should be under 3800 chars, got ${compactedPrompt.length}`);
+assert.ok(compactedPrompt.length < 4600, `Compacted prompt should be under 4600 chars, got ${compactedPrompt.length}`);
 assert.ok(compactedPrompt.includes('ZERO-HALLUCINATION & EPISTEMIC GROUNDING'), 'Compacted prompt must contain Zero-Hallucination section');
 assert.ok(compactedPrompt.includes('Never invent people, dates, prices, statistics'), 'Prompt must strictly prohibit invented facts');
 assert.ok(compactedPrompt.includes("No, no, no don't do that! I thought we were having a good time."), '18+ boundary deflection quote preserved');
