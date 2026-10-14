@@ -264,6 +264,7 @@ async function getInstantFactHelper() {
         'qwen-2.5-coder-32b',
         'gemma2-9b-it',
         'deepseek-r1-distill-qwen-32b',
+        'gemini-3.8-flash',
         'gemini-3.7-flash',
         'gemini-2.5-pro',
         'gemini-2.5-flash',
@@ -472,20 +473,21 @@ async function getInstantFactHelper() {
 
         let geminiList = [];
         if (tier === 'deep') {
-            geminiList = [mappedGemini, configured, 'gemini-2.5-pro', 'gemini-3.7-flash', 'gemini-2.5-flash'];
+            geminiList = [mappedGemini, configured, 'gemini-3.8-flash', 'gemini-2.5-pro', 'gemini-3.7-flash', 'gemini-2.5-flash'];
         } else if (preferSpeed || tier === 'instant') {
-            geminiList = [mappedGemini, configured, 'gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-3.7-flash', 'gemini-2.5-pro'];
+            geminiList = [mappedGemini, configured, 'gemini-2.5-flash-lite', 'gemini-3.8-flash', 'gemini-2.5-flash', 'gemini-3.7-flash', 'gemini-2.5-pro'];
         } else {
-            geminiList = [mappedGemini, configured, 'gemini-3.7-flash', 'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'];
+            geminiList = [mappedGemini, configured, 'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-2.5-flash-lite'];
         }
         return [...new Set(geminiList.filter(Boolean))];
     }
 
     const KNOWN_GEMINI_VISION_MODELS = new Set([
+        'gemini-3.8-flash',
         'gemini-3.7-flash',
+        'gemini-2.5-pro',
         'gemini-2.5-flash',
         'gemini-2.0-flash',
-        'gemini-2.5-pro',
         'gemini-1.5-flash',
         'gemini-2.5-flash-lite'
     ]);
@@ -498,10 +500,11 @@ async function getInstantFactHelper() {
             ? String(userSelectedModel || '').trim()
             : (String(userSelectedModel || '').startsWith('gemini-') ? String(userSelectedModel) : '');
         const visionModels = [
+            'gemini-3.8-flash',
             'gemini-3.7-flash',
+            'gemini-2.5-pro',
             'gemini-2.5-flash',
             'gemini-2.0-flash',
-            'gemini-2.5-pro',
             'gemini-1.5-flash',
             'gemini-2.5-flash-lite'
         ];
@@ -1295,7 +1298,7 @@ const edgeResponseCache = new EdgeSemanticLruCache();
 
     function supportsGeminiThinking(modelName = '') {
         const m = String(modelName || '').toLowerCase();
-        return m.includes('thinking') || m.includes('2.5-pro') || m.includes('3.7');
+        return m.includes('thinking') || m.includes('2.5-pro') || m.includes('3.7') || m.includes('3.8');
     }
 
     function isExplicitReasoningIntent(intent = '', message = '') {
