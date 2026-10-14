@@ -323,4 +323,149 @@ console.log('11. Verifying missing-attachment refusal detection...');
     console.log('  [PASS] 11.1 All model refusal variants accurately detected without false positives.');
 }
 
+const { classifyQueryComplexity, buildServerSystemPrompt } = chatTest;
+
+// =========================================================================
+// 12. Mathematical Reasoning Rules in Multimodal Prompt
+// =========================================================================
+console.log('12. Verifying mathematical reasoning rules in multimodal image prompt...');
+{
+    const mathImage = {
+        name: 'triangle_problem.png',
+        mimeType: 'image/png',
+        base64: Buffer.from('mock_triangle_bytes').toString('base64')
+    };
+
+    const mathPrompt = buildGroundedUserMessage({
+        message: 'Find the missing angle',
+        grounding: {
+            kind: 'attachment',
+            images: [mathImage]
+        },
+        images: [mathImage]
+    });
+
+    // Rule 6 header
+    assert.ok(mathPrompt.includes('MATHEMATICAL & QUANTITATIVE REASONING'), 'Must include math reasoning rule header');
+    // Sub-rule a: diagram-first
+    assert.ok(mathPrompt.includes('INTERPRET THE DIAGRAM FIRST'), 'Must instruct diagram interpretation before computing');
+    // Sub-rule b: variable definition
+    assert.ok(mathPrompt.includes('DEFINE EVERY VARIABLE'), 'Must require variable definition before substitution');
+    // Sub-rule c: theorem statement
+    assert.ok(mathPrompt.includes('STATE THE THEOREM OR FORMULA'), 'Must require theorem/formula statement before application');
+    // Sub-rule d: step-by-step
+    assert.ok(mathPrompt.includes('SHOW EVERY STEP'), 'Must require showing every algebraic step');
+    // Sub-rule e: verification
+    assert.ok(mathPrompt.includes('VERIFY THE ANSWER'), 'Must require answer verification');
+    // Sub-rule f: ambiguity
+    assert.ok(mathPrompt.includes('HANDLE AMBIGUITY HONESTLY'), 'Must require honest ambiguity handling');
+    // Rule 7: LaTeX formatting
+    assert.ok(mathPrompt.includes('LATEX FORMATTING'), 'Must include LaTeX formatting directive');
+    assert.ok(mathPrompt.includes('$$...$$'), 'Must specify display equation delimiter');
+    assert.ok(mathPrompt.includes('$...$'), 'Must specify inline math delimiter');
+    // Rule 8: Geometric discipline
+    assert.ok(mathPrompt.includes('GEOMETRIC DIAGRAM DISCIPLINE'), 'Must include geometric diagram discipline rule');
+
+    console.log('  [PASS] 12.1 All mathematical reasoning rules (6-8 with sub-rules) present in multimodal prompt.');
+}
+
+// =========================================================================
+// 13. System Prompt Contains Global Math Reasoning Block
+// =========================================================================
+console.log('13. Verifying global math reasoning block in server system prompt...');
+{
+    const sysPrompt = buildServerSystemPrompt({}, 'chat');
+
+    assert.ok(
+        sysPrompt.includes('MATHEMATICAL & QUANTITATIVE REASONING'),
+        'System prompt must include global math reasoning block'
+    );
+    assert.ok(
+        sysPrompt.includes('Define every variable and its unit before substituting a value'),
+        'System prompt must include variable definition rule'
+    );
+    assert.ok(
+        sysPrompt.includes('verify it by substituting back into the original equation'),
+        'System prompt must include answer verification rule'
+    );
+    assert.ok(
+        sysPrompt.includes('$$...$$'),
+        'System prompt must specify display equation LaTeX delimiter'
+    );
+    assert.ok(
+        sysPrompt.includes('state the ambiguity explicitly rather than inventing a value'),
+        'System prompt must require ambiguity disclosure rather than fabrication'
+    );
+
+    // Verify it applies to both chat intent and deep_reasoning intent
+    const deepPrompt = buildServerSystemPrompt({}, 'deep_reasoning');
+    assert.ok(deepPrompt.includes('MATHEMATICAL & QUANTITATIVE REASONING'), 'Math block must appear in deep_reasoning system prompt too');
+    assert.ok(deepPrompt.includes('DEEP REASONING & RECURSIVE VERIFICATION DIRECTIVE'), 'Deep reasoning directive must still be present');
+
+    console.log('  [PASS] 13.1 Global math reasoning block verified in system prompt for both chat and deep_reasoning intents.');
+}
+
+// =========================================================================
+// 14. classifyQueryComplexity Never Returns 'instant' for Image Requests
+// =========================================================================
+console.log('14. Verifying image attachment tier floor (never instant)...');
+{
+    // Greeting with image — must not downgrade to instant
+    const greetingWithImage = classifyQueryComplexity('hi', { intent: 'selection_custom' });
+    assert.notEqual(greetingWithImage.tier, 'instant', 'Image requests must not be downgraded to instant tier');
+    assert.equal(greetingWithImage.tier, 'standard', 'Image requests must be at least standard tier');
+
+    // hasImages flag path
+    const imageFlag = classifyQueryComplexity('solve this', { hasImages: true });
+    assert.notEqual(imageFlag.tier, 'instant', 'hasImages flag must prevent instant tier');
+
+    // Short lookup with image — still standard
+    const shortWithImage = classifyQueryComplexity('what is this', { intent: 'selection_custom' });
+    assert.notEqual(shortWithImage.tier, 'instant');
+
+    // Simple math expression with no image — still allowed to be instant (existing behavior preserved)
+    const pureCalc = classifyQueryComplexity('2 + 2', {});
+    assert.equal(pureCalc.tier, 'instant', 'Pure calculator math without images should remain instant');
+
+    // Greeting without image — still allowed to be instant
+    const greeting = classifyQueryComplexity('hello', {});
+    assert.equal(greeting.tier, 'instant', 'Greeting without images should remain instant');
+
+    console.log('  [PASS] 14.1 Image attachment correctly floors tier to standard; non-image fast-path preserved.');
+}
+
+// =========================================================================
+// 15. Math OCR Text Is Not Filtered — Included as Supplementary Evidence
+// =========================================================================
+console.log('15. Verifying math OCR text passes the isMeaningfulOcrText filter...');
+{
+    const mathImage = {
+        name: 'equation.png',
+        mimeType: 'image/png',
+        base64: 'mock_data'
+    };
+    const mathOcrText = 'x^2 + 5x + 6 = 0';
+
+    const promptWithMathOcr = buildGroundedUserMessage({
+        message: 'Solve the equation shown',
+        grounding: {
+            kind: 'attachment',
+            selectedText: mathOcrText,
+            images: [mathImage]
+        },
+        images: [mathImage]
+    });
+
+    assert.ok(
+        promptWithMathOcr.includes('Supplementary extracted text'),
+        'Short math OCR text must not be filtered out — must appear as supplementary evidence'
+    );
+    assert.ok(
+        promptWithMathOcr.includes(mathOcrText),
+        'The actual math OCR text must be present in the prompt'
+    );
+
+    console.log('  [PASS] 15.1 Short math OCR text preserved as supplementary evidence in multimodal prompt.');
+}
+
 console.log('--- ALL JARVIS IMAGE UNDERSTANDING TESTS PASSED ---');
