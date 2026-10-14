@@ -13751,7 +13751,8 @@ ${code}
             clearTimeout(_prewarmDebounceTimer);
             _prewarmDebounceTimer = setTimeout(() => {
                 _lastPrewarmTimestamp = Date.now();
-                fetch((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, { method: 'HEAD' }).catch(() => {});
+                const ep = (window.APP_CONFIG || APP_CONFIG)?.endpoints?.diagnostics || '/api/diagnostics';
+                fetch(ep, { method: 'HEAD' }).catch(() => {});
             }, 350);
         }
 
