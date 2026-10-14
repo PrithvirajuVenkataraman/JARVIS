@@ -20,6 +20,9 @@
     "dependencies": {
         "@vercel/blob": "^2.4.1"
     },
+    "engines": {
+        "node": ">=20.x"
+    },
     "vercel": {
         "functions": {
             "api/**/*.js": {
