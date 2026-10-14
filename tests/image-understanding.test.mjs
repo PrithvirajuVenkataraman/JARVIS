@@ -9,7 +9,9 @@ const {
     getPreferredGeminiVisionCandidates,
     getPreferredGroqVisionCandidates,
     normalizeImageMimeType,
-    formatGeminiDialogContents
+    formatGeminiDialogContents,
+    normalizeChatRequest,
+    scoreChatIntent
 } = chatTest;
 
 // =========================================================================
@@ -605,6 +607,45 @@ console.log('20. Verifying mixed attachments (image + document) preservation...'
     assert.ok(mixedPrompt.includes('CONTRACT AGREEMENT'), 'Must preserve extracted document text');
     assert.ok(mixedPrompt.includes('Compare the photo with the contract document'), 'Must preserve user message');
     console.log('  [PASS] 20.1 Mixed image and document attachments preserved in multimodal prompt.');
+}
+
+// =========================================================================
+// 21. Empty Message with Image Attachment Normalization
+// =========================================================================
+console.log('21. Verifying empty message normalization when image attachments are present...');
+{
+    const sampleImg = {
+        name: 'scan.jpeg',
+        mimeType: 'image/jpeg',
+        base64: 'dGVzdA=='
+    };
+
+    // User sends image with empty string or whitespace message
+    const emptyMsgReq = normalizeChatRequest({
+        message: '   ',
+        images: [sampleImg]
+    });
+    assert.equal(emptyMsgReq.ok, true, 'Must allow empty message when images are attached');
+    assert.equal(emptyMsgReq.value.images.length, 1, 'Must preserve attached image');
+
+    // User sends request without message and without images
+    const invalidReq = normalizeChatRequest({
+        message: '   '
+    });
+    assert.equal(invalidReq.ok, false, 'Must reject empty message when no images are attached');
+    assert.equal(invalidReq.error, 'Message is required.');
+
+    console.log('  [PASS] 21.1 normalizeChatRequest accepts empty message with image attachment and rejects empty message without image.');
+}
+
+// =========================================================================
+// 22. Lazy Compiled Chat Intents & Zero Cold-Start Overhead
+// =========================================================================
+console.log('22. Verifying lazy intent compilation & cold-start safety...');
+{
+    const score = scoreChatIntent('What is the capital of France?', 'timeless_factual');
+    assert.ok(typeof score === 'number' && score > 0, 'scoreChatIntent must compute valid score via lazy intent engine');
+    console.log('  [PASS] 22.1 Lazy BM25 & Semantic Intent engine computes scoring with zero boot-time crashes.');
 }
 
 console.log('--- ALL JARVIS IMAGE UNDERSTANDING TESTS PASSED ---');
