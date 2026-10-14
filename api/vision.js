@@ -115,7 +115,10 @@ export default async function handler(req, res) {
             return sendVisionError(res, 503, 'vision_provider_unavailable', 'Image recognition requires a Gemini (GEMINI_API_KEY) or Groq Vision (GROQ_API_KEY) API key configured in the environment.');
         }
 
-        if (task === 'math_ocr_solve') { 
+        const isMathOrProblemQuery = !prompt || String(prompt).trim() === '?' || /\b(?:solve|calculate|find|compute|radius|diameter|area|equation|answer|geometry|triangle|circle|math|\?)\b/i.test(String(prompt));
+        const activeTask = (task === 'general_vision' && isMathOrProblemQuery) ? 'math_ocr_solve' : task;
+
+        if (activeTask === 'math_ocr_solve') { 
             let fastResult = null;
             try {
                 fastResult = await runFastMathOcrSolvePipeline({ 
@@ -125,20 +128,27 @@ export default async function handler(req, res) {
                     userPrompt: prompt 
                 });
             } catch (_) {}
-            const result = shouldEscalateMathOcrSolve(fastResult, prompt)
-                ? await runMathOcrSolvePipeline({ 
-                    providers, 
-                    mimeType: normalizedMimeType, 
-                    imageBase64, 
-                    userPrompt: prompt 
-                })
-                : fastResult; 
-            return res.status(200).json({ 
-                success: true, 
-                task, 
-                response: result.response,
-                details: result.details
-            });
+            let result = null;
+            try {
+                result = shouldEscalateMathOcrSolve(fastResult, prompt)
+                    ? await runMathOcrSolvePipeline({ 
+                        providers, 
+                        mimeType: normalizedMimeType, 
+                        imageBase64, 
+                        userPrompt: prompt 
+                    })
+                    : fastResult; 
+            } catch (_) {
+                result = fastResult;
+            }
+            if (result && result.response) {
+                return res.status(200).json({ 
+                    success: true, 
+                    task: activeTask, 
+                    response: result.response,
+                    details: result.details
+                });
+            }
         }
         if (task === 'translate_to_english') {
             const result = await runTranslateToEnglishPipeline({
@@ -957,6 +967,11 @@ function buildVisionPrompt(userPrompt, task) {
             ? '- Do NOT lead with background signs, wall posters, small labels, or unrelated printed text unless the user asked to read text.'
             : '- Ignore wall color/background/decor unless user explicitly asks for background.',
         '- VISIBLE EVIDENCE RULE: Describe only what is visibly supported by the image pixels. Accurately identify people, attire, gestures, objects, text, math, charts, and scenes that are clearly visible.',
+        '- EMBEDDED PROBLEM SOLVING & SCREEN BYPASS MANDATE: If the image depicts a mathematical problem, geometry puzzle, diagram with dimensions, physics question, exam question, or educational exercise (even if displayed on a smartphone screen, monitor, whiteboard, textbook, or held by hands):',
+        '     * Focus on SOLVING THE PROBLEM itself, rather than describing the smartphone hardware, bezels, fingers, room, or people holding the device.',
+        '     * Provide the complete, rigorous step-by-step mathematical working, equations, and exact final numerical/symbolic answer directly in "answer".',
+        '     * In "summary", briefly state the problem being solved (e.g. "Calculating the radius of the circle with inscribed right triangle").',
+        '     * If the user prompt is "?", "solve", or empty, execute the solution to the embedded question or problem directly.',
         '- UNCERTAINTY & ZERO-HALLUCINATION RULE: If uncertain about any identity, object, model, brand, or visual detail, state uncertainty clearly rather than guessing. Never invent, assume, or fabricate unseen devices, screens, backgrounds, or contexts.',
         '- PERSONS & PORTRAIT RULE: When a person, portrait, or group of people appears in the image, identify public figures when clearly recognizable from prominent visual features. For unknown or non-public individuals, provide a clear, respectful description of:',
         '     * How the person or people look (apparent age range, expression, hair color/style, facial features).',
@@ -1210,6 +1225,16 @@ function formatVisionResponse(data, task, userPrompt = '') {
         textFocused
         || (!hasStrongSubject && !animals.length)
     );
+
+    const hasSubstantiveSolution = directAnswer && (
+        directAnswer.includes('\n') ||
+        /\b(?:solution|step|radius|pythagor|equation|formula|final answer|calculate|equals|=|\d+\s*cm)\b/i.test(directAnswer) ||
+        directAnswer.length > 80
+    );
+    if (hasSubstantiveSolution) {
+        return cleanVisionDisplayText(directAnswer);
+    }
+
     const objectFirstAnswer = buildObjectFirstVisionAnswer({
         directAnswer,
         summary,
