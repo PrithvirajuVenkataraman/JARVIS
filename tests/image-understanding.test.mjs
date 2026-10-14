@@ -648,4 +648,36 @@ console.log('22. Verifying lazy intent compilation & cold-start safety...');
     console.log('  [PASS] 22.1 Lazy BM25 & Semantic Intent engine computes scoring with zero boot-time crashes.');
 }
 
+// =========================================================================
+// 23. Embedded Problem Solving & Math OCR Solver Routing
+// =========================================================================
+console.log('23. Verifying embedded problem solving & math OCR solver routing...');
+{
+    const fs = await import('node:fs');
+    const indexSource = fs.readFileSync('index.html', 'utf8');
+    const visionSource = fs.readFileSync('api/vision.js', 'utf8');
+
+    // 23.1 index.html must route "?" or problem queries to math_ocr_solve in vision fallback
+    assert.ok(
+        indexSource.includes("const isMathOrProblemQuery = !rawPromptText || rawPromptText === '?'"),
+        'index.html vision fallback must detect ? and problem queries'
+    );
+    assert.ok(
+        indexSource.includes("const fallbackTask = isMathOrProblemQuery ? 'math_ocr_solve' : 'general_vision';"),
+        'index.html vision fallback must route problem queries to math_ocr_solve'
+    );
+
+    // 23.2 api/vision.js must have embedded problem solving mandate and preserve substantive solutions
+    assert.ok(
+        visionSource.includes('EMBEDDED PROBLEM SOLVING & SCREEN BYPASS MANDATE'),
+        'api/vision.js must mandate solving embedded problems and bypassing screen/phone containers'
+    );
+    assert.ok(
+        visionSource.includes('const hasSubstantiveSolution = directAnswer &&'),
+        'api/vision.js must preserve substantive multi-step solutions without squashing'
+    );
+
+    console.log('  [PASS] 23.1 Embedded problem solving and math OCR solver routing verified.');
+}
+
 console.log('--- ALL JARVIS IMAGE UNDERSTANDING TESTS PASSED ---');
