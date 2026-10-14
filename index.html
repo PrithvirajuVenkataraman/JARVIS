@@ -5959,22 +5959,24 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
                         if (imgBase64) {
                             console.warn('[askGeminiAI] Attachment chat request failed, cascading to /api/vision fallback:', error?.message || error);
                             const visionEndpoint = (window.APP_CONFIG || APP_CONFIG)?.endpoints?.vision || '/api/vision';
+                            const rawPromptText = String(normalizedUserMessage || userMessage || '').trim();
+                            const isMathOrProblemQuery = !rawPromptText || rawPromptText === '?' || /\b(?:solve|calculate|find|compute|radius|diameter|area|equation|answer|geometry|triangle|circle|math|what is|how much|\?)\b/i.test(rawPromptText);
+                            const fallbackTask = isMathOrProblemQuery ? 'math_ocr_solve' : 'general_vision';
+                            const fallbackPrompt = (isMathOrProblemQuery && (!rawPromptText || rawPromptText === '?'))
+                                ? 'Solve the problem, question, or diagram in the image step by step with complete working and final answer.'
+                                : (rawPromptText || 'Analyze and describe this image in detail.');
+                            const visionPayload = {
+                                imageBase64: imgBase64,
+                                mimeType: primaryImg.mimeType || 'image/jpeg',
+                                prompt: fallbackPrompt,
+                                task: fallbackTask
+                            };
                             const visionData = await (window.JarvisApi?.postJson
-                                ? window.JarvisApi.postJson(visionEndpoint, {
-                                    imageBase64: imgBase64,
-                                    mimeType: primaryImg.mimeType || 'image/jpeg',
-                                    prompt: normalizedUserMessage || userMessage || 'Analyze and describe this image in detail.',
-                                    task: 'general_vision'
-                                }, { signal: controller.signal, timeoutMs: 25000 })
+                                ? window.JarvisApi.postJson(visionEndpoint, visionPayload, { signal: controller.signal, timeoutMs: 25000 })
                                 : fetch(visionEndpoint, {
                                     method: 'POST',
                                     headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({
-                                        imageBase64: imgBase64,
-                                        mimeType: primaryImg.mimeType || 'image/jpeg',
-                                        prompt: normalizedUserMessage || userMessage || 'Analyze and describe this image in detail.',
-                                        task: 'general_vision'
-                                    }),
+                                    body: JSON.stringify(visionPayload),
                                     signal: controller.signal
                                 }).then(r => r.json())
                             );
