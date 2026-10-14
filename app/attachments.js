@@ -1,3 +1,10 @@
+import {
+    BM25Index,
+    computeBM25Scores,
+    textToEmbeddingVector,
+    vectorCosineSimilarity
+} from './bm25.js';
+
 const MAX_ATTACHMENTS = 12;
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
 const MAX_EXTRACT_CHARS = 120000;
@@ -7,6 +14,59 @@ const IMAGE_EXTENSIONS = /\.(jpe?g|pjpeg|png|gif|webp|bmp|dib|tiff?|heic|heif|he
 const XLSX_EXTENSIONS = /\.(xlsx|xls|ods)$/i;
 const ZIP_EXTENSIONS = /\.(zip|cbz)$/i;
 const EPUB_EXTENSIONS = /\.epub$/i;
+
+/* ── BM25 & Semantic Vector Engine for Attachments ────────── */
+const ATTACHMENT_INTENT_INDEX = new BM25Index({ k1: 1.2, b: 0.75 });
+const ATTACHMENT_INTENTS = [
+    {
+        id: 'pinpoint_extraction',
+        text: 'find extract locate search pinpoint specific date name number email phone address section clause quote fact detail cite lookup where when who which'
+    },
+    {
+        id: 'global_synthesis',
+        text: 'analyze review summarize explain understand read inspect see everything whole entire full overall all pages attached document comprehensive walkthrough synopsis'
+    },
+    {
+        id: 'ocr_status_diagnostic',
+        text: 'no clear readable text detected visible could not find detect extract any text unable to detect does not contain readable text no text was detected empty image extraction failed no readable text could be extracted attached file type could not extract readable error status notice'
+    },
+    {
+        id: 'substantive_content',
+        text: 'experience education skills resume curriculum project internship objective summary email phone work history employment professional background degree university college certification responsibilities achievements publication research company organization report document data table analysis findings conclusion methodology results discussion section chapter'
+    },
+    {
+        id: 'scene_visual_analysis',
+        text: 'what is this identify object animal vehicle scene describe photo picture image view look at visual appearance'
+    },
+    {
+        id: 'document_text_task',
+        text: 'read text extract document transcribe scan receipt invoice words text page tabular sheet form statement'
+    }
+];
+
+const COMPILED_ATTACHMENT_INTENTS = ATTACHMENT_INTENTS.map(p => {
+    ATTACHMENT_INTENT_INDEX.addDocument(p.id, p.text, p);
+    return {
+        ...p,
+        vector: textToEmbeddingVector(p.text, 512)
+    };
+});
+
+function scoreAttachmentIntent(query, categoryId) {
+    const raw = String(query || '').trim();
+    if (!raw) return 0;
+    const proto = COMPILED_ATTACHMENT_INTENTS.find(p => p.id === categoryId);
+    if (!proto) return 0;
+
+    const queryVec = textToEmbeddingVector(raw, 512);
+    const semSim = vectorCosineSimilarity(queryVec, proto.vector);
+
+    const bm25Res = ATTACHMENT_INTENT_INDEX.search(raw, { topK: 10 });
+    const match = bm25Res.find(r => r.doc.id === categoryId);
+    const bm25Score = match ? Math.min(1.0, match.score / 4.0) : 0;
+
+    return semSim * 0.5 + bm25Score * 0.5;
+}
 
 const pendingAttachments = [];
 
@@ -157,9 +217,9 @@ export async function ingestAllForMessage(attachments = [], userText = '') {
                 originalRequest: prompt,
                 customInstruction: [
                     'The user has attached image(s)/document(s).',
-                    'Describe and answer directly about what is depicted in the attached image, including people, objects, text, diagrams, or scenes shown.',
-                    'Do not write meta-commentary about vision algorithms, CNNs, or machine learning.',
-                    'Do not state that you cannot see the image. Directly describe the objects, text, scene, and content of the image.'
+                    'Describe and answer directly about what is depicted, including text, diagrams, mathematical expressions, equations, or geometric figures.',
+                    'For mathematical or quantitative problems: identify all given values and unknowns from the image; define each variable explicitly before using it; state the relevant formula or theorem; show every calculation step clearly on its own line; verify the answer by substituting back into the original equation; format equations using $...$ (inline) and $$...$$ (display); include appropriate units.',
+                    'Do not write meta-commentary about vision algorithms. Do not state that you cannot see the image. Answer directly from the visual evidence.'
                 ].join(' ')
             }
             : null,
@@ -193,12 +253,11 @@ async function rankAttachmentTextForQuery(query, text) {
 }
 
 function shouldRankAttachmentText(query) {
-    const value = String(query || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    const value = String(query || '').trim();
     if (!value) return false;
-    if (/\b(analy[sz]e|review|summari[sz]e|explain|understand|read|see everything|whole|entire|full|overall|all pages?|attached file|attached document|pdf)\b/.test(value)) {
-        return false;
-    }
-    return /\b(find|extract|where|when|who|which|specific|date|dates|name|names|number|numbers|email|phone|address|section|clause|quote)\b/.test(value);
+    const pinpointScore = scoreAttachmentIntent(value, 'pinpoint_extraction');
+    const globalScore = scoreAttachmentIntent(value, 'global_synthesis');
+    return pinpointScore > 0.15 && pinpointScore > globalScore;
 }
 
 export async function ingestAttachmentWithFallback(attachment) {
@@ -807,25 +866,28 @@ function isImageAttachment(attachment) {
 }
 
 function isOcrStatusMessage(text) {
-    const s = String(text || '').trim().toLowerCase();
+    const s = String(text || '').trim();
     if (!s) return true;
-    return /\b(?:no (?:clear )?(?:readable )?text|no text (?:was )?detected|no text detected|no visible text|could not (?:find|detect|extract) (?:any )?(?:readable )?text|unable to (?:find|detect|extract) (?:any )?(?:readable )?text|does not contain (?:any )?readable text)\b/i.test(s);
+    const statusScore = scoreAttachmentIntent(s, 'ocr_status_diagnostic');
+    const contentScore = scoreAttachmentIntent(s, 'substantive_content');
+    return statusScore >= 0.25 && statusScore > contentScore;
 }
 
 function hasUsefulExtractedText(text) {
     const value = String(text || '').replace(/\s+/g, ' ').trim();
     if (value.length < 40) return false;
     if (isMetadataOnlyExtract(value) || isOcrStatusMessage(value)) return false;
-    const letters = (value.match(/[A-Za-z\u00C0-\u024F]/g) || []).length;
+    const letters = (value.match(/[\p{L}]/gu) || []).length;
     return letters >= 24;
 }
 
 function isMetadataOnlyExtract(text) {
-    const value = String(text || '').toLowerCase();
+    const value = String(text || '').trim();
     if (!value) return true;
     if (isOcrStatusMessage(value)) return true;
-    return /no readable text could be extracted|extraction failed|attached file:\s*.+\s*type:\s*|could not extract readable|no text was detected|no text detected/i.test(value) &&
-        !/\b(experience|education|skills|resume|curriculum|project|internship|objective|summary|email|phone|@)\b/i.test(value);
+    const statusScore = scoreAttachmentIntent(value, 'ocr_status_diagnostic');
+    const contentScore = scoreAttachmentIntent(value, 'substantive_content');
+    return statusScore >= 0.20 && contentScore < 0.15;
 }
 
 function isDuplicateText(left, right) {
@@ -1347,17 +1409,18 @@ function detectSceneTask(attachment) {
     const name = (attachment?.name || '').toLowerCase();
     const mimeType = (attachment?.mimeType || '').toLowerCase();
 
-    // Use scene understanding for images that are likely photos/scenes, not documents
-    const isLikelyPhoto = /\.(jpe?g|png|webp|gif|bmp|tiff?)$/i.test(name) &&
-        !/(scan|document|receipt|invoice|bill|statement|form|page|slide|screenshot)/i.test(name);
+    // Score filename against document text task via BM25 & semantics
+    const nameDocScore = scoreAttachmentIntent(name, 'document_text_task');
+    const isImage = /^image\//i.test(mimeType) || IMAGE_EXTENSIONS.test(name);
+    const isLikelyPhoto = isImage && nameDocScore < 0.20;
 
-    // Check if user text suggests they want to know "what is this" vs "read this"
-    const userText = (globalThis?.currentUserText || '').toLowerCase();
-    const wantsSceneAnalysis = /\b(what is this|what's this|identify|what do you see|what animal|what object|what vehicle|describe|analyze|scene|photo|picture)\b/i.test(userText);
+    // Check user text intent via BM25 + semantic similarity
+    const userText = String(globalThis?.currentUserText || '').trim();
+    const sceneScore = scoreAttachmentIntent(userText, 'scene_visual_analysis');
+    const docScore = scoreAttachmentIntent(userText, 'document_text_task');
+    const wantsSceneAnalysis = sceneScore > 0.25 && sceneScore >= docScore;
 
-    // For PDFs, check if it's likely a scanned document vs a presentation with images
     const isPdf = mimeType === 'application/pdf' || /\.pdf$/i.test(name);
-
     return (isLikelyPhoto || wantsSceneAnalysis) && !isPdf;
 }
 
