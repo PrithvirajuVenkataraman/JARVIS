@@ -147,7 +147,7 @@ export async function ingestAttachmentPayload(payload = {}) {
         const vision = await extractTextFromImage({
             mimeType: visionMime,
             imageBase64: base64,
-            prompt: `Extract all readable text from this image for file "${filename}". Preserve line order and numbers exactly.`
+            prompt: `Extract all readable text, mathematical formulas, equations, numbers, and diagram labels from this image for file "${filename}". Preserve line order, mathematical symbols, and formatting exactly.`
         }).catch(error => ({
             ok: false,
             text: '',
@@ -208,12 +208,23 @@ function clipText(text) {
     return value.length > MAX_EXTRACT_CHARS ? `${value.slice(0, MAX_EXTRACT_CHARS)}\n\n[Truncated]` : value;
 }
 
+function isMathematicalOrFormulaContent(text) {
+    const str = String(text || '').trim();
+    if (str.length < 5) return false;
+    const hasEquationOrInequality = /[\d\w\p{L}]+\s*(?:=|<|>|<=|>=|≈|\\approx|\\le|\\ge|≠|\\neq)\s*[\d\w\p{L}]/u.test(str);
+    const hasMathOperators = /[\d\w\p{L}]\s*(?:[+\-*/^×÷±]|\\[a-zA-Z]+)\s*[\d\w\p{L}]/u.test(str);
+    const hasMathTerms = /\b(?:solve|evaluate|simplify|calculate|derivative|integral|limit|matrix|vector|triangle|hypotenuse|radius|diameter|perimeter|area|volume|angle|degree|sin|cos|tan|log|ln|sqrt|sum|sigma|mean|median|variance|probability)\b/i.test(str);
+    const hasLatexMath = /\\(?:frac|sqrt|int|sum|prod|lim|alpha|beta|gamma|theta|pi|partial|cdot|times)/i.test(str);
+    return (hasEquationOrInequality || hasMathOperators || hasLatexMath || (hasMathTerms && /\d/.test(str)));
+}
+
 function hasUsefulServerText(text) {
     const value = String(text || '').replace(/\s+/g, ' ').trim();
-    if (value.length < 40) return false;
     if (/\b(?:no (?:clear )?(?:readable )?text|no text (?:was )?detected|no text detected|no visible text|could not (?:find|detect|extract) (?:any )?(?:readable )?text|unable to (?:find|detect|extract) (?:any )?(?:readable )?text|does not contain (?:any )?readable text|extraction failed)\b/i.test(value)) {
         return false;
     }
+    if (isMathematicalOrFormulaContent(value)) return true;
+    if (value.length < 40) return false;
     const letters = (value.match(/[A-Za-z\u00C0-\u024F]/g) || []).length;
     return letters >= 24;
 }
@@ -248,7 +259,8 @@ function isImage(mimeType, filename) {
 
 function normalizeImageMime(mimeType, filename = '', base64 = '') {
     if (base64 && typeof base64 === 'string') {
-        const clean = base64.trim().slice(0, 32);
+        const raw = base64.includes(',') ? base64.split(',')[1].trim() : base64.trim();
+        const clean = raw.slice(0, 32);
         if (clean.startsWith('/9j/')) return 'image/jpeg';
         if (clean.startsWith('iVBOR')) return 'image/png';
         if (clean.startsWith('R0lGO')) return 'image/gif';
