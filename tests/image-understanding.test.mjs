@@ -680,4 +680,41 @@ console.log('23. Verifying embedded problem solving & math OCR solver routing...
     console.log('  [PASS] 23.1 Embedded problem solving and math OCR solver routing verified.');
 }
 
+// =========================================================================
+// 24. Geometric Diagram Discipline & Segment Endpoint Tracing
+// =========================================================================
+console.log('24. Verifying geometric diagram endpoint tracing and anti-shortcut rules...');
+{
+    const fs = await import('node:fs');
+    const visionSource = fs.readFileSync('api/vision.js', 'utf8');
+    const chatGroqSource = fs.readFileSync('api/chat-groq.js', 'utf8');
+
+    // 24.1 api/vision.js must instruct segment endpoint tracing and prevent 3-4-5 traps
+    assert.ok(
+        visionSource.includes('GEOMETRY DIAGRAM DISCIPLINE & SEGMENT ENDPOINT TRACING'),
+        'api/vision.js must include geometry diagram discipline and endpoint tracing'
+    );
+    assert.ok(
+        visionSource.includes('portion from the circumference to the center is the radius R'),
+        'api/vision.js fast pipeline must instruct chord/radius relationship'
+    );
+    assert.ok(
+        visionSource.includes('(L - R)^2 + H^2 = R^2'),
+        'api/vision.js pipelines must instruct the exact algebraic formulation'
+    );
+
+    // 24.2 api/chat-groq.js Rule 6a must instruct endpoint tracing and anti-triple rules
+    assert.ok(
+        chatGroqSource.includes('Trace every segment from its start to end point'),
+        'api/chat-groq.js Rule 6a must instruct tracing every segment start and end point'
+    );
+    assert.ok(
+        chatGroqSource.includes('remaining segment to a right-angle vertex is (L - R), NOT L'),
+        'api/chat-groq.js Rule 6a must instruct (L - R) chord deduction'
+    );
+
+    console.log('  [PASS] 24.1 Geometric diagram endpoint tracing and anti-shortcut rules verified.');
+}
+
 console.log('--- ALL JARVIS IMAGE UNDERSTANDING TESTS PASSED ---');
+
