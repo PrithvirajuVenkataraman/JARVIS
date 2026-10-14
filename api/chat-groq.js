@@ -571,8 +571,15 @@ async function getInstantFactHelper() {
         return isLiveRetrievalConfigured() || isPublicFactSearchConfigured();
     }
 
-    const CONSTRAINT_PROTOTYPE_VECTOR = textToEmbeddingVector('must be strictly required rules constraints format only concise in typescript python no external dependencies');
-    const DECISION_PROTOTYPE_VECTOR = textToEmbeddingVector('we will use selected architecture chosen database framework postgresql prisma redis solution implementation decision');
+    let _constraintProtoVec = null;
+    let _decisionProtoVec = null;
+    function getSummaryProtoVectors() {
+        if (!_constraintProtoVec) {
+            _constraintProtoVec = textToEmbeddingVector('must be strictly required rules constraints format only concise in typescript python no external dependencies');
+            _decisionProtoVec = textToEmbeddingVector('we will use selected architecture chosen database framework postgresql prisma redis solution implementation decision');
+        }
+        return { constraintVec: _constraintProtoVec, decisionVec: _decisionProtoVec };
+    }
 
     function extractRollingExecutiveSummary(olderTurns) {
         if (!Array.isArray(olderTurns) || !olderTurns.length) return null;
@@ -580,6 +587,7 @@ async function getInstantFactHelper() {
         const constraints = [];
         const decisions = [];
         const topics = [];
+        const { constraintVec, decisionVec } = getSummaryProtoVectors();
 
         for (const turn of olderTurns) {
             const isUser = turn?.role === 'user';
@@ -587,8 +595,8 @@ async function getInstantFactHelper() {
             if (!text) continue;
 
             const vec = textToEmbeddingVector(text);
-            const constraintSim = vectorCosineSimilarity(vec, CONSTRAINT_PROTOTYPE_VECTOR);
-            const decisionSim = vectorCosineSimilarity(vec, DECISION_PROTOTYPE_VECTOR);
+            const constraintSim = vectorCosineSimilarity(vec, constraintVec);
+            const decisionSim = vectorCosineSimilarity(vec, decisionVec);
 
             if (isUser && constraintSim >= 0.18) {
                 const snippet = text.length > 140 ? text.slice(0, 137) + '...' : text;
