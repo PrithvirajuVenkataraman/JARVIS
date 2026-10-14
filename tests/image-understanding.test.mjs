@@ -143,6 +143,7 @@ console.log('5. Verifying preferred vision model candidates selection...');
     // Gemini Vision Candidates
     const geminiVision = getPreferredGeminiVisionCandidates();
     assert.ok(Array.isArray(geminiVision) && geminiVision.length > 0);
+    assert.ok(geminiVision.includes('gemini-3.8-flash'));
     assert.ok(geminiVision.includes('gemini-3.7-flash'));
     assert.ok(geminiVision.includes('gemini-2.0-flash'));
     assert.ok(geminiVision.includes('gemini-2.5-pro'));
@@ -150,7 +151,7 @@ console.log('5. Verifying preferred vision model candidates selection...');
     // When configured model is text-only, must fallback to valid vision candidates
     const fromTextOnly = getPreferredGeminiVisionCandidates('text-only-model');
     assert.ok(fromTextOnly.length >= 3);
-    assert.equal(fromTextOnly[0], 'gemini-3.7-flash', 'Default vision candidate must be prioritized');
+    assert.equal(fromTextOnly[0], 'gemini-3.8-flash', 'Default vision candidate must be prioritized to latest model');
 
     // Groq Vision Candidates (must have zero Llama models)
     const groqVision = getPreferredGroqVisionCandidates();
