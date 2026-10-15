@@ -36,7 +36,7 @@ flowchart TD
     WriteCache --> FinalResponse(["Final Verified & Attributed Response"])
     
     %% Direct LLM Branch
-    Router -->|"Reasoning / Code / Chat"| GroqCascade["Groq-First Resilient Cascade<br/>GPT-OSS to Llama 3.3 to Qwen to DeepSeek to Gemini<br/>api/chat-groq.js"]
+    Router -->|"Reasoning / Code / Chat"| GroqCascade["Groq-First Resilient Cascade<br/>GPT-OSS 120B to GPT-OSS 20B to Qwen 3.8 to Gemini<br/>api/chat-groq.js"]
     
     GroqCascade --> CoTThinking["Dynamic Chain-of-Thought Engine<br/>app/markdown-renderer.js"]
     CoTThinking --> FinalResponse
@@ -116,7 +116,7 @@ Beyond RAG, the repository contains a production-grade conversational AI archite
   - One-way surrogate masking for OpenAI, Groq, Anthropic, Google, GitHub, and AWS keys, JWT tokens, Credit Card numbers, and Social Security Numbers (`[REDACTED_API_KEY]`, `[REDACTED_CREDIT_CARD]`) before dispatching to external LLMs.
 
 ### 3.2 Groq-First Resilient Model Cascade
-- **Primary Execution**: Ultra-low-latency Groq inference (`GPT-OSS 120B/20B`, `Llama 3.3 70B`, `Qwen 2.5 Coder`, `DeepSeek R1 Distill`).
+- **Primary Execution**: Ultra-low-latency Groq inference (`GPT-OSS 120B/20B`, `Qwen 3.8 27B`, `Safety GPT-OSS 20B`).
 - **Fast-Failover Cascade**: 3.5s timeout automatically triggers fallback to Google Gemini (`gemini-2.5-flash`, `gemini-1.5-pro`) without dropping user sessions.
 
 ### 3.3 Dynamic Chain-of-Thought (CoT) Thinking
@@ -176,4 +176,5 @@ npm test
 8. `tests/emergency-sos.test.mjs`: Satellite Emergency SOS contacts CRUD, distress telemetry, and dispatch URLs.
 9. `tests/context-engine.test.mjs`: Context compaction and rolling conversation memory.
 10. `tests/self-improving-loops.test.mjs`: Learned preference extraction and speculative arithmetic.
-11. `tools/hardcoded-content-scanner.mjs`: Repository hygiene scanner verifying 0 hardcoded answers or country tables across 106 files.
+11. `tests/image-generator.test.mjs`: Zero-cost image generation configuration, routing, storage fallback, and tool dispatching.
+12. `tools/hardcoded-content-scanner.mjs`: Repository hygiene scanner verifying 0 hardcoded answers or country tables across 108 files.
