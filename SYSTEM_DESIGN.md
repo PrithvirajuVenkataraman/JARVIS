@@ -29,7 +29,7 @@ graph TD
     end
 
     subgraph Models["Model & Provider Pool"]
-        GroqPool["Groq LPU Pool (Multi-Key Round-Robin: GPT OSS 120B/20B, Llama 3.3 70B, Qwen 2.5)"]
+        GroqPool["Groq LPU Pool (Multi-Key Round-Robin: GPT OSS 120B/20B, Qwen 3.8 27B)"]
         GeminiPool["Google Gemini Pool (Gemini 3.7 Flash, 2.5 Pro, 2.5 Flash)"]
         DeterministicFacts["Deterministic Instant Fact Layer"]
     end
@@ -119,9 +119,9 @@ JARVIS uses an **autonomous, single-pass routing engine** with user model overri
 
 | Request Type | Primary Engine | Model Hierarchy / Fallback | Rationale |
 | :--- | :--- | :--- | :--- |
-| **Standard Text Chat / Coding / Reasoning** | **Groq LPU** | `GPT OSS 120B` &rarr; `GPT OSS 20B` &rarr; `Llama 3.3 70B` &rarr; `Gemini 3.7 Flash` | Ultra-fast token generation and deep reasoning on Groq LPUs. |
+| **Standard Text Chat / Coding / Reasoning** | **Groq LPU** | `GPT OSS 120B` &rarr; `GPT OSS 20B` &rarr; `Qwen 3.8 27B` &rarr; `Gemini 3.7 Flash` | Ultra-fast token generation and deep reasoning on Groq LPUs. |
 | **Live Political Leaders & Real-Time Facts** | **Deep Web RAG** | `DuckDuckGo Web` + `Google News RSS` &rarr; `Parallel Scraper` &rarr; `Groq / Gemini RAG` | Bypasses obsolete training weights, excludes Wikipedia overview pages, and outputs current leader names in sentence 1. |
-| **Media / Image Uploads / Live Photos** | **Google Gemini** | `Gemini 3.7 Flash` &rarr; `Gemini 2.5 Pro` &rarr; `Gemini 2.5 Flash` &rarr; `Groq Vision (Llama 3.2)` | Native multimodal vision processing with direct base64 `inline_data` encoding. |
+| **Media / Image Uploads / Live Photos** | **Google Gemini** | `Gemini 3.7 Flash` &rarr; `Gemini 2.5 Pro` &rarr; `Gemini 2.5 Flash` &rarr; `Groq Vision (Qwen 3.8 27B)` | Native multimodal vision processing with direct base64 `inline_data` encoding. |
 | **Explicit Gemini Model Selection** | **Google Gemini** | `Gemini 3.7 Flash` / `Gemini 2.5 Pro` / `Gemini 2.5 Flash` &rarr; `Groq Fallback` | Direct priority routing to Google Gemini API whenever a Gemini model is chosen in the selector. |
 | **Follow-Up Questions on Images** | **Groq / Gemini** | `GPT OSS 120B` or `Gemini 3.7 Flash` (with visual context injected) | Preserves visual grounding context across conversation turns. |
 | **Instant Live Facts & Place Data** | **Dynamic Live APIs** | Wikipedia REST, Open-Meteo, NASA EONET, CoinGecko, Nominatim | Real-time dynamic public API fetching with 0 hardcoded answers. |
