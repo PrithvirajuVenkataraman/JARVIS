@@ -234,3 +234,47 @@ export function computeBM25Scores(query, documents = [], options = {}) {
 
     return index.scoreAll(query);
 }
+
+export function textToEmbeddingVector(text, dim = 512) {
+    const v = new Float32Array(dim);
+    const tokens = String(text || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').trim().split(/\s+/).filter(Boolean);
+    if (!tokens.length) return v;
+    for (const token of tokens) {
+        let h1 = 0x811c9dc5;
+        let h2 = 0x5bd1e995;
+        for (let i = 0; i < token.length; i++) {
+            const code = token.charCodeAt(i);
+            h1 ^= code;
+            h1 = Math.imul(h1, 0x01000193);
+            h2 ^= code;
+            h2 = Math.imul(h2, 0x5bd1e995);
+        }
+        const idx1 = Math.abs(h1) % dim;
+        const idx2 = Math.abs(h2) % dim;
+        v[idx1] += 1.0;
+        v[idx2] += 0.5;
+        if (token.length >= 4) {
+            for (let i = 0; i < token.length - 2; i++) {
+                const trigram = token.slice(i, i + 3);
+                let th = 0;
+                for (let j = 0; j < trigram.length; j++) th = (th * 31 + trigram.charCodeAt(j)) | 0;
+                v[Math.abs(th) % dim] += 0.2;
+            }
+        }
+    }
+    let norm = 0;
+    for (let i = 0; i < dim; i++) norm += v[i] * v[i];
+    norm = Math.sqrt(norm);
+    if (norm > 0) {
+        for (let i = 0; i < dim; i++) v[i] /= norm;
+    }
+    return v;
+}
+
+export function vectorCosineSimilarity(a, b) {
+    if (!a || !b) return 0;
+    let dot = 0;
+    const len = Math.min(a.length, b.length);
+    for (let i = 0; i < len; i++) dot += a[i] * b[i];
+    return dot;
+}
