@@ -18,23 +18,22 @@ graph TD
     Classifier -->|Live Fact / Web Search| WebRAG["Deep Web RAG Engine"]
 
     subgraph GroqLPU["Groq LPU Cascade"]
-        G1["openai/gpt-oss-120b (Flagship)"] --> G2["openai/gpt-oss-20b"]
-        G2 --> G3["llama-3.3-70b-versatile"]
-        G3 --> G4["qwen/qwen-2.5-coder-32b"]
-        G4 --> G5["deepseek-r1-distill-llama-70b"]
-        G5 --> GemFallback["Gemini 2.5 Flash (Cloud Fallback)"]
+        G1["openai/gpt-oss-120b (Flagship Reasoning & Text)"] --> G2["openai/gpt-oss-20b (Fast Speed Tier)"]
+        G2 --> G3["qwen/qwen3.8-27b (Vision & Tool Use)"]
+        G3 --> G4["openai/safety-gpt-oss-20b (Safety Moderation)"]
+        G4 --> GemFallback["Gemini 2.5 Flash (Cloud Fallback)"]
     end
 
     subgraph GeminiPool["Gemini Multimodal Pool"]
         M1["gemini-2.5-flash (Primary)"] --> M2["gemini-2.0-flash"]
-        M2 --> M3["llama-3.2-11b-vision-preview (Groq Vision)"]
+        M2 --> M3["qwen/qwen3.8-27b (Groq Vision)"]
         M3 --> M4["gemini-1.5-flash"]
     end
 
     subgraph WebRAG["Deep Web Grounding Engine"]
         W1["DuckDuckGo HTML + Google News RSS"] --> W2["Parallel Article Body Scraper (2.5s)"]
         W2 --> W3["Zero-Parametric Prompt Pinning"]
-        W3 --> W4["Llama 3.3 70B / Gemini RAG Synthesis"]
+        W3 --> W4["GPT OSS 120B / Gemini RAG Synthesis"]
     end
 ```
 
@@ -42,15 +41,14 @@ graph TD
 
 ## 2. Model Inventory & Capabilities
 
-### ⚡ Text & Reasoning Models (Groq LPU)
+### ⚡ Text, Reasoning & Tool Use Models (Groq LPU)
 
 | Model Name | Parameter Size | Provider | Primary Use Case | Output Speed |
 | :--- | :--- | :--- | :--- | :--- |
-| **`openai/gpt-oss-120b`** | 120 Billion | Groq | **Primary Flagship**: Complex reasoning, agent workflows, deep writing, long-form synthesis. | ~130–180 tok/s |
-| **`openai/gpt-oss-20b`** | 20 Billion | Groq | **Fast Lightweight**: Quick conversational turns, short summaries, low-latency follow-ups. | ~250–350 tok/s |
-| **`llama-3.3-70b-versatile`** | 70 Billion | Groq | **Structured RAG & Grounding**: Web search synthesis, factual validation, instruction following. | ~180–220 tok/s |
-| **`qwen/qwen-2.5-coder-32b`** | 32 Billion | Groq | **Code Specialist**: Full-stack programming, regex generation, algorithm debugging, unit tests. | ~200–260 tok/s |
-| **`deepseek-r1-distill-llama-70b`** | 70 Billion | Groq | **Chain-of-Thought (CoT)**: Mathematical proofs, algebraic problem solving, logic puzzles. | ~150–200 tok/s |
+| **`openai/gpt-oss-120b`** | 120 Billion | Groq | **Primary Flagship**: Complex reasoning, function calling / tool use, multilingual synthesis. | ~130–180 tok/s |
+| **`openai/gpt-oss-20b`** | 20 Billion | Groq | **Fast Direct**: Low-latency turns, fast instant tier, function calling, multilingual. | ~250–350 tok/s |
+| **`qwen/qwen3.8-27b`** | 27 Billion | Groq | **Vision & Reasoning**: Visual analysis, function calling, deep reasoning. | ~200–260 tok/s |
+| **`openai/safety-gpt-oss-20b`** | 20 Billion | Groq | **Safety & Content Moderation**: Enterprise safety classification and policy guardrails. | ~300+ tok/s |
 
 ---
 
@@ -58,10 +56,10 @@ graph TD
 
 | Model Name | Provider | Primary Use Case | Features |
 | :--- | :--- | :--- | :--- |
-| **`gemini-2.5-flash`** | Google Gemini | **Primary Vision & Document OCR**: Image description, chart analysis, diagram understanding, document transcription. | Native multimodal, 1M+ token context window. |
+| **`qwen/qwen3.8-27b`** | Groq | **Primary LPU Vision**: Rapid image analysis, visual document extraction, OCR. | Native vision on Groq LPUs. |
+| **`gemini-2.5-flash`** | Google Gemini | **Multimodal Vision & Document OCR**: Image description, chart analysis, diagram understanding. | Native multimodal, 1M+ token context window. |
 | **`gemini-2.0-flash`** | Google Gemini | **Vision Fallback**: Secondary high-speed visual processing. | Low latency, robust scene reasoning. |
-| **`llama-3.2-11b-vision-preview`** | Groq | **LPU Vision**: Rapid image analysis without cloud API keys. | Real-time scene description on Groq LPUs. |
-| **`llama-3.2-90b-vision-preview`** | Groq | **Deep Visual Reasoning**: Detailed visual document extraction and object localization. | High-capacity open vision architecture. |
+| **`gemini-3.7-flash`** | Google Gemini | **Coding & Deep Multimodal**: Advanced spatial visual reasoning. | High multimodal precision. |
 
 ---
 
