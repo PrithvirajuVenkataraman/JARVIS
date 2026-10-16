@@ -1392,7 +1392,7 @@ export default async function handler(req, res) {
             lengthGuidance ? `Length guidance:\n${lengthGuidance}` : '',
             buildReasoningInstruction(intent, model, userSelectedModel, message),
             'Do not wrap the answer in JSON.',
-            'Accuracy rules: Prefer being brief and correct. Keep internal reasoning concise and focused without producing lengthy speculative guesswork. If unsure about a fact, say so in one short clause instead of inventing names, dates, numbers, or sources. Never invent URLs or citations. Resolve pronouns only from the recent turns above.'
+            'Accuracy rules: Prefer being brief and correct. Keep internal reasoning concise and focused without producing lengthy speculative guesswork. If unsure about a fact, say so in one short clause instead of inventing names, dates, numbers, or sources. Never invent person names, locations, affiliations, URLs, or citations. Resolve pronouns and follow-up references only from the recent turns above. If an identity or location is not explicitly stated in retrieved evidence, state that it is unconfirmed or unreleased.'
         ].filter(Boolean).join('\n\n');
     }
 
@@ -1404,7 +1404,7 @@ export default async function handler(req, res) {
             buildIntentPromptHint(intent),
             lengthGuidance ? `Length guidance:\n${lengthGuidance}` : '',
             buildReasoningInstruction(intent, model, userSelectedModel, message),
-            'Accuracy rules: Prefer being brief and correct. If unsure about a fact, say so directly. Never invent URLs or citations. Maintain conversational continuity across turns without repeating previous statements unnecessarily.'
+            'Accuracy rules: Prefer being brief and correct. If unsure about a fact, say so directly. Never invent person names, locations, affiliations, URLs, or citations. Resolve pronouns and follow-up references strictly from the conversation context and retrieved sources. If a person\'s name or place is not explicitly confirmed in the sources, state that it is unreleased or unconfirmed rather than guessing. Maintain conversational continuity across turns without repeating previous statements unnecessarily.'
         ];
 
         if (rollingSummary && typeof rollingSummary === 'string' && rollingSummary.trim()) {
@@ -4616,7 +4616,7 @@ Style & Language Rules:
 
 ZERO-HALLUCINATION & EPISTEMIC GROUNDING (CRITICAL):
 - Never invent people, dates, prices, statistics, quotes, URLs, citations, code APIs, model versions, or event outcomes. If uncertain, state "I am not sure" rather than guessing.
-- Ground answers strictly in retrieved source text when provided. Present facts cleanly in natural prose without emitting bracket citations (e.g. [1], [2]) or citation phrases (e.g. 'found in [1]'). When none is supplied, answer from general knowledge only when stable.
+- Ground answers strictly in retrieved source text. When answering conversational follow-ups (e.g. suspects, names, locations, updates), stay anchored to context facts and never fabricate unstated identities or places; if unreleased, explicitly state it. Present facts in natural prose without emitting bracket citations (e.g. [1], [2]).
 - Music, Songs & Lyrics (CRITICAL):
   * NEVER fabricate or hallucinate song lyrics, lines, or verses. When asked about songs or lyrics, provide verified credits (film/album, composer, singers, lyricist) and brief thematic context. NEVER dump full transliterated verses, line-by-line lyric breakdowns, or stanzas from memory. Instead, embed a clean markdown link [View Full Lyrics](url) using the top verified lyrics URL from retrieved search results or falling back to a structured Google search link (https://www.google.com/search?q=<song>+<artist>+lyrics).
   * Strict music credits & soundtrack attribution: NEVER guess or conflate composers, singers, lyricists, or soundtracks across films or albums. Every music credit must be strictly accurate; if unsure, state uncertainty rather than guessing.
