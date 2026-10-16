@@ -47,6 +47,14 @@
             acceptNode(node) {
                 const parent = node.parentElement;
                 if (!parent || skip.has(parent.tagName)) return NodeFilter.FILTER_REJECT;
+                let cur = parent;
+                while (cur && cur !== root) {
+                    const cls = typeof cur.className === 'string' ? cur.className : '';
+                    if (cls.includes('math-') || cls.includes('katex')) {
+                        return NodeFilter.FILTER_REJECT;
+                    }
+                    cur = cur.parentElement;
+                }
                 if (!/[A-Z0-9.eE-]/.test(node.nodeValue || '')) return NodeFilter.FILTER_REJECT;
                 return NodeFilter.FILTER_ACCEPT;
             }
@@ -113,7 +121,7 @@
     }
 
     const api = {
-        enhancePlainText, 
+        enhancePlainText,
         enhanceHtml,
         normalizeScienceText
     };
