@@ -391,6 +391,25 @@ console.log('--- Section 10: Code Highlighter, Math & Markdown Renderers ---');
     const sqrtExpr = formatLatexExpression('\\sqrt{x_1 + x_2}');
     assert.ok(sqrtExpr.includes('math-sqrt') || sqrtExpr.includes('sqrt'));
 
+    // Notebook math rendering tests: boxed answers, multiline alignments, and symbol normalization
+    const boxedExpr = formatLatexExpression('\\boxed{r = 3 \\sqrt{13}\\ cm \\; (\\approx 10.8\\ cm)}');
+    assert.ok(boxedExpr.includes('math-notebook-answer'), 'Must render boxed expressions as notebook answers');
+    assert.ok(!boxedExpr.includes('\\boxed'), 'Must strip literal \\boxed syntax');
+    assert.ok(boxedExpr.includes('&asymp;'), 'Must normalize \\approx to &asymp;');
+
+    // Multiline alignment in math block
+    const alignMd = '```latex\n\\begin{aligned}\nr &\\approx 3 \\times 3.6055 \\\\\n  &\\approx 10.82\\text{ cm}\n\\end{aligned}\n```';
+    const alignRendered = renderMarkdown(alignMd);
+    assert.ok(alignRendered.includes('math-display-block'), 'Latex block must render as display math, NOT code block');
+    assert.ok(!alignRendered.includes('assistant-md-code-container'), 'Latex block must NEVER produce assistant-md-code-container');
+    assert.ok(!alignRendered.includes('\\end{aligned}'), 'Must not leak dangling \\end{aligned}');
+
+    // Inline backticked math unwrap
+    const backtickMd = 'The radius is `r \\approx 3 \\times 3.6055` and answer `\\boxed{10.8\\ cm}`.';
+    const backtickRendered = renderMarkdown(backtickMd);
+    assert.ok(!backtickRendered.includes('assistant-md-inline-code'), 'Backticked math must NOT produce assistant-md-inline-code badge');
+    assert.ok(backtickRendered.includes('math-notebook-answer'), 'Backticked \\boxed must produce math-notebook-answer');
+
     // Markdown rendering
     const md = `# Title\n\nInline math $a^2 + b^2 = c^2$\n\n\`\`\`python\ndef add(a, b):\n    return a + b\n\`\`\`\n`;
     const rendered = renderMarkdown(md);
