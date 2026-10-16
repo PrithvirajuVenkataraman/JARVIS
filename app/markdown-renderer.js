@@ -4,7 +4,7 @@
  */
 
 import { highlightCode } from './code-highlighter.js';
-import { renderMathInText } from './math-renderer.js';
+import { renderMathInText, formatLatexExpression } from './math-renderer.js';
 
 function escapeHtml(text) {
     return String(text || '')
@@ -15,16 +15,42 @@ function escapeHtml(text) {
         .replace(/'/g, '&#39;');
 }
 
+function isMathCodeBlock(lang = '', code = '') {
+    const normalizedLang = String(lang || '').trim().toLowerCase();
+    if (['math', 'latex', 'tex', 'katex'].includes(normalizedLang)) {
+        return true;
+    }
+    const trimmed = String(code || '').trim();
+    if (!trimmed) return false;
+
+    // Check if it contains characteristic LaTeX math markers or environment tags
+    const hasMathCommands = /\\(?:frac|sqrt|boxed|begin\{(?:aligned|align|split|gather|cases|matrix|bmatrix|pmatrix)\}|approx|times|cdot|sum|int|partial|alpha|beta|gamma|theta|pi|le|ge|neq|pm)\b/.test(trimmed);
+    const hasDanglingMathEnv = /\\(?:end\{(?:aligned|align|cases|matrix)\})/.test(trimmed);
+
+    // Make sure it doesn't look like actual programming code
+    const hasCodeKeywords = /\b(?:function|def|import|from|class|const|let|var|return|console\.log|public|private|interface|struct)\b/.test(trimmed);
+
+    return (hasMathCommands || hasDanglingMathEnv) && !hasCodeKeywords;
+}
+
 export function renderMarkdown(rawText = '', options = {}) {
     if (typeof rawText !== 'string') return '';
     let text = rawText.trim();
     if (!text) return '';
 
-    // Step 1: Extract code blocks before any other substitutions
+    // Step 1: Extract math blocks and programming code blocks before any other substitutions
     const codeBlocks = [];
+    const mathBlocks = [];
+
     text = text.replace(/```([a-zA-Z0-9_\-+]*)\n?([\s\S]*?)```/g, (_, lang, code) => {
+        const rawCode = code.replace(/\n$/, '');
+        if (isMathCodeBlock(lang, rawCode)) {
+            const mathIdx = mathBlocks.length;
+            mathBlocks.push(rawCode.trim());
+            return `__MATH_BLOCK_${mathIdx}__`;
+        }
         const idx = codeBlocks.length;
-        codeBlocks.push({ lang: (lang || '').trim(), code: code.replace(/\n$/, '') });
+        codeBlocks.push({ lang: (lang || '').trim(), code: rawCode });
         return `__CODE_BLOCK_${idx}__`;
     });
 
@@ -38,6 +64,12 @@ export function renderMarkdown(rawText = '', options = {}) {
         const trim = line.trim();
 
         if (trim.startsWith('__CODE_BLOCK_') && trim.endsWith('__')) {
+            out.push(trim);
+            i += 1;
+            continue;
+        }
+
+        if (trim.startsWith('__MATH_BLOCK_') && trim.endsWith('__')) {
             out.push(trim);
             i += 1;
             continue;
@@ -111,7 +143,8 @@ export function renderMarkdown(rawText = '', options = {}) {
                 !/^\s*>/.test(String(lines[i] || '')) &&
                 !/^(#{1,4})\s+/.test(String(lines[i] || '')) &&
                 !/^\s*\|.+\|\s*$/.test(String(lines[i] || '')) &&
-                !(String(lines[i] || '').trim().startsWith('__CODE_BLOCK_') && String(lines[i] || '').trim().endsWith('__'))
+                !(String(lines[i] || '').trim().startsWith('__CODE_BLOCK_') && String(lines[i] || '').trim().endsWith('__')) &&
+                !(String(lines[i] || '').trim().startsWith('__MATH_BLOCK_') && String(lines[i] || '').trim().endsWith('__'))
             ) {
                 para.push(String(lines[i]));
                 i += 1;
@@ -128,14 +161,35 @@ export function renderMarkdown(rawText = '', options = {}) {
 
     // Inline formatting: math, inline code, bold, italics, links & citations
     html = renderMathInText(html);
-    html = html.replace(/`([^`\n]+)`/g, '<code class="assistant-md-inline-code">$1</code>');
+
+    // Handle backticked content: route math expressions to inline math instead of code badge boxes
+    html = html.replace(/`([^`\n]+)`/g, (match, inner) => {
+        const trimmed = inner.trim();
+        const isMath = /^\$[^$]+\$$/.test(trimmed) ||
+                       /\\(?:frac|sqrt|boxed|approx|times|cdot|pm|le|ge|neq|alpha|beta|gamma|pi|theta|text|mathrm|mathbf|sum|int)\b/.test(trimmed) ||
+                       /^[a-zA-Z]\s*(?:=|≈|&asymp;|\approx|\+|-|\*|\/|\\times|\\approx)\s*[\d\w\\.+*/^_-]+/.test(trimmed);
+
+        if (isMath) {
+            const cleanExpr = trimmed.replace(/^\$|\$$/g, '');
+            return `<span class="math-inline">${formatLatexExpression(cleanExpr, false)}</span>`;
+        }
+        return `<code class="assistant-md-inline-code">${inner}</code>`;
+    });
+
     html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
     html = html.replace(/\[\^(\d+)\]\((https?:\/\/[^)]+)\)/g, `<a href="$2" target="_blank" rel="noopener noreferrer" class="citation-badge" title="Source [$1]"><sup>[$1]</sup></a>`);
     html = html.replace(/\[\^(\d+)\]/g, `<span class="citation-badge-static" title="Citation [$1]"><sup>[$1]</sup></span>`);
     html = html.replace(/\[(\d+)\]\((https?:\/\/[^)]+)\)/g, `<a href="$2" target="_blank" rel="noopener noreferrer" class="citation-badge" title="Source [$1]"><sup>[$1]</sup></a>`);
     html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, `<a href="$2" target="_blank" rel="noopener noreferrer" class="assistant-link">$1</a>`);
 
-    // Step 3: Re-inject code blocks with syntax highlighting & action buttons
+    // Step 3: Re-inject display math blocks with clean notebook styling (NO code container / copy buttons)
+    html = html.replace(/__MATH_BLOCK_(\d+)__/g, (_, idx) => {
+        const mathCode = mathBlocks[Number(idx)];
+        if (!mathCode) return '';
+        return `<div class="math-display-block"><span class="math-display-inner">${formatLatexExpression(mathCode, true)}</span></div>`;
+    });
+
+    // Step 4: Re-inject code blocks with syntax highlighting & action buttons
     html = html.replace(/__CODE_BLOCK_(\d+)__/g, (_, idx) => {
         const block = codeBlocks[Number(idx)];
         if (!block) return '';
