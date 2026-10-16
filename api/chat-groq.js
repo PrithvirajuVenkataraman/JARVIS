@@ -387,6 +387,25 @@ async function getInstantFactHelper() {
         return hasOptions || (hasMcqPhrases && /\b[A-Da-d]\b/.test(raw));
     }
 
+    function isMathematicalOrQuantitativeQuery(text = '', options = {}) {
+        const raw = String(text || '').trim();
+        const lower = raw.toLowerCase();
+        if (!raw && !options?.hasImages) return false;
+
+        const mathKeywords = /\b(?:radius|diameter|circumference|circle|chord|tangent|secant|triangle|hypotenuse|perpendicular|pythagorean|geometry|geometric|algebra|algebraic|equation|system\s+of\s+equations|quadratic|polynomial|calculus|derivative|integral|integrate|matrix|determinant|eigenvalue|trigonometry|sine|cosine|logarithm|solve\s+for\s+[a-zA-Z]|prove\s+that|proof|derivation|derive|formula)\b/i;
+        if (mathKeywords.test(lower)) return true;
+
+        const hasMathSymbols = /[=≈√∑∫±πθλ]/.test(raw) || /\\(?:frac|sqrt|boxed|approx|times|cdot|sum|int|partial|pi|theta|alpha|beta)\b/.test(raw);
+        const hasSolveIntent = /\b(?:solve|calculate|compute|find|determine|evaluate|simplify)\b/i.test(lower);
+        if (hasMathSymbols && (hasSolveIntent || raw.length > 8)) return true;
+
+        if (options?.hasImages && (/\b(?:solve|find|calculate|radius|length|area|perimeter|equation|value|x|angle)\b/i.test(lower) || !raw)) {
+            return true;
+        }
+
+        return false;
+    }
+
     function classifyQueryComplexity(rawQuery = '', options = {}) {
         const intent = String(options?.intent || '');
         if (options?.tier === 'deep' || options?.forceReasoning === true || intent === 'deep_reasoning') {
@@ -396,9 +415,12 @@ async function getInstantFactHelper() {
         // Image attachments require a vision-capable model with sufficient capacity.
         // Never downgrade to the instant tier when images are present.
         const hasImages = options?.hasImages === true || intent === 'selection_custom';
+        const isMathProblem = isMathematicalOrQuantitativeQuery(rawQuery, { hasImages });
+
         if (hasImages) {
-            // Still allow explicit deep-tier upgrades for image math/reasoning; default to standard.
-            if (scoreChatIntent(String(rawQuery || ''), 'explicit_math_logic_proof') >= 0.28 ||
+            // Auto-promote any image containing math, geometry, or calculation to deep tier
+            if (isMathProblem ||
+                scoreChatIntent(String(rawQuery || ''), 'explicit_math_logic_proof') >= 0.28 ||
                 scoreChatIntent(String(rawQuery || ''), 'deep_engineering_reasoning') >= 0.28) {
                 return { tier: 'deep', preferSpeed: false, reason: 'image_math_deep_reasoning' };
             }
@@ -409,6 +431,11 @@ async function getInstantFactHelper() {
         const words = query.split(/\s+/).filter(Boolean);
         const wordCount = words.length;
         const lower = query.toLowerCase();
+
+        // Auto-promote text math & quantitative questions to deep reasoning tier (never single-pass fast)
+        if (isMathProblem) {
+            return { tier: 'deep', preferSpeed: false, reason: 'auto_promoted_math_reasoning' };
+        }
 
         // MCQ fast-path: Multiple choice questions should respond quickly without deep CoT deliberation
         const isMcq = isMultipleChoiceQuestion(query);
@@ -433,7 +460,7 @@ async function getInstantFactHelper() {
         const isGreeting = scoreChatIntent(lower, 'trivial_greeting') >= 0.28;
         const isLeadershipOrTemporal = scoreChatIntent(lower, 'mutable_office_entity') >= 0.25 || scoreChatIntent(lower, 'time_sensitive_freshness') >= 0.25 || scoreChatIntent(lower, 'recency_incumbent') >= 0.25;
         const isSimpleFact = !isLeadershipOrTemporal && isStableDefinitionQuery(lower) && wordCount < 15;
-        const isSimpleMath = /^\s*[\d\s+\-*/^().=%xXyYzZ]+\s*$/.test(query) || (/\d/.test(query) && scoreChatIntent(lower, 'risk_calculation') >= 0.28 && wordCount < 10);
+        const isSimpleMath = !isMathProblem && (/^\s*[\d\s+\-*/^().=%]+\s*$/.test(query) && wordCount < 6);
 
         if (isGreeting || isSimpleFact || isSimpleMath) {
             return { tier: 'instant', preferSpeed: true, reason: 'instant_fast_path' };
@@ -2046,11 +2073,12 @@ export default async function handler(req, res) {
                 '   e. VERIFY THE ANSWER: After reaching a result, substitute it back into the original equation or constraint to confirm it satisfies all conditions. State the verification explicitly.',
                 '   f. HANDLE AMBIGUITY HONESTLY: If a label, measurement, or diagram element is unclear or could be read more than one way, state the ambiguity explicitly. Do not invent or assume a value for unclear information; show working under the most reasonable interpretation and note any caveat.',
                 '   g. UNITS & FINAL ANSWER: Always include appropriate units. Clearly label the final answer.',
+                '   h. ANALYTICAL GEOMETRY & COORDINATE FRAMING: For non-trivial geometry diagrams (e.g., intersecting circles, tangents, inscribed shapes, or unknown radii/lengths), establish a Cartesian coordinate system with an origin $(0,0)$ at a natural landmark (such as a circle center or right-angle vertex). Express points, lines, circles $(x - a)^2 + (y - b)^2 = R^2$, and distance equations analytically. Solve the algebraic system directly to eliminate visual ambiguity and perceptual misjudgments.',
                 '7. LATEX FORMATTING (apply to all mathematical content in the response):',
                 '   - Display equations (multi-line working, final answers): use $$...$$',
                 '   - Inline mathematical expressions within prose: use $...$',
                 '   - Do NOT use plain-text approximations (e.g. "x^2") when LaTeX delimiters are available.',
-                '8. GEOMETRIC DIAGRAM DISCIPLINE: When working with geometric figures, explicitly identify the type of figure (triangle, circle, polygon, etc.), trace all segment endpoints, list all given measurements, and state any geometric properties (parallel lines, perpendicular, congruent, similar, radius relationships) visible in the diagram before computing.',
+                '8. GEOMETRIC DIAGRAM DISCIPLINE: When working with geometric figures, explicitly identify the type of figure (triangle, circle, polygon, etc.), trace all segment endpoints, list all given measurements, and state any geometric properties (parallel lines, perpendicular, congruent, similar, radius relationships) visible in the diagram before computing. Frame complex geometries with coordinate equations where appropriate.',
                 userRequest ? `User request: ${userRequest}` : 'User request: (User provided image without text; infer and execute the appropriate task)',
                 hasMeaningfulText ? `Supplementary extracted text (use for reference, but verify against actual image pixels):\n${extractedText}` : '',
                 customInstruction && customInstruction !== userRequest ? `Extra instruction: ${customInstruction}` : ''
@@ -2350,13 +2378,18 @@ export default async function handler(req, res) {
                         contents = formatted;
                     }
                 }
-                const shouldSuppressGeminiReasoning = options?.minimalThinking === true ||
+                const isMathTarget = isMathematicalOrQuantitativeQuery(prompt, { hasImages: Boolean(images?.length) });
+                const shouldSuppressGeminiReasoning = !isMathTarget && (
+                    options?.minimalThinking === true ||
                     options?.preferSpeed === true ||
                     options?.tier === 'instant' ||
-                    ['fast_simple', 'casual_chat', 'chat_title', 'internal_summary', 'fast_explainer'].includes(String(options?.intent || ''));
+                    ['fast_simple', 'casual_chat', 'chat_title', 'internal_summary', 'fast_explainer'].includes(String(options?.intent || ''))
+                );
                 const geminiGenConfig = { temperature: temp, topK: 40, topP: 0.95, maxOutputTokens: maxTokens };
                 if (shouldSuppressGeminiReasoning && supportsGeminiThinking(model)) {
                     geminiGenConfig.thinkingConfig = { thinkingBudget: 0 };
+                } else if (isMathTarget && supportsGeminiThinking(model)) {
+                    geminiGenConfig.thinkingConfig = { thinkingBudget: 8192 };
                 }
                 const geminiBody = {
                     contents,
@@ -2806,11 +2839,14 @@ export default async function handler(req, res) {
                 }
             }
             const isUserChosenR1 = String(options?.userSelectedModel || '').toLowerCase().includes('r1');
-            const isReasoning = isExplicitReasoningIntent(options?.intent, prompt) || isUserChosenR1;
-            const shouldSuppressReasoning = !isReasoning || options?.minimalThinking === true ||
+            const isMathStream = isMathematicalOrQuantitativeQuery(prompt, { hasImages: Boolean(images?.length) });
+            const isReasoning = isMathStream || isExplicitReasoningIntent(options?.intent, prompt) || isUserChosenR1;
+            const shouldSuppressReasoning = !isReasoning || (!isMathStream && (
+                options?.minimalThinking === true ||
                 options?.preferSpeed === true ||
                 options?.tier === 'instant' ||
-                ['fast_simple', 'casual_chat', 'chat_title', 'internal_summary', 'fast_explainer', 'pop_culture_reference', 'chat'].includes(String(options?.intent || ''));
+                ['fast_simple', 'casual_chat', 'chat_title', 'internal_summary', 'fast_explainer', 'pop_culture_reference', 'chat'].includes(String(options?.intent || ''))
+            ));
             const generationConfig = {
                 temperature,
                 topK: 40,
@@ -2819,6 +2855,8 @@ export default async function handler(req, res) {
             };
             if (shouldSuppressReasoning && supportsGeminiThinking(model)) {
                 generationConfig.thinkingConfig = { thinkingBudget: 0 };
+            } else if (isMathStream && supportsGeminiThinking(model)) {
+                generationConfig.thinkingConfig = { thinkingBudget: 8192 };
             }
             const reqBody = {
                 contents,
@@ -4647,6 +4685,7 @@ MATHEMATICAL & QUANTITATIVE REASONING (applies to all math problems, whether fro
 - State the relevant theorem, formula, or principle before applying it.
 - Show each algebraic or arithmetic step on its own line; do not skip steps.
 - After reaching a result, verify it by substituting back into the original equation or constraint.
+- Analytical geometry: for geometry diagrams or spatial problems, place the figure in a coordinate frame $(0,0)$ and solve algebraically.
 - Format: use $$...$$ for display equations and $...$ for inline math. Never use plain-text approximations like "x^2" in place of LaTeX when the output supports it.
 - If a measurement, label, or diagram element is ambiguous, state the ambiguity explicitly rather than inventing a value.
 - Always include units and clearly label the final answer.
