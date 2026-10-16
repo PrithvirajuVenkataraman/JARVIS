@@ -53,6 +53,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
     <link rel="stylesheet" href="styles.css?v=2.0.5">
     <script src="science-format.js?v=2.0.1"></script>
     <script type="module" src="app/bootstrap.js?v=2.0.5"></script>
@@ -8516,11 +8518,28 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             }
 
             const codeBlocks = [];
+            const mathBlocks = [];
+            const isMathCode = (l, c) => {
+                const nl = String(l || '').trim().toLowerCase();
+                if (['math', 'latex', 'tex', 'katex'].includes(nl)) return true;
+                const tc = String(c || '').trim();
+                const hasMath = /\\(?:frac|sqrt|boxed|begin\{(?:aligned|align|split|gather|cases|matrix)\}|approx|times|cdot|sum|int|alpha|beta|gamma|theta|pi|le|ge|neq|pm)\b/.test(tc);
+                const hasDangling = /\\(?:end\{(?:aligned|align|cases|matrix)\})/.test(tc);
+                const hasCode = /\b(?:function|def|import|from|class|const|let|var|return|console\.log)\b/.test(tc);
+                return (hasMath || hasDangling) && !hasCode;
+            };
+
             let working = text.replace(/```([\w+-]*)\n([\s\S]*?)```/g, (_, lang, code) => {
+                const rawCode = String(code || '');
+                if (isMathCode(lang, rawCode)) {
+                    const mId = mathBlocks.length;
+                    mathBlocks.push(rawCode.trim());
+                    return `__MATH_BLOCK_${mId}__`;
+                }
                 const id = codeBlocks.length;
                 codeBlocks.push({
                     lang: String(lang || '').trim(),
-                    code: String(code || '')
+                    code: rawCode
                 });
                 return `__CODE_BLOCK_${id}__`;
             });
@@ -8532,6 +8551,18 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             while (i < lines.length) {
                 const line = lines[i] ?? '';
                 const trim = line.trim();
+
+                if (trim.startsWith('__CODE_BLOCK_') && trim.endsWith('__')) {
+                    out.push(trim);
+                    i += 1;
+                    continue;
+                }
+
+                if (trim.startsWith('__MATH_BLOCK_') && trim.endsWith('__')) {
+                    out.push(trim);
+                    i += 1;
+                    continue;
+                }
 
                 const heading = trim.match(/^(#{1,4})\s+(.+)$/);
                 if (heading) {
@@ -8592,7 +8623,17 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
 
                 if (trim) {
                     const para = [];
-                    while (i < lines.length && String(lines[i] || '').trim() && !/^\s*[-*]\s+/.test(String(lines[i] || '')) && !/^\s*\d+\.\s+/.test(String(lines[i] || '')) && !/^\s*>/.test(String(lines[i] || '')) && !/^(#{1,4})\s+/.test(String(lines[i] || '')) && !/^\s*\|.+\|\s*$/.test(String(lines[i] || ''))) {
+                    while (
+                        i < lines.length &&
+                        String(lines[i] || '').trim() &&
+                        !/^\s*[-*]\s+/.test(String(lines[i] || '')) &&
+                        !/^\s*\d+\.\s+/.test(String(lines[i] || '')) &&
+                        !/^\s*>/.test(String(lines[i] || '')) &&
+                        !/^(#{1,4})\s+/.test(String(lines[i] || '')) &&
+                        !/^\s*\|.+\|\s*$/.test(String(lines[i] || '')) &&
+                        !(String(lines[i] || '').trim().startsWith('__CODE_BLOCK_') && String(lines[i] || '').trim().endsWith('__')) &&
+                        !(String(lines[i] || '').trim().startsWith('__MATH_BLOCK_') && String(lines[i] || '').trim().endsWith('__'))
+                    ) {
                         para.push(String(lines[i]));
                         i += 1;
                     }
@@ -8618,13 +8659,35 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 html = html.replace(/(?<!\\)\$(?!\s)([^\$\n]+?)(?<!\s)\$(?!\d)/g, '<span class="math-inline">$1</span>');
             }
 
-            html = html.replace(/`([^`\n]+)`/g, '<code class="assistant-md-inline-code">$1</code>');
+            html = html.replace(/`([^`\n]+)`/g, (match, inner) => {
+                const trimmed = inner.trim();
+                const isMath = /^\$[^$]+\$$/.test(trimmed) ||
+                               /\\(?:frac|sqrt|boxed|approx|times|cdot|pm|le|ge|neq|alpha|beta|gamma|pi|theta|text|mathrm|mathbf|sum|int)\b/.test(trimmed) ||
+                               /^[a-zA-Z]\s*(?:=|≈|&asymp;|\approx|\+|-|\*|\/|\\times|\\approx)\s*[\d\w\\.+*/^_-]+/.test(trimmed);
+                if (isMath) {
+                    const cleanExpr = trimmed.replace(/^\$|\$$/g, '');
+                    if (globalThis.JarvisMathRenderer?.formatLatexExpression) {
+                        return `<span class="math-inline">${globalThis.JarvisMathRenderer.formatLatexExpression(cleanExpr, false)}</span>`;
+                    }
+                    return `<span class="math-inline">${cleanExpr}</span>`;
+                }
+                return `<code class="assistant-md-inline-code">${inner}</code>`;
+            });
             html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
             html = html.replace(/\[(\d+)\]\((https?:\/\/[^)]+)\)/g, `<a href="$2" target="_blank" rel="noopener noreferrer" class="citation-badge" data-source-id="$1" title="Source [$1]"><sup>[$1]</sup></a>`);
             html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, `<a href="$2" target="_blank" rel="noopener noreferrer" class="${linkClass}">$1</a>`);
             html = html.replace(/(?<![\[\w`])\[(\d+(?:\s*,\s*\d+)*)\](?![\]\(])/g, (match, idsStr) => {
                 const ids = idsStr.split(',').map(s => s.trim()).filter(Boolean);
                 return ids.map(id => `<button type="button" class="citation-badge" data-source-id="${id}" onclick="window.JarvisLiveResearch?.highlightSource('${id}')" title="Source [${id}]"><sup>[${id}]</sup></button>`).join('');
+            });
+
+            html = html.replace(/__MATH_BLOCK_(\d+)__/g, (_, idx) => {
+                const mCode = mathBlocks[Number(idx)];
+                if (!mCode) return '';
+                if (globalThis.JarvisMathRenderer?.formatLatexExpression) {
+                    return `<div class="math-display-block"><span class="math-display-inner">${globalThis.JarvisMathRenderer.formatLatexExpression(mCode, true)}</span></div>`;
+                }
+                return `<div class="math-display-block"><span class="math-display-inner">${escapeHtml(mCode)}</span></div>`;
             });
 
             html = html.replace(/__CODE_BLOCK_(\d+)__/g, (_, idx) => {
