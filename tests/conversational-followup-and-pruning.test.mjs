@@ -14,7 +14,9 @@ import {
     buildSearchQueryRewrite,
     reformulateQueryWithGroq,
     needsContextualReformulation,
-    cleanReformulatedSearchQuery
+    cleanReformulatedSearchQuery,
+    deriveEpistemicLedger,
+    buildHierarchicalFacetQuery
 } from '../api/search.js';
 import fs from 'node:fs';
 
@@ -485,4 +487,81 @@ test('10. Follow-Up Named Entity & Incident Anchoring: Prevents Name/Location Ha
     const resUpdates = resolveContextualFollowUpQuery('Any updates?', crimeTurns);
     assert.ok(resUpdates.toLowerCase().includes('sri venkateswara') || resUpdates.toLowerCase().includes('aurora'), `Expected topic anchor in "${resUpdates}"`);
 });
+
+test('11. Epistemic Session Ledger: Multi-Hop Coreference & Facet Queries Across 4+ Turns', () => {
+    const multiHopTurns = [
+        // Turn 1: Macro-incident
+        { role: 'user', text: 'Mass Shooting Plot Targeting Sri Venkateswara Temple in Aurora, Illinois' },
+        { role: 'assistant', text: '**Verified live news sources:** On October 14, authorities arrested an individual in Aurora, Illinois for a planned attack.' },
+        // Turn 2: Suspect Identity
+        { role: 'user', text: 'Who was arrested?' },
+        { role: 'assistant', text: 'Aurora police reported taking a 19-year-old into custody on federal charges.' },
+        // Turn 3: Legal Charges
+        { role: 'user', text: 'What were his charges?' },
+        { role: 'assistant', text: 'The suspect was charged with attempting to provide material support to a foreign terrorist organization.' },
+        // Turn 4: Court / Trial Schedule
+        { role: 'user', text: 'When is the trial scheduled?' },
+        { role: 'assistant', text: 'The trial is scheduled for November 2026 in federal court.' }
+    ];
+
+    // Turn 2 follow-up verification (identity)
+    const t2Context = multiHopTurns.slice(0, 2);
+    const ledgerT2 = deriveEpistemicLedger(t2Context);
+    assert.ok(ledgerT2.rootTopic.toLowerCase().includes('sri venkateswara') || ledgerT2.rootTopic.toLowerCase().includes('aurora'));
+    const t2Query = resolveContextualFollowUpQuery('Who was arrested?', t2Context, ledgerT2);
+    assert.ok(t2Query.toLowerCase().includes('sri venkateswara') || t2Query.toLowerCase().includes('aurora'), `Expected root anchor in Turn 2: "${t2Query}"`);
+    assert.ok(t2Query.toLowerCase().includes('suspect') || t2Query.toLowerCase().includes('arrested'), `Expected suspect/arrest in Turn 2: "${t2Query}"`);
+
+    // Turn 3 follow-up verification (charges)
+    const t3Context = multiHopTurns.slice(0, 4);
+    const ledgerT3 = deriveEpistemicLedger(t3Context);
+    assert.ok(ledgerT3.rootTopic.toLowerCase().includes('sri venkateswara') || ledgerT3.rootTopic.toLowerCase().includes('aurora'));
+    const t3Query = resolveContextualFollowUpQuery('What were his charges?', t3Context, ledgerT3);
+    assert.ok(t3Query.toLowerCase().includes('sri venkateswara') || t3Query.toLowerCase().includes('aurora'), `Expected root anchor in Turn 3: "${t3Query}"`);
+    assert.ok(t3Query.toLowerCase().includes('charges') || t3Query.toLowerCase().includes('indictment'), `Expected charges in Turn 3: "${t3Query}"`);
+
+    // Turn 4 follow-up verification (legal schedule)
+    const t4Context = multiHopTurns.slice(0, 6);
+    const ledgerT4 = deriveEpistemicLedger(t4Context);
+    assert.ok(ledgerT4.rootTopic.toLowerCase().includes('sri venkateswara') || ledgerT4.rootTopic.toLowerCase().includes('aurora'));
+    const t4Query = resolveContextualFollowUpQuery('When is the trial scheduled?', t4Context, ledgerT4);
+    assert.ok(t4Query.toLowerCase().includes('sri venkateswara') || t4Query.toLowerCase().includes('aurora'), `Expected root anchor in Turn 4: "${t4Query}"`);
+    assert.ok(t4Query.toLowerCase().includes('trial') || t4Query.toLowerCase().includes('scheduled') || t4Query.toLowerCase().includes('court'), `Expected trial/schedule in Turn 4: "${t4Query}"`);
+
+    // Turn 5 follow-up verification (facility status)
+    const t5Context = multiHopTurns.slice(0, 8);
+    const ledgerT5 = deriveEpistemicLedger(t5Context);
+    const t5Query = resolveContextualFollowUpQuery('Has the temple reopened?', t5Context, ledgerT5);
+    assert.ok(t5Query.toLowerCase().includes('sri venkateswara') || t5Query.toLowerCase().includes('aurora'), `Expected root anchor in Turn 5: "${t5Query}"`);
+    assert.ok(t5Query.toLowerCase().includes('temple') && (t5Query.toLowerCase().includes('reopen') || t5Query.toLowerCase().includes('status')), `Expected reopen/status in Turn 5: "${t5Query}"`);
+});
+
+test('12. Deterministic Topic Shift & Ledger Reset: Independent Questions Never Inherit Prior Anchors', () => {
+    const dialogueWithShift = [
+        { role: 'user', text: 'Mass Shooting Plot Targeting Sri Venkateswara Temple in Aurora, Illinois' },
+        { role: 'assistant', text: 'On October 14, authorities arrested an individual in Illinois.' },
+        { role: 'user', text: 'Who was arrested?' },
+        { role: 'assistant', text: 'Aurora police reported taking a 19-year-old into custody on federal charges.' },
+        // Independent topic shift without topic lead
+        { role: 'user', text: 'What is the capital of France?' }
+    ];
+
+    const priorContext = dialogueWithShift.slice(0, 4);
+
+    // Verify standalone question is not marked as needing contextual reformulation
+    assert.equal(needsContextualReformulation('What is the capital of France?', priorContext), false);
+
+    // Verify resolveContextualFollowUpQuery leaves query verbatim
+    const query = resolveContextualFollowUpQuery('What is the capital of France?', priorContext);
+    assert.equal(query, 'What is the capital of France?');
+    assert.ok(!query.toLowerCase().includes('aurora'), 'Must not contain previous thread keywords');
+    assert.ok(!query.toLowerCase().includes('temple'), 'Must not contain previous thread keywords');
+
+    // Verify deriveEpistemicLedger resets root topic
+    const ledger = deriveEpistemicLedger(dialogueWithShift);
+    assert.ok(ledger.rootTopic.toLowerCase().includes('france'), `Expected new root topic France, got "${ledger.rootTopic}"`);
+    assert.ok(!ledger.rootTopic.toLowerCase().includes('aurora'), 'Reset ledger must not retain old root keywords');
+    assert.ok(!ledger.rootTopic.toLowerCase().includes('temple'), 'Reset ledger must not retain old root keywords');
+});
+
 
