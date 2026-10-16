@@ -1575,6 +1575,10 @@ RULES:
 4. GROUNDED CITATIONS & NATURAL SYNTHESIS: Ground key statements and extracted facts thoroughly in the verified sources below. Present the answer in clean, natural prose without emitting bracket citations (like [1], [2]) or citation phrases (like 'found in [1]'). Verified sources are tracked and rendered separately in the interface.
 5. STRUCTURE: Provide a direct answer first, followed by clear explanations, requested lists, and impact analyses.
 6. CHRONOLOGICAL PRIORITY: Sources are ordered chronologically with the newest/most recent updates listed first ([1], [2], ...). For questions about current status, updates, or recent developments, prioritize the latest sources over older sources.
+7. ENTITY INTEGRITY & ZERO HALLUCINATION (CRITICAL):
+   - For proper nouns, suspect identities, person names, places, and organizations: report ONLY names and places explicitly stated in the retrieved sources below.
+   - If a person's name, suspect identity, or specific location is unstated, unconfirmed, or has not been publicly released in the verified sources, explicitly state that authorities or reports have not released the name/location. NEVER guess, assume, or invent person names, places, or affiliations.
+   - When answering follow-up questions, stay anchored to the specific event, location, and entities established in the conversation history. Do not conflate or substitute names or locations from unrelated search excerpts.
 ${conversationHistoryBlock}
 User question: "${effectiveUserPrompt}"
 
