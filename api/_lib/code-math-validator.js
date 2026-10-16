@@ -12,12 +12,18 @@
 export function safeEvaluateArithmetic(expr) {
     let raw = String(expr || '').trim()
         .replace(/\\times|×/g, '*')
+        .replace(/\\cdot/g, '*')
         .replace(/\\div|÷/g, '/')
         .replace(/\\sqrt\{([^}]+)\}/g, 'Math.sqrt($1)')
         .replace(/\\sqrt\(([^)]+)\)/g, 'Math.sqrt($1)')
+        .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, '(($1)/($2))')
         .replace(/\\pi|\bpi\b/gi, 'Math.PI')
         .replace(/\\log\(([^)]+)\)/g, 'Math.log($1)')
         .replace(/\^/g, '**');
+
+    // Handle implicit multiplication: e.g. "3 Math.sqrt(13)" or "3(5)" -> "3 * Math.sqrt"
+    raw = raw.replace(/(\d+)\s*(Math\.sqrt|Math\.PI|\()/g, '$1 * $2');
+    raw = raw.replace(/\)\s*(\d+|Math\.sqrt|Math\.PI|\()/g, ') * $1');
 
     // Percentage conversion: "15% of 80", "15% * 80", or "15%"
     raw = raw.replace(/(\d+(?:\.\d+)?)\s*%\s*(?:of|\*)\s*(\d+(?:\.\d+)?)/gi, '($1/100)*$2');
@@ -29,7 +35,7 @@ export function safeEvaluateArithmetic(expr) {
     try {
         const fn = new Function('Math', `"use strict"; return (${raw});`);
         const res = fn(Math);
-        return typeof res === 'number' && Number.isFinite(res) ? Math.round(res * 1e8) / 1e8 : null;
+        return typeof res === 'number' && Number.isFinite(res) ? Math.round(res * 1e6) / 1e6 : null;
     } catch {
         return null;
     }
@@ -46,7 +52,43 @@ export function verifyAndRepairMathClaims(text = '') {
 
     const repairs = [];
 
-    // Match arithmetic equality patterns: e.g., "12 * 15 = 175", "15% of 80 = 14", "\(25 + 5\) = 30", "$144 / 12 = 13$"
+    // Match deterministic calculation execution blocks: e.g. ```calc \n 3 * Math.sqrt(13) \n ```
+    result = result.replace(/```(?:calc|math-eval)\s*[\r\n]+([\s\S]*?)```/gi, (match, code) => {
+        const lines = code.split('\n');
+        const evaluatedLines = lines.map(line => {
+            const trimmed = line.trim();
+            if (!trimmed) return '';
+            const eqMatch = trimmed.match(/^([^=]+)=(.*)$/);
+            if (eqMatch) {
+                const varName = eqMatch[1].trim();
+                const evalVal = safeEvaluateArithmetic(eqMatch[2]);
+                if (evalVal !== null) return `${varName} = ${evalVal}`;
+            }
+            const directVal = safeEvaluateArithmetic(trimmed);
+            if (directVal !== null) return `${trimmed} = ${directVal}`;
+            return trimmed;
+        });
+        repairs.push({ expr: code.trim(), claimed: 0, actual: 0 });
+        return evaluatedLines.filter(Boolean).join('\n');
+    });
+
+    // Match delimited LaTeX formulas: e.g., "$3 \times \sqrt{13} \approx 10.82$", "\(\frac{1}{2} + \frac{1}{4} = 0.75\)"
+    const latexDelimitedPattern = /(\$|\\\()([^\$=]+?)\s*(?:=|\\approx|≈)\s*(-?[\d.]+)(\$|\\\))/g;
+    result = result.replace(latexDelimitedPattern, (fullMatch, openDelim, leftExpr, claimedValStr, closeDelim) => {
+        const claimedVal = parseFloat(claimedValStr);
+        if (isNaN(claimedVal)) return fullMatch;
+        const evaluated = safeEvaluateArithmetic(leftExpr);
+        if (evaluated === null) return fullMatch;
+
+        const tolerance = Math.max(0.015, Math.abs(claimedVal) * 0.005);
+        if (Math.abs(evaluated - claimedVal) > tolerance) {
+            repairs.push({ expr: leftExpr.trim(), claimed: claimedVal, actual: evaluated });
+            return `${openDelim}${leftExpr.trim()} = ${evaluated}${closeDelim}`;
+        }
+        return fullMatch;
+    });
+
+    // Match standard arithmetic equality patterns: e.g., "12 * 15 = 175", "15% of 80 = 14", "\(25 + 5\) = 30", "$144 / 12 = 13$"
     const mathEqualityPattern = /(?:\$|\\\(|\b)((?:\d+(?:\.\d+)?\s*%\s*(?:of|\*)\s*\d+(?:\.\d+)?|[\d\s+\-*/().^%×÷\\])+?)\s*(?:=|\\approx|≈)\s*(-?[\d.]+)(?:\$|\\\)|\b)/g;
 
     result = result.replace(mathEqualityPattern, (fullMatch, leftExpr, claimedValStr) => {
