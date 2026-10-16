@@ -5420,7 +5420,15 @@ export function needsContextualReformulation(query, contextTurns = []) {
     const hasComparative = /\b(?:compare\s+(?:the\s+two|them|both)|difference\s+between|which\s+one\s+is\s+(?:better|faster|cheaper|larger|recommended)|who\s+won|head\s+to\s+head)\b/i.test(raw);
     const isFragment = raw.split(/\s+/).length <= 4 && /^(?:why|how\s+much|how\s+many|when|where|who|salary|net\s+worth|age|height|founder|price|status|cost|results?)\??$/i.test(raw);
 
-    return Boolean(hasReferentialPronoun || hasDemonstrative || hasElliptical || hasComparative || isFragment);
+    // Follow-up inquiries on active entities/events (e.g. suspect, arrest, motive, casualties, updates)
+    const hasDefiniteFollowUp = /\b(?:who\s+(?:was|is|got)\s+(?:the\s+)?(?:arrested|charged|responsible|suspect|perpetrator|shooter|attacker)|what\s+(?:is|was)\s+(?:his|her|their|(?:the\s+)?(?:suspect|shooter|perpetrator|attacker|person|individual)(?:'s)?)\s+name|name\s+of\s+(?:the\s+)?(?:suspect|shooter)|who\s+(?:is|was)\s+(?:he|they|the\s+suspect|the\s+shooter))\b/i.test(raw) ||
+        /\b(?:where\s+did\s+(?:this|it|the\s+\w+)\s+happen|where\s+is\s+(?:it|this|the\s+\w+)\s+located|which\s+city|what\s+city|where\s+was\s+(?:it|this))\b/i.test(raw) ||
+        /\b(?:what\s+(?:was|is)\s+(?:the\s+)?motive|why\s+did\s+(?:he|they|this)\s+(?:do\s+it|happen))\b/i.test(raw) ||
+        /\b(?:was\s+anyone\s+(?:injured|hurt|killed)|(?:any|were\s+there\s+any)\s+(?:casualties|injuries|deaths|victims))\b/i.test(raw) ||
+        /\b(?:what\s+did\s+(?:the\s+)?(?:police|authorities|officials)\s+say|police\s+statement|official\s+statement)\b/i.test(raw) ||
+        /^(?:any\s+updates?|latest\s+update|what\s+is\s+the\s+(?:latest|current\s+status|update)|what\s+happened\s+next)\??$/i.test(raw);
+
+    return Boolean(hasReferentialPronoun || hasDemonstrative || hasElliptical || hasComparative || isFragment || hasDefiniteFollowUp);
 }
 
 export function cleanReformulatedSearchQuery(text = '', originalQuery = '') {
@@ -5479,7 +5487,7 @@ export async function reformulateQueryWithGroq(query, contextTurns = [], options
         return `${role}: ${content}`;
     }).join('\n');
 
-    const systemPrompt = 'You are a search query reformulation engine. Convert the user\'s conversational follow-up into a single, concise, standalone web search query using the conversation context.\nRules:\n- Resolve all pronouns ("he", "she", "it", "they", "his", "her", "their"), demonstratives ("this", "that", "these", "those"), elliptical phrases ("what about in 2024?"), or comparative references ("compare the two") using the conversation history.\n- If the question is already complete and standalone, return it unchanged.\n- Return ONLY the search query text. Do NOT include quotes, explanations, markdown, or punctuation at the end.';
+    const systemPrompt = 'You are a search query reformulation engine. Convert the user\'s conversational follow-up into a single, concise, standalone web search query using the conversation context.\nRules:\n- Resolve all pronouns ("he", "she", "it", "they", "his", "her", "their"), demonstratives ("this", "that", "these", "those"), elliptical phrases ("what about in 2024?"), or comparative references ("compare the two") using the conversation history.\n- Always anchor follow-up questions to the substantive topic and named entities (people, places, organizations, events) established earlier in the conversation.\n- For questions asking about a suspect, person identity, location, motive, or updates, combine the conversation\'s specific event/subject anchor with the requested detail.\n- If the question is already complete and standalone, return it unchanged.\n- Return ONLY the search query text. Do NOT include quotes, explanations, markdown, or punctuation at the end.';
 
     const userPrompt = `Conversation:\n${historyLines}\n\nUser follow-up: ${raw}\nStandalone search query:`;
 
@@ -5534,17 +5542,39 @@ export function resolveContextualFollowUpQuery(query, contextTurns = []) {
             if (lastAsst && lastUser) break;
         }
 
+        let userTopic = '';
+        if (lastUser) {
+            userTopic = lastUser
+                .replace(/^(?:please\s+)?(?:can|could|would)\s+you\s+(?:please\s+)?(?:tell\s+me|show\s+me|find|explain|search\s+for)\s+/i, '')
+                .replace(/^(?:tell\s+me\s+about|find\s+out|search\s+for|what\s+do\s+you\s+know\s+about|who\s+is|what\s+is|where\s+is)\s+/i, '')
+                .replace(/[?.!]+$/, '')
+                .trim();
+        }
+
+        const BOILERPLATE_ENTITIES = new Set([
+            'summary', 'overview', 'key details', 'sources', 'verified sources',
+            'verified live news sources', 'citations', 'references', 'background',
+            'update', 'details', 'report', 'analysis', 'findings', 'conclusion',
+            'introduction', 'notes', 'timeline', 'status', 'highlights', 'source',
+            'source excerpts', 'verification report', 'source metadata', 'user request',
+            'verified live news'
+        ]);
+
         const entities = [];
         if (lastAsst) {
             const boldMatches = lastAsst.matchAll(/\*\*([A-Za-z0-9][A-Za-z0-9\s,'’\.\-–—]{2,60})\*\*/g);
             for (const m of boldMatches) {
                 const val = m[1].replace(/[:–—\-\.]+$/, '').trim();
-                if (val && !entities.includes(val)) entities.push(val);
+                if (val && !BOILERPLATE_ENTITIES.has(val.toLowerCase()) && !entities.includes(val)) {
+                    entities.push(val);
+                }
             }
             const propMatches = lastAsst.matchAll(/\b([A-Z][a-z0-9]{2,}(?:\s+[A-Z][a-z0-9]{2,}){1,3})\b/g);
             for (const m of propMatches) {
                 const val = m[1].trim();
-                if (val && !entities.includes(val)) entities.push(val);
+                if (val && !BOILERPLATE_ENTITIES.has(val.toLowerCase()) && !entities.includes(val)) {
+                    entities.push(val);
+                }
             }
         }
         if (lastUser) {
@@ -5556,7 +5586,9 @@ export function resolveContextualFollowUpQuery(query, contextTurns = []) {
         }
 
         const cleanQ = raw.replace(/[?.!]+$/, '').trim();
-        const primaryEntity = entities[0] || '';
+        const primaryEntity = entities[0] || userTopic || '';
+        const topicAnchor = userTopic || primaryEntity || '';
+        const anchor = topicAnchor || primaryEntity;
 
         // Comparative fallback
         if (/\b(?:compare\s+(?:the\s+two|them|both)|difference\s+between|which\s+one\s+is|who\s+won|head\s+to\s+head)\b/i.test(cleanQ)) {
@@ -5606,20 +5638,57 @@ export function resolveContextualFollowUpQuery(query, contextTurns = []) {
             }
         }
 
-        // Pronoun or fragment fallback
-        if (primaryEntity) {
+        // Specific follow-up query resolutions
+        if (/\b(?:who\s+(?:was|is|got)\s+(?:the\s+)?(?:arrested|charged|responsible|suspect|perpetrator|shooter|attacker)|what\s+(?:is|was)\s+(?:his|her|their|(?:the\s+)?(?:suspect|shooter|perpetrator|attacker|person|individual)(?:'s)?)\s+name|name\s+of\s+(?:the\s+)?(?:suspect|shooter)|who\s+(?:is|was)\s+(?:he|they|the\s+suspect|the\s+shooter))\b/i.test(cleanQ)) {
+            const isGenericTopic = /\b(?:plot|shooting|attack|incident|case|investigation|temple|church|mosque|school)\b/i.test(primaryEntity);
+            if (!isGenericTopic && primaryEntity && primaryEntity !== anchor) {
+                return `${primaryEntity} identity details`;
+            }
+            return `${anchor} suspect arrested name identity`;
+        }
+
+        if (/\b(?:where\s+did\s+(?:this|it|the\s+\w+)\s+happen|where\s+is\s+(?:it|this|the\s+\w+)\s+located|which\s+city|what\s+city|where\s+was\s+(?:it|this))\b/i.test(cleanQ)) {
+            return `${anchor} location city`;
+        }
+
+        if (/\b(?:what\s+(?:was|is)\s+(?:the\s+)?motive|why\s+did\s+(?:he|they|this)\s+(?:do\s+it|happen))\b/i.test(cleanQ)) {
+            return `${anchor} motive reason`;
+        }
+
+        if (/\b(?:was\s+anyone\s+(?:injured|hurt|killed)|(?:any|were\s+there\s+any)\s+(?:casualties|injuries|deaths|victims))\b/i.test(cleanQ)) {
+            return `${anchor} casualties injuries victims`;
+        }
+
+        if (/\b(?:what\s+did\s+(?:the\s+)?(?:police|authorities|officials)\s+say|police\s+statement|official\s+statement)\b/i.test(cleanQ)) {
+            return `${anchor} police statement`;
+        }
+
+        if (/^(?:any\s+updates?|latest\s+update|what\s+is\s+the\s+(?:latest|current\s+status|update)|what\s+happened\s+next)\??$/i.test(cleanQ)) {
+            return `${anchor} latest update status`;
+        }
+
+        // Pronoun, demonstrative, or fragment fallback
+        if (anchor) {
             let rewritten = cleanQ;
-            rewritten = rewritten.replace(/\b(?:his|her|their|its)\b/gi, primaryEntity);
-            rewritten = rewritten.replace(/\b(?:he|him|she|they|them|it)\b/gi, primaryEntity);
+            const replacementEntity = primaryEntity || anchor;
+            rewritten = rewritten.replace(/\b(?:his|her|their|its)\b/gi, replacementEntity);
+            rewritten = rewritten.replace(/\b(?:he|him|she|they|them|it|this|that|these|those)\b/gi, replacementEntity);
             rewritten = rewritten
-                .replace(/^(?:what|who|when|where|how)\s+(?:is|are|was|were|do|does|did)\s+/i, '')
-                .replace(/^(?:tell\s+me\s+about|find\s+out|search\s+for)\s+/i, '')
+                .replace(/^(?:what|who|when|where|how|why)\s+(?:is|are|was|were|do|does|did|can|will)\s+/i, '')
+                .replace(/^(?:tell\s+me\s+about|find\s+out|search\s+for|explain)\s+/i, '')
                 .replace(/\s+/g, ' ')
                 .trim();
+
+            const lowerRewritten = rewritten.toLowerCase();
+            const hasAnchor = lowerRewritten.includes(replacementEntity.toLowerCase()) || (anchor && lowerRewritten.includes(anchor.toLowerCase()));
+            if (!hasAnchor) {
+                rewritten = `${anchor} ${rewritten}`.trim();
+            }
+
             if (rewritten.length >= 3) {
                 return rewritten;
             }
-            return `${primaryEntity} ${cleanQ}`;
+            return `${anchor} ${cleanQ}`;
         }
 
         return raw;
