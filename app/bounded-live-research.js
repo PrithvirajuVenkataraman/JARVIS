@@ -1218,10 +1218,12 @@ export class BoundedLiveResearchController {
         assistantMessageId,
         fetchSearchFn,
         streamSynthesisFn,
-        uiCallbacks = {}
+        uiCallbacks = {},
+        threadState = null
     }) {
         return new Promise((resolve) => {
             this._resolveExecution = resolve;
+            this.threadState = threadState;
             const query = normalizeUserQuery(rawQuery);
             this.telemetry.t_start = performance.now();
 
@@ -1459,6 +1461,7 @@ export class BoundedLiveResearchController {
                         const searchRes = await fetchSearchFn({
                             query: distillSearchQuery(query) || query,
                             context: effectiveContextTurns,
+                            threadState: this.threadState,
                             signal: this.searchAbortController.signal,
                             timeoutMs: this.searchTimeoutMs
                         });
