@@ -5972,7 +5972,7 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
                                 task: fallbackTask
                             };
                             const visionData = await (window.JarvisApi?.postJson
-                                ? window.JarvisApi.postJson(visionEndpoint, visionPayload, { signal: controller.signal, timeoutMs: 45000 })
+                                ? window.JarvisApi.postJson(visionEndpoint, visionPayload, { signal: controller.signal, timeoutMs: 25000 })
                                 : fetch(visionEndpoint, {
                                     method: 'POST',
                                     headers: { 'Content-Type': 'application/json' },
