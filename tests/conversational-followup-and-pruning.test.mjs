@@ -439,4 +439,50 @@ test('9. BoundedLiveResearchController: Receives question, history context, and 
     assert.ok(Array.isArray(receivedContext) && receivedContext.length >= 2);
     assert.equal(receivedContext[0].role, 'user');
     assert.equal(receivedContext[1].role, 'assistant');
+    assert.ok(receivedPrompt.includes('ENTITY INTEGRITY & ZERO HALLUCINATION (CRITICAL):'), 'Prompt must enforce entity integrity');
 });
+
+test('10. Follow-Up Named Entity & Incident Anchoring: Prevents Name/Location Hallucinations', () => {
+    const crimeTurns = [
+        { role: 'user', text: 'Mass Shooting Plot Targeting Sri Venkateswara Temple in Aurora, Illinois' },
+        { role: 'assistant', text: '**Verified live news sources:** On October 14, authorities arrested an individual in Illinois regarding the thwarted attack.' }
+    ];
+
+    // Verify needsContextualReformulation identifies specific incident follow-ups
+    assert.equal(needsContextualReformulation('Who was arrested?', crimeTurns), true);
+    assert.equal(needsContextualReformulation('What is his name?', crimeTurns), true);
+    assert.equal(needsContextualReformulation('Where did this happen?', crimeTurns), true);
+    assert.equal(needsContextualReformulation('What was the motive?', crimeTurns), true);
+    assert.equal(needsContextualReformulation('Was anyone injured?', crimeTurns), true);
+    assert.equal(needsContextualReformulation('What did police say?', crimeTurns), true);
+    assert.equal(needsContextualReformulation('Any updates?', crimeTurns), true);
+
+    // Verify resolveContextualFollowUpQuery anchors every query to the specific incident and entities
+    const resWho = resolveContextualFollowUpQuery('Who was arrested?', crimeTurns);
+    assert.ok(resWho.toLowerCase().includes('sri venkateswara') || resWho.toLowerCase().includes('aurora'), `Expected topic anchor in "${resWho}"`);
+    assert.ok(resWho.toLowerCase().includes('arrested') || resWho.toLowerCase().includes('suspect'), `Expected suspect/arrest in "${resWho}"`);
+    assert.notEqual(resWho.trim().toLowerCase(), 'arrested', 'Must never reduce to bare single word "arrested"');
+
+    const resName = resolveContextualFollowUpQuery('What is his name?', crimeTurns);
+    assert.ok(resName.toLowerCase().includes('sri venkateswara') || resName.toLowerCase().includes('aurora'), `Expected topic anchor in "${resName}"`);
+    assert.notEqual(resName.trim().toLowerCase(), 'name', 'Must never reduce to bare word "name"');
+
+    const resWhere = resolveContextualFollowUpQuery('Where did this happen?', crimeTurns);
+    assert.ok(resWhere.toLowerCase().includes('sri venkateswara') || resWhere.toLowerCase().includes('aurora'), `Expected topic anchor in "${resWhere}"`);
+    assert.notEqual(resWhere.trim().toLowerCase(), 'this happen', 'Must never reduce to bare words "this happen"');
+
+    const resMotive = resolveContextualFollowUpQuery('What was the motive?', crimeTurns);
+    assert.ok(resMotive.toLowerCase().includes('sri venkateswara') || resMotive.toLowerCase().includes('aurora'), `Expected topic anchor in "${resMotive}"`);
+    assert.ok(resMotive.toLowerCase().includes('motive'), `Expected motive in "${resMotive}"`);
+    assert.notEqual(resMotive.trim().toLowerCase(), 'the motive', 'Must never reduce to bare words "the motive"');
+
+    const resInjured = resolveContextualFollowUpQuery('Was anyone injured?', crimeTurns);
+    assert.ok(resInjured.toLowerCase().includes('sri venkateswara') || resInjured.toLowerCase().includes('aurora'), `Expected topic anchor in "${resInjured}"`);
+
+    const resPolice = resolveContextualFollowUpQuery('What did police say?', crimeTurns);
+    assert.ok(resPolice.toLowerCase().includes('sri venkateswara') || resPolice.toLowerCase().includes('aurora'), `Expected topic anchor in "${resPolice}"`);
+
+    const resUpdates = resolveContextualFollowUpQuery('Any updates?', crimeTurns);
+    assert.ok(resUpdates.toLowerCase().includes('sri venkateswara') || resUpdates.toLowerCase().includes('aurora'), `Expected topic anchor in "${resUpdates}"`);
+});
+
