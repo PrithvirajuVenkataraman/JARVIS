@@ -14797,6 +14797,7 @@ async function fetchLiveSearchJson(query, options = {}) {
         body: JSON.stringify({
             query,
             context: Array.isArray(options.context) ? options.context : undefined,
+            threadState: options.threadState || (typeof window !== 'undefined' && window.JarvisConversation?.getActiveLedger ? window.JarvisConversation.getActiveLedger() : undefined),
             maxResults: options.maxResults || 8,
             answer: Boolean(options.answer),
             domain: options.domain || '',
@@ -21376,8 +21377,9 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
             userText: userDisplayQuery,
             context: conversationContext || window.JarvisConversation?.buildContext?.({ maxTurns: 6 }) || [],
             assistantMessageId,
-            fetchSearchFn: async ({ query: fetchQuery, context: searchContext, signal, timeoutMs }) => {
+            fetchSearchFn: async ({ query: fetchQuery, context: searchContext, signal, timeoutMs, threadState }) => {
                 const effectiveSearchContext = searchContext || conversationContext || window.JarvisConversation?.buildContext?.({ maxTurns: 6 }) || [];
+                const activeLedger = threadState || window.JarvisConversation?.getActiveLedger?.() || null;
                 return fetchLiveSearchJson(fetchQuery || query, {
                     signal,
                     maxResults: 8,
@@ -21388,6 +21390,7 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                     allowDeepCrawl: true,
                     skipAutoDeepCrawl: false,
                     context: effectiveSearchContext,
+                    threadState: activeLedger,
                     timeoutMs: timeoutMs || controller.searchTimeoutMs || 4500
                 });
             },
