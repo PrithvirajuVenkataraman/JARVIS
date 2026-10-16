@@ -674,11 +674,12 @@ export default async function handler(req, res) {
 
     const originalQuery = normalizeSearchQuery(req.body?.query || req.body?.q || req.body?.url || '');
     const contextTurns = Array.isArray(req.body?.context) ? req.body.context : (Array.isArray(req.body?.turns) ? req.body.turns : []);
+    const incomingThreadState = req.body?.threadState || req.body?.ledger || null;
     let resolvedQuery = originalQuery;
     if (contextTurns.length > 0 && needsContextualReformulation(originalQuery, contextTurns)) {
-        resolvedQuery = await reformulateQueryWithGroq(originalQuery, contextTurns, { timeoutMs: 250 });
+        resolvedQuery = await reformulateQueryWithGroq(originalQuery, contextTurns, { timeoutMs: 250, threadState: incomingThreadState });
     }
-    const rewrite = buildSearchQueryRewrite(resolvedQuery, contextTurns);
+    const rewrite = buildSearchQueryRewrite(resolvedQuery, contextTurns, incomingThreadState);
     const query = rewrite.query || resolvedQuery;
     if (!query) {
         return res.status(400).json({
@@ -5420,12 +5421,15 @@ export function needsContextualReformulation(query, contextTurns = []) {
     const hasComparative = /\b(?:compare\s+(?:the\s+two|them|both)|difference\s+between|which\s+one\s+is\s+(?:better|faster|cheaper|larger|recommended)|who\s+won|head\s+to\s+head)\b/i.test(raw);
     const isFragment = raw.split(/\s+/).length <= 4 && /^(?:why|how\s+much|how\s+many|when|where|who|salary|net\s+worth|age|height|founder|price|status|cost|results?)\??$/i.test(raw);
 
-    // Follow-up inquiries on active entities/events (e.g. suspect, arrest, motive, casualties, updates)
+    // Follow-up inquiries on active entities/events (e.g. suspect, arrest, motive, casualties, updates, legal schedule, charges)
     const hasDefiniteFollowUp = /\b(?:who\s+(?:was|is|got)\s+(?:the\s+)?(?:arrested|charged|responsible|suspect|perpetrator|shooter|attacker)|what\s+(?:is|was)\s+(?:his|her|their|(?:the\s+)?(?:suspect|shooter|perpetrator|attacker|person|individual)(?:'s)?)\s+name|name\s+of\s+(?:the\s+)?(?:suspect|shooter)|who\s+(?:is|was)\s+(?:he|they|the\s+suspect|the\s+shooter))\b/i.test(raw) ||
         /\b(?:where\s+did\s+(?:this|it|the\s+\w+)\s+happen|where\s+is\s+(?:it|this|the\s+\w+)\s+located|which\s+city|what\s+city|where\s+was\s+(?:it|this))\b/i.test(raw) ||
         /\b(?:what\s+(?:was|is)\s+(?:the\s+)?motive|why\s+did\s+(?:he|they|this)\s+(?:do\s+it|happen))\b/i.test(raw) ||
         /\b(?:was\s+anyone\s+(?:injured|hurt|killed)|(?:any|were\s+there\s+any)\s+(?:casualties|injuries|deaths|victims))\b/i.test(raw) ||
         /\b(?:what\s+did\s+(?:the\s+)?(?:police|authorities|officials)\s+say|police\s+statement|official\s+statement)\b/i.test(raw) ||
+        /\b(?:what\s+(?:are|were)\s+(?:the\s+)?charges|charges?\s+(?:filed|brought)|indictment|charged\s+with)\b/i.test(raw) ||
+        /\b(?:when\s+is\s+(?:the\s+)?(?:trial|hearing|court\s+date)|trial\s+scheduled|court\s+appearance|sentenc(?:e|ing))\b/i.test(raw) ||
+        /\b(?:has\s+(?:the\s+)?(?:temple|church|facility|building)\s+reopened|reopening\s+date|visitor\s+hours)\b/i.test(raw) ||
         /^(?:any\s+updates?|latest\s+update|what\s+is\s+the\s+(?:latest|current\s+status|update)|what\s+happened\s+next)\??$/i.test(raw);
 
     return Boolean(hasReferentialPronoun || hasDemonstrative || hasElliptical || hasComparative || isFragment || hasDefiniteFollowUp);
@@ -5447,6 +5451,225 @@ export function cleanReformulatedSearchQuery(text = '', originalQuery = '') {
     return cleaned;
 }
 
+export const BOILERPLATE_ENTITIES = new Set([
+    'summary', 'overview', 'key details', 'sources', 'verified sources',
+    'verified live news sources', 'citations', 'references', 'background',
+    'update', 'details', 'report', 'analysis', 'findings', 'conclusion',
+    'introduction', 'notes', 'timeline', 'status', 'highlights', 'source',
+    'source excerpts', 'verification report', 'source metadata', 'user request',
+    'verified live news'
+]);
+
+export function deriveTopicPhrase(text = '') {
+    return String(text || '')
+        .replace(/^(?:please\s+)?(?:can|could|would)\s+you\s+(?:please\s+)?(?:tell\s+me|show\s+me|find|explain|search\s+for)\s+/i, '')
+        .replace(/^(?:tell\s+me\s+about|find\s+out|search\s+for|what\s+do\s+you\s+know\s+about|who\s+is|what\s+is|where\s+is)\s+/i, '')
+        .replace(/[?.!]+$/, '')
+        .trim();
+}
+
+export function isExplicitTopicShift(text = '') {
+    return /^(?:(?:new|different|another)\s+topic[:\s]|switch(?:\s+topic)?\s+to[:\s]|by the way[,:\s]|on another note[,:\s]|let's talk about\s+|moving on to\s+)/i.test(text);
+}
+
+export function isStandaloneInvariant(text = '') {
+    if (isExplicitTopicShift(text)) return true;
+    if (/^(?:which of the following|choose the correct|select the best|question:)\b/i.test(text) || /\boptions?:\s*[a-d]/i.test(text)) return true;
+    if (/^:::(?:image|vision)\[/i.test(text) || /\b(?:generate|draw|paint|sketch|create)\s+(?:an?\s+)?image\b/i.test(text)) return true;
+    if (/^(?:write|create|implement|code|generate|debug)\s+(?:a|an)?\s*(?:python|javascript|typescript|c\+\+|java|rust|go|html|css|sql|script|function|class|algorithm)\b/i.test(text)) return true;
+    return false;
+}
+
+export function deriveEpistemicLedger(contextTurns = [], initialLedger = null) {
+    const validTurns = (Array.isArray(contextTurns) ? contextTurns : [])
+        .filter(t => t && (t.text || t.content || t.user || t.ai));
+
+    let ledger = initialLedger && typeof initialLedger === 'object' && initialLedger.rootTopic ? {
+        rootTopic: String(initialLedger.rootTopic || ''),
+        rootKeywords: Array.isArray(initialLedger.rootKeywords) ? [...initialLedger.rootKeywords] : [],
+        entities: Array.isArray(initialLedger.entities) ? [...initialLedger.entities] : [],
+        subEntities: Array.isArray(initialLedger.subEntities) ? [...initialLedger.subEntities] : [],
+        activeSubEntity: initialLedger.activeSubEntity ? { ...initialLedger.activeSubEntity } : null,
+        currentFacet: initialLedger.currentFacet || 'general',
+        turnCount: Number(initialLedger.turnCount) || 0
+    } : {
+        rootTopic: '',
+        rootKeywords: [],
+        entities: [],
+        subEntities: [],
+        activeSubEntity: null,
+        currentFacet: 'general',
+        turnCount: 0
+    };
+
+    for (let i = 0; i < validTurns.length; i++) {
+        const t = validTurns[i];
+        const isAssistant = t.role === 'assistant' || Boolean(t.ai);
+        const role = isAssistant ? 'assistant' : 'user';
+        const rawText = String(t.text || t.content || (isAssistant ? t.ai : t.user) || '').trim();
+        if (!rawText) continue;
+
+        if (role === 'user') {
+            const hasPronoun = /\b(?:he|him|his|she|her|hers|they|them|their|theirs|it|its|this|that|these|those)\b/i.test(rawText);
+            const hasIncidentNoun = /\b(?:suspect|shooter|attacker|perpetrator|victim|motive|charges|trial|judge|hearing|court|police|authorities|casualties|injuries|arrest|arrested|update|reopen|status|temple|facility)\b/i.test(rawText);
+            const isEllipticalOrCompare = /^(?:(?:and|what|how)\s+about|and\s+in|what\s+if|why|how\s+so)\b/i.test(rawText) ||
+                /\b(?:compare\s+(?:the\s+two|them|both)|difference\s+between|which\s+one\s+is|who\s+won|head\s+to\s+head)\b/i.test(rawText);
+            const isShift = isExplicitTopicShift(rawText);
+            const hasExistingOverlap = (ledger.rootKeywords || []).some(kw => rawText.toLowerCase().includes(kw)) ||
+                (ledger.entities || []).some(e => rawText.toLowerCase().includes(e.toLowerCase()));
+
+            const isContinuation = Boolean(ledger.rootTopic) && !isShift && (hasPronoun || hasIncidentNoun || isEllipticalOrCompare || hasExistingOverlap);
+
+            if (!isContinuation) {
+                // New Root Topic
+                const cleanTopic = deriveTopicPhrase(rawText);
+                ledger.rootTopic = cleanTopic || rawText;
+                ledger.rootKeywords = (cleanTopic || rawText)
+                    .toLowerCase()
+                    .replace(/[^a-z0-9\s]/g, ' ')
+                    .split(/\s+/)
+                    .filter(w => w.length >= 3 && !/^(?:the|and|for|with|about|what|who|where|how|tell)\b/.test(w));
+                ledger.entities = [];
+                ledger.subEntities = [];
+                ledger.activeSubEntity = null;
+                ledger.currentFacet = 'general';
+                ledger.turnCount = 1;
+            } else {
+                // Continuation turn on existing thread
+                ledger.turnCount++;
+
+                // Detect Facet & Active Sub-Entity
+                if (/\b(?:who\s+(?:was|is|got)\s+(?:the\s+)?(?:arrested|charged|responsible|suspect|perpetrator|shooter|attacker)|what\s+(?:is|was)\s+(?:his|her|their|(?:the\s+)?(?:suspect|shooter|perpetrator|attacker|person)(?:'s)?)\s+name|name\s+of\s+(?:the\s+)?(?:suspect|shooter)|who\s+(?:did\s+it|was\s+it))\b/i.test(rawText)) {
+                    ledger.activeSubEntity = { name: 'suspect', type: 'suspect' };
+                    ledger.currentFacet = 'identity';
+                } else if (/\b(?:charges?|indictment|charged\s+with|court|bail|plea)\b/i.test(rawText)) {
+                    ledger.activeSubEntity = ledger.activeSubEntity || { name: 'suspect', type: 'suspect' };
+                    ledger.currentFacet = 'charges';
+                } else if (/\b(?:trial|judge|court\s+date|hearing|sentenc(?:e|ing)|scheduled)\b/i.test(rawText)) {
+                    ledger.activeSubEntity = ledger.activeSubEntity || { name: 'suspect', type: 'suspect' };
+                    ledger.currentFacet = 'legal_schedule';
+                } else if (/\b(?:where\s+did\s+(?:this|it)\s+happen|which\s+city|what\s+city|location|where\s+is\s+it)\b/i.test(rawText)) {
+                    ledger.currentFacet = 'location';
+                } else if (/\b(?:motive|why\s+did\s+(?:he|they|this)\s+(?:do\s+it|happen)|reason)\b/i.test(rawText)) {
+                    ledger.currentFacet = 'motive';
+                } else if (/\b(?:casualties|injured|injuries|killed|deaths?|victims?|hurt)\b/i.test(rawText)) {
+                    ledger.currentFacet = 'casualties';
+                } else if (/\b(?:police|authorities|officials|fbi|statement|press\s+conference)\b/i.test(rawText)) {
+                    ledger.currentFacet = 'statement';
+                } else if (/\b(?:temple|church|facility|building)\s+(?:reopen|open|visitor|status)\b|\b(?:reopen|reopened|visiting\s+hours)\b/i.test(rawText)) {
+                    ledger.activeSubEntity = { name: 'temple', type: 'facility' };
+                    ledger.currentFacet = 'facility_status';
+                } else if (/\b(?:any\s+updates?|latest|current\s+status|what\s+happened\s+next)\b/i.test(rawText)) {
+                    ledger.currentFacet = 'status';
+                }
+            }
+
+            // Extract capitalized proper entities from user text
+            const userProps = rawText.matchAll(/\b([A-Z][a-z0-9]{2,}(?:\s+[A-Z][a-z0-9]{2,}){1,3})\b/g);
+            for (const m of userProps) {
+                const val = m[1].trim();
+                if (val && !BOILERPLATE_ENTITIES.has(val.toLowerCase()) && !ledger.entities.includes(val)) {
+                    ledger.entities.push(val);
+                }
+            }
+        } else {
+            // Assistant turn: extract non-boilerplate entities and update sub-entities
+            const boldMatches = rawText.matchAll(/\*\*([A-Za-z0-9][A-Za-z0-9\s,'’\.\-–—]{2,60})\*\*/g);
+            for (const m of boldMatches) {
+                const val = m[1].replace(/[:–—\-\.]+$/, '').trim();
+                if (val && !BOILERPLATE_ENTITIES.has(val.toLowerCase()) && !ledger.entities.includes(val)) {
+                    ledger.entities.push(val);
+                }
+            }
+            const asstProps = rawText.matchAll(/\b([A-Z][a-z0-9]{2,}(?:\s+[A-Z][a-z0-9]{2,}){1,3})\b/g);
+            for (const m of asstProps) {
+                const val = m[1].trim();
+                if (val && !BOILERPLATE_ENTITIES.has(val.toLowerCase()) && !ledger.entities.includes(val)) {
+                    ledger.entities.push(val);
+                }
+            }
+        }
+    }
+
+    return ledger;
+}
+
+export function buildHierarchicalFacetQuery(query, ledger) {
+    const raw = String(query || '').trim();
+    if (!ledger || !ledger.rootTopic) return raw;
+
+    const cleanQ = raw.replace(/[?.!]+$/, '').trim();
+    const root = ledger.rootTopic;
+
+    // Detect facet & active sub-entity directly from current query (or fallback to ledger)
+    let facet = 'general';
+    let subEntity = ledger.activeSubEntity?.name || '';
+
+    if (/\b(?:who\s+(?:was|is|got)\s+(?:the\s+)?(?:arrested|charged|responsible|suspect|perpetrator|shooter|attacker)|what\s+(?:is|was)\s+(?:his|her|their|(?:the\s+)?(?:suspect|shooter|perpetrator|attacker|person|individual)(?:'s)?)\s+name|name\s+of\s+(?:the\s+)?(?:suspect|shooter)|who\s+(?:is|was)\s+(?:he|they|the\s+suspect|the\s+shooter)|who\s+(?:did\s+it|was\s+it))\b/i.test(cleanQ)) {
+        facet = 'identity';
+        subEntity = subEntity || 'suspect';
+    } else if (/\b(?:charges?|indictment|charged\s+with|court|bail|plea)\b/i.test(cleanQ)) {
+        facet = 'charges';
+        subEntity = subEntity || 'suspect';
+    } else if (/\b(?:trial|judge|court\s+date|hearing|sentenc(?:e|ing)|scheduled)\b/i.test(cleanQ)) {
+        facet = 'legal_schedule';
+        subEntity = subEntity || 'suspect';
+    } else if (/\b(?:where\s+did\s+(?:this|it|the\s+\w+)\s+happen|where\s+is\s+(?:it|this|the\s+\w+)\s+located|which\s+city|what\s+city|where\s+was\s+(?:it|this))\b/i.test(cleanQ)) {
+        facet = 'location';
+    } else if (/\b(?:what\s+(?:was|is)\s+(?:the\s+)?motive|why\s+did\s+(?:he|they|this)\s+(?:do\s+it|happen)|reason)\b/i.test(cleanQ)) {
+        facet = 'motive';
+    } else if (/\b(?:was\s+anyone\s+(?:injured|hurt|killed)|(?:any|were\s+there\s+any)\s+(?:casualties|injuries|deaths|victims)|hurt)\b/i.test(cleanQ)) {
+        facet = 'casualties';
+    } else if (/\b(?:what\s+did\s+(?:the\s+)?(?:police|authorities|officials)\s+say|police\s+statement|official\s+statement|fbi|press\s+conference)\b/i.test(cleanQ)) {
+        facet = 'statement';
+    } else if (/\b(?:temple|church|facility|building)\s+(?:reopen|open|visitor|status)\b|\b(?:reopen|reopened|visitor\s+hours|security\s+status)\b/i.test(cleanQ)) {
+        facet = 'facility_status';
+        subEntity = subEntity || 'temple';
+    } else if (/^(?:any\s+updates?|latest\s+update|what\s+is\s+the\s+(?:latest|current\s+status|update)|what\s+happened\s+next)\??$/i.test(cleanQ)) {
+        facet = 'status';
+    } else if (ledger.currentFacet && ledger.currentFacet !== 'general') {
+        facet = ledger.currentFacet;
+    }
+
+    // Facet mappings
+    switch (facet) {
+        case 'identity':
+            return `${root} ${subEntity || 'suspect'} arrested identity name details`.replace(/\s+/g, ' ').trim();
+        case 'charges':
+            return `${root} ${subEntity || 'suspect'} federal charges indictment filed`.replace(/\s+/g, ' ').trim();
+        case 'legal_schedule':
+            return `${root} ${subEntity || 'suspect'} court appearance trial date scheduled`.replace(/\s+/g, ' ').trim();
+        case 'location':
+            return `${root} incident location city address`.replace(/\s+/g, ' ').trim();
+        case 'motive':
+            return `${root} motive reason investigation fbi`.replace(/\s+/g, ' ').trim();
+        case 'casualties':
+            return `${root} casualties injuries victims hospital`.replace(/\s+/g, ' ').trim();
+        case 'statement':
+            return `${root} police department statement press conference`.replace(/\s+/g, ' ').trim();
+        case 'facility_status':
+            return `${root} temple reopen visitor hours security status`.replace(/\s+/g, ' ').trim();
+        case 'status':
+            return `${root} latest updates current status developments`.replace(/\s+/g, ' ').trim();
+        default: {
+            // Sub-entity pronoun replacement
+            let rewritten = cleanQ;
+            const replacement = subEntity || ledger.entities[0] || root;
+            rewritten = rewritten.replace(/\b(?:his|her|their|its)\b/gi, replacement);
+            rewritten = rewritten.replace(/\b(?:he|him|she|they|them|it|this|that|these|those)\b/gi, replacement);
+            rewritten = rewritten
+                .replace(/^(?:what|who|when|where|how|why)\s+(?:is|are|was|were|do|does|did|can|will)\s+/i, '')
+                .replace(/^(?:tell\s+me\s+about|find\s+out|search\s+for|explain)\s+/i, '')
+                .replace(/\s+/g, ' ')
+                .trim();
+            if (!rewritten.toLowerCase().includes(root.toLowerCase()) && !rewritten.toLowerCase().includes(replacement.toLowerCase())) {
+                return `${root} ${rewritten}`.replace(/\s+/g, ' ').trim();
+            }
+            return rewritten;
+        }
+    }
+}
+
 export async function reformulateQueryWithGroq(query, contextTurns = [], options = {}) {
     const raw = String(query || '').trim();
     if (!raw) return '';
@@ -5454,10 +5677,13 @@ export async function reformulateQueryWithGroq(query, contextTurns = [], options
         return raw;
     }
 
+    const threadState = options.threadState || null;
+    const ledger = deriveEpistemicLedger(contextTurns, threadState);
+
     const groqKey = options.apiKey || getGroqApiKey();
     if (!groqKey) {
         // Fallback when no API key configured: return baseline anchor or original query
-        return resolveContextualFollowUpQuery(raw, contextTurns);
+        return resolveContextualFollowUpQuery(raw, contextTurns, ledger);
     }
 
     const timeoutMs = options.timeoutMs ?? 250;
@@ -5487,7 +5713,8 @@ export async function reformulateQueryWithGroq(query, contextTurns = [], options
         return `${role}: ${content}`;
     }).join('\n');
 
-    const systemPrompt = 'You are a search query reformulation engine. Convert the user\'s conversational follow-up into a single, concise, standalone web search query using the conversation context.\nRules:\n- Resolve all pronouns ("he", "she", "it", "they", "his", "her", "their"), demonstratives ("this", "that", "these", "those"), elliptical phrases ("what about in 2024?"), or comparative references ("compare the two") using the conversation history.\n- Always anchor follow-up questions to the substantive topic and named entities (people, places, organizations, events) established earlier in the conversation.\n- For questions asking about a suspect, person identity, location, motive, or updates, combine the conversation\'s specific event/subject anchor with the requested detail.\n- If the question is already complete and standalone, return it unchanged.\n- Return ONLY the search query text. Do NOT include quotes, explanations, markdown, or punctuation at the end.';
+    const anchorInstruction = ledger?.rootTopic ? `\n- Root conversation topic: "${ledger.rootTopic}". Anchor follow-up queries strictly to this root topic and its sub-entities.` : '';
+    const systemPrompt = `You are a search query reformulation engine. Convert the user's conversational follow-up into a single, concise, standalone web search query using the conversation context.\nRules:\n- Resolve all pronouns ("he", "she", "it", "they", "his", "her", "their"), demonstratives ("this", "that", "these", "those"), elliptical phrases ("what about in 2024?"), or comparative references ("compare the two") using the conversation history.${anchorInstruction}\n- Always anchor follow-up questions to the substantive topic and named entities (people, places, organizations, events) established earlier in the conversation.\n- For questions asking about a suspect, person identity, location, motive, or updates, combine the conversation's specific event/subject anchor with the requested detail.\n- If the question is already complete and standalone, return it unchanged.\n- Return ONLY the search query text. Do NOT include quotes, explanations, markdown, or punctuation at the end.`;
 
     const userPrompt = `Conversation:\n${historyLines}\n\nUser follow-up: ${raw}\nStandalone search query:`;
 
@@ -5521,79 +5748,33 @@ export async function reformulateQueryWithGroq(query, contextTurns = [], options
         // Strict 250ms timeout or network failure -> immediately fail-open to original query
     }
 
-    return resolveContextualFollowUpQuery(raw, contextTurns);
+    return resolveContextualFollowUpQuery(raw, contextTurns, ledger);
 }
 
-export function resolveContextualFollowUpQuery(query, contextTurns = []) {
+export function resolveContextualFollowUpQuery(query, contextTurns = [], incomingLedger = null) {
     try {
         const raw = String(query || '').trim();
         if (!raw || !Array.isArray(contextTurns) || !contextTurns.length) return raw;
         if (!needsContextualReformulation(raw, contextTurns)) return raw;
 
-        const turns = contextTurns.filter(t => t && (t.text || t.content || t.user || t.ai));
-        let lastAsst = '';
-        let lastUser = '';
-        for (let i = turns.length - 1; i >= 0; i--) {
-            const t = turns[i];
-            const role = String(t.role || (t.user ? 'user' : (t.ai ? 'assistant' : ''))).toLowerCase();
-            const text = String(t.text || t.content || (role === 'user' ? t.user : t.ai) || '').trim();
-            if (!lastAsst && role === 'assistant') lastAsst = text;
-            else if (!lastUser && role === 'user') lastUser = text;
-            if (lastAsst && lastUser) break;
-        }
-
-        let userTopic = '';
-        if (lastUser) {
-            userTopic = lastUser
-                .replace(/^(?:please\s+)?(?:can|could|would)\s+you\s+(?:please\s+)?(?:tell\s+me|show\s+me|find|explain|search\s+for)\s+/i, '')
-                .replace(/^(?:tell\s+me\s+about|find\s+out|search\s+for|what\s+do\s+you\s+know\s+about|who\s+is|what\s+is|where\s+is)\s+/i, '')
-                .replace(/[?.!]+$/, '')
-                .trim();
-        }
-
-        const BOILERPLATE_ENTITIES = new Set([
-            'summary', 'overview', 'key details', 'sources', 'verified sources',
-            'verified live news sources', 'citations', 'references', 'background',
-            'update', 'details', 'report', 'analysis', 'findings', 'conclusion',
-            'introduction', 'notes', 'timeline', 'status', 'highlights', 'source',
-            'source excerpts', 'verification report', 'source metadata', 'user request',
-            'verified live news'
-        ]);
-
-        const entities = [];
-        if (lastAsst) {
-            const boldMatches = lastAsst.matchAll(/\*\*([A-Za-z0-9][A-Za-z0-9\s,'’\.\-–—]{2,60})\*\*/g);
-            for (const m of boldMatches) {
-                const val = m[1].replace(/[:–—\-\.]+$/, '').trim();
-                if (val && !BOILERPLATE_ENTITIES.has(val.toLowerCase()) && !entities.includes(val)) {
-                    entities.push(val);
-                }
-            }
-            const propMatches = lastAsst.matchAll(/\b([A-Z][a-z0-9]{2,}(?:\s+[A-Z][a-z0-9]{2,}){1,3})\b/g);
-            for (const m of propMatches) {
-                const val = m[1].trim();
-                if (val && !BOILERPLATE_ENTITIES.has(val.toLowerCase()) && !entities.includes(val)) {
-                    entities.push(val);
-                }
-            }
-        }
-        if (lastUser) {
-            const userProp = lastUser.matchAll(/\b([A-Z][a-z0-9]{2,}(?:\s+[A-Z][a-z0-9]{2,}){1,3})\b/g);
-            for (const m of userProp) {
-                const val = m[1].trim();
-                if (val && !entities.includes(val)) entities.push(val);
-            }
-        }
-
+        const ledger = deriveEpistemicLedger(contextTurns, incomingLedger);
         const cleanQ = raw.replace(/[?.!]+$/, '').trim();
-        const primaryEntity = entities[0] || userTopic || '';
-        const topicAnchor = userTopic || primaryEntity || '';
-        const anchor = topicAnchor || primaryEntity;
 
-        // Comparative fallback
+        // 1. Comparative fallback (e.g. "compare the two", "which one is faster")
         if (/\b(?:compare\s+(?:the\s+two|them|both)|difference\s+between|which\s+one\s+is|who\s+won|head\s+to\s+head)\b/i.test(cleanQ)) {
             let item1 = '';
             let item2 = '';
+            const turns = contextTurns.filter(t => t && (t.text || t.content || t.user || t.ai));
+            let lastAsst = '';
+            let lastUser = '';
+            for (let i = turns.length - 1; i >= 0; i--) {
+                const t = turns[i];
+                const role = String(t.role || (t.user ? 'user' : (t.ai ? 'assistant' : ''))).toLowerCase();
+                const text = String(t.text || t.content || (role === 'user' ? t.user : t.ai) || '').trim();
+                if (!lastAsst && role === 'assistant') lastAsst = text;
+                else if (!lastUser && role === 'user') lastUser = text;
+                if (lastAsst && lastUser) break;
+            }
             if (lastAsst) {
                 const listMatches = lastAsst.matchAll(/^(?:(?:\d{1,2}|[a-e])[\.\)]|\-|\*)\s+(?:\*\*)?([A-Za-z0-9][A-Za-z0-9\s,'’\.\-–—:]{2,60})(?:\*\*)?/gim);
                 const items = [];
@@ -5603,9 +5784,9 @@ export function resolveContextualFollowUpQuery(query, contextTurns = []) {
                     item2 = items[1];
                 }
             }
-            if (!item1 && entities.length >= 2) {
-                item1 = entities[0];
-                item2 = entities[1];
+            if (!item1 && ledger.entities.length >= 2) {
+                item1 = ledger.entities[0];
+                item2 = ledger.entities[1];
             } else if (!item1 && lastUser) {
                 const vsMatch = lastUser.match(/\b([A-Za-z0-9][A-Za-z0-9\s-]{1,30})\s+(?:vs\.?|versus|and|or)\s+([A-Za-z0-9][A-Za-z0-9\s-]{1,30})\b/i);
                 if (vsMatch) {
@@ -5618,19 +5799,23 @@ export function resolveContextualFollowUpQuery(query, contextTurns = []) {
             }
         }
 
-        // Elliptical fallback
+        // 2. Elliptical fallback (e.g. "what about in 2024?")
         if (/^(?:(?:and|what|how)\s+about\s+)?(?:in|at|for|during|since)\s+([0-9]{4}|[A-Za-z\s'-]+)$/i.test(cleanQ)) {
             const ellipticalMatch = cleanQ.match(/^(?:(?:and|what|how)\s+about\s+)?(?:in|at|for|during|since)\s+([0-9]{4}|[A-Za-z\s'-]+)$/i);
             if (ellipticalMatch && ellipticalMatch[1]) {
                 const modifier = ellipticalMatch[1].trim();
-                let baseTopic = primaryEntity || '';
-                if (lastUser) {
-                    const topicSubject = lastUser
-                        .replace(/^(?:who|what|where|when|which|why|how)\s+(?:is|are|was|were|do|does|did|can|will)\s+(?:the\s+|a\s+|an\s+)?/i, '')
-                        .replace(/\b(?:in|at|for|during|since)\s+[0-9]{4}\b/gi, '')
-                        .replace(/[?.!]+$/, '')
-                        .trim();
-                    if (topicSubject.length >= 3) baseTopic = topicSubject;
+                let baseTopic = ledger.rootTopic || ledger.entities[0] || '';
+                if (!baseTopic) {
+                    const lastUserTurn = contextTurns.slice().reverse().find(t => !t.role || t.role === 'user' || t.user);
+                    const lastUser = String(lastUserTurn?.text || lastUserTurn?.content || lastUserTurn?.user || '').trim();
+                    if (lastUser) {
+                        const topicSubject = lastUser
+                            .replace(/^(?:who|what|where|when|which|why|how)\s+(?:is|are|was|were|do|does|did|can|will)\s+(?:the\s+|a\s+|an\s+)?/i, '')
+                            .replace(/\b(?:in|at|for|during|since)\s+[0-9]{4}\b/gi, '')
+                            .replace(/[?.!]+$/, '')
+                            .trim();
+                        if (topicSubject.length >= 3) baseTopic = topicSubject;
+                    }
                 }
                 if (baseTopic) {
                     return `${baseTopic} in ${modifier}`.replace(/\bin\s+in\b/gi, 'in').trim();
@@ -5638,57 +5823,9 @@ export function resolveContextualFollowUpQuery(query, contextTurns = []) {
             }
         }
 
-        // Specific follow-up query resolutions
-        if (/\b(?:who\s+(?:was|is|got)\s+(?:the\s+)?(?:arrested|charged|responsible|suspect|perpetrator|shooter|attacker)|what\s+(?:is|was)\s+(?:his|her|their|(?:the\s+)?(?:suspect|shooter|perpetrator|attacker|person|individual)(?:'s)?)\s+name|name\s+of\s+(?:the\s+)?(?:suspect|shooter)|who\s+(?:is|was)\s+(?:he|they|the\s+suspect|the\s+shooter))\b/i.test(cleanQ)) {
-            const isGenericTopic = /\b(?:plot|shooting|attack|incident|case|investigation|temple|church|mosque|school)\b/i.test(primaryEntity);
-            if (!isGenericTopic && primaryEntity && primaryEntity !== anchor) {
-                return `${primaryEntity} identity details`;
-            }
-            return `${anchor} suspect arrested name identity`;
-        }
-
-        if (/\b(?:where\s+did\s+(?:this|it|the\s+\w+)\s+happen|where\s+is\s+(?:it|this|the\s+\w+)\s+located|which\s+city|what\s+city|where\s+was\s+(?:it|this))\b/i.test(cleanQ)) {
-            return `${anchor} location city`;
-        }
-
-        if (/\b(?:what\s+(?:was|is)\s+(?:the\s+)?motive|why\s+did\s+(?:he|they|this)\s+(?:do\s+it|happen))\b/i.test(cleanQ)) {
-            return `${anchor} motive reason`;
-        }
-
-        if (/\b(?:was\s+anyone\s+(?:injured|hurt|killed)|(?:any|were\s+there\s+any)\s+(?:casualties|injuries|deaths|victims))\b/i.test(cleanQ)) {
-            return `${anchor} casualties injuries victims`;
-        }
-
-        if (/\b(?:what\s+did\s+(?:the\s+)?(?:police|authorities|officials)\s+say|police\s+statement|official\s+statement)\b/i.test(cleanQ)) {
-            return `${anchor} police statement`;
-        }
-
-        if (/^(?:any\s+updates?|latest\s+update|what\s+is\s+the\s+(?:latest|current\s+status|update)|what\s+happened\s+next)\??$/i.test(cleanQ)) {
-            return `${anchor} latest update status`;
-        }
-
-        // Pronoun, demonstrative, or fragment fallback
-        if (anchor) {
-            let rewritten = cleanQ;
-            const replacementEntity = primaryEntity || anchor;
-            rewritten = rewritten.replace(/\b(?:his|her|their|its)\b/gi, replacementEntity);
-            rewritten = rewritten.replace(/\b(?:he|him|she|they|them|it|this|that|these|those)\b/gi, replacementEntity);
-            rewritten = rewritten
-                .replace(/^(?:what|who|when|where|how|why)\s+(?:is|are|was|were|do|does|did|can|will)\s+/i, '')
-                .replace(/^(?:tell\s+me\s+about|find\s+out|search\s+for|explain)\s+/i, '')
-                .replace(/\s+/g, ' ')
-                .trim();
-
-            const lowerRewritten = rewritten.toLowerCase();
-            const hasAnchor = lowerRewritten.includes(replacementEntity.toLowerCase()) || (anchor && lowerRewritten.includes(anchor.toLowerCase()));
-            if (!hasAnchor) {
-                rewritten = `${anchor} ${rewritten}`.trim();
-            }
-
-            if (rewritten.length >= 3) {
-                return rewritten;
-            }
-            return `${anchor} ${cleanQ}`;
+        // 3. Hierarchical Facet Query from Session Ledger
+        if (ledger && ledger.rootTopic) {
+            return buildHierarchicalFacetQuery(raw, ledger);
         }
 
         return raw;
@@ -5697,8 +5834,8 @@ export function resolveContextualFollowUpQuery(query, contextTurns = []) {
     }
 }
 
-export function buildSearchQueryRewrite(query, contextTurns = []) {
-    const contextual = resolveContextualFollowUpQuery(query, contextTurns);
+export function buildSearchQueryRewrite(query, contextTurns = [], incomingLedger = null) {
+    const contextual = resolveContextualFollowUpQuery(query, contextTurns, incomingLedger);
     const distilled = distillSearchQuery(contextual);
     const normalized = normalizeSearchQuery(distilled || contextual)
         .replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, '')
@@ -6309,5 +6446,11 @@ export const __test = {
     resolveContextualFollowUpQuery,
     needsContextualReformulation,
     cleanReformulatedSearchQuery,
-    reformulateQueryWithGroq
+    reformulateQueryWithGroq,
+    deriveTopicPhrase,
+    isExplicitTopicShift,
+    isStandaloneInvariant,
+    deriveEpistemicLedger,
+    buildHierarchicalFacetQuery,
+    BOILERPLATE_ENTITIES
 };
