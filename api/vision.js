@@ -78,14 +78,36 @@ export default async function handler(req, res) {
         });
     }
 
-    const { prompt = '', task = 'general_vision', mimeType = 'image/jpeg', imageBase64 = '' } = req.body || {};
+    const { prompt = '', task = 'general_vision', mimeType = 'image/jpeg', imageBase64: rawImageBase64 = '' } = req.body || {};
     if (String(prompt).length > 2000 || String(task).length > 120) {
         return sendVisionError(res, 413, 'payload_too_large', 'Prompt or task is too long.');
     }
-    if (!imageBase64 || typeof imageBase64 !== 'string') {
+    if (!rawImageBase64 || typeof rawImageBase64 !== 'string') {
         return sendVisionError(res, 400, 'invalid_request', 'imageBase64 is required.');
     }
+
     let rawMimeType = String(mimeType || '').trim().toLowerCase();
+    const dataUrlMatch = rawImageBase64.match(/^data:([^;]+);base64,/i);
+    if (dataUrlMatch && dataUrlMatch[1] && (!rawMimeType || rawMimeType === 'application/octet-stream' || rawMimeType === 'image/jpeg')) {
+        rawMimeType = dataUrlMatch[1].trim().toLowerCase();
+    }
+
+    let imageBase64 = String(rawImageBase64 || '')
+        .replace(/^data:[^;]+;base64,/i, '')
+        .replace(/\s+/g, '')
+        .replace(/-/g, '+')
+        .replace(/_/g, '/');
+
+    if (!imageBase64) {
+        return sendVisionError(res, 400, 'invalid_request', 'imageBase64 is required.');
+    }
+
+    if (!imageBase64.endsWith('=')) {
+        while (imageBase64.length % 4 !== 0) {
+            imageBase64 += '=';
+        }
+    }
+
     if (!rawMimeType || rawMimeType === 'application/octet-stream') {
         const detected = detectImageMimeFromBase64(imageBase64);
         if (detected) rawMimeType = detected;
