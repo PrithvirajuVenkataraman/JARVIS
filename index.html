@@ -12343,7 +12343,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                     const backupUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(cleanPrompt)}?width=${width}&height=${height}&model=turbo&nologo=true&seed=${backupSeed}`;
                     imgEl.src = backupUrl;
                 }
-            }, 8500);
+            }, 22000);
 
             function revealImage(src, id) {
                 if (imageRevealed) return;
