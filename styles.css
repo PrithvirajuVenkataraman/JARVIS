@@ -3339,7 +3339,7 @@ body.dark .footer-action-btn-primary:hover {
 .help-modal-enhanced h2,
 .help-modal-enhanced h3,
 .help-modal-enhanced p,
-.help-modal-enhanced span,
+.help-modal-enhanced span:not(.help-modal-ok-btn):not(.help-modal-ok-btn *),
 .help-modal-enhanced label {
     color: var(--ui-text) !important;
 }
@@ -4443,13 +4443,18 @@ button:hover {
     text-overflow: ellipsis !important;
 }
 
-.help-modal-ok-btn {
+.help-modal-ok-btn,
+.help-modal-ok-btn *,
+.help-modal-ok-btn span,
+.help-modal-enhanced .help-modal-ok-btn,
+.help-modal-enhanced .help-modal-ok-btn * {
     min-width: 68px !important;
     height: 36px !important;
     padding: 0 16px !important;
     border-radius: 999px !important;
     background: #ffffff !important;
-    color: #09090b !important;
+    color: #000000 !important;
+    -webkit-text-fill-color: #000000 !important;
     border: 1px solid #ffffff !important;
     font-size: 13px !important;
     font-weight: 750 !important;
@@ -4463,13 +4468,16 @@ button:hover {
     flex-shrink: 0 !important;
 }
 
-.help-modal-ok-btn:hover {
+.help-modal-ok-btn:hover,
+.help-modal-enhanced .help-modal-ok-btn:hover {
     background: #e4e4e7 !important;
+    border-color: #e4e4e7 !important;
     transform: translateY(-1px) !important;
     box-shadow: 0 4px 14px rgba(255, 255, 255, 0.28) !important;
 }
 
-.help-modal-ok-btn:active {
+.help-modal-ok-btn:active,
+.help-modal-enhanced .help-modal-ok-btn:active {
     transform: scale(0.97) !important;
 }
 
@@ -4514,23 +4522,33 @@ button:hover {
     align-items: flex-start !important;
     justify-content: space-between !important;
     gap: 12px !important;
+    width: 100% !important;
 }
 
 .settings-card-title-group {
     display: flex !important;
-    align-items: center !important;
+    align-items: flex-start !important;
     gap: 12px !important;
+    min-width: 0 !important;
+    flex: 1 1 auto !important;
+}
+
+.settings-card-title-text {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 2px !important;
     min-width: 0 !important;
 }
 
 .settings-icon-badge {
-    width: 36px !important;
-    height: 36px !important;
-    border-radius: 10px !important;
+    width: 34px !important;
+    height: 34px !important;
+    border-radius: 9px !important;
     display: inline-flex !important;
     align-items: center !important;
     justify-content: center !important;
     flex-shrink: 0 !important;
+    margin-top: 1px !important;
 }
 
 .settings-icon-cyan {
@@ -4568,11 +4586,11 @@ button:hover {
     font-size: 15px !important;
     font-weight: 700 !important;
     color: #ffffff !important;
-    line-height: 1.25 !important;
+    line-height: 1.3 !important;
 }
 
 .settings-section-desc {
-    margin: 2px 0 0 !important;
+    margin: 0 !important;
     font-size: 12.5px !important;
     color: #94a3b8 !important;
     line-height: 1.4 !important;
@@ -4654,9 +4672,11 @@ button:hover {
     display: flex !important;
     flex-direction: column !important;
     gap: 6px !important;
+    width: 100% !important;
 }
 
 .help-modal-enhanced .custom-system-prompt-input {
+    display: block !important;
     width: 100% !important;
     min-height: 100px !important;
     max-height: 220px !important;
@@ -4873,6 +4893,13 @@ button:hover {
     gap: 12px !important;
     min-width: 0 !important;
     flex: 1 1 auto !important;
+}
+
+.settings-privacy-text {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 2px !important;
+    min-width: 0 !important;
 }
 
 .settings-privacy-summary {
