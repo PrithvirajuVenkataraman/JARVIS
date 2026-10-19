@@ -7175,6 +7175,19 @@ body:not(.dark) .assistant-followup-chip:hover {
     max-width: 100%;
 }
 
+/* Notebook Step Labels (Whiteboard / Teacher Margin Style) */
+.math-step-label {
+    display: inline-block;
+    font-weight: 600;
+    color: #38bdf8;
+    margin-top: 0.85rem;
+    margin-bottom: 0.35rem;
+    font-size: 0.95em;
+    letter-spacing: 0.02em;
+    border-bottom: 1px dashed rgba(56, 189, 248, 0.3);
+    padding-bottom: 2px;
+}
+
 /* Notebook Final Answer Callout */
 .math-notebook-answer,
 .katex .mord.framebox,
@@ -7182,12 +7195,12 @@ body:not(.dark) .assistant-followup-chip:hover {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 4px 12px;
-    margin: 4px 6px;
-    border: 1.5px solid rgba(56, 189, 248, 0.65) !important;
-    border-radius: 8px;
-    background: rgba(56, 189, 248, 0.08) !important;
-    box-shadow: 0 0 12px rgba(56, 189, 248, 0.12);
+    padding: 3px 10px;
+    margin: 3px 5px;
+    border: 1.5px solid rgba(56, 189, 248, 0.6) !important;
+    border-radius: 6px;
+    background: rgba(56, 189, 248, 0.07) !important;
+    box-shadow: 0 0 10px rgba(56, 189, 248, 0.1);
     font-family: inherit;
     color: #7dd3fc !important;
     font-style: normal;
