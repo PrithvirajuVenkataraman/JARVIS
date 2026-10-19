@@ -70,7 +70,7 @@ self.onmessage = async function handleWorkerMessage(event) {
         try {
             self.postMessage({ action: 'progress', id, phase: 'init', percent: 20, message: 'Connecting to fast AI engine...' });
 
-            const model = options.model || 'turbo';
+            const model = options.model || 'flux';
             const negativePrompt = encodeURIComponent(options.negativePrompt || 'text,watermark,words,letters,signature,typography,lowres,blurry');
             const encodedPrompt = encodeURIComponent(String(prompt || '').trim());
             let seed = options.seed || Math.floor(Math.random() * 1000000);
@@ -108,7 +108,7 @@ self.onmessage = async function handleWorkerMessage(event) {
             let res = null;
             if (proxyUrl) {
                 try {
-                    res = await fetchWithTimeout(proxyUrl, 12000);
+                    res = await fetchWithTimeout(proxyUrl, 25000);
                     if (!res.ok) res = null;
                 } catch (_) {
                     res = null;
