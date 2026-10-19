@@ -33,10 +33,83 @@ function isMathCodeBlock(lang = '', code = '') {
     return (hasMathCommands || hasDanglingMathEnv) && !hasCodeKeywords;
 }
 
+/**
+ * Automatically balances unclosed code fences, LaTeX display and inline math blocks,
+ * and environments during token-by-token live streaming to prevent layout shift and popping.
+ * @param {string} rawText
+ * @returns {string} Balanced text
+ */
+export function balanceDelimitersForStreaming(rawText = '') {
+    let text = String(rawText || '');
+    if (!text) return '';
+
+    // 1. Balance unclosed code blocks ```
+    const codeFenceMatches = text.match(/```/g) || [];
+    if (codeFenceMatches.length % 2 === 1) {
+        text += '\n```\n';
+    }
+
+    // 2. Balance unclosed display math $$
+    const displayMathMatches = text.match(/(?<!\\)\$\$/g) || [];
+    if (displayMathMatches.length % 2 === 1) {
+        // Also check if there's an unclosed LaTeX environment inside the display math block
+        const envOpenMatches = [...text.matchAll(/\\begin\{([a-zA-Z*]+)\}/g)];
+        const envCloseMatches = [...text.matchAll(/\\end\{([a-zA-Z*]+)\}/g)];
+        const openStack = [];
+        for (const m of envOpenMatches) {
+            openStack.push(m[1]);
+        }
+        for (const m of envCloseMatches) {
+            const idx = openStack.lastIndexOf(m[1]);
+            if (idx !== -1) openStack.splice(idx, 1);
+        }
+        while (openStack.length > 0) {
+            const envName = openStack.pop();
+            text += `\n\\end{${envName}}`;
+        }
+        text += '\n$$\n';
+    } else {
+        // Even if $$ is balanced, check for open LaTeX environments
+        const envOpenMatches = [...text.matchAll(/\\begin\{([a-zA-Z*]+)\}/g)];
+        const envCloseMatches = [...text.matchAll(/\\end\{([a-zA-Z*]+)\}/g)];
+        const openStack = [];
+        for (const m of envOpenMatches) {
+            openStack.push(m[1]);
+        }
+        for (const m of envCloseMatches) {
+            const idx = openStack.lastIndexOf(m[1]);
+            if (idx !== -1) openStack.splice(idx, 1);
+        }
+        while (openStack.length > 0) {
+            const envName = openStack.pop();
+            text += `\n\\end{${envName}}`;
+        }
+    }
+
+    // 3. Balance unclosed display math \[ and \]
+    const openDisplay = (text.match(/\\\[/g) || []).length;
+    const closeDisplay = (text.match(/\\\]/g) || []).length;
+    if (openDisplay > closeDisplay) {
+        text += '\n\\]\n'.repeat(openDisplay - closeDisplay);
+    }
+
+    // 4. Balance unclosed inline math \( and \)
+    const openInline = (text.match(/\\\(/g) || []).length;
+    const closeInline = (text.match(/\\\)/g) || []).length;
+    if (openInline > closeInline) {
+        text += '\\)'.repeat(openInline - closeInline);
+    }
+
+    return text;
+}
+
 export function renderMarkdown(rawText = '', options = {}) {
     if (typeof rawText !== 'string') return '';
     let text = rawText.trim();
     if (!text) return '';
+
+    // Automatically balance unclosed code fences and math blocks during streaming
+    text = balanceDelimitersForStreaming(text);
 
     // Step 1: Extract math blocks and programming code blocks before any other substitutions
     const codeBlocks = [];
@@ -202,6 +275,12 @@ export function renderMarkdown(rawText = '', options = {}) {
             };
         }
         const langLabel = block.lang ? escapeHtml(block.lang.toUpperCase()) : 'CODE';
+        const isPython = /^(python|py|python3)$/i.test(block.lang || '');
+        const runBtnHtml = isPython ? `<button type="button" class="code-header-btn code-run-btn" onclick="runPythonBlockInBrowser(this, '${blockId}')" title="Run code in Python WebAssembly (Pyodide)">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+            <span>Run</span>
+        </button>` : '';
+
         const copyBtnHtml = `<button type="button" class="code-header-btn" onclick="copyCodeBlock(this, '${blockId}')" title="Copy code">
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
             <span>Copy</span>
@@ -214,10 +293,12 @@ export function renderMarkdown(rawText = '', options = {}) {
                 <div class="assistant-md-code-header">
                     <span class="assistant-md-code-lang">${langLabel}</span>
                     <div class="assistant-md-code-actions">
+                        ${runBtnHtml}
                         ${copyBtnHtml}
                     </div>
                 </div>
                 <pre class="assistant-md-code-block"><code class="lang-${escapeHtml(block.lang || 'text')}">${highlighted}</code></pre>
+                <div class="assistant-code-output" id="output_${blockId}" style="display:none;"></div>
             </div>
         `;
     });
