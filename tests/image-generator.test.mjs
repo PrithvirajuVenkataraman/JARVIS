@@ -443,7 +443,85 @@ console.log('--- Running Image Generator Suite ---');
     });
     assert.equal(goodStatusCode, 200, `Expected 200 from image proxy, got ${goodStatusCode}`);
     assert.ok(Buffer.isBuffer(goodBuffer) && goodBuffer.length > 500, 'Expected image buffer payload');
-    assert.equal(goodHeaders['Content-Type'], 'image/jpeg');
+    assert.ok(['image/jpeg', 'image/png', 'image/webp'].includes(goodHeaders['Content-Type']), `Expected valid image content type, got ${goodHeaders['Content-Type']}`);
+
+    // Test 7.3 Gemini-First prioritization invariants
+    {
+        const originalEnv = process.env.GEMINI_API_KEY;
+        const originalFetch = globalThis.fetch;
+        try {
+            process.env.GEMINI_API_KEY = 'test-gemini-key-123';
+            let fetchedUrls = [];
+            globalThis.fetch = async (url, options) => {
+                fetchedUrls.push(String(url));
+                if (String(url).includes('gemini-2.5-flash-image')) {
+                    const fakeBase64 = Buffer.from('fake-image-bytes-gemini-preview-payload-1234567890-pad-for-minimum-length-500-bytes-123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890').toString('base64');
+                    return {
+                        ok: true,
+                        json: async () => ({
+                            candidates: [{
+                                content: {
+                                    parts: [{
+                                        inlineData: {
+                                            mimeType: 'image/png',
+                                            data: fakeBase64
+                                        }
+                                    }]
+                                }
+                            }]
+                        })
+                    };
+                }
+                return originalFetch(url, options);
+            };
+
+            // Test 7.3.1: Even with model=turbo, Gemini is attempted first
+            let geminiHeaders = {};
+            let geminiStatus = 0;
+            let geminiBuffer = null;
+            await imageProxyHandler({
+                method: 'GET',
+                url: '/api/image-proxy?prompt=cyberpunk%20car&model=turbo'
+            }, {
+                setHeader(k, v) { geminiHeaders[k] = v; },
+                status(c) {
+                    geminiStatus = c;
+                    return {
+                        send(b) { geminiBuffer = b; },
+                        json(j) { geminiBuffer = j; }
+                    };
+                }
+            });
+
+            assert.equal(geminiStatus, 200);
+            assert.equal(geminiHeaders['X-Image-Model'], 'gemini-2.5-flash-image');
+            assert.equal(geminiHeaders['Content-Type'], 'image/png');
+            assert.ok(fetchedUrls.some(u => u.includes('gemini-2.5-flash-image')), 'Gemini endpoint must be called first even when model=turbo');
+
+            // Test 7.3.2: Explicit provider=pollinations bypasses Gemini
+            fetchedUrls = [];
+            let pollinationsHeaders = {};
+            let pollinationsStatus = 0;
+            await imageProxyHandler({
+                method: 'GET',
+                url: '/api/image-proxy?prompt=cyberpunk%20car&provider=pollinations'
+            }, {
+                setHeader(k, v) { pollinationsHeaders[k] = v; },
+                status(c) {
+                    pollinationsStatus = c;
+                    return {
+                        send() {},
+                        json() {}
+                    };
+                }
+            });
+            assert.ok(!fetchedUrls.some(u => u.includes('gemini')), 'Gemini must be bypassed when provider=pollinations is specified');
+
+        } finally {
+            process.env.GEMINI_API_KEY = originalEnv;
+            globalThis.fetch = originalFetch;
+        }
+    }
 
     console.log('✔ Image proxy API contract & upstream proxy fetch tests passed');
 }
