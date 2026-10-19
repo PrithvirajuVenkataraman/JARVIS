@@ -193,8 +193,8 @@ export class StreamingSpeculativeGuard {
         this.buffer += str;
         this.fullAccumulated += str;
 
-        // Split buffer along safe sentence/paragraph delimiters
-        const delimiterMatch = this.buffer.match(/^(.*?(?:[.!?]\s+|\n\n|```[\w]*\n))([\s\S]*)$/);
+        // Split buffer along safe sentence/paragraph delimiters or math line endings
+        const delimiterMatch = this.buffer.match(/^(.*?(?:[.!?]\s+|\n\n|```[\w]*\n|\n|\$\$))([\s\S]*)$/);
         if (delimiterMatch && delimiterMatch[1]) {
             const sentenceToVerify = delimiterMatch[1];
             const remaining = delimiterMatch[2] || '';
@@ -214,9 +214,9 @@ export class StreamingSpeculativeGuard {
      * @returns {string} Final verified trailing text.
      */
     flushRemaining() {
-        if (!this.buffer && !this.fullAccumulated) return '';
-        const finalRepaired = validateAndRepairCodeAndMath(this.fullAccumulated);
-        const remainingToEmit = finalRepaired.text.slice(this.fullAccumulated.length - this.buffer.length);
+        if (!this.buffer) return '';
+        const finalRepaired = validateAndRepairCodeAndMath(this.buffer);
+        const remainingToEmit = finalRepaired.text;
         this.buffer = '';
         if (this.onVerifiedChunk && remainingToEmit) this.onVerifiedChunk(remainingToEmit);
         return remainingToEmit;
