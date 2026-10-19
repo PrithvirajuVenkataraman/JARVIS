@@ -14299,12 +14299,16 @@ async function sendTextInput(submission = {}) {
                                 attachmentsForSend
                                     .filter(a => /^image\//i.test(a.mimeType || '') || /\.(jpe?g|pjpeg|png|gif|webp|bmp|dib|tiff?|heic|heif|heics|heifs|avif|avifs|dng|raw|cr[23]|nef|nrw|arw|srf|sr2|raf|rw2|orf|pef|jp2|j2k|jpf|jpx|jpm|pict?|pct|pic|psd|ico|cur|svgz?)$/i.test(a.name || ''))
                                     .map(async a => {
-                                        const base64 = a.base64 || (a.file ? await new Promise(res => {
-                                            const r = new FileReader();
-                                            r.onload = () => res(String(r.result || '').split(',')[1] || '');
-                                            r.onerror = () => res('');
-                                            r.readAsDataURL(a.file);
-                                        }) : '');
+                                        const base64 = a.base64 || (a.file ? (
+                                            window.JarvisAttachments?.downsampleImageFileToSafeBase64
+                                                ? await window.JarvisAttachments.downsampleImageFileToSafeBase64(a.file)
+                                                : await new Promise(res => {
+                                                    const r = new FileReader();
+                                                    r.onload = () => res(String(r.result || '').split(',')[1] || '');
+                                                    r.onerror = () => res('');
+                                                    r.readAsDataURL(a.file);
+                                                })
+                                        ) : '');
                                         const rawMime = a.mimeType || 'image/jpeg';
                                         // Normalize to only what Gemini/Groq accept
                                         const safeMime = /^image\/(png|webp|gif)$/i.test(rawMime) ? rawMime : 'image/jpeg';
