@@ -1036,21 +1036,112 @@ function readFileAsText(file) {
     });
 }
 
-function fileToBase64(file) {
-    return new Promise((resolve, reject) => {
-        if (!file) {
-            reject(new Error('Missing file.'));
-            return;
+export async function downsampleImageFileToSafeBase64(file, maxBytes = 3.2 * 1024 * 1024) {
+    if (!file) return '';
+    const isImage = (file.type && file.type.startsWith('image/')) ||
+                    /\.(jpe?g|png|webp|bmp|gif|tiff?|avif|heic|heif)$/i.test(file.name || '');
+
+    // If not an image or already small (< 2.2 MB), read directly without canvas overhead
+    if (!isImage || (file.size && file.size <= 2.2 * 1024 * 1024)) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+                const result = String(reader.result || '');
+                const comma = result.indexOf(',');
+                resolve(comma >= 0 ? result.slice(comma + 1) : result);
+            };
+            reader.onerror = () => reject(reader.error || new Error('Could not encode file.'));
+            reader.readAsDataURL(file);
+        });
+    }
+
+    if (typeof Image === 'undefined' || typeof document === 'undefined') {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+                const result = String(reader.result || '');
+                const comma = result.indexOf(',');
+                resolve(comma >= 0 ? result.slice(comma + 1) : result);
+            };
+            reader.onerror = () => reject(reader.error || new Error('Could not encode file.'));
+            reader.readAsDataURL(file);
+        });
+    }
+
+    return new Promise((resolve) => {
+        try {
+            const url = URL.createObjectURL(file);
+            const img = new Image();
+            img.onload = () => {
+                try {
+                    URL.revokeObjectURL(url);
+                    let { width, height } = img;
+                    const MAX_DIM = 2048;
+                    if (width > MAX_DIM || height > MAX_DIM) {
+                        if (width > height) {
+                            height = Math.round((height * MAX_DIM) / width);
+                            width = MAX_DIM;
+                        } else {
+                            width = Math.round((width * MAX_DIM) / height);
+                            height = MAX_DIM;
+                        }
+                    }
+                    const canvas = document.createElement('canvas');
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height);
+
+                    let quality = 0.88;
+                    let dataUrl = canvas.toDataURL('image/jpeg', quality);
+                    let comma = dataUrl.indexOf(',');
+                    let b64 = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
+
+                    while (b64.length * 0.75 > maxBytes && quality > 0.40) {
+                        quality -= 0.15;
+                        dataUrl = canvas.toDataURL('image/jpeg', quality);
+                        comma = dataUrl.indexOf(',');
+                        b64 = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
+                    }
+                    resolve(b64);
+                } catch (_) {
+                    const r = new FileReader();
+                    r.onload = () => {
+                        const res = String(r.result || '');
+                        const c = res.indexOf(',');
+                        resolve(c >= 0 ? res.slice(c + 1) : res);
+                    };
+                    r.onerror = () => resolve('');
+                    r.readAsDataURL(file);
+                }
+            };
+            img.onerror = () => {
+                URL.revokeObjectURL(url);
+                const r = new FileReader();
+                r.onload = () => {
+                    const res = String(r.result || '');
+                    const c = res.indexOf(',');
+                    resolve(c >= 0 ? res.slice(c + 1) : res);
+                };
+                r.onerror = () => resolve('');
+                r.readAsDataURL(file);
+            };
+            img.src = url;
+        } catch (_) {
+            const r = new FileReader();
+            r.onload = () => {
+                const res = String(r.result || '');
+                const c = res.indexOf(',');
+                resolve(c >= 0 ? res.slice(c + 1) : res);
+            };
+            r.onerror = () => resolve('');
+            r.readAsDataURL(file);
         }
-        const reader = new FileReader();
-        reader.onload = () => {
-            const result = String(reader.result || '');
-            const comma = result.indexOf(',');
-            resolve(comma >= 0 ? result.slice(comma + 1) : result);
-        };
-        reader.onerror = () => reject(reader.error || new Error('Could not encode file.'));
-        reader.readAsDataURL(file);
     });
+}
+
+function fileToBase64(file) {
+    return downsampleImageFileToSafeBase64(file);
 }
 
 async function extractPdfTextClient(file) {
