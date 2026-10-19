@@ -17,7 +17,12 @@ export default async function handler(req, res) {
 
     const filename = String(req.body?.filename || 'attachment').trim() || 'attachment';
     const mimeType = String(req.body?.mimeType || '').trim();
-    const base64 = String(req.body?.base64 || '').trim();
+    const rawBase64 = String(req.body?.base64 || '').trim();
+    const base64 = rawBase64
+        .replace(/^data:[^;]+;base64,/i, '')
+        .replace(/\s+/g, '')
+        .replace(/-/g, '+')
+        .replace(/_/g, '/');
     const clientText = String(req.body?.clientText || '').trim();
     const clientMethod = String(req.body?.clientMethod || '').trim();
 
