@@ -41,10 +41,13 @@ async function generateGeminiImageBuffer(prompt, { width = 512, height = 512, ti
         else if (ratio <= 0.8) aspectRatio = '3:4';
     }
 
+    const primaryTimeout = Math.min(14000, timeoutMs);
+    const secondaryTimeout = Math.min(10000, Math.max(5000, timeoutMs - primaryTimeout));
+
     // 1. Primary: gemini-2.5-flash-image with native IMAGE response modality via Google GenAI REST
     try {
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        const timer = setTimeout(() => controller.abort(), primaryTimeout);
         try {
             const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key=${encodeURIComponent(apiKey)}`;
             const res = await fetch(url, {
@@ -75,7 +78,7 @@ async function generateGeminiImageBuffer(prompt, { width = 512, height = 512, ti
     // 2. Secondary: imagen-3.0-generate-002 fallback
     try {
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        const timer = setTimeout(() => controller.abort(), secondaryTimeout);
         try {
             const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${encodeURIComponent(apiKey)}`;
             const res = await fetch(url, {
@@ -153,7 +156,9 @@ export async function imageProxyHandler(req, res) {
     const acceptsJson = String(req.headers?.['accept'] || '').includes('application/json') || params.response_format === 'json' || params.format === 'json';
 
     // Tier 1: Gemini-First high-fidelity generation via native Google GenAI REST
-    if (requestedModel.includes('gemini') || requestedModel.includes('google') || requestedModel === 'flux' || requestedModel === 'default') {
+    // Always attempt Gemini first when available unless explicitly forced to use Pollinations
+    const forcePollinations = params.provider === 'pollinations' || params.fallback === 'pollinations' || requestedModel === 'pollinations';
+    if (!forcePollinations) {
         const geminiResult = await generateGeminiImageBuffer(prompt, { width, height });
         if (geminiResult && geminiResult.buffer && geminiResult.buffer.length > 500) {
             res.setHeader('Content-Type', geminiResult.contentType);
@@ -179,7 +184,8 @@ export async function imageProxyHandler(req, res) {
     }
 
     // Tier 2: Graceful failover to Pollinations (Flux / Turbo)
-    const modelsToTry = Array.from(new Set([requestedModel, 'flux', 'turbo']));
+    const fallbackModel = (requestedModel.includes('gemini') || requestedModel.includes('google')) ? 'flux' : requestedModel;
+    const modelsToTry = Array.from(new Set([fallbackModel, 'flux', 'turbo']));
 
     let lastError = null;
     let fallbackDirectUrl = '';
