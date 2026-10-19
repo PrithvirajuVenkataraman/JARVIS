@@ -6937,42 +6937,41 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                             </svg>
                         </button>
                         <div class="help-modal-title-block">
-                            <span class="settings-header-badge">PREFERENCES</span>
-                            <h2 id="help-modal-title" class="settings-modal-heading">Settings & Controls</h2>
+                            <h2 id="help-modal-title" class="settings-modal-heading">Settings</h2>
                         </div>
-                        <button type="button" onclick="applyCustomSystemPromptAndClose()" class="help-modal-ok-btn" aria-label="Save settings">
-                            <span>Done</span>
+                        <button type="button" onclick="applyCustomSystemPromptAndClose()" class="help-modal-ok-btn" aria-label="Save settings" style="background:#ffffff!important;color:#000000!important;-webkit-text-fill-color:#000000!important;font-weight:750!important;">
+                            Done
                         </button>
                     </div>
 
                     <!-- Scrollable Modal Body -->
                     <div class="help-modal-body custom-scrollbar">
-                        <!-- Section 1: Custom Instructions Studio -->
+                        <!-- Section 1: Custom Instructions -->
                         <section class="settings-studio-card">
                             <div class="settings-card-header">
                                 <div class="settings-card-title-group">
-                                    <div class="settings-icon-badge settings-icon-cyan">
+                                    <div class="settings-icon-badge settings-icon-cyan" aria-hidden="true">
                                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                             <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
                                         </svg>
                                     </div>
-                                    <div>
-                                        <h3 class="settings-section-title">Custom Instructions Studio</h3>
-                                        <p class="settings-section-desc">Shape the AI persona, tone, coding preferences, and answering style.</p>
+                                    <div class="settings-card-title-text">
+                                        <h3 class="settings-section-title">Custom Instructions</h3>
+                                        <p class="settings-section-desc">Shape how JARVIS responds, sets tone, or formats answers.</p>
                                     </div>
                                 </div>
-                                <button type="button" class="settings-ghost-btn" onclick="resetCustomSystemPrompt()" title="Clear instructions">
+                                <button type="button" class="settings-ghost-btn" onclick="resetCustomSystemPrompt()" title="Clear custom instructions">
                                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
                                         <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
                                         <path d="M3 3v5h5"/>
                                     </svg>
-                                    <span>Reset</span>
+                                    <span>Clear</span>
                                 </button>
                             </div>
 
                             <!-- Quick Persona Preset Chips -->
                             <div class="settings-presets-container">
-                                <span class="settings-presets-label">Quick Personas:</span>
+                                <span class="settings-presets-label">Quick Presets:</span>
                                 <div class="settings-presets-pills">
                                     <button type="button" class="settings-preset-chip" onclick="applyPresetPrompt('concise')">⚡ Concise</button>
                                     <button type="button" class="settings-preset-chip" onclick="applyPresetPrompt('teacher')">🎓 Socratic</button>
@@ -6990,19 +6989,19 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                                     oninput="updateCustomPromptCharCount(this)"
                                     placeholder="e.g. Reply like ChatGPT. Be concise, structured, direct, and avoid conversational filler.">${escapeHtml(currentPrompt)}</textarea>
                                 <div class="settings-textarea-footer">
-                                    <span class="settings-textarea-tip">Applied across all conversations and prompts</span>
+                                    <span class="settings-textarea-tip">Saved across all conversations and prompts</span>
                                     <span id="custom-prompt-char-count" class="settings-char-count">${charCount} / 1200</span>
                                 </div>
                             </div>
                         </section>
 
-                        <!-- Section 2: Core Capabilities Grid -->
-                        <div class="settings-section-label">CAPABILITIES & EXTENSIONS</div>
+                        <!-- Section 2: Assistant Preferences Grid -->
+                        <div class="settings-section-label">ASSISTANT PREFERENCES</div>
                         <div class="settings-capabilities-grid">
                             <!-- Memory Card -->
                             <div class="settings-cap-card">
                                 <div class="settings-cap-header">
-                                    <div class="settings-icon-badge settings-icon-purple">
+                                    <div class="settings-icon-badge settings-icon-purple" aria-hidden="true">
                                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                             <path d="M12 2a4 4 0 0 1 4 4c0 1.95-1.4 3.58-3.25 3.93L12 18l-3-3"/>
                                             <path d="M9.5 2a4 4 0 0 0-4 4c0 1.95 1.4 3.58 3.25 3.93"/>
@@ -7011,7 +7010,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                                     </div>
                                     <div class="settings-cap-content">
                                         <h4 class="settings-cap-title">Long-Term Memory</h4>
-                                        <p class="settings-cap-desc">Manage remembered user context, facts, and preferences.</p>
+                                        <p class="settings-cap-desc">View and manage remembered facts, preferences, and context.</p>
                                     </div>
                                 </div>
                                 <div class="settings-cap-action">
@@ -7024,35 +7023,10 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                                 </div>
                             </div>
 
-                            <!-- Emergency SOS Card -->
-                            <div class="settings-cap-card settings-cap-card-emergency">
-                                <div class="settings-cap-header">
-                                    <div class="settings-icon-badge settings-icon-rose">
-                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-                                            <line x1="12" y1="9" x2="12" y2="13"/>
-                                            <line x1="12" y1="17" x2="12.01" y2="17"/>
-                                        </svg>
-                                    </div>
-                                    <div class="settings-cap-content">
-                                        <h4 class="settings-cap-title">Emergency SOS</h4>
-                                        <p class="settings-cap-desc">Configure emergency distress contacts and satellite dispatch.</p>
-                                    </div>
-                                </div>
-                                <div class="settings-cap-action">
-                                    <button type="button" class="settings-action-btn settings-action-btn-rose" onclick="closeHelpModal(); openEmergencyContactModal();">
-                                        <span>Configure SOS</span>
-                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                            <path d="M5 12h14M12 5l7 7-7 7"/>
-                                        </svg>
-                                    </button>
-                                </div>
-                            </div>
-
                             <!-- Image Studio Card -->
                             <div class="settings-cap-card">
                                 <div class="settings-cap-header">
-                                    <div class="settings-icon-badge settings-icon-amber">
+                                    <div class="settings-icon-badge settings-icon-amber" aria-hidden="true">
                                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                             <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
                                             <circle cx="8.5" cy="8.5" r="1.5"/>
@@ -7061,7 +7035,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                                     </div>
                                     <div class="settings-cap-content">
                                         <h4 class="settings-cap-title">Image Gallery</h4>
-                                        <p class="settings-cap-desc">Browse, inspect, and export all AI generated artwork and diagrams.</p>
+                                        <p class="settings-cap-desc">Browse and inspect generated artwork, diagrams, and charts.</p>
                                     </div>
                                 </div>
                                 <div class="settings-cap-action">
@@ -7077,7 +7051,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                             <!-- Export Dialogue Card -->
                             <div class="settings-cap-card">
                                 <div class="settings-cap-header">
-                                    <div class="settings-icon-badge settings-icon-emerald">
+                                    <div class="settings-icon-badge settings-icon-emerald" aria-hidden="true">
                                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
                                             <polyline points="7 10 12 15 17 10"/>
@@ -7085,7 +7059,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                                         </svg>
                                     </div>
                                     <div class="settings-cap-content">
-                                        <h4 class="settings-cap-title">Export Dialogue</h4>
+                                        <h4 class="settings-cap-title">Export Chat</h4>
                                         <p class="settings-cap-desc">Download active conversation history for offline archives.</p>
                                     </div>
                                 </div>
@@ -7105,21 +7079,46 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                                     </button>
                                 </div>
                             </div>
+
+                            <!-- Emergency SOS Card -->
+                            <div class="settings-cap-card">
+                                <div class="settings-cap-header">
+                                    <div class="settings-icon-badge settings-icon-rose" aria-hidden="true">
+                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                                            <line x1="12" y1="9" x2="12" y2="13"/>
+                                            <line x1="12" y1="17" x2="12.01" y2="17"/>
+                                        </svg>
+                                    </div>
+                                    <div class="settings-cap-content">
+                                        <h4 class="settings-cap-title">Emergency SOS</h4>
+                                        <p class="settings-cap-desc">Set emergency distress contacts and satellite safety dispatch.</p>
+                                    </div>
+                                </div>
+                                <div class="settings-cap-action">
+                                    <button type="button" class="settings-action-btn" onclick="closeHelpModal(); openEmergencyContactModal();">
+                                        <span>Configure SOS</span>
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <path d="M5 12h14M12 5l7 7-7 7"/>
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
                         </div>
 
                         <!-- Section 3: Data & Local Privacy -->
-                        <div class="settings-section-label">SECURITY & STORAGE</div>
+                        <div class="settings-section-label">DATA & STORAGE</div>
                         <section class="settings-privacy-card">
                             <div class="settings-privacy-body">
                                 <div class="settings-privacy-left">
-                                    <div class="settings-icon-badge settings-icon-cyan">
+                                    <div class="settings-icon-badge settings-icon-cyan" aria-hidden="true">
                                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                             <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
                                         </svg>
                                     </div>
-                                    <div>
-                                        <h4 class="settings-cap-title">Local-First Storage & Privacy</h4>
-                                        <p class="settings-cap-desc">Conversations, preferences, and memory remain stored locally on your device in secure IndexedDB storage.</p>
+                                    <div class="settings-privacy-text">
+                                        <h4 class="settings-cap-title">Local Storage & Privacy</h4>
+                                        <p class="settings-cap-desc">Conversations, preferences, and memory remain stored privately on your device in secure IndexedDB storage.</p>
                                         <div id="privacy-data-summary" class="settings-privacy-summary">
                                             ${typeof buildPrivacyDataSummaryHtml === 'function' ? buildPrivacyDataSummaryHtml() : ''}
                                         </div>
