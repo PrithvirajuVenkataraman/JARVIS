@@ -5165,9 +5165,9 @@ async function streamChatCompletion(payload, options = {}) {
             return;
         }
         if (event.event === 'correction') {
-            // Keep streamed text stable once delivered; ignore late post-stream mutations
-            if (!accumulated) {
-                accumulated = String(event.data?.text || '');
+            const correctedText = String(event.data?.text || '').trim();
+            if (correctedText) {
+                accumulated = correctedText;
                 const id = ensureStreamMessage();
                 updateStreamingAssistantMessage(id, accumulated, {
                     userMessage,
@@ -5184,9 +5184,7 @@ async function streamChatCompletion(payload, options = {}) {
             if (deadlineTimer) { clearTimeout(deadlineTimer); deadlineTimer = null; }
             donePayload = event.data || {};
             const rawDone = String(donePayload.response || '').trim();
-            const doneResponse = (rawDone && rawDone.length >= accumulated.trim().length)
-                ? rawDone
-                : (accumulated.trim() || rawDone);
+            const doneResponse = rawDone || accumulated.trim();
             if (isConverseStream && doneResponse) {
                 finishStreamingConverseSpeech(doneResponse, activeTurnId);
             }
@@ -8529,7 +8527,17 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 return (hasMath || hasDangling) && !hasCode;
             };
 
-            let working = text.replace(/```([\w+-]*)\n([\s\S]*?)```/g, (_, lang, code) => {
+            let workingText = text;
+            if (globalThis.JarvisMarkdownRenderer?.balanceDelimitersForStreaming) {
+                workingText = globalThis.JarvisMarkdownRenderer.balanceDelimitersForStreaming(workingText);
+            } else {
+                const codeFenceMatches = workingText.match(/```/g) || [];
+                if (codeFenceMatches.length % 2 === 1) workingText += '\n```\n';
+                const displayMathMatches = workingText.match(/(?<!\\)\$\$/g) || [];
+                if (displayMathMatches.length % 2 === 1) workingText += '\n$$\n';
+            }
+
+            let working = workingText.replace(/```([\w+-]*)\n([\s\S]*?)```/g, (_, lang, code) => {
                 const rawCode = String(code || '');
                 if (isMathCode(lang, rawCode)) {
                     const mId = mathBlocks.length;
@@ -26505,16 +26513,31 @@ const JarvisIndexedDbStorage = {
     },
 
     async setItem(key, value) {
+        const valStr = typeof value === 'string' ? value : JSON.stringify(value);
         try {
-            localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value));
-        } catch (_) {}
+            localStorage.setItem(key, valStr);
+        } catch (e) {
+            if (e && (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED' || e.code === 22 || e.code === 1014)) {
+                try {
+                    const keysToRemove = [];
+                    for (let i = 0; i < localStorage.length; i++) {
+                        const k = localStorage.key(i);
+                        if (k && k !== key && (k.startsWith('unify_cached_') || k.startsWith('jarvis_cache_') || k.startsWith('unify_scratch_'))) {
+                            keysToRemove.push(k);
+                        }
+                    }
+                    keysToRemove.forEach(k => localStorage.removeItem(k));
+                    localStorage.setItem(key, valStr);
+                } catch (_) {}
+            }
+        }
         try {
             const db = await this.getDb();
             if (!db) return;
             const kvStore = (window.APP_CONFIG || APP_CONFIG).storage.objectStores?.kv || 'kv_store';
             const tx = db.transaction(kvStore, 'readwrite');
             const store = tx.objectStore(kvStore);
-            store.put({ key, value: typeof value === 'string' ? value : JSON.stringify(value), updatedAt: Date.now() });
+            store.put({ key, value: valStr, updatedAt: Date.now() });
         } catch (_) {}
     },
 
@@ -29080,6 +29103,142 @@ function copyCodeBlock(btn, blockId) {
     }
 }
 
+async function runPythonBlockInBrowser(btn, blockId) {
+    const data = window._jarvisCodeBlocks?.[blockId];
+    let code = data?.code || '';
+    const container = document.getElementById(`container_${blockId}`);
+    if (!code && container) {
+        const codeEl = container.querySelector('code');
+        if (codeEl) code = codeEl.innerText || '';
+    }
+    if (!code.trim()) return;
+
+    let outputEl = document.getElementById(`output_${blockId}`);
+    if (!outputEl && container) {
+        outputEl = document.createElement('div');
+        outputEl.className = 'assistant-code-output';
+        outputEl.id = `output_${blockId}`;
+        container.appendChild(outputEl);
+    }
+    if (!outputEl) return;
+
+    const span = btn?.querySelector('span');
+    if (btn) {
+        btn.classList.add('is-running');
+        btn.disabled = true;
+    }
+    if (span) span.innerText = 'Running...';
+
+    outputEl.style.display = 'block';
+    outputEl.innerHTML = `
+        <div class="assistant-code-output-title">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+            <span>Python WebAssembly Output</span>
+        </div>
+        <div class="python-output-text" style="color: #94a3b8;">Initializing Python runtime (Pyodide WASM)...</div>
+    `;
+
+    try {
+        const py = await loadPyodideRuntime((pct, msg) => {
+            const textEl = outputEl.querySelector('.python-output-text');
+            if (textEl) textEl.textContent = `${msg || 'Loading Python runtime'} (${Math.round(pct * 100)}%)...`;
+        });
+
+        const textEl = outputEl.querySelector('.python-output-text');
+        if (textEl) textEl.textContent = 'Executing Python code...';
+
+        try {
+            await py.loadPackagesFromImports(code);
+        } catch (_) {}
+
+        const wrappedCode = `
+import sys, io as _io
+_output_buf = _io.StringIO()
+_orig_stdout = sys.stdout
+_orig_stderr = sys.stderr
+sys.stdout = _output_buf
+sys.stderr = _output_buf
+
+try:
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    _has_mpl = True
+except Exception:
+    _has_mpl = False
+
+_chart_b64 = None
+
+try:
+${code.split('\n').map(l => '    ' + l).join('\n')}
+except Exception as _e:
+    import traceback
+    print(traceback.format_exc(), file=_output_buf)
+
+if _has_mpl:
+    try:
+        fig = plt.gcf()
+        if fig.get_axes():
+            import base64
+            _buf = _io.BytesIO()
+            fig.savefig(_buf, format='png', dpi=110, bbox_inches='tight', facecolor='#0d1117')
+            _chart_b64 = base64.b64encode(_buf.getvalue()).decode()
+            plt.close('all')
+    except Exception:
+        pass
+
+sys.stdout = _orig_stdout
+sys.stderr = _orig_stderr
+_stdout_text = _output_buf.getvalue()
+`;
+        await py.runPythonAsync(wrappedCode);
+        const stdout = String(py.globals.get('_stdout_text') || '').trim();
+        const chartB64 = py.globals.get('_chart_b64') || null;
+
+        let outputContent = '';
+        if (chartB64) {
+            outputContent += `<img src="data:image/png;base64,${chartB64}" class="python-output-chart" alt="Generated Plot" />`;
+        }
+        if (stdout) {
+            const escaped = stdout.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            outputContent += `<pre class="python-output-text">${escaped}</pre>`;
+        }
+        if (!stdout && !chartB64) {
+            outputContent += `<pre class="python-output-text" style="color:#64748b;">(Code executed successfully with zero stdout output)</pre>`;
+        }
+
+        outputEl.innerHTML = `
+            <div class="assistant-code-output-title">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                <span>Python WebAssembly Output</span>
+            </div>
+            ${outputContent}
+        `;
+    } catch (err) {
+        const errEscaped = String(err?.message || err).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        outputEl.innerHTML = `
+            <div class="assistant-code-output-title" style="color:#f87171;">
+                <span>⚠️ Execution Error</span>
+            </div>
+            <pre class="python-output-error">${errEscaped}</pre>
+        `;
+    } finally {
+        if (btn) {
+            btn.classList.remove('is-running');
+            btn.disabled = false;
+        }
+        if (span) span.innerText = 'Rerun';
+    }
+}
+window.runPythonBlockInBrowser = runPythonBlockInBrowser;
+
+function stripLargeBase64ForHistory(text) {
+    if (!text || typeof text !== 'string') return '';
+    return text
+        .replace(/data:image\/[a-zA-Z0-9.+_-]+;base64,[A-Za-z0-9+/=\s]+/gi, '[Image Attachment]')
+        .replace(/data:application\/[a-zA-Z0-9.+_-]+;base64,[A-Za-z0-9+/=\s]+/gi, '[File Attachment]');
+}
+
 function getHistoryStorageKey() {
     const safeUserName = (userName || 'default_user').replace(/[^a-zA-Z0-9]/g, '_');
     return `unify_history_${safeUserName}`;
@@ -29089,7 +29248,21 @@ function saveConversationHistory() {
     if (!persistMemoryToDevice) return;
     try {
         const historyKey = getHistoryStorageKey();
-        JarvisIndexedDbStorage.setItem(historyKey, JSON.stringify(conversationHistory));
+        let records = (Array.isArray(conversationHistory) ? conversationHistory : []).slice(-30).map(item => ({
+            timestamp: String(item?.timestamp || ''),
+            user: stripLargeBase64ForHistory(String(item?.user || '')).slice(0, 10000),
+            ai: stripLargeBase64ForHistory(String(item?.ai || '')).slice(0, 20000),
+            date: String(item?.date || ''),
+            turnId: String(item?.turnId || '')
+        }));
+        let payload = JSON.stringify(records);
+        try {
+            JarvisIndexedDbStorage.setItem(historyKey, payload);
+        } catch (_) {
+            records = records.slice(-15);
+            payload = JSON.stringify(records);
+            JarvisIndexedDbStorage.setItem(historyKey, payload);
+        }
     } catch (_) {}
 }
 
@@ -29128,8 +29301,8 @@ function sanitizeConversationHistoryRecords(historyItems) {
     return source
         .map(item => ({
             timestamp: String(item?.timestamp || '').trim(),
-            user: normalizeHistoryUserMessage(item?.user || ''),
-            ai: normalizeHistoryAssistantMessage(item?.ai || ''),
+            user: stripLargeBase64ForHistory(normalizeHistoryUserMessage(item?.user || '')),
+            ai: stripLargeBase64ForHistory(normalizeHistoryAssistantMessage(item?.ai || '')),
             date: String(item?.date || '').trim(),
             turnId: String(item?.turnId || '').trim()
         }))
@@ -29138,8 +29311,8 @@ function sanitizeConversationHistoryRecords(historyItems) {
 
 function saveToHistory(userMessage, aiResponse, options = {}) {
     const turnId = String(activeResponseRenderContext?.turnId || '');
-    const cleanUser = normalizeHistoryUserMessage(userMessage);
-    const cleanAi = normalizeHistoryAssistantMessage(aiResponse);
+    const cleanUser = stripLargeBase64ForHistory(normalizeHistoryUserMessage(userMessage));
+    const cleanAi = stripLargeBase64ForHistory(normalizeHistoryAssistantMessage(aiResponse));
     conversationHistory.push({
         timestamp: new Date().toISOString(),
         user: cleanUser,
@@ -29147,6 +29320,10 @@ function saveToHistory(userMessage, aiResponse, options = {}) {
         date: new Date().toLocaleDateString(),
         turnId
     });
+
+    if (conversationHistory.length > 40) {
+        conversationHistory = conversationHistory.slice(-40);
+    }
 
     if (cleanUser) conversationContext.push({ role: 'user', text: cleanUser, turnId });
     if (cleanAi) conversationContext.push({ role: 'assistant', text: cleanAi, turnId });
@@ -29168,10 +29345,18 @@ function saveToHistory(userMessage, aiResponse, options = {}) {
     saveConversationHistory();
 }
 
-function loadHistory() {
+async function loadHistory() {
     if (!persistMemoryToDevice) return;
     const historyKey = getHistoryStorageKey();
-    const saved = localStorage.getItem(historyKey);
+    let saved = null;
+    try {
+        saved = localStorage.getItem(historyKey);
+    } catch (_) {}
+    if (!saved) {
+        try {
+            saved = await JarvisIndexedDbStorage.getItem(historyKey);
+        } catch (_) {}
+    }
     if (saved) {
         try {
             conversationHistory = JSON.parse(saved);
@@ -29233,6 +29418,7 @@ async function loadPyodideRuntime(onProgress) {
         } catch (_) {
             await py.loadPackagesFromImports('import numpy, pandas, matplotlib');
         }
+        try { await py.loadPackage('sympy'); } catch (_) {}
         try { await py.loadPackage('openpyxl'); } catch (_) {}
         onProgress?.(1.0, 'Python ready');
         return py;
