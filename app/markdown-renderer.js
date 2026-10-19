@@ -17,20 +17,42 @@ function escapeHtml(text) {
 
 function isMathCodeBlock(lang = '', code = '') {
     const normalizedLang = String(lang || '').trim().toLowerCase();
-    if (['math', 'latex', 'tex', 'katex'].includes(normalizedLang)) {
+    if (['math', 'latex', 'tex', 'katex', 'calc', 'formula', 'equation', 'algebra', 'derivation', 'geometry', 'steps'].includes(normalizedLang)) {
         return true;
     }
     const trimmed = String(code || '').trim();
     if (!trimmed) return false;
 
-    // Check if it contains characteristic LaTeX math markers or environment tags
-    const hasMathCommands = /\\(?:frac|sqrt|boxed|begin\{(?:aligned|align|split|gather|cases|matrix|bmatrix|pmatrix)\}|approx|times|cdot|sum|int|partial|alpha|beta|gamma|theta|pi|le|ge|neq|pm)\b/.test(trimmed);
-    const hasDanglingMathEnv = /\\(?:end\{(?:aligned|align|cases|matrix)\})/.test(trimmed);
-
     // Make sure it doesn't look like actual programming code
-    const hasCodeKeywords = /\b(?:function|def|import|from|class|const|let|var|return|console\.log|public|private|interface|struct)\b/.test(trimmed);
+    const hasCodeKeywords = /\b(?:function|def|import|from|class|const|let|var|return|console\.log|public|private|interface|struct|namespace|package|void|static|val|fn)\b/.test(trimmed);
+    if (hasCodeKeywords) return false;
 
-    return (hasMathCommands || hasDanglingMathEnv) && !hasCodeKeywords;
+    // Check if it contains characteristic LaTeX math markers or environment tags
+    const hasMathCommands = /\\(?:frac|sqrt|boxed|begin\{(?:aligned|align|split|gather|cases|matrix|bmatrix|pmatrix)\}|approx|times|cdot|sum|int|partial|alpha|beta|gamma|theta|pi|le|ge|neq|pm|quad|qquad|text|mathrm|mathbf)\b/.test(trimmed);
+    const hasDanglingMathEnv = /\\(?:end\{(?:aligned|align|cases|matrix)\})/.test(trimmed);
+    if (hasMathCommands || hasDanglingMathEnv) return true;
+
+    // Intercept unlabeled, calc, text, or formula code blocks containing arithmetic/algebra
+    if (['', 'text', 'txt', 'plaintext', 'calc', 'formula'].includes(normalizedLang)) {
+        const lines = trimmed.split('\n').map(l => l.trim()).filter(Boolean);
+        if (lines.length > 0) {
+            let mathLines = 0;
+            for (const line of lines) {
+                if (/[=≈≠≤≥<>]/.test(line) && /[\d\w]/.test(line)) {
+                    mathLines++;
+                } else if (/^(?:Step\s*\d+:?|Therefore|Hence|Since|So|Given|We have)/i.test(line)) {
+                    mathLines++;
+                } else if (/^[\d\w\s()+\-*/^=._]+$/.test(line) && /[+\-*/^]/.test(line)) {
+                    mathLines++;
+                }
+            }
+            if (mathLines >= Math.ceil(lines.length * 0.5)) {
+                return true;
+            }
+        }
+    }
+
+    return false;
 }
 
 /**
@@ -222,7 +244,10 @@ export function renderMarkdown(rawText = '', options = {}) {
                 para.push(String(lines[i]));
                 i += 1;
             }
-            out.push(`<p class="assistant-md-p">${escapeHtml(para.join('\n')).replace(/\n/g, '<br>')}</p>`);
+            let pContent = escapeHtml(para.join('\n')).replace(/\n/g, '<br>');
+            pContent = pContent.replace(/^<strong>(Step\s*\d+[^<]*)<\/strong>/i, '<span class="math-step-label">$1</span>');
+            pContent = pContent.replace(/^(Step\s*\d+:[^\n<]*)/im, '<span class="math-step-label">$1</span>');
+            out.push(`<p class="assistant-md-p">${pContent}</p>`);
             continue;
         }
 
@@ -238,9 +263,14 @@ export function renderMarkdown(rawText = '', options = {}) {
     // Handle backticked content: route math expressions to inline math instead of code badge boxes
     html = html.replace(/`([^`\n]+)`/g, (match, inner) => {
         const trimmed = inner.trim();
-        const isMath = /^\$[^$]+\$$/.test(trimmed) ||
-                       /\\(?:frac|sqrt|boxed|approx|times|cdot|pm|le|ge|neq|alpha|beta|gamma|pi|theta|text|mathrm|mathbf|sum|int)\b/.test(trimmed) ||
-                       /^[a-zA-Z]\s*(?:=|≈|&asymp;|\approx|\+|-|\*|\/|\\times|\\approx)\s*[\d\w\\.+*/^_-]+/.test(trimmed);
+        const isExplicitMath = /^\$[^$]+\$$/.test(trimmed) ||
+                               /\\(?:frac|sqrt|boxed|approx|times|cdot|pm|le|ge|neq|alpha|beta|gamma|pi|theta|text|mathrm|mathbf|sum|int|partial|nabla|infty|degree|circ)\b/.test(trimmed);
+        const isEquationOrRelation = /^[a-zA-Z0-9_\(\)]+\s*(?:=|≈|&asymp;|\approx|\+|-|\*|\/|\\times|\\approx|≠|<=|>=|<|>|\\le|\\ge|\\neq)\s*[\d\w\s\\.+*/^_-]+/.test(trimmed);
+        const isCoordinate = /^\([a-zA-Z0-9_+-]+,\s*[a-zA-Z0-9_+-]+\)$/.test(trimmed);
+        const isSubSuper = /^[a-zA-Z]\s*[\^_]\{?[\w\d+-]+\}?$/.test(trimmed);
+        const isArithmetic = /^(?:[\d\w_]+\s*[\+\-\*\/\^]\s*)+[\d\w_]+$/.test(trimmed) && /[+\-*/^]/.test(trimmed) && !/[a-zA-Z]{5,}/.test(trimmed);
+
+        const isMath = isExplicitMath || isEquationOrRelation || isCoordinate || isSubSuper || isArithmetic;
 
         if (isMath) {
             const cleanExpr = trimmed.replace(/^\$|\$$/g, '');
