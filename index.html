@@ -6915,7 +6915,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             window.__helpModalReturnFocus = document.activeElement;
             const modal = document.createElement('div');
             modal.id = 'help-modal';
-            modal.className = 'fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4';
+            modal.className = 'fixed inset-0 bg-black/75 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-4 md:p-6';
             modal.setAttribute('role', 'dialog');
             modal.setAttribute('aria-modal', 'true');
             modal.setAttribute('aria-labelledby', 'help-modal-title');
@@ -6923,97 +6923,217 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 if (e.target === modal) closeHelpModal();
             };
 
+            const currentPrompt = (typeof customSystemPrompt === 'string' ? customSystemPrompt : (window.customSystemPrompt || ''));
+            const charCount = currentPrompt.length;
+
             modal.innerHTML = `
-                <div class="help-modal-enhanced max-w-3xl w-full">
-                    <div class="help-modal-header p-4">
-                        <button onclick="closeHelpModal()" class="help-modal-back-btn" aria-label="Back to previous screen">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+                <div class="help-modal-enhanced">
+                    <!-- Modal Header -->
+                    <div class="help-modal-header">
+                        <button type="button" onclick="closeHelpModal()" class="help-modal-back-btn" aria-label="Close settings">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                 <path d="M19 12H5"></path>
                                 <path d="M12 19l-7-7 7-7"></path>
                             </svg>
                         </button>
                         <div class="help-modal-title-block">
-                            <h2 id="help-modal-title" class="text-xl font-bold">Settings & Instructions</h2>
+                            <span class="settings-header-badge">PREFERENCES</span>
+                            <h2 id="help-modal-title" class="settings-modal-heading">Settings & Controls</h2>
                         </div>
-                        <button onclick="applyCustomSystemPromptAndClose()" class="help-modal-ok-btn" aria-label="Save custom instructions">
-                            OK
+                        <button type="button" onclick="applyCustomSystemPromptAndClose()" class="help-modal-ok-btn" aria-label="Save settings">
+                            <span>Done</span>
                         </button>
                     </div>
 
-                    <div class="help-modal-body p-4 custom-scrollbar">
-                        <section class="help-settings-card">
-                            <div class="help-section-heading">
-                                <div>
-                                    <h3 class="font-bold">Custom instructions</h3>
-                                    <p class="text-xs">Tell JARVIS how to reply.</p>
+                    <!-- Scrollable Modal Body -->
+                    <div class="help-modal-body custom-scrollbar">
+                        <!-- Section 1: Custom Instructions Studio -->
+                        <section class="settings-studio-card">
+                            <div class="settings-card-header">
+                                <div class="settings-card-title-group">
+                                    <div class="settings-icon-badge settings-icon-cyan">
+                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+                                        </svg>
+                                    </div>
+                                    <div>
+                                        <h3 class="settings-section-title">Custom Instructions Studio</h3>
+                                        <p class="settings-section-desc">Shape the AI persona, tone, coding preferences, and answering style.</p>
+                                    </div>
                                 </div>
-                                <button type="button" class="memory-action-btn" onclick="resetCustomSystemPrompt()">Reset</button>
+                                <button type="button" class="settings-ghost-btn" onclick="resetCustomSystemPrompt()" title="Clear instructions">
+                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+                                        <path d="M3 3v5h5"/>
+                                    </svg>
+                                    <span>Reset</span>
+                                </button>
                             </div>
-                            <textarea
-                                id="custom-system-prompt-input"
-                                class="custom-system-prompt-input"
-                                rows="5"
-                                maxlength="1200"
-                                placeholder="Example: Reply like ChatGPT. Be concise, structured, direct, and avoid unnecessary endings.">${escapeHtml(customSystemPrompt)}</textarea>
-                        </section>
 
-                        <!-- Memory & Context -->
-                        <section class="help-settings-card" style="margin-top: 14px;">
-                            <div class="help-section-heading">
-                                <div>
-                                    <h3 class="font-bold">Memory & Context</h3>
-                                    <p class="text-xs">Manage personal facts and preferences remembered across chats.</p>
+                            <!-- Quick Persona Preset Chips -->
+                            <div class="settings-presets-container">
+                                <span class="settings-presets-label">Quick Personas:</span>
+                                <div class="settings-presets-pills">
+                                    <button type="button" class="settings-preset-chip" onclick="applyPresetPrompt('concise')">⚡ Concise</button>
+                                    <button type="button" class="settings-preset-chip" onclick="applyPresetPrompt('teacher')">🎓 Socratic</button>
+                                    <button type="button" class="settings-preset-chip" onclick="applyPresetPrompt('coder')">💻 Senior Dev</button>
+                                    <button type="button" class="settings-preset-chip" onclick="applyPresetPrompt('academic')">🔬 Academic</button>
                                 </div>
-                                <button type="button" class="memory-action-btn" onclick="closeHelpModal(); showMemoryManager();">Manage Memory</button>
                             </div>
-                        </section>
 
-                        <!-- Emergency SOS -->
-                        <section class="help-settings-card" style="margin-top: 14px;">
-                            <div class="help-section-heading">
-                                <div>
-                                    <h3 class="font-bold">Emergency SOS</h3>
-                                    <p class="text-xs">Configure distress contacts and satellite emergency dispatch.</p>
-                                </div>
-                                <button type="button" class="memory-action-btn" style="color: #fca5a5; border-color: rgba(239, 68, 68, 0.35);" onclick="closeHelpModal(); openEmergencyContactModal();">Configure SOS</button>
-                            </div>
-                        </section>
-
-                        <!-- Image Gallery -->
-                        <section class="help-settings-card" style="margin-top: 14px;">
-                            <div class="help-section-heading">
-                                <div>
-                                    <h3 class="font-bold">Image Gallery</h3>
-                                    <p class="text-xs">Browse all AI generated photos, illustrations, and art.</p>
-                                </div>
-                                <button type="button" class="memory-action-btn" onclick="closeHelpModal(); openImageGalleryModal();">Open Gallery</button>
-                            </div>
-                        </section>
-
-                        <!-- Export Conversation -->
-                        <section class="help-settings-card" style="margin-top: 14px;">
-                            <div class="help-section-heading">
-                                <div>
-                                    <h3 class="font-bold">Export Conversation</h3>
-                                    <p class="text-xs">Save current conversation records for offline viewing or backup.</p>
-                                </div>
-                                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-                                    <button type="button" class="memory-action-btn" onclick="exportCurrentChat('markdown')">Markdown</button>
-                                    <button type="button" class="memory-action-btn" onclick="exportCurrentChat('json')">JSON</button>
+                            <div class="settings-textarea-wrapper">
+                                <textarea
+                                    id="custom-system-prompt-input"
+                                    class="custom-system-prompt-input"
+                                    rows="4"
+                                    maxlength="1200"
+                                    oninput="updateCustomPromptCharCount(this)"
+                                    placeholder="e.g. Reply like ChatGPT. Be concise, structured, direct, and avoid conversational filler.">${escapeHtml(currentPrompt)}</textarea>
+                                <div class="settings-textarea-footer">
+                                    <span class="settings-textarea-tip">Applied across all conversations and prompts</span>
+                                    <span id="custom-prompt-char-count" class="settings-char-count">${charCount} / 1200</span>
                                 </div>
                             </div>
                         </section>
 
-                        <section class="help-settings-card" style="margin-top: 14px;">
-                            <div class="help-section-heading">
-                                <div>
-                                    <h3 class="font-bold">Data & Privacy</h3>
-                                    <p class="text-xs">Manage locally cached session memory and history records.</p>
+                        <!-- Section 2: Core Capabilities Grid -->
+                        <div class="settings-section-label">CAPABILITIES & EXTENSIONS</div>
+                        <div class="settings-capabilities-grid">
+                            <!-- Memory Card -->
+                            <div class="settings-cap-card">
+                                <div class="settings-cap-header">
+                                    <div class="settings-icon-badge settings-icon-purple">
+                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M12 2a4 4 0 0 1 4 4c0 1.95-1.4 3.58-3.25 3.93L12 18l-3-3"/>
+                                            <path d="M9.5 2a4 4 0 0 0-4 4c0 1.95 1.4 3.58 3.25 3.93"/>
+                                            <path d="M17 14a5 5 0 0 1 3.5 8.5H3.5A5 5 0 0 1 7 14"/>
+                                        </svg>
+                                    </div>
+                                    <div class="settings-cap-content">
+                                        <h4 class="settings-cap-title">Long-Term Memory</h4>
+                                        <p class="settings-cap-desc">Manage remembered user context, facts, and preferences.</p>
+                                    </div>
                                 </div>
-                                <button type="button" class="memory-action-btn" style="color: #ef4444;" onclick="promptClearAllDataConfirmation() /* deleteAllLocalDataNow() */">Clear All Data</button>
+                                <div class="settings-cap-action">
+                                    <button type="button" class="settings-action-btn" onclick="closeHelpModal(); showMemoryManager();">
+                                        <span>Manage Memory</span>
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <path d="M5 12h14M12 5l7 7-7 7"/>
+                                        </svg>
+                                    </button>
+                                </div>
                             </div>
-                            <div id="privacy-data-summary" class="text-xs text-zinc-400 mt-2 space-y-1">
-                                ${typeof buildPrivacyDataSummaryHtml === 'function' ? buildPrivacyDataSummaryHtml() : ''}
+
+                            <!-- Emergency SOS Card -->
+                            <div class="settings-cap-card settings-cap-card-emergency">
+                                <div class="settings-cap-header">
+                                    <div class="settings-icon-badge settings-icon-rose">
+                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                                            <line x1="12" y1="9" x2="12" y2="13"/>
+                                            <line x1="12" y1="17" x2="12.01" y2="17"/>
+                                        </svg>
+                                    </div>
+                                    <div class="settings-cap-content">
+                                        <h4 class="settings-cap-title">Emergency SOS</h4>
+                                        <p class="settings-cap-desc">Configure emergency distress contacts and satellite dispatch.</p>
+                                    </div>
+                                </div>
+                                <div class="settings-cap-action">
+                                    <button type="button" class="settings-action-btn settings-action-btn-rose" onclick="closeHelpModal(); openEmergencyContactModal();">
+                                        <span>Configure SOS</span>
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <path d="M5 12h14M12 5l7 7-7 7"/>
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Image Studio Card -->
+                            <div class="settings-cap-card">
+                                <div class="settings-cap-header">
+                                    <div class="settings-icon-badge settings-icon-amber">
+                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                                            <circle cx="8.5" cy="8.5" r="1.5"/>
+                                            <polyline points="21 15 16 10 5 21"/>
+                                        </svg>
+                                    </div>
+                                    <div class="settings-cap-content">
+                                        <h4 class="settings-cap-title">Image Gallery</h4>
+                                        <p class="settings-cap-desc">Browse, inspect, and export all AI generated artwork and diagrams.</p>
+                                    </div>
+                                </div>
+                                <div class="settings-cap-action">
+                                    <button type="button" class="settings-action-btn" onclick="closeHelpModal(); openImageGalleryModal();">
+                                        <span>Open Gallery</span>
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <path d="M5 12h14M12 5l7 7-7 7"/>
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Export Dialogue Card -->
+                            <div class="settings-cap-card">
+                                <div class="settings-cap-header">
+                                    <div class="settings-icon-badge settings-icon-emerald">
+                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                            <polyline points="7 10 12 15 17 10"/>
+                                            <line x1="12" y1="15" x2="12" y2="3"/>
+                                        </svg>
+                                    </div>
+                                    <div class="settings-cap-content">
+                                        <h4 class="settings-cap-title">Export Dialogue</h4>
+                                        <p class="settings-cap-desc">Download active conversation history for offline archives.</p>
+                                    </div>
+                                </div>
+                                <div class="settings-cap-action settings-export-buttons">
+                                    <button type="button" class="settings-chip-btn" onclick="exportCurrentChat('markdown')">
+                                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                            <polyline points="14 2 14 8 20 8"/>
+                                        </svg>
+                                        <span>Markdown</span>
+                                    </button>
+                                    <button type="button" class="settings-chip-btn" onclick="exportCurrentChat('json')">
+                                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <path d="M4 17l6-6-6-6M12 19h8"/>
+                                        </svg>
+                                        <span>JSON</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Section 3: Data & Local Privacy -->
+                        <div class="settings-section-label">SECURITY & STORAGE</div>
+                        <section class="settings-privacy-card">
+                            <div class="settings-privacy-body">
+                                <div class="settings-privacy-left">
+                                    <div class="settings-icon-badge settings-icon-cyan">
+                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                                        </svg>
+                                    </div>
+                                    <div>
+                                        <h4 class="settings-cap-title">Local-First Storage & Privacy</h4>
+                                        <p class="settings-cap-desc">Conversations, preferences, and memory remain stored locally on your device in secure IndexedDB storage.</p>
+                                        <div id="privacy-data-summary" class="settings-privacy-summary">
+                                            ${typeof buildPrivacyDataSummaryHtml === 'function' ? buildPrivacyDataSummaryHtml() : ''}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="settings-privacy-action">
+                                    <button type="button" class="settings-danger-btn" onclick="promptClearAllDataConfirmation()">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <polyline points="3 6 5 6 21 6"/>
+                                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                                        </svg>
+                                        <span>Clear All Data</span>
+                                    </button>
+                                </div>
                             </div>
                         </section>
                     </div>   
@@ -8004,11 +8124,42 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             customSystemPrompt = '';
             window.customSystemPrompt = '';
             const input = document.getElementById('custom-system-prompt-input');
-            if (input) input.value = '';
+            if (input) {
+                input.value = '';
+                updateCustomPromptCharCount(input);
+            }
             window.JarvisConversation?.setPreferences({ customSystemPrompt: '' });
             window.JarvisState?.setPreferences({ customSystemPrompt: '' });
             saveAssistantModes();
             showTemporaryMessage('Custom instructions reset.');
+        }
+
+        function applyPresetPrompt(type) {
+            const input = document.getElementById('custom-system-prompt-input');
+            if (!input) return;
+            const presets = {
+                concise: 'Be direct, concise, and structured. Eliminate conversational filler, pleasantries, and unnecessary preamble.',
+                teacher: 'Act as an engaging, insightful Socratic mentor. Break concepts down into intuitive mental models, verify understanding, and guide step-by-step.',
+                coder: 'Act as a principal software engineer. Provide clean, modern, well-typed code with robust error handling, minimal dependencies, and concise rationale.',
+                academic: 'Provide rigorous, publication-grade academic explanations. State theorems and hypotheses clearly, and rigorously verify mathematical and scientific calculations.'
+            };
+            if (presets[type]) {
+                input.value = presets[type];
+                updateCustomPromptCharCount(input);
+                input.focus();
+            }
+        }
+
+        function updateCustomPromptCharCount(el) {
+            const counter = document.getElementById('custom-prompt-char-count');
+            if (!counter || !el) return;
+            const len = el.value.length;
+            counter.textContent = `${len} / 1200`;
+            if (len >= 1150) {
+                counter.style.color = '#f87171';
+            } else {
+                counter.style.color = '';
+            }
         }
 
         async function setResponseLength(mode) {
