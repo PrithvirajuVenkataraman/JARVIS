@@ -1,6 +1,6 @@
 export const config = { maxDuration: 60 };
 import { applyApiSecurity } from './_lib/security.js';
-import { validateAndRepairCodeAndMath } from './_lib/code-math-validator.js';
+import { validateAndRepairCodeAndMath, StreamingSpeculativeGuard } from './_lib/code-math-validator.js';
 import { inspectPromptSecurity } from './_lib/prompt-guard.js';
 import { redactSensitiveData } from './_lib/pii-redactor.js';
 import {
@@ -1404,8 +1404,16 @@ export default async function handler(req, res) {
         }
         const isUserChosenR1 = String(userSelectedModel || '').toLowerCase().includes('r1');
         const needsReasoning = isNativeReasoningModel(model) && (isExplicitReasoningIntent(intent, message) || isUserChosenR1);
+        const isMathOrQuant = isMathematicalOrQuantitativeQuery(message) || scoreChatIntent(message, 'explicit_math_logic_proof') >= 0.28;
+
         if (needsReasoning) {
-            return 'Reasoning instruction: Work through the problem within <think>...</think> tags before delivering the final answer. Keep internal reasoning concise, focused, and minimal (1-3 short sentences max without rambling guesswork). Everything after </think> must be ONLY the final polished answer for the user with zero meta-commentary.';
+            const mathClause = isMathOrQuant
+                ? ' For mathematical calculations, algebraic formulas, or geometric derivations, verify all arithmetic and equations carefully, and include an executable Python verification code block (using sympy or math) that prints the exact result.'
+                : '';
+            return `Reasoning instruction: Work through the problem within <think>...</think> tags before delivering the final answer. Keep internal reasoning concise, focused, and minimal (1-3 short sentences max without rambling guesswork). Everything after </think> must be ONLY the final polished answer for the user with zero meta-commentary.${mathClause}`;
+        }
+        if (isMathOrQuant) {
+            return 'Accuracy & formatting rules: Deliver the polished final answer directly with clarity and precision. For mathematical calculations, algebraic formulas, or geometric derivations, verify all arithmetic and equations carefully, and provide an executable Python snippet (using sympy or math) printing the exact result.';
         }
         return 'Accuracy & formatting rules: Deliver the polished final answer directly with clarity and precision. Do not output artificial <think> tags, synthetic reasoning checklists, or meta-commentary.';
     }
@@ -1595,6 +1603,13 @@ export default async function handler(req, res) {
             const streamImages = Array.isArray(images)
                 ? images
                 : (Array.isArray(grounding?.images) ? grounding.images : undefined);
+            const isMathOrReasoningQuery = intent === 'deep_reasoning' ||
+                options?.tier === 'deep' ||
+                Boolean(options?.forceReasoning) ||
+                isMathematicalOrQuantitativeQuery(effectiveMessage, { hasImages: Boolean(streamImages?.length) });
+
+            let mathGuard = isMathOrReasoningQuery ? new StreamingSpeculativeGuard() : null;
+
             const streamResult = await streamModelWithFallback(prompt, lengthPolicy, delta => {
                 if (!delta) return;
                 if (!firstTokenReceivedAt) {
@@ -1602,7 +1617,14 @@ export default async function handler(req, res) {
                     timing.ttftMs = firstTokenReceivedAt - (timing.startedAt || modelStartedAt);
                 }
                 streamedText += delta;
-                writeSse(res, 'delta', { text: delta });
+                if (mathGuard) {
+                    const verifiedChunk = mathGuard.ingest(delta);
+                    if (verifiedChunk) {
+                        writeSse(res, 'delta', { text: verifiedChunk });
+                    }
+                } else {
+                    writeSse(res, 'delta', { text: delta });
+                }
             }, selectedModel, streamImages, {
                 structuredMessages: structuredChat,
                 systemPrompt,
@@ -1615,10 +1637,18 @@ export default async function handler(req, res) {
                 onReset: () => {
                     streamedText = '';
                     firstTokenReceivedAt = null;
+                    if (mathGuard) mathGuard = new StreamingSpeculativeGuard();
                     writeSse(res, 'reset', { reason: 'failover' });
                 }
             });
             timing.modelMs += Date.now() - modelStartedAt;
+
+            if (mathGuard) {
+                const remaining = mathGuard.flushRemaining();
+                if (remaining) {
+                    writeSse(res, 'delta', { text: remaining });
+                }
+            }
 
             if (!streamResult.ok) {
                 writeSse(res, 'error', {
@@ -1631,6 +1661,13 @@ export default async function handler(req, res) {
             let finalText = ensureCompleteAssistantResponse(
                 replaceLongDashes(String(streamResult.text || streamedText || '').trim())
             );
+
+            // Terminal math and syntax verification
+            const postRepaired = validateAndRepairCodeAndMath(finalText);
+            if (postRepaired.modified) {
+                finalText = postRepaired.text;
+                writeSse(res, 'correction', { text: finalText });
+            }
             // Preserve <think> reasoning for the client but strip it for quality/length evaluation.
             const { thought: streamThought, response: answerOnly } = extractThoughtAndResponse(finalText);
             let evaluationText = answerOnly || finalText;
