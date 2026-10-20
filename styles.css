@@ -6594,12 +6594,7 @@ body:not(.dark) .citation-badge:hover {
 }
 
 .perplexity-related-tray {
-    display: flex;
-    flex-direction: column;
-    gap: 0.45rem;
-    margin-top: 0.75rem;
-    padding-top: 0.65rem;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    display: none !important;
 }
 
 body:not(.dark) .perplexity-related-tray {
