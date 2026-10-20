@@ -3231,7 +3231,6 @@ body.dark .footer-action-btn-primary:hover {
     overflow: hidden !important;
 }
 
-.help-modal-enhanced > div:first-child,
 .help-modal-header {
     background: var(--ui-surface-muted) !important;
     border-bottom: 1px solid var(--ui-border) !important;
@@ -4730,16 +4729,21 @@ button:hover {
     text-transform: uppercase !important;
     color: #64748b !important;
     margin: 4px 0 -6px 2px !important;
+    flex-shrink: 0 !important;
 }
 
 /* Settings View Panels & Sub-view Transition */
 .settings-view-panel {
-    display: flex !important;
+    display: none !important;
     flex-direction: column !important;
     width: 100% !important;
     height: 100% !important;
     min-height: 0 !important;
     flex: 1 1 auto !important;
+}
+
+.settings-view-panel.active {
+    display: flex !important;
 }
 
 .settings-subview-panel {
@@ -4795,6 +4799,7 @@ button:hover {
     margin-bottom: 20px !important;
     display: flex !important;
     flex-direction: column !important;
+    flex-shrink: 0 !important;
 }
 
 .settings-group-card .settings-row {
@@ -4816,6 +4821,8 @@ button:hover {
     box-sizing: border-box !important;
     width: 100% !important;
     position: relative !important;
+    flex-shrink: 0 !important;
+    min-width: 0 !important;
 }
 
 .settings-row-interactive {
@@ -4858,6 +4865,7 @@ button:hover {
     min-width: 0 !important;
     flex: 1 1 auto !important;
     text-align: left !important;
+    overflow: hidden !important;
 }
 
 .settings-row-title {
@@ -4867,6 +4875,9 @@ button:hover {
     color: #f4f4f5 !important;
     line-height: 1.35 !important;
     letter-spacing: -0.01em !important;
+    word-break: normal !important;
+    overflow-wrap: break-word !important;
+    white-space: normal !important;
 }
 
 .settings-row-desc {
@@ -4874,6 +4885,8 @@ button:hover {
     font-size: 12px !important;
     color: #94a3b8 !important;
     line-height: 1.4 !important;
+    word-break: normal !important;
+    overflow-wrap: break-word !important;
 }
 
 .settings-row-right {
@@ -5082,7 +5095,8 @@ button:hover {
 .settings-export-buttons {
     display: flex !important;
     gap: 8px !important;
-    width: 100% !important;
+    width: auto !important;
+    flex-shrink: 0 !important;
 }
 
 .settings-chip-btn {
@@ -5284,7 +5298,35 @@ button:hover {
     }
 
     .settings-danger-btn {
-        width: 100% !important;
+        width: auto !important;
+    }
+
+    .settings-row {
+        padding: 12px 14px !important;
+        gap: 10px !important;
+    }
+
+    .settings-row-left {
+        gap: 10px !important;
+    }
+
+    .settings-icon-badge {
+        width: 32px !important;
+        height: 32px !important;
+        min-width: 32px !important;
+    }
+
+    .settings-chip-btn {
+        height: 32px !important;
+        padding: 0 8px !important;
+        font-size: 11.5px !important;
+        gap: 4px !important;
+    }
+
+    .settings-action-btn {
+        height: 32px !important;
+        padding: 0 10px !important;
+        font-size: 11.5px !important;
     }
 
     /* Touch Target Minimum 44px */
@@ -5293,6 +5335,39 @@ button:hover {
     .settings-danger-btn,
     .settings-ghost-btn {
         min-height: 42px !important;
+    }
+}
+
+@media (max-width: 480px) {
+    .settings-row {
+        padding: 10px 12px !important;
+        gap: 10px !important;
+    }
+
+    .settings-row-title {
+        font-size: 13.5px !important;
+    }
+
+    .settings-row-desc {
+        font-size: 11.5px !important;
+    }
+
+    .settings-chip-btn {
+        height: 30px !important;
+        padding: 0 7px !important;
+        font-size: 11px !important;
+    }
+
+    .settings-action-btn {
+        height: 30px !important;
+        padding: 0 8px !important;
+        font-size: 11px !important;
+    }
+
+    .settings-danger-btn {
+        height: 30px !important;
+        padding: 0 8px !important;
+        font-size: 11px !important;
     }
 }
 
