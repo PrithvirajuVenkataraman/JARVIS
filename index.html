@@ -21768,16 +21768,7 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                         isFallback: provenance !== 'web_grounded'
                     });
 
-                    if (row && hasSources && window.JarvisLiveResearch?.generateRelatedResearchQuestions) {
-                        const questions = window.JarvisLiveResearch.generateRelatedResearchQuestions({
-                            query,
-                            sources,
-                            answer: content
-                        });
-                        if (questions && questions.length > 0) {
-                            window.JarvisLiveResearch.renderRelatedQuestionsTray(row, questions);
-                        }
-                    }
+                    // Live web search follow-up questions section completely removed per user request
 
                     console.log('[Bounded Live Research Telemetry]', {
                         turnId: controller.turnId,
