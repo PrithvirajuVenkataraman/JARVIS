@@ -4728,7 +4728,7 @@ button:hover {
     letter-spacing: 0.08em !important;
     text-transform: uppercase !important;
     color: #64748b !important;
-    margin: 4px 0 -6px 2px !important;
+    margin: 8px 0 2px 4px !important;
     flex-shrink: 0 !important;
 }
 
@@ -4790,20 +4790,20 @@ button:hover {
     margin: 0 0 14px 0 !important;
 }
 
-/* Grouped Settings Rows (macOS/iOS Style) */
+/* Grouped Settings Rows (Clean Unboxed Surface) */
 .settings-group-card {
-    background: rgba(22, 26, 36, 0.65) !important;
-    border: 1px solid rgba(255, 255, 255, 0.08) !important;
-    border-radius: 14px !important;
-    overflow: hidden !important;
-    margin-bottom: 20px !important;
+    background: transparent !important;
+    border: none !important;
+    border-radius: 0 !important;
+    overflow: visible !important;
+    margin-bottom: 24px !important;
     display: flex !important;
     flex-direction: column !important;
     flex-shrink: 0 !important;
 }
 
 .settings-group-card .settings-row {
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07) !important;
 }
 
 .settings-group-card .settings-row:last-child {
@@ -4815,7 +4815,7 @@ button:hover {
     align-items: center !important;
     justify-content: space-between !important;
     gap: 16px !important;
-    padding: 14px 18px !important;
+    padding: 13px 4px !important;
     min-height: 56px !important;
     transition: background-color 0.16s ease !important;
     box-sizing: border-box !important;
@@ -4836,6 +4836,7 @@ button:hover {
     -webkit-appearance: none !important;
     appearance: none !important;
     user-select: none !important;
+    border-radius: 8px !important;
 }
 
 .settings-row-interactive:hover {
@@ -5302,7 +5303,7 @@ button:hover {
     }
 
     .settings-row {
-        padding: 12px 14px !important;
+        padding: 12px 2px !important;
         gap: 10px !important;
     }
 
@@ -5340,7 +5341,7 @@ button:hover {
 
 @media (max-width: 480px) {
     .settings-row {
-        padding: 10px 12px !important;
+        padding: 10px 2px !important;
         gap: 10px !important;
     }
 
