@@ -2597,7 +2597,7 @@ function handleNegativeFeedback(buttonElement, reason = '') {
     const query = container?.dataset?.query ? decodeURIComponent(container.dataset.query) : (lastQueryResponse?.query || '');
     const response = container?.dataset?.response ? decodeURIComponent(container.dataset.response) : (lastQueryResponse?.response || '');
 
-    if (reason && typeof JarvisSelfImprovingMemory !== 'undefined') {
+    if (reason && typeof JarvisSelfImprovingMemory !== 'undefined' && (typeof isPersonalizationEnabled !== 'function' || isPersonalizationEnabled())) {
         JarvisSelfImprovingMemory.distillNegativeFeedback(reason, query, response).then(item => {
             if (item && typeof showTemporaryMessage === 'function') {
                 showTemporaryMessage(`Adapted: ${item.directive}`);
@@ -5491,6 +5491,24 @@ function setEnterprisePersona(personaKey) {
     }
 }
 
+function isPersonalizationEnabled() {
+    try {
+        if (typeof localStorage === 'undefined') return true;
+        return localStorage.getItem('jarvis_personalized_experience') !== 'false';
+    } catch (_) {
+        return true;
+    }
+}
+window.isPersonalizationEnabled = isPersonalizationEnabled;
+
+function setPersonalizationEnabled(enabled) {
+    try {
+        if (typeof localStorage === 'undefined') return;
+        localStorage.setItem('jarvis_personalized_experience', enabled ? 'true' : 'false');
+    } catch (_) {}
+}
+window.setPersonalizationEnabled = setPersonalizationEnabled;
+
 async function askGeminiAI(userMessage, requestOptions = {}) {
     const normalizedUserMessage = String(userMessage || '').trim();
     const latencyTrace = {
@@ -5525,7 +5543,8 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
         };
 
         setLastVisibleUserMessage(normalizedUserMessage);  
-        if (typeof JarvisSelfImprovingMemory !== 'undefined' && normalizedUserMessage) {
+        const personalizationActive = typeof isPersonalizationEnabled === 'function' ? isPersonalizationEnabled() : true;
+        if (personalizationActive && typeof JarvisSelfImprovingMemory !== 'undefined' && normalizedUserMessage) {
             JarvisSelfImprovingMemory.processUserMessage(normalizedUserMessage);
         }
  
@@ -5552,23 +5571,23 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
         const fastExplainerHint = requestOptions?.fastExplainer === true
             ? 'Fast explainer mode: answer directly from stable general knowledge in 3-6 concise sentences. Do not search, cite sources, mention retrieval, or add generic next steps.'
             : '';
-        const relevantSavedMemoryContext = requestOptions?.grounding
+        const relevantSavedMemoryContext = (!personalizationActive || requestOptions?.grounding)
             ? ''
             : await buildRelevantSavedMemoryContextAsync(normalizedUserMessage, {
                 intent: requestOptions?.intent || (isFastSimpleRequest ? 'fast_simple' : 'chat'),
                 routeDecision: requestOptions?.routeDecision,
                 isFastSimple: isFastSimpleRequest
             });
-        const learnedStyleHint = buildLearnedAnswerStyleHint();
-        const learnedPreferenceHint = buildLearnedPreferenceHint();
+        const learnedStyleHint = personalizationActive ? buildLearnedAnswerStyleHint() : '';
+        const learnedPreferenceHint = personalizationActive ? buildLearnedPreferenceHint() : '';
 
         const activePersonaKey = typeof getActivePersona === 'function' ? getActivePersona() : 'general';
         const activePersonaConfig = ENTERPRISE_PERSONAS[activePersonaKey];
         const personaDirective = activePersonaConfig?.directive || '';
 
         const selectedModel = getSelectedModel();
-        const baseMem = (typeof JarvisSelfImprovingMemory !== 'undefined' && JarvisSelfImprovingMemory) ||
-            (typeof globalThis !== 'undefined' && globalThis.JarvisSelfImprovingMemory) || null;
+        const baseMem = personalizationActive && ((typeof JarvisSelfImprovingMemory !== 'undefined' && JarvisSelfImprovingMemory) ||
+            (typeof globalThis !== 'undefined' && globalThis.JarvisSelfImprovingMemory) || null);
         const baseSystemPrompt = (baseMem && typeof baseMem.injectIntoSystemPrompt === 'function')
             ? baseMem.injectIntoSystemPrompt(customSystemPrompt, normalizedUserMessage)
             : customSystemPrompt;
@@ -5652,6 +5671,7 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
                 responseStyle,
                 customSystemPrompt: systemDirectives,
                 learnedDirectives: (() => {
+                    if (!personalizationActive) return [];
                     try {
                         const mem = (typeof JarvisSelfImprovingMemory !== 'undefined' && JarvisSelfImprovingMemory) ||
                             (typeof globalThis !== 'undefined' && globalThis.JarvisSelfImprovingMemory) || null;
@@ -6911,8 +6931,12 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
 
         
         
+        let currentSettingsView = 'main';
+
         function showHelpModal() {
             window.__helpModalReturnFocus = document.activeElement;
+            window.__currentSettingsView = 'main';
+            currentSettingsView = 'main';
             const modal = document.createElement('div');
             modal.id = 'help-modal';
             modal.className = 'fixed inset-0 bg-black/75 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-4 md:p-6';
@@ -6920,54 +6944,255 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             modal.setAttribute('aria-modal', 'true');
             modal.setAttribute('aria-labelledby', 'help-modal-title');
             modal.onclick = (e) => {
-                if (e.target === modal) closeHelpModal();
+                if (e.target === modal) {
+                    if (window.__currentSettingsView === 'custom_instructions') {
+                        const input = document.getElementById('custom-system-prompt-input');
+                        if (input) setCustomSystemPrompt(input.value, false);
+                    }
+                    closeHelpModal();
+                }
             };
 
             const currentPrompt = (typeof customSystemPrompt === 'string' ? customSystemPrompt : (window.customSystemPrompt || ''));
             const charCount = currentPrompt.length;
+            const isPersonalized = typeof isPersonalizationEnabled === 'function' ? isPersonalizationEnabled() : true;
+            const hasCustom = Boolean(currentPrompt && currentPrompt.trim().length > 0);
 
             modal.innerHTML = `
                 <div class="help-modal-enhanced">
-                    <!-- Modal Header -->
-                    <div class="help-modal-header">
-                        <button type="button" onclick="closeHelpModal()" class="help-modal-back-btn" aria-label="Close settings">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                <path d="M19 12H5"></path>
-                                <path d="M12 19l-7-7 7-7"></path>
-                            </svg>
-                        </button>
-                        <div class="help-modal-title-block">
-                            <h2 id="help-modal-title" class="settings-modal-heading">Settings</h2>
+                    <!-- Main Settings View -->
+                    <div id="settings-view-main" class="settings-view-panel active">
+                        <!-- Modal Header -->
+                        <div class="help-modal-header">
+                            <button type="button" onclick="closeHelpModal()" class="help-modal-back-btn" aria-label="Close settings">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <path d="M19 12H5"></path>
+                                    <path d="M12 19l-7-7 7-7"></path>
+                                </svg>
+                            </button>
+                            <div class="help-modal-title-block">
+                                <h2 id="help-modal-title" class="settings-modal-heading">Settings</h2>
+                            </div>
+                            <button type="button" onclick="closeHelpModal()" class="help-modal-ok-btn" aria-label="Close settings" style="background:#ffffff!important;color:#000000!important;-webkit-text-fill-color:#000000!important;font-weight:750!important;">
+                                Done
+                            </button>
                         </div>
-                        <button type="button" onclick="applyCustomSystemPromptAndClose()" class="help-modal-ok-btn" aria-label="Save settings" style="background:#ffffff!important;color:#000000!important;-webkit-text-fill-color:#000000!important;font-weight:750!important;">
-                            Done
-                        </button>
-                    </div>
 
-                    <!-- Scrollable Modal Body -->
-                    <div class="help-modal-body custom-scrollbar">
-                        <!-- Section 1: Custom Instructions -->
-                        <section class="settings-studio-card">
-                            <div class="settings-card-header">
-                                <div class="settings-card-title-group">
-                                    <div class="settings-icon-badge settings-icon-cyan" aria-hidden="true">
-                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                            <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+                        <!-- Scrollable Modal Body -->
+                        <div class="help-modal-body custom-scrollbar">
+                            <!-- Section 1: PERSONALIZATION & BEHAVIOR -->
+                            <div class="settings-section-label">PERSONALIZATION &amp; BEHAVIOR</div>
+                            <div class="settings-group-card">
+                                <!-- Custom Instructions Row -->
+                                <button type="button" class="settings-row settings-row-interactive" id="settings-row-custom-instructions" onclick="switchSettingsView('custom_instructions')" aria-label="Custom Instructions">
+                                    <div class="settings-row-left">
+                                        <div class="settings-icon-badge settings-icon-cyan" aria-hidden="true">
+                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+                                            </svg>
+                                        </div>
+                                        <div class="settings-row-text">
+                                            <h3 class="settings-row-title">Custom Instructions</h3>
+                                            <p class="settings-row-desc">Shape how JARVIS responds, sets tone, or formats answers.</p>
+                                        </div>
+                                    </div>
+                                    <div class="settings-row-right">
+                                        <span id="custom-instructions-status" class="settings-row-status ${hasCustom ? 'configured' : ''}">${hasCustom ? 'Configured' : 'Default'}</span>
+                                        <svg class="settings-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                            <path d="M9 18l6-6-6-6"/>
                                         </svg>
                                     </div>
-                                    <div class="settings-card-title-text">
-                                        <h3 class="settings-section-title">Custom Instructions</h3>
-                                        <p class="settings-section-desc">Shape how JARVIS responds, sets tone, or formats answers.</p>
+                                </button>
+
+                                <!-- Personalized Experience Row -->
+                                <div class="settings-row">
+                                    <div class="settings-row-left">
+                                        <div class="settings-icon-badge settings-icon-purple" aria-hidden="true">
+                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                <path d="M12 2a4 4 0 0 1 4 4c0 1.95-1.4 3.58-3.25 3.93L12 18l-3-3"/>
+                                                <path d="M9.5 2a4 4 0 0 0-4 4c0 1.95 1.4 3.58 3.25 3.93"/>
+                                                <path d="M17 14a5 5 0 0 1 3.5 8.5H3.5A5 5 0 0 1 7 14"/>
+                                            </svg>
+                                        </div>
+                                        <div class="settings-row-text">
+                                            <label id="settings-personalization-label" for="settings-personalization-toggle" class="settings-row-title cursor-pointer">Personalized Experience</label>
+                                            <p class="settings-row-desc">Use and learn from previous conversations</p>
+                                        </div>
+                                    </div>
+                                    <div class="settings-row-right">
+                                        <label class="settings-switch">
+                                            <input
+                                                type="checkbox"
+                                                id="settings-personalization-toggle"
+                                                class="settings-switch-input"
+                                                role="switch"
+                                                aria-labelledby="settings-personalization-label"
+                                                aria-checked="${isPersonalized ? 'true' : 'false'}"
+                                                ${isPersonalized ? 'checked' : ''}
+                                                onkeydown="if(event.key==='Enter'){event.preventDefault();this.click();}"
+                                                onchange="handlePersonalizationToggleChange(this)">
+                                            <span class="settings-switch-slider" aria-hidden="true"></span>
+                                        </label>
                                     </div>
                                 </div>
-                                <button type="button" class="settings-ghost-btn" onclick="resetCustomSystemPrompt()" title="Clear custom instructions">
-                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                                        <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
-                                        <path d="M3 3v5h5"/>
-                                    </svg>
-                                    <span>Clear</span>
-                                </button>
+
+                                <!-- Saved Memories Row -->
+                                <div class="settings-row">
+                                    <div class="settings-row-left">
+                                        <div class="settings-icon-badge settings-icon-purple" aria-hidden="true">
+                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                <circle cx="12" cy="12" r="3"/>
+                                                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                                            </svg>
+                                        </div>
+                                        <div class="settings-row-text">
+                                            <h3 class="settings-row-title">Saved Memories</h3>
+                                            <p class="settings-row-desc">View, search, and manage learned facts and rules</p>
+                                        </div>
+                                    </div>
+                                    <div class="settings-row-right">
+                                        <button type="button" class="settings-action-btn" onclick="closeHelpModal(); showMemoryManager();">
+                                            <span>Manage &rarr;</span>
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
+
+                            <!-- Section 2: TOOLS & ARCHIVES -->
+                            <div class="settings-section-label">TOOLS &amp; ARCHIVES</div>
+                            <div class="settings-group-card">
+                                <!-- Image Gallery Row -->
+                                <div class="settings-row">
+                                    <div class="settings-row-left">
+                                        <div class="settings-icon-badge settings-icon-amber" aria-hidden="true">
+                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                                                <circle cx="8.5" cy="8.5" r="1.5"/>
+                                                <polyline points="21 15 16 10 5 21"/>
+                                            </svg>
+                                        </div>
+                                        <div class="settings-row-text">
+                                            <h3 class="settings-row-title">Image Gallery</h3>
+                                            <p class="settings-row-desc">Browse all AI-generated diagrams and artwork</p>
+                                        </div>
+                                    </div>
+                                    <div class="settings-row-right">
+                                        <button type="button" class="settings-action-btn" onclick="closeHelpModal(); openImageGalleryModal();">
+                                            <span>Open &rarr;</span>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <!-- Export Conversation Row -->
+                                <div class="settings-row">
+                                    <div class="settings-row-left">
+                                        <div class="settings-icon-badge settings-icon-emerald" aria-hidden="true">
+                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                                <polyline points="7 10 12 15 17 10"/>
+                                                <line x1="12" y1="15" x2="12" y2="3"/>
+                                            </svg>
+                                        </div>
+                                        <div class="settings-row-text">
+                                            <h3 class="settings-row-title">Export Conversation</h3>
+                                            <p class="settings-row-desc">Save active conversation for offline archives</p>
+                                        </div>
+                                    </div>
+                                    <div class="settings-row-right settings-export-buttons">
+                                        <button type="button" class="settings-chip-btn" onclick="exportCurrentChat('markdown')">
+                                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                                <polyline points="14 2 14 8 20 8"/>
+                                            </svg>
+                                            <span>Markdown</span>
+                                        </button>
+                                        <button type="button" class="settings-chip-btn" onclick="exportCurrentChat('json')">
+                                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                <path d="M4 17l6-6-6-6M12 19h8"/>
+                                            </svg>
+                                            <span>JSON</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Section 3: SAFETY & DATA -->
+                            <div class="settings-section-label">SAFETY &amp; DATA</div>
+                            <div class="settings-group-card">
+                                <!-- Emergency SOS Row -->
+                                <div class="settings-row">
+                                    <div class="settings-row-left">
+                                        <div class="settings-icon-badge settings-icon-rose" aria-hidden="true">
+                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                                                <line x1="12" y1="9" x2="12" y2="13"/>
+                                                <line x1="12" y1="17" x2="12.01" y2="17"/>
+                                            </svg>
+                                        </div>
+                                        <div class="settings-row-text">
+                                            <h3 class="settings-row-title">Emergency SOS</h3>
+                                            <p class="settings-row-desc">Configure distress contacts and emergency dispatch</p>
+                                        </div>
+                                    </div>
+                                    <div class="settings-row-right">
+                                        <button type="button" class="settings-action-btn" onclick="closeHelpModal(); openEmergencyContactModal();">
+                                            <span>Configure &rarr;</span>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <!-- Local Storage & Privacy Row -->
+                                <div class="settings-row">
+                                    <div class="settings-row-left">
+                                        <div class="settings-icon-badge settings-icon-cyan" aria-hidden="true">
+                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                                            </svg>
+                                        </div>
+                                        <div class="settings-row-text">
+                                            <h3 class="settings-row-title">Local Storage & Privacy</h3>
+                                            <p class="settings-row-desc">IndexedDB storage metrics and complete local reset</p>
+                                            <div id="privacy-data-summary" class="settings-privacy-summary">
+                                                ${typeof buildPrivacyDataSummaryHtml === 'function' ? buildPrivacyDataSummaryHtml() : ''}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="settings-row-right">
+                                        <button type="button" class="settings-danger-btn" onclick="promptClearAllDataConfirmation()">
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                <polyline points="3 6 5 6 21 6"/>
+                                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                                            </svg>
+                                            <span>Clear All Data</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Sub-View: Custom Instructions -->
+                    <div id="settings-view-custom-instructions" class="settings-view-panel settings-subview-panel" style="display: none;">
+                        <!-- Sub-view Header -->
+                        <div class="help-modal-header">
+                            <button type="button" onclick="saveCustomInstructionsAndReturn()" class="help-modal-back-btn settings-subview-back-btn" aria-label="Back to settings">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <path d="M19 12H5"></path>
+                                    <path d="M12 19l-7-7 7-7"></path>
+                                </svg>
+                                <span class="settings-back-label">Settings</span>
+                            </button>
+                            <div class="help-modal-title-block">
+                                <h2 id="custom-instructions-subview-title" class="settings-modal-heading">Custom Instructions</h2>
+                            </div>
+                            <button type="button" onclick="saveCustomInstructionsAndReturn()" class="help-modal-ok-btn" aria-label="Save and return" style="background:#ffffff!important;color:#000000!important;-webkit-text-fill-color:#000000!important;font-weight:750!important;">
+                                Done
+                            </button>
+                        </div>
+
+                        <!-- Sub-view Body -->
+                        <div class="help-modal-body custom-scrollbar">
+                            <p class="settings-subview-desc">What would you like JARVIS to know about you to provide better responses? These instructions shape JARVIS's tone, reasoning depth, and formatting across all conversations.</p>
 
                             <!-- Quick Persona Preset Chips -->
                             <div class="settings-presets-container">
@@ -6980,177 +7205,132 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                                 </div>
                             </div>
 
+                            <!-- Textarea & live count & Clear button -->
                             <div class="settings-textarea-wrapper">
                                 <textarea
                                     id="custom-system-prompt-input"
                                     class="custom-system-prompt-input"
-                                    rows="4"
+                                    rows="6"
                                     maxlength="1200"
-                                    oninput="updateCustomPromptCharCount(this)"
+                                    oninput="handleCustomPromptInput(this)"
                                     placeholder="e.g. Reply like ChatGPT. Be concise, structured, direct, and avoid conversational filler.">${escapeHtml(currentPrompt)}</textarea>
                                 <div class="settings-textarea-footer">
-                                    <span class="settings-textarea-tip">Saved across all conversations and prompts</span>
+                                    <button type="button" class="settings-ghost-btn" onclick="clearCustomInstructionsInput()" title="Clear custom instructions">
+                                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+                                            <path d="M3 3v5h5"/>
+                                        </svg>
+                                        <span>Clear</span>
+                                    </button>
                                     <span id="custom-prompt-char-count" class="settings-char-count">${charCount} / 1200</span>
                                 </div>
                             </div>
-                        </section>
-
-                        <!-- Section 2: Assistant Preferences Grid -->
-                        <div class="settings-section-label">ASSISTANT PREFERENCES</div>
-                        <div class="settings-capabilities-grid">
-                            <!-- Memory Card -->
-                            <div class="settings-cap-card">
-                                <div class="settings-cap-header">
-                                    <div class="settings-icon-badge settings-icon-purple" aria-hidden="true">
-                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                            <path d="M12 2a4 4 0 0 1 4 4c0 1.95-1.4 3.58-3.25 3.93L12 18l-3-3"/>
-                                            <path d="M9.5 2a4 4 0 0 0-4 4c0 1.95 1.4 3.58 3.25 3.93"/>
-                                            <path d="M17 14a5 5 0 0 1 3.5 8.5H3.5A5 5 0 0 1 7 14"/>
-                                        </svg>
-                                    </div>
-                                    <div class="settings-cap-content">
-                                        <h4 class="settings-cap-title">Long-Term Memory</h4>
-                                        <p class="settings-cap-desc">View and manage remembered facts, preferences, and context.</p>
-                                    </div>
-                                </div>
-                                <div class="settings-cap-action">
-                                    <button type="button" class="settings-action-btn" onclick="closeHelpModal(); showMemoryManager();">
-                                        <span>Manage Memory</span>
-                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                            <path d="M5 12h14M12 5l7 7-7 7"/>
-                                        </svg>
-                                    </button>
-                                </div>
-                            </div>
-
-                            <!-- Image Studio Card -->
-                            <div class="settings-cap-card">
-                                <div class="settings-cap-header">
-                                    <div class="settings-icon-badge settings-icon-amber" aria-hidden="true">
-                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-                                            <circle cx="8.5" cy="8.5" r="1.5"/>
-                                            <polyline points="21 15 16 10 5 21"/>
-                                        </svg>
-                                    </div>
-                                    <div class="settings-cap-content">
-                                        <h4 class="settings-cap-title">Image Gallery</h4>
-                                        <p class="settings-cap-desc">Browse and inspect generated artwork, diagrams, and charts.</p>
-                                    </div>
-                                </div>
-                                <div class="settings-cap-action">
-                                    <button type="button" class="settings-action-btn" onclick="closeHelpModal(); openImageGalleryModal();">
-                                        <span>Open Gallery</span>
-                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                            <path d="M5 12h14M12 5l7 7-7 7"/>
-                                        </svg>
-                                    </button>
-                                </div>
-                            </div>
-
-                            <!-- Export Dialogue Card -->
-                            <div class="settings-cap-card">
-                                <div class="settings-cap-header">
-                                    <div class="settings-icon-badge settings-icon-emerald" aria-hidden="true">
-                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                                            <polyline points="7 10 12 15 17 10"/>
-                                            <line x1="12" y1="15" x2="12" y2="3"/>
-                                        </svg>
-                                    </div>
-                                    <div class="settings-cap-content">
-                                        <h4 class="settings-cap-title">Export Chat</h4>
-                                        <p class="settings-cap-desc">Download active conversation history for offline archives.</p>
-                                    </div>
-                                </div>
-                                <div class="settings-cap-action settings-export-buttons">
-                                    <button type="button" class="settings-chip-btn" onclick="exportCurrentChat('markdown')">
-                                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                                            <polyline points="14 2 14 8 20 8"/>
-                                        </svg>
-                                        <span>Markdown</span>
-                                    </button>
-                                    <button type="button" class="settings-chip-btn" onclick="exportCurrentChat('json')">
-                                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                            <path d="M4 17l6-6-6-6M12 19h8"/>
-                                        </svg>
-                                        <span>JSON</span>
-                                    </button>
-                                </div>
-                            </div>
-
-                            <!-- Emergency SOS Card -->
-                            <div class="settings-cap-card">
-                                <div class="settings-cap-header">
-                                    <div class="settings-icon-badge settings-icon-rose" aria-hidden="true">
-                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-                                            <line x1="12" y1="9" x2="12" y2="13"/>
-                                            <line x1="12" y1="17" x2="12.01" y2="17"/>
-                                        </svg>
-                                    </div>
-                                    <div class="settings-cap-content">
-                                        <h4 class="settings-cap-title">Emergency SOS</h4>
-                                        <p class="settings-cap-desc">Set emergency distress contacts and satellite safety dispatch.</p>
-                                    </div>
-                                </div>
-                                <div class="settings-cap-action">
-                                    <button type="button" class="settings-action-btn" onclick="closeHelpModal(); openEmergencyContactModal();">
-                                        <span>Configure SOS</span>
-                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                            <path d="M5 12h14M12 5l7 7-7 7"/>
-                                        </svg>
-                                    </button>
-                                </div>
-                            </div>
                         </div>
-
-                        <!-- Section 3: Data & Local Privacy -->
-                        <div class="settings-section-label">DATA & STORAGE</div>
-                        <section class="settings-privacy-card">
-                            <div class="settings-privacy-body">
-                                <div class="settings-privacy-left">
-                                    <div class="settings-icon-badge settings-icon-cyan" aria-hidden="true">
-                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-                                        </svg>
-                                    </div>
-                                    <div class="settings-privacy-text">
-                                        <h4 class="settings-cap-title">Local Storage & Privacy</h4>
-                                        <p class="settings-cap-desc">Conversations, preferences, and memory remain stored privately on your device in secure IndexedDB storage.</p>
-                                        <div id="privacy-data-summary" class="settings-privacy-summary">
-                                            ${typeof buildPrivacyDataSummaryHtml === 'function' ? buildPrivacyDataSummaryHtml() : ''}
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="settings-privacy-action">
-                                    <button type="button" class="settings-danger-btn" onclick="promptClearAllDataConfirmation()">
-                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                            <polyline points="3 6 5 6 21 6"/>
-                                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                                        </svg>
-                                        <span>Clear All Data</span>
-                                    </button>
-                                </div>
-                            </div>
-                        </section>
-                    </div>   
-                </div>   
-            `;   
+                    </div>
+                </div>
+            `;
 
             document.querySelector('.page-shell')?.setAttribute('aria-hidden', 'true');
             document.body.appendChild(modal); 
-            syncHelpModalModeButtons(); 
             if (typeof refreshPrivacyDataSummary === 'function') refreshPrivacyDataSummary();
+
+            const customInput = modal.querySelector('#custom-system-prompt-input');
+            if (customInput) {
+                customInput.addEventListener('paste', () => {
+                    setTimeout(() => {
+                        handleCustomPromptInput(customInput);
+                    }, 0);
+                });
+            }
+
             modal.querySelector('.help-modal-back-btn')?.focus(); 
             modal.addEventListener('keydown', trapModalFocus);
+        }
+
+        function switchSettingsView(viewName) {
+            window.__currentSettingsView = viewName;
+            currentSettingsView = viewName;
+            const mainView = document.getElementById('settings-view-main');
+            const subView = document.getElementById('settings-view-custom-instructions');
+            if (!mainView || !subView) return;
+
+            if (viewName === 'custom_instructions') {
+                mainView.style.display = 'none';
+                mainView.classList.remove('active');
+                subView.style.display = 'flex';
+                subView.classList.add('active');
+
+                const input = document.getElementById('custom-system-prompt-input');
+                if (input) {
+                    const currentVal = typeof customSystemPrompt === 'string' ? customSystemPrompt : (window.customSystemPrompt || '');
+                    input.value = currentVal.slice(0, 1200);
+                    updateCustomPromptCharCount(input);
+                }
+                const backBtn = subView.querySelector('.settings-subview-back-btn');
+                if (backBtn) backBtn.focus();
+            } else {
+                subView.style.display = 'none';
+                subView.classList.remove('active');
+                mainView.style.display = 'flex';
+                mainView.classList.add('active');
+
+                updateCustomInstructionsStatus();
+                const rowBtn = document.getElementById('settings-row-custom-instructions');
+                if (rowBtn) rowBtn.focus();
+            }
+        }
+
+        function saveCustomInstructionsAndReturn() {
+            const input = document.getElementById('custom-system-prompt-input');
+            if (input) {
+                setCustomSystemPrompt(input.value, false);
+            }
+            switchSettingsView('main');
+        }
+
+        function updateCustomInstructionsStatus() {
+            const statusEl = document.getElementById('custom-instructions-status');
+            if (!statusEl) return;
+            const current = (typeof customSystemPrompt === 'string' ? customSystemPrompt : (window.customSystemPrompt || '')).trim();
+            const hasCustom = current.length > 0;
+            statusEl.textContent = hasCustom ? 'Configured' : 'Default';
+            statusEl.classList.toggle('configured', hasCustom);
+        }
+
+        function handleCustomPromptInput(el) {
+            if (!el) return;
+            if (el.value.length > 1200) {
+                el.value = el.value.slice(0, 1200);
+            }
+            updateCustomPromptCharCount(el);
+        }
+
+        function clearCustomInstructionsInput() {
+            const input = document.getElementById('custom-system-prompt-input');
+            if (input) {
+                input.value = '';
+                updateCustomPromptCharCount(input);
+                input.focus();
+            }
+        }
+
+        function handlePersonalizationToggleChange(checkbox) {
+            const isChecked = Boolean(checkbox && checkbox.checked);
+            if (checkbox) checkbox.setAttribute('aria-checked', isChecked ? 'true' : 'false');
+            setPersonalizationEnabled(isChecked);
+            if (typeof showTemporaryMessage === 'function') {
+                showTemporaryMessage(isChecked ? 'Personalized experience enabled.' : 'Personalized experience disabled.');
+            }
         }
 
         function trapModalFocus(event) {
             if (event.key === 'Escape') {
                 event.preventDefault();
-                closeHelpModal();
+                if (window.__currentSettingsView === 'custom_instructions') {
+                    saveCustomInstructionsAndReturn();
+                } else {
+                    closeHelpModal();
+                }
                 return;
             }
             if (event.key !== 'Tab') return;
@@ -8105,11 +8285,12 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
         }
 
         function setCustomSystemPrompt(value, announce = false) {
-            customSystemPrompt = String(value || '').replace(/\s+/g, ' ').trim().slice(0, 1200);
+            customSystemPrompt = String(value || '').trim().slice(0, 1200);
             window.customSystemPrompt = customSystemPrompt;
             window.JarvisConversation?.setPreferences({ customSystemPrompt });
             window.JarvisState?.setPreferences({ customSystemPrompt });
             saveAssistantModes();
+            updateCustomInstructionsStatus();
             if (announce) showTemporaryMessage(customSystemPrompt ? 'Custom instructions saved.' : 'Custom instructions cleared.');
         }
 
@@ -8130,6 +8311,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             window.JarvisConversation?.setPreferences({ customSystemPrompt: '' });
             window.JarvisState?.setPreferences({ customSystemPrompt: '' });
             saveAssistantModes();
+            updateCustomInstructionsStatus();
             showTemporaryMessage('Custom instructions reset.');
         }
 
@@ -8143,7 +8325,12 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 academic: 'Provide rigorous, publication-grade academic explanations. State theorems and hypotheses clearly, and rigorously verify mathematical and scientific calculations.'
             };
             if (presets[type]) {
-                input.value = presets[type];
+                const text = presets[type];
+                if (input.value && input.value.trim().length > 0) {
+                    input.value = (input.value.trim() + '\n\n' + text).slice(0, 1200);
+                } else {
+                    input.value = text.slice(0, 1200);
+                }
                 updateCustomPromptCharCount(input);
                 input.focus();
             }
@@ -8223,6 +8410,8 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
         }
 
         function closeHelpModal() {
+            window.__currentSettingsView = 'main';
+            currentSettingsView = 'main';
             const modal = document.getElementById('help-modal');
             if (modal) modal.remove();
             document.querySelector('.page-shell')?.removeAttribute('aria-hidden');
@@ -14250,7 +14439,7 @@ async function sendTextInput(submission = {}) {
                     toggleSendButton();
                     return;
                 }
-                if (text && typeof JarvisSelfImprovingMemory !== 'undefined') {
+                if (text && typeof JarvisSelfImprovingMemory !== 'undefined' && (typeof isPersonalizationEnabled !== 'function' || isPersonalizationEnabled())) {
                     const lastAssistantTurn = Array.isArray(conversationHistory) && conversationHistory.length
                         ? (conversationHistory[conversationHistory.length - 1]?.ai || '')
                         : '';
