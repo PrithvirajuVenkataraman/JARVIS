@@ -43,7 +43,7 @@
         if ('caches' in window) {
             caches.keys().then((keys) => {
                 keys.forEach((key) => {
-                    if (key.startsWith('jarvis-cache-') && key !== 'jarvis-cache-v9') {
+                    if (key.startsWith('jarvis-cache-') && key !== 'jarvis-cache-v12') {
                         caches.delete(key).catch(() => {});
                     }
                 });
@@ -55,7 +55,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous">
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
-    <link rel="stylesheet" href="styles.css?v=2.0.5">
+    <link rel="stylesheet" href="styles.css?v=2.0.6">
     <script src="science-format.js?v=2.0.1"></script>
     <script type="module" src="app/bootstrap.js?v=2.0.5"></script>
 </head>
@@ -7172,7 +7172,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                     </div>
 
                     <!-- Sub-View: Custom Instructions -->
-                    <div id="settings-view-custom-instructions" class="settings-view-panel settings-subview-panel" style="display: none;">
+                    <div id="settings-view-custom-instructions" class="settings-view-panel settings-subview-panel">
                         <!-- Sub-view Header -->
                         <div class="help-modal-header">
                             <button type="button" onclick="saveCustomInstructionsAndReturn()" class="help-modal-back-btn settings-subview-back-btn" aria-label="Back to settings">
