@@ -12596,7 +12596,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
 
             const seed = Math.floor(Math.random() * 1000000);
             const negPrompt = encodeURIComponent('text,watermark,words,letters,signature,typography,lowres,blurry');
-            const proxyUrl = `/api/image-proxy?prompt=${encodeURIComponent(cleanPrompt)}&width=${width}&height=${height}&model=flux&seed=${seed}`;
+            const proxyUrl = `/api/image-proxy?prompt=${encodeURIComponent(cleanPrompt)}&width=${width}&height=${height}&model=imagen-3.0&seed=${seed}&aspectRatio=${encodeURIComponent(aspectRatio)}`;
             const directFallbackUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(cleanPrompt)}?width=${width}&height=${height}&model=flux&nologo=true&seed=${seed}`;
             const initialUrl = (typeof window !== 'undefined' && window.location?.origin?.startsWith('http')) ? proxyUrl : directFallbackUrl;
 
@@ -12614,7 +12614,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             <div class="image-gen-progress-bar-bg">
                 <div id="${cardId}-progress" class="image-gen-progress-bar-fill" style="width: 15%"></div>
             </div>
-            <div id="${cardId}-sub" class="image-gen-status-sub">Connecting to high-speed diffusion... 15%</div>
+            <div id="${cardId}-sub" class="image-gen-status-sub">Connecting to Google Imagen 3... 15%</div>
         </div>
     </div>
     <div id="${cardId}-actions" class="image-gen-actions-bar hidden">
@@ -12671,9 +12671,9 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
 
                 if (subEl) {
                     if (percent < 35) {
-                        subEl.textContent = `Connecting to high-speed diffusion... ${percent}%`;
+                        subEl.textContent = `Connecting to Google Imagen 3... ${percent}%`;
                     } else if (percent < 65) {
-                        subEl.textContent = `Synthesizing neural latents... ${percent}%`;
+                        subEl.textContent = `Synthesizing neural latents with Imagen 3... ${percent}%`;
                     } else if (percent < 85) {
                         subEl.textContent = `Rendering high-definition details... ${percent}%`;
                     } else {
@@ -12690,7 +12690,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                     const backupUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(cleanPrompt)}?width=${width}&height=${height}&model=turbo&nologo=true&seed=${backupSeed}`;
                     imgEl.src = backupUrl;
                 }
-            }, 22000);
+            }, 45000);
 
             function revealImage(src, id) {
                 if (imageRevealed) return;
@@ -12734,7 +12734,15 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 imgEl.onload = () => {
                     revealImage(imgEl.src);
                 };
+                let hasRetriedProxy = false;
                 imgEl.onerror = () => {
+                    if (!hasRetriedProxy) {
+                        hasRetriedProxy = true;
+                        if (subEl) subEl.textContent = 'Retrying generation...';
+                        const retrySeed = Math.floor(Math.random() * 1000000);
+                        imgEl.src = `/api/image-proxy?prompt=${encodeURIComponent(cleanPrompt)}&width=${width}&height=${height}&model=imagen-3.0&seed=${retrySeed}&aspectRatio=${encodeURIComponent(aspectRatio)}`;
+                        return;
+                    }
                     // Try direct Pollinations turbo fallback
                     const retrySeed = Math.floor(Math.random() * 1000000);
                     const retryUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(cleanPrompt)}?width=${width}&height=${height}&model=turbo&nologo=true&seed=${retrySeed}`;
