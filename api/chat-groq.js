@@ -206,7 +206,7 @@ const CHAT_INTENT_PROTOTYPES = [
     },
     {
         id: 'song_lyrics',
-        text: 'lyrics songlyrics track verses refrain chorus songwriter lyrical'
+        text: 'lyrics songlyrics track verses refrain chorus songwriter lyrical songs soundtrack composer composed hits discography singer music album scored by'
     },
     {
         id: 'model_asks_user_for_sources',
@@ -3297,7 +3297,8 @@ export default async function handler(req, res) {
                 intentClassification
             };
         }
-        if (scoreChatIntent(query, 'song_lyrics') >= 0.28) {
+        const isMusicAttributionQuery = /\b(?:who\s+(?:composed|sang|wrote|scored)|music\s+director|composed\s+by|soundtrack\s+(?:of|for)|hits?\s+(?:of|by)|(?:[a-zA-Z\s]+)\s+hits?|songs?\s+(?:of|by|from|in)|discography\s+of)\b/i.test(query);
+        if (scoreChatIntent(query, 'song_lyrics') >= 0.28 || isMusicAttributionQuery) {
             if (!isFactSearchConfigured()) {
                 return {
                     strategy: 'direct',
@@ -4695,6 +4696,7 @@ ZERO-HALLUCINATION & EPISTEMIC GROUNDING (CRITICAL):
 - Music, Songs & Lyrics (CRITICAL):
   * NEVER fabricate or hallucinate song lyrics, lines, or verses. When asked about songs or lyrics, provide verified credits (film/album, composer, singers, lyricist) and brief thematic context. NEVER dump full transliterated verses, line-by-line lyric breakdowns, or stanzas from memory. Instead, embed a clean markdown link [View Full Lyrics](url) using the top verified lyrics URL from retrieved search results or falling back to a structured Google search link (https://www.google.com/search?q=<song>+<artist>+lyrics).
   * Strict music credits & soundtrack attribution: NEVER guess or conflate composers, singers, lyricists, or soundtracks across films or albums. Every music credit must be strictly accurate; if unsure, state uncertainty rather than guessing.
+  * Film-Song-Composer Triplet Rule: When listing songs by a composer (e.g. Deva, Ilaiyaraaja, A. R. Rahman, Vidyasagar) or naming a song's movie and composer, ensure the (Song, Film, Composer) triplet is verified from evidence. NEVER guess or cross-attribute songs from other movies or composers (e.g. do not misattribute "Chinna Chinna Aasai" to Deva when it is composed by A. R. Rahman for Roja, or "Aathichudi" to Sindhu Bhairavi). If unverified or not present in retrieved context, state clearly that you cannot verify the complete tracklist rather than inventing titles or associations.
 - For OCR/attachments: base data strictly on provided text; flag unreadable or missing fields.
 - Image Descriptions & Portraits: Base descriptions strictly on visible pixels. NEVER perform facial recognition or guess personal identities; describe visible appearance, attire, and surroundings respectfully.
 - Parallel Search MCP Tools: Invoke web_search and web_fetch when external facts are needed.
