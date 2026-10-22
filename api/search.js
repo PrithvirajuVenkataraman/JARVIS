@@ -18,6 +18,8 @@ import { planTemporalSearchQueries, classifyTemporalScope } from './_lib/tempora
 import { classifyDomainTrustTier, getDomainTrustDelta, isScraperOrContentFarm, normaliseDomain } from './_lib/domain-trust-registry.js';
 import { annotateCorroboration, shouldCorroborate, corroborationScoreDelta } from './_lib/multi-source-corroboration.js';
 import { validateAndSanitizeTemporalClaims, stripInlineCitationMarkers } from './_lib/entity-verifier.js';
+import { isObservabilityEnabled, createSearchTelemetryTracker } from './_lib/search-telemetry.js';
+import { isResponseCacheEnabled, getSearchResponseCache, setSearchResponseCache, buildSearchCacheKey } from './_lib/search-response-cache.js';
 
 const SERPER_SEARCH_URL = 'https://google.serper.dev/search';
 const WIKIPEDIA_SEARCH_URL = 'https://en.wikipedia.org/w/api.php';
@@ -1176,6 +1178,7 @@ export async function searchPublicSources(query, options = {}) {
 
     const maxCeiling = options.answer === false ? 3500 : 4000;
     const boundedTimeoutMs = Math.min(Number(options.timeoutMs) || maxCeiling, maxCeiling);
+    const tracker = options.tracker || (isObservabilityEnabled(options) ? createSearchTelemetryTracker(normalizedQuery, options) : null);
 
     let liveNews = [];
     let wiki = [];
@@ -1193,10 +1196,17 @@ export async function searchPublicSources(query, options = {}) {
         ...targetQueries
     ])).slice(0, 2);
 
+    if (tracker) tracker.startProvider('google_news_rss');
     const taskNews = isTechDocs
-        ? Promise.resolve()
+        ? Promise.resolve().then(() => { if (tracker) tracker.finishProvider('google_news_rss', { resultCount: 0, status: 204 }); })
         : Promise.allSettled(newsQueries.map(candidate => searchGoogleNewsRss(candidate, { limit: Math.min(limit, 4), timeoutMs: Math.min(boundedTimeoutMs, 2000) })))
-            .then(s => { liveNews = s.flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []); });
+            .then(s => {
+                liveNews = s.flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []);
+                liveNews.forEach(item => { item.__provider = 'google_news_rss'; });
+                if (tracker) tracker.finishProvider('google_news_rss', { resultCount: liveNews.length, status: liveNews.length ? 200 : 204 });
+            }).catch(err => {
+                if (tracker) tracker.finishProvider('google_news_rss', { resultCount: 0, status: 500, error: err?.message });
+            });
     
     // General web search (DuckDuckGo & SearXNG) given full 2800ms individual budget
     const webSearchTimeoutMs = Math.min(boundedTimeoutMs, 2800);
@@ -1223,30 +1233,84 @@ export async function searchPublicSources(query, options = {}) {
         ...targetQueries
     ])).slice(0, webParallelCount);
 
+    if (tracker) tracker.startProvider('duckduckgo');
     const taskDdg = Promise.allSettled(webQueries.map(candidate => searchDuckDuckGoHtml(candidate, { limit, timeoutMs: webSearchTimeoutMs, signal: options.signal, dateFilter: effectiveDateFilter })))
-        .then(s => { ddgWeb = s.flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []); });
+        .then(s => {
+            ddgWeb = s.flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []);
+            ddgWeb.forEach(item => { item.__provider = 'duckduckgo'; });
+            if (tracker) tracker.finishProvider('duckduckgo', { resultCount: ddgWeb.length, status: ddgWeb.length ? 200 : 204 });
+        }).catch(err => {
+            if (tracker) tracker.finishProvider('duckduckgo', { resultCount: 0, status: 500, error: err?.message });
+        });
+
     // SearXNG: zero-config metasearch (aggregates Google, Bing, Brave, DuckDuckGo, 70+ engines).
     // Uses SEARXNG_URL env if configured (own/hosted instance); otherwise races 4 public fallback instances.
     // No API key required. Works on Vercel free tier out of the box.
+    if (tracker) tracker.startProvider('searxng');
     const taskSearXNG = Promise.allSettled(webQueries.map(candidate => searchSearXNGRacer(candidate, { limit: 6, timeoutMs: webSearchTimeoutMs, signal: options.signal, dateFilter: effectiveDateFilter })))
-        .then(s => { searxngWeb = s.flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []); });
+        .then(s => {
+            searxngWeb = s.flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []);
+            searxngWeb.forEach(item => { item.__provider = 'searxng'; });
+            if (tracker) tracker.finishProvider('searxng', { resultCount: searxngWeb.length, status: searxngWeb.length ? 200 : 204 });
+        }).catch(err => {
+            if (tracker) tracker.finishProvider('searxng', { resultCount: 0, status: 500, error: err?.message });
+        });
+
+    if (tracker) tracker.startProvider('wikipedia');
     const taskWiki = Promise.allSettled(targetQueries.slice(0, 2).map(candidate => searchWikipedia(candidate, { limit: 2, timeoutMs: Math.min(boundedTimeoutMs, 2000) })))
-        .then(s => { wiki = s.flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []).slice(0, 3); });
+        .then(s => {
+            wiki = s.flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []).slice(0, 3);
+            wiki.forEach(item => { item.__provider = 'wikipedia'; });
+            if (tracker) tracker.finishProvider('wikipedia', { resultCount: wiki.length, status: wiki.length ? 200 : 204 });
+        }).catch(err => {
+            if (tracker) tracker.finishProvider('wikipedia', { resultCount: 0, status: 500, error: err?.message });
+        });
+
+    if (tracker) tracker.startProvider('wikidata');
     const taskWikidata = Promise.allSettled([searchWikidata(targetQueries[0] || normalizedQuery, { limit: 2, timeoutMs: Math.min(boundedTimeoutMs, 1800) })])
-        .then(s => { wikidata = s.flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []).slice(0, 2); });
+        .then(s => {
+            wikidata = s.flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []).slice(0, 2);
+            wikidata.forEach(item => { item.__provider = 'wikidata'; });
+            if (tracker) tracker.finishProvider('wikidata', { resultCount: wikidata.length, status: wikidata.length ? 200 : 204 });
+        }).catch(err => {
+            if (tracker) tracker.finishProvider('wikidata', { resultCount: 0, status: 500, error: err?.message });
+        });
+
+    if (tracker) tracker.startProvider('yahoo_finance');
     const taskYahoo = Promise.allSettled([searchYahooFinanceQuotes(normalizedQuery, { limit: 2, timeoutMs: 1800 })])
         .then(s => {
             liveWeb = s.flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : [])
                 .filter(item => !isPolitical || (!String(item?.url || '').includes('wikipedia.org') && !String(item?.url || '').includes('wikidata.org')));
+            liveWeb.forEach(item => { item.__provider = 'yahoo_finance'; });
+            if (tracker) tracker.finishProvider('yahoo_finance', { resultCount: liveWeb.length, status: liveWeb.length ? 200 : 204 });
+        }).catch(err => {
+            if (tracker) tracker.finishProvider('yahoo_finance', { resultCount: 0, status: 500, error: err?.message });
         });
+
+    if (tracker) tracker.startProvider('government_role');
     const taskGov = (options.skipStructuredRoles === true || !isLeadership)
-        ? Promise.resolve()
+        ? Promise.resolve().then(() => { if (tracker) tracker.finishProvider('government_role', { resultCount: 0, status: 204 }); })
         : Promise.allSettled([searchGovernmentRole(normalizedQuery, { limit: Math.min(3, limit), timeoutMs: Math.min(boundedTimeoutMs, 1500), signal: options.signal })])
-            .then(s => { governmentRoleResults = (Array.isArray(s) ? s : []).flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []); });
+            .then(s => {
+                governmentRoleResults = (Array.isArray(s) ? s : []).flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []);
+                governmentRoleResults.forEach(item => { item.__provider = 'government_role'; });
+                if (tracker) tracker.finishProvider('government_role', { resultCount: governmentRoleResults.length, status: governmentRoleResults.length ? 200 : 204 });
+            }).catch(err => {
+                if (tracker) tracker.finishProvider('government_role', { resultCount: 0, status: 500, error: err?.message });
+            });
+
+    if (tracker) tracker.startProvider('gdelt');
     const taskGdelt = (options.skipGdelt === true || isTechDocs)
-        ? Promise.resolve()
+        ? Promise.resolve().then(() => { if (tracker) tracker.finishProvider('gdelt', { resultCount: 0, status: 204 }); })
         : Promise.allSettled(gdeltQueries.map(candidate => searchGdeltNews(candidate, { limit, timeoutMs: Math.min(boundedTimeoutMs, 2500) })))
-            .then(s => { gdelt = (Array.isArray(s) ? s : []).flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []); });
+            .then(s => {
+                gdelt = (Array.isArray(s) ? s : []).flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []);
+                gdelt.forEach(item => { item.__provider = 'gdelt'; });
+                if (tracker) tracker.finishProvider('gdelt', { resultCount: gdelt.length, status: gdelt.length ? 200 : 204 });
+            }).catch(err => {
+                if (tracker) tracker.finishProvider('gdelt', { resultCount: 0, status: 500, error: err?.message });
+            });
+
     // Gemini Grounding: primary live web provider — runs in the fast window alongside DDG/SearXNG.
     // Results rank first when available because Gemini grounds against live Google Search,
     // fully bypassing cloud-IP scraping blocks.
@@ -1254,19 +1318,31 @@ export async function searchPublicSources(query, options = {}) {
     const hasSeedGrounding = Array.isArray(options.seedResults) && options.seedResults.length > 0;
     if (hasSeedGrounding) {
         geminiGroundingResults = options.seedResults;
+        geminiGroundingResults.forEach(item => { item.__provider = 'gemini_grounding'; });
     }
+    if (tracker) tracker.startProvider('gemini_grounding');
     const taskGemini = (hasGeminiKey() && !hasSeedGrounding)
         ? Promise.allSettled([searchGeminiGrounding(targetQueries[0] || normalizedQuery, { limit, timeoutMs: geminiTimeoutMs }).then(r => r.results || [])])
-            .then(s => { geminiGroundingResults = (Array.isArray(s) ? s : []).flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []); })
-        : Promise.resolve();
+            .then(s => {
+                geminiGroundingResults = (Array.isArray(s) ? s : []).flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []);
+                geminiGroundingResults.forEach(item => { item.__provider = 'gemini_grounding'; });
+                if (tracker) tracker.finishProvider('gemini_grounding', { resultCount: geminiGroundingResults.length, status: geminiGroundingResults.length ? 200 : 204 });
+            }).catch(err => {
+                if (tracker) tracker.finishProvider('gemini_grounding', { resultCount: 0, status: 500, error: err?.message });
+            })
+        : Promise.resolve().then(() => {
+            if (tracker) tracker.finishProvider('gemini_grounding', { resultCount: geminiGroundingResults.length, status: geminiGroundingResults.length ? 200 : 204 });
+        });
 
     // Gemini is now a fast-path provider: runs in parallel with News/DDG/SearXNG/Wikipedia/Wikidata/Yahoo.
     const fastTasks = [taskNews, taskDdg, taskSearXNG, taskWiki, taskWikidata, taskYahoo, taskGov, taskGemini];
     const allTasks = [...fastTasks, taskGdelt];
 
     // Wait for fast tasks to complete (or time out after 2800ms)
+    let fastCompleted = false;
+    const fastPromise = Promise.all(fastTasks).then(() => { fastCompleted = true; });
     await Promise.race([
-        Promise.all(fastTasks),
+        fastPromise,
         new Promise(res => setTimeout(res, Math.min(boundedTimeoutMs, 2800)))
     ]);
 
@@ -1317,6 +1393,13 @@ export async function searchPublicSources(query, options = {}) {
     if (options.skipAutoDeepCrawl !== true && (options.allowDeepCrawl === true || hasInsufficientEvidence)) {
         await enrichSearchResultsWithDeepCrawl(deduped, 3).catch(() => {});
     }
+
+    if (tracker) {
+        tracker.markUsedInAnswer(deduped);
+        tracker.logReport();
+        deduped.__telemetry = tracker.getReport();
+    }
+
     return deduped;
 }
 
@@ -1850,6 +1933,17 @@ export async function searchExa(query, options = {}) {
 }
 
 export async function runVerifiedWebSearch(query, options = {}) {
+    const cacheKey = buildSearchCacheKey(query, { ...options, mode: 'verified' });
+    const cached = getSearchResponseCache(cacheKey, query, options);
+    if (cached) {
+        return {
+            ...cached.data,
+            cached: true,
+            cacheHit: true,
+            cacheAgeMs: cached.ageMs
+        };
+    }
+
     const limit = clampInt(options.limit, 8, 1, 20);
     const distilled = distillSearchQuery(query);
     const normalizedQuery = normalizeSearchQuery(distilled || query);
@@ -1932,15 +2026,18 @@ export async function runVerifiedWebSearch(query, options = {}) {
     const hasSearx = enhancedResults.some(r => r.qualitySignals?.includes('searxng_json'));
     const provider = hasGrounding ? 'google_grounded_sources' : (hasSearx ? 'searxng_meta_sources' : 'public_sources');
 
-    return buildSearchSummary(enhancedResults, {
+    const summary = buildSearchSummary(enhancedResults, {
         query: normalizedQuery,
         provider,
         publicSourceCount: enhancedResults.length,
         geminiEnhanced: geminiEnhanced || Boolean(geminiGroundingAnswer),
         answer: geminiGroundingAnswer || undefined,
         answerProvider: geminiGroundingAnswer ? 'google_search_grounding' : undefined,
-        warnings
+        warnings,
+        telemetry: publicSources?.__telemetry || undefined
     });
+    setSearchResponseCache(cacheKey, summary, options, query);
+    return summary;
 }
 
 export async function runEvidenceFirstWebRag(query, options = {}) {
@@ -2067,7 +2164,9 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
         dateFilter: options.dateFilter,
         chronological: isLiveRag,
         forceLive: options.forceLive,
-        liveMode: options.liveMode
+        liveMode: options.liveMode,
+        tracker: options.tracker,
+        observability: options.observability
     }).then(r => {
         timing.publicSourcesMs = Number((performance.now() - searchStart).toFixed(1));
         return r;
@@ -2389,6 +2488,7 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
             triadScores,
             timing,
             latencyBreakdown,
+            telemetry: publicResults?.__telemetry || undefined,
             warnings: Array.from(new Set([...warnings, gate.reason].filter(Boolean)))
         };
         return unverifiedPayload;
@@ -2436,6 +2536,7 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
         triadScores,
         timing,
         latencyBreakdown,
+        telemetry: publicResults?.__telemetry || undefined,
         warnings: Array.from(new Set(warnings.filter(Boolean)))
     };
 
@@ -3252,7 +3353,8 @@ function buildSearchSummary(results, metadata = {}) {
         publicSourceCount: Number(metadata.publicSourceCount) || 0,
         geminiEnhanced: Boolean(metadata.geminiEnhanced),
         warnings: Array.from(new Set((metadata.warnings || []).filter(Boolean))),
-        refreshed: Boolean(metadata.refreshed)
+        refreshed: Boolean(metadata.refreshed),
+        ...(metadata.telemetry ? { telemetry: metadata.telemetry } : {})
     };
 }
 
