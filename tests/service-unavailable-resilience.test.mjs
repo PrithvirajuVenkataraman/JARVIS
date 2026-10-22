@@ -144,11 +144,17 @@ assert.ok(popCultureHint.includes('Song lyrics & music credits: Never fabricate 
 assert.ok(popCultureHint.includes('[View Full Lyrics](url)'), 'Pop culture hint must instruct embedding [View Full Lyrics](url) link');
 console.log('  [PASS] 3.3 System prompt and pop_culture_reference include strict epistemic directives for music & lyrics');
 
-// 3.5 Routing of Lyrics Requests to Live Search
+// 3.5 Routing of Lyrics & Music Attribution Requests to Live Search
 const lyricsRouting = chatTest.classifyRoutingDecision('lyrics of Naan Pizhai', '', { intent: 'chat' });
 assert.equal(lyricsRouting.strategy, 'live_first', 'Lyrics queries must route to live_first for search grounding');
 assert.equal(lyricsRouting.reason, 'lyrics_retrieval_grounding', 'Lyrics queries must specify lyrics_retrieval_grounding reason');
-console.log('  [PASS] 3.4 classifyRoutingDecision routes lyrics requests to live_first for live context retrieval');
+
+const composerRouting = chatTest.classifyRoutingDecision('Deva hits', '', { intent: 'chat' });
+assert.equal(composerRouting.strategy, 'live_first', 'Composer hit queries must route to live_first for search grounding');
+
+const songCreditRouting = chatTest.classifyRoutingDecision('who composed Chinna Chinna Aasai', '', { intent: 'chat' });
+assert.equal(songCreditRouting.strategy, 'live_first', 'Song credit queries must route to live_first for search grounding');
+console.log('  [PASS] 3.4 classifyRoutingDecision routes lyrics and composer attribution requests to live_first for live context retrieval');
 
 // ---------------------------------------------------------
 // Test 4: Frontend Stream Resilience & Fast Fallback Invariants
