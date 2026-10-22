@@ -454,6 +454,18 @@ console.log('--- Running Image Generator Suite ---');
             let fetchedUrls = [];
             globalThis.fetch = async (url, options) => {
                 fetchedUrls.push(String(url));
+                if (String(url).includes('imagen-3.0-generate-002')) {
+                    const fakeBase64 = Buffer.from('fake-image-bytes-gemini-preview-payload-1234567890-pad-for-minimum-length-500-bytes-123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890').toString('base64');
+                    return {
+                        ok: true,
+                        json: async () => ({
+                            predictions: [{
+                                mimeType: 'image/jpeg',
+                                bytesBase64Encoded: fakeBase64
+                            }]
+                        })
+                    };
+                }
                 if (String(url).includes('gemini-2.5-flash-image')) {
                     const fakeBase64 = Buffer.from('fake-image-bytes-gemini-preview-payload-1234567890-pad-for-minimum-length-500-bytes-123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890').toString('base64');
                     return {
@@ -475,7 +487,7 @@ console.log('--- Running Image Generator Suite ---');
                 return originalFetch(url, options);
             };
 
-            // Test 7.3.1: Even with model=turbo, Gemini is attempted first
+            // Test 7.3.1: Even with model=turbo, Imagen 3 is attempted first
             let geminiHeaders = {};
             let geminiStatus = 0;
             let geminiBuffer = null;
@@ -494,11 +506,11 @@ console.log('--- Running Image Generator Suite ---');
             });
 
             assert.equal(geminiStatus, 200);
-            assert.equal(geminiHeaders['X-Image-Model'], 'gemini-2.5-flash-image');
-            assert.equal(geminiHeaders['Content-Type'], 'image/png');
-            assert.ok(fetchedUrls.some(u => u.includes('gemini-2.5-flash-image')), 'Gemini endpoint must be called first even when model=turbo');
+            assert.equal(geminiHeaders['X-Image-Model'], 'imagen-3.0');
+            assert.equal(geminiHeaders['Content-Type'], 'image/jpeg');
+            assert.ok(fetchedUrls.some(u => u.includes('imagen-3.0-generate-002')), 'Imagen 3 endpoint must be called first even when model=turbo');
 
-            // Test 7.3.2: Explicit provider=pollinations bypasses Gemini
+            // Test 7.3.2: Explicit provider=pollinations bypasses Gemini / Imagen
             fetchedUrls = [];
             let pollinationsHeaders = {};
             let pollinationsStatus = 0;
@@ -515,7 +527,38 @@ console.log('--- Running Image Generator Suite ---');
                     };
                 }
             });
-            assert.ok(!fetchedUrls.some(u => u.includes('gemini')), 'Gemini must be bypassed when provider=pollinations is specified');
+            assert.ok(!fetchedUrls.some(u => u.includes('imagen') || u.includes('gemini')), 'Gemini/Imagen must be bypassed when provider=pollinations is specified');
+
+            // Test 7.3.3: Failover to gemini-2.5-flash-image when imagen-3.0-generate-002 fails
+            fetchedUrls = [];
+            let fallbackHeaders = {};
+            let fallbackStatus = 0;
+            const originalMockFetch = globalThis.fetch;
+            globalThis.fetch = async (url, options) => {
+                fetchedUrls.push(String(url));
+                if (String(url).includes('imagen-3.0-generate-002')) {
+                    return { ok: false, status: 500, text: async () => 'Service Unavailable' };
+                }
+                return originalMockFetch(url, options);
+            };
+
+            await imageProxyHandler({
+                method: 'GET',
+                url: '/api/image-proxy?prompt=cyberpunk%20car'
+            }, {
+                setHeader(k, v) { fallbackHeaders[k] = v; },
+                status(c) {
+                    fallbackStatus = c;
+                    return {
+                        send() {},
+                        json() {}
+                    };
+                }
+            });
+            assert.equal(fallbackStatus, 200);
+            assert.equal(fallbackHeaders['X-Image-Model'], 'gemini-2.5-flash-image');
+            assert.equal(fallbackHeaders['Content-Type'], 'image/png');
+            assert.ok(fetchedUrls.some(u => u.includes('gemini-2.5-flash-image')), 'Gemini fallback must be invoked when Imagen fails');
 
         } finally {
             process.env.GEMINI_API_KEY = originalEnv;
