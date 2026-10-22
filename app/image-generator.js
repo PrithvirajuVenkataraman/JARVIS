@@ -94,7 +94,7 @@ async function generateDirectFallback(id, prompt, options = {}, onProgress = nul
     const config = getImageConfig();
     const fallbackUrl = buildFallbackImageUrl(prompt, options);
     const proxyUrl = (typeof window !== 'undefined' && window.location && window.location.origin && window.location.origin.startsWith('http'))
-        ? `${window.location.origin}/api/image-proxy?prompt=${encodeURIComponent(prompt)}&width=${options.width || config.defaultWidth}&height=${options.height || config.defaultHeight}&model=${encodeURIComponent(options.model || config.model || 'flux')}`
+        ? `${window.location.origin}/api/image-proxy?prompt=${encodeURIComponent(prompt)}&width=${options.width || config.defaultWidth}&height=${options.height || config.defaultHeight}&model=${encodeURIComponent(options.model || config.model || 'imagen-3.0')}`
         : '';
     const startTime = performance.now();
     const controller = new AbortController();
