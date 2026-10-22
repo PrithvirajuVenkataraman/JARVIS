@@ -4,7 +4,7 @@
  * Logs per-provider outcomes for every live search:
  *  - Provider name (searxng, ddg, gemini, google_news, wikipedia, etc.)
  *  - Execution latency (ms)
- *  - Result count
+ *  - Result count 
  *  - HTTP status / resolution status
  *  - Timeout / abort flag
  *  - Whether any provider results were used in the final synthesized answer
