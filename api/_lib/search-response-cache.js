@@ -10,7 +10,7 @@
  * Characteristics:
  *  - Short default TTL (60s) to keep live results reasonably fresh
  *  - Max cache size of 200 entries to prevent memory growth
- *  - Strict hit/miss outcome logging
+ *  - Strict hit/miss outcome logging 
  */
 
 import { createHash } from 'node:crypto';
