@@ -70,7 +70,7 @@ self.onmessage = async function handleWorkerMessage(event) {
         try {
             self.postMessage({ action: 'progress', id, phase: 'init', percent: 20, message: 'Connecting to fast AI engine...' });
 
-            const model = options.model || 'flux';
+            const model = options.model || 'imagen-3.0';
             const negativePrompt = encodeURIComponent(options.negativePrompt || 'text,watermark,words,letters,signature,typography,lowres,blurry');
             const encodedPrompt = encodeURIComponent(String(prompt || '').trim());
             let seed = options.seed || Math.floor(Math.random() * 1000000);
