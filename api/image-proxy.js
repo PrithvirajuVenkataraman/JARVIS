@@ -28,12 +28,15 @@ async function fetchProxyImageBuffer(url, timeoutMs = IMAGE_PROXY_TIMEOUT_MS) {
     }
 }
 
-async function generateGeminiImageBuffer(prompt, { width = 512, height = 512, timeoutMs = 25000 } = {}) {
-    const apiKey = String(process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY || process.env.GOOGLE_API_KEY || '').trim();
+async function generateGeminiImageBuffer(prompt, { width = 512, height = 512, timeoutMs = 35000, apiKey: customApiKey = '', aspectRatio: customAspectRatio = '' } = {}) {
+    const apiKey = String(customApiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY || process.env.GOOGLE_API_KEY || '').trim();
     if (!apiKey) return null;
 
     let aspectRatio = '1:1';
-    if (width && height) {
+    const validRatios = new Set(['1:1', '3:4', '4:3', '9:16', '16:9']);
+    if (customAspectRatio && validRatios.has(customAspectRatio)) {
+        aspectRatio = customAspectRatio;
+    } else if (width && height) {
         const ratio = width / height;
         if (ratio >= 1.5) aspectRatio = '16:9';
         else if (ratio >= 1.25) aspectRatio = '4:3';
@@ -41,19 +44,64 @@ async function generateGeminiImageBuffer(prompt, { width = 512, height = 512, ti
         else if (ratio <= 0.8) aspectRatio = '3:4';
     }
 
-    const primaryTimeout = Math.min(14000, timeoutMs);
-    const secondaryTimeout = Math.min(10000, Math.max(5000, timeoutMs - primaryTimeout));
+    const primaryTimeout = Math.min(28000, timeoutMs);
+    const secondaryTimeout = Math.min(15000, Math.max(5000, timeoutMs - primaryTimeout));
 
-    // 1. Primary: gemini-2.5-flash-image with native IMAGE response modality via Google GenAI REST
+    // 1. Primary: imagen-3.0-generate-002 via Google GenAI REST :predict
     try {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), primaryTimeout);
+        try {
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${encodeURIComponent(apiKey)}`;
+            const res = await fetch(url, {
+                method: 'POST',
+                signal: controller.signal,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-goog-api-key': apiKey
+                },
+                body: JSON.stringify({
+                    instances: [{ prompt }],
+                    parameters: {
+                        sampleCount: 1,
+                        aspectRatio,
+                        outputMimeType: 'image/jpeg'
+                    }
+                })
+            });
+            if (res.ok) {
+                const data = await res.json();
+                const pred = data?.predictions?.[0];
+                const b64 = pred?.bytesBase64Encoded;
+                if (b64) {
+                    const mimeType = pred.mimeType || 'image/jpeg';
+                    const buffer = Buffer.from(b64, 'base64');
+                    return { buffer, contentType: mimeType, model: 'imagen-3.0' };
+                }
+            } else {
+                const errText = await res.text().catch(() => '');
+                console.error(`[image-proxy] Imagen 3 upstream error (HTTP ${res.status}):`, errText);
+            }
+        } finally {
+            clearTimeout(timer);
+        }
+    } catch (err) {
+        console.error('[image-proxy] Imagen 3 request error:', err?.message || err);
+    }
+
+    // 2. Secondary fallback / mock compatibility: gemini-2.5-flash-image
+    try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), secondaryTimeout);
         try {
             const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key=${encodeURIComponent(apiKey)}`;
             const res = await fetch(url, {
                 method: 'POST',
                 signal: controller.signal,
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-goog-api-key': apiKey
+                },
                 body: JSON.stringify({
                     contents: [{ parts: [{ text: prompt }] }],
                     generationConfig: {
@@ -69,41 +117,16 @@ async function generateGeminiImageBuffer(prompt, { width = 512, height = 512, ti
                     const buffer = Buffer.from(part.inlineData.data, 'base64');
                     return { buffer, contentType: mimeType, model: 'gemini-2.5-flash-image' };
                 }
+            } else {
+                const errText = await res.text().catch(() => '');
+                console.error(`[image-proxy] Gemini image fallback error (HTTP ${res.status}):`, errText);
             }
         } finally {
             clearTimeout(timer);
         }
-    } catch (_) {}
-
-    // 2. Secondary: imagen-3.0-generate-002 fallback
-    try {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), secondaryTimeout);
-        try {
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${encodeURIComponent(apiKey)}`;
-            const res = await fetch(url, {
-                method: 'POST',
-                signal: controller.signal,
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    instances: [{ prompt }],
-                    parameters: { sampleCount: 1, aspectRatio }
-                })
-            });
-            if (res.ok) {
-                const data = await res.json();
-                const pred = data?.predictions?.[0];
-                const b64 = pred?.bytesBase64Encoded;
-                if (b64) {
-                    const mimeType = pred.mimeType || 'image/png';
-                    const buffer = Buffer.from(b64, 'base64');
-                    return { buffer, contentType: mimeType, model: 'imagen-3.0' };
-                }
-            }
-        } finally {
-            clearTimeout(timer);
-        }
-    } catch (_) {}
+    } catch (err) {
+        console.error('[image-proxy] Gemini image fallback request error:', err?.message || err);
+    }
 
     return null;
 }
@@ -151,15 +174,28 @@ export async function imageProxyHandler(req, res) {
     const width = Math.min(1280, Math.max(256, Number(params.width) || 512));
     const height = Math.min(1280, Math.max(256, Number(params.height) || 512));
     const seed = Number(params.seed) || Math.floor(Math.random() * 1000000);
-    const requestedModel = String(params.model || 'flux').trim().toLowerCase();
+    const requestedModel = String(params.model || 'imagen-3.0').trim().toLowerCase();
     const negativePrompt = params.negative_prompt || params.negativePrompt || DEFAULT_IMAGE_NEGATIVE_PROMPT;
     const acceptsJson = String(req.headers?.['accept'] || '').includes('application/json') || params.response_format === 'json' || params.format === 'json';
+    const clientApiKey = String(
+        req.headers?.['x-gemini-api-key'] ||
+        req.headers?.['x-goog-api-key'] ||
+        params.apiKey ||
+        params.gemini_api_key ||
+        ''
+    ).trim();
 
-    // Tier 1: Gemini-First high-fidelity generation via native Google GenAI REST
-    // Always attempt Gemini first when available unless explicitly forced to use Pollinations
+    // Tier 1: Gemini/Imagen-First high-fidelity generation via native Google GenAI REST
+    // Always attempt Gemini/Imagen first when available unless explicitly forced to use Pollinations
     const forcePollinations = params.provider === 'pollinations' || params.fallback === 'pollinations' || requestedModel === 'pollinations';
     if (!forcePollinations) {
-        const geminiResult = await generateGeminiImageBuffer(prompt, { width, height });
+        const geminiResult = await generateGeminiImageBuffer(prompt, {
+            width,
+            height,
+            timeoutMs: 35000,
+            apiKey: clientApiKey,
+            aspectRatio: params.aspectRatio || params.aspect_ratio || ''
+        });
         if (geminiResult && geminiResult.buffer && geminiResult.buffer.length > 500) {
             res.setHeader('Content-Type', geminiResult.contentType);
             res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
@@ -184,7 +220,7 @@ export async function imageProxyHandler(req, res) {
     }
 
     // Tier 2: Graceful failover to Pollinations (Flux / Turbo)
-    const fallbackModel = (requestedModel.includes('gemini') || requestedModel.includes('google')) ? 'flux' : requestedModel;
+    const fallbackModel = (requestedModel.includes('gemini') || requestedModel.includes('google') || requestedModel.includes('imagen')) ? 'flux' : requestedModel;
     const modelsToTry = Array.from(new Set([fallbackModel, 'flux', 'turbo']));
 
     let lastError = null;
