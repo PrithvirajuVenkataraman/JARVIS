@@ -1261,7 +1261,7 @@ export function classifyQueryShape(text) {
     const isMostlyNonLatin = hasNonLatinScript && !/[a-zA-Z]{4,}/.test(raw);
 
     // 7. Explicit media context words (not the entity itself — surrounding words)
-    const hasMediaContext = /\b(?:song|track|album|lyrics?|singer|sang|music|film|movie|series|episode|actor|actress|director|artist|band|released?|from\s+the\s+movie|from\s+the\s+film|from\s+the\s+show|ost|soundtrack)\b/i.test(lower);
+    const hasMediaContext = /\b(?:song|songs|track|tracks|album|albums|lyrics?|singer|singers|sang|music|musician|composer|composers|composed|soundtrack|soundtracks|ost|hits?|discography|film|films|movie|movies|series|episode|actor|actress|director|artist|band|released?|from\s+the\s+movie|from\s+the\s+film|from\s+the\s+show)\b/i.test(lower);
 
     // ── Shape classification ───────────────────────────────────────────────────
 
@@ -1284,7 +1284,7 @@ export function classifyQueryShape(text) {
         };
     }
 
-    const hasDescriptorOrTopic = /\b(?:song|track|soundtrack|album|lyrics?|movie|film|cinema|architecture|history|construction|date|geology|formation|erosion|definition|meaning|code|array|algorithm)\b/i.test(lower);
+    const hasDescriptorOrTopic = /\b(?:hits?|songs?|tracks?|soundtracks?|albums?|lyrics?|singers?|composer|composers|composed|discography|movies?|films?|cinemas?|architecture|history|construction|date|geology|formation|erosion|definition|meaning|code|array|algorithm)\b/i.test(lower);
 
     // Bare entity: short, no interrogative, no command verb, no topic/descriptor
     // High confidence when: token count <= 6 AND (title-cased OR non-Latin)
