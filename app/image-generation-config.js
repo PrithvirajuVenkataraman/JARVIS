@@ -15,7 +15,7 @@ export const DEFAULT_IMAGE_CONFIG = Object.freeze({
     maxHistoryItems: 50,
     timeoutMs: 60000,
     minVramBytes: 2 * 1024 * 1024 * 1024, // 2GB minimum VRAM heuristic
-    model: 'flux',
+    model: 'imagen-3.0',
     defaultNegativePrompt: 'text,watermark,words,letters,signature,typography,lowres,blurry',
     fallbackEndpointTemplate: 'https://image.pollinations.ai/prompt/{prompt}?width={width}&height={height}&model={model}&negative_prompt={negativePrompt}&nologo=true&seed={seed}',
     storageKey: 'jarvis_image_config_v1'
