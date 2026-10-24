@@ -162,6 +162,20 @@ assert.ok(
     'Clickable rows must provide responsive hover and active tap feedback'
 );
 
-console.log('  [PASS] 3.1 Row alignment, dividers, status badge, and tactile feedback verified');
+// =========================================================================
+// Section 4: Safety & Data Local Storage Minimal Text
+// =========================================================================
+console.log('--- Section 4: Safety & Data Local Storage Minimal Text ---');
+
+assert.ok(
+    indexHtml.includes('<p class="settings-row-desc">Stored locally on this device</p>'),
+    'Local Storage & Privacy row description must be minimal and user-friendly'
+);
+assert.ok(
+    !indexHtml.includes('IndexedDB storage metrics'),
+    'Jargon "IndexedDB storage metrics" must not be displayed in settings description'
+);
+console.log('  [PASS] 4.1 Safety & Data description is minimal and jargon-free');
 
 console.log('=== All Responsive Settings UI Tests PASSED ===');
+
