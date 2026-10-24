@@ -4771,16 +4771,52 @@ button:hover {
 .settings-subview-back-btn {
     display: inline-flex !important;
     align-items: center !important;
+    justify-content: center !important;
     gap: 6px !important;
     width: auto !important;
-    padding: 0 10px 0 6px !important;
-    border-radius: 8px !important;
+    min-width: max-content !important;
+    height: 38px !important;
+    padding: 0 12px 0 8px !important;
+    border-radius: 9px !important;
+    background: rgba(56, 189, 248, 0.1) !important;
+    border: 1px solid rgba(56, 189, 248, 0.28) !important;
+    color: #f4f4f5 !important;
+    cursor: pointer !important;
+    flex-shrink: 0 !important;
+    box-sizing: border-box !important;
+    transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.settings-subview-back-btn svg {
+    color: #38bdf8 !important;
+    flex-shrink: 0 !important;
+    transition: transform 0.18s ease !important;
+}
+
+.settings-subview-back-btn:hover {
+    background: rgba(56, 189, 248, 0.18) !important;
+    border-color: rgba(56, 189, 248, 0.45) !important;
+    color: #ffffff !important;
+    transform: translateY(-1px) !important;
+}
+
+.settings-subview-back-btn:hover svg {
+    transform: translateX(-2px) !important;
+}
+
+.settings-subview-back-btn:active {
+    transform: scale(0.96) !important;
+    background: rgba(56, 189, 248, 0.24) !important;
 }
 
 .settings-back-label {
     font-size: 13.5px !important;
-    font-weight: 600 !important;
-    color: #e4e4e7 !important;
+    font-weight: 650 !important;
+    color: #ffffff !important;
+    letter-spacing: -0.01em !important;
+    white-space: nowrap !important;
+    display: inline-block !important;
+    line-height: 1 !important;
 }
 
 .settings-subview-desc {
@@ -4803,7 +4839,7 @@ button:hover {
 }
 
 .settings-group-card .settings-row {
-    border-bottom: 1px solid rgba(255, 255, 255, 0.07) !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
 }
 
 .settings-group-card .settings-row:last-child {
@@ -4827,7 +4863,8 @@ button:hover {
 
 .settings-row-interactive {
     background: transparent !important;
-    border: none !important;
+    border: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
     cursor: pointer !important;
     text-align: left !important;
     color: inherit !important;
@@ -4839,12 +4876,19 @@ button:hover {
     border-radius: 8px !important;
 }
 
-.settings-row-interactive:hover {
+.settings-row-interactive:hover,
+.settings-row-clickable:hover {
     background: rgba(255, 255, 255, 0.04) !important;
 }
 
-.settings-row-interactive:active {
+.settings-row-interactive:active,
+.settings-row-clickable:active {
     background: rgba(255, 255, 255, 0.07) !important;
+}
+
+.settings-row-clickable {
+    cursor: pointer !important;
+    border-radius: 8px !important;
 }
 
 .settings-row-interactive:focus-visible {
@@ -4893,30 +4937,41 @@ button:hover {
 .settings-row-right {
     display: flex !important;
     align-items: center !important;
+    justify-content: flex-end !important;
     gap: 10px !important;
     flex-shrink: 0 !important;
+    min-height: 28px !important;
 }
 
 .settings-row-status {
-    font-size: 12.5px !important;
-    font-weight: 500 !important;
-    color: #71717a !important;
+    font-size: 11.5px !important;
+    font-weight: 600 !important;
     letter-spacing: -0.01em !important;
+    padding: 3px 9px !important;
+    border-radius: 9999px !important;
+    background: rgba(255, 255, 255, 0.08) !important;
+    border: 1px solid rgba(255, 255, 255, 0.14) !important;
+    color: #cbd5e1 !important;
+    transition: all 0.16s ease !important;
+    display: inline-flex !important;
+    align-items: center !important;
 }
 
 .settings-row-status.configured {
+    background: rgba(56, 189, 248, 0.16) !important;
+    border-color: rgba(56, 189, 248, 0.38) !important;
     color: #38bdf8 !important;
-    font-weight: 600 !important;
+    font-weight: 650 !important;
 }
 
 .settings-chevron {
-    color: #71717a !important;
+    color: #94a3b8 !important;
     transition: transform 0.16s ease, color 0.16s ease !important;
     flex-shrink: 0 !important;
 }
 
 .settings-row-interactive:hover .settings-chevron {
-    color: #f4f4f5 !important;
+    color: #38bdf8 !important;
     transform: translateX(2px) !important;
 }
 
@@ -4925,12 +4980,33 @@ button:hover {
     position: relative !important;
     display: inline-flex !important;
     align-items: center !important;
+    justify-content: center !important;
     width: 48px !important;
     height: 28px !important;
+    min-width: 48px !important;
     min-height: 28px !important;
+    max-height: 28px !important;
     flex-shrink: 0 !important;
     cursor: pointer !important;
     user-select: none !important;
+    box-sizing: border-box !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    vertical-align: middle !important;
+}
+
+/* Accessible touch target without visual track distortion */
+.settings-switch::after {
+    content: "" !important;
+    position: absolute !important;
+    top: 50% !important;
+    left: 50% !important;
+    transform: translate(-50%, -50%) !important;
+    min-width: 48px !important;
+    min-height: 44px !important;
+    width: 100% !important;
+    height: 100% !important;
+    pointer-events: auto !important;
 }
 
 .settings-switch-input {
@@ -4946,10 +5022,13 @@ button:hover {
     position: absolute !important;
     cursor: pointer !important;
     inset: 0 !important;
+    width: 48px !important;
+    height: 28px !important;
     background-color: #27272a !important;
-    border: 1px solid rgba(255, 255, 255, 0.15) !important;
+    border: 1px solid rgba(255, 255, 255, 0.18) !important;
     border-radius: 9999px !important;
-    transition: background-color 0.22s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.22s ease !important;
+    transition: background-color 0.22s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.22s ease, box-shadow 0.22s ease !important;
+    box-sizing: border-box !important;
 }
 
 .settings-switch-slider::before {
@@ -4958,11 +5037,12 @@ button:hover {
     height: 22px !important;
     width: 22px !important;
     left: 2px !important;
-    bottom: 2px !important;
+    top: 50% !important;
+    transform: translateY(-50%) !important;
     background-color: #ffffff !important;
     border-radius: 50% !important;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4) !important;
-    transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1) !important;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.45) !important;
+    transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.22s ease !important;
 }
 
 .settings-switch-input:checked + .settings-switch-slider {
@@ -4971,19 +5051,11 @@ button:hover {
 }
 
 .settings-switch-input:checked + .settings-switch-slider::before {
-    transform: translateX(20px) !important;
+    transform: translate(20px, -50%) !important;
 }
 
 .settings-switch-input:focus-visible + .settings-switch-slider {
     box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.45) !important;
-}
-
-@media (pointer: coarse) {
-    .settings-row-interactive,
-    .settings-switch,
-    .settings-subview-back-btn {
-        min-height: 44px !important;
-    }
 }
 
 /* Section 2: Responsive Capabilities Grid */
@@ -5235,13 +5307,44 @@ button:hover {
         gap: 8px !important;
     }
 
-    .help-modal-back-btn {
+    .help-modal-back-btn:not(.settings-subview-back-btn) {
         width: 36px !important;
         height: 36px !important;
     }
 
+    .settings-subview-back-btn {
+        width: auto !important;
+        min-width: max-content !important;
+        height: 36px !important;
+        padding: 0 11px 0 7px !important;
+        gap: 5px !important;
+        flex-shrink: 0 !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        background: rgba(56, 189, 248, 0.14) !important;
+        border: 1px solid rgba(56, 189, 248, 0.35) !important;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25) !important;
+    }
+
+    .settings-subview-back-btn svg {
+        color: #38bdf8 !important;
+        width: 17px !important;
+        height: 17px !important;
+    }
+
+    .settings-subview-back-btn .settings-back-label {
+        display: inline-block !important;
+        font-size: 13px !important;
+        font-weight: 650 !important;
+        color: #ffffff !important;
+        line-height: 1 !important;
+    }
+
     .settings-modal-heading {
-        font-size: 16px !important;
+        font-size: clamp(14px, 4vw, 16px) !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+        white-space: nowrap !important;
     }
 
     .help-modal-ok-btn {
@@ -5382,8 +5485,27 @@ button:hover {
         padding: 8px 10px !important;
     }
 
+    .settings-subview-back-btn {
+        padding: 0 8px 0 6px !important;
+        gap: 4px !important;
+        height: 34px !important;
+    }
+
+    .settings-subview-back-btn svg {
+        width: 15px !important;
+        height: 15px !important;
+    }
+
+    .settings-subview-back-btn .settings-back-label {
+        font-size: 12px !important;
+    }
+
     .settings-modal-heading {
-        font-size: 15px !important;
+        font-size: 14px !important;
+        max-width: 135px !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+        white-space: nowrap !important;
     }
 
     .settings-card-title-group {
