@@ -7005,7 +7005,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                                 </button>
 
                                 <!-- Personalized Experience Row -->
-                                <div class="settings-row">
+                                <div class="settings-row settings-row-clickable" id="settings-row-personalization" onclick="if(!event.target.closest('.settings-switch') && !event.target.closest('label')){ document.getElementById('settings-personalization-toggle')?.click(); }">
                                     <div class="settings-row-left">
                                         <div class="settings-icon-badge settings-icon-purple" aria-hidden="true">
                                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
