@@ -22,7 +22,7 @@
         "@vercel/blob": "^2.4.1"
     },
     "engines": {
-        "node": ">=20.x"
+        "node": ">=22.23.4"
     },
     "vercel": {
         "functions": {
