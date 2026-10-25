@@ -239,76 +239,11 @@ export async function imageProxyHandler(req, res) {
         });
     }
 
-    // Tier 2: Resilient failover to high-fidelity diffusion (Flux / Turbo) when Gemini/Imagen encounters quota, 403/404, or upstream failure
-    console.warn('[image-proxy] Google GenAI image generation unavailable, failing over to Tier-2 diffusion:', geminiResult?.message);
-    const fallbackSeed = Number(params.seed) || Math.floor(Math.random() * 1000000);
-    const fallbackModels = ['flux', 'turbo'];
-    for (const fbModel of fallbackModels) {
-        const encodedPrompt = encodeURIComponent(prompt);
-        const fbUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&model=${fbModel}&nologo=true&seed=${fallbackSeed}`;
-        try {
-            const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), 20000);
-            const upstreamRes = await fetch(fbUrl, {
-                signal: controller.signal,
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
-                    'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8'
-                }
-            });
-            clearTimeout(timer);
-            if (upstreamRes.ok) {
-                const arrayBuf = await upstreamRes.arrayBuffer();
-                const buffer = Buffer.from(arrayBuf);
-                if (buffer.length > 500) {
-                    const contentType = upstreamRes.headers.get('content-type') || 'image/jpeg';
-                    res.setHeader('Content-Type', contentType);
-                    res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
-                    res.setHeader('X-Image-Model', `fallback-${fbModel}`);
-                    if (acceptsJson) {
-                        return res.status(200).json({
-                            success: true,
-                            image: buffer.toString('base64'),
-                            dataUrl: `data:${contentType};base64,${buffer.toString('base64')}`,
-                            model: `fallback-${fbModel}`
-                        });
-                    }
-                    const responder = typeof res.status === 'function' ? res.status(200) : res;
-                    if (responder && typeof responder.send === 'function') return responder.send(buffer);
-                    if (responder && typeof responder.end === 'function') return responder.end(buffer);
-                    if (typeof res.send === 'function') return res.send(buffer);
-                    if (typeof res.end === 'function') return res.end(buffer);
-                    return;
-                }
-            }
-        } catch (fbErr) {
-            console.error(`[image-proxy] Tier-2 fallback model ${fbModel} failed:`, fbErr?.message || fbErr);
-        }
-    }
-
-    // Direct browser redirect failover for browser <img> GET requests
-    if (req.method === 'GET' && !acceptsJson) {
-        const directRedirectUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=${width}&height=${height}&model=flux&nologo=true&seed=${fallbackSeed}`;
-        if (typeof res.redirect === 'function') {
-            return res.redirect(307, directRedirectUrl);
-        }
-        if (typeof res.setHeader === 'function') {
-            res.setHeader('Location', directRedirectUrl);
-        }
-        if (typeof res.status === 'function') {
-            const responder = res.status(307);
-            if (responder && typeof responder.end === 'function') return responder.end();
-        }
-        if (typeof res.end === 'function') {
-            return res.end();
-        }
-    }
-
     return res.status(502).json({
         success: false,
         error: {
-            code: 'image_generation_failed',
-            message: 'Unable to generate image. Please check your network connection and try again.'
+            code: 'gemini_image_generation_failed',
+            message: geminiResult?.message || 'Gemini image generation failed. Please verify your GEMINI_API_KEY and quota.'
         }
     });
 }
