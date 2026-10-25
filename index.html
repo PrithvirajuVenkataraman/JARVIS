@@ -12907,36 +12907,25 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
     <div class="image-gen-viewport" data-ratio="${escapeHtml(aspectRatio)}">
         <img id="${cardId}-img" class="image-gen-img hidden" alt="${escapeHtml(cleanPrompt)}" onclick="window.openImageLightboxFromCard('${cardId}')" />
         <div id="${cardId}-loader" class="image-gen-loader-overlay">
-            <div id="${cardId}-scratch-box" class="image-scratch-box">
-                <div class="image-scratch-canvas">
-                    <svg class="image-scratch-svg" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <defs>
-                            <linearGradient id="${cardId}-scratchGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                                <stop offset="0%" stop-color="#818cf8" />
-                                <stop offset="50%" stop-color="#c084fc" />
-                                <stop offset="100%" stop-color="#38bdf8" />
-                            </linearGradient>
-                        </defs>
-                        <rect x="3" y="3" width="58" height="58" rx="10" class="scratch-surface" />
-                        <path class="scratch-stroke stroke-1" d="M 12 18 L 48 14 L 14 28 L 52 24 L 12 38 L 48 34 L 14 48 L 48 44 L 20 54" stroke="url(#${cardId}-scratchGrad)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
-                        <path class="scratch-stroke stroke-2" d="M 22 10 L 14 54 M 34 10 L 26 54 M 46 12 L 38 54" stroke="url(#${cardId}-scratchGrad)" stroke-width="2" stroke-linecap="round" />
-                        <path class="scratch-stroke stroke-3" d="M 10 24 Q 32 10 52 24 Q 34 40 12 36" stroke="url(#${cardId}-scratchGrad)" stroke-width="2.2" stroke-linecap="round" />
-                    </svg>
-                    <div class="scratch-foil-sheen"></div>
-                </div>
-                <div class="image-scratch-pencil">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#e0e7ff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M12 20h9"></path>
-                        <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
-                    </svg>
-                    <div class="scratch-sparkle"></div>
-                </div>
+            <div id="${cardId}-sparkle" class="image-ai-sparkle-container">
+                <div class="image-ai-aura"></div>
+                <div class="image-ai-wave wave-1"></div>
+                <div class="image-ai-wave wave-2"></div>
+                <svg class="image-ai-star" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <defs>
+                        <linearGradient id="${cardId}-starGrad" x1="2" y1="2" x2="30" y2="30" gradientUnits="userSpaceOnUse">
+                            <stop offset="0%" stop-color="#818cf8" />
+                            <stop offset="50%" stop-color="#c084fc" />
+                            <stop offset="100%" stop-color="#38bdf8" />
+                        </linearGradient>
+                    </defs>
+                    <path d="M16 2C16 9.73 9.73 16 2 16C9.73 16 16 22.27 16 30C16 22.27 22.27 16 30 16C22.27 16 16 9.73 16 2Z" fill="url(#${cardId}-starGrad)" />
+                </svg>
             </div>
-            <div id="${cardId}-status" class="image-gen-status-text">Generating image...</div>
+            <div id="${cardId}-status" class="image-gen-status-text">Generating... 15%</div>
             <div id="${cardId}-progress-bg" class="image-gen-progress-bar-bg">
                 <div id="${cardId}-progress" class="image-gen-progress-bar-fill" style="width: 15%"></div>
             </div>
-            <div id="${cardId}-sub" class="image-gen-status-sub">Connecting to Gemini... 15%</div>
             <div id="${cardId}-retry-wrap" class="image-scratch-retry-wrap hidden">
                 <button type="button" class="image-scratch-retry-btn" onclick="window.regenerateImageCard('${cardId}')">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
@@ -12971,11 +12960,10 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             cardElem?.scrollIntoView({ behavior: 'smooth', block: 'end' });
 
             const statusEl = cardElem?.querySelector('.image-gen-status-text') || document.getElementById(`${cardId}-status`);
-            const subEl = cardElem?.querySelector('.image-gen-status-sub') || document.getElementById(`${cardId}-sub`);
             const progressEl = cardElem?.querySelector('.image-gen-progress-bar-fill') || document.getElementById(`${cardId}-progress`);
             const progressBgEl = cardElem?.querySelector('.image-gen-progress-bar-bg') || document.getElementById(`${cardId}-progress-bg`);
             const loaderEl = cardElem?.querySelector('.image-gen-loader-overlay') || document.getElementById(`${cardId}-loader`);
-            const scratchEl = cardElem?.querySelector('.image-scratch-box') || document.getElementById(`${cardId}-scratch-box`);
+            const sparkleEl = cardElem?.querySelector('.image-ai-sparkle-container') || document.getElementById(`${cardId}-sparkle`);
             const retryWrapEl = cardElem?.querySelector('.image-scratch-retry-wrap') || document.getElementById(`${cardId}-retry-wrap`);
             const imgEl = cardElem?.querySelector('.image-gen-img') || document.getElementById(`${cardId}-img`);
             const actionsEl = cardElem?.querySelector('.image-floating-pencil') || document.getElementById(`${cardId}-actions`);
@@ -12990,33 +12978,20 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 let percent = Math.min(92, Math.round(15 + (1 - Math.exp(-elapsedSec / 3.0)) * 77));
 
                 if (progressEl) progressEl.style.width = `${percent}%`;
-
-                if (subEl) {
-                    if (percent < 35) {
-                        subEl.textContent = `Connecting to Gemini... ${percent}%`;
-                    } else if (percent < 65) {
-                        subEl.textContent = `Sketching neural latents... ${percent}%`;
-                    } else if (percent < 85) {
-                        subEl.textContent = `Rendering fine details... ${percent}%`;
-                    } else {
-                        subEl.textContent = `Finalizing image... ${percent}%`;
-                    }
-                }
+                if (statusEl) statusEl.textContent = `Generating... ${percent}%`;
             }, 100);
 
-            const showPausedState = (errorMsg, detailMsg) => {
+            const showPausedState = (errorMsg) => {
                 clearInterval(progressTimer);
                 clearTimeout(autoFailoverTimeout);
                 const activeCard = document.getElementById(cardId) || cardElem;
-                const activeScratch = activeCard?.querySelector('.image-scratch-box') || scratchEl;
+                const activeSparkle = activeCard?.querySelector('.image-ai-sparkle-container') || sparkleEl;
                 const activeStatus = activeCard?.querySelector('.image-gen-status-text') || statusEl;
-                const activeSub = activeCard?.querySelector('.image-gen-status-sub') || subEl;
                 const activeProgressBg = activeCard?.querySelector('.image-gen-progress-bar-bg') || progressBgEl;
                 const activeRetryWrap = activeCard?.querySelector('.image-scratch-retry-wrap') || retryWrapEl;
 
-                if (activeScratch) activeScratch.classList.add('is-paused');
-                if (activeStatus) activeStatus.textContent = errorMsg || 'Generation Paused';
-                if (activeSub) activeSub.textContent = detailMsg || 'Check connection or tap Retry below';
+                if (activeSparkle) activeSparkle.classList.add('is-paused');
+                if (activeStatus) activeStatus.textContent = errorMsg || 'Generation paused';
                 if (activeProgressBg) activeProgressBg.style.display = 'none';
                 if (activeRetryWrap) {
                     activeRetryWrap.classList.remove('hidden');
@@ -13027,7 +13002,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             let imageRevealed = false;
             const autoFailoverTimeout = setTimeout(() => {
                 if (!imageRevealed) {
-                    showPausedState('Generation Paused', 'Tap Retry below to generate again.');
+                    showPausedState('Generation paused');
                 }
             }, 60000);
 
@@ -13043,11 +13018,11 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 const activeLoader = activeCard?.querySelector('.image-gen-loader-overlay') || loaderEl;
                 const activeActions = activeCard?.querySelector('.image-floating-pencil') || actionsEl;
                 const activeProgress = activeCard?.querySelector('.image-gen-progress-bar-fill') || progressEl;
-                const activeSub = activeCard?.querySelector('.image-gen-status-sub') || subEl;
+                const activeStatus = activeCard?.querySelector('.image-gen-status-text') || statusEl;
 
                 if (activeViewport) activeViewport.classList.add('has-image');
                 if (activeProgress) activeProgress.style.width = '100%';
-                if (activeSub) activeSub.textContent = '100% complete';
+                if (activeStatus) activeStatus.textContent = 'Generating... 100%';
 
                 if (activeImg) {
                     activeImg.src = src;
@@ -13077,7 +13052,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 imgEl.onerror = async () => {
                     if (!hasRetried) {
                         hasRetried = true;
-                        if (subEl) subEl.textContent = 'Retrying Gemini generation...';
+                        if (statusEl) statusEl.textContent = 'Retrying...';
                         const retrySeed = Math.floor(Math.random() * 1000000);
                         let retryUrl = `/api/image-proxy?prompt=${encodeURIComponent(cleanPrompt)}&width=${width}&height=${height}&aspectRatio=${encodeURIComponent(aspectRatio)}&seed=${retrySeed}`;
                         if (clientApiKey) retryUrl += `&apiKey=${encodeURIComponent(clientApiKey)}`;
@@ -13085,8 +13060,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                         return;
                     }
 
-                    let errorMsg = 'Generation Paused';
-                    let detailMsg = 'Check connection or tap Retry below';
+                    let errorMsg = 'Generation paused';
                     try {
                         let queryUrl = proxyUrl;
                         if (!queryUrl.includes('response_format=json')) {
@@ -13097,21 +13071,18 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                             const errData = await errRes.json().catch(() => null);
                             if (errData?.error?.code === 'missing_gemini_key') {
                                 errorMsg = 'API Key Required';
-                                detailMsg = 'Add GEMINI_API_KEY to your .env or settings.';
                             } else if (errData?.error?.message) {
                                 const rawMsg = String(errData.error.message);
                                 if (rawMsg.includes('{') || rawMsg.includes('HTTP 404') || rawMsg.includes('HTTP 500') || rawMsg.includes('is not found')) {
                                     errorMsg = 'Service Unavailable';
-                                    detailMsg = 'Upstream AI model paused. Tap Retry.';
                                 } else {
-                                    errorMsg = 'Generation Paused';
-                                    detailMsg = rawMsg.slice(0, 48);
+                                    errorMsg = 'Generation paused';
                                 }
                             }
                         }
                     } catch (_) {}
 
-                    showPausedState(errorMsg, detailMsg);
+                    showPausedState(errorMsg);
                 };
 
                 // Trigger browser image download immediately
