@@ -1,7 +1,7 @@
 /**
  * @file app/image-generator-worker.js
- * @description Dedicated background Web Worker for zero-cost AI image diffusion
- * and generation. Keeps the main UI thread at a responsive 60 FPS.
+ * @description Dedicated background Web Worker for AI image generation.
+ * Keeps the main UI thread at a responsive 60 FPS.
  */
 
 /* global self */
@@ -36,7 +36,6 @@ async function blobToDataUrl(blob) {
             reader.readAsDataURL(blob);
         });
     }
-    // Universal fallback in Worker without FileReader
     const buffer = await blob.arrayBuffer();
     const bytes = new Uint8Array(buffer);
     let binary = '';
@@ -68,31 +67,23 @@ self.onmessage = async function handleWorkerMessage(event) {
         const height = options.height || 512;
 
         try {
-            self.postMessage({ action: 'progress', id, phase: 'init', percent: 20, message: 'Connecting to fast AI engine...' });
+            self.postMessage({ action: 'progress', id, phase: 'init', percent: 20, message: 'Connecting to Gemini AI engine...' });
 
-            const model = options.model || 'imagen-3.0';
-            const negativePrompt = encodeURIComponent(options.negativePrompt || 'text,watermark,words,letters,signature,typography,lowres,blurry');
+            const model = options.model || 'gemini-2.5-flash-image';
             const encodedPrompt = encodeURIComponent(String(prompt || '').trim());
-            let seed = options.seed || Math.floor(Math.random() * 1000000);
+            const seed = options.seed || Math.floor(Math.random() * 1000000);
+            const aspectRatio = options.aspectRatio || (width === height ? '1:1' : `${width}:${height}`);
 
             let proxyUrl = '';
             if (typeof self !== 'undefined' && self.location && self.location.origin && self.location.origin.startsWith('http')) {
-                proxyUrl = `${self.location.origin}/api/image-proxy?prompt=${encodedPrompt}&width=${width}&height=${height}&model=${encodeURIComponent(model)}&seed=${seed}`;
+                proxyUrl = `${self.location.origin}/api/image-proxy?prompt=${encodedPrompt}&width=${width}&height=${height}&model=${encodeURIComponent(model)}&seed=${seed}&aspectRatio=${encodeURIComponent(aspectRatio)}`;
+            } else {
+                proxyUrl = `/api/image-proxy?prompt=${encodedPrompt}&width=${width}&height=${height}&model=${encodeURIComponent(model)}&seed=${seed}&aspectRatio=${encodeURIComponent(aspectRatio)}`;
             }
 
-            let fallbackUrl = options.fallbackUrl || (options.fallbackEndpointTemplate
-                ? options.fallbackEndpointTemplate
-                    .replace('{prompt}', encodedPrompt)
-                    .replace('{width}', String(width))
-                    .replace('{height}', String(height))
-                    .replace('{model}', encodeURIComponent(model))
-                    .replace('{negativePrompt}', negativePrompt)
-                    .replace('{seed}', String(seed))
-                : `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&model=${encodeURIComponent(model)}&negative_prompt=${negativePrompt}&nologo=true&seed=${seed}`);
+            self.postMessage({ action: 'progress', id, phase: 'download', percent: 55, message: 'Generating Gemini AI image...' });
 
-            self.postMessage({ action: 'progress', id, phase: 'download', percent: 55, message: 'Generating AI image...' });
-
-            async function fetchWithTimeout(url, timeoutMs = 25000) {
+            async function fetchWithTimeout(url, timeoutMs = 35000) {
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
                 try {
@@ -106,26 +97,21 @@ self.onmessage = async function handleWorkerMessage(event) {
             }
 
             let res = null;
-            if (proxyUrl) {
-                try {
-                    res = await fetchWithTimeout(proxyUrl, 25000);
-                    if (!res.ok) res = null;
-                } catch (_) {
-                    res = null;
+            try {
+                res = await fetchWithTimeout(proxyUrl, 35000);
+                if (!res.ok) {
+                    const errJson = await res.json().catch(() => null);
+                    throw new Error(errJson?.error?.message || `Image API returned HTTP ${res.status}`);
                 }
-            }
-
-            if (!res) {
-                try {
-                    res = await fetchWithTimeout(fallbackUrl, 25000);
-                    if (!res.ok) throw new Error(`Cloud engine returned HTTP ${res.status}`);
-                } catch (firstErr) {
-                    // Retry once with a fresh random seed and turbo
-                    seed = Math.floor(Math.random() * 1000000);
-                    fallbackUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&model=turbo&negative_prompt=${negativePrompt}&nologo=true&seed=${seed}`;
-                    self.postMessage({ action: 'progress', id, phase: 'download', percent: 75, message: 'Retrying fast render...' });
-                    res = await fetchWithTimeout(fallbackUrl, 25000);
-                    if (!res.ok) throw new Error(`Cloud engine retry returned HTTP ${res.status}`);
+            } catch (firstErr) {
+                // Retry once with fresh seed
+                const retrySeed = Math.floor(Math.random() * 1000000);
+                const retryUrl = proxyUrl.replace(/seed=\d+/, `seed=${retrySeed}`);
+                self.postMessage({ action: 'progress', id, phase: 'download', percent: 75, message: 'Retrying Gemini render...' });
+                res = await fetchWithTimeout(retryUrl, 35000);
+                if (!res.ok) {
+                    const errJson = await res.json().catch(() => null);
+                    throw new Error(errJson?.error?.message || `Image API retry returned HTTP ${res.status}`);
                 }
             }
 
@@ -138,9 +124,8 @@ self.onmessage = async function handleWorkerMessage(event) {
                 id,
                 prompt,
                 dataUrl,
-                fallbackUrl,
-                url: fallbackUrl,
-                provider: 'free_cloud',
+                url: proxyUrl,
+                provider: 'gemini_api',
                 durationMs,
                 width,
                 height
@@ -149,7 +134,7 @@ self.onmessage = async function handleWorkerMessage(event) {
             self.postMessage({
                 action: 'error',
                 id,
-                error: String(error?.message || 'Image generation failed')
+                error: error.message || 'Image generation failed'
             });
         }
     }
