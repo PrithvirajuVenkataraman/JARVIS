@@ -70,7 +70,7 @@ async function generateGeminiImageBuffer(prompt, {
         triedModels.add(model);
 
         const isImagenPredict = model.includes('imagen-3.0');
-        const timeout = Math.min(6000, timeoutMs);
+        const timeout = Math.min(timeoutMs || 35000, 45000);
 
         try {
             const controller = new AbortController();
