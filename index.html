@@ -12907,20 +12907,44 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
     <div class="image-gen-viewport" data-ratio="${escapeHtml(aspectRatio)}">
         <img id="${cardId}-img" class="image-gen-img hidden" alt="${escapeHtml(cleanPrompt)}" onclick="window.openImageLightboxFromCard('${cardId}')" />
         <div id="${cardId}-loader" class="image-gen-loader-overlay">
-            <div class="image-gen-spinner"></div>
-            <div id="${cardId}-status" class="image-gen-status-text">Generating image...</div>
-            <div id="${cardId}-timer" class="image-gen-timer-badge">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-                <span id="${cardId}-time-text" class="image-gen-time-text">0.0s elapsed</span>
+            <div id="${cardId}-scratch-box" class="image-scratch-box">
+                <div class="image-scratch-canvas">
+                    <svg class="image-scratch-svg" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <defs>
+                            <linearGradient id="${cardId}-scratchGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                                <stop offset="0%" stop-color="#818cf8" />
+                                <stop offset="50%" stop-color="#c084fc" />
+                                <stop offset="100%" stop-color="#38bdf8" />
+                            </linearGradient>
+                        </defs>
+                        <rect x="3" y="3" width="58" height="58" rx="10" class="scratch-surface" />
+                        <path class="scratch-stroke stroke-1" d="M 12 18 L 48 14 L 14 28 L 52 24 L 12 38 L 48 34 L 14 48 L 48 44 L 20 54" stroke="url(#${cardId}-scratchGrad)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+                        <path class="scratch-stroke stroke-2" d="M 22 10 L 14 54 M 34 10 L 26 54 M 46 12 L 38 54" stroke="url(#${cardId}-scratchGrad)" stroke-width="2" stroke-linecap="round" />
+                        <path class="scratch-stroke stroke-3" d="M 10 24 Q 32 10 52 24 Q 34 40 12 36" stroke="url(#${cardId}-scratchGrad)" stroke-width="2.2" stroke-linecap="round" />
+                    </svg>
+                    <div class="scratch-foil-sheen"></div>
+                </div>
+                <div class="image-scratch-pencil">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#e0e7ff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 20h9"></path>
+                        <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                    </svg>
+                    <div class="scratch-sparkle"></div>
+                </div>
             </div>
-            <div class="image-gen-progress-bar-bg">
+            <div id="${cardId}-status" class="image-gen-status-text">Generating image...</div>
+            <div id="${cardId}-progress-bg" class="image-gen-progress-bar-bg">
                 <div id="${cardId}-progress" class="image-gen-progress-bar-fill" style="width: 15%"></div>
             </div>
-            <div id="${cardId}-sub" class="image-gen-status-sub">Connecting to Gemini AI Image API... 15%</div>
+            <div id="${cardId}-sub" class="image-gen-status-sub">Connecting to Gemini... 15%</div>
+            <div id="${cardId}-retry-wrap" class="image-scratch-retry-wrap hidden">
+                <button type="button" class="image-scratch-retry-btn" onclick="window.regenerateImageCard('${cardId}')">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                    <span>Retry</span>
+                </button>
+            </div>
         </div>
-    </div>
-    <div id="${cardId}-actions" class="image-gen-actions-bar hidden">
-        <div class="image-pencil-dropdown-wrapper">
+        <div id="${cardId}-actions" class="image-pencil-dropdown-wrapper image-floating-pencil hidden">
             <button type="button" class="image-pencil-trigger-btn" onclick="window.toggleImagePencilMenu('${cardId}')" title="Options (Download, Copy)" aria-label="Image options">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
             </button>
@@ -12947,12 +12971,14 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             cardElem?.scrollIntoView({ behavior: 'smooth', block: 'end' });
 
             const statusEl = cardElem?.querySelector('.image-gen-status-text') || document.getElementById(`${cardId}-status`);
-            const timeTextEl = cardElem?.querySelector('.image-gen-time-text') || cardElem?.querySelector('.image-gen-timer-badge span') || document.getElementById(`${cardId}-time-text`);
             const subEl = cardElem?.querySelector('.image-gen-status-sub') || document.getElementById(`${cardId}-sub`);
             const progressEl = cardElem?.querySelector('.image-gen-progress-bar-fill') || document.getElementById(`${cardId}-progress`);
+            const progressBgEl = cardElem?.querySelector('.image-gen-progress-bar-bg') || document.getElementById(`${cardId}-progress-bg`);
             const loaderEl = cardElem?.querySelector('.image-gen-loader-overlay') || document.getElementById(`${cardId}-loader`);
+            const scratchEl = cardElem?.querySelector('.image-scratch-box') || document.getElementById(`${cardId}-scratch-box`);
+            const retryWrapEl = cardElem?.querySelector('.image-scratch-retry-wrap') || document.getElementById(`${cardId}-retry-wrap`);
             const imgEl = cardElem?.querySelector('.image-gen-img') || document.getElementById(`${cardId}-img`);
-            const actionsEl = cardElem?.querySelector('.image-gen-actions-bar') || document.getElementById(`${cardId}-actions`);
+            const actionsEl = cardElem?.querySelector('.image-floating-pencil') || document.getElementById(`${cardId}-actions`);
 
             const startTime = Date.now();
             const progressTimer = setInterval(() => {
@@ -12964,40 +12990,44 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 let percent = Math.min(92, Math.round(15 + (1 - Math.exp(-elapsedSec / 3.0)) * 77));
 
                 if (progressEl) progressEl.style.width = `${percent}%`;
-                if (timeTextEl) timeTextEl.textContent = `${elapsedSec.toFixed(1)}s elapsed`;
 
                 if (subEl) {
                     if (percent < 35) {
-                        subEl.textContent = `Connecting to Gemini AI Image API... ${percent}%`;
+                        subEl.textContent = `Connecting to Gemini... ${percent}%`;
                     } else if (percent < 65) {
-                        subEl.textContent = `Synthesizing neural latents with Gemini... ${percent}%`;
+                        subEl.textContent = `Sketching neural latents... ${percent}%`;
                     } else if (percent < 85) {
-                        subEl.textContent = `Rendering high-definition details... ${percent}%`;
+                        subEl.textContent = `Rendering fine details... ${percent}%`;
                     } else {
-                        subEl.textContent = `Finalizing Gemini image stream... ${percent}%`;
+                        subEl.textContent = `Finalizing image... ${percent}%`;
                     }
                 }
             }, 100);
 
+            const showPausedState = (errorMsg, detailMsg) => {
+                clearInterval(progressTimer);
+                clearTimeout(autoFailoverTimeout);
+                const activeCard = document.getElementById(cardId) || cardElem;
+                const activeScratch = activeCard?.querySelector('.image-scratch-box') || scratchEl;
+                const activeStatus = activeCard?.querySelector('.image-gen-status-text') || statusEl;
+                const activeSub = activeCard?.querySelector('.image-gen-status-sub') || subEl;
+                const activeProgressBg = activeCard?.querySelector('.image-gen-progress-bar-bg') || progressBgEl;
+                const activeRetryWrap = activeCard?.querySelector('.image-scratch-retry-wrap') || retryWrapEl;
+
+                if (activeScratch) activeScratch.classList.add('is-paused');
+                if (activeStatus) activeStatus.textContent = errorMsg;
+                if (activeSub) activeSub.textContent = detailMsg;
+                if (activeProgressBg) activeProgressBg.style.display = 'none';
+                if (activeRetryWrap) {
+                    activeRetryWrap.classList.remove('hidden');
+                    activeRetryWrap.style.display = 'inline-flex';
+                }
+            };
+
             let imageRevealed = false;
             const autoFailoverTimeout = setTimeout(() => {
                 if (!imageRevealed) {
-                    clearInterval(progressTimer);
-                    const activeCard = document.getElementById(cardId) || cardElem;
-                    const activeStatus = activeCard?.querySelector('.image-gen-status-text') || statusEl;
-                    const activeSub = activeCard?.querySelector('.image-gen-status-sub') || subEl;
-                    const activeActions = activeCard?.querySelector('.image-gen-actions-bar') || actionsEl;
-                    if (activeStatus) activeStatus.textContent = 'Gemini generation paused.';
-                    if (activeSub) activeSub.textContent = 'Tap retry to generate again.';
-                    if (activeActions) {
-                        activeActions.classList.remove('hidden');
-                        activeActions.style.display = 'flex';
-                        activeActions.innerHTML = `
-                            <button type="button" class="image-gen-action-btn is-primary" onclick="window.regenerateImageCard('${cardId}')">
-                                <span>Retry</span>
-                            </button>
-                        `;
-                    }
+                    showPausedState('Gemini generation paused.', 'Tap Retry to generate again.');
                 }
             }, 60000);
 
@@ -13010,13 +13040,11 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 const activeCard = document.getElementById(cardId) || cardElem;
                 const activeImg = activeCard?.querySelector('.image-gen-img') || imgEl;
                 const activeLoader = activeCard?.querySelector('.image-gen-loader-overlay') || loaderEl;
-                const activeActions = activeCard?.querySelector('.image-gen-actions-bar') || actionsEl;
+                const activeActions = activeCard?.querySelector('.image-floating-pencil') || actionsEl;
                 const activeProgress = activeCard?.querySelector('.image-gen-progress-bar-fill') || progressEl;
-                const activeTime = activeCard?.querySelector('.image-gen-time-text') || activeCard?.querySelector('.image-gen-timer-badge span') || timeTextEl;
                 const activeSub = activeCard?.querySelector('.image-gen-status-sub') || subEl;
 
                 if (activeProgress) activeProgress.style.width = '100%';
-                if (activeTime) activeTime.textContent = 'Completed in ' + ((Date.now() - startTime) / 1000).toFixed(1) + 's';
                 if (activeSub) activeSub.textContent = '100% complete';
 
                 if (activeImg) {
@@ -13034,7 +13062,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 }
                 if (activeActions) {
                     activeActions.classList.remove('hidden');
-                    activeActions.style.display = 'flex';
+                    activeActions.style.display = 'inline-flex';
                 }
                 saveToHistory(cleanPrompt, `[Generated Image: "${cleanPrompt}"]`, { recordContext: true });
             }
@@ -13054,13 +13082,6 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                         imgEl.src = retryUrl;
                         return;
                     }
-                    clearInterval(progressTimer);
-                    clearTimeout(autoFailoverTimeout);
-                    const activeCard = document.getElementById(cardId) || cardElem;
-                    const activeStatus = activeCard?.querySelector('.image-gen-status-text') || statusEl;
-                    const activeTime = activeCard?.querySelector('.image-gen-time-text') || timeTextEl;
-                    const activeSub = activeCard?.querySelector('.image-gen-status-sub') || subEl;
-                    const activeActions = activeCard?.querySelector('.image-gen-actions-bar') || actionsEl;
 
                     let errorMsg = 'Image generation paused.';
                     let detailMsg = 'Please verify your network connection and tap Retry.';
@@ -13086,18 +13107,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                         }
                     } catch (_) {}
 
-                    if (activeStatus) activeStatus.textContent = errorMsg;
-                    if (activeSub) activeSub.textContent = detailMsg;
-                    if (activeTime) activeTime.textContent = 'Paused';
-                    if (activeActions) {
-                        activeActions.classList.remove('hidden');
-                        activeActions.style.display = 'flex';
-                        activeActions.innerHTML = `
-                            <button type="button" class="image-gen-action-btn is-primary" onclick="window.regenerateImageCard('${cardId}')">
-                                <span>Retry</span>
-                            </button>
-                        `;
-                    }
+                    showPausedState(errorMsg, detailMsg);
                 };
 
                 // Trigger browser image download immediately
