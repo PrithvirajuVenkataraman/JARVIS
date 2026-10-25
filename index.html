@@ -12595,10 +12595,12 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             else if (aspectRatio === '3:4') { width = 480; height = 640; }
 
             const seed = Math.floor(Math.random() * 1000000);
-            const negPrompt = encodeURIComponent('text,watermark,words,letters,signature,typography,lowres,blurry');
-            const proxyUrl = `/api/image-proxy?prompt=${encodeURIComponent(cleanPrompt)}&width=${width}&height=${height}&model=imagen-3.0&seed=${seed}&aspectRatio=${encodeURIComponent(aspectRatio)}`;
-            const directFallbackUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(cleanPrompt)}?width=${width}&height=${height}&model=flux&nologo=true&seed=${seed}`;
-            const initialUrl = (typeof window !== 'undefined' && window.location?.origin?.startsWith('http')) ? proxyUrl : directFallbackUrl;
+            const clientApiKey = (typeof localStorage !== 'undefined' && (localStorage.getItem('gemini_api_key') || localStorage.getItem('GEMINI_API_KEY') || localStorage.getItem('apiKey'))) || (typeof window !== 'undefined' && (window.GEMINI_API_KEY || window.geminiApiKey)) || '';
+            let proxyUrl = `/api/image-proxy?prompt=${encodeURIComponent(cleanPrompt)}&width=${width}&height=${height}&aspectRatio=${encodeURIComponent(aspectRatio)}&seed=${seed}`;
+            if (clientApiKey) {
+                proxyUrl += `&apiKey=${encodeURIComponent(clientApiKey)}`;
+            }
+            const initialUrl = proxyUrl;
 
             const cardHtml = `
 <div id="${cardId}" class="image-gen-card" data-prompt="${escapeHtml(rawPrompt)}" data-enhanced-prompt="${escapeHtml(cleanPrompt)}" data-aspect-ratio="${escapeHtml(aspectRatio)}">
@@ -12614,7 +12616,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             <div class="image-gen-progress-bar-bg">
                 <div id="${cardId}-progress" class="image-gen-progress-bar-fill" style="width: 15%"></div>
             </div>
-            <div id="${cardId}-sub" class="image-gen-status-sub">Connecting to Google Imagen 3... 15%</div>
+            <div id="${cardId}-sub" class="image-gen-status-sub">Connecting to Gemini AI Image API... 15%</div>
         </div>
     </div>
     <div id="${cardId}-actions" class="image-gen-actions-bar hidden">
@@ -12671,9 +12673,9 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
 
                 if (subEl) {
                     if (percent < 35) {
-                        subEl.textContent = `Connecting to Google Imagen 3... ${percent}%`;
+                        subEl.textContent = `Connecting to Gemini AI Image API... ${percent}%`;
                     } else if (percent < 65) {
-                        subEl.textContent = `Synthesizing neural latents with Imagen 3... ${percent}%`;
+                        subEl.textContent = `Synthesizing neural latents with Gemini... ${percent}%`;
                     } else if (percent < 85) {
                         subEl.textContent = `Rendering high-definition details... ${percent}%`;
                     } else {
@@ -12684,13 +12686,25 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
 
             let imageRevealed = false;
             const autoFailoverTimeout = setTimeout(() => {
-                if (!imageRevealed && imgEl) {
-                    if (subEl) subEl.textContent = 'Switching to fast backup engine...';
-                    const backupSeed = Math.floor(Math.random() * 1000000);
-                    const backupUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(cleanPrompt)}?width=${width}&height=${height}&model=turbo&nologo=true&seed=${backupSeed}`;
-                    imgEl.src = backupUrl;
+                if (!imageRevealed) {
+                    clearInterval(progressTimer);
+                    const activeCard = document.getElementById(cardId) || cardElem;
+                    const activeStatus = activeCard?.querySelector('.image-gen-status-text') || statusEl;
+                    const activeSub = activeCard?.querySelector('.image-gen-status-sub') || subEl;
+                    const activeActions = activeCard?.querySelector('.image-gen-actions-bar') || actionsEl;
+                    if (activeStatus) activeStatus.textContent = 'Gemini generation timed out. Click retry.';
+                    if (activeSub) activeSub.textContent = 'Timeout waiting for Gemini image stream.';
+                    if (activeActions) {
+                        activeActions.classList.remove('hidden');
+                        activeActions.style.display = 'flex';
+                        activeActions.innerHTML = `
+                            <button type="button" class="image-gen-action-btn is-primary" onclick="window.regenerateImageCard('${cardId}')">
+                                <span>Retry</span>
+                            </button>
+                        `;
+                    }
                 }
-            }, 45000);
+            }, 60000);
 
             function revealImage(src, id) {
                 if (imageRevealed) return;
@@ -12735,43 +12749,55 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                     revealImage(imgEl.src);
                 };
                 let hasRetriedProxy = false;
-                imgEl.onerror = () => {
+                imgEl.onerror = async () => {
                     if (!hasRetriedProxy) {
                         hasRetriedProxy = true;
-                        if (subEl) subEl.textContent = 'Retrying generation...';
+                        if (subEl) subEl.textContent = 'Retrying Gemini generation...';
                         const retrySeed = Math.floor(Math.random() * 1000000);
-                        imgEl.src = `/api/image-proxy?prompt=${encodeURIComponent(cleanPrompt)}&width=${width}&height=${height}&model=imagen-3.0&seed=${retrySeed}&aspectRatio=${encodeURIComponent(aspectRatio)}`;
+                        let retryUrl = `/api/image-proxy?prompt=${encodeURIComponent(cleanPrompt)}&width=${width}&height=${height}&aspectRatio=${encodeURIComponent(aspectRatio)}&seed=${retrySeed}`;
+                        if (clientApiKey) retryUrl += `&apiKey=${encodeURIComponent(clientApiKey)}`;
+                        imgEl.src = retryUrl;
                         return;
                     }
-                    // Try direct Pollinations turbo fallback
-                    const retrySeed = Math.floor(Math.random() * 1000000);
-                    const retryUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(cleanPrompt)}?width=${width}&height=${height}&model=turbo&nologo=true&seed=${retrySeed}`;
-                    imgEl.onerror = () => {
-                        // Second retry with flux
-                        const fluxSeed = Math.floor(Math.random() * 1000000);
-                        const fluxUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(cleanPrompt)}?width=${width}&height=${height}&model=flux&negative_prompt=${negPrompt}&nologo=true&seed=${fluxSeed}`;
-                        imgEl.onerror = () => {
-                            clearInterval(progressTimer);
-                            clearTimeout(autoFailoverTimeout);
-                            const activeCard = document.getElementById(cardId) || cardElem;
-                            const activeStatus = activeCard?.querySelector('.image-gen-status-text') || statusEl;
-                            const activeTime = activeCard?.querySelector('.image-gen-time-text') || timeTextEl;
-                            const activeActions = activeCard?.querySelector('.image-gen-actions-bar') || actionsEl;
-                            if (activeStatus) activeStatus.textContent = 'Generation failed. Click retry.';
-                            if (activeTime) activeTime.textContent = 'Failed';
-                            if (activeActions) {
-                                activeActions.classList.remove('hidden');
-                                activeActions.style.display = 'flex';
-                                activeActions.innerHTML = `
-                                    <button type="button" class="image-gen-action-btn is-primary" onclick="window.regenerateImageCard('${cardId}')">
-                                        <span>Retry</span>
-                                    </button>
-                                `;
+                    clearInterval(progressTimer);
+                    clearTimeout(autoFailoverTimeout);
+                    const activeCard = document.getElementById(cardId) || cardElem;
+                    const activeStatus = activeCard?.querySelector('.image-gen-status-text') || statusEl;
+                    const activeTime = activeCard?.querySelector('.image-gen-time-text') || timeTextEl;
+                    const activeSub = activeCard?.querySelector('.image-gen-status-sub') || subEl;
+                    const activeActions = activeCard?.querySelector('.image-gen-actions-bar') || actionsEl;
+
+                    let errorMsg = 'Gemini image generation failed.';
+                    let detailMsg = 'Please verify your GEMINI_API_KEY and network connection.';
+                    try {
+                        let queryUrl = proxyUrl;
+                        if (!queryUrl.includes('response_format=json')) {
+                            queryUrl += '&response_format=json';
+                        }
+                        const errRes = await fetch(queryUrl);
+                        if (!errRes.ok) {
+                            const errData = await errRes.json().catch(() => null);
+                            if (errData?.error?.message) {
+                                errorMsg = errData.error.message;
                             }
-                        };
-                        imgEl.src = fluxUrl;
-                    };
-                    imgEl.src = retryUrl;
+                            if (errData?.error?.code === 'missing_gemini_key') {
+                                detailMsg = 'Add GEMINI_API_KEY to your .env or environment to generate images.';
+                            }
+                        }
+                    } catch (_) {}
+
+                    if (activeStatus) activeStatus.textContent = errorMsg;
+                    if (activeSub) activeSub.textContent = detailMsg;
+                    if (activeTime) activeTime.textContent = 'Failed';
+                    if (activeActions) {
+                        activeActions.classList.remove('hidden');
+                        activeActions.style.display = 'flex';
+                        activeActions.innerHTML = `
+                            <button type="button" class="image-gen-action-btn is-primary" onclick="window.regenerateImageCard('${cardId}')">
+                                <span>Retry</span>
+                            </button>
+                        `;
+                    }
                 };
 
                 // Trigger browser image download immediately
