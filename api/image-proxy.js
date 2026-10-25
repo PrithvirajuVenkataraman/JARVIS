@@ -53,16 +53,16 @@ async function generateGeminiImageBuffer(prompt, {
 
     let lastError = null;
 
-    // Define candidate models in priority order: genuine Imagen 3 predict model, then Gemini image candidate
+    // Define candidate models in priority order: prioritized gemini-3.1-flash-lite-image, then multimodal fallbacks
     const candidateModels = [];
     if (requestedModel && !['auto', 'gemini', 'imagen'].includes(requestedModel)) {
         candidateModels.push(requestedModel);
     }
     candidateModels.push(
-        'imagen-3.0-generate-002',
+        'gemini-3.1-flash-lite-image',
         'gemini-2.5-flash-image',
         'gemini-2.0-flash',
-        'gemini-3.1-flash-image'
+        'imagen-3.0-generate-002'
     );
 
     const triedModels = new Set();
