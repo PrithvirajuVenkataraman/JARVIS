@@ -3510,6 +3510,27 @@ body.dark .footer-action-btn-primary:hover {
     background: var(--ui-primary-hover);
 }
 
+.selection-ask-jarvis-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: none;
+    border-radius: 999px;
+    padding: 7px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #ffffff;
+    background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+    box-shadow: 0 2px 8px rgba(99, 102, 241, 0.35);
+    cursor: pointer;
+    transition: transform 0.15s ease, filter 0.15s ease;
+}
+
+.selection-ask-jarvis-btn:hover {
+    filter: brightness(1.12);
+    transform: translateY(-1px);
+}
+
 .help-settings-card {
     padding: 14px;
     border: 1px solid var(--ui-border);
@@ -10272,4 +10293,231 @@ table {
         gap: 6px;
     }
 }
+
+/* ==========================================================================
+   Composer Selection Grounding Tray ("Ask JARVIS")
+   ========================================================================== */
+.composer-selection-tray {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px 4px 14px;
+    margin-bottom: 2px;
+}
+.composer-selection-tray.hidden {
+    display: none !important;
+}
+.composer-selection-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    max-width: min(520px, calc(100vw - 40px));
+    padding: 5px 12px;
+    border-radius: 999px;
+    background: rgba(39, 39, 42, 0.85);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: #e4e4e7;
+    font-size: 12.5px;
+    line-height: 1.4;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+.composer-selection-icon {
+    font-size: 13px;
+    flex-shrink: 0;
+}
+.composer-selection-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #f4f4f5;
+    font-weight: 500;
+}
+.composer-selection-remove {
+    background: transparent;
+    border: none;
+    color: #a1a1aa;
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 2px 4px;
+    margin-left: 2px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.15s ease, background 0.15s ease;
+}
+.composer-selection-remove:hover {
+    color: #ffffff;
+    background: rgba(255, 255, 255, 0.15);
+}
+
+.composer-image-chip {
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+    background: rgba(39, 39, 42, 0.95);
+    border: 1px solid rgba(168, 85, 247, 0.35);
+}
+.composer-image-chip:hover {
+    background: rgba(55, 55, 62, 0.98);
+    border-color: rgba(168, 85, 247, 0.65);
+}
+.image-chip-ratio-badge {
+    display: inline-block;
+    padding: 1px 7px;
+    margin-left: 6px;
+    border-radius: 999px;
+    background: rgba(168, 85, 247, 0.22);
+    color: #d8b4fe;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    border: 1px solid rgba(168, 85, 247, 0.45);
+    transition: background 0.15s ease, transform 0.1s ease;
+}
+.image-chip-ratio-badge:hover {
+    background: rgba(168, 85, 247, 0.38);
+    transform: scale(1.05);
+}
+
+/* ==========================================================================
+   Floating ChatGPT-grade Memory Updated Toast
+   ========================================================================== */
+.jarvis-memory-toast {
+    position: fixed;
+    bottom: 84px;
+    left: 50%;
+    transform: translateX(-50%) translateY(16px);
+    z-index: 1000;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s cubic-bezier(0.16, 1, 0.3, 1), transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.jarvis-memory-toast.is-visible {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateX(-50%) translateY(0);
+}
+@media (prefers-reduced-motion: reduce) {
+    .jarvis-memory-toast {
+        transition: none !important;
+        transform: translateX(-50%) !important;
+    }
+}
+.jarvis-memory-toast-content {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 14px 8px 12px;
+    border-radius: 999px;
+    background: rgba(24, 24, 27, 0.94);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    color: #f4f4f5;
+    font-size: 13px;
+    font-weight: 500;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+.jarvis-memory-toast-icon {
+    font-size: 14px;
+    color: #a855f7;
+    filter: drop-shadow(0 0 6px rgba(168, 85, 247, 0.4));
+}
+.jarvis-memory-toast-msg {
+    color: #f4f4f5;
+}
+.jarvis-memory-toast-undo {
+    border: none;
+    background: rgba(255, 255, 255, 0.12);
+    color: #ffffff;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+.jarvis-memory-toast-undo:hover {
+    background: rgba(255, 255, 255, 0.22);
+}
+.jarvis-memory-toast-close {
+    border: none;
+    background: transparent;
+    color: #a1a1aa;
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: 50%;
+    margin-left: -2px;
+}
+.jarvis-memory-toast-close:hover {
+    color: #ffffff;
+}
+
+/* ==========================================================================
+   Unified Memory Manager Styles
+   ========================================================================== */
+.memory-cat-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: capitalize;
+    letter-spacing: 0.02em;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.memory-cat-identity { background: rgba(59, 130, 246, 0.15); color: #93c5fd; border-color: rgba(59, 130, 246, 0.3); }
+.memory-cat-location { background: rgba(16, 185, 129, 0.15); color: #6ee7b7; border-color: rgba(16, 185, 129, 0.3); }
+.memory-cat-occupation { background: rgba(245, 158, 11, 0.15); color: #fcd34d; border-color: rgba(245, 158, 11, 0.3); }
+.memory-cat-preference { background: rgba(168, 85, 247, 0.15); color: #d8b4fe; border-color: rgba(168, 85, 247, 0.3); }
+.memory-cat-constraint { background: rgba(239, 68, 68, 0.15); color: #fca5a5; border-color: rgba(239, 68, 68, 0.3); }
+.memory-cat-pet_family { background: rgba(236, 72, 153, 0.15); color: #f9a8d4; border-color: rgba(236, 72, 153, 0.3); }
+.memory-cat-hobby { background: rgba(20, 184, 166, 0.15); color: #5eead4; border-color: rgba(20, 184, 166, 0.3); }
+.memory-cat-diet_health { background: rgba(34, 197, 94, 0.15); color: #86efac; border-color: rgba(34, 197, 94, 0.3); }
+.memory-cat-tech { background: rgba(99, 102, 241, 0.15); color: #a5b4fc; border-color: rgba(99, 102, 241, 0.3); }
+
+.memory-toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 38px;
+    height: 22px;
+    flex-shrink: 0;
+}
+.memory-toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+.memory-toggle-switch .toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background-color: rgba(255, 255, 255, 0.16);
+    transition: 0.2s;
+    border-radius: 22px;
+}
+.memory-toggle-switch .toggle-slider:before {
+    position: absolute;
+    content: "";
+    height: 16px;
+    width: 16px;
+    left: 3px;
+    bottom: 3px;
+    background-color: white;
+    transition: 0.2s;
+    border-radius: 50%;
+}
+.memory-toggle-switch input:checked + .toggle-slider {
+    background-color: #6366f1;
+}
+.memory-toggle-switch input:checked + .toggle-slider:before {
+    transform: translateX(16px);
+}
+
 
