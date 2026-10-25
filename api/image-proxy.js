@@ -60,8 +60,10 @@ async function generateGeminiImageBuffer(prompt, {
     }
     candidateModels.push(
         'gemini-3.1-flash-lite-image',
+        'gemini-3.1-flash-image',
+        'gemini-3.1-flash-image-preview',
         'gemini-2.5-flash-image',
-        'gemini-2.0-flash',
+        'gemini-3-pro-image',
         'imagen-3.0-generate-002'
     );
 
@@ -102,16 +104,39 @@ async function generateGeminiImageBuffer(prompt, {
                     if (res.ok) {
                         const data = await res.json();
                         const pred = data?.predictions?.[0];
-                        const b64 = pred?.bytesBase64Encoded;
+                        const b64 = pred?.bytesBase64Encoded || pred?.bytes_base64_encoded || pred?.imageBytes;
                         if (b64) {
-                            const mimeType = pred.mimeType || 'image/jpeg';
+                            const mimeType = pred.mimeType || pred.mime_type || 'image/jpeg';
                             const buffer = Buffer.from(b64, 'base64');
                             return { success: true, buffer, contentType: mimeType, model };
                         }
                     } else {
                         const errText = await res.text().catch(() => '');
-                        lastError = new Error(`Imagen (${model}) HTTP ${res.status}: ${errText.slice(0, 200)}`);
-                        console.error(`[image-proxy] Imagen upstream error (${model}):`, res.status, errText.slice(0, 200));
+                        let friendlyMsg = '';
+                        let errStatus = '';
+                        try {
+                            const parsed = JSON.parse(errText);
+                            friendlyMsg = parsed?.error?.message || '';
+                            errStatus = parsed?.error?.status || '';
+                        } catch (_) {}
+
+                        if (res.status === 400 && (friendlyMsg.includes('API key') || errStatus === 'INVALID_ARGUMENT')) {
+                            return {
+                                success: false,
+                                code: 'invalid_api_key',
+                                message: 'Invalid Gemini API key. Please check your GEMINI_API_KEY.'
+                            };
+                        }
+                        if (res.status === 429 || friendlyMsg.includes('quota') || errStatus === 'RESOURCE_EXHAUSTED') {
+                            return {
+                                success: false,
+                                code: 'quota_exceeded',
+                                message: 'Gemini API quota exceeded. Please check your Google AI Studio quota.'
+                            };
+                        }
+
+                        lastError = new Error(`Imagen (${model}) HTTP ${res.status}: ${friendlyMsg || errText.slice(0, 150)}`);
+                        console.error(`[image-proxy] Imagen upstream error (${model}):`, res.status, friendlyMsg || errText.slice(0, 200));
                     }
                 } else {
                     // Google Gemini REST :generateContent with IMAGE modality
@@ -126,7 +151,10 @@ async function generateGeminiImageBuffer(prompt, {
                         body: JSON.stringify({
                             contents: [{ parts: [{ text: prompt }] }],
                             generationConfig: {
-                                responseModalities: ['TEXT', 'IMAGE']
+                                responseModalities: ['TEXT', 'IMAGE'],
+                                imageConfig: {
+                                    aspectRatio: aspectRatio || '1:1'
+                                }
                             }
                         })
                     });
@@ -134,16 +162,45 @@ async function generateGeminiImageBuffer(prompt, {
                     if (res.ok) {
                         const data = await res.json();
                         const parts = data?.candidates?.[0]?.content?.parts || [];
-                        const imagePart = parts.find(p => p.inlineData?.data);
-                        if (imagePart?.inlineData?.data) {
-                            const mimeType = imagePart.inlineData.mimeType || 'image/png';
-                            const buffer = Buffer.from(imagePart.inlineData.data, 'base64');
+                        const imagePart = parts.find(p => (
+                            p?.inlineData?.data ||
+                            p?.inline_data?.data ||
+                            p?.image?.bytesBase64Encoded ||
+                            p?.image?.imageBytes
+                        ));
+                        if (imagePart) {
+                            const b64 = imagePart.inlineData?.data || imagePart.inline_data?.data || imagePart.image?.bytesBase64Encoded || imagePart.image?.imageBytes;
+                            const mimeType = imagePart.inlineData?.mimeType || imagePart.inline_data?.mime_type || 'image/png';
+                            const buffer = Buffer.from(b64, 'base64');
                             return { success: true, buffer, contentType: mimeType, model };
                         }
                     } else {
                         const errText = await res.text().catch(() => '');
-                        lastError = new Error(`Gemini (${model}) HTTP ${res.status}: ${errText.slice(0, 200)}`);
-                        console.error(`[image-proxy] Gemini image error (${model}):`, res.status, errText.slice(0, 200));
+                        let friendlyMsg = '';
+                        let errStatus = '';
+                        try {
+                            const parsed = JSON.parse(errText);
+                            friendlyMsg = parsed?.error?.message || '';
+                            errStatus = parsed?.error?.status || '';
+                        } catch (_) {}
+
+                        if (res.status === 400 && (friendlyMsg.includes('API key') || errStatus === 'INVALID_ARGUMENT')) {
+                            return {
+                                success: false,
+                                code: 'invalid_api_key',
+                                message: 'Invalid Gemini API key. Please check your GEMINI_API_KEY.'
+                            };
+                        }
+                        if (res.status === 429 || friendlyMsg.includes('quota') || errStatus === 'RESOURCE_EXHAUSTED') {
+                            return {
+                                success: false,
+                                code: 'quota_exceeded',
+                                message: 'Gemini API quota exceeded. Please check your Google AI Studio quota.'
+                            };
+                        }
+
+                        lastError = new Error(`Gemini (${model}) HTTP ${res.status}: ${friendlyMsg || errText.slice(0, 150)}`);
+                        console.error(`[image-proxy] Gemini image error (${model}):`, res.status, friendlyMsg || errText.slice(0, 200));
                     }
                 }
             } finally {
@@ -237,6 +294,26 @@ export async function imageProxyHandler(req, res) {
             error: {
                 code: 'missing_gemini_key',
                 message: geminiResult.message || 'Gemini API key is required. Please set GEMINI_API_KEY in your environment.'
+            }
+        });
+    }
+
+    if (geminiResult?.code === 'invalid_api_key') {
+        return res.status(401).json({
+            success: false,
+            error: {
+                code: 'invalid_api_key',
+                message: geminiResult.message || 'Invalid Gemini API key. Please check your GEMINI_API_KEY.'
+            }
+        });
+    }
+
+    if (geminiResult?.code === 'quota_exceeded') {
+        return res.status(429).json({
+            success: false,
+            error: {
+                code: 'quota_exceeded',
+                message: geminiResult.message || 'Gemini API quota exceeded. Please check your Google AI Studio quota.'
             }
         });
     }
