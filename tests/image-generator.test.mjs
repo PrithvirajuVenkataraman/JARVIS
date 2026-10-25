@@ -471,7 +471,7 @@ console.log('--- Running Image Generator Suite ---');
                         })
                     };
                 }
-                if (String(url).includes('gemini-2.5-flash-image') || String(url).includes('gemini-2.0-flash')) {
+                if (String(url).includes('gemini-3.1-flash-lite-image') || String(url).includes('gemini-2.5-flash-image') || String(url).includes('gemini-2.0-flash')) {
                     const fakeBase64 = Buffer.from('fake-image-bytes-gemini-preview-payload-1234567890-pad-for-minimum-length-500-bytes-123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890').toString('base64');
                     return {
                         ok: true,
@@ -518,14 +518,14 @@ console.log('--- Running Image Generator Suite ---');
             // Test 7.3.2: Verify pollinations is completely removed and never contacted
             assert.ok(!fetchedUrls.some(u => u.includes('pollinations')), 'pollinations.ai must NEVER be contacted');
 
-            // Test 7.3.3: Failover to gemini-2.5-flash-image when imagen-3.0 fails
+            // Test 7.3.3: Failover to gemini-2.5-flash-image when gemini-3.1-flash-lite-image fails
             fetchedUrls = [];
             let fallbackHeaders = {};
             let fallbackStatus = 0;
             const originalMockFetch = globalThis.fetch;
             globalThis.fetch = async (url, options) => {
                 fetchedUrls.push(String(url));
-                if (String(url).includes('imagen-3.0-generate-002')) {
+                if (String(url).includes('gemini-3.1-flash-lite-image')) {
                     return { ok: false, status: 500, text: async () => 'Service Unavailable' };
                 }
                 return originalMockFetch(url, options);
@@ -547,7 +547,7 @@ console.log('--- Running Image Generator Suite ---');
             assert.equal(fallbackStatus, 200);
             assert.equal(fallbackHeaders['X-Image-Model'], 'gemini-2.5-flash-image');
             assert.equal(fallbackHeaders['Content-Type'], 'image/png');
-            assert.ok(fetchedUrls.some(u => u.includes('gemini-2.5-flash-image')), 'Gemini multimodal fallback must be invoked when Imagen fails');
+            assert.ok(fetchedUrls.some(u => u.includes('gemini-2.5-flash-image')), 'Gemini multimodal fallback must be invoked when primary model fails');
 
             // Test 7.3.4: Complete absence of pollinations in proxy handler
             assert.ok(!fetchedUrls.some(u => u.includes('pollinations')), 'Zero network requests may target pollinations.ai');
