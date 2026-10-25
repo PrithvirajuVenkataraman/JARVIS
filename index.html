@@ -13093,16 +13093,16 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                         const errRes = await fetch(queryUrl);
                         if (!errRes.ok) {
                             const errData = await errRes.json().catch(() => null);
-                            if (errData?.error?.message) {
+                            if (errData?.error?.code === 'missing_gemini_key') {
+                                errorMsg = 'Gemini API key required';
+                                detailMsg = 'Please add GEMINI_API_KEY to your .env or environment.';
+                            } else if (errData?.error?.message) {
                                 const rawMsg = String(errData.error.message);
                                 if (rawMsg.includes('{') || rawMsg.includes('HTTP 404') || rawMsg.includes('HTTP 500') || rawMsg.includes('is not found')) {
                                     errorMsg = 'Image generation service temporarily unavailable.';
                                 } else {
                                     errorMsg = rawMsg;
                                 }
-                            }
-                            if (errData?.error?.code === 'missing_gemini_key') {
-                                detailMsg = 'Add GEMINI_API_KEY to your environment to generate images.';
                             }
                         }
                     } catch (_) {}
