@@ -8451,14 +8451,14 @@ body:not(.dark) .assistant-followup-chip:hover {
     width: 100%;
     min-height: 250px;
     background: #090d16;
-    border-radius: 14px;
+    border-radius: 16px;
     overflow: hidden;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    border: 1px solid rgba(129, 140, 248, 0.24);
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.45);
+    border: 1px solid rgba(129, 140, 248, 0.22);
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.45);
     transition: border-color 0.25s ease, box-shadow 0.25s ease;
 }
 
@@ -8480,7 +8480,7 @@ body:not(.dark) .assistant-followup-chip:hover {
     width: 100%;
     height: 100%;
     object-fit: cover;
-    border-radius: 14px;
+    border-radius: 16px;
     cursor: zoom-in;
     transition: opacity 0.3s ease;
 }
@@ -8492,200 +8492,124 @@ body:not(.dark) .assistant-followup-chip:hover {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    padding: 12px 10px;
-    background: linear-gradient(135deg, rgba(13, 18, 36, 0.96), rgba(24, 30, 56, 0.94), rgba(16, 14, 34, 0.96));
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
+    padding: 16px 14px;
+    background: radial-gradient(circle at center, rgba(30, 27, 75, 0.5) 0%, rgba(9, 13, 22, 0.95) 70%);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
     z-index: 2;
     transition: opacity 0.3s ease;
 }
 
-/* Small Box Getting Scratched Animation - Compact & Crisp */
-.image-scratch-box {
+/* Luminous AI Star & Pulse Waves Animation */
+.image-ai-sparkle-container {
     position: relative;
-    width: 50px;
-    height: 50px;
-    margin-bottom: 8px;
+    width: 72px;
+    height: 72px;
     display: flex;
     align-items: center;
     justify-content: center;
+    margin-bottom: 12px;
     flex-shrink: 0;
 }
 
-.image-scratch-canvas {
-    position: relative;
-    width: 46px;
-    height: 46px;
-    border-radius: 8px;
-    background: rgba(15, 23, 42, 0.85);
-    border: 1.5px solid rgba(129, 140, 248, 0.32);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4), inset 0 0 8px rgba(99, 102, 241, 0.18), 0 0 10px rgba(129, 140, 248, 0.2);
-    overflow: hidden;
-}
-
-.image-scratch-svg {
-    width: 100%;
-    height: 100%;
-    display: block;
-}
-
-.scratch-surface {
-    fill: rgba(15, 23, 42, 0.6);
-    stroke: rgba(129, 140, 248, 0.2);
-    stroke-width: 1;
-}
-
-.scratch-stroke {
-    filter: drop-shadow(0 0 3px rgba(129, 140, 248, 0.8));
-}
-
-.scratch-stroke.stroke-1 {
-    stroke-dasharray: 220;
-    stroke-dashoffset: 220;
-    animation: scratch-stroke-draw-1 1.4s ease-in-out infinite;
-}
-
-.scratch-stroke.stroke-2 {
-    stroke-dasharray: 140;
-    stroke-dashoffset: 140;
-    animation: scratch-stroke-draw-2 1.4s ease-in-out infinite 0.25s;
-}
-
-.scratch-stroke.stroke-3 {
-    stroke-dasharray: 120;
-    stroke-dashoffset: 120;
-    animation: scratch-stroke-draw-3 1.4s ease-in-out infinite 0.45s;
-}
-
-@keyframes scratch-stroke-draw-1 {
-    0% { stroke-dashoffset: 220; opacity: 0.25; }
-    40% { stroke-dashoffset: 80; opacity: 1; }
-    70% { stroke-dashoffset: 0; opacity: 1; }
-    90% { stroke-dashoffset: 0; opacity: 0.85; }
-    100% { stroke-dashoffset: 220; opacity: 0.25; }
-}
-
-@keyframes scratch-stroke-draw-2 {
-    0% { stroke-dashoffset: 140; opacity: 0.2; }
-    50% { stroke-dashoffset: 0; opacity: 0.95; }
-    85% { stroke-dashoffset: 0; opacity: 0.7; }
-    100% { stroke-dashoffset: 140; opacity: 0.2; }
-}
-
-@keyframes scratch-stroke-draw-3 {
-    0% { stroke-dashoffset: 120; opacity: 0.2; }
-    60% { stroke-dashoffset: 0; opacity: 1; }
-    85% { stroke-dashoffset: 0; opacity: 0.65; }
-    100% { stroke-dashoffset: 120; opacity: 0.2; }
-}
-
-.scratch-foil-sheen {
+.image-ai-aura {
     position: absolute;
-    inset: 0;
-    border-radius: 7px;
-    background: linear-gradient(115deg, transparent 20%, rgba(255, 255, 255, 0.16) 48%, rgba(192, 132, 252, 0.22) 55%, transparent 75%);
-    background-size: 200% 100%;
-    animation: scratch-foil-sweep 2.2s ease-in-out infinite;
-    pointer-events: none;
-}
-
-@keyframes scratch-foil-sweep {
-    0% { background-position: -150% 0; }
-    100% { background-position: 150% 0; }
-}
-
-/* Animated Scratching Pencil */
-.image-scratch-pencil {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 17px;
-    height: 17px;
-    pointer-events: none;
-    z-index: 3;
-    animation: scratch-pencil-dance 1.4s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
-    filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.6));
-}
-
-@keyframes scratch-pencil-dance {
-    0% { transform: translate(8px, 4px) rotate(-18deg); }
-    15% { transform: translate(30px, 8px) rotate(8deg); }
-    30% { transform: translate(10px, 16px) rotate(-22deg); }
-    45% { transform: translate(32px, 22px) rotate(12deg); }
-    60% { transform: translate(12px, 28px) rotate(-15deg); }
-    75% { transform: translate(28px, 32px) rotate(6deg); }
-    90% { transform: translate(14px, 12px) rotate(-10deg); }
-    100% { transform: translate(8px, 4px) rotate(-18deg); }
-}
-
-.scratch-sparkle {
-    position: absolute;
-    bottom: -1px;
-    left: -1px;
-    width: 4px;
-    height: 4px;
-    background: #ffffff;
+    width: 48px;
+    height: 48px;
     border-radius: 50%;
-    box-shadow: 0 0 5px 2px rgba(165, 180, 252, 0.95), 0 0 8px 3px rgba(192, 132, 252, 0.6);
-    animation: scratch-sparkle-flicker 0.25s infinite alternate;
+    background: radial-gradient(circle, rgba(168, 85, 247, 0.45) 0%, rgba(99, 102, 241, 0.25) 50%, transparent 75%);
+    filter: blur(10px);
+    animation: ai-aura-glow 3s ease-in-out infinite alternate;
 }
 
-@keyframes scratch-sparkle-flicker {
-    0% { opacity: 0.6; transform: scale(0.8); }
-    100% { opacity: 1; transform: scale(1.3); }
+@keyframes ai-aura-glow {
+    0% { transform: scale(0.9); opacity: 0.6; }
+    100% { transform: scale(1.3); opacity: 1; }
 }
 
-.image-scratch-box.is-paused .image-scratch-pencil {
+.image-ai-wave {
+    position: absolute;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    border: 1.5px solid rgba(129, 140, 248, 0.4);
+    opacity: 0;
+    pointer-events: none;
+    animation: ai-wave-expand 2.6s cubic-bezier(0.1, 0.7, 0.1, 1) infinite;
+}
+
+.image-ai-wave.wave-2 {
+    animation-delay: 1.3s;
+}
+
+@keyframes ai-wave-expand {
+    0% {
+        transform: scale(0.6);
+        opacity: 0.8;
+        border-color: rgba(168, 85, 247, 0.6);
+    }
+    50% {
+        opacity: 0.4;
+    }
+    100% {
+        transform: scale(1.65);
+        opacity: 0;
+        border-color: rgba(56, 189, 248, 0.1);
+    }
+}
+
+.image-ai-star {
+    position: relative;
+    width: 34px;
+    height: 34px;
+    z-index: 2;
+    filter: drop-shadow(0 0 12px rgba(168, 85, 247, 0.75)) drop-shadow(0 0 20px rgba(99, 102, 241, 0.5));
+    animation: ai-star-breathe 2.6s ease-in-out infinite;
+}
+
+@keyframes ai-star-breathe {
+    0%, 100% {
+        transform: scale(1) rotate(0deg);
+        filter: drop-shadow(0 0 10px rgba(168, 85, 247, 0.6)) drop-shadow(0 0 16px rgba(99, 102, 241, 0.4));
+    }
+    50% {
+        transform: scale(1.14) rotate(8deg);
+        filter: drop-shadow(0 0 16px rgba(168, 85, 247, 0.9)) drop-shadow(0 0 26px rgba(56, 189, 248, 0.65));
+    }
+}
+
+.image-ai-sparkle-container.is-paused .image-ai-star {
     animation-play-state: paused;
     opacity: 0.5;
+    filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.2));
 }
-.image-scratch-box.is-paused .scratch-stroke {
-    animation-play-state: paused;
-    opacity: 0.35;
-}
-.image-scratch-box.is-paused .scratch-sparkle {
+
+.image-ai-sparkle-container.is-paused .image-ai-wave {
     display: none;
 }
-.image-scratch-box.is-paused .scratch-foil-sheen {
+
+.image-ai-sparkle-container.is-paused .image-ai-aura {
     animation-play-state: paused;
     opacity: 0.2;
 }
 
-/* Status Text & Progress - Balanced & Protected Against Text Breaking */
+/* Minimalist, Single-Line Status Text */
 .image-gen-status-text {
     font-size: 13px;
     font-weight: 600;
     color: #f8fafc;
     text-align: center;
-    margin: 4px 0 2px 0;
+    margin: 0 0 8px 0;
     letter-spacing: -0.01em;
     line-height: 1.35;
-    padding: 0 8px;
-    word-break: normal;
-    overflow-wrap: break-word;
-    text-wrap: balance;
-    max-width: 240px;
-    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
-}
-
-.image-gen-status-sub {
-    font-size: 11px;
-    color: rgba(226, 232, 240, 0.72);
-    text-align: center;
-    margin: 3px 0 0 0;
-    line-height: 1.35;
-    padding: 0 10px;
-    word-break: normal;
-    overflow-wrap: break-word;
-    text-wrap: balance;
-    max-width: 240px;
+    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+    white-space: nowrap;
 }
 
 .image-gen-progress-bar-bg {
     width: 100%;
     max-width: 130px;
     height: 3.5px;
-    margin: 4px 0 2px 0;
     background: rgba(255, 255, 255, 0.08);
     border-radius: 9999px;
     overflow: hidden;
@@ -8696,7 +8620,7 @@ body:not(.dark) .assistant-followup-chip:hover {
 .image-gen-progress-bar-fill {
     height: 100%;
     width: 0%;
-    background: linear-gradient(90deg, #6366f1, #a855f7, #ec4899, #6366f1);
+    background: linear-gradient(90deg, #6366f1, #a855f7, #38bdf8, #6366f1);
     background-size: 200% 100%;
     border-radius: 9999px;
     transition: width 0.25s ease-out;
@@ -8708,10 +8632,9 @@ body:not(.dark) .assistant-followup-chip:hover {
     100% { background-position: 200% 0%; }
 }
 
-/* Retry Button (Single, Inside Viewport) - Fully Protected from Clipping */
+/* Retry Button (Single, Clean, Protected) */
 .image-scratch-retry-wrap {
     margin-top: 10px;
-    margin-bottom: 2px;
     display: inline-flex;
     justify-content: center;
     flex-shrink: 0;
@@ -8847,35 +8770,26 @@ body:not(.dark) .assistant-followup-chip:hover {
     flex-shrink: 0;
 }
 
-/* Device Responsive Rules across all screens */
+/* Device Responsive Rules */
 @media (max-width: 480px) {
     .image-gen-card {
         max-width: 250px;
     }
     .image-gen-viewport {
         min-height: 240px;
-        border-radius: 12px;
+        border-radius: 14px;
     }
     .image-gen-status-text {
         font-size: 12px;
-        max-width: 220px;
     }
-    .image-gen-status-sub {
-        font-size: 10.5px;
-        max-width: 220px;
+    .image-ai-sparkle-container {
+        width: 64px;
+        height: 64px;
+        margin-bottom: 10px;
     }
-    .image-scratch-box {
-        width: 46px;
-        height: 46px;
-        margin-bottom: 6px;
-    }
-    .image-scratch-canvas {
-        width: 42px;
-        height: 42px;
-    }
-    .image-scratch-retry-btn {
-        padding: 4px 12px;
-        font-size: 11px;
+    .image-ai-star {
+        width: 30px;
+        height: 30px;
     }
 }
 
@@ -8884,15 +8798,10 @@ body:not(.dark) .assistant-followup-chip:hover {
         max-width: 225px;
     }
     .image-gen-viewport {
-        min-height: 230px;
+        min-height: 220px;
     }
     .image-gen-status-text {
         font-size: 11.5px;
-        max-width: 200px;
-    }
-    .image-gen-status-sub {
-        font-size: 10px;
-        max-width: 200px;
     }
 }
 
