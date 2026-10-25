@@ -1,36 +1,43 @@
 export const config = { maxDuration: 60 };
 
 const DEFAULT_IMAGE_NEGATIVE_PROMPT = 'text,watermark,words,letters,signature,typography,lowres,blurry';
-const IMAGE_PROXY_TIMEOUT_MS = 20000;
+const IMAGE_PROXY_TIMEOUT_MS = 30000;
 
-async function fetchProxyImageBuffer(url, timeoutMs = IMAGE_PROXY_TIMEOUT_MS) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-        const upstreamRes = await fetch(url, {
-            signal: controller.signal,
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
-                'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8'
-            }
-        });
-        if (!upstreamRes.ok) {
-            throw new Error(`Upstream returned HTTP ${upstreamRes.status}`);
-        }
-        const contentType = upstreamRes.headers.get('content-type') || 'image/jpeg';
-        const arrayBuf = await upstreamRes.arrayBuffer();
-        return {
-            buffer: Buffer.from(arrayBuf),
-            contentType
-        };
-    } finally {
-        clearTimeout(timer);
-    }
+function resolveGeminiApiKey(customApiKey = '', req = null, params = {}) {
+    return String(
+        customApiKey ||
+        params?.apiKey ||
+        params?.gemini_api_key ||
+        params?.key ||
+        req?.headers?.['x-gemini-api-key'] ||
+        req?.headers?.['x-goog-api-key'] ||
+        process.env.GEMINI_API_KEY ||
+        process.env.GOOGLE_GENERATIVE_AI_API_KEY ||
+        process.env.GOOGLE_API_KEY ||
+        ''
+    ).trim();
 }
 
-async function generateGeminiImageBuffer(prompt, { width = 512, height = 512, timeoutMs = 35000, apiKey: customApiKey = '', aspectRatio: customAspectRatio = '' } = {}) {
-    const apiKey = String(customApiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY || process.env.GOOGLE_API_KEY || '').trim();
-    if (!apiKey) return null;
+/**
+ * Generates an image using Google Gemini / Imagen models exclusively.
+ * Routes to native Google Generative Language REST APIs.
+ */
+async function generateGeminiImageBuffer(prompt, {
+    width = 512,
+    height = 512,
+    timeoutMs = 35000,
+    apiKey: customApiKey = '',
+    aspectRatio: customAspectRatio = '',
+    requestedModel = ''
+} = {}) {
+    const apiKey = resolveGeminiApiKey(customApiKey);
+    if (!apiKey) {
+        return {
+            success: false,
+            code: 'missing_gemini_key',
+            message: 'Gemini API key is required. Please configure GEMINI_API_KEY in your environment or provide it in the request.'
+        };
+    }
 
     let aspectRatio = '1:1';
     const validRatios = new Set(['1:1', '3:4', '4:3', '9:16', '16:9']);
@@ -44,100 +51,118 @@ async function generateGeminiImageBuffer(prompt, { width = 512, height = 512, ti
         else if (ratio <= 0.8) aspectRatio = '3:4';
     }
 
-    const primaryTimeout = Math.min(28000, timeoutMs);
-    const secondaryTimeout = Math.min(15000, Math.max(5000, timeoutMs - primaryTimeout));
+    let lastError = null;
 
-    // 1. Primary: imagen-3.0-generate-002 via Google GenAI REST :predict
-    try {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), primaryTimeout);
+    // Define candidate models in priority order
+    // 1. Imagen 3 predict models
+    // 2. Gemini native multimodal image models (generateContent with responseModalities: ["TEXT", "IMAGE"])
+    const candidateModels = [];
+    if (requestedModel && !['auto', 'gemini', 'imagen'].includes(requestedModel)) {
+        candidateModels.push(requestedModel);
+    }
+    candidateModels.push(
+        'imagen-3.0-generate-002',
+        'gemini-2.5-flash-image',
+        'gemini-2.0-flash',
+        'gemini-2.0-flash-exp',
+        'imagen-3.0-fast-generate-001'
+    );
+
+    const triedModels = new Set();
+
+    for (const model of candidateModels) {
+        if (triedModels.has(model)) continue;
+        triedModels.add(model);
+
+        const isImagenPredict = model.includes('imagen-3.0');
+        const timeout = Math.min(25000, timeoutMs);
+
         try {
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${encodeURIComponent(apiKey)}`;
-            const res = await fetch(url, {
-                method: 'POST',
-                signal: controller.signal,
-                headers: {
-                    'Content-Type': 'application/json',
-                    'x-goog-api-key': apiKey
-                },
-                body: JSON.stringify({
-                    instances: [{ prompt }],
-                    parameters: {
-                        sampleCount: 1,
-                        aspectRatio,
-                        outputMimeType: 'image/jpeg'
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), timeout);
+
+            try {
+                if (isImagenPredict) {
+                    // Google GenAI REST :predict
+                    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:predict?key=${encodeURIComponent(apiKey)}`;
+                    const res = await fetch(url, {
+                        method: 'POST',
+                        signal: controller.signal,
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'x-goog-api-key': apiKey
+                        },
+                        body: JSON.stringify({
+                            instances: [{ prompt }],
+                            parameters: {
+                                sampleCount: 1,
+                                aspectRatio,
+                                outputMimeType: 'image/jpeg'
+                            }
+                        })
+                    });
+
+                    if (res.ok) {
+                        const data = await res.json();
+                        const pred = data?.predictions?.[0];
+                        const b64 = pred?.bytesBase64Encoded;
+                        if (b64) {
+                            const mimeType = pred.mimeType || 'image/jpeg';
+                            const buffer = Buffer.from(b64, 'base64');
+                            return { success: true, buffer, contentType: mimeType, model };
+                        }
+                    } else {
+                        const errText = await res.text().catch(() => '');
+                        lastError = new Error(`Imagen (${model}) HTTP ${res.status}: ${errText.slice(0, 200)}`);
+                        console.error(`[image-proxy] Imagen upstream error (${model}):`, res.status, errText.slice(0, 200));
                     }
-                })
-            });
-            if (res.ok) {
-                const data = await res.json();
-                const pred = data?.predictions?.[0];
-                const b64 = pred?.bytesBase64Encoded;
-                if (b64) {
-                    const mimeType = pred.mimeType || 'image/jpeg';
-                    const buffer = Buffer.from(b64, 'base64');
-                    return { buffer, contentType: mimeType, model: 'imagen-3.0' };
-                }
-            } else {
-                const errText = await res.text().catch(() => '');
-                console.error(`[image-proxy] Imagen 3 upstream error (HTTP ${res.status}):`, errText);
-            }
-        } finally {
-            clearTimeout(timer);
-        }
-    } catch (err) {
-        console.error('[image-proxy] Imagen 3 request error:', err?.message || err);
-    }
+                } else {
+                    // Google Gemini REST :generateContent with IMAGE modality
+                    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+                    const res = await fetch(url, {
+                        method: 'POST',
+                        signal: controller.signal,
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'x-goog-api-key': apiKey
+                        },
+                        body: JSON.stringify({
+                            contents: [{ parts: [{ text: prompt }] }],
+                            generationConfig: {
+                                responseModalities: ['TEXT', 'IMAGE']
+                            }
+                        })
+                    });
 
-    // 2. Secondary fallback / mock compatibility: gemini-2.5-flash-image
-    try {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), secondaryTimeout);
-        try {
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key=${encodeURIComponent(apiKey)}`;
-            const res = await fetch(url, {
-                method: 'POST',
-                signal: controller.signal,
-                headers: {
-                    'Content-Type': 'application/json',
-                    'x-goog-api-key': apiKey
-                },
-                body: JSON.stringify({
-                    contents: [{ parts: [{ text: prompt }] }],
-                    generationConfig: {
-                        responseModalities: ['IMAGE']
+                    if (res.ok) {
+                        const data = await res.json();
+                        const parts = data?.candidates?.[0]?.content?.parts || [];
+                        const imagePart = parts.find(p => p.inlineData?.data);
+                        if (imagePart?.inlineData?.data) {
+                            const mimeType = imagePart.inlineData.mimeType || 'image/png';
+                            const buffer = Buffer.from(imagePart.inlineData.data, 'base64');
+                            return { success: true, buffer, contentType: mimeType, model };
+                        }
+                    } else {
+                        const errText = await res.text().catch(() => '');
+                        lastError = new Error(`Gemini (${model}) HTTP ${res.status}: ${errText.slice(0, 200)}`);
+                        console.error(`[image-proxy] Gemini image error (${model}):`, res.status, errText.slice(0, 200));
                     }
-                })
-            });
-            if (res.ok) {
-                const data = await res.json();
-                const part = data?.candidates?.[0]?.content?.parts?.find(p => p.inlineData?.data);
-                if (part?.inlineData?.data) {
-                    const mimeType = part.inlineData.mimeType || 'image/png';
-                    const buffer = Buffer.from(part.inlineData.data, 'base64');
-                    return { buffer, contentType: mimeType, model: 'gemini-2.5-flash-image' };
                 }
-            } else {
-                const errText = await res.text().catch(() => '');
-                console.error(`[image-proxy] Gemini image fallback error (HTTP ${res.status}):`, errText);
+            } finally {
+                clearTimeout(timer);
             }
-        } finally {
-            clearTimeout(timer);
+        } catch (err) {
+            lastError = err;
+            console.error(`[image-proxy] Request error for model ${model}:`, err?.message || err);
         }
-    } catch (err) {
-        console.error('[image-proxy] Gemini image fallback request error:', err?.message || err);
     }
 
-    return null;
-}
-
-function buildPollinationsUrl(prompt, { width = 512, height = 512, model = 'turbo', seed = 42, negativePrompt = '' } = {}) {
-    const encodedPrompt = encodeURIComponent(String(prompt || '').trim());
-    let url = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&model=${encodeURIComponent(model)}&nologo=true&seed=${seed}`;
-    if (negativePrompt && model !== 'turbo') {
-        url += `&negative_prompt=${encodeURIComponent(String(negativePrompt).trim())}`;
-    }
-    return url;
+    return {
+        success: false,
+        code: 'gemini_image_generation_failed',
+        message: lastError?.message || 'Gemini image generation failed across all available models.'
+    };
 }
 
 export async function imageProxyHandler(req, res) {
@@ -145,7 +170,7 @@ export async function imageProxyHandler(req, res) {
         if (typeof res.setHeader === 'function') {
             res.setHeader('Access-Control-Allow-Origin', '*');
             res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-            res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+            res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-gemini-api-key, x-goog-api-key');
         }
         return res.status(204).end();
     }
@@ -173,122 +198,57 @@ export async function imageProxyHandler(req, res) {
 
     const width = Math.min(1280, Math.max(256, Number(params.width) || 512));
     const height = Math.min(1280, Math.max(256, Number(params.height) || 512));
-    const seed = Number(params.seed) || Math.floor(Math.random() * 1000000);
-    const requestedModel = String(params.model || 'imagen-3.0').trim().toLowerCase();
-    const negativePrompt = params.negative_prompt || params.negativePrompt || DEFAULT_IMAGE_NEGATIVE_PROMPT;
+    const requestedModel = String(params.model || '').trim().toLowerCase();
     const acceptsJson = String(req.headers?.['accept'] || '').includes('application/json') || params.response_format === 'json' || params.format === 'json';
-    const clientApiKey = String(
-        req.headers?.['x-gemini-api-key'] ||
-        req.headers?.['x-goog-api-key'] ||
-        params.apiKey ||
-        params.gemini_api_key ||
-        ''
-    ).trim();
+    const clientApiKey = resolveGeminiApiKey('', req, params);
 
-    // Tier 1: Gemini/Imagen-First high-fidelity generation via native Google GenAI REST
-    // Always attempt Gemini/Imagen first when available unless explicitly forced to use Pollinations
-    const forcePollinations = params.provider === 'pollinations' || params.fallback === 'pollinations' || requestedModel === 'pollinations';
-    if (!forcePollinations) {
-        const geminiResult = await generateGeminiImageBuffer(prompt, {
-            width,
-            height,
-            timeoutMs: 35000,
-            apiKey: clientApiKey,
-            aspectRatio: params.aspectRatio || params.aspect_ratio || ''
+    // Route exclusively to Gemini API (Imagen 3 / Gemini multimodal image generation)
+    const geminiResult = await generateGeminiImageBuffer(prompt, {
+        width,
+        height,
+        timeoutMs: 35000,
+        apiKey: clientApiKey,
+        aspectRatio: params.aspectRatio || params.aspect_ratio || '',
+        requestedModel
+    });
+
+    if (geminiResult && geminiResult.success && geminiResult.buffer && geminiResult.buffer.length > 500) {
+        res.setHeader('Content-Type', geminiResult.contentType);
+        res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
+        res.setHeader('X-Image-Model', geminiResult.model);
+
+        if (acceptsJson) {
+            return res.status(200).json({
+                success: true,
+                image: geminiResult.buffer.toString('base64'),
+                dataUrl: `data:${geminiResult.contentType};base64,${geminiResult.buffer.toString('base64')}`,
+                model: geminiResult.model
+            });
+        }
+
+        const responder = typeof res.status === 'function' ? res.status(200) : res;
+        if (responder && typeof responder.send === 'function') return responder.send(geminiResult.buffer);
+        if (responder && typeof responder.end === 'function') return responder.end(geminiResult.buffer);
+        if (typeof res.send === 'function') return res.send(geminiResult.buffer);
+        if (typeof res.end === 'function') return res.end(geminiResult.buffer);
+        return;
+    }
+
+    if (geminiResult?.code === 'missing_gemini_key') {
+        return res.status(401).json({
+            success: false,
+            error: {
+                code: 'missing_gemini_key',
+                message: geminiResult.message || 'Gemini API key is required. Please set GEMINI_API_KEY in your environment.'
+            }
         });
-        if (geminiResult && geminiResult.buffer && geminiResult.buffer.length > 500) {
-            res.setHeader('Content-Type', geminiResult.contentType);
-            res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
-            res.setHeader('X-Image-Model', geminiResult.model);
-
-            if (acceptsJson) {
-                return res.status(200).json({
-                    success: true,
-                    image: geminiResult.buffer.toString('base64'),
-                    dataUrl: `data:${geminiResult.contentType};base64,${geminiResult.buffer.toString('base64')}`,
-                    model: geminiResult.model
-                });
-            }
-
-            const responder = typeof res.status === 'function' ? res.status(200) : res;
-            if (responder && typeof responder.send === 'function') return responder.send(geminiResult.buffer);
-            if (responder && typeof responder.end === 'function') return responder.end(geminiResult.buffer);
-            if (typeof res.send === 'function') return res.send(geminiResult.buffer);
-            if (typeof res.end === 'function') return res.end(geminiResult.buffer);
-            return;
-        }
-    }
-
-    // Tier 2: Graceful failover to Pollinations (Flux / Turbo)
-    const fallbackModel = (requestedModel.includes('gemini') || requestedModel.includes('google') || requestedModel.includes('imagen')) ? 'flux' : requestedModel;
-    const modelsToTry = Array.from(new Set([fallbackModel, 'flux', 'turbo']));
-
-    let lastError = null;
-    let fallbackDirectUrl = '';
-    for (const model of modelsToTry) {
-        const targetUrl = buildPollinationsUrl(prompt, { width, height, model, seed, negativePrompt });
-        if (!fallbackDirectUrl) fallbackDirectUrl = targetUrl;
-        try {
-            const { buffer, contentType } = await fetchProxyImageBuffer(targetUrl, IMAGE_PROXY_TIMEOUT_MS);
-            if (buffer && buffer.length > 500) {
-                res.setHeader('Content-Type', contentType);
-                res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
-                res.setHeader('X-Image-Model', model);
-
-                if (acceptsJson) {
-                    return res.status(200).json({
-                        success: true,
-                        image: buffer.toString('base64'),
-                        dataUrl: `data:${contentType};base64,${buffer.toString('base64')}`,
-                        model
-                    });
-                }
-
-                const responder = typeof res.status === 'function' ? res.status(200) : res;
-                if (responder && typeof responder.send === 'function') {
-                    return responder.send(buffer);
-                }
-                if (responder && typeof responder.end === 'function') {
-                    return responder.end(buffer);
-                }
-                if (typeof res.send === 'function') {
-                    return res.send(buffer);
-                }
-                if (typeof res.end === 'function') {
-                    return res.end(buffer);
-                }
-                return;
-            }
-        } catch (err) {
-            lastError = err;
-            if (String(err?.message || '').includes('429')) {
-                await new Promise(r => setTimeout(r, 1200));
-            }
-        }
-    }
-
-    // Direct browser redirect failover if serverless proxy times out or is rate limited
-    if (fallbackDirectUrl && req.method === 'GET') {
-        if (typeof res.redirect === 'function') {
-            return res.redirect(307, fallbackDirectUrl);
-        }
-        if (typeof res.setHeader === 'function') {
-            res.setHeader('Location', fallbackDirectUrl);
-        }
-        if (typeof res.status === 'function') {
-            const responder = res.status(307);
-            if (responder && typeof responder.end === 'function') return responder.end();
-        }
-        if (typeof res.end === 'function') {
-            return res.end();
-        }
     }
 
     return res.status(502).json({
         success: false,
         error: {
             code: 'image_generation_failed',
-            message: `Image generation failed across all fallback models: ${lastError?.message || 'Unknown error'}`
+            message: geminiResult?.message || 'Gemini image generation failed.'
         }
     });
 }
