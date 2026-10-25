@@ -8437,7 +8437,7 @@ body:not(.dark) .assistant-followup-chip:hover {
     display: inline-flex;
     flex-direction: column;
     width: 100%;
-    max-width: 270px;
+    max-width: 275px;
     margin: 6px 0;
     padding: 0;
     background: transparent;
@@ -8449,11 +8449,12 @@ body:not(.dark) .assistant-followup-chip:hover {
 .image-gen-viewport {
     position: relative;
     width: 100%;
-    aspect-ratio: 1 / 1;
+    min-height: 250px;
     background: #090d16;
     border-radius: 14px;
     overflow: hidden;
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
     border: 1px solid rgba(129, 140, 248, 0.24);
@@ -8461,14 +8462,19 @@ body:not(.dark) .assistant-followup-chip:hover {
     transition: border-color 0.25s ease, box-shadow 0.25s ease;
 }
 
-.image-gen-viewport:hover {
-    border-color: rgba(129, 140, 248, 0.4);
+.image-gen-viewport.has-image {
+    min-height: auto;
 }
 
+.image-gen-viewport[data-ratio="1:1"]  { aspect-ratio: 1 / 1; }
 .image-gen-viewport[data-ratio="16:9"] { aspect-ratio: 16 / 9; }
 .image-gen-viewport[data-ratio="9:16"] { aspect-ratio: 9 / 16; }
 .image-gen-viewport[data-ratio="4:3"]  { aspect-ratio: 4 / 3; }
 .image-gen-viewport[data-ratio="3:4"]  { aspect-ratio: 3 / 4; }
+
+.image-gen-viewport:hover {
+    border-color: rgba(129, 140, 248, 0.4);
+}
 
 .image-gen-img {
     width: 100%;
@@ -8486,33 +8492,34 @@ body:not(.dark) .assistant-followup-chip:hover {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    padding: 16px;
-    background: linear-gradient(135deg, rgba(13, 18, 36, 0.95), rgba(24, 30, 56, 0.92), rgba(16, 14, 34, 0.95));
+    padding: 12px 10px;
+    background: linear-gradient(135deg, rgba(13, 18, 36, 0.96), rgba(24, 30, 56, 0.94), rgba(16, 14, 34, 0.96));
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
     z-index: 2;
     transition: opacity 0.3s ease;
 }
 
-/* Small Box Getting Scratched Animation */
+/* Small Box Getting Scratched Animation - Compact & Crisp */
 .image-scratch-box {
     position: relative;
-    width: 64px;
-    height: 64px;
-    margin-bottom: 12px;
+    width: 50px;
+    height: 50px;
+    margin-bottom: 8px;
     display: flex;
     align-items: center;
     justify-content: center;
+    flex-shrink: 0;
 }
 
 .image-scratch-canvas {
     position: relative;
-    width: 58px;
-    height: 58px;
-    border-radius: 10px;
+    width: 46px;
+    height: 46px;
+    border-radius: 8px;
     background: rgba(15, 23, 42, 0.85);
     border: 1.5px solid rgba(129, 140, 248, 0.32);
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4), inset 0 0 10px rgba(99, 102, 241, 0.18), 0 0 12px rgba(129, 140, 248, 0.2);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4), inset 0 0 8px rgba(99, 102, 241, 0.18), 0 0 10px rgba(129, 140, 248, 0.2);
     overflow: hidden;
 }
 
@@ -8575,7 +8582,7 @@ body:not(.dark) .assistant-followup-chip:hover {
 .scratch-foil-sheen {
     position: absolute;
     inset: 0;
-    border-radius: 9px;
+    border-radius: 7px;
     background: linear-gradient(115deg, transparent 20%, rgba(255, 255, 255, 0.16) 48%, rgba(192, 132, 252, 0.22) 55%, transparent 75%);
     background-size: 200% 100%;
     animation: scratch-foil-sweep 2.2s ease-in-out infinite;
@@ -8592,8 +8599,8 @@ body:not(.dark) .assistant-followup-chip:hover {
     position: absolute;
     top: 0;
     left: 0;
-    width: 20px;
-    height: 20px;
+    width: 17px;
+    height: 17px;
     pointer-events: none;
     z-index: 3;
     animation: scratch-pencil-dance 1.4s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
@@ -8601,25 +8608,25 @@ body:not(.dark) .assistant-followup-chip:hover {
 }
 
 @keyframes scratch-pencil-dance {
-    0% { transform: translate(10px, 6px) rotate(-18deg); }
-    15% { transform: translate(38px, 12px) rotate(8deg); }
-    30% { transform: translate(12px, 22px) rotate(-22deg); }
-    45% { transform: translate(40px, 28px) rotate(12deg); }
-    60% { transform: translate(14px, 36px) rotate(-15deg); }
-    75% { transform: translate(36px, 42px) rotate(6deg); }
-    90% { transform: translate(18px, 16px) rotate(-10deg); }
-    100% { transform: translate(10px, 6px) rotate(-18deg); }
+    0% { transform: translate(8px, 4px) rotate(-18deg); }
+    15% { transform: translate(30px, 8px) rotate(8deg); }
+    30% { transform: translate(10px, 16px) rotate(-22deg); }
+    45% { transform: translate(32px, 22px) rotate(12deg); }
+    60% { transform: translate(12px, 28px) rotate(-15deg); }
+    75% { transform: translate(28px, 32px) rotate(6deg); }
+    90% { transform: translate(14px, 12px) rotate(-10deg); }
+    100% { transform: translate(8px, 4px) rotate(-18deg); }
 }
 
 .scratch-sparkle {
     position: absolute;
     bottom: -1px;
     left: -1px;
-    width: 5px;
-    height: 5px;
+    width: 4px;
+    height: 4px;
     background: #ffffff;
     border-radius: 50%;
-    box-shadow: 0 0 6px 2px rgba(165, 180, 252, 0.95), 0 0 10px 4px rgba(192, 132, 252, 0.6);
+    box-shadow: 0 0 5px 2px rgba(165, 180, 252, 0.95), 0 0 8px 3px rgba(192, 132, 252, 0.6);
     animation: scratch-sparkle-flicker 0.25s infinite alternate;
 }
 
@@ -8644,36 +8651,46 @@ body:not(.dark) .assistant-followup-chip:hover {
     opacity: 0.2;
 }
 
-/* Status Text & Progress */
+/* Status Text & Progress - Balanced & Protected Against Text Breaking */
 .image-gen-status-text {
-    font-size: 12.5px;
+    font-size: 13px;
     font-weight: 600;
     color: #f8fafc;
     text-align: center;
-    margin-bottom: 6px;
+    margin: 4px 0 2px 0;
     letter-spacing: -0.01em;
+    line-height: 1.35;
+    padding: 0 8px;
+    word-break: normal;
+    overflow-wrap: break-word;
+    text-wrap: balance;
+    max-width: 240px;
     text-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
-    max-width: 220px;
 }
 
 .image-gen-status-sub {
-    font-size: 10.5px;
-    color: rgba(226, 232, 240, 0.7);
+    font-size: 11px;
+    color: rgba(226, 232, 240, 0.72);
     text-align: center;
-    margin-top: 5px;
-    margin-bottom: 0;
-    max-width: 220px;
-    line-height: 1.3;
+    margin: 3px 0 0 0;
+    line-height: 1.35;
+    padding: 0 10px;
+    word-break: normal;
+    overflow-wrap: break-word;
+    text-wrap: balance;
+    max-width: 240px;
 }
 
 .image-gen-progress-bar-bg {
     width: 100%;
-    max-width: 140px;
+    max-width: 130px;
     height: 3.5px;
+    margin: 4px 0 2px 0;
     background: rgba(255, 255, 255, 0.08);
     border-radius: 9999px;
     overflow: hidden;
     box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35);
+    flex-shrink: 0;
 }
 
 .image-gen-progress-bar-fill {
@@ -8691,11 +8708,13 @@ body:not(.dark) .assistant-followup-chip:hover {
     100% { background-position: 200% 0%; }
 }
 
-/* Retry Button (Single, Inside Viewport) */
+/* Retry Button (Single, Inside Viewport) - Fully Protected from Clipping */
 .image-scratch-retry-wrap {
     margin-top: 10px;
+    margin-bottom: 2px;
     display: inline-flex;
     justify-content: center;
+    flex-shrink: 0;
 }
 
 .image-scratch-retry-wrap.hidden {
@@ -8706,20 +8725,22 @@ body:not(.dark) .assistant-followup-chip:hover {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 5px 12px;
-    background: rgba(99, 102, 241, 0.22);
-    border: 1px solid rgba(99, 102, 241, 0.45);
+    padding: 5px 14px;
+    background: rgba(99, 102, 241, 0.24);
+    border: 1px solid rgba(129, 140, 248, 0.45);
     border-radius: 9999px;
-    color: #c7d2fe;
+    color: #e0e7ff;
     font-size: 11.5px;
     font-weight: 600;
     cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    flex-shrink: 0;
 }
 
 .image-scratch-retry-btn:hover {
-    background: rgba(99, 102, 241, 0.38);
-    border-color: rgba(99, 102, 241, 0.65);
+    background: rgba(99, 102, 241, 0.4);
+    border-color: rgba(129, 140, 248, 0.7);
     color: #ffffff;
     transform: scale(1.04);
 }
@@ -8826,9 +8847,52 @@ body:not(.dark) .assistant-followup-chip:hover {
     flex-shrink: 0;
 }
 
+/* Device Responsive Rules across all screens */
 @media (max-width: 480px) {
     .image-gen-card {
         max-width: 250px;
+    }
+    .image-gen-viewport {
+        min-height: 240px;
+        border-radius: 12px;
+    }
+    .image-gen-status-text {
+        font-size: 12px;
+        max-width: 220px;
+    }
+    .image-gen-status-sub {
+        font-size: 10.5px;
+        max-width: 220px;
+    }
+    .image-scratch-box {
+        width: 46px;
+        height: 46px;
+        margin-bottom: 6px;
+    }
+    .image-scratch-canvas {
+        width: 42px;
+        height: 42px;
+    }
+    .image-scratch-retry-btn {
+        padding: 4px 12px;
+        font-size: 11px;
+    }
+}
+
+@media (max-width: 360px) {
+    .image-gen-card {
+        max-width: 225px;
+    }
+    .image-gen-viewport {
+        min-height: 230px;
+    }
+    .image-gen-status-text {
+        font-size: 11.5px;
+        max-width: 200px;
+    }
+    .image-gen-status-sub {
+        font-size: 10px;
+        max-width: 200px;
     }
 }
 
