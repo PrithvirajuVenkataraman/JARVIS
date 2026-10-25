@@ -12999,7 +12999,13 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                     activeRetryWrap.style.display = 'inline-flex';
                 }
                 if (activeLabel) {
-                    activeLabel.textContent = isKeyError ? 'Set API Key' : 'Retry';
+                    if (isKeyError || errorMsg === 'API Key Required' || errorMsg === 'Invalid API Key') {
+                        activeLabel.textContent = 'Set API Key';
+                    } else if (errorMsg === 'Quota Exceeded') {
+                        activeLabel.textContent = 'Switch Key';
+                    } else {
+                        activeLabel.textContent = 'Retry';
+                    }
                 }
             };
 
@@ -13115,16 +13121,26 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             const card = document.getElementById(cardId);
             if (!card) return;
             const label = card.querySelector(`#${cardId}-action-label`) || card.querySelector('.image-scratch-retry-btn span');
-            if (label && label.textContent.trim() === 'Set API Key') {
-                const enteredKey = window.prompt('Enter your Google Gemini API key to enable image generation:\n(Get one free at https://aistudio.google.com/app/apikey)');
+            const actionText = label?.textContent?.trim() || '';
+
+            if (actionText === 'Set API Key' || actionText === 'Switch Key') {
+                const promptMsg = actionText === 'Switch Key'
+                    ? 'Gemini quota exceeded for your current key.\nEnter another Google Gemini API key (or link billing at https://aistudio.google.com/):\nLeave blank to retry with the current key.'
+                    : 'Enter your Google Gemini API key to enable image generation:\n(Get one free at https://aistudio.google.com/app/apikey)';
+
+                const enteredKey = window.prompt(promptMsg);
                 if (enteredKey && enteredKey.trim()) {
                     const cleanKey = enteredKey.trim();
                     try {
                         localStorage.setItem('gemini_api_key', cleanKey);
                         localStorage.setItem('GEMINI_API_KEY', cleanKey);
                     } catch (_) {}
-                    window.showTemporaryMessage?.('Gemini API key saved! Regenerating image...');
+                    window.showTemporaryMessage?.('Gemini API key updated! Regenerating image...');
                     regenerateImageCard(cardId);
+                    return;
+                } else if (actionText === 'Switch Key') {
+                    regenerateImageCard(cardId);
+                    return;
                 }
                 return;
             }
