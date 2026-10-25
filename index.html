@@ -7641,6 +7641,10 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             const choice = slashCommandChoices.find(item => item.id === commandId) || slashCommandChoices[slashCommandPickerIndex];
             if (!choice) return;
             closeSlashCommandPicker();
+            if (choice.id === 'image') {
+                activateComposerImageMode({ aspectRatio: '1:1' });
+                return;
+            }
             const input = document.getElementById('text-input');
             if (!input) return;
             input.value = choice.template || '';
@@ -10572,15 +10576,107 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             tray.classList.remove('hidden');
         }
 
+        let composerImageModeState = null;
+
+        function activateComposerImageMode(options = {}) {
+            const ratio = options.aspectRatio || '1:1';
+            composerImageModeState = { active: true, aspectRatio: ratio };
+            const tray = document.getElementById('composer-selection-tray');
+            if (tray) {
+                const existing = document.getElementById('composer-image-chip');
+                if (existing) existing.remove();
+                const chip = document.createElement('div');
+                chip.id = 'composer-image-chip';
+                chip.className = 'composer-selection-chip composer-image-chip';
+                chip.setAttribute('role', 'button');
+                chip.setAttribute('tabindex', '0');
+                chip.setAttribute('title', 'Click to cycle aspect ratio (1:1, 16:9, 9:16, 4:3)');
+                chip.innerHTML = `
+                    <span class="composer-selection-icon" aria-hidden="true">🖼️</span>
+                    <span class="composer-selection-label">Create Image <span class="image-chip-ratio-badge" id="image-chip-ratio">${escapeHtml(ratio)}</span></span>
+                    <button type="button" class="composer-selection-remove" aria-label="Cancel image mode" onclick="deactivateComposerImageMode(event)">×</button>
+                `;
+                chip.addEventListener('click', (e) => {
+                    if (e.target.closest('.composer-selection-remove')) return;
+                    cycleComposerImageRatio(e);
+                });
+                chip.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        cycleComposerImageRatio(e);
+                    }
+                });
+                tray.prepend(chip);
+                tray.classList.remove('hidden');
+            }
+            const input = document.getElementById('text-input') || document.getElementById('composer-textarea');
+            if (input) {
+                if (/^\/(?:image|img|draw|art)\s*$/i.test(input.value.trim())) {
+                    input.value = '';
+                }
+                input.placeholder = 'Describe the image you want to create...';
+                input.focus();
+                autoResizeComposerTextarea?.();
+                toggleSendButton?.();
+            }
+        }
+        window.activateComposerImageMode = activateComposerImageMode;
+
+        function cycleComposerImageRatio(event) {
+            if (event) event.stopPropagation();
+            if (!composerImageModeState) return;
+            const ratios = ['1:1', '16:9', '9:16', '4:3'];
+            const current = composerImageModeState.aspectRatio || '1:1';
+            const nextIdx = (ratios.indexOf(current) + 1) % ratios.length;
+            const nextRatio = ratios[nextIdx];
+            composerImageModeState.aspectRatio = nextRatio;
+            const badge = document.getElementById('image-chip-ratio');
+            if (badge) badge.textContent = nextRatio;
+        }
+        window.cycleComposerImageRatio = cycleComposerImageRatio;
+
+        function deactivateComposerImageMode(event) {
+            if (event) event.stopPropagation();
+            composerImageModeState = null;
+            const chip = document.getElementById('composer-image-chip');
+            if (chip) chip.remove();
+            const tray = document.getElementById('composer-selection-tray');
+            if (tray && !tray.querySelector('.composer-selection-chip')) {
+                tray.classList.add('hidden');
+            }
+            const input = document.getElementById('text-input') || document.getElementById('composer-textarea');
+            if (input) {
+                input.placeholder = 'Ask Jarvis...';
+                toggleSendButton?.();
+            }
+        }
+        window.deactivateComposerImageMode = deactivateComposerImageMode;
+
+        function isComposerImageModeActive() {
+            return Boolean(composerImageModeState?.active);
+        }
+        window.isComposerImageModeActive = isComposerImageModeActive;
+
+        function detectSmartAspectRatio(text) {
+            const str = String(text || '').toLowerCase();
+            if (/\b(?:wallpaper|landscape|wide|widescreen|banner|16:9|16x9)\b/i.test(str)) return '16:9';
+            if (/\b(?:portrait|vertical|story|stories|reel|reels|phone\s+wallpaper|mobile\s+wallpaper|tiktok|9:16|9x16)\b/i.test(str)) return '9:16';
+            if (/\b(?:4:3|4x3)\b/i.test(str)) return '4:3';
+            if (/\b(?:3:4|3x4)\b/i.test(str)) return '3:4';
+            return null;
+        }
+        window.detectSmartAspectRatio = detectSmartAspectRatio;
+
         function clearComposerSelectionTray() {
             pendingSelectionGrounding = null;
+            composerImageModeState = null;
             const tray = document.getElementById('composer-selection-tray');
             if (tray) {
                 tray.innerHTML = '';
                 tray.classList.add('hidden');
             }
             const input = document.getElementById('text-input');
-            if (input && input.placeholder === 'Ask a question about this text...') {
+            if (input && (input.placeholder === 'Ask a question about this text...' || input.placeholder === 'Describe the image you want to create...')) {
                 input.placeholder = 'Ask Jarvis...';
             }
         }
@@ -12780,7 +12876,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             const rawPrompt = (typeof extractImagePrompt === 'function' ? extractImagePrompt(promptText) : '') ||
                 String(promptText || '').replace(/^\/(?:image|img|draw|art)\s*/i, '').replace(/[?!.]+$/, '').trim();
             if (!rawPrompt) {
-                addChatMessage('Please provide a description of what you want to create (e.g. `generate an image of a cosmic nebula`).', false);
+                activateComposerImageMode();
                 return;
             }
             const cleanPrompt = (typeof enhanceImagePromptForAccuracy === 'function')
@@ -12788,7 +12884,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 : rawPrompt;
 
             hideThinkingIndicator();
-            const aspectRatio = options.aspectRatio || '1:1';
+            const aspectRatio = options.aspectRatio || (typeof detectSmartAspectRatio === 'function' ? detectSmartAspectRatio(rawPrompt) : null) || '1:1';
             const cardId = 'img-card-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
 
             let width = 512;
@@ -12971,8 +13067,8 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                     const activeSub = activeCard?.querySelector('.image-gen-status-sub') || subEl;
                     const activeActions = activeCard?.querySelector('.image-gen-actions-bar') || actionsEl;
 
-                    let errorMsg = 'Gemini image generation failed.';
-                    let detailMsg = 'Please verify your GEMINI_API_KEY and network connection.';
+                    let errorMsg = 'Image generation paused.';
+                    let detailMsg = 'Please verify your network connection and tap Retry.';
                     try {
                         let queryUrl = proxyUrl;
                         if (!queryUrl.includes('response_format=json')) {
@@ -12982,10 +13078,15 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                         if (!errRes.ok) {
                             const errData = await errRes.json().catch(() => null);
                             if (errData?.error?.message) {
-                                errorMsg = errData.error.message;
+                                const rawMsg = String(errData.error.message);
+                                if (rawMsg.includes('{') || rawMsg.includes('HTTP 404') || rawMsg.includes('HTTP 500') || rawMsg.includes('is not found')) {
+                                    errorMsg = 'Image generation service temporarily unavailable.';
+                                } else {
+                                    errorMsg = rawMsg;
+                                }
                             }
                             if (errData?.error?.code === 'missing_gemini_key') {
-                                detailMsg = 'Add GEMINI_API_KEY to your .env or environment to generate images.';
+                                detailMsg = 'Add GEMINI_API_KEY to your environment to generate images.';
                             }
                         }
                     } catch (_) {}
@@ -13012,13 +13113,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
         window.handleImageGenerationRequest = handleImageGenerationRequest;
 
         function triggerImageGenerationPrompt() {
-            const input = document.getElementById('composer-textarea') || document.getElementById('text-input') || document.getElementById('user-input');
-            if (input) {
-                input.value = '/image ';
-                input.focus();
-                autoResizeComposerTextarea?.();
-                toggleSendButton?.();
-            }
+            activateComposerImageMode({ aspectRatio: '1:1' });
             closeComposerActionsMenu?.();
         }
         window.triggerImageGenerationPrompt = triggerImageGenerationPrompt;
@@ -14540,6 +14635,15 @@ ${code}
                 return;
             }
             if (event.key === 'Enter' && !event.shiftKey) {
+                const input = document.getElementById('text-input');
+                const val = String(input?.value || '').trim();
+                // If user entered /image or /img alone without a prompt, smoothly transition to image mode!
+                if (/^\/(?:image|img|draw|art)\s*$/i.test(val)) {
+                    event.preventDefault();
+                    if (input) input.value = '';
+                    activateComposerImageMode();
+                    return;
+                }
                 event.preventDefault();
                 sendTextInput();
             }
@@ -14668,6 +14772,32 @@ async function sendTextInput(submission = {}) {
                 return;
             }
             if (hasText || pendingAttachments.length) {
+                if (typeof isComposerImageModeActive === 'function' && isComposerImageModeActive() && hasText) {
+                    const imgPrompt = text;
+                    const ratio = composerImageModeState?.aspectRatio || (typeof detectSmartAspectRatio === 'function' ? detectSmartAspectRatio(imgPrompt) : null) || '1:1';
+                    deactivateComposerImageMode();
+                    if (input) {
+                        input.value = '';
+                        input.style.height = '';
+                        autoResizeComposerTextarea();
+                    }
+                    toggleSendButton();
+                    addChatMessage(imgPrompt, true);
+                    await handleImageGenerationRequest(imgPrompt, { aspectRatio: ratio });
+                    return;
+                }
+                if (/^\/(?:image|img|draw|art)\s*$/i.test(text)) {
+                    if (input) {
+                        input.value = '';
+                        input.style.height = '';
+                        autoResizeComposerTextarea();
+                    }
+                    if (typeof activateComposerImageMode === 'function') {
+                        activateComposerImageMode();
+                    }
+                    toggleSendButton();
+                    return;
+                }
                 if (hasText && handleLocalVoiceCommand(text, inputSource)) {
                     input.value = '';
                     delete input.dataset.inputSource;
@@ -23039,8 +23169,9 @@ function isWakeGreetingText(text) {
             if (slashNorm?.isSlashCommand) {
                 if (slashNorm.command === 'image' || isImageGenerationIntent(text)) {
                     const imgPrompt = slashNorm.payload || extractImagePrompt(text);
-                    logRoutingDebug('processCommand -> image_generation (slash)', text, { imgPrompt });
-                    await handleImageGenerationRequest(imgPrompt || text);
+                    const ratio = (typeof detectSmartAspectRatio === 'function' ? detectSmartAspectRatio(imgPrompt || text) : null) || '1:1';
+                    logRoutingDebug('processCommand -> image_generation (slash)', text, { imgPrompt, ratio });
+                    await handleImageGenerationRequest(imgPrompt || text, { aspectRatio: ratio });
                     return;
                 }
                 if (['agent', 'workflow'].includes(slashNorm.command)) {
@@ -23049,8 +23180,9 @@ function isWakeGreetingText(text) {
                 text = slashNorm.normalizedText || text;
             } else if (isImageGenerationIntent(text)) {
                 const imgPrompt = extractImagePrompt(text);
-                logRoutingDebug('processCommand -> image_generation (direct)', text, { imgPrompt });
-                await handleImageGenerationRequest(imgPrompt || text);
+                const ratio = (typeof detectSmartAspectRatio === 'function' ? detectSmartAspectRatio(imgPrompt || text) : null) || '1:1';
+                logRoutingDebug('processCommand -> image_generation (direct)', text, { imgPrompt, ratio });
+                await handleImageGenerationRequest(imgPrompt || text, { aspectRatio: ratio });
                 return;
             }
             const hasRecentHistory = (Array.isArray(conversationHistory) && conversationHistory.length > 0) ||
