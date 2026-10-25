@@ -52,6 +52,7 @@ async function generateGeminiImageBuffer(prompt, {
     }
 
     let lastError = null;
+    let lastErrorCode = '';
 
     // Define candidate models in priority order: prioritized gemini-3.1-flash-lite-image, then multimodal fallbacks
     const candidateModels = [];
@@ -128,11 +129,10 @@ async function generateGeminiImageBuffer(prompt, {
                             };
                         }
                         if (res.status === 429 || friendlyMsg.includes('quota') || errStatus === 'RESOURCE_EXHAUSTED') {
-                            return {
-                                success: false,
-                                code: 'quota_exceeded',
-                                message: 'Gemini API quota exceeded. Please check your Google AI Studio quota.'
-                            };
+                            lastError = new Error(`Imagen (${model}) HTTP 429: ${friendlyMsg || 'Quota exceeded'}`);
+                            lastErrorCode = 'quota_exceeded';
+                            console.warn(`[image-proxy] Quota limit for ${model}, attempting fallback to next model...`);
+                            continue;
                         }
 
                         lastError = new Error(`Imagen (${model}) HTTP ${res.status}: ${friendlyMsg || errText.slice(0, 150)}`);
@@ -192,11 +192,10 @@ async function generateGeminiImageBuffer(prompt, {
                             };
                         }
                         if (res.status === 429 || friendlyMsg.includes('quota') || errStatus === 'RESOURCE_EXHAUSTED') {
-                            return {
-                                success: false,
-                                code: 'quota_exceeded',
-                                message: 'Gemini API quota exceeded. Please check your Google AI Studio quota.'
-                            };
+                            lastError = new Error(`Gemini (${model}) HTTP 429: ${friendlyMsg || 'Quota exceeded'}`);
+                            lastErrorCode = 'quota_exceeded';
+                            console.warn(`[image-proxy] Quota limit for ${model}, attempting fallback to next model...`);
+                            continue;
                         }
 
                         lastError = new Error(`Gemini (${model}) HTTP ${res.status}: ${friendlyMsg || errText.slice(0, 150)}`);
@@ -210,6 +209,14 @@ async function generateGeminiImageBuffer(prompt, {
             lastError = err;
             console.error(`[image-proxy] Request error for model ${model}:`, err?.message || err);
         }
+    }
+
+    if (lastErrorCode === 'quota_exceeded') {
+        return {
+            success: false,
+            code: 'quota_exceeded',
+            message: 'Gemini API quota exceeded across available models. Please link a billing account or use a key with available quota.'
+        };
     }
 
     return {
