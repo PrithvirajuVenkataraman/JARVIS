@@ -5,8 +5,8 @@
  */
 
 export const DEFAULT_IMAGE_CONFIG = Object.freeze({
-    modelId: 'gemini-2.5-flash-image',
-    modelName: 'Gemini Image Diffusion (Gemini 2.5 Flash)',
+    modelId: 'gemini-3.1-flash-lite-image',
+    modelName: 'Gemini Image Diffusion (Gemini 3.1 Flash Lite Image)',
     quantization: 'int8',
     defaultSteps: 4,
     defaultWidth: 512,
@@ -15,7 +15,7 @@ export const DEFAULT_IMAGE_CONFIG = Object.freeze({
     maxHistoryItems: 50,
     timeoutMs: 60000,
     minVramBytes: 2 * 1024 * 1024 * 1024,
-    model: 'gemini-2.5-flash-image',
+    model: 'gemini-3.1-flash-lite-image',
     defaultNegativePrompt: 'text,watermark,words,letters,signature,typography,lowres,blurry',
     fallbackEndpointTemplate: '/api/image-proxy?prompt={prompt}&width={width}&height={height}&model={model}&negative_prompt={negativePrompt}&seed={seed}',
     storageKey: 'jarvis_image_config_v1'
