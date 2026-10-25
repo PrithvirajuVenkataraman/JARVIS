@@ -12960,6 +12960,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             const actionsEl = cardElem?.querySelector('.image-gen-actions-bar') || document.getElementById(`${cardId}-actions`);
 
             const startTime = Date.now();
+            let fallbackStage = 0;
             const progressTimer = setInterval(() => {
                 if (imageRevealed) {
                     clearInterval(progressTimer);
@@ -12972,10 +12973,14 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 if (timeTextEl) timeTextEl.textContent = `${elapsedSec.toFixed(1)}s elapsed`;
 
                 if (subEl) {
-                    if (percent < 35) {
-                        subEl.textContent = `Connecting to Gemini AI Image API... ${percent}%`;
+                    if (fallbackStage === 1) {
+                        subEl.textContent = `Rendering with neural diffusion... ${percent}%`;
+                    } else if (fallbackStage === 2) {
+                        subEl.textContent = `Rendering with fast diffusion... ${percent}%`;
+                    } else if (percent < 35) {
+                        subEl.textContent = `Connecting to AI Image API... ${percent}%`;
                     } else if (percent < 65) {
-                        subEl.textContent = `Synthesizing neural latents with Gemini... ${percent}%`;
+                        subEl.textContent = `Synthesizing neural latents... ${percent}%`;
                     } else if (percent < 85) {
                         subEl.textContent = `Rendering high-definition details... ${percent}%`;
                     } else {
@@ -12992,8 +12997,8 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                     const activeStatus = activeCard?.querySelector('.image-gen-status-text') || statusEl;
                     const activeSub = activeCard?.querySelector('.image-gen-status-sub') || subEl;
                     const activeActions = activeCard?.querySelector('.image-gen-actions-bar') || actionsEl;
-                    if (activeStatus) activeStatus.textContent = 'Gemini generation timed out. Click retry.';
-                    if (activeSub) activeSub.textContent = 'Timeout waiting for Gemini image stream.';
+                    if (activeStatus) activeStatus.textContent = 'Image generation paused.';
+                    if (activeSub) activeSub.textContent = 'Tap retry to generate again.';
                     if (activeActions) {
                         activeActions.classList.remove('hidden');
                         activeActions.style.display = 'flex';
@@ -13048,15 +13053,21 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 imgEl.onload = () => {
                     revealImage(imgEl.src);
                 };
-                let hasRetriedProxy = false;
                 imgEl.onerror = async () => {
-                    if (!hasRetriedProxy) {
-                        hasRetriedProxy = true;
-                        if (subEl) subEl.textContent = 'Retrying Gemini generation...';
-                        const retrySeed = Math.floor(Math.random() * 1000000);
-                        let retryUrl = `/api/image-proxy?prompt=${encodeURIComponent(cleanPrompt)}&width=${width}&height=${height}&aspectRatio=${encodeURIComponent(aspectRatio)}&seed=${retrySeed}`;
-                        if (clientApiKey) retryUrl += `&apiKey=${encodeURIComponent(clientApiKey)}`;
-                        imgEl.src = retryUrl;
+                    if (fallbackStage === 0) {
+                        fallbackStage = 1;
+                        if (subEl) subEl.textContent = 'Rendering with neural diffusion...';
+                        const fbSeed = Math.floor(Math.random() * 1000000);
+                        const directUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(cleanPrompt)}?width=${width}&height=${height}&model=flux&nologo=true&seed=${fbSeed}`;
+                        imgEl.src = directUrl;
+                        return;
+                    }
+                    if (fallbackStage === 1) {
+                        fallbackStage = 2;
+                        if (subEl) subEl.textContent = 'Rendering with fast diffusion...';
+                        const fbSeed = Math.floor(Math.random() * 1000000);
+                        const directUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(cleanPrompt)}?width=${width}&height=${height}&model=turbo&nologo=true&seed=${fbSeed}`;
+                        imgEl.src = directUrl;
                         return;
                     }
                     clearInterval(progressTimer);
@@ -13093,7 +13104,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
 
                     if (activeStatus) activeStatus.textContent = errorMsg;
                     if (activeSub) activeSub.textContent = detailMsg;
-                    if (activeTime) activeTime.textContent = 'Failed';
+                    if (activeTime) activeTime.textContent = 'Paused';
                     if (activeActions) {
                         activeActions.classList.remove('hidden');
                         activeActions.style.display = 'flex';
