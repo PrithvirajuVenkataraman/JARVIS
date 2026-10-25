@@ -70,7 +70,7 @@ async function generateGeminiImageBuffer(prompt, {
         triedModels.add(model);
 
         const isImagenPredict = model.includes('imagen-3.0');
-        const timeout = Math.min(25000, timeoutMs);
+        const timeout = Math.min(6000, timeoutMs);
 
         try {
             const controller = new AbortController();
@@ -283,6 +283,24 @@ export async function imageProxyHandler(req, res) {
             }
         } catch (fbErr) {
             console.error(`[image-proxy] Tier-2 fallback model ${fbModel} failed:`, fbErr?.message || fbErr);
+        }
+    }
+
+    // Direct browser redirect failover for browser <img> GET requests
+    if (req.method === 'GET' && !acceptsJson) {
+        const directRedirectUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=${width}&height=${height}&model=flux&nologo=true&seed=${fallbackSeed}`;
+        if (typeof res.redirect === 'function') {
+            return res.redirect(307, directRedirectUrl);
+        }
+        if (typeof res.setHeader === 'function') {
+            res.setHeader('Location', directRedirectUrl);
+        }
+        if (typeof res.status === 'function') {
+            const responder = res.status(307);
+            if (responder && typeof responder.end === 'function') return responder.end();
+        }
+        if (typeof res.end === 'function') {
+            return res.end();
         }
     }
 
