@@ -60,7 +60,9 @@ async function generateGeminiImageBuffer(prompt, {
     }
     candidateModels.push(
         'imagen-3.0-generate-002',
-        'gemini-2.5-flash-image'
+        'gemini-2.5-flash-image',
+        'gemini-2.0-flash',
+        'gemini-3.1-flash-image'
     );
 
     const triedModels = new Set();
