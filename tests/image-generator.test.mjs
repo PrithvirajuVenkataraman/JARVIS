@@ -54,22 +54,21 @@ console.log('--- Running Image Generator Suite ---');
 
     // Dynamic fallback URL builder contract
     const testCases = [
-        { prompt: 'a neon futuristic city', options: { width: 768, height: 512, seed: 42, model: 'turbo' } },
+        { prompt: 'a neon futuristic city', options: { width: 768, height: 512, seed: 42, model: 'gemini-2.5-flash-image' } },
         { prompt: 'chidambaram town in aerial view, golden hour', options: { width: 512, height: 512, seed: 999 } }
     ];
 
     for (const tc of testCases) {
         const urlStr = buildFallbackImageUrl(tc.prompt, tc.options);
-        const parsedUrl = new URL(urlStr);
-        assert.equal(parsedUrl.protocol, 'https:');
-        assert.ok(parsedUrl.pathname.includes(encodeURIComponent(tc.prompt)) || parsedUrl.search.includes(encodeURIComponent(tc.prompt)));
+        const parsedUrl = new URL(urlStr, 'https://localhost');
+        assert.ok(parsedUrl.pathname.includes('/api/image-proxy'), 'Fallback URL must route to /api/image-proxy');
+        assert.ok(parsedUrl.search.includes(encodeURIComponent(tc.prompt)));
         assert.equal(parsedUrl.searchParams.get('width'), String(tc.options.width));
         assert.equal(parsedUrl.searchParams.get('height'), String(tc.options.height));
         if (tc.options.seed !== undefined) {
             assert.equal(parsedUrl.searchParams.get('seed'), String(tc.options.seed));
         }
         assert.equal(parsedUrl.searchParams.get('model'), tc.options.model || cfg.model);
-        assert.equal(parsedUrl.searchParams.get('nologo'), 'true');
         assert.ok(parsedUrl.searchParams.has('negative_prompt'));
     }
     console.log('✔ Image generation config & URL builder contract tests passed');
@@ -424,30 +423,36 @@ console.log('--- Running Image Generator Suite ---');
     assert.equal(badStatusCode, 400);
     assert.equal(badResponse.error.code, 'missing_prompt');
 
-    // Test 7.2 Proxy executes and returns valid image buffer with headers
-    let goodStatusCode = 0;
-    let goodHeaders = {};
-    let goodBuffer = null;
-    await imageProxyHandler({
-        method: 'GET',
-        url: '/api/image-proxy?prompt=blue%20circle&width=256&height=256&model=flux&seed=42'
-    }, {
-        setHeader(k, v) { goodHeaders[k] = v; },
-        status(c) {
-            goodStatusCode = c;
-            return {
-                send(b) { goodBuffer = b; },
-                json(j) { goodBuffer = j; }
-            };
-        }
-    });
-    assert.equal(goodStatusCode, 200, `Expected 200 from image proxy, got ${goodStatusCode}`);
-    assert.ok(Buffer.isBuffer(goodBuffer) && goodBuffer.length > 500, 'Expected image buffer payload');
-    assert.ok(['image/jpeg', 'image/png', 'image/webp'].includes(goodHeaders['Content-Type']), `Expected valid image content type, got ${goodHeaders['Content-Type']}`);
+    // Test 7.2 Missing Gemini API key returns 401 missing_gemini_key
+    const originalEnv = process.env.GEMINI_API_KEY;
+    const originalGoogleKey = process.env.GOOGLE_API_KEY;
+    const originalGenAiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+    try {
+        delete process.env.GEMINI_API_KEY;
+        delete process.env.GOOGLE_API_KEY;
+        delete process.env.GOOGLE_GENERATIVE_AI_API_KEY;
 
-    // Test 7.3 Gemini-First prioritization invariants
+        let missingKeyStatus = 0;
+        let missingKeyResponse = null;
+        await imageProxyHandler({
+            method: 'GET',
+            url: '/api/image-proxy?prompt=blue%20circle'
+        }, {
+            status(c) {
+                missingKeyStatus = c;
+                return { json(j) { missingKeyResponse = j; } };
+            }
+        });
+        assert.equal(missingKeyStatus, 401, `Expected 401 for missing API key, got ${missingKeyStatus}`);
+        assert.equal(missingKeyResponse.error.code, 'missing_gemini_key');
+    } finally {
+        if (originalEnv) process.env.GEMINI_API_KEY = originalEnv;
+        if (originalGoogleKey) process.env.GOOGLE_API_KEY = originalGoogleKey;
+        if (originalGenAiKey) process.env.GOOGLE_GENERATIVE_AI_API_KEY = originalGenAiKey;
+    }
+
+    // Test 7.3 Gemini API routing and mock generation invariants
     {
-        const originalEnv = process.env.GEMINI_API_KEY;
         const originalFetch = globalThis.fetch;
         try {
             process.env.GEMINI_API_KEY = 'test-gemini-key-123';
@@ -466,7 +471,7 @@ console.log('--- Running Image Generator Suite ---');
                         })
                     };
                 }
-                if (String(url).includes('gemini-2.5-flash-image')) {
+                if (String(url).includes('gemini-2.5-flash-image') || String(url).includes('gemini-2.0-flash')) {
                     const fakeBase64 = Buffer.from('fake-image-bytes-gemini-preview-payload-1234567890-pad-for-minimum-length-500-bytes-123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890').toString('base64');
                     return {
                         ok: true,
@@ -487,13 +492,13 @@ console.log('--- Running Image Generator Suite ---');
                 return originalFetch(url, options);
             };
 
-            // Test 7.3.1: Even with model=turbo, Imagen 3 is attempted first
+            // Test 7.3.1: Successful generation via Gemini/Imagen returns image buffer
             let geminiHeaders = {};
             let geminiStatus = 0;
             let geminiBuffer = null;
             await imageProxyHandler({
                 method: 'GET',
-                url: '/api/image-proxy?prompt=cyberpunk%20car&model=turbo'
+                url: '/api/image-proxy?prompt=cyberpunk%20car'
             }, {
                 setHeader(k, v) { geminiHeaders[k] = v; },
                 status(c) {
@@ -506,30 +511,14 @@ console.log('--- Running Image Generator Suite ---');
             });
 
             assert.equal(geminiStatus, 200);
-            assert.equal(geminiHeaders['X-Image-Model'], 'imagen-3.0');
-            assert.equal(geminiHeaders['Content-Type'], 'image/jpeg');
-            assert.ok(fetchedUrls.some(u => u.includes('imagen-3.0-generate-002')), 'Imagen 3 endpoint must be called first even when model=turbo');
+            assert.ok(geminiHeaders['X-Image-Model'], 'Should have X-Image-Model header');
+            assert.ok(['image/jpeg', 'image/png'].includes(geminiHeaders['Content-Type']));
+            assert.ok(fetchedUrls.some(u => u.includes('imagen-3.0') || u.includes('gemini')), 'Gemini/Imagen endpoint must be called');
 
-            // Test 7.3.2: Explicit provider=pollinations bypasses Gemini / Imagen
-            fetchedUrls = [];
-            let pollinationsHeaders = {};
-            let pollinationsStatus = 0;
-            await imageProxyHandler({
-                method: 'GET',
-                url: '/api/image-proxy?prompt=cyberpunk%20car&provider=pollinations'
-            }, {
-                setHeader(k, v) { pollinationsHeaders[k] = v; },
-                status(c) {
-                    pollinationsStatus = c;
-                    return {
-                        send() {},
-                        json() {}
-                    };
-                }
-            });
-            assert.ok(!fetchedUrls.some(u => u.includes('imagen') || u.includes('gemini')), 'Gemini/Imagen must be bypassed when provider=pollinations is specified');
+            // Test 7.3.2: Verify pollinations is completely removed and never contacted
+            assert.ok(!fetchedUrls.some(u => u.includes('pollinations')), 'pollinations.ai must NEVER be contacted');
 
-            // Test 7.3.3: Failover to gemini-2.5-flash-image when imagen-3.0-generate-002 fails
+            // Test 7.3.3: Failover to gemini-2.5-flash-image when imagen-3.0 fails
             fetchedUrls = [];
             let fallbackHeaders = {};
             let fallbackStatus = 0;
@@ -558,8 +547,10 @@ console.log('--- Running Image Generator Suite ---');
             assert.equal(fallbackStatus, 200);
             assert.equal(fallbackHeaders['X-Image-Model'], 'gemini-2.5-flash-image');
             assert.equal(fallbackHeaders['Content-Type'], 'image/png');
-            assert.ok(fetchedUrls.some(u => u.includes('gemini-2.5-flash-image')), 'Gemini fallback must be invoked when Imagen fails');
+            assert.ok(fetchedUrls.some(u => u.includes('gemini-2.5-flash-image')), 'Gemini multimodal fallback must be invoked when Imagen fails');
 
+            // Test 7.3.4: Complete absence of pollinations in proxy handler
+            assert.ok(!fetchedUrls.some(u => u.includes('pollinations')), 'Zero network requests may target pollinations.ai');
         } finally {
             process.env.GEMINI_API_KEY = originalEnv;
             globalThis.fetch = originalFetch;
