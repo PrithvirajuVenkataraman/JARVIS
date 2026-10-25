@@ -13015,8 +13015,8 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 const activeRetryWrap = activeCard?.querySelector('.image-scratch-retry-wrap') || retryWrapEl;
 
                 if (activeScratch) activeScratch.classList.add('is-paused');
-                if (activeStatus) activeStatus.textContent = errorMsg;
-                if (activeSub) activeSub.textContent = detailMsg;
+                if (activeStatus) activeStatus.textContent = errorMsg || 'Generation Paused';
+                if (activeSub) activeSub.textContent = detailMsg || 'Check connection or tap Retry below';
                 if (activeProgressBg) activeProgressBg.style.display = 'none';
                 if (activeRetryWrap) {
                     activeRetryWrap.classList.remove('hidden');
@@ -13027,7 +13027,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             let imageRevealed = false;
             const autoFailoverTimeout = setTimeout(() => {
                 if (!imageRevealed) {
-                    showPausedState('Gemini generation paused.', 'Tap Retry to generate again.');
+                    showPausedState('Generation Paused', 'Tap Retry below to generate again.');
                 }
             }, 60000);
 
@@ -13038,12 +13038,14 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 clearTimeout(autoFailoverTimeout);
 
                 const activeCard = document.getElementById(cardId) || cardElem;
+                const activeViewport = activeCard?.querySelector('.image-gen-viewport');
                 const activeImg = activeCard?.querySelector('.image-gen-img') || imgEl;
                 const activeLoader = activeCard?.querySelector('.image-gen-loader-overlay') || loaderEl;
                 const activeActions = activeCard?.querySelector('.image-floating-pencil') || actionsEl;
                 const activeProgress = activeCard?.querySelector('.image-gen-progress-bar-fill') || progressEl;
                 const activeSub = activeCard?.querySelector('.image-gen-status-sub') || subEl;
 
+                if (activeViewport) activeViewport.classList.add('has-image');
                 if (activeProgress) activeProgress.style.width = '100%';
                 if (activeSub) activeSub.textContent = '100% complete';
 
@@ -13083,8 +13085,8 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                         return;
                     }
 
-                    let errorMsg = 'Image generation paused.';
-                    let detailMsg = 'Please verify your network connection and tap Retry.';
+                    let errorMsg = 'Generation Paused';
+                    let detailMsg = 'Check connection or tap Retry below';
                     try {
                         let queryUrl = proxyUrl;
                         if (!queryUrl.includes('response_format=json')) {
@@ -13094,14 +13096,16 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                         if (!errRes.ok) {
                             const errData = await errRes.json().catch(() => null);
                             if (errData?.error?.code === 'missing_gemini_key') {
-                                errorMsg = 'Gemini API key required';
-                                detailMsg = 'Please add GEMINI_API_KEY to your .env or environment.';
+                                errorMsg = 'API Key Required';
+                                detailMsg = 'Add GEMINI_API_KEY to your .env or settings.';
                             } else if (errData?.error?.message) {
                                 const rawMsg = String(errData.error.message);
                                 if (rawMsg.includes('{') || rawMsg.includes('HTTP 404') || rawMsg.includes('HTTP 500') || rawMsg.includes('is not found')) {
-                                    errorMsg = 'Image generation service temporarily unavailable.';
+                                    errorMsg = 'Service Unavailable';
+                                    detailMsg = 'Upstream AI model paused. Tap Retry.';
                                 } else {
-                                    errorMsg = rawMsg;
+                                    errorMsg = 'Generation Paused';
+                                    detailMsg = rawMsg.slice(0, 48);
                                 }
                             }
                         }
