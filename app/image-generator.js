@@ -89,36 +89,28 @@ function getOrCreateWorker() {
 
 async function generateDirectFallback(id, prompt, options = {}, onProgress = null) {
     if (typeof onProgress === 'function') {
-        onProgress({ phase: 'download', percent: 50, message: 'Generating AI image...' });
+        onProgress({ phase: 'download', percent: 50, message: 'Generating Gemini AI image...' });
     }
     const config = getImageConfig();
-    const fallbackUrl = buildFallbackImageUrl(prompt, options);
+    const model = options.model || config.model || 'gemini-2.5-flash-image';
+    const proxyPath = `/api/image-proxy?prompt=${encodeURIComponent(prompt)}&width=${options.width || config.defaultWidth}&height=${options.height || config.defaultHeight}&model=${encodeURIComponent(model)}`;
     const proxyUrl = (typeof window !== 'undefined' && window.location && window.location.origin && window.location.origin.startsWith('http'))
-        ? `${window.location.origin}/api/image-proxy?prompt=${encodeURIComponent(prompt)}&width=${options.width || config.defaultWidth}&height=${options.height || config.defaultHeight}&model=${encodeURIComponent(options.model || config.model || 'imagen-3.0')}`
-        : '';
+        ? `${window.location.origin}${proxyPath}`
+        : proxyPath;
     const startTime = performance.now();
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), options.timeoutMs || 25000);
+    const timeoutId = setTimeout(() => controller.abort(), options.timeoutMs || 35000);
     let res = null;
-    if (proxyUrl) {
-        try {
-            res = await fetch(proxyUrl, { signal: controller.signal });
-            if (!res.ok) res = null;
-        } catch (_) {
-            res = null;
-        }
-    }
-    if (!res) {
-        try {
-            res = await fetch(fallbackUrl, { signal: controller.signal });
-            clearTimeout(timeoutId);
-            if (!res.ok) throw new Error(`Failed to fetch image: HTTP ${res.status}`);
-        } catch (fetchErr) {
-            clearTimeout(timeoutId);
-            throw fetchErr;
-        }
-    } else {
+    try {
+        res = await fetch(proxyUrl, { signal: controller.signal });
         clearTimeout(timeoutId);
+        if (!res.ok) {
+            const errJson = await res.json().catch(() => null);
+            throw new Error(errJson?.error?.message || `Image API returned HTTP ${res.status}`);
+        }
+    } catch (fetchErr) {
+        clearTimeout(timeoutId);
+        throw fetchErr;
     }
     const blob = await res.blob();
     const dataUrl = await new Promise(resolve => {
@@ -134,7 +126,7 @@ async function generateDirectFallback(id, prompt, options = {}, onProgress = nul
                     binary += String.fromCharCode.apply(null, bytes.subarray(i, Math.min(i + 8192, bytes.length)));
                 }
                 resolve(`data:${blob.type || 'image/jpeg'};base64,${btoa(binary)}`);
-            }).catch(() => resolve(fallbackUrl));
+            }).catch(() => resolve(proxyUrl));
         }
     });
     const durationMs = Math.round(performance.now() - startTime);
@@ -144,9 +136,8 @@ async function generateDirectFallback(id, prompt, options = {}, onProgress = nul
         id,
         prompt,
         dataUrl,
-        fallbackUrl,
-        url: fallbackUrl,
-        provider: 'free_cloud',
+        url: proxyUrl,
+        provider: 'gemini_api',
         durationMs,
         width: options.width || config.defaultWidth,
         height: options.height || config.defaultHeight
