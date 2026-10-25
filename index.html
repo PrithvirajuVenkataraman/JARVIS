@@ -12927,9 +12927,9 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 <div id="${cardId}-progress" class="image-gen-progress-bar-fill" style="width: 15%"></div>
             </div>
             <div id="${cardId}-retry-wrap" class="image-scratch-retry-wrap hidden">
-                <button type="button" class="image-scratch-retry-btn" onclick="window.regenerateImageCard('${cardId}')">
+                <button type="button" class="image-scratch-retry-btn" onclick="window.handleImageCardAction('${cardId}')">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
-                    <span>Retry</span>
+                    <span id="${cardId}-action-label">Retry</span>
                 </button>
             </div>
         </div>
@@ -12981,7 +12981,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 if (statusEl) statusEl.textContent = `Generating... ${percent}%`;
             }, 100);
 
-            const showPausedState = (errorMsg) => {
+            const showPausedState = (errorMsg, isKeyError) => {
                 clearInterval(progressTimer);
                 clearTimeout(autoFailoverTimeout);
                 const activeCard = document.getElementById(cardId) || cardElem;
@@ -12989,6 +12989,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 const activeStatus = activeCard?.querySelector('.image-gen-status-text') || statusEl;
                 const activeProgressBg = activeCard?.querySelector('.image-gen-progress-bar-bg') || progressBgEl;
                 const activeRetryWrap = activeCard?.querySelector('.image-scratch-retry-wrap') || retryWrapEl;
+                const activeLabel = activeCard?.querySelector(`#${cardId}-action-label`) || activeRetryWrap?.querySelector('span');
 
                 if (activeSparkle) activeSparkle.classList.add('is-paused');
                 if (activeStatus) activeStatus.textContent = errorMsg || 'Generation paused';
@@ -12996,6 +12997,9 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 if (activeRetryWrap) {
                     activeRetryWrap.classList.remove('hidden');
                     activeRetryWrap.style.display = 'inline-flex';
+                }
+                if (activeLabel) {
+                    activeLabel.textContent = isKeyError ? 'Set API Key' : 'Retry';
                 }
             };
 
@@ -13061,6 +13065,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                     }
 
                     let errorMsg = 'Generation paused';
+                    let isKeyError = false;
                     try {
                         let queryUrl = proxyUrl;
                         if (!queryUrl.includes('response_format=json')) {
@@ -13069,20 +13074,28 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                         const errRes = await fetch(queryUrl);
                         if (!errRes.ok) {
                             const errData = await errRes.json().catch(() => null);
-                            if (errData?.error?.code === 'missing_gemini_key') {
+                            const errCode = errData?.error?.code;
+                            const rawMsg = String(errData?.error?.message || '');
+
+                            if (errCode === 'missing_gemini_key' || rawMsg.includes('missing_gemini_key') || rawMsg.includes('key is required')) {
                                 errorMsg = 'API Key Required';
-                            } else if (errData?.error?.message) {
-                                const rawMsg = String(errData.error.message);
-                                if (rawMsg.includes('{') || rawMsg.includes('HTTP 404') || rawMsg.includes('HTTP 500') || rawMsg.includes('is not found')) {
-                                    errorMsg = 'Service Unavailable';
-                                } else {
-                                    errorMsg = 'Generation paused';
-                                }
+                                isKeyError = true;
+                            } else if (errCode === 'invalid_api_key' || rawMsg.includes('API key not valid') || rawMsg.includes('INVALID_ARGUMENT')) {
+                                errorMsg = 'Invalid API Key';
+                                isKeyError = true;
+                            } else if (errCode === 'quota_exceeded' || rawMsg.includes('quota') || rawMsg.includes('RESOURCE_EXHAUSTED')) {
+                                errorMsg = 'Quota Exceeded';
+                            } else if (rawMsg.includes('HTTP 404') || rawMsg.includes('is not found')) {
+                                errorMsg = 'Model Unavailable';
+                            } else if (rawMsg.includes('HTTP 500') || rawMsg.includes('HTTP 502') || rawMsg.includes('HTTP 503')) {
+                                errorMsg = 'Service Unavailable';
+                            } else {
+                                errorMsg = 'Generation paused';
                             }
                         }
                     } catch (_) {}
 
-                    showPausedState(errorMsg);
+                    showPausedState(errorMsg, isKeyError);
                 };
 
                 // Trigger browser image download immediately
@@ -13098,11 +13111,33 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
         }
         window.triggerImageGenerationPrompt = triggerImageGenerationPrompt;
 
+        function handleImageCardAction(cardId) {
+            const card = document.getElementById(cardId);
+            if (!card) return;
+            const label = card.querySelector(`#${cardId}-action-label`) || card.querySelector('.image-scratch-retry-btn span');
+            if (label && label.textContent.trim() === 'Set API Key') {
+                const enteredKey = window.prompt('Enter your Google Gemini API key to enable image generation:\n(Get one free at https://aistudio.google.com/app/apikey)');
+                if (enteredKey && enteredKey.trim()) {
+                    const cleanKey = enteredKey.trim();
+                    try {
+                        localStorage.setItem('gemini_api_key', cleanKey);
+                        localStorage.setItem('GEMINI_API_KEY', cleanKey);
+                    } catch (_) {}
+                    window.showTemporaryMessage?.('Gemini API key saved! Regenerating image...');
+                    regenerateImageCard(cardId);
+                }
+                return;
+            }
+            regenerateImageCard(cardId);
+        }
+        window.handleImageCardAction = handleImageCardAction;
+
         function regenerateImageCard(cardId) {
             const card = document.getElementById(cardId);
             if (!card) return;
             const prompt = card.dataset.prompt;
             const ratio = card.dataset.aspectRatio || '1:1';
+            card.remove();
             handleImageGenerationRequest(prompt, { aspectRatio: ratio });
         }
         window.regenerateImageCard = regenerateImageCard;
