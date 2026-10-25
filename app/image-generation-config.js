@@ -1,12 +1,12 @@
 /**
  * @file app/image-generation-config.js
- * @description Dynamic, non-hardcoded configuration engine for zero-cost WebGPU
- * image generation and graceful zero-cost fallback routing.
+ * @description Dynamic, non-hardcoded configuration engine for Gemini AI
+ * image generation and proxy routing.
  */
 
 export const DEFAULT_IMAGE_CONFIG = Object.freeze({
-    modelId: 'latent-consistency/lcm-dreamshaper-v7',
-    modelName: 'LCM-Dreamshaper-v7 (4-Step WebGPU)',
+    modelId: 'gemini-2.5-flash-image',
+    modelName: 'Gemini Image Diffusion (Gemini 2.5 Flash)',
     quantization: 'int8',
     defaultSteps: 4,
     defaultWidth: 512,
@@ -14,10 +14,10 @@ export const DEFAULT_IMAGE_CONFIG = Object.freeze({
     guidanceScale: 1.0,
     maxHistoryItems: 50,
     timeoutMs: 60000,
-    minVramBytes: 2 * 1024 * 1024 * 1024, // 2GB minimum VRAM heuristic
-    model: 'imagen-3.0',
+    minVramBytes: 2 * 1024 * 1024 * 1024,
+    model: 'gemini-2.5-flash-image',
     defaultNegativePrompt: 'text,watermark,words,letters,signature,typography,lowres,blurry',
-    fallbackEndpointTemplate: 'https://image.pollinations.ai/prompt/{prompt}?width={width}&height={height}&model={model}&negative_prompt={negativePrompt}&nologo=true&seed={seed}',
+    fallbackEndpointTemplate: '/api/image-proxy?prompt={prompt}&width={width}&height={height}&model={model}&negative_prompt={negativePrompt}&seed={seed}',
     storageKey: 'jarvis_image_config_v1'
 });
 
@@ -81,7 +81,7 @@ export function resetImageConfig() {
 }
 
 /**
- * Dynamically builds a zero-cost fallback URL by injecting prompt and dimensions.
+ * Dynamically builds the Gemini image proxy URL by injecting prompt and dimensions.
  * @param {string} prompt
  * @param {object} [options]
  * @returns {string}
@@ -91,7 +91,7 @@ export function buildFallbackImageUrl(prompt, options = {}) {
     const template = String(options.template || config.fallbackEndpointTemplate);
     const width = Number(options.width || config.defaultWidth);
     const height = Number(options.height || config.defaultHeight);
-    const model = String(options.model || config.model || 'turbo');
+    const model = String(options.model || config.model || 'gemini-2.5-flash-image');
     const negativePrompt = encodeURIComponent(String(options.negativePrompt || config.defaultNegativePrompt || 'text,watermark,words,letters,signature,typography,lowres,blurry'));
     const seed = Number(options.seed || Math.floor(Math.random() * 1000000));
     const encodedPrompt = encodeURIComponent(String(prompt || '').trim());
