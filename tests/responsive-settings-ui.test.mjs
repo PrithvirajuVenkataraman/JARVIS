@@ -177,5 +177,42 @@ assert.ok(
 );
 console.log('  [PASS] 4.1 Safety & Data description is minimal and jargon-free');
 
+// =========================================================================
+// Section 5: Settings Action Button Width, Image Gallery Persistence & Multimodal Search
+// =========================================================================
+console.log('--- Section 5: Settings Action Button Width, Image Gallery Persistence & Multimodal Search ---');
+
+// 5.1 Action button width & padding expansion
+assert.ok(
+    stylesCss.includes('.settings-action-btn {') &&
+    stylesCss.includes('min-width: 104px !important;') &&
+    stylesCss.includes('padding: 0 16px !important;') &&
+    stylesCss.includes('white-space: nowrap !important;'),
+    '.settings-action-btn must have ample min-width (104px), 16px padding, and nowrap text'
+);
+
+assert.ok(
+    stylesCss.includes('min-width: 92px !important;') &&
+    stylesCss.includes('min-width: 86px !important;'),
+    'Responsive media queries must maintain comfortable button widths on smaller screens'
+);
+
+// 5.2 Immediate Image Gallery persistence upon image reveal
+assert.ok(
+    indexHtml.includes('window.JarvisImageStorage?.saveImage') &&
+    indexHtml.includes('jarvis_recent_images_meta'),
+    'revealImage must immediately persist generated images to JarvisImageStorage and localStorage fallback'
+);
+
+// 5.3 Multimodal media attachment live web search integration
+assert.ok(
+    indexHtml.includes('const userOptedWebSearch = Boolean(') &&
+    indexHtml.includes('getWebSearchMode() === \'force\'') &&
+    indexHtml.includes('web_search_multimodal'),
+    'Attachment processing must trigger live web search when user opts for web search'
+);
+
+console.log('  [PASS] 5.1 Settings action button width, gallery auto-save, and multimodal search verified');
+
 console.log('=== All Responsive Settings UI Tests PASSED ===');
 
