@@ -604,6 +604,63 @@ console.log('--- Running Image Generator Suite ---');
             assert.equal(interactionPayload.generation_config?.thinking_level, 'minimal');
             assert.equal(interactionPayload.generation_config?.image_config?.image_size, '1K');
             assert.equal(interactionPayload.generation_config?.image_config?.aspect_ratio, '16:9');
+
+            // Test 7.3.6: AI Horde fallback when Gemini returns quota_exceeded (429)
+            let hordeHeaders = {};
+            let hordeStatus = 0;
+            const fakeHordeImage = Buffer.from('fake-horde-image-bytes-testing-payload-pad-for-over-100-bytes-1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890').toString('base64');
+            globalThis.fetch = async (url, options) => {
+                const u = String(url);
+                if (u.includes('generativelanguage.googleapis.com')) {
+                    // All Gemini calls return 429 quota exceeded
+                    return {
+                        ok: false,
+                        status: 429,
+                        text: async () => JSON.stringify({ error: { message: 'Quota exceeded', status: 'RESOURCE_EXHAUSTED' } })
+                    };
+                }
+                if (u.includes('aihorde.net/api/v2/generate/async')) {
+                    return {
+                        ok: true,
+                        json: async () => ({ id: 'mock-horde-job-id' })
+                    };
+                }
+                if (u.includes('aihorde.net/api/v2/generate/check/')) {
+                    return {
+                        ok: true,
+                        json: async () => ({ done: true, finished: 1 })
+                    };
+                }
+                if (u.includes('aihorde.net/api/v2/generate/status/')) {
+                    return {
+                        ok: true,
+                        json: async () => ({
+                            generations: [{
+                                img: fakeHordeImage,
+                                model: 'stable_diffusion'
+                            }]
+                        })
+                    };
+                }
+                return originalFetch(url, options);
+            };
+
+            await imageProxyHandler({
+                method: 'GET',
+                url: '/api/image-proxy?prompt=cyberpunk%20car'
+            }, {
+                setHeader(k, v) { hordeHeaders[k] = v; },
+                status(c) {
+                    hordeStatus = c;
+                    return {
+                        send() {},
+                        json() {}
+                    };
+                }
+            });
+
+            assert.equal(hordeStatus, 200, 'AI Horde fallback must return 200 when Gemini quota is exceeded');
+            assert.equal(hordeHeaders['X-Image-Model'], 'aihorde-stable_diffusion');
         } finally {
             process.env.GEMINI_API_KEY = originalEnv;
             globalThis.fetch = originalFetch;
