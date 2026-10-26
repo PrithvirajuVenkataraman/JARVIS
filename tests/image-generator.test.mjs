@@ -706,5 +706,35 @@ console.log('--- Running Image Generator Suite ---');
     console.log('✔ Image prompt accuracy, entity grounding, and artistic preservation tests passed');
 }
 
+// 9. Lightbox Download Button Alignment & Prompt Caption Deletion Invariants
+{
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const cssPath = path.resolve('styles.css');
+    const cssContent = fs.readFileSync(cssPath, 'utf8');
+
+    // 9.1 Lightbox download action button must center the symbol to the wordings
+    assert.match(cssContent, /\.image-gen-action-btn\s*\{[^}]*display:\s*inline-flex/s, 'Button must use inline-flex');
+    assert.match(cssContent, /\.image-gen-action-btn\s*\{[^}]*align-items:\s*center/s, 'Button must center items vertically');
+    assert.match(cssContent, /\.image-gen-action-btn\s*\{[^}]*justify-content:\s*center/s, 'Button must center content horizontally');
+    assert.match(cssContent, /\.image-gen-action-btn svg\s*\{[^}]*vertical-align:\s*middle/s, 'SVG symbol must be vertically centered');
+
+    // 9.2 Lightbox caption must be deleted / hidden from view
+    assert.match(cssContent, /\.image-lightbox-caption\s*\{[^}]*display:\s*none\s*!important/s, 'Prompt caption must be hidden');
+
+    const indexPath = path.resolve('index.html');
+    const indexContent = fs.readFileSync(indexPath, 'utf8');
+
+    // 9.3 Lightbox DOM must have action button with centered structure
+    assert.match(indexContent, /class="image-gen-action-btn"[^>]*onclick="downloadLightboxImage\(\)"/s);
+    assert.match(indexContent, /id="image-lightbox-caption"[^>]*style="display:\s*none;"/s);
+
+    // 9.4 Handler contracts: prompt caption text must not be displayed
+    assert.match(indexContent, /caption\.textContent\s*=\s*'';/);
+    assert.match(indexContent, /caption\.style\.display\s*=\s*'none';/);
+
+    console.log('✔ Lightbox download button centering and prompt caption deletion verified');
+}
+
 console.log('--- All Image Generator & Command Tests Passed Successfully! ---');
 
