@@ -20,6 +20,8 @@ import { annotateCorroboration, shouldCorroborate, corroborationScoreDelta } fro
 import { validateAndSanitizeTemporalClaims, stripInlineCitationMarkers } from './_lib/entity-verifier.js';
 import { isObservabilityEnabled, createSearchTelemetryTracker } from './_lib/search-telemetry.js';
 import { isResponseCacheEnabled, getSearchResponseCache, setSearchResponseCache, buildSearchCacheKey } from './_lib/search-response-cache.js';
+import { evaluateDeepCorroboration, isEarlyExitEnabled } from '../app/search/corroboration.mjs';
+import { getCircuitBreakerDebugState } from '../app/search/circuitBreaker.mjs';
 
 const SERPER_SEARCH_URL = 'https://google.serper.dev/search';
 const WIKIPEDIA_SEARCH_URL = 'https://en.wikipedia.org/w/api.php';
@@ -1338,25 +1340,92 @@ export async function searchPublicSources(query, options = {}) {
     const fastTasks = [taskNews, taskDdg, taskSearXNG, taskWiki, taskWikidata, taskYahoo, taskGov, taskGemini];
     const allTasks = [...fastTasks, taskGdelt];
 
-    // Wait for fast tasks to complete (or time out after 2800ms)
-    let fastCompleted = false;
-    const fastPromise = Promise.all(fastTasks).then(() => { fastCompleted = true; });
-    await Promise.race([
-        fastPromise,
-        new Promise(res => setTimeout(res, Math.min(boundedTimeoutMs, 2800)))
-    ]);
+    const raceStartMs = Date.now();
+    let exitReason = 'all_settled';
+    let timeToExitMs = 0;
+    let earlyExitCorroboration = null;
+    let earlyExitTriggered = false;
+
+    const earlyExitActive = isEarlyExitEnabled(options);
 
     const getFastCount = () => (liveNews.length + ddgWeb.length + searxngWeb.length + wiki.length + wikidata.length + liveWeb.length + governmentRoleResults.length + geminiGroundingResults.length);
     const getGeneralWebCount = () => (ddgWeb.length + searxngWeb.length + wiki.length + wikidata.length + liveWeb.length + geminiGroundingResults.length);
 
-    // If fast tasks returned sufficient sources AND at least 1 general web source arrived (or leadership query), proceed.
-    // Otherwise wait for trailing tasks (GDELT) up to boundedTimeoutMs.
-    if (getFastCount() < 2 || (!isLeadership && getGeneralWebCount() === 0)) {
+    // Create an early-exit resolver promise
+    let triggerEarlyExitResolve;
+    const earlyExitPromise = new Promise(resolve => {
+        triggerEarlyExitResolve = resolve;
+    });
+
+    const checkEarlyExit = () => {
+        if (!earlyExitActive || earlyExitTriggered) return;
+        const currentPool = [
+            ...geminiGroundingResults,
+            ...governmentRoleResults,
+            ...wikidata,
+            ...wiki,
+            ...searxngWeb,
+            ...ddgWeb,
+            ...liveWeb,
+            ...liveNews
+        ].filter(Boolean);
+
+        const evalResult = evaluateDeepCorroboration(currentPool);
+        const hasGeneralWeb = isLeadership || getGeneralWebCount() >= 1;
+        if (evalResult.satisfied && hasGeneralWeb) {
+            earlyExitTriggered = true;
+            earlyExitCorroboration = evalResult;
+            exitReason = 'early_exit';
+            timeToExitMs = Date.now() - raceStartMs;
+            console.log(`[SearchEarlyExit] exitReason="early_exit" timeToExitMs=${timeToExitMs} sources=${evalResult.verifiedCount} domains=${evalResult.domainCount}`);
+            triggerEarlyExitResolve(evalResult);
+        }
+    };
+
+    // Attach listener to each fast task so we trigger the cutoff immediately when condition is met
+    if (earlyExitActive) {
+        checkEarlyExit();
+        fastTasks.forEach(task => {
+            if (task && typeof task.then === 'function') {
+                task.then(checkEarlyExit).catch(() => {});
+            }
+        });
+    }
+
+    // Wait for fast tasks to complete (or early exit or time out after 2800ms)
+    const fastPromise = Promise.all(fastTasks).then(() => {
+        if (!earlyExitTriggered) {
+            exitReason = 'all_settled';
+            timeToExitMs = Date.now() - raceStartMs;
+        }
+    });
+
+    const deadlineMs = Math.min(boundedTimeoutMs, 2800);
+    const deadlinePromise = new Promise(res => setTimeout(res, deadlineMs)).then(() => {
+        if (!earlyExitTriggered && exitReason !== 'all_settled') {
+            exitReason = 'deadline';
+            timeToExitMs = Date.now() - raceStartMs;
+            console.log(`[SearchEarlyExit] exitReason="deadline" timeToExitMs=${timeToExitMs} sources=${getFastCount()}`);
+        }
+    });
+
+    await Promise.race([
+        fastPromise,
+        earlyExitPromise,
+        deadlinePromise
+    ]);
+
+    // If early exit was NOT triggered, and fast tasks returned insufficient sources, wait for trailing tasks (GDELT)
+    if (!earlyExitTriggered && (getFastCount() < 2 || (!isLeadership && getGeneralWebCount() === 0))) {
         const remainingMs = Math.max(50, boundedTimeoutMs - 2800);
         await Promise.race([
             Promise.all(allTasks),
             new Promise(res => setTimeout(res, remainingMs))
         ]);
+    }
+
+    if (!timeToExitMs) {
+        timeToExitMs = Date.now() - raceStartMs;
     }
 
     const combined = [
@@ -1399,6 +1468,14 @@ export async function searchPublicSources(query, options = {}) {
         tracker.logReport();
         deduped.__telemetry = tracker.getReport();
     }
+
+    const finalEval = earlyExitCorroboration || evaluateDeepCorroboration(deduped);
+    deduped.__earlyExit = {
+        exitReason,
+        timeToExitMs,
+        sourceCount: finalEval.verifiedCount,
+        domainCount: finalEval.domainCount
+    };
 
     return deduped;
 }
@@ -6554,5 +6631,8 @@ export const __test = {
     isStandaloneInvariant,
     deriveEpistemicLedger,
     buildHierarchicalFacetQuery,
-    BOILERPLATE_ENTITIES
+    BOILERPLATE_ENTITIES,
+    getCircuitBreakerDebugState
 };
+
+export { getCircuitBreakerDebugState };
