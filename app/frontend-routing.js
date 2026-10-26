@@ -1570,7 +1570,7 @@ export function decideFrontendRoute(text, context = {}) {
         };
         FRONTEND_ROUTE_CACHE.set(cacheKey, res);
         return res;
-    }
+    } 
 
     const res = {
         ...base,
