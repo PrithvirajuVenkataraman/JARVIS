@@ -369,7 +369,8 @@ async function generateGeminiImageBuffer(prompt, {
 async function generateAiHordeImageBuffer(prompt, {
     width = 512,
     height = 512,
-    timeoutMs = 28000,
+    steps = 35,
+    timeoutMs = 32000,
     apiKey: customKey = ''
 } = {}) {
     const apiKey = customKey || process.env.AI_HORDE_API_KEY || '0000000000';
@@ -401,7 +402,7 @@ async function generateAiHordeImageBuffer(prompt, {
             params: {
                 width: targetWidth,
                 height: targetHeight,
-                steps: 28,
+                steps: Math.min(50, Math.max(20, steps || 35)),
                 cfg_scale: 7.5,
                 sampler_name: 'k_dpmpp_2m',
                 karras: true,
@@ -532,7 +533,8 @@ export async function imageProxyHandler(req, res) {
             const hordeResult = await generateAiHordeImageBuffer(prompt, {
                 width,
                 height,
-                timeoutMs: 25000,
+                steps: 35,
+                timeoutMs: 32000,
                 apiKey: process.env.AI_HORDE_API_KEY || ''
             });
             if (hordeResult && hordeResult.success && hordeResult.buffer && hordeResult.buffer.length > 100) {
