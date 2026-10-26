@@ -8471,13 +8471,21 @@ body:not(.dark) .assistant-followup-chip:hover {
     min-height: 0 !important;
     height: auto !important;
     aspect-ratio: auto !important;
+    display: block !important;
 }
 
-.image-gen-viewport:not(.has-image)[data-ratio="1:1"]  { aspect-ratio: 1 / 1; }
-.image-gen-viewport:not(.has-image)[data-ratio="16:9"] { aspect-ratio: 16 / 9; }
-.image-gen-viewport:not(.has-image)[data-ratio="9:16"] { aspect-ratio: 9 / 16; }
-.image-gen-viewport:not(.has-image)[data-ratio="4:3"]  { aspect-ratio: 4 / 3; }
-.image-gen-viewport:not(.has-image)[data-ratio="3:4"]  { aspect-ratio: 3 / 4; }
+.image-gen-viewport:has(.image-gen-img[src]:not(.hidden)) {
+    min-height: 0 !important;
+    height: auto !important;
+    aspect-ratio: auto !important;
+    display: block !important;
+}
+
+.image-gen-viewport:not(.has-image):not(:has(.image-gen-img[src]:not(.hidden)))[data-ratio="1:1"]  { aspect-ratio: 1 / 1; }
+.image-gen-viewport:not(.has-image):not(:has(.image-gen-img[src]:not(.hidden)))[data-ratio="16:9"] { aspect-ratio: 16 / 9; }
+.image-gen-viewport:not(.has-image):not(:has(.image-gen-img[src]:not(.hidden)))[data-ratio="9:16"] { aspect-ratio: 9 / 16; }
+.image-gen-viewport:not(.has-image):not(:has(.image-gen-img[src]:not(.hidden)))[data-ratio="4:3"]  { aspect-ratio: 4 / 3; }
+.image-gen-viewport:not(.has-image):not(:has(.image-gen-img[src]:not(.hidden)))[data-ratio="3:4"]  { aspect-ratio: 3 / 4; }
 
 .image-gen-viewport:hover {
     border-color: rgba(129, 140, 248, 0.4);
@@ -8794,7 +8802,7 @@ body:not(.dark) .assistant-followup-chip:hover {
     .image-gen-card {
         max-width: 250px;
     }
-    .image-gen-viewport:not(.has-image) {
+    .image-gen-viewport:not(.has-image):not(:has(.image-gen-img[src]:not(.hidden))) {
         min-height: 240px;
         border-radius: 14px;
     }
@@ -8816,7 +8824,7 @@ body:not(.dark) .assistant-followup-chip:hover {
     .image-gen-card {
         max-width: 225px;
     }
-    .image-gen-viewport:not(.has-image) {
+    .image-gen-viewport:not(.has-image):not(:has(.image-gen-img[src]:not(.hidden))) {
         min-height: 220px;
     }
     .image-gen-status-text {
