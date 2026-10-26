@@ -13055,57 +13055,50 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             }
 
             if (imgEl) {
-                imgEl.onload = () => {
-                    revealImage(imgEl.src);
-                };
-                let hasRetried = false;
-                imgEl.onerror = async () => {
-                    if (!hasRetried) {
-                        hasRetried = true;
-                        if (statusEl) statusEl.textContent = 'Retrying...';
-                        const retrySeed = Math.floor(Math.random() * 1000000);
-                        let retryUrl = `/api/image-proxy?prompt=${encodeURIComponent(cleanPrompt)}&width=${width}&height=${height}&aspectRatio=${encodeURIComponent(aspectRatio)}&seed=${retrySeed}`;
-                        if (clientApiKey) retryUrl += `&apiKey=${encodeURIComponent(clientApiKey)}`;
-                        imgEl.src = retryUrl;
-                        return;
+                (async () => {
+                    let fetchUrl = proxyUrl;
+                    if (!fetchUrl.includes('response_format=json')) {
+                        fetchUrl += '&response_format=json';
                     }
-
-                    let errorMsg = 'Generation paused';
-                    let isKeyError = false;
                     try {
-                        let queryUrl = proxyUrl;
-                        if (!queryUrl.includes('response_format=json')) {
-                            queryUrl += '&response_format=json';
-                        }
-                        const errRes = await fetch(queryUrl);
-                        if (!errRes.ok) {
-                            const errData = await errRes.json().catch(() => null);
-                            const errCode = errData?.error?.code;
-                            const rawMsg = String(errData?.error?.message || '');
-
-                            if (errCode === 'missing_gemini_key' || rawMsg.includes('missing_gemini_key') || rawMsg.includes('key is required')) {
-                                errorMsg = 'API Key Required';
-                                isKeyError = true;
-                            } else if (errCode === 'invalid_api_key' || rawMsg.includes('API key not valid') || rawMsg.includes('INVALID_ARGUMENT')) {
-                                errorMsg = 'Invalid API Key';
-                                isKeyError = true;
-                            } else if (errCode === 'quota_exceeded' || rawMsg.includes('quota') || rawMsg.includes('RESOURCE_EXHAUSTED')) {
-                                errorMsg = 'Quota Exceeded';
-                            } else if (rawMsg.includes('HTTP 404') || rawMsg.includes('is not found')) {
-                                errorMsg = 'Model Unavailable';
-                            } else if (rawMsg.includes('HTTP 500') || rawMsg.includes('HTTP 502') || rawMsg.includes('HTTP 503')) {
-                                errorMsg = 'Service Unavailable';
-                            } else {
-                                errorMsg = 'Generation paused';
+                        const res = await fetch(fetchUrl);
+                        if (res.ok) {
+                            const data = await res.json().catch(() => null);
+                            const imageSrc = data?.dataUrl || (data?.image ? `data:image/png;base64,${data.image}` : '');
+                            if (imageSrc) {
+                                revealImage(imageSrc, data?.model);
+                                return;
                             }
                         }
-                    } catch (_) {}
 
-                    showPausedState(errorMsg, isKeyError);
-                };
+                        // Failed: parse structured error details from response
+                        let errorMsg = 'Generation paused';
+                        let isKeyError = false;
+                        const errData = await res.json().catch(() => null);
+                        const errCode = errData?.error?.code;
+                        const rawMsg = String(errData?.error?.message || '');
 
-                // Trigger browser image download immediately
-                imgEl.src = initialUrl;
+                        if (errCode === 'missing_gemini_key' || rawMsg.includes('missing_gemini_key') || rawMsg.includes('key is required')) {
+                            errorMsg = 'API Key Required';
+                            isKeyError = true;
+                        } else if (errCode === 'invalid_api_key' || rawMsg.includes('API key not valid') || rawMsg.includes('INVALID_ARGUMENT')) {
+                            errorMsg = 'Invalid API Key';
+                            isKeyError = true;
+                        } else if (errCode === 'quota_exceeded' || res.status === 429 || rawMsg.includes('quota') || rawMsg.includes('RESOURCE_EXHAUSTED')) {
+                            errorMsg = 'Quota Exceeded';
+                        } else if (rawMsg.includes('HTTP 404') || rawMsg.includes('is not found')) {
+                            errorMsg = 'Model Unavailable';
+                        } else if (rawMsg.includes('HTTP 500') || rawMsg.includes('HTTP 502') || rawMsg.includes('HTTP 503')) {
+                            errorMsg = 'Service Unavailable';
+                        } else {
+                            errorMsg = 'Generation paused';
+                        }
+
+                        showPausedState(errorMsg, isKeyError);
+                    } catch (err) {
+                        showPausedState('Service Unavailable', false);
+                    }
+                })();
             }
         }
 
