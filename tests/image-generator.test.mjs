@@ -551,6 +551,59 @@ console.log('--- Running Image Generator Suite ---');
 
             // Test 7.3.4: Complete absence of pollinations in proxy handler
             assert.ok(!fetchedUrls.some(u => u.includes('pollinations')), 'Zero network requests may target pollinations.ai');
+
+            // Test 7.3.5: Google GenAI Interactions API (steps model_output with part.type == 'image' and generation_config)
+            let interactionPayload = null;
+            let interactionHeaders = {};
+            let interactionStatus = 0;
+            const fakeImageBase64 = Buffer.from('fake-image-bytes-interactions-api-testing-500-bytes-123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890-padding-extra-12345678901234567890123456789012345678901234567890123456789012345678901234567890').toString('base64');
+            globalThis.fetch = async (url, options) => {
+                if (String(url).includes('interactions')) {
+                    if (options?.body) {
+                        interactionPayload = JSON.parse(options.body);
+                    }
+                    return {
+                        ok: true,
+                        json: async () => ({
+                            steps: [
+                                {
+                                    type: 'model_output',
+                                    content: [
+                                        { type: 'text', text: 'Here is the generated image' },
+                                        { type: 'image', data: fakeImageBase64, mimeType: 'image/png' }
+                                    ]
+                                }
+                            ]
+                        })
+                    };
+                }
+                return originalFetch(url, options);
+            };
+
+            await imageProxyHandler({
+                method: 'GET',
+                url: '/api/image-proxy?prompt=serene%20waterfall&aspectRatio=16:9'
+            }, {
+                setHeader(k, v) { interactionHeaders[k] = v; },
+                status(c) {
+                    interactionStatus = c;
+                    return {
+                        send() {},
+                        json() {}
+                    };
+                }
+            });
+
+            assert.equal(interactionStatus, 200);
+            assert.equal(interactionHeaders['X-Image-Model'], 'gemini-3.1-flash-lite-image');
+            assert.equal(interactionHeaders['Content-Type'], 'image/png');
+            assert.ok(interactionPayload, 'Interactions payload must be sent');
+            assert.equal(interactionPayload.model, 'models/gemini-3.1-flash-lite-image');
+            assert.equal(interactionPayload.input, 'serene waterfall');
+            assert.deepEqual(interactionPayload.response_modalities, ['image', 'text']);
+            assert.equal(interactionPayload.generation_config?.thinking_level, 'minimal');
+            assert.equal(interactionPayload.generation_config?.image_config?.image_size, '1K');
+            assert.equal(interactionPayload.generation_config?.image_config?.aspect_ratio, '16:9');
         } finally {
             process.env.GEMINI_API_KEY = originalEnv;
             globalThis.fetch = originalFetch;
