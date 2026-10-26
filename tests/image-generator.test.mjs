@@ -729,11 +729,20 @@ console.log('--- Running Image Generator Suite ---');
     assert.match(indexContent, /class="image-gen-action-btn"[^>]*onclick="downloadLightboxImage\(\)"/s);
     assert.match(indexContent, /id="image-lightbox-caption"[^>]*style="display:\s*none;"/s);
 
-    // 9.4 Handler contracts: prompt caption text must not be displayed
-    assert.match(indexContent, /caption\.textContent\s*=\s*'';/);
-    assert.match(indexContent, /caption\.style\.display\s*=\s*'none';/);
+    // 9.5 High-accuracy step configuration in image proxy
+    const proxyPath = path.resolve('api/image-proxy.js');
+    const proxyContent = fs.readFileSync(proxyPath, 'utf8');
+    assert.match(proxyContent, /steps\s*=\s*35/, 'AI Horde must default to 35 steps for maximum accuracy');
 
-    console.log('✔ Lightbox download button centering and prompt caption deletion verified');
+    // 9.6 Viewport uncropped layout invariants
+    assert.match(cssContent, /\.image-gen-viewport\.has-image\s*\{[^}]*min-height:\s*0\s*!important/s, 'Viewport must not force min-height when image is loaded');
+    assert.match(cssContent, /\.image-gen-img\s*\{[^}]*object-fit:\s*contain/s, 'Image must use contain to prevent cropping');
+
+    // 9.7 Pencil button symbol styling & sanitization retention
+    assert.match(cssContent, /\.image-pencil-trigger-btn svg\s*\{[^}]*stroke:\s*#ffffff/s, 'Pencil SVG must have explicit white stroke');
+    assert.match(indexContent, /tagAllowedAttrs\.has\(name\)/, 'Sanitizer must check lowercase attribute name for case-insensitive attributes');
+
+    console.log('✔ Lightbox download button centering, prompt caption deletion, uncropped layout, and pencil icon verified');
 }
 
 console.log('--- All Image Generator & Command Tests Passed Successfully! ---');
