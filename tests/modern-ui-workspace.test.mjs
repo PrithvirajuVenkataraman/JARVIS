@@ -24,10 +24,10 @@ assert.ok(!indexHtml.includes('id="header-model-dropdown"'), 'Header model dropd
 assert.ok(!indexHtml.includes('id="theme-toggle-btn"'), 'Theme toggle button must be removed (dark mode is exclusive)');
 console.log('  [PASS] 1. Streamlined top navigation bar verified (header model pill, theme toggle, canvas, and command palette search removed)');
 
-// Sidebar model selector preserved
-assert.ok(indexHtml.includes('id="model-selector"'), 'Sidebar model selector must exist');
-assert.ok(indexHtml.includes('class="chat-sidebar-model-block"'), 'Sidebar model block must exist');
-console.log('  [PASS] 2. Native sidebar model selector preserved cleanly');
+// Model selector moved from sidebar into settings modal per user directives
+assert.ok(indexHtml.includes('id="model-selector"'), 'Model selector must exist in settings modal');
+assert.ok(!indexHtml.includes('class="chat-sidebar-model-block"'), 'Sidebar model block must be removed to streamline sidebar');
+console.log('  [PASS] 2. Model selector moved to settings modal cleanly');
 
 // Main chat container and empty state hero
 assert.ok(indexHtml.includes('id="chat-main"'), 'Main chat viewport must exist');
