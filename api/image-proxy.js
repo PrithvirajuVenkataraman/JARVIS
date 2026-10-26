@@ -373,7 +373,20 @@ async function generateAiHordeImageBuffer(prompt, {
     apiKey: customKey = ''
 } = {}) {
     const apiKey = customKey || process.env.AI_HORDE_API_KEY || '0000000000';
-    const models = ['stable_diffusion', "ICBINP - I Can't Believe It's Not Photography", 'Deliberate', 'Anything v5'];
+    // Prioritize high-fidelity photorealism & SDXL models over base SD 1.5
+    const models = [
+        'Juggernaut XL',
+        'AlbedoBase XL (SDXL)',
+        "ICBINP - I Can't Believe It's Not Photography",
+        'Deliberate',
+        'stable_diffusion'
+    ];
+
+    const negativePrompt = 'blurry, low quality, washed out, lowres, muddy, foggy, distorted, bad architecture, artifacts, watermark, signature';
+    const payloadPrompt = prompt.includes('###') ? prompt : `${prompt} ### ${negativePrompt}`;
+
+    const targetWidth = Math.min(1024, Math.max(512, width >= 512 ? 768 : width));
+    const targetHeight = Math.min(1024, Math.max(512, height >= 512 ? 768 : height));
 
     // 1. Submit async generation job
     const postRes = await fetch('https://aihorde.net/api/v2/generate/async', {
@@ -384,11 +397,14 @@ async function generateAiHordeImageBuffer(prompt, {
             'Client-Agent': 'JarvisAssistant:1.0'
         },
         body: JSON.stringify({
-            prompt,
+            prompt: payloadPrompt,
             params: {
-                width: Math.min(768, Math.max(384, width)),
-                height: Math.min(768, Math.max(384, height)),
-                steps: 20,
+                width: targetWidth,
+                height: targetHeight,
+                steps: 28,
+                cfg_scale: 7.5,
+                sampler_name: 'k_dpmpp_2m',
+                karras: true,
                 n: 1
             },
             models
