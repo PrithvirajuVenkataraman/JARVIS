@@ -4703,7 +4703,9 @@ async function publishResolvedModelMessage(userMessage, answerText, options = {}
     }
     const messageMeta = {
         routing: options?.routing || null,
-        detached: options?.detached === true
+        detached: options?.detached === true,
+        sources: options?.sources || options?.messageMeta?.sources || null,
+        sourceType: options?.sourceType || (options?.sources?.length ? 'verified' : null)
     };
     if (Object.prototype.hasOwnProperty.call(options || {}, 'turnId')) {
         messageMeta.turnId = options.turnId;
@@ -13024,9 +13026,10 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                     activeImg.style.display = 'block';
                     activeImg.onclick = () => window.openImageLightboxFromCard?.(cardId);
                 }
+                const imageId = id || `img_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
                 if (activeCard) {
                     activeCard.dataset.imageUrl = src;
-                    activeCard.dataset.imageId = id || `img_${Date.now()}`;
+                    activeCard.dataset.imageId = imageId;
                 }
                 if (activeLoader) {
                     activeLoader.style.display = 'none';
@@ -13036,6 +13039,32 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                     activeActions.style.display = 'inline-flex';
                 }
                 saveToHistory(cleanPrompt, `[Generated Image: "${cleanPrompt}"]`, { recordContext: true });
+
+                // Persist immediately to Image Gallery (IndexedDB + localStorage fallback) so it is preserved even if chat is deleted
+                const galleryRecord = {
+                    id: imageId,
+                    prompt: cleanPrompt,
+                    dataUrl: src,
+                    imageUrl: src,
+                    provider: (typeof id === 'string' && (id.includes('/') || id.includes('gemini') || id.includes('horde'))) ? id : 'remote',
+                    timestamp: Date.now()
+                };
+                if (window.JarvisImageStorage?.saveImage) {
+                    window.JarvisImageStorage.saveImage(galleryRecord).catch(err => {
+                        console.warn('[image-storage] auto-save failed:', err);
+                    });
+                } else if (window.JarvisImageStorage?.saveGeneratedImage) {
+                    window.JarvisImageStorage.saveGeneratedImage(galleryRecord).catch(err => {
+                        console.warn('[image-storage] auto-save failed:', err);
+                    });
+                } else {
+                    try {
+                        const list = JSON.parse(localStorage.getItem('jarvis_recent_images_meta') || '[]');
+                        list.unshift(galleryRecord);
+                        if (list.length > 50) list.length = 50;
+                        localStorage.setItem('jarvis_recent_images_meta', JSON.stringify(list));
+                    } catch (_) {}
+                }
             }
 
             if (imgEl) {
@@ -13334,7 +13363,12 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
 
             try {
                 const storage = window.JarvisImageStorage;
-                const images = (await storage?.getAllImages?.(50)) || [];
+                let images = (await storage?.getAllImages?.(50)) || [];
+                if (!images.length) {
+                    try {
+                        images = JSON.parse(localStorage.getItem('jarvis_recent_images_meta') || '[]');
+                    } catch (_) {}
+                }
                 if (countBadge) countBadge.textContent = String(images.length);
 
                 if (!images.length) {
@@ -15093,28 +15127,45 @@ async function sendTextInput(submission = {}) {
                         const hasImageAttachments = Array.isArray(attachmentContext?.grounding?.images) && attachmentContext.grounding.images.length > 0;
 
                         let webSearchContext = '';
+                        let liveSearchSources = [];
+                        const userOptedWebSearch = Boolean(
+                            submission?.forceWebSearch === true ||
+                            (typeof getWebSearchMode === 'function' && getWebSearchMode() === 'force') ||
+                            document.getElementById('web-search-toggle-btn')?.dataset?.webMode === 'force' ||
+                            document.getElementById('web-search-toggle-btn')?.classList?.contains('is-web-forced')
+                        );
                         const needsLiveVerification = Boolean(
-                            submission?.forceWebSearch ||
+                            userOptedWebSearch ||
                             isExplicitWebSearchRequest(attachmentRequest) ||
                             isStrictLatestQuery(attachmentRequest) ||
-                            /\b(verify|check|current|latest|online|price|market|news|now)\b/i.test(attachmentRequest)
+                            /\b(verify|check|current|latest|online|price|market|news|now|search|find|lookup|who is|what is)\b/i.test(attachmentRequest)
                         );
                         if (needsLiveVerification && typeof fetchLiveSearchJson === 'function') {
-                            showThinkingIndicator('Checking live web sources...');
-                            try {
-                                const webController = new AbortController();
-                                const webTimer = setTimeout(() => webController.abort(), 3500);
-                                const searchRes = await fetchLiveSearchJson(attachmentRequest, {
-                                    signal: webController.signal,
-                                    maxResults: 4,
-                                    mode: 'rag'
-                                }).catch(() => null);
-                                clearTimeout(webTimer);
-                                if (Array.isArray(searchRes?.results) && searchRes.results.length) {
-                                    const snippets = searchRes.results.slice(0, 4).map((r, idx) => `Source ${idx + 1}: ${r.title}: ${r.description || ''} (${r.url})`).join('\n');
-                                    webSearchContext = `\n\nVerified Live Web Sources (use for real-time verification):\n${snippets}\nSynthesize external facts cleanly in natural prose without bracket citations ([1], [2]) or citation phrases (e.g. 'found in [1]').`;
+                            let searchQuery = String(attachmentRequest || '').trim();
+                            if (!searchQuery || searchQuery.length < 4 || /^(what is this|who is this|check this|analyze this|search this|find this)$/i.test(searchQuery)) {
+                                const textSnippet = String(attachmentContext.combinedText || '').replace(/^\[Attached Image:[^\]]+\]/i, '').trim();
+                                if (textSnippet) {
+                                    searchQuery = `${searchQuery ? searchQuery + ' ' : ''}${textSnippet.slice(0, 120).trim()}`.trim();
                                 }
-                            } catch (_) {}
+                            }
+                            if (searchQuery) {
+                                showThinkingIndicator('Checking live web sources...');
+                                try {
+                                    const webController = new AbortController();
+                                    const webTimer = setTimeout(() => webController.abort(), 4500);
+                                    const searchRes = await fetchLiveSearchJson(searchQuery, {
+                                        signal: webController.signal,
+                                        maxResults: 4,
+                                        mode: 'rag'
+                                    }).catch(() => null);
+                                    clearTimeout(webTimer);
+                                    if (Array.isArray(searchRes?.results) && searchRes.results.length) {
+                                        liveSearchSources = searchRes.results;
+                                        const snippets = searchRes.results.slice(0, 4).map((r, idx) => `Source ${idx + 1}: ${r.title}: ${r.description || ''} (${r.url})`).join('\n');
+                                        webSearchContext = `\n\nVerified Live Web Sources (use for real-time verification):\n${snippets}\nSynthesize external facts cleanly in natural prose without bracket citations ([1], [2]) or citation phrases (e.g. 'found in [1]').`;
+                                    }
+                                } catch (_) {}
+                            }
                         }
 
                         const nonImageDocText = (attachmentContext.combinedText && !attachmentContext.combinedText.startsWith('[Attached Image:'))
@@ -15194,10 +15245,18 @@ async function sendTextInput(submission = {}) {
                             }
                         }
                         if (answer) {
-                            await publishResolvedModelMessage(displayOutgoingText, answer, {
-                                label: 'Attachment answer',
-                                routing: result?.routing || null,
-                                existingAssistantMessageId: result?.assistantMessageId || null
+                            let finalAnswer = answer;
+                            if (liveSearchSources.length > 0 && typeof formatLiveSourceLinks === 'function') {
+                                const sourceLinks = formatLiveSourceLinks(liveSearchSources, 4);
+                                if (sourceLinks && !finalAnswer.includes('http') && !finalAnswer.includes('Sources:')) {
+                                    finalAnswer += `\n\nSources:\n${sourceLinks}`;
+                                }
+                            }
+                            await publishResolvedModelMessage(displayOutgoingText, finalAnswer, {
+                                label: liveSearchSources.length > 0 ? 'Verified live answer' : 'Attachment answer',
+                                routing: result?.routing || (liveSearchSources.length > 0 ? { intent: 'web_search_multimodal', requiresSources: true } : null),
+                                existingAssistantMessageId: result?.assistantMessageId || null,
+                                sources: liveSearchSources.length > 0 ? liveSearchSources : null
                             });
                             rememberMultimodalGrounding({
                                 kind: 'attachment',
