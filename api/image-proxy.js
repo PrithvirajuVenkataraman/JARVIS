@@ -3,19 +3,38 @@ export const config = { maxDuration: 60 };
 const DEFAULT_IMAGE_NEGATIVE_PROMPT = 'text,watermark,words,letters,signature,typography,lowres,blurry';
 const IMAGE_PROXY_TIMEOUT_MS = 30000;
 
-function resolveGeminiApiKey(customApiKey = '', req = null, params = {}) {
+function getEnvGeminiApiKey() {
     return String(
+        process.env.GEMINI_API_KEY ||
+        process.env.GOOGLE_GENERATIVE_AI_API_KEY ||
+        process.env.GOOGLE_API_KEY ||
+        ''
+    ).trim();
+}
+
+function resolveCandidateApiKeys(customApiKey = '', req = null, params = {}) {
+    const keys = [];
+    const clientKey = String(
         customApiKey ||
         params?.apiKey ||
         params?.gemini_api_key ||
         params?.key ||
         req?.headers?.['x-gemini-api-key'] ||
         req?.headers?.['x-goog-api-key'] ||
-        process.env.GEMINI_API_KEY ||
-        process.env.GOOGLE_GENERATIVE_AI_API_KEY ||
-        process.env.GOOGLE_API_KEY ||
         ''
     ).trim();
+    if (clientKey) keys.push(clientKey);
+
+    const envKey = getEnvGeminiApiKey();
+    if (envKey && !keys.includes(envKey)) {
+        keys.push(envKey);
+    }
+    return keys;
+}
+
+function resolveGeminiApiKey(customApiKey = '', req = null, params = {}) {
+    const candidateKeys = resolveCandidateApiKeys(customApiKey, req, params);
+    return candidateKeys[0] || '';
 }
 
 function extractImageFromData(data) {
@@ -83,8 +102,8 @@ async function generateGeminiImageBuffer(prompt, {
     aspectRatio: customAspectRatio = '',
     requestedModel = ''
 } = {}) {
-    const apiKey = resolveGeminiApiKey(customApiKey);
-    if (!apiKey) {
+    const candidateKeys = resolveCandidateApiKeys(customApiKey);
+    if (candidateKeys.length === 0) {
         return {
             success: false,
             code: 'missing_gemini_key',
@@ -121,82 +140,27 @@ async function generateGeminiImageBuffer(prompt, {
         'imagen-3.0-generate-002'
     );
 
-    const triedModels = new Set();
+    for (const apiKey of candidateKeys) {
+        const triedModels = new Set();
 
-    for (const model of candidateModels) {
-        if (triedModels.has(model)) continue;
-        triedModels.add(model);
+        for (const model of candidateModels) {
+            if (triedModels.has(model)) continue;
+            triedModels.add(model);
 
-        const isImagenPredict = model.includes('imagen-3.0');
-        const timeout = Math.min(timeoutMs || 35000, 45000);
-        const rawModel = model.replace(/^models\//, '');
-        const normalizedModel = model.startsWith('models/') ? model : `models/${model}`;
-
-        try {
-            const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), timeout);
+            const isImagenPredict = model.includes('imagen-3.0');
+            const timeout = Math.min(timeoutMs || 35000, 45000);
+            const rawModel = model.replace(/^models\//, '');
+            const normalizedModel = model.startsWith('models/') ? model : `models/${model}`;
 
             try {
-                if (isImagenPredict) {
-                    // Google GenAI REST :predict
-                    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(rawModel)}:predict?key=${encodeURIComponent(apiKey)}`;
-                    const res = await fetch(url, {
-                        method: 'POST',
-                        signal: controller.signal,
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'x-goog-api-key': apiKey
-                        },
-                        body: JSON.stringify({
-                            instances: [{ prompt }],
-                            parameters: {
-                                sampleCount: 1,
-                                aspectRatio,
-                                outputMimeType: 'image/jpeg'
-                            }
-                        })
-                    });
+                const controller = new AbortController();
+                const timer = setTimeout(() => controller.abort(), timeout);
 
-                    if (res.ok) {
-                        const data = await res.json().catch(() => null);
-                        const extracted = extractImageFromData(data);
-                        if (extracted && extracted.b64) {
-                            const buffer = Buffer.from(extracted.b64, 'base64');
-                            return { success: true, buffer, contentType: extracted.mimeType, model: rawModel };
-                        }
-                    } else {
-                        const errText = await res.text().catch(() => '');
-                        let friendlyMsg = '';
-                        let errStatus = '';
-                        try {
-                            const parsed = JSON.parse(errText);
-                            friendlyMsg = parsed?.error?.message || '';
-                            errStatus = parsed?.error?.status || '';
-                        } catch (_) {}
-
-                        if (res.status === 400 && (friendlyMsg.includes('API key') || errStatus === 'INVALID_ARGUMENT')) {
-                            return {
-                                success: false,
-                                code: 'invalid_api_key',
-                                message: 'Invalid Gemini API key. Please check your GEMINI_API_KEY.'
-                            };
-                        }
-                        if (res.status === 429 || friendlyMsg.includes('quota') || errStatus === 'RESOURCE_EXHAUSTED') {
-                            lastError = new Error(`Imagen (${model}) HTTP 429: ${friendlyMsg || 'Quota exceeded'}`);
-                            lastErrorCode = 'quota_exceeded';
-                            console.warn(`[image-proxy] Quota limit for ${model}, attempting fallback to next model...`);
-                            continue;
-                        }
-
-                        lastError = new Error(`Imagen (${model}) HTTP ${res.status}: ${friendlyMsg || errText.slice(0, 150)}`);
-                        console.error(`[image-proxy] Imagen upstream error (${model}):`, res.status, friendlyMsg || errText.slice(0, 200));
-                    }
-                } else {
-                    // 1. Google GenAI Interactions API (user-specified exact interaction.create protocol)
-                    const interactionsUrl = `https://generativelanguage.googleapis.com/v1beta/interactions?key=${encodeURIComponent(apiKey)}&model=${encodeURIComponent(rawModel)}`;
-                    let interactionsRes = null;
-                    try {
-                        interactionsRes = await fetch(interactionsUrl, {
+                try {
+                    if (isImagenPredict) {
+                        // Google GenAI REST :predict
+                        const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(rawModel)}:predict?key=${encodeURIComponent(apiKey)}`;
+                        const res = await fetch(url, {
                             method: 'POST',
                             signal: controller.signal,
                             headers: {
@@ -204,121 +168,183 @@ async function generateGeminiImageBuffer(prompt, {
                                 'x-goog-api-key': apiKey
                             },
                             body: JSON.stringify({
-                                model: normalizedModel,
-                                input: prompt,
-                                generation_config: {
-                                    temperature: 1,
-                                    max_output_tokens: 65536,
-                                    top_p: 0.95,
-                                    thinking_level: 'minimal',
-                                    image_config: {
-                                        image_size: '1K',
-                                        aspect_ratio: aspectRatio || '1:1'
-                                    }
-                                },
-                                response_modalities: ['image', 'text']
+                                instances: [{ prompt }],
+                                parameters: {
+                                    sampleCount: 1,
+                                    aspectRatio,
+                                    outputMimeType: 'image/jpeg'
+                                }
                             })
                         });
-                    } catch (fetchErr) {
-                        console.warn(`[image-proxy] Interactions endpoint error for ${model}:`, fetchErr?.message || fetchErr);
-                    }
 
-                    if (interactionsRes && interactionsRes.ok) {
-                        const data = await interactionsRes.json().catch(() => null);
-                        const extracted = extractImageFromData(data);
-                        if (extracted && extracted.b64) {
-                            const buffer = Buffer.from(extracted.b64, 'base64');
-                            return { success: true, buffer, contentType: extracted.mimeType, model: rawModel };
-                        }
-                    }
-
-                    if (interactionsRes) {
-                        const errText = await interactionsRes.text().catch(() => '');
-                        let friendlyMsg = '';
-                        let errStatus = '';
-                        try {
-                            const parsed = JSON.parse(errText);
-                            friendlyMsg = parsed?.error?.message || '';
-                            errStatus = parsed?.error?.status || '';
-                        } catch (_) {}
-
-                        if (interactionsRes.status === 400 && (friendlyMsg.includes('API key') || errStatus === 'INVALID_ARGUMENT')) {
-                            return {
-                                success: false,
-                                code: 'invalid_api_key',
-                                message: 'Invalid Gemini API key. Please check your GEMINI_API_KEY.'
-                            };
-                        }
-                        if (interactionsRes.status === 429 || friendlyMsg.includes('quota') || errStatus === 'RESOURCE_EXHAUSTED') {
-                            lastError = new Error(`Gemini (${model}) HTTP 429: ${friendlyMsg || 'Quota exceeded'}`);
-                            lastErrorCode = 'quota_exceeded';
-                            console.warn(`[image-proxy] Quota limit for ${model}, attempting fallback to next model...`);
-                            continue;
-                        }
-                    }
-
-                    // 2. Fallback: Google Gemini REST :generateContent with IMAGE modality
-                    const genContentUrl = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(rawModel)}:generateContent?key=${encodeURIComponent(apiKey)}`;
-                    const genRes = await fetch(genContentUrl, {
-                        method: 'POST',
-                        signal: controller.signal,
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'x-goog-api-key': apiKey
-                        },
-                        body: JSON.stringify({
-                            contents: [{ parts: [{ text: prompt }] }],
-                            generationConfig: {
-                                responseModalities: ['TEXT', 'IMAGE'],
-                                imageConfig: {
-                                    aspectRatio: aspectRatio || '1:1'
-                                }
+                        if (res.ok) {
+                            const data = await res.json().catch(() => null);
+                            const extracted = extractImageFromData(data);
+                            if (extracted && extracted.b64) {
+                                const buffer = Buffer.from(extracted.b64, 'base64');
+                                return { success: true, buffer, contentType: extracted.mimeType, model: rawModel };
                             }
-                        })
-                    });
+                        } else {
+                            const errText = await res.text().catch(() => '');
+                            let friendlyMsg = '';
+                            let errStatus = '';
+                            try {
+                                const parsed = JSON.parse(errText);
+                                friendlyMsg = parsed?.error?.message || '';
+                                errStatus = parsed?.error?.status || '';
+                            } catch (_) {}
 
-                    if (genRes.ok) {
-                        const genData = await genRes.json().catch(() => null);
-                        const extracted = extractImageFromData(genData);
-                        if (extracted && extracted.b64) {
-                            const buffer = Buffer.from(extracted.b64, 'base64');
-                            return { success: true, buffer, contentType: extracted.mimeType, model: rawModel };
+                            if (res.status === 400 && (friendlyMsg.includes('API key') || errStatus === 'INVALID_ARGUMENT')) {
+                                lastError = new Error(`Invalid Gemini API key (${model})`);
+                                lastErrorCode = 'invalid_api_key';
+                                console.warn(`[image-proxy] Invalid API key for ${model}, attempting fallback key/model...`);
+                                break;
+                            }
+                            if (res.status === 429 || friendlyMsg.includes('quota') || errStatus === 'RESOURCE_EXHAUSTED') {
+                                lastError = new Error(`Imagen (${model}) HTTP 429: ${friendlyMsg || 'Quota exceeded'}`);
+                                lastErrorCode = 'quota_exceeded';
+                                console.warn(`[image-proxy] Quota limit for ${model}, attempting fallback to next model...`);
+                                continue;
+                            }
+
+                            lastError = new Error(`Imagen (${model}) HTTP ${res.status}: ${friendlyMsg || errText.slice(0, 150)}`);
+                            console.error(`[image-proxy] Imagen upstream error (${model}):`, res.status, friendlyMsg || errText.slice(0, 200));
                         }
                     } else {
-                        const genErrText = await genRes.text().catch(() => '');
-                        let genFriendlyMsg = '';
-                        let genErrStatus = '';
+                        // 1. Google GenAI Interactions API (user-specified exact interaction.create protocol)
+                        const interactionsUrl = `https://generativelanguage.googleapis.com/v1beta/interactions?key=${encodeURIComponent(apiKey)}&model=${encodeURIComponent(rawModel)}`;
+                        let interactionsRes = null;
                         try {
-                            const parsed = JSON.parse(genErrText);
-                            genFriendlyMsg = parsed?.error?.message || '';
-                            genErrStatus = parsed?.error?.status || '';
-                        } catch (_) {}
-
-                        if (genRes.status === 400 && (genFriendlyMsg.includes('API key') || genErrStatus === 'INVALID_ARGUMENT')) {
-                            return {
-                                success: false,
-                                code: 'invalid_api_key',
-                                message: 'Invalid Gemini API key. Please check your GEMINI_API_KEY.'
-                            };
+                            interactionsRes = await fetch(interactionsUrl, {
+                                method: 'POST',
+                                signal: controller.signal,
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'x-goog-api-key': apiKey
+                                },
+                                body: JSON.stringify({
+                                    model: normalizedModel,
+                                    input: prompt,
+                                    generation_config: {
+                                        temperature: 1,
+                                        max_output_tokens: 65536,
+                                        top_p: 0.95,
+                                        thinking_level: 'minimal',
+                                        image_config: {
+                                            image_size: '1K',
+                                            aspect_ratio: aspectRatio || '1:1'
+                                        }
+                                    },
+                                    response_modalities: ['image', 'text']
+                                })
+                            });
+                        } catch (fetchErr) {
+                            console.warn(`[image-proxy] Interactions endpoint error for ${model}:`, fetchErr?.message || fetchErr);
                         }
-                        if (genRes.status === 429 || genFriendlyMsg.includes('quota') || genErrStatus === 'RESOURCE_EXHAUSTED') {
-                            lastError = new Error(`Gemini (${model}) HTTP 429: ${genFriendlyMsg || 'Quota exceeded'}`);
-                            lastErrorCode = 'quota_exceeded';
-                            console.warn(`[image-proxy] Quota limit for ${model}, attempting fallback to next model...`);
-                            continue;
+
+                        if (interactionsRes && interactionsRes.ok) {
+                            const data = await interactionsRes.json().catch(() => null);
+                            const extracted = extractImageFromData(data);
+                            if (extracted && extracted.b64) {
+                                const buffer = Buffer.from(extracted.b64, 'base64');
+                                return { success: true, buffer, contentType: extracted.mimeType, model: rawModel };
+                            }
                         }
 
-                        lastError = new Error(`Gemini (${model}) HTTP ${genRes.status}: ${genFriendlyMsg || genErrText.slice(0, 150)}`);
-                        console.error(`[image-proxy] Gemini image error (${model}):`, genRes.status, genFriendlyMsg || genErrText.slice(0, 200));
+                        if (interactionsRes) {
+                            const errText = await interactionsRes.text().catch(() => '');
+                            let friendlyMsg = '';
+                            let errStatus = '';
+                            try {
+                                const parsed = JSON.parse(errText);
+                                friendlyMsg = parsed?.error?.message || '';
+                                errStatus = parsed?.error?.status || '';
+                            } catch (_) {}
+
+                            if (interactionsRes.status === 400 && (friendlyMsg.includes('API key') || errStatus === 'INVALID_ARGUMENT')) {
+                                lastError = new Error(`Invalid Gemini API key (${model})`);
+                                lastErrorCode = 'invalid_api_key';
+                                console.warn(`[image-proxy] Invalid API key for ${model}, attempting fallback key/model...`);
+                                break;
+                            }
+                            if (interactionsRes.status === 429 || friendlyMsg.includes('quota') || errStatus === 'RESOURCE_EXHAUSTED') {
+                                lastError = new Error(`Gemini (${model}) HTTP 429: ${friendlyMsg || 'Quota exceeded'}`);
+                                lastErrorCode = 'quota_exceeded';
+                                console.warn(`[image-proxy] Quota limit for ${model}, attempting fallback to next model...`);
+                                continue;
+                            }
+                        }
+
+                        // 2. Fallback: Google Gemini REST :generateContent with IMAGE modality
+                        const genContentUrl = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(rawModel)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+                        const genRes = await fetch(genContentUrl, {
+                            method: 'POST',
+                            signal: controller.signal,
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'x-goog-api-key': apiKey
+                            },
+                            body: JSON.stringify({
+                                contents: [{ parts: [{ text: prompt }] }],
+                                generationConfig: {
+                                    responseModalities: ['TEXT', 'IMAGE'],
+                                    imageConfig: {
+                                        aspectRatio: aspectRatio || '1:1'
+                                    }
+                                }
+                            })
+                        });
+
+                        if (genRes.ok) {
+                            const genData = await genRes.json().catch(() => null);
+                            const extracted = extractImageFromData(genData);
+                            if (extracted && extracted.b64) {
+                                const buffer = Buffer.from(extracted.b64, 'base64');
+                                return { success: true, buffer, contentType: extracted.mimeType, model: rawModel };
+                            }
+                        } else {
+                            const genErrText = await genRes.text().catch(() => '');
+                            let genFriendlyMsg = '';
+                            let genErrStatus = '';
+                            try {
+                                const parsed = JSON.parse(genErrText);
+                                genFriendlyMsg = parsed?.error?.message || '';
+                                genErrStatus = parsed?.error?.status || '';
+                            } catch (_) {}
+
+                            if (genRes.status === 400 && (genFriendlyMsg.includes('API key') || genErrStatus === 'INVALID_ARGUMENT')) {
+                                lastError = new Error(`Invalid Gemini API key (${model})`);
+                                lastErrorCode = 'invalid_api_key';
+                                console.warn(`[image-proxy] Invalid API key for ${model}, attempting fallback key/model...`);
+                                break;
+                            }
+                            if (genRes.status === 429 || genFriendlyMsg.includes('quota') || genErrStatus === 'RESOURCE_EXHAUSTED') {
+                                lastError = new Error(`Gemini (${model}) HTTP 429: ${genFriendlyMsg || 'Quota exceeded'}`);
+                                lastErrorCode = 'quota_exceeded';
+                                console.warn(`[image-proxy] Quota limit for ${model}, attempting fallback to next model...`);
+                                continue;
+                            }
+
+                            lastError = new Error(`Gemini (${model}) HTTP ${genRes.status}: ${genFriendlyMsg || genErrText.slice(0, 150)}`);
+                            console.error(`[image-proxy] Gemini image error (${model}):`, genRes.status, genFriendlyMsg || genErrText.slice(0, 200));
+                        }
                     }
+                } finally {
+                    clearTimeout(timer);
                 }
-            } finally {
-                clearTimeout(timer);
+            } catch (err) {
+                lastError = err;
+                console.error(`[image-proxy] Request error for model ${model}:`, err?.message || err);
             }
-        } catch (err) {
-            lastError = err;
-            console.error(`[image-proxy] Request error for model ${model}:`, err?.message || err);
         }
+    }
+
+    if (lastErrorCode === 'invalid_api_key' && candidateKeys.length === 1) {
+        return {
+            success: false,
+            code: 'invalid_api_key',
+            message: 'Invalid Gemini API key. Please check your GEMINI_API_KEY.'
+        };
     }
 
     if (lastErrorCode === 'quota_exceeded') {
@@ -331,7 +357,7 @@ async function generateGeminiImageBuffer(prompt, {
 
     return {
         success: false,
-        code: 'gemini_image_generation_failed',
+        code: lastErrorCode || 'gemini_image_generation_failed',
         message: lastError?.message || 'Gemini image generation failed across all available models.'
     };
 }
