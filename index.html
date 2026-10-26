@@ -7875,8 +7875,16 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
         }
 
         function isAbortError(error) {
+            if (!error) return false;
+            const name = String(error?.name || '');
             const message = String(error?.message || error || '').toLowerCase();
-            return error?.name === 'AbortError' || message.includes('aborted');
+            return name === 'AbortError' ||
+                   name === 'TimeoutError' ||
+                   Boolean(error?.isTimeout) ||
+                   Boolean(error?.timedOut) ||
+                   message.includes('abort') ||
+                   message.includes('cancelled') ||
+                   message.includes('canceled');
         }
 
         if (!globalThis.InteractionState) {
@@ -15221,11 +15229,13 @@ async function sendTextInput(submission = {}) {
                                 showThinkingIndicator('Checking live web sources...');
                                 try {
                                     const webController = new AbortController();
-                                    const webTimer = setTimeout(() => webController.abort(), 4500);
+                                    const webTimer = setTimeout(() => webController.abort(), 6000);
                                     const searchRes = await fetchLiveSearchJson(searchQuery, {
                                         signal: webController.signal,
                                         maxResults: 4,
-                                        mode: 'rag'
+                                        answer: false,
+                                        mode: 'rag',
+                                        timeoutMs: 6000
                                     }).catch(() => null);
                                     clearTimeout(webTimer);
                                     if (Array.isArray(searchRes?.results) && searchRes.results.length) {
@@ -15714,68 +15724,101 @@ function formatLiveSearchFailureMessage(data = {}, status = 0) {
     return 'Live search failed before usable results were returned.';
 }
 
+function createSafeTimeoutSignal(timeoutMs, externalSignal) {
+    const controller = new AbortController();
+    let timer = null;
+    if (timeoutMs > 0 && timeoutMs < Infinity) {
+        timer = setTimeout(() => {
+            try {
+                controller.abort(new DOMException('Search request timed out', 'TimeoutError'));
+            } catch (_) {
+                try { controller.abort(); } catch (_) {}
+            }
+        }, timeoutMs);
+    }
+    let cleanup = () => {
+        if (timer) {
+            clearTimeout(timer);
+            timer = null;
+        }
+    };
+    if (externalSignal) {
+        if (externalSignal.aborted) {
+            try {
+                controller.abort(externalSignal.reason);
+            } catch (_) {
+                try { controller.abort(); } catch (_) {}
+            }
+            cleanup();
+        } else {
+            const onAbort = () => {
+                try {
+                    controller.abort(externalSignal.reason);
+                } catch (_) {
+                    try { controller.abort(); } catch (_) {}
+                }
+                cleanup();
+            };
+            externalSignal.addEventListener('abort', onAbort, { once: true });
+            const prevCleanup = cleanup;
+            cleanup = () => {
+                prevCleanup();
+                try { externalSignal.removeEventListener('abort', onAbort); } catch (_) {}
+            };
+        }
+    }
+    return { signal: controller.signal, cleanup, controller };
+}
+
 async function fetchLiveSearchJson(query, options = {}) {
     window.JarvisInteractionState?.transition?.('SEARCHING', { metadata: { query } });
     showThinkingIndicator('SEARCHING');
-    const searchTimeout = options.timeoutMs || 4500;
-    let signal = options.signal;
-    if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
-        const timeoutSig = AbortSignal.timeout(searchTimeout);
-        if (options.signal) {
-            if (typeof AbortSignal.any === 'function') {
-                signal = AbortSignal.any([options.signal, timeoutSig]);
-            } else {
-                const combinedController = new AbortController();
-                const forwardAbort = () => {
-                    try {
-                        combinedController.abort(options.signal.aborted ? options.signal.reason : timeoutSig.reason);
-                    } catch (_) {
-                        combinedController.abort();
-                    }
-                };
-                if (options.signal.aborted) {
-                    forwardAbort();
-                } else if (timeoutSig.aborted) {
-                    forwardAbort();
-                } else {
-                    options.signal.addEventListener('abort', forwardAbort, { once: true });
-                    timeoutSig.addEventListener('abort', forwardAbort, { once: true });
-                }
-                signal = combinedController.signal;
-            }
-        } else {
-            signal = timeoutSig;
+    // Generous timeout for mobile networks & Safari (9.5s when synthesis requested, 7.5s otherwise)
+    const defaultTimeout = Boolean(options.answer) ? 9500 : 7500;
+    const searchTimeout = Math.max(Number(options.timeoutMs) || defaultTimeout, 6000);
+    const { signal, cleanup } = createSafeTimeoutSignal(searchTimeout, options.signal);
+    try {
+        const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.search, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            signal,
+            body: JSON.stringify({
+                query,
+                context: Array.isArray(options.context) ? options.context : undefined,
+                threadState: options.threadState || (typeof window !== 'undefined' && window.JarvisConversation?.getActiveLedger ? window.JarvisConversation.getActiveLedger() : undefined),
+                maxResults: options.maxResults || 8,
+                answer: Boolean(options.answer),
+                domain: options.domain || '',
+                factType: options.factType || '',
+                mode: options.mode || options.searchMode || '',
+                mustContain: Array.isArray(options.mustContain) ? options.mustContain : [],
+                forceLive: options.forceLive !== undefined ? Boolean(options.forceLive) : true,
+                chronological: options.chronological !== undefined ? Boolean(options.chronological) : true,
+                dateContext: options.dateContext || undefined,
+                dateFilter: options.dateFilter || undefined,
+                timeoutMs: searchTimeout
+            })
+        });
+        const data = await parseJsonResponseSafely(response);
+        if (!response.ok || data?.success === false) {
+            const error = new Error(formatLiveSearchFailureMessage(data, response.status));
+            error.status = response.status;
+            error.data = data;
+            throw error;
         }
+        return data;
+    } catch (err) {
+        if (isAbortError(err)) {
+            const abortErr = new Error('Search request timed out or was cancelled');
+            abortErr.name = 'AbortError';
+            abortErr.isTimeout = true;
+            abortErr.originalError = err;
+            throw abortErr;
+        }
+        throw err;
+    } finally {
+        cleanup();
     }
-    const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.search, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal,
-        body: JSON.stringify({
-            query,
-            context: Array.isArray(options.context) ? options.context : undefined,
-            threadState: options.threadState || (typeof window !== 'undefined' && window.JarvisConversation?.getActiveLedger ? window.JarvisConversation.getActiveLedger() : undefined),
-            maxResults: options.maxResults || 8,
-            answer: Boolean(options.answer),
-            domain: options.domain || '',
-            factType: options.factType || '',
-            mode: options.mode || options.searchMode || '',
-            mustContain: Array.isArray(options.mustContain) ? options.mustContain : [],
-            forceLive: options.forceLive !== undefined ? Boolean(options.forceLive) : true,
-            chronological: options.chronological !== undefined ? Boolean(options.chronological) : true,
-            dateContext: options.dateContext || undefined,
-            dateFilter: options.dateFilter || undefined,
-            timeoutMs: searchTimeout
-        })
-    });
-    const data = await parseJsonResponseSafely(response);
-    if (!response.ok || data?.success === false) {
-        const error = new Error(formatLiveSearchFailureMessage(data, response.status));
-        error.status = response.status;
-        error.data = data;
-        throw error;
-    }
-    return data;
 }
 
 
@@ -22582,18 +22625,22 @@ async function handleLiveRetrievalQuery(userText, options = {}) {
                 mode: 'rag',
                 domain: intent.domain || '',
                 factType: intent.factType || '',
-                mustContain: getLiveSearchMustContainHints(intent, query)
+                mustContain: getLiveSearchMustContainHints(intent, query),
+                timeoutMs: 7800
             });
             clearTimeout(budgetTimer);
         } catch (searchErr) {
             clearTimeout(budgetTimer);
             if (isAbortError(searchErr)) {
-                if (!didBudgetTimeout) throw searchErr;
-                logRoutingDebug('handler fallback: search_timeout_reached', query, {});
+                logRoutingDebug('handler fallback: search_timeout_reached', query, {
+                    error: String(searchErr?.message || searchErr)
+                });
+                answerData = null;
             } else {
                 logRoutingDebug('handler fallback: live_search_error', query, {
                     error: String(searchErr?.message || searchErr)
                 });
+                answerData = null;
             }
         }
 
@@ -22754,13 +22801,17 @@ ${snippets}`;
             return false;
         }
         if (isAbortError(error)) {
+            if (!failClosed && !requiresStrictLiveVerification(queryStr, fallbackIntent, fallbackEntityIntent)) {
+                const fallbackPublished = await publishUniversalModelFallback({ userText: queryStr, intent: fallbackIntent, entityIntent: fallbackEntityIntent }, 'Model answer');
+                if (fallbackPublished) return true;
+            }
             return publishStrictVerificationClarification({
                 userText: queryStr,
                 intent: fallbackIntent,
                 entityIntent: fallbackEntityIntent
             }, {
                 sources: [],
-                summaryText: 'Verification timed out before confidence threshold. Please narrow the query and I will retry.',
+                summaryText: 'Verification search took longer than expected on this network. Please retry or ask a shorter question.',
                 badge: 'Verification unavailable'
             });
         }
