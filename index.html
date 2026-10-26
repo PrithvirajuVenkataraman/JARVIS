@@ -12919,7 +12919,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
         </div>
         <div id="${cardId}-actions" class="image-pencil-dropdown-wrapper image-floating-pencil hidden">
             <button type="button" class="image-pencil-trigger-btn" onclick="window.toggleImagePencilMenu('${cardId}')" title="Options (Download, Copy)" aria-label="Image options">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path><path d="m15 5 4 4"></path></svg>
             </button>
             <div id="${cardId}-menu" class="image-pencil-menu hidden">
                 <button type="button" class="image-pencil-menu-item" onclick="window.downloadImageCard('${cardId}'); window.toggleImagePencilMenu('${cardId}', false)">
@@ -13837,11 +13837,11 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 'SVG', 'PATH', 'LINE', 'POLYGON', 'POLYLINE', 'RECT', 'CIRCLE', 'USE', 'G', 'DEFS', 'SYMBOL'
             ]);
             const mathAttrs = new Set(['class', 'style', 'mathvariant', 'stretchy', 'fence', 'separator', 'lspace', 'rspace', 'form', 'accent', 'xmlns', 'display', 'encoding']);
-            const svgAttrs = new Set(['class', 'style', 'width', 'height', 'viewbox', 'fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin', 'points', 'x', 'y', 'x1', 'y1', 'x2', 'y2', 'r', 'cx', 'cy', 'd', 'xmlns', 'aria-hidden', 'role', 'href', 'xlink:href']);
+            const svgAttrs = new Set(['class', 'style', 'width', 'height', 'viewbox', 'viewBox', 'fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin', 'points', 'x', 'y', 'x1', 'y1', 'x2', 'y2', 'r', 'cx', 'cy', 'd', 'xmlns', 'aria-hidden', 'aria-label', 'role', 'href', 'xlink:href']);
             const allowedAttrs = {
                 A: new Set(['href', 'target', 'rel', 'class', 'style', 'title', 'id']),
                 BLOCKQUOTE: new Set(['class', 'style', 'id']),
-                BUTTON: new Set(['class', 'style', 'type', 'onclick', 'title', 'id', 'disabled']),
+                BUTTON: new Set(['class', 'style', 'type', 'onclick', 'title', 'id', 'disabled', 'aria-label']),
                 CODE: new Set(['class', 'style', 'id']),
                 DIV: new Set(['class', 'style', 'id']),
                 H1: new Set(['class', 'style', 'id']),
@@ -13925,7 +13925,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                     const name = attr.name.toLowerCase();
                     const value = attr.value;
                     const tagAllowedAttrs = allowedAttrs[tag] || new Set();
-                    const isAllowedAttr = tagAllowedAttrs.has(attr.name) || name.startsWith('data-');
+                    const isAllowedAttr = tagAllowedAttrs.has(attr.name) || tagAllowedAttrs.has(name) || name.startsWith('data-') || name.startsWith('aria-');
                     const isEventHandler = name.startsWith('on') && !tagAllowedAttrs.has(attr.name);
                     if (!isAllowedAttr || isEventHandler) {
                         node.removeAttribute(attr.name);
