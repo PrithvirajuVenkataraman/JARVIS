@@ -9379,7 +9379,13 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"></path></svg>',
                 file: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path><path d="M8 13h8"></path><path d="M8 17h5"></path></svg>',
                 speaker: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>',
-                memory: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3v14l-4-2-4 2-4-2-4 2V5z"></path><path d="M8 7h8"></path><path d="M8 11h6"></path></svg>'
+                memory: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3v14l-4-2-4 2-4-2-4 2V5z"></path><path d="M8 7h8"></path><path d="M8 11h6"></path></svg>',
+                pdf: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><path d="M9 13v4"></path><path d="M9 13h2a1 1 0 0 1 0 2H9"></path><path d="M13 13v4"></path></svg>',
+                word: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><path d="M8 13l2 4 2-4 2 4 2-4"></path></svg>',
+                csv: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M3 9h18M3 15h18M9 3v18M15 3v18"></path></svg>',
+                html: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>',
+                json: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H6a2 2 0 0 0-2 2v3a2 2 0 0 1-2 2 2 2 0 0 1 2 2v3a2 2 0 0 0 2 2h2"></path><path d="M16 3h2a2 2 0 0 1 2 2v3a2 2 0 0 0 2 2 2 2 0 0 0-2 2v3a2 2 0 0 1-2 2h-2"></path></svg>',
+                txt: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="6" x2="20" y2="6"></line><line x1="4" y1="12" x2="14" y2="12"></line><line x1="4" y1="18" x2="18" y2="18"></line></svg>'
             };
             return icons[name] || icons.dots;
         }
@@ -9682,7 +9688,14 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                         <div id="assistant-action-menu-${safeId}" class="assistant-action-menu hidden" role="menu" data-message-id="${safeId}"> 
                             <button type="button" data-assistant-action="ask" onclick="return handleAssistantActionInline(event, '${safeId}', 'ask')" role="menuitem">${getActionIconSvg('ask')}<span>Ask JARVIS</span></button> 
                             <button type="button" data-assistant-action="verify" onclick="return handleAssistantActionInline(event, '${safeId}', 'verify')" role="menuitem">${getActionIconSvg('verify')}<span>Verify this</span></button> 
+                            <div class="assistant-action-menu-divider"></div>
+                            <button type="button" data-assistant-action="export_pdf" onclick="return handleAssistantActionInline(event, '${safeId}', 'export_pdf')" role="menuitem">${getActionIconSvg('pdf')}<span>Export as PDF</span></button> 
+                            <button type="button" data-assistant-action="export_docx" onclick="return handleAssistantActionInline(event, '${safeId}', 'export_docx')" role="menuitem">${getActionIconSvg('word')}<span>Export as Word (.docx)</span></button> 
+                            <button type="button" data-assistant-action="export_csv" onclick="return handleAssistantActionInline(event, '${safeId}', 'export_csv')" role="menuitem">${getActionIconSvg('csv')}<span>Export as Excel / CSV</span></button> 
                             <button type="button" data-assistant-action="export_markdown" onclick="return handleAssistantActionInline(event, '${safeId}', 'export_markdown')" role="menuitem">${getActionIconSvg('file')}<span>Export as Markdown</span></button> 
+                            <button type="button" data-assistant-action="export_html" onclick="return handleAssistantActionInline(event, '${safeId}', 'export_html')" role="menuitem">${getActionIconSvg('html')}<span>Export as HTML</span></button> 
+                            <button type="button" data-assistant-action="export_json" onclick="return handleAssistantActionInline(event, '${safeId}', 'export_json')" role="menuitem">${getActionIconSvg('json')}<span>Export as JSON</span></button> 
+                            <button type="button" data-assistant-action="export_txt" onclick="return handleAssistantActionInline(event, '${safeId}', 'export_txt')" role="menuitem">${getActionIconSvg('txt')}<span>Export as Text</span></button> 
                         </div> 
                     </div>
                 </div>
@@ -9700,6 +9713,12 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             copy_clean: copyCleanAssistantMessage,
             copy_sources: copyAssistantMessageWithSources,
             export_markdown: exportAssistantMessageMarkdown,
+            export_pdf: exportAssistantMessagePdf,
+            export_docx: exportAssistantMessageDocx,
+            export_csv: exportAssistantMessageCsv,
+            export_html: exportAssistantMessageHtml,
+            export_json: exportAssistantMessageJson,
+            export_txt: exportAssistantMessageTxt,
             transform_simplify: messageId => transformAssistantAnswer(messageId, 'simplify'),
             transform_deeper: messageId => transformAssistantAnswer(messageId, 'deeper'),
             transform_shorter: messageId => transformAssistantAnswer(messageId, 'shorter'),
@@ -9938,6 +9957,90 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             if (!meta?.text) return;
             downloadTextFile(`jarvis-answer-${Date.now()}.md`, buildAssistantAnswerMarkdown(meta), 'text/markdown;charset=utf-8');
             showTemporaryMessage('Answer exported as Markdown.');
+            closeAssistantActionMenus();
+        }
+
+        function exportAssistantMessagePdf(messageId) {
+            const meta = getAssistantMessageMeta(messageId);
+            if (!meta?.text) return;
+            const title = `JARVIS Document - ${extractCoreTopic(meta.priorUserPrompt, meta.text)}`;
+            const row = document.querySelector(`[data-message-id="${messageId}"]`);
+            const answerEl = row?.querySelector('.assistant-message-text');
+            const answerHtml = answerEl ? answerEl.innerHTML : escapeHtml(meta.text);
+            const pdfHtml = globalThis.JarvisDocumentExporter?.generatePdfHtml(title, meta.priorUserPrompt, answerHtml, meta)
+                || `<!DOCTYPE html><html><body><h1>${escapeHtml(title)}</h1><p>${escapeHtml(meta.text)}</p></body></html>`;
+            globalThis.JarvisDocumentExporter?.openPrintDialog(title, pdfHtml);
+            showTemporaryMessage('Opening clean PDF print view...');
+            closeAssistantActionMenus();
+        }
+
+        function exportAssistantMessageDocx(messageId) {
+            const meta = getAssistantMessageMeta(messageId);
+            if (!meta?.text) return;
+            const title = `JARVIS Document - ${extractCoreTopic(meta.priorUserPrompt, meta.text)}`;
+            const row = document.querySelector(`[data-message-id="${messageId}"]`);
+            const answerEl = row?.querySelector('.assistant-message-text');
+            const answerHtml = answerEl ? answerEl.innerHTML : escapeHtml(meta.text);
+            const wordDoc = globalThis.JarvisDocumentExporter?.generateWordDoc(title, meta.priorUserPrompt, answerHtml, meta);
+            downloadTextFile(`jarvis-answer-${Date.now()}.doc`, wordDoc, 'application/vnd.ms-word;charset=utf-8');
+            showTemporaryMessage('Answer exported as Word document (.docx).');
+            closeAssistantActionMenus();
+        }
+
+        function exportAssistantMessageCsv(messageId) {
+            const meta = getAssistantMessageMeta(messageId);
+            if (!meta?.text) return;
+            const row = document.querySelector(`[data-message-id="${messageId}"]`);
+            const table = row?.querySelector('table');
+            let csvContent = '';
+            if (table && globalThis.JarvisDocumentExporter?.tableToCsv) {
+                csvContent = globalThis.JarvisDocumentExporter.tableToCsv(table);
+            } else {
+                const lines = String(meta.text || '').split('\n').filter(Boolean);
+                csvContent = lines.map(l => `"${l.replace(/"/g, '""')}"`).join('\r\n');
+            }
+            downloadTextFile(`jarvis-data-${Date.now()}.csv`, csvContent, 'text/csv;charset=utf-8');
+            showTemporaryMessage('Answer exported as CSV.');
+            closeAssistantActionMenus();
+        }
+
+        function exportAssistantMessageHtml(messageId) {
+            const meta = getAssistantMessageMeta(messageId);
+            if (!meta?.text) return;
+            const title = `JARVIS Document - ${extractCoreTopic(meta.priorUserPrompt, meta.text)}`;
+            const row = document.querySelector(`[data-message-id="${messageId}"]`);
+            const answerEl = row?.querySelector('.assistant-message-text');
+            const answerHtml = answerEl ? answerEl.innerHTML : escapeHtml(meta.text);
+            const docHtml = globalThis.JarvisDocumentExporter?.generateStandaloneHtml(title, meta.priorUserPrompt, answerHtml, meta);
+            downloadTextFile(`jarvis-answer-${Date.now()}.html`, docHtml, 'text/html;charset=utf-8');
+            showTemporaryMessage('Answer exported as HTML document.');
+            closeAssistantActionMenus();
+        }
+
+        function exportAssistantMessageJson(messageId) {
+            const meta = getAssistantMessageMeta(messageId);
+            if (!meta?.text) return;
+            const record = {
+                id: messageId,
+                title: extractCoreTopic(meta.priorUserPrompt, meta.text),
+                prompt: meta.priorUserPrompt || '',
+                answer: meta.text || '',
+                model: meta.model || 'JARVIS',
+                timestamp: meta.timestamp || Date.now(),
+                thought: meta.thought || ''
+            };
+            downloadTextFile(`jarvis-answer-${Date.now()}.json`, JSON.stringify(record, null, 2), 'application/json;charset=utf-8');
+            showTemporaryMessage('Answer exported as JSON.');
+            closeAssistantActionMenus();
+        }
+
+        function exportAssistantMessageTxt(messageId) {
+            const meta = getAssistantMessageMeta(messageId);
+            if (!meta?.text) return;
+            const prompt = meta.priorUserPrompt ? `PROMPT: ${meta.priorUserPrompt}\n\n` : '';
+            const txt = `${prompt}RESPONSE:\n${meta.text}`;
+            downloadTextFile(`jarvis-answer-${Date.now()}.txt`, txt, 'text/plain;charset=utf-8');
+            showTemporaryMessage('Answer exported as Plain Text.');
             closeAssistantActionMenus();
         }
 
@@ -22824,10 +22927,76 @@ function exportChatHistoryMarkdown() {
 function exportChatHistoryPdf() {
     closeChatExportFormatPicker();
     try {
-        window.print();
-        showTemporaryMessage('Opening print / PDF preview...');
+        const title = 'JARVIS Conversation History';
+        const rows = Array.from(document.querySelectorAll('.chat-row-assistant, .chat-row-user, [data-message-id]'));
+        let combinedHtml = '';
+        if (rows.length > 0) {
+            combinedHtml = rows.map(row => {
+                const isUser = row.classList.contains('chat-row-user') || row.querySelector('.chat-bubble-user');
+                const sender = isUser ? 'User' : 'JARVIS';
+                const textEl = row.querySelector('.assistant-message-text, .user-message-text') || row;
+                const inner = textEl.innerHTML || escapeHtml(textEl.textContent || '');
+                return `<div style="margin-bottom: 18px; padding-bottom: 12px; border-bottom: 1px solid #e2e8f0;">
+                    <strong style="color: ${isUser ? '#2563eb' : '#6366f1'}; font-size: 11pt;">${sender}:</strong>
+                    <div style="margin-top: 6px;">${inner}</div>
+                </div>`;
+            }).join('\n');
+        } else {
+            combinedHtml = (conversationHistory || []).map(m => {
+                const isUser = m.role === 'user' || m.isUser;
+                return `<div style="margin-bottom: 14px;"><strong style="color:${isUser ? '#2563eb':'#6366f1'}">${isUser ? 'User' : 'JARVIS'}:</strong><p>${escapeHtml(m.content || m.text || '')}</p></div>`;
+            }).join('');
+        }
+
+        const fullPdfHtml = globalThis.JarvisDocumentExporter?.generatePdfHtml(title, '', combinedHtml, { timestamp: Date.now() })
+            || `<!DOCTYPE html><html><body>${combinedHtml}</body></html>`;
+        globalThis.JarvisDocumentExporter?.openPrintDialog(title, fullPdfHtml);
+        showTemporaryMessage('Opening clean PDF print view...');
     } catch (_) {
-        showTemporaryMessage('Could not open print preview.');
+        window.print();
+    }
+}
+
+function exportChatHistoryDocx() {
+    closeChatExportFormatPicker();
+    try {
+        const title = 'JARVIS Conversation History';
+        let combinedHtml = (conversationHistory || []).map(m => {
+            const isUser = m.role === 'user' || m.isUser;
+            return `<div style="margin-bottom: 12pt;"><p><strong style="color:${isUser ? '#2563eb':'#6366f1'}">${isUser ? 'User' : 'JARVIS'}:</strong></p><p>${escapeHtml(m.content || m.text || '').replace(/\n/g, '<br>')}</p></div>`;
+        }).join('');
+        const docxContent = globalThis.JarvisDocumentExporter?.generateWordDoc(title, '', combinedHtml, { timestamp: Date.now() });
+        downloadTextFile(`jarvis-conversation-${Date.now()}.doc`, docxContent, 'application/vnd.ms-word;charset=utf-8');
+        showTemporaryMessage('Chat history exported as Word document (.docx).');
+    } catch (_) {
+        showTemporaryMessage('Could not export Word document.');
+    }
+}
+
+function exportChatHistoryCsv() {
+    closeChatExportFormatPicker();
+    try {
+        const csvContent = globalThis.JarvisDocumentExporter?.formatHistoryAsCsv(conversationHistory);
+        downloadTextFile(`jarvis-conversation-${Date.now()}.csv`, csvContent, 'text/csv;charset=utf-8');
+        showTemporaryMessage('Chat history exported as CSV.');
+    } catch (_) {
+        showTemporaryMessage('Could not export CSV.');
+    }
+}
+
+function exportChatHistoryHtml() {
+    closeChatExportFormatPicker();
+    try {
+        const title = 'JARVIS Conversation History';
+        let combinedHtml = (conversationHistory || []).map(m => {
+            const isUser = m.role === 'user' || m.isUser;
+            return `<div style="margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid #e2e8f0;"><strong style="color:${isUser ? '#2563eb':'#6366f1'}">${isUser ? 'User' : 'JARVIS'}:</strong><div style="margin-top:4px;">${escapeHtml(m.content || m.text || '').replace(/\n/g, '<br>')}</div></div>`;
+        }).join('');
+        const fullHtml = globalThis.JarvisDocumentExporter?.generateStandaloneHtml(title, '', combinedHtml, { timestamp: Date.now() });
+        downloadTextFile(`jarvis-conversation-${Date.now()}.html`, fullHtml, 'text/html;charset=utf-8');
+        showTemporaryMessage('Chat history exported as HTML.');
+    } catch (_) {
+        showTemporaryMessage('Could not export HTML.');
     }
 }
 
@@ -22846,14 +23015,38 @@ function showChatExportFormatPicker() {
     modal.innerHTML = `
         <div class="export-format-panel">
             <div class="export-format-header">
-                <strong>Export chat</strong>
+                <strong>Export Chat History</strong>
                 <button type="button" onclick="closeChatExportFormatPicker()" aria-label="Close export options">×</button>
             </div>
             <div class="export-format-actions">
-                <button type="button" onclick="exportChatHistoryMarkdown(); closeChatExportFormatPicker();">Markdown (.md)</button>
-                <button type="button" onclick="exportChatHistoryPdf(); closeChatExportFormatPicker();">PDF (Print)</button>
-                <button type="button" onclick="exportChatHistoryJson(); closeChatExportFormatPicker();">JSON (.json)</button>
-                <button type="button" onclick="exportChatHistoryText(); closeChatExportFormatPicker();">TXT</button>
+                <button type="button" onclick="exportChatHistoryPdf(); closeChatExportFormatPicker();">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><path d="M9 13v4"></path><path d="M9 13h2a1 1 0 0 1 0 2H9"></path><path d="M13 13v4"></path></svg>
+                    <span>PDF Document (Print)</span>
+                </button>
+                <button type="button" onclick="exportChatHistoryDocx(); closeChatExportFormatPicker();">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><path d="M8 13l2 4 2-4 2 4 2-4"></path></svg>
+                    <span>Word Document (.docx)</span>
+                </button>
+                <button type="button" onclick="exportChatHistoryCsv(); closeChatExportFormatPicker();">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M3 9h18M3 15h18M9 3v18M15 3v18"></path></svg>
+                    <span>Excel / CSV (.csv)</span>
+                </button>
+                <button type="button" onclick="exportChatHistoryMarkdown(); closeChatExportFormatPicker();">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path><path d="M8 13h8"></path><path d="M8 17h5"></path></svg>
+                    <span>Markdown (.md)</span>
+                </button>
+                <button type="button" onclick="exportChatHistoryHtml(); closeChatExportFormatPicker();">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
+                    <span>HTML Document (.html)</span>
+                </button>
+                <button type="button" onclick="exportChatHistoryJson(); closeChatExportFormatPicker();">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H6a2 2 0 0 0-2 2v3a2 2 0 0 1-2 2 2 2 0 0 1 2 2v3a2 2 0 0 0 2 2h2"></path><path d="M16 3h2a2 2 0 0 1 2 2v3a2 2 0 0 0 2 2 2 2 0 0 0-2 2v3a2 2 0 0 1-2 2h-2"></path></svg>
+                    <span>JSON Data (.json)</span>
+                </button>
+                <button type="button" onclick="exportChatHistoryText(); closeChatExportFormatPicker();">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="6" x2="20" y2="6"></line><line x1="4" y1="12" x2="14" y2="12"></line><line x1="4" y1="18" x2="18" y2="18"></line></svg>
+                    <span>Plain Text (.txt)</span>
+                </button>
             </div>
         </div>
     `;
@@ -30254,6 +30447,164 @@ _stdout_text = _output_buf.getvalue()
     }
 }
 window.runPythonBlockInBrowser = runPythonBlockInBrowser;
+
+async function runJsBlockInBrowser(btn, blockId) {
+    const data = window._jarvisCodeBlocks?.[blockId];
+    let code = data?.code || '';
+    const container = document.getElementById(`container_${blockId}`);
+    if (!code && container) {
+        const codeEl = container.querySelector('code');
+        if (codeEl) code = codeEl.innerText || '';
+    }
+    if (!code.trim()) return;
+
+    let outputEl = document.getElementById(`output_${blockId}`);
+    if (!outputEl && container) {
+        outputEl = document.createElement('div');
+        outputEl.className = 'assistant-code-output';
+        outputEl.id = `output_${blockId}`;
+        container.appendChild(outputEl);
+    }
+    if (!outputEl) return;
+
+    const span = btn?.querySelector('span');
+    if (btn) {
+        btn.classList.add('is-running');
+        btn.disabled = true;
+    }
+    if (span) span.innerText = 'Running...';
+
+    outputEl.style.display = 'block';
+    outputEl.innerHTML = `
+        <div class="assistant-code-output-title">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+            <span>JavaScript Sandbox Output</span>
+        </div>
+        <div class="python-output-text" style="color: #94a3b8;">Executing in safe client sandbox...</div>
+    `;
+
+    try {
+        const logs = [];
+        const captureLog = (level, args) => {
+            const formatted = args.map(arg => {
+                if (arg === null) return 'null';
+                if (arg === undefined) return 'undefined';
+                if (typeof arg === 'object') {
+                    try { return JSON.stringify(arg, null, 2); } catch (_) { return String(arg); }
+                }
+                return String(arg);
+            }).join(' ');
+            logs.push({ level, text: formatted });
+        };
+
+        const sandboxConsole = {
+            log: (...args) => captureLog('log', args),
+            info: (...args) => captureLog('info', args),
+            warn: (...args) => captureLog('warn', args),
+            error: (...args) => captureLog('error', args),
+        };
+
+        const startTime = performance.now();
+        const runner = new Function('console', `"use strict";\n${code}`);
+        const result = runner(sandboxConsole);
+        const duration = (performance.now() - startTime).toFixed(1);
+
+        let outputContent = '';
+        if (logs.length > 0) {
+            outputContent = logs.map(l => {
+                const color = l.level === 'error' ? '#f87171' : (l.level === 'warn' ? '#fbbf24' : '#e2e8f0');
+                const badge = l.level === 'log' ? '' : `<span style="font-size:10px; opacity:0.8; margin-right:6px; text-transform:uppercase;">[${l.level}]</span>`;
+                const escaped = escapeHtml(l.text);
+                return `<div style="color:${color}; font-family:ui-monospace, monospace; font-size:12px; margin:2px 0;">${badge}${escaped}</div>`;
+            }).join('');
+        }
+        if (result !== undefined) {
+            const resStr = typeof result === 'object' ? JSON.stringify(result, null, 2) : String(result);
+            outputContent += `<div style="color:#a5b4fc; font-family:ui-monospace, monospace; font-size:12px; margin-top:6px; padding-top:4px; border-top:1px dashed rgba(255,255,255,0.1);"><span style="opacity:0.7;">&lt;return&gt;</span> ${escapeHtml(resStr)}</div>`;
+        }
+        if (!outputContent) {
+            outputContent = `<div style="color:#64748b; font-size:12px; font-family:ui-monospace, monospace;">(Executed successfully in ${duration}ms with zero console output)</div>`;
+        }
+
+        outputEl.innerHTML = `
+            <div class="assistant-code-output-title">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                <span>JavaScript Output (${duration}ms)</span>
+            </div>
+            <div class="python-output-text" style="padding-top:4px;">${outputContent}</div>
+        `;
+    } catch (err) {
+        const errEscaped = escapeHtml(String(err?.stack || err?.message || err));
+        outputEl.innerHTML = `
+            <div class="assistant-code-output-title" style="color:#f87171;">
+                <span>⚠️ Execution Error</span>
+            </div>
+            <pre class="python-output-error">${errEscaped}</pre>
+        `;
+    } finally {
+        if (btn) {
+            btn.classList.remove('is-running');
+            btn.disabled = false;
+        }
+        if (span) span.innerText = 'Rerun';
+    }
+}
+window.runJsBlockInBrowser = runJsBlockInBrowser;
+
+function toggleCodePreview(blockId) {
+    const body = document.getElementById(`preview_body_${blockId}`);
+    if (body) {
+        body.classList.toggle('hidden');
+    }
+}
+window.toggleCodePreview = toggleCodePreview;
+
+function refreshCodePreview(blockId) {
+    const iframe = document.getElementById(`iframe_${blockId}`);
+    const data = window._jarvisCodeBlocks?.[blockId];
+    if (iframe && data?.code) {
+        iframe.srcdoc = data.code;
+    }
+}
+window.refreshCodePreview = refreshCodePreview;
+
+function openCodePreviewInNewTab(blockId) {
+    const data = window._jarvisCodeBlocks?.[blockId];
+    const code = data?.code || '';
+    if (!code) return;
+    const blob = new Blob([code], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank', 'noopener,noreferrer');
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+window.openCodePreviewInNewTab = openCodePreviewInNewTab;
+
+function downloadTableCsv(btn) {
+    const wrap = btn?.closest?.('.assistant-md-table-wrap');
+    const table = wrap?.querySelector?.('table');
+    if (!table) return;
+    const csv = globalThis.JarvisDocumentExporter?.tableToCsv(table) || '';
+    downloadTextFile(`jarvis-table-${Date.now()}.csv`, csv, 'text/csv;charset=utf-8');
+    showTemporaryMessage?.('Table downloaded as CSV.');
+}
+window.downloadTableCsv = downloadTableCsv;
+
+function copyTableTsv(btn) {
+    const wrap = btn?.closest?.('.assistant-md-table-wrap');
+    const table = wrap?.querySelector?.('table');
+    if (!table) return;
+    const tsv = globalThis.JarvisDocumentExporter?.tableToTsv(table) || '';
+    if (navigator?.clipboard?.writeText) {
+        navigator.clipboard.writeText(tsv).then(() => {
+            showTemporaryMessage?.('Table copied for Excel / Sheets.');
+        }).catch(() => {
+            copyToClipboard?.(tsv);
+        });
+    } else {
+        copyToClipboard?.(tsv);
+    }
+}
+window.copyTableTsv = copyTableTsv;
 
 function stripLargeBase64ForHistory(text) {
     if (!text || typeof text !== 'string') return '';
