@@ -362,6 +362,105 @@ async function generateGeminiImageBuffer(prompt, {
     };
 }
 
+/**
+ * Generates an image using AI Horde (free, decentralized community GPU cluster).
+ * Zero rate limits, no mandatory API key required (uses default 0000000000).
+ */
+async function generateAiHordeImageBuffer(prompt, {
+    width = 512,
+    height = 512,
+    timeoutMs = 28000,
+    apiKey: customKey = ''
+} = {}) {
+    const apiKey = customKey || process.env.AI_HORDE_API_KEY || '0000000000';
+    const models = ['stable_diffusion', "ICBINP - I Can't Believe It's Not Photography", 'Deliberate', 'Anything v5'];
+
+    // 1. Submit async generation job
+    const postRes = await fetch('https://aihorde.net/api/v2/generate/async', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'apikey': apiKey,
+            'Client-Agent': 'JarvisAssistant:1.0'
+        },
+        body: JSON.stringify({
+            prompt,
+            params: {
+                width: Math.min(768, Math.max(384, width)),
+                height: Math.min(768, Math.max(384, height)),
+                steps: 20,
+                n: 1
+            },
+            models
+        })
+    });
+
+    if (!postRes.ok) {
+        const errText = await postRes.text().catch(() => '');
+        throw new Error(`AI Horde submit failed (${postRes.status}): ${errText.slice(0, 100)}`);
+    }
+
+    const postData = await postRes.json();
+    const id = postData?.id;
+    if (!id) throw new Error('AI Horde returned no job ID');
+
+    // 2. Poll check status
+    const startTime = Date.now();
+    let isDone = false;
+    while (!isDone && (Date.now() - startTime) < timeoutMs) {
+        await new Promise(r => setTimeout(r, 1500));
+        const checkRes = await fetch(`https://aihorde.net/api/v2/generate/check/${id}`, {
+            headers: { 'Client-Agent': 'JarvisAssistant:1.0' }
+        });
+        if (checkRes.ok) {
+            const checkData = await checkRes.json();
+            if (checkData.done || checkData.finished > 0) {
+                isDone = true;
+                break;
+            }
+            if (checkData.faulted) {
+                throw new Error('AI Horde job faulted');
+            }
+        }
+    }
+
+    // 3. Fetch completed status & image
+    const statusRes = await fetch(`https://aihorde.net/api/v2/generate/status/${id}`, {
+        headers: { 'Client-Agent': 'JarvisAssistant:1.0' }
+    });
+    if (!statusRes.ok) throw new Error(`AI Horde status fetch failed (${statusRes.status})`);
+
+    const statusData = await statusRes.json();
+    const generation = statusData.generations?.[0];
+    if (!generation) throw new Error('AI Horde returned no generations');
+
+    let imageBuffer = null;
+    let contentType = 'image/webp';
+
+    if (generation.img) {
+        if (generation.img.startsWith('http://') || generation.img.startsWith('https://')) {
+            const imgRes = await fetch(generation.img);
+            if (!imgRes.ok) throw new Error(`Failed to download AI Horde image (${imgRes.status})`);
+            contentType = imgRes.headers.get('content-type') || 'image/webp';
+            const arrBuf = await imgRes.arrayBuffer();
+            imageBuffer = Buffer.from(arrBuf);
+        } else {
+            imageBuffer = Buffer.from(generation.img, 'base64');
+        }
+    }
+
+    if (!imageBuffer || imageBuffer.length < 100) {
+        throw new Error('AI Horde returned empty image payload');
+    }
+
+    return {
+        success: true,
+        buffer: imageBuffer,
+        contentType,
+        model: `aihorde-${generation.model || 'stable_diffusion'}`
+    };
+}
+
 export async function imageProxyHandler(req, res) {
     if (req.method === 'OPTIONS') {
         if (typeof res.setHeader === 'function') {
@@ -399,64 +498,85 @@ export async function imageProxyHandler(req, res) {
     const acceptsJson = String(req.headers?.['accept'] || '').includes('application/json') || params.response_format === 'json' || params.format === 'json';
     const clientApiKey = resolveGeminiApiKey('', req, params);
 
-    // Route exclusively to Gemini API (Imagen 3 / Gemini multimodal image generation)
-    const geminiResult = await generateGeminiImageBuffer(prompt, {
+    // 1. Primary attempt: Google Gemini (models/gemini-3.1-flash-lite-image)
+    let result = await generateGeminiImageBuffer(prompt, {
         width,
         height,
-        timeoutMs: 35000,
+        timeoutMs: 30000,
         apiKey: clientApiKey,
         aspectRatio: params.aspectRatio || params.aspect_ratio || '',
         requestedModel
     });
 
-    if (geminiResult && geminiResult.success && geminiResult.buffer && geminiResult.buffer.length > 500) {
-        res.setHeader('Content-Type', geminiResult.contentType);
-        res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
-        res.setHeader('X-Image-Model', geminiResult.model);
+    // 2. If Gemini fails due to quota limit (e.g. Free Tier limit 0) or upstream service failure:
+    // Seamlessly fall back to AI Horde (free, crowd-sourced GPU cluster) so user gets their image
+    if (!result?.success && (result?.code === 'quota_exceeded' || result?.code === 'gemini_image_generation_failed' || params?.provider === 'aihorde')) {
+        console.warn(`[image-proxy] Gemini image generation unavailable (${result?.code || 'failed'}), attempting AI Horde community fallback...`);
+        try {
+            const hordeResult = await generateAiHordeImageBuffer(prompt, {
+                width,
+                height,
+                timeoutMs: 25000,
+                apiKey: process.env.AI_HORDE_API_KEY || ''
+            });
+            if (hordeResult && hordeResult.success && hordeResult.buffer && hordeResult.buffer.length > 100) {
+                result = hordeResult;
+            }
+        } catch (hordeErr) {
+            console.error('[image-proxy] AI Horde fallback error:', hordeErr?.message || hordeErr);
+        }
+    }
+
+    if (result && result.success && result.buffer && result.buffer.length > 100) {
+        if (typeof res.setHeader === 'function') {
+            res.setHeader('Content-Type', result.contentType || 'image/webp');
+            res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
+            res.setHeader('X-Image-Model', result.model);
+        }
 
         if (acceptsJson) {
             return res.status(200).json({
                 success: true,
-                image: geminiResult.buffer.toString('base64'),
-                dataUrl: `data:${geminiResult.contentType};base64,${geminiResult.buffer.toString('base64')}`,
-                model: geminiResult.model
+                image: result.buffer.toString('base64'),
+                dataUrl: `data:${result.contentType || 'image/webp'};base64,${result.buffer.toString('base64')}`,
+                model: result.model
             });
         }
 
         const responder = typeof res.status === 'function' ? res.status(200) : res;
-        if (responder && typeof responder.send === 'function') return responder.send(geminiResult.buffer);
-        if (responder && typeof responder.end === 'function') return responder.end(geminiResult.buffer);
-        if (typeof res.send === 'function') return res.send(geminiResult.buffer);
-        if (typeof res.end === 'function') return res.end(geminiResult.buffer);
+        if (responder && typeof responder.send === 'function') return responder.send(result.buffer);
+        if (responder && typeof responder.end === 'function') return responder.end(result.buffer);
+        if (typeof res.send === 'function') return res.send(result.buffer);
+        if (typeof res.end === 'function') return res.end(result.buffer);
         return;
     }
 
-    if (geminiResult?.code === 'missing_gemini_key') {
+    if (result?.code === 'missing_gemini_key') {
         return res.status(401).json({
             success: false,
             error: {
                 code: 'missing_gemini_key',
-                message: geminiResult.message || 'Gemini API key is required. Please set GEMINI_API_KEY in your environment.'
+                message: result.message || 'Gemini API key is required. Please set GEMINI_API_KEY in your environment.'
             }
         });
     }
 
-    if (geminiResult?.code === 'invalid_api_key') {
+    if (result?.code === 'invalid_api_key') {
         return res.status(401).json({
             success: false,
             error: {
                 code: 'invalid_api_key',
-                message: geminiResult.message || 'Invalid Gemini API key. Please check your GEMINI_API_KEY.'
+                message: result.message || 'Invalid Gemini API key. Please check your GEMINI_API_KEY.'
             }
         });
     }
 
-    if (geminiResult?.code === 'quota_exceeded') {
+    if (result?.code === 'quota_exceeded') {
         return res.status(429).json({
             success: false,
             error: {
                 code: 'quota_exceeded',
-                message: geminiResult.message || 'Gemini API quota exceeded. Please check your Google AI Studio quota.'
+                message: result.message || 'Gemini API quota exceeded. Please check your Google AI Studio quota.'
             }
         });
     }
@@ -465,7 +585,7 @@ export async function imageProxyHandler(req, res) {
         success: false,
         error: {
             code: 'gemini_image_generation_failed',
-            message: geminiResult?.message || 'Gemini image generation failed. Please verify your GEMINI_API_KEY and quota.'
+            message: result?.message || 'Image generation failed across all available providers.'
         }
     });
 }
