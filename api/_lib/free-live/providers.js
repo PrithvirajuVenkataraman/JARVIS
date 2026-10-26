@@ -3,6 +3,38 @@ import { cleanQueryTarget, extractQueryTargetMetadata } from '../query-target-cl
 import { cleanSnippetText, decodeHtmlEntities } from '../snippet-sanitizer.js';
 import { classifyTemporalScope } from '../temporal-query-planner.js';
 import { parseDocumentDate, formatDocumentDate } from '../hybrid-reranker.js';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import {
+    globalCircuitBreaker,
+    isCircuitBreakerEnabled,
+    classifyResponseOutcome,
+    FAILURE_TYPES,
+    BREAKER_STATES,
+    getCircuitBreakerDebugState
+} from '../../../app/search/circuitBreaker.mjs';
+
+let VERIFIED_SEARXNG_POOL = [
+    'https://search.sapti.me/search',
+    'https://etsi.me/search',
+    'https://baresearch.org/search',
+    'https://priv.au/search',
+    'https://searx.be/search',
+    'https://searx.tiekoetter.com/search',
+    'https://search.disroot.org/search',
+    'https://paulgo.io/search',
+    'https://search.ononoki.org/search',
+    'https://searx.work/search'
+];
+
+try {
+    const poolPath = fileURLToPath(new URL('../../../app/search/searxng-pool.json', import.meta.url));
+    const poolRaw = readFileSync(poolPath, 'utf8');
+    const parsed = JSON.parse(poolRaw);
+    if (Array.isArray(parsed?.instances) && parsed.instances.length >= 8) {
+        VERIFIED_SEARXNG_POOL = parsed.instances.map(inst => inst.url).filter(Boolean);
+    }
+} catch (_) {}
 
 const OPEN_METEO_GEOCODE_URL = 'https://geocoding-api.open-meteo.com/v1/search';
 const OPEN_METEO_FORECAST_URL = 'https://api.open-meteo.com/v1/forecast';
@@ -299,19 +331,9 @@ export async function searchSearXNGRacer(query, options = {}) {
     const configuredUrl = String(process.env.SEARXNG_URL || process.env.SEARX_URL || '').trim().replace(/\/+$/, '');
     const endpoints = configuredUrl 
         ? [configuredUrl.endsWith('/search') ? configuredUrl : `${configuredUrl}/search`]
-        : [
-            // Curated list of public SearXNG instances — ordered by typical cloud-IP acceptance
-            'https://search.sapti.me/search',
-            'https://etsi.me/search',
-            'https://baresearch.org/search',
-            'https://priv.au/search',
-            'https://searx.be/search',
-            'https://searx.tiekoetter.com/search',
-            'https://search.disroot.org/search',
-            'https://paulgo.io/search'
-        ];
+        : (Array.isArray(options.endpoints) && options.endpoints.length > 0 ? options.endpoints : VERIFIED_SEARXNG_POOL);
 
-    const fetchSingleEndpoint = async (baseEndpoint, useDateFilter = true) => {
+    const fetchSingleEndpoint = async (baseEndpoint, useDateFilter = true, signal = null) => {
         const url = new URL(baseEndpoint);
         url.searchParams.set('q', rawQ);
         url.searchParams.set('format', 'json');
@@ -320,29 +342,173 @@ export async function searchSearXNGRacer(query, options = {}) {
             url.searchParams.set('time_range', dateFilter.searx);
         }
 
-        const response = await fetchWithTimeout(url.toString(), {
+        const effectiveSignal = signal || options.signal;
+        const fetchFn = options.fetchFn || fetchWithTimeout;
+        const response = await fetchFn(url.toString(), {
             headers: {
                 'Accept': 'application/json, text/javascript, */*',
                 'Accept-Language': 'en-US,en;q=0.9',
                 'Accept-Encoding': 'gzip, deflate, br',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
             },
-            signal: options.signal
+            signal: effectiveSignal
         }, timeoutMs);
 
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const data = await response.json();
-        const results = parseSearXNGResults(data, rawQ, limit);
-        if (!results.length) throw new Error('No results from endpoint');
-        return results;
+        return response;
+    };
+
+    // Legacy Fallback when SEARCH_CIRCUIT_BREAKER is disabled
+    if (!isCircuitBreakerEnabled(options)) {
+        const runLegacy = async (ep, useDf) => {
+            const res = await fetchSingleEndpoint(ep, useDf);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            const results = parseSearXNGResults(data, rawQ, limit);
+            if (!results.length) throw new Error('No results from endpoint');
+            return results;
+        };
+
+        try {
+            return await Promise.any(endpoints.map(ep => runLegacy(ep, true)));
+        } catch (_) {
+            if (dateFilter?.searx) {
+                try {
+                    return await Promise.any(endpoints.map(ep => runLegacy(ep, false)));
+                } catch (_) {}
+            }
+            return [];
+        }
+    }
+
+    // Circuit Breaker & Health Scorer Path
+    const breaker = options.circuitBreakerRegistry || globalCircuitBreaker;
+    const now = options.now ?? Date.now();
+    const rng = options.rng ?? Math.random;
+
+    const { primaryCandidates, secondaryCandidates, skippedOpen } = breaker.selectRacingCandidates(endpoints, { now, rng, limit: 4 });
+
+    if (skippedOpen.length > 0 && options.verbose) {
+        console.log(`[SearchRacer] Skipped OPEN endpoints: ${skippedOpen.join(', ')}`);
+    }
+
+    if (primaryCandidates.length === 0) {
+        console.log('[SearchRacer] All SearXNG endpoints are OPEN. Falling through to non-SearXNG providers.');
+        return [];
+    }
+
+    const raceTier = async (candidateList) => {
+        const tierController = new AbortController();
+        let clientAborted = false;
+
+        const onClientAbort = () => {
+            clientAborted = true;
+            tierController.abort();
+        };
+
+        if (options.signal) {
+            if (options.signal.aborted) {
+                clientAborted = true;
+                tierController.abort();
+            } else {
+                options.signal.addEventListener('abort', onClientAbort, { once: true });
+            }
+        }
+
+        try {
+            const tasks = candidateList.map(async (ep) => {
+                const isProbe = breaker.getState(ep, now) === BREAKER_STATES.HALF_OPEN;
+                if (isProbe) {
+                    breaker.acquireProbeLease(ep);
+                }
+
+                const startTime = Date.now();
+                const reqController = new AbortController();
+                const onTierAbort = () => reqController.abort();
+                tierController.signal.addEventListener('abort', onTierAbort, { once: true });
+
+                let failureRecorded = false;
+                try {
+                    const response = await fetchSingleEndpoint(ep, true, reqController.signal);
+                    const latencyMs = Date.now() - startTime;
+
+                    if (!response.ok) {
+                        const rawBody = await response.text().catch(() => '');
+                        const outcome = classifyResponseOutcome({
+                            status: response.status,
+                            headers: response.headers,
+                            body: rawBody,
+                            isClientAbort: clientAborted || tierController.signal.reason === 'winner_found'
+                        });
+                        if (outcome && outcome !== FAILURE_TYPES.CLIENT_ABORT) {
+                            failureRecorded = true;
+                            breaker.recordFailure(ep, { type: outcome, reason: `HTTP ${response.status}`, latencyMs }, now, rng);
+                        }
+                        throw new Error(`HTTP ${response.status}`);
+                    }
+
+                    const rawText = await response.text();
+                    const hasCfHeader = Boolean(response.headers?.['cf-mitigated'] || response.headers?.get?.('cf-mitigated'));
+                    const isChallenge = hasCfHeader || rawText.includes('cf-browser-verification') || rawText.includes('challenge-running') || rawText.includes('turnstile');
+                    if (isChallenge) {
+                        failureRecorded = true;
+                        breaker.recordFailure(ep, { type: FAILURE_TYPES.HARD_FAILURE, reason: 'bot_challenge', latencyMs }, now, rng);
+                        throw new Error('bot_challenge');
+                    }
+
+                    let data;
+                    try {
+                        data = JSON.parse(rawText);
+                    } catch (_) {
+                        failureRecorded = true;
+                        breaker.recordFailure(ep, { type: FAILURE_TYPES.SOFT_FAILURE, reason: 'invalid_json', latencyMs }, now, rng);
+                        throw new Error('invalid_json');
+                    }
+
+                    const results = parseSearXNGResults(data, rawQ, limit);
+                    if (!results.length) {
+                        failureRecorded = true;
+                        breaker.recordFailure(ep, { type: FAILURE_TYPES.SOFT_FAILURE, reason: 'empty_results', latencyMs }, now, rng);
+                        throw new Error('empty_results');
+                    }
+
+                    // Success!
+                    breaker.recordSuccess(ep, latencyMs, now);
+                    tierController.abort('winner_found'); // hard-cancel other in-flight requests in tier
+                    return results;
+                } catch (err) {
+                    const latencyMs = Date.now() - startTime;
+                    const isOurAbort = tierController.signal.reason === 'winner_found';
+                    if (!failureRecorded && !clientAborted && !isOurAbort) {
+                        const isTimeout = err.name === 'TimeoutError' || (err.name === 'AbortError' && !reqController.signal.aborted);
+                        const failType = isTimeout ? FAILURE_TYPES.TIMEOUT : FAILURE_TYPES.HARD_FAILURE;
+                        breaker.recordFailure(ep, { type: failType, reason: err.message || failType, latencyMs }, now, rng);
+                    }
+                    throw err;
+                }
+ finally {
+                    tierController.signal.removeEventListener('abort', onTierAbort);
+                    if (isProbe) {
+                        breaker.releaseProbeLease(ep);
+                    }
+                }
+            });
+
+            return await Promise.any(tasks);
+        } finally {
+            if (options.signal) {
+                options.signal.removeEventListener('abort', onClientAbort);
+            }
+        }
     };
 
     try {
-        return await Promise.any(endpoints.map(ep => fetchSingleEndpoint(ep, true)));
+        return await raceTier(primaryCandidates);
     } catch (_) {
-        if (dateFilter?.searx) {
+        // If all 4 in Tier 1 fail or return empty, immediately launch Tier 2
+        if (secondaryCandidates.length > 0) {
+            const tier2 = secondaryCandidates.slice(0, 4);
             try {
-                return await Promise.any(endpoints.map(ep => fetchSingleEndpoint(ep, false)));
+                return await raceTier(tier2);
             } catch (_) {}
         }
         return [];
@@ -1209,5 +1375,8 @@ export const __test = {
     searchSearXNGJson,
     searchSearXNGRacer,
     searchGoogleNewsRss,
-    searchYahooFinanceQuotes
+    searchYahooFinanceQuotes,
+    getCircuitBreakerDebugState
 };
+
+export { getCircuitBreakerDebugState };
