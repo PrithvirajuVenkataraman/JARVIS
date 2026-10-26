@@ -8463,14 +8463,16 @@ body:not(.dark) .assistant-followup-chip:hover {
 }
 
 .image-gen-viewport.has-image {
-    min-height: auto;
+    min-height: 0 !important;
+    height: auto !important;
+    aspect-ratio: auto !important;
 }
 
-.image-gen-viewport[data-ratio="1:1"]  { aspect-ratio: 1 / 1; }
-.image-gen-viewport[data-ratio="16:9"] { aspect-ratio: 16 / 9; }
-.image-gen-viewport[data-ratio="9:16"] { aspect-ratio: 9 / 16; }
-.image-gen-viewport[data-ratio="4:3"]  { aspect-ratio: 4 / 3; }
-.image-gen-viewport[data-ratio="3:4"]  { aspect-ratio: 3 / 4; }
+.image-gen-viewport:not(.has-image)[data-ratio="1:1"]  { aspect-ratio: 1 / 1; }
+.image-gen-viewport:not(.has-image)[data-ratio="16:9"] { aspect-ratio: 16 / 9; }
+.image-gen-viewport:not(.has-image)[data-ratio="9:16"] { aspect-ratio: 9 / 16; }
+.image-gen-viewport:not(.has-image)[data-ratio="4:3"]  { aspect-ratio: 4 / 3; }
+.image-gen-viewport:not(.has-image)[data-ratio="3:4"]  { aspect-ratio: 3 / 4; }
 
 .image-gen-viewport:hover {
     border-color: rgba(129, 140, 248, 0.4);
@@ -8478,9 +8480,11 @@ body:not(.dark) .assistant-followup-chip:hover {
 
 .image-gen-img {
     width: 100%;
-    height: 100%;
-    object-fit: cover;
-    border-radius: 16px;
+    height: auto;
+    max-height: 100%;
+    object-fit: contain;
+    display: block;
+    border-radius: 14px;
     cursor: zoom-in;
     transition: opacity 0.3s ease;
 }
@@ -8709,6 +8713,16 @@ body:not(.dark) .assistant-followup-chip:hover {
     transform: scale(0.96);
 }
 
+.image-pencil-trigger-btn svg {
+    display: block;
+    width: 14px;
+    height: 14px;
+    stroke: #ffffff;
+    color: #ffffff;
+    flex-shrink: 0;
+    pointer-events: none;
+}
+
 .image-pencil-menu {
     position: absolute;
     bottom: calc(100% + 6px);
@@ -8775,7 +8789,7 @@ body:not(.dark) .assistant-followup-chip:hover {
     .image-gen-card {
         max-width: 250px;
     }
-    .image-gen-viewport {
+    .image-gen-viewport:not(.has-image) {
         min-height: 240px;
         border-radius: 14px;
     }
@@ -8797,7 +8811,7 @@ body:not(.dark) .assistant-followup-chip:hover {
     .image-gen-card {
         max-width: 225px;
     }
-    .image-gen-viewport {
+    .image-gen-viewport:not(.has-image) {
         min-height: 220px;
     }
     .image-gen-status-text {
