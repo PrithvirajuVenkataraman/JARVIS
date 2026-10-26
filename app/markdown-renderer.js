@@ -223,7 +223,22 @@ export function renderMarkdown(rawText = '', options = {}) {
             const header = cells(tableRows[0]);
             const body = tableRows.slice(1).map(cells);
             out.push(
-                `<div class="assistant-md-table-wrap"><table class="assistant-md-table"><thead><tr>${header.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${body.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`
+                `<div class="assistant-md-table-wrap">
+                    <div class="assistant-table-toolbar">
+                        <span class="assistant-table-badge">Data Table</span>
+                        <div class="assistant-table-actions">
+                            <button type="button" class="assistant-table-btn" onclick="window.downloadTableCsv?.(this)" title="Download as CSV (Excel compatible)">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                <span>CSV</span>
+                            </button>
+                            <button type="button" class="assistant-table-btn" onclick="window.copyTableTsv?.(this)" title="Copy table for Excel or Sheets">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                                <span>Copy</span>
+                            </button>
+                        </div>
+                    </div>
+                    <table class="assistant-md-table"><thead><tr>${header.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${body.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table>
+                </div>`
             );
             continue;
         }
@@ -306,10 +321,21 @@ export function renderMarkdown(rawText = '', options = {}) {
         }
         const langLabel = block.lang ? escapeHtml(block.lang.toUpperCase()) : 'CODE';
         const isPython = /^(python|py|python3)$/i.test(block.lang || '');
-        const runBtnHtml = isPython ? `<button type="button" class="code-header-btn code-run-btn" onclick="runPythonBlockInBrowser(this, '${blockId}')" title="Run code in Python WebAssembly (Pyodide)">
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
-            <span>Run</span>
-        </button>` : '';
+        const isHtml = /^(html|htm)$/i.test(block.lang || '');
+        const isJs = /^(javascript|js|typescript|ts)$/i.test(block.lang || '');
+
+        let runBtnHtml = '';
+        if (isPython) {
+            runBtnHtml = `<button type="button" class="code-header-btn code-run-btn" onclick="window.runPythonBlockInBrowser?.(this, '${blockId}')" title="Run code in Python WebAssembly (Pyodide)">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                <span>Run</span>
+            </button>`;
+        } else if (isJs) {
+            runBtnHtml = `<button type="button" class="code-header-btn code-run-btn" onclick="window.runJsBlockInBrowser?.(this, '${blockId}')" title="Run JavaScript in client sandbox">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                <span>Run</span>
+            </button>`;
+        }
 
         const copyBtnHtml = `<button type="button" class="code-header-btn" onclick="copyCodeBlock(this, '${blockId}')" title="Copy code">
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
@@ -317,6 +343,31 @@ export function renderMarkdown(rawText = '', options = {}) {
         </button>`;
 
         const highlighted = highlightCode(block.code, block.lang);
+
+        let previewHtml = '';
+        if (isHtml && block.code.trim()) {
+            const escapedCode = String(block.code || '')
+                .replace(/&/g, '&amp;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+            previewHtml = `
+                <div class="assistant-code-preview-wrap" id="preview_wrap_${blockId}">
+                    <div class="assistant-code-preview-header">
+                        <div class="assistant-code-preview-title">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"></circle><polygon points="10 8 16 12 10 16 10 8"></polygon></svg>
+                            <span>Live Interactive Preview</span>
+                        </div>
+                        <div class="assistant-code-preview-actions">
+                            <button type="button" class="code-preview-btn" onclick="window.toggleCodePreview?.('${blockId}')" title="Collapse / Expand Preview">Toggle</button>
+                            <button type="button" class="code-preview-btn" onclick="window.refreshCodePreview?.('${blockId}')" title="Reload Preview">Refresh</button>
+                            <button type="button" class="code-preview-btn" onclick="window.openCodePreviewInNewTab?.('${blockId}')" title="Open Fullscreen in New Window">New Window</button>
+                        </div>
+                    </div>
+                    <div class="assistant-code-preview-body" id="preview_body_${blockId}">
+                        <iframe class="assistant-code-preview-iframe" id="iframe_${blockId}" sandbox="allow-scripts allow-modals allow-forms" loading="lazy" srcdoc="${escapedCode}"></iframe>
+                    </div>
+                </div>`;
+        }
 
         return `
             <div class="assistant-md-code-container" id="container_${blockId}">
@@ -328,6 +379,7 @@ export function renderMarkdown(rawText = '', options = {}) {
                     </div>
                 </div>
                 <pre class="assistant-md-code-block"><code class="lang-${escapeHtml(block.lang || 'text')}">${highlighted}</code></pre>
+                ${previewHtml}
                 <div class="assistant-code-output" id="output_${blockId}" style="display:none;"></div>
             </div>
         `;
