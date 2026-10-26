@@ -18,6 +18,59 @@ function resolveGeminiApiKey(customApiKey = '', req = null, params = {}) {
     ).trim();
 }
 
+function extractImageFromData(data) {
+    if (!data || typeof data !== 'object') return null;
+
+    // 1. Google GenAI Interactions API steps format (interaction.steps -> step.type == 'model_output' -> part.type == 'image' -> part.data)
+    if (Array.isArray(data.steps)) {
+        for (const step of data.steps) {
+            if (step?.type === 'model_output' && Array.isArray(step?.content)) {
+                for (const part of step.content) {
+                    if (part?.type === 'image') {
+                        const b64 = part.data || part.image?.data || part.inlineData?.data || part.bytesBase64Encoded;
+                        if (b64) {
+                            const mimeType = part.mimeType || part.mime_type || 'image/png';
+                            return { b64, mimeType };
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Direct output_image / outputImage property
+    const outImg = data.output_image || data.outputImage;
+    if (outImg?.data) {
+        return {
+            b64: outImg.data,
+            mimeType: outImg.mimeType || outImg.mime_type || 'image/png'
+        };
+    }
+
+    // 3. Gemini generateContent candidates format
+    const parts = data.candidates?.[0]?.content?.parts || [];
+    for (const p of parts) {
+        if (p?.type === 'image' && p?.data) {
+            return { b64: p.data, mimeType: p.mimeType || p.mime_type || 'image/png' };
+        }
+        const b64 = p?.inlineData?.data || p?.inline_data?.data || p?.image?.bytesBase64Encoded || p?.image?.imageBytes;
+        if (b64) {
+            const mimeType = p?.inlineData?.mimeType || p?.inline_data?.mime_type || p?.mimeType || 'image/png';
+            return { b64, mimeType };
+        }
+    }
+
+    // 4. Imagen predictions format
+    const pred = data.predictions?.[0];
+    const predB64 = pred?.bytesBase64Encoded || pred?.bytes_base64_encoded || pred?.imageBytes;
+    if (predB64) {
+        const mimeType = pred?.mimeType || pred?.mime_type || 'image/jpeg';
+        return { b64: predB64, mimeType };
+    }
+
+    return null;
+}
+
 /**
  * Generates an image using Google Gemini / Imagen models exclusively.
  * Routes to native Google Generative Language REST APIs.
@@ -76,6 +129,8 @@ async function generateGeminiImageBuffer(prompt, {
 
         const isImagenPredict = model.includes('imagen-3.0');
         const timeout = Math.min(timeoutMs || 35000, 45000);
+        const rawModel = model.replace(/^models\//, '');
+        const normalizedModel = model.startsWith('models/') ? model : `models/${model}`;
 
         try {
             const controller = new AbortController();
@@ -84,7 +139,7 @@ async function generateGeminiImageBuffer(prompt, {
             try {
                 if (isImagenPredict) {
                     // Google GenAI REST :predict
-                    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:predict?key=${encodeURIComponent(apiKey)}`;
+                    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(rawModel)}:predict?key=${encodeURIComponent(apiKey)}`;
                     const res = await fetch(url, {
                         method: 'POST',
                         signal: controller.signal,
@@ -103,13 +158,11 @@ async function generateGeminiImageBuffer(prompt, {
                     });
 
                     if (res.ok) {
-                        const data = await res.json();
-                        const pred = data?.predictions?.[0];
-                        const b64 = pred?.bytesBase64Encoded || pred?.bytes_base64_encoded || pred?.imageBytes;
-                        if (b64) {
-                            const mimeType = pred.mimeType || pred.mime_type || 'image/jpeg';
-                            const buffer = Buffer.from(b64, 'base64');
-                            return { success: true, buffer, contentType: mimeType, model };
+                        const data = await res.json().catch(() => null);
+                        const extracted = extractImageFromData(data);
+                        if (extracted && extracted.b64) {
+                            const buffer = Buffer.from(extracted.b64, 'base64');
+                            return { success: true, buffer, contentType: extracted.mimeType, model: rawModel };
                         }
                     } else {
                         const errText = await res.text().catch(() => '');
@@ -139,9 +192,74 @@ async function generateGeminiImageBuffer(prompt, {
                         console.error(`[image-proxy] Imagen upstream error (${model}):`, res.status, friendlyMsg || errText.slice(0, 200));
                     }
                 } else {
-                    // Google Gemini REST :generateContent with IMAGE modality
-                    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
-                    const res = await fetch(url, {
+                    // 1. Google GenAI Interactions API (user-specified exact interaction.create protocol)
+                    const interactionsUrl = `https://generativelanguage.googleapis.com/v1beta/interactions?key=${encodeURIComponent(apiKey)}&model=${encodeURIComponent(rawModel)}`;
+                    let interactionsRes = null;
+                    try {
+                        interactionsRes = await fetch(interactionsUrl, {
+                            method: 'POST',
+                            signal: controller.signal,
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'x-goog-api-key': apiKey
+                            },
+                            body: JSON.stringify({
+                                model: normalizedModel,
+                                input: prompt,
+                                generation_config: {
+                                    temperature: 1,
+                                    max_output_tokens: 65536,
+                                    top_p: 0.95,
+                                    thinking_level: 'minimal',
+                                    image_config: {
+                                        image_size: '1K',
+                                        aspect_ratio: aspectRatio || '1:1'
+                                    }
+                                },
+                                response_modalities: ['image', 'text']
+                            })
+                        });
+                    } catch (fetchErr) {
+                        console.warn(`[image-proxy] Interactions endpoint error for ${model}:`, fetchErr?.message || fetchErr);
+                    }
+
+                    if (interactionsRes && interactionsRes.ok) {
+                        const data = await interactionsRes.json().catch(() => null);
+                        const extracted = extractImageFromData(data);
+                        if (extracted && extracted.b64) {
+                            const buffer = Buffer.from(extracted.b64, 'base64');
+                            return { success: true, buffer, contentType: extracted.mimeType, model: rawModel };
+                        }
+                    }
+
+                    if (interactionsRes) {
+                        const errText = await interactionsRes.text().catch(() => '');
+                        let friendlyMsg = '';
+                        let errStatus = '';
+                        try {
+                            const parsed = JSON.parse(errText);
+                            friendlyMsg = parsed?.error?.message || '';
+                            errStatus = parsed?.error?.status || '';
+                        } catch (_) {}
+
+                        if (interactionsRes.status === 400 && (friendlyMsg.includes('API key') || errStatus === 'INVALID_ARGUMENT')) {
+                            return {
+                                success: false,
+                                code: 'invalid_api_key',
+                                message: 'Invalid Gemini API key. Please check your GEMINI_API_KEY.'
+                            };
+                        }
+                        if (interactionsRes.status === 429 || friendlyMsg.includes('quota') || errStatus === 'RESOURCE_EXHAUSTED') {
+                            lastError = new Error(`Gemini (${model}) HTTP 429: ${friendlyMsg || 'Quota exceeded'}`);
+                            lastErrorCode = 'quota_exceeded';
+                            console.warn(`[image-proxy] Quota limit for ${model}, attempting fallback to next model...`);
+                            continue;
+                        }
+                    }
+
+                    // 2. Fallback: Google Gemini REST :generateContent with IMAGE modality
+                    const genContentUrl = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(rawModel)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+                    const genRes = await fetch(genContentUrl, {
                         method: 'POST',
                         signal: controller.signal,
                         headers: {
@@ -159,47 +277,39 @@ async function generateGeminiImageBuffer(prompt, {
                         })
                     });
 
-                    if (res.ok) {
-                        const data = await res.json();
-                        const parts = data?.candidates?.[0]?.content?.parts || [];
-                        const imagePart = parts.find(p => (
-                            p?.inlineData?.data ||
-                            p?.inline_data?.data ||
-                            p?.image?.bytesBase64Encoded ||
-                            p?.image?.imageBytes
-                        ));
-                        if (imagePart) {
-                            const b64 = imagePart.inlineData?.data || imagePart.inline_data?.data || imagePart.image?.bytesBase64Encoded || imagePart.image?.imageBytes;
-                            const mimeType = imagePart.inlineData?.mimeType || imagePart.inline_data?.mime_type || 'image/png';
-                            const buffer = Buffer.from(b64, 'base64');
-                            return { success: true, buffer, contentType: mimeType, model };
+                    if (genRes.ok) {
+                        const genData = await genRes.json().catch(() => null);
+                        const extracted = extractImageFromData(genData);
+                        if (extracted && extracted.b64) {
+                            const buffer = Buffer.from(extracted.b64, 'base64');
+                            return { success: true, buffer, contentType: extracted.mimeType, model: rawModel };
                         }
                     } else {
-                        const errText = await res.text().catch(() => '');
-                        let friendlyMsg = '';
-                        let errStatus = '';
+                        const genErrText = await genRes.text().catch(() => '');
+                        let genFriendlyMsg = '';
+                        let genErrStatus = '';
                         try {
-                            const parsed = JSON.parse(errText);
-                            friendlyMsg = parsed?.error?.message || '';
-                            errStatus = parsed?.error?.status || '';
+                            const parsed = JSON.parse(genErrText);
+                            genFriendlyMsg = parsed?.error?.message || '';
+                            genErrStatus = parsed?.error?.status || '';
                         } catch (_) {}
 
-                        if (res.status === 400 && (friendlyMsg.includes('API key') || errStatus === 'INVALID_ARGUMENT')) {
+                        if (genRes.status === 400 && (genFriendlyMsg.includes('API key') || genErrStatus === 'INVALID_ARGUMENT')) {
                             return {
                                 success: false,
                                 code: 'invalid_api_key',
                                 message: 'Invalid Gemini API key. Please check your GEMINI_API_KEY.'
                             };
                         }
-                        if (res.status === 429 || friendlyMsg.includes('quota') || errStatus === 'RESOURCE_EXHAUSTED') {
-                            lastError = new Error(`Gemini (${model}) HTTP 429: ${friendlyMsg || 'Quota exceeded'}`);
+                        if (genRes.status === 429 || genFriendlyMsg.includes('quota') || genErrStatus === 'RESOURCE_EXHAUSTED') {
+                            lastError = new Error(`Gemini (${model}) HTTP 429: ${genFriendlyMsg || 'Quota exceeded'}`);
                             lastErrorCode = 'quota_exceeded';
                             console.warn(`[image-proxy] Quota limit for ${model}, attempting fallback to next model...`);
                             continue;
                         }
 
-                        lastError = new Error(`Gemini (${model}) HTTP ${res.status}: ${friendlyMsg || errText.slice(0, 150)}`);
-                        console.error(`[image-proxy] Gemini image error (${model}):`, res.status, friendlyMsg || errText.slice(0, 200));
+                        lastError = new Error(`Gemini (${model}) HTTP ${genRes.status}: ${genFriendlyMsg || genErrText.slice(0, 150)}`);
+                        console.error(`[image-proxy] Gemini image error (${model}):`, genRes.status, genFriendlyMsg || genErrText.slice(0, 200));
                     }
                 }
             } finally {
