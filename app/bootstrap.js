@@ -28,7 +28,7 @@ import * as JarvisImageGenerator from './image-generator.js?v=2.0.5';
 import { selfImprovingMemory } from './self-improving-memory.js?v=2.0.5';
 import * as JarvisLiveResearch from './bounded-live-research.js?v=2.0.5';
 import * as JarvisQueryNormalizer from './query-normalizer.js?v=2.0.5';
-import * as JarvisUnifiedMemory from './memory/index.mjs';
+import * as JarvisUnifiedMemory from './unified-memory.js?v=2.0.5';
 import * as JarvisDocumentExporter from './document-exporter.js?v=2.0.5';
 
 import { createInteractionStateMachine, InteractionState } from './interaction-state.js?v=2.0.5';
