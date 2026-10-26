@@ -121,3 +121,41 @@ test('Safari & iOS Support 5: BoundedLiveResearchController recognizes AbortErro
         'BoundedLiveResearchController must recognize abort message as timeout'
     );
 });
+
+test('Safari & iOS Support 6: app/bootstrap.js imports unified-memory.js with versioning to prevent module crash', () => {
+    const bootstrapSrc = fs.readFileSync(path.join(__dirname, '../app/bootstrap.js'), 'utf8');
+    assert.ok(
+        bootstrapSrc.includes("import * as JarvisUnifiedMemory from './unified-memory.js?v=2.0.5';"),
+        'bootstrap.js must import unified-memory.js with cache-busting to prevent 404 on unbundled index.mjs'
+    );
+    assert.ok(
+        !bootstrapSrc.includes("from './memory/index.mjs'"),
+        'bootstrap.js must NOT import from ./memory/index.mjs to avoid browser 404 network failure'
+    );
+});
+
+test('Safari & iOS Support 7: app/unified-memory.js exports all core contracts required by runtime and search', async () => {
+    const mem = await import('../app/unified-memory.js');
+    assert.equal(typeof mem.isMemoryActive, 'function');
+    assert.equal(typeof mem.setMemoryActive, 'function');
+    assert.equal(typeof mem.UnifiedMemoryStore, 'function');
+    assert.equal(typeof mem.unifiedMemoryStore, 'object');
+    assert.equal(typeof mem.extract, 'function');
+    assert.equal(typeof mem.parseForgetIntent, 'function');
+    assert.equal(typeof mem.findMemoriesToForget, 'function');
+    assert.equal(typeof mem.isMetaQuery, 'function');
+    assert.equal(typeof mem.isMetaMemoryQuery, 'function');
+    assert.equal(typeof mem.selectRelevantMemories, 'function');
+    assert.equal(typeof mem.buildNormalTurnMemoryPrompt, 'function');
+    assert.equal(typeof mem.buildMetaQueryMemoryPrompt, 'function');
+
+    // Test dual-contract forget matching
+    const testMemories = [
+        { id: '1', text: 'Lives in London', category: 'location' }
+    ];
+    const matches = mem.findMemoriesToForget('London', testMemories);
+    assert.equal(matches.length, 1, 'Dual contract: array length works');
+    assert.equal(matches[0].id, '1', 'Dual contract: indexing works');
+    assert.ok(matches.exactMatch, 'Dual contract: exactMatch property works');
+});
+
