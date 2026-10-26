@@ -11130,7 +11130,9 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                     formattedText = readableText
                         .replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, `<a href="$2" target="_blank" rel="noopener noreferrer" class="${linkClass}">$1</a>`)
                         .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-                    formattedText = formattedText.replace(/\n(?![^<]*>)/g, '<br>');
+                    if (!readableText.includes('image-gen-card')) {
+                        formattedText = formattedText.replace(/\n(?![^<]*>)/g, '<br>');
+                    }
                 } else {
                     const isLiveSearchTurn = meta?.isLiveSearch === true || meta?.sourceType === 'verified' || meta?.liveResearch === true;
                     formattedText = allowEmptyAssistant
@@ -12888,54 +12890,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             }
             const initialUrl = proxyUrl;
 
-            const cardHtml = `
-<div id="${cardId}" class="image-gen-card" data-prompt="${escapeHtml(rawPrompt)}" data-enhanced-prompt="${escapeHtml(cleanPrompt)}" data-aspect-ratio="${escapeHtml(aspectRatio)}">
-    <div class="image-gen-viewport" data-ratio="${escapeHtml(aspectRatio)}">
-        <img id="${cardId}-img" class="image-gen-img hidden" alt="${escapeHtml(cleanPrompt)}" onclick="window.openImageLightboxFromCard('${cardId}')" />
-        <div id="${cardId}-loader" class="image-gen-loader-overlay">
-            <div id="${cardId}-sparkle" class="image-ai-sparkle-container">
-                <div class="image-ai-aura"></div>
-                <div class="image-ai-wave wave-1"></div>
-                <div class="image-ai-wave wave-2"></div>
-                <svg class="image-ai-star" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <defs>
-                        <linearGradient id="${cardId}-starGrad" x1="2" y1="2" x2="30" y2="30" gradientUnits="userSpaceOnUse">
-                            <stop offset="0%" stop-color="#818cf8" />
-                            <stop offset="50%" stop-color="#c084fc" />
-                            <stop offset="100%" stop-color="#38bdf8" />
-                        </linearGradient>
-                    </defs>
-                    <path d="M16 2C16 9.73 9.73 16 2 16C9.73 16 16 22.27 16 30C16 22.27 22.27 16 30 16C22.27 16 16 9.73 16 2Z" fill="url(#${cardId}-starGrad)" />
-                </svg>
-            </div>
-            <div id="${cardId}-status" class="image-gen-status-text">Generating... 15%</div>
-            <div id="${cardId}-progress-bg" class="image-gen-progress-bar-bg">
-                <div id="${cardId}-progress" class="image-gen-progress-bar-fill" style="width: 15%"></div>
-            </div>
-            <div id="${cardId}-retry-wrap" class="image-scratch-retry-wrap hidden">
-                <button type="button" class="image-scratch-retry-btn" onclick="window.handleImageCardAction('${cardId}')">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
-                    <span id="${cardId}-action-label">Retry</span>
-                </button>
-            </div>
-        </div>
-        <div id="${cardId}-actions" class="image-pencil-dropdown-wrapper image-floating-pencil hidden">
-            <button type="button" class="image-pencil-trigger-btn" onclick="window.toggleImagePencilMenu('${cardId}')" title="Options (Download, Copy)" aria-label="Image options">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path><path d="m15 5 4 4"></path></svg>
-            </button>
-            <div id="${cardId}-menu" class="image-pencil-menu hidden">
-                <button type="button" class="image-pencil-menu-item" onclick="window.downloadImageCard('${cardId}'); window.toggleImagePencilMenu('${cardId}', false)">
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-                    <span>Download</span>
-                </button>
-                <button type="button" class="image-pencil-menu-item" onclick="window.copyImageCard('${cardId}'); window.toggleImagePencilMenu('${cardId}', false)">
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                    <span>Copy</span>
-                </button>
-            </div>
-        </div>
-    </div>
-</div>`;
+            const cardHtml = `<div id="${cardId}" class="image-gen-card" data-prompt="${escapeHtml(rawPrompt)}" data-enhanced-prompt="${escapeHtml(cleanPrompt)}" data-aspect-ratio="${escapeHtml(aspectRatio)}"><div id="${cardId}-viewport" class="image-gen-viewport" data-ratio="${escapeHtml(aspectRatio)}"><img id="${cardId}-img" class="image-gen-img hidden" alt="${escapeHtml(cleanPrompt)}" onclick="window.openImageLightboxFromCard('${cardId}')" /><div id="${cardId}-loader" class="image-gen-loader-overlay"><div id="${cardId}-sparkle" class="image-ai-sparkle-container"><div class="image-ai-aura"></div><div class="image-ai-wave wave-1"></div><div class="image-ai-wave wave-2"></div><svg class="image-ai-star" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="${cardId}-starGrad" x1="2" y1="2" x2="30" y2="30" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#818cf8" /><stop offset="50%" stop-color="#c084fc" /><stop offset="100%" stop-color="#38bdf8" /></linearGradient></defs><path d="M16 2C16 9.73 9.73 16 2 16C9.73 16 16 22.27 16 30C16 22.27 22.27 16 30 16C22.27 16 16 9.73 16 2Z" fill="url(#${cardId}-starGrad)" /></svg></div><div id="${cardId}-status" class="image-gen-status-text">Generating... 15%</div><div id="${cardId}-progress-bg" class="image-gen-progress-bar-bg"><div id="${cardId}-progress" class="image-gen-progress-bar-fill" style="width: 15%"></div></div><div id="${cardId}-retry-wrap" class="image-scratch-retry-wrap hidden"><button type="button" class="image-scratch-retry-btn" onclick="window.handleImageCardAction('${cardId}')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg><span id="${cardId}-action-label">Retry</span></button></div></div><div id="${cardId}-actions" class="image-pencil-dropdown-wrapper image-floating-pencil hidden"><button type="button" class="image-pencil-trigger-btn" onclick="window.toggleImagePencilMenu('${cardId}')" title="Options (Download, Copy)" aria-label="Image options"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path><path d="m15 5 4 4"></path></svg></button><div id="${cardId}-menu" class="image-pencil-menu hidden"><button type="button" class="image-pencil-menu-item" onclick="window.downloadImageCard('${cardId}'); window.toggleImagePencilMenu('${cardId}', false)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg><span>Download</span></button><button type="button" class="image-pencil-menu-item" onclick="window.copyImageCard('${cardId}'); window.toggleImagePencilMenu('${cardId}', false)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg><span>Copy</span></button></div></div></div></div>`;
 
             addChatMessage(cardHtml, false, null, {
                 sourceType: 'tool',
@@ -12953,6 +12908,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             const retryWrapEl = cardElem?.querySelector('.image-scratch-retry-wrap') || document.getElementById(`${cardId}-retry-wrap`);
             const imgEl = cardElem?.querySelector('.image-gen-img') || document.getElementById(`${cardId}-img`);
             const actionsEl = cardElem?.querySelector('.image-floating-pencil') || document.getElementById(`${cardId}-actions`);
+            const viewportEl = cardElem?.querySelector('.image-gen-viewport') || document.getElementById(`${cardId}-viewport`);
 
             const startTime = Date.now();
             const progressTimer = setInterval(() => {
@@ -13009,14 +12965,19 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 clearTimeout(autoFailoverTimeout);
 
                 const activeCard = document.getElementById(cardId) || cardElem;
-                const activeViewport = activeCard?.querySelector('.image-gen-viewport');
+                const activeViewport = activeCard?.querySelector('.image-gen-viewport') || viewportEl || document.getElementById(`${cardId}-viewport`);
                 const activeImg = activeCard?.querySelector('.image-gen-img') || imgEl;
                 const activeLoader = activeCard?.querySelector('.image-gen-loader-overlay') || loaderEl;
                 const activeActions = activeCard?.querySelector('.image-floating-pencil') || actionsEl;
                 const activeProgress = activeCard?.querySelector('.image-gen-progress-bar-fill') || progressEl;
                 const activeStatus = activeCard?.querySelector('.image-gen-status-text') || statusEl;
 
-                if (activeViewport) activeViewport.classList.add('has-image');
+                if (activeViewport) {
+                    activeViewport.classList.add('has-image');
+                    activeViewport.style.aspectRatio = 'auto';
+                    activeViewport.style.minHeight = '0';
+                    activeViewport.style.height = 'auto';
+                }
                 if (activeProgress) activeProgress.style.width = '100%';
                 if (activeStatus) activeStatus.textContent = 'Generating... 100%';
 
@@ -13868,7 +13829,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 'A', 'BLOCKQUOTE', 'BR', 'BUTTON', 'CODE', 'DIV', 'H1', 'H2', 'H3', 'H4', 'IFRAME', 'IMG', 'LI', 'OL', 'P', 'PRE', 'SPAN', 'STRONG', 'TABLE', 'TBODY', 'TD', 'TH', 'THEAD', 'TR', 'UL',
                 'SUP', 'SUB', 'EM', 'I', 'B', 'SMALL', 'HR', 'S', 'DEL', 'MARK', 'ABBR',
                 'MATH', 'ANNOTATION', 'SEMANTICS', 'MROW', 'MI', 'MN', 'MO', 'MSUP', 'MSUB', 'MSUBSUP', 'MFRAC', 'MSQRT', 'MROOT', 'MTABLE', 'MTR', 'MTD', 'MTEXT', 'MSPACE', 'MOVER', 'MUNDER', 'MUNDEROVER', 'MENCLOSE', 'MPADDED', 'MPHANTOM', 'MERROR',
-                'SVG', 'PATH', 'LINE', 'POLYGON', 'POLYLINE', 'RECT', 'CIRCLE', 'USE', 'G', 'DEFS', 'SYMBOL'
+                'SVG', 'PATH', 'LINE', 'POLYGON', 'POLYLINE', 'RECT', 'CIRCLE', 'USE', 'G', 'DEFS', 'SYMBOL', 'LINEARGRADIENT', 'RADIALGRADIENT', 'STOP', 'CLIPPATH', 'MASK'
             ]);
             const mathAttrs = new Set(['class', 'style', 'mathvariant', 'stretchy', 'fence', 'separator', 'lspace', 'rspace', 'form', 'accent', 'xmlns', 'display', 'encoding']);
             const svgAttrs = new Set(['class', 'style', 'width', 'height', 'viewbox', 'viewBox', 'fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin', 'points', 'x', 'y', 'x1', 'y1', 'x2', 'y2', 'r', 'cx', 'cy', 'd', 'xmlns', 'aria-hidden', 'aria-label', 'role', 'href', 'xlink:href']);
@@ -13944,12 +13905,17 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 G: svgAttrs,
                 DEFS: svgAttrs,
                 SYMBOL: svgAttrs,
+                LINEARGRADIENT: svgAttrs,
+                RADIALGRADIENT: svgAttrs,
+                STOP: svgAttrs,
+                CLIPPATH: svgAttrs,
+                MASK: svgAttrs,
                 BR: new Set()
             };
 
             const nodes = Array.from(template.content.querySelectorAll('*'));
             for (const node of nodes) {
-                const tag = node.tagName;
+                const tag = String(node.tagName || '').toUpperCase();
                 if (!allowedTags.has(tag)) {
                     node.replaceWith(...Array.from(node.childNodes));
                     continue;
@@ -13960,7 +13926,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                     const value = attr.value;
                     const tagAllowedAttrs = allowedAttrs[tag] || new Set();
                     const isAllowedAttr = tagAllowedAttrs.has(attr.name) || tagAllowedAttrs.has(name) || name.startsWith('data-') || name.startsWith('aria-');
-                    const isEventHandler = name.startsWith('on') && !tagAllowedAttrs.has(attr.name);
+                    const isEventHandler = name.startsWith('on') && !tagAllowedAttrs.has(attr.name) && !tagAllowedAttrs.has(name);
                     if (!isAllowedAttr || isEventHandler) {
                         node.removeAttribute(attr.name);
                         continue;
