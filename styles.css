@@ -8847,12 +8847,7 @@ body:not(.dark) .assistant-followup-chip:hover {
 }
 
 .image-lightbox-caption {
-    margin-top: 14px;
-    font-size: 14px;
-    color: rgba(255, 255, 255, 0.85);
-    text-align: center;
-    max-width: 600px;
-    line-height: 1.4;
+    display: none !important;
 }
 
 .image-lightbox-close-btn {
@@ -8880,8 +8875,62 @@ body:not(.dark) .assistant-followup-chip:hover {
 
 .image-lightbox-toolbar {
     display: flex;
+    align-items: center;
+    justify-content: center;
     gap: 10px;
-    margin-top: 12px;
+    margin-top: 14px;
+    width: 100%;
+}
+
+.image-gen-action-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    height: 38px;
+    padding: 0 18px;
+    border-radius: 9999px;
+    background: rgba(30, 41, 59, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    color: #ffffff;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1;
+    cursor: pointer;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.image-gen-action-btn:hover {
+    background: rgba(99, 102, 241, 0.45);
+    border-color: rgba(129, 140, 248, 0.6);
+    color: #ffffff;
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5), 0 0 14px rgba(99, 102, 241, 0.3);
+}
+
+.image-gen-action-btn:active {
+    transform: translateY(0) scale(0.97);
+}
+
+.image-gen-action-btn svg {
+    display: block;
+    width: 15px;
+    height: 15px;
+    flex-shrink: 0;
+    margin: 0;
+    vertical-align: middle;
+}
+
+.image-gen-action-btn span {
+    display: inline-block;
+    line-height: 1;
+    margin: 0;
+    padding: 0;
 }
 
 /* Image History Gallery Modal / Drawer */
