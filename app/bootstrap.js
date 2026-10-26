@@ -28,6 +28,8 @@ import * as JarvisImageGenerator from './image-generator.js?v=2.0.5';
 import { selfImprovingMemory } from './self-improving-memory.js?v=2.0.5';
 import * as JarvisLiveResearch from './bounded-live-research.js?v=2.0.5';
 import * as JarvisQueryNormalizer from './query-normalizer.js?v=2.0.5';
+import * as JarvisUnifiedMemory from './memory/index.mjs';
+import * as JarvisDocumentExporter from './document-exporter.js?v=2.0.5';
 
 import { createInteractionStateMachine, InteractionState } from './interaction-state.js?v=2.0.5';
 
@@ -71,6 +73,11 @@ globalThis.JarvisLiveResearch = { ...JarvisLiveResearch, ...(globalThis.JarvisLi
 globalThis.JarvisQueryNormalizer = Object.freeze({ ...JarvisQueryNormalizer });
 globalThis.normalizeUserQuery = JarvisQueryNormalizer.normalizeUserQuery;
 globalThis.hasSearchableContent = JarvisQueryNormalizer.hasSearchableContent;
+globalThis.JarvisUnifiedMemory = JarvisUnifiedMemory;
+globalThis.JarvisDocumentExporter = JarvisDocumentExporter;
+try {
+    JarvisUnifiedMemory.unifiedMemoryStore?.runIdempotentMigration();
+} catch (_) {}
 selfImprovingMemory.init().catch(() => {});
 
 function initializeSpeechInput() {
