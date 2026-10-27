@@ -8042,6 +8042,80 @@ body:not(.dark) .assistant-followup-chip:hover {
 }
 
 /* ==========================================================================
+   Horizontal Scroll Container & Markdown Table Typography
+   ========================================================================== */
+.assistant-table-scroll-container {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.28) rgba(255, 255, 255, 0.04);
+}
+
+/* Custom styled horizontal scrollbar across all engines */
+.assistant-table-scroll-container::-webkit-scrollbar {
+    height: 7px;
+}
+
+.assistant-table-scroll-container::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 0 0 10px 10px;
+}
+
+.assistant-table-scroll-container::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.22);
+    border-radius: 4px;
+}
+
+.assistant-table-scroll-container::-webkit-scrollbar-thumb:hover {
+    background: rgba(99, 102, 241, 0.6);
+}
+
+.assistant-md-table {
+    width: 100%;
+    min-width: 500px;
+    border-collapse: collapse;
+    font-size: 13.5px;
+    line-height: 1.5;
+    text-align: left;
+}
+
+.assistant-md-table th {
+    background: rgba(255, 255, 255, 0.045);
+    color: #f1f5f9;
+    font-weight: 600;
+    padding: 10px 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+    white-space: nowrap;
+    letter-spacing: 0.015em;
+    user-select: text;
+}
+
+.assistant-md-table td {
+    padding: 9px 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    color: #cbd5e1;
+    white-space: normal;
+    vertical-align: top;
+    user-select: text;
+}
+
+.assistant-md-table tbody tr:nth-child(even) {
+    background: rgba(255, 255, 255, 0.015);
+}
+
+.assistant-md-table tbody tr:hover {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.assistant-md-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+/* ==========================================================================
    HTML Live Interactive Preview Sandbox
    ========================================================================== */
 .assistant-code-preview-wrap {
