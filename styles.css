@@ -7988,7 +7988,8 @@ body:not(.dark) .assistant-followup-chip:hover {
     border-radius: 10px;
     border: 1px solid rgba(255, 255, 255, 0.1);
     background: #09090b;
-    overflow: hidden;
+    overflow-x: auto;
+    overflow-y: hidden;
 }
 
 .assistant-table-toolbar {
