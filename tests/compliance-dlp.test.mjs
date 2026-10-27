@@ -720,7 +720,7 @@ test('Image Generator 10.2: Prompts with credentials throw and are blocked', asy
 // Suite 11: UI and CSS Structure Verification
 // =========================================================================
 
-test('UI Verification 11.1: Index.html has required compliance, DLP, and feedback elements', () => {
+test('UI Verification 11.1: Index.html has required compliance, DLP, and feedback elements', () => { 
     // Composer DLP tray
     assert.ok(indexHtml.includes('id="composer-dlp-tray"'), 'Must have #composer-dlp-tray');
 
