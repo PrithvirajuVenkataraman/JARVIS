@@ -33,7 +33,7 @@
         "rewrites": [
             {
                 "source": "/api/feedback",
-                "destination": "/api/diagnostics"
+                "destination": "/api/diagnostics?__route=feedback"
             },
             {
                 "source": "/",
