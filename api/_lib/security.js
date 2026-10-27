@@ -186,7 +186,7 @@ export function applyApiSecurity(req, res, options = {}) {
     }
 
     const contentType = String(req?.headers?.['content-type'] || '').toLowerCase();
-    if (allowedMethods.includes('POST') && !contentType.includes('application/json')) {
+    if (req.method === 'POST' && !contentType.includes('application/json')) {
         sendSecurityError(res, 415, 'unsupported_media_type', 'Content-Type must be application/json.');
         return { handled: true };
     }
