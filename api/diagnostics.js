@@ -50,8 +50,17 @@ export function buildDiagnosticsStatus() {
 }
 
 export default async function handler(req, res) {
+    const matchedPath = String(req?.headers?.['x-matched-path'] || req?.headers?.['x-original-uri'] || '').trim();
     const reqPath = resolveRequestPath(req);
-    if (reqPath === '/api/feedback' || req.url?.includes('feedback') || req.body?.score !== undefined) {
+    const isFeedback = (
+        reqPath === '/api/feedback' ||
+        matchedPath === '/api/feedback' ||
+        req?.query?.__route === 'feedback' ||
+        req.url?.includes('__route=feedback') ||
+        req.url?.includes('feedback') ||
+        req.body?.score !== undefined
+    );
+    if (isFeedback) {
         return handleFeedback(req, res);
     }
 
