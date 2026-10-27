@@ -646,6 +646,40 @@ option {
     white-space: nowrap;
 }
 
+.chat-search-snippet-mark {
+    background: rgba(245, 158, 11, 0.28);
+    color: #fcd34d;
+    border-radius: 3px;
+    padding: 0 2px;
+    font-weight: 600;
+}
+
+.chat-in-page-search-hit {
+    background: rgba(245, 158, 11, 0.35);
+    color: #fef08a;
+    border-radius: 4px;
+    padding: 1px 4px;
+    font-weight: 600;
+    box-shadow: 0 0 10px rgba(245, 158, 11, 0.5);
+    animation: chat-in-page-search-hit-glow 3s ease forwards;
+}
+
+@keyframes chat-in-page-search-hit-glow {
+    0% {
+        background: rgba(245, 158, 11, 0.45);
+        box-shadow: 0 0 14px rgba(245, 158, 11, 0.7);
+    }
+    70% {
+        background: rgba(245, 158, 11, 0.30);
+        box-shadow: 0 0 8px rgba(245, 158, 11, 0.3);
+    }
+    100% {
+        background: transparent;
+        color: inherit;
+        box-shadow: none;
+    }
+}
+
 .chat-row-search-hit {
     animation: chat-row-search-hit 1.4s ease;
 }
@@ -656,7 +690,8 @@ option {
 }
 
 .chat-session-more,
-.chat-session-delete-btn {
+.chat-session-delete-btn,
+.chat-session-rename-btn {
     width: 28px;
     height: 28px;
     border-radius: 7px;
@@ -671,6 +706,12 @@ option {
     transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
 }
 
+.chat-session-rename-btn:hover,
+.chat-session-rename-btn:focus-visible {
+    background: rgba(99, 102, 241, 0.22);
+    color: #818cf8;
+}
+
 .chat-session-delete-btn:hover,
 .chat-session-delete-btn:focus-visible {
     background: rgba(239, 68, 68, 0.18);
@@ -682,13 +723,36 @@ option {
 .chat-session-row.is-active .chat-session-more,
 .chat-session-row:hover .chat-session-delete-btn,
 .chat-session-row:focus-within .chat-session-delete-btn,
-.chat-session-row.is-active .chat-session-delete-btn {
+.chat-session-row.is-active .chat-session-delete-btn,
+.chat-session-row:hover .chat-session-rename-btn,
+.chat-session-row:focus-within .chat-session-rename-btn,
+.chat-session-row.is-active .chat-session-rename-btn {
     opacity: 1;
+}
+
+.chat-session-title-input {
+    width: 100%;
+    font-size: 13px;
+    font-weight: 500;
+    color: #fff;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(99, 102, 241, 0.6);
+    border-radius: 6px;
+    padding: 3px 7px;
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.25);
+    box-sizing: border-box;
+}
+
+.chat-session-title-input:focus {
+    border-color: #818cf8;
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.35);
 }
 
 @media (max-width: 640px) {
     .chat-session-more,
-    .chat-session-delete-btn {
+    .chat-session-delete-btn,
+    .chat-session-rename-btn {
         opacity: 0.75;
     }
 }
@@ -11029,5 +11093,198 @@ table {
 .memory-toggle-switch input:checked + .toggle-slider:before {
     transform: translateX(16px);
 }
+
+/* ============================================================
+   Compliance, DLP & Observability Styles
+   ============================================================ */
+
+/* Composer DLP Tray & Banner */
+.composer-dlp-tray {
+    width: 100%;
+    margin-bottom: 8px;
+    z-index: 45;
+}
+.composer-dlp-banner {
+    animation: settingsSlideIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Assistant Feedback Popover */
+.assistant-feedback-popover {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 0;
+    width: 290px;
+    max-width: 90vw;
+    background: #18181b;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 12px;
+    padding: 12px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
+    z-index: 60;
+    animation: settingsSlideIn 0.18s ease-out;
+}
+.feedback-popover-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 12px;
+    font-weight: 600;
+    color: #e4e4e7;
+    margin-bottom: 8px;
+}
+.feedback-popover-close-btn {
+    background: transparent;
+    border: none;
+    color: #a1a1aa;
+    font-size: 16px;
+    cursor: pointer;
+    line-height: 1;
+}
+.feedback-popover-close-btn:hover {
+    color: #ffffff;
+}
+.feedback-tags-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+.feedback-tag-chip {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #d4d4d8;
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+.feedback-tag-chip:hover {
+    background: rgba(255, 255, 255, 0.12);
+}
+.feedback-tag-chip.is-selected {
+    background: rgba(56, 189, 248, 0.2);
+    border-color: #38bdf8;
+    color: #38bdf8;
+    font-weight: 600;
+}
+.feedback-comment-input {
+    width: 100%;
+    height: 52px;
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    padding: 6px 8px;
+    font-size: 11px;
+    color: #ffffff;
+    resize: none;
+    margin-bottom: 8px;
+    font-family: inherit;
+}
+.feedback-comment-input:focus {
+    outline: none;
+    border-color: #38bdf8;
+}
+.feedback-popover-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+}
+.feedback-cancel-btn {
+    padding: 4px 10px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.08);
+    color: #a1a1aa;
+    font-size: 11px;
+    border: none;
+    cursor: pointer;
+}
+.feedback-cancel-btn:hover {
+    background: rgba(255, 255, 255, 0.14);
+    color: #ffffff;
+}
+.feedback-submit-btn {
+    padding: 4px 10px;
+    border-radius: 6px;
+    background: #38bdf8;
+    color: #09090b;
+    font-size: 11px;
+    font-weight: 600;
+    border: none;
+    cursor: pointer;
+}
+.feedback-submit-btn:hover {
+    background: #7dd3fc;
+}
+
+/* Compliance Badges & Indicators */
+.compliance-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 9999px;
+    font-size: 11px;
+    font-weight: 600;
+}
+.compliance-badge.personal {
+    background: rgba(56, 189, 248, 0.15);
+    color: #38bdf8;
+    border: 1px solid rgba(56, 189, 248, 0.3);
+}
+.compliance-badge.enforced {
+    background: rgba(168, 85, 247, 0.15);
+    color: #c084fc;
+    border: 1px solid rgba(168, 85, 247, 0.3);
+}
+.compliance-status-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: #a1a1aa;
+}
+.compliance-status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+}
+.compliance-status-dot.green {
+    background: #10b981;
+    box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
+}
+.compliance-status-dot.neutral {
+    background: #71717a;
+}
+
+/* Audit Log Table in Settings */
+.compliance-audit-action {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+}
+.compliance-audit-action.badge-block {
+    background: rgba(239, 68, 68, 0.2);
+    color: #f87171;
+    border: 1px solid rgba(239, 68, 68, 0.4);
+}
+.compliance-audit-action.badge-mask {
+    background: rgba(245, 158, 11, 0.2);
+    color: #fbbf24;
+    border: 1px solid rgba(245, 158, 11, 0.4);
+}
+.compliance-audit-action.badge-feedback {
+    background: rgba(14, 165, 233, 0.2);
+    color: #38bdf8;
+    border: 1px solid rgba(14, 165, 233, 0.4);
+}
+.compliance-audit-action.badge-allow {
+    background: rgba(16, 185, 129, 0.2);
+    color: #34d399;
+    border: 1px solid rgba(16, 185, 129, 0.4);
+}
+
 
 
