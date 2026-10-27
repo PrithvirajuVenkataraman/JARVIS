@@ -1326,7 +1326,19 @@ export function installSpeechInputUI(options = {}) {
         }
     });
 
-    globalThis.toggleVoiceToText = async () => {
+    let lastHandledEvent = null;
+    let lastHandledEventTime = 0;
+    globalThis.toggleVoiceToText = async (event) => {
+        if (event) {
+            const now = Date.now();
+            if (event === lastHandledEvent || (lastHandledEventTime && now - lastHandledEventTime < 250)) {
+                event.stopImmediatePropagation?.();
+                return false;
+            }
+            lastHandledEvent = event;
+            lastHandledEventTime = now;
+            event.stopImmediatePropagation?.();
+        }
         const isCurrentlyDictating = controller.getState().mode === 'dictation';
         if (isCurrentlyDictating) {
             // Second press: user stops dictation (ChatGPT style)
@@ -1372,7 +1384,10 @@ export function installSpeechInputUI(options = {}) {
     globalThis.setVoiceInputLanguage = language => controller.setLanguage(language);
 
     // VTT button toggles dictation (Voice-to-Text)
-    vttButton.addEventListener('click', globalThis.toggleVoiceToText);
+    const hasInlineOnclick = typeof vttButton?.getAttribute === 'function' && Boolean(vttButton.getAttribute('onclick'));
+    if (!hasInlineOnclick && typeof vttButton?.addEventListener === 'function') {
+        vttButton.addEventListener('click', globalThis.toggleVoiceToText);
+    }
     globalThis.addEventListener?.('jarvis:assistant-processing', event => {
         const state = controller.getState?.() || {};
         if (!event.detail?.active) {
