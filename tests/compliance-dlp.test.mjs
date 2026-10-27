@@ -634,16 +634,42 @@ test('Feedback API 7.1: Method validation, score recording, and DLP scanning', a
 });
 
 test('Feedback API 7.2: Diagnostics handler forwards /api/feedback requests to feedbackHandler', async () => {
-    const req = createMockRequest('/api/feedback', {
+    // 1. Direct path /api/feedback
+    const req1 = createMockRequest('/api/feedback', {
         turnId: 'turn-004',
         score: 1,
         tags: ['speed'],
         comment: 'Fast response'
     });
-    const res = createMockResponse();
-    await diagnosticsHandler(req, res);
-    assert.equal(res.statusCode, 200);
-    assert.equal(res.body.success, true);
+    const res1 = createMockResponse();
+    await diagnosticsHandler(req1, res1);
+    assert.equal(res1.statusCode, 200);
+    assert.equal(res1.body.success, true);
+
+    // 2. Vercel query-based rewrite /api/diagnostics?__route=feedback
+    const req2 = createMockRequest('/api/diagnostics?__route=feedback', {
+        turnId: 'turn-005',
+        score: 1,
+        tags: ['precise'],
+        comment: 'Accurate reasoning'
+    });
+    const res2 = createMockResponse();
+    await diagnosticsHandler(req2, res2);
+    assert.equal(res2.statusCode, 200);
+    assert.equal(res2.body.success, true);
+
+    // 3. Vercel header-based rewrite with x-matched-path: /api/feedback
+    const req3 = createMockRequest('/api/diagnostics', {
+        turnId: 'turn-006',
+        score: 1,
+        tags: ['reliable']
+    }, {
+        headers: { 'x-matched-path': '/api/feedback' }
+    });
+    const res3 = createMockResponse();
+    await diagnosticsHandler(req3, res3);
+    assert.equal(res3.statusCode, 200);
+    assert.equal(res3.body.success, true);
 });
 
 // =========================================================================
@@ -720,7 +746,7 @@ test('Image Generator 10.2: Prompts with credentials throw and are blocked', asy
 // Suite 11: UI and CSS Structure Verification
 // =========================================================================
 
-test('UI Verification 11.1: Index.html has required compliance, DLP, and feedback elements', () => { 
+test('UI Verification 11.1: Index.html has required compliance, DLP, and feedback elements', () => {
     // Composer DLP tray
     assert.ok(indexHtml.includes('id="composer-dlp-tray"'), 'Must have #composer-dlp-tray');
 
