@@ -6,6 +6,7 @@
 
 import { getImageConfig, buildFallbackImageUrl } from './image-generation-config.js';
 import { saveGeneratedImage, getRecentGeneratedImages, deleteGeneratedImage, clearAllGeneratedImages } from './image-storage.js';
+import { dlpGateway } from './dlp-gateway.js';
 
 let activeWorker = null;
 const pendingJobs = new Map();
@@ -172,6 +173,12 @@ export async function generateImage(promptOrOptions, options = {}, onProgress = 
     if (!cleanPrompt) {
         throw new Error('Prompt is required for image generation.');
     }
+
+    const dlpResult = dlpGateway(cleanPrompt, { channel: 'image' });
+    if (dlpResult.decision === 'BLOCK') {
+        throw new Error('Image generation prompt contains sensitive credentials and was blocked by policy.');
+    }
+    cleanPrompt = dlpResult.sanitizedText || cleanPrompt;
 
     const config = getImageConfig();
     const id = `img_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
