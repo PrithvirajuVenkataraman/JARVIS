@@ -331,6 +331,7 @@
         <div class="composer-wrap">
             <div id="composer-attachment-tray" class="composer-attachment-tray hidden" aria-live="polite"></div>
             <div id="composer-selection-tray" class="composer-selection-tray hidden" aria-live="polite"></div>
+            <div id="composer-dlp-tray" class="composer-dlp-tray hidden" aria-live="assertive"></div>
             <div id="input-bar-inner" class="composer-shell modern-input">
                 <div class="composer-leading">
                     <div class="composer-actions">
@@ -6017,6 +6018,21 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
             err?.status === 504 ||
             /temporarily unavailable|missing credentials|service_unavailable|configure your api key/i.test(String(err?.message || ''));
 
+        if (error?.code === 'dlp_violation' || error?.data?.code === 'dlp_violation' || error?.data?.error?.code === 'dlp_violation') {
+            const cat = error?.category || error?.data?.category || error?.data?.error?.category || 'credential';
+            if (typeof showComposerDlpBanner === 'function') {
+                showComposerDlpBanner({
+                    categories: [cat],
+                    rawText: userMessage
+                });
+            }
+            return {
+                response: 'Your request was blocked by server security policy because it contained credentials or secrets.',
+                intent: 'dlp_violation',
+                guardrailBlocked: true
+            };
+        }
+
         if (isPermanentProviderFailure(error)) {
             window.__jarvisServiceUnavailable = true;
         }
@@ -7318,6 +7334,27 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                                     </div>
                                 </div>
 
+                                <!-- Compliance & Observability Row -->
+                                <button type="button" class="settings-row settings-row-interactive" id="settings-row-compliance" onclick="switchSettingsView('compliance')" aria-label="Compliance & Observability">
+                                    <div class="settings-row-left">
+                                        <div class="settings-icon-badge settings-icon-cyan" aria-hidden="true">
+                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                                            </svg>
+                                        </div>
+                                        <div class="settings-row-text">
+                                            <h3 class="settings-row-title">Compliance &amp; Observability</h3>
+                                            <p class="settings-row-desc">DLP policies, PII masking &amp; local diagnostics log</p>
+                                        </div>
+                                    </div>
+                                    <div class="settings-row-right">
+                                        <span id="compliance-policy-status-pill" class="settings-row-status configured">DLP Active</span>
+                                        <svg class="settings-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                            <path d="M9 18l6-6-6-6"/>
+                                        </svg>
+                                    </div>
+                                </button>
+
                                 <!-- Local Storage & Privacy Row -->
                                 <div class="settings-row">
                                     <div class="settings-row-left">
@@ -7404,6 +7441,109 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                             </div>
                         </div>
                     </div>
+
+                    <!-- Sub-View: Compliance & Observability -->
+                    <div id="settings-view-compliance" class="settings-view-panel settings-subview-panel" style="display:none;">
+                        <!-- Sub-view Header -->
+                        <div class="help-modal-header">
+                            <button type="button" onclick="switchSettingsView('main')" class="help-modal-back-btn settings-subview-back-btn" aria-label="Back to settings">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <path d="M19 12H5"></path>
+                                    <path d="M12 19l-7-7 7-7"></path>
+                                </svg>
+                                <span class="settings-back-label">Settings</span>
+                            </button>
+                            <div class="help-modal-title-block">
+                                <h2 class="settings-modal-heading">Compliance &amp; Observability</h2>
+                            </div>
+                            <button type="button" onclick="switchSettingsView('main')" class="help-modal-ok-btn" aria-label="Done" style="background:#ffffff!important;color:#000000!important;-webkit-text-fill-color:#000000!important;font-weight:750!important;">
+                                Done
+                            </button>
+                        </div>
+
+                        <!-- Sub-view Body -->
+                        <div class="help-modal-body custom-scrollbar">
+                            <div class="flex items-center justify-between p-3 rounded-xl bg-white/[0.04] border border-white/10 mb-4">
+                                <div>
+                                    <div class="text-xs font-semibold text-neutral-300">Policy Mode</div>
+                                    <p class="text-[11px] text-neutral-400 mt-0.5">Governs how sensitive data and secrets are handled before leaving your browser.</p>
+                                </div>
+                                <span id="compliance-policy-badge" class="compliance-badge personal">Personal (User-controlled)</span>
+                            </div>
+
+                            <div class="settings-section-label">DATA LOSS PREVENTION (DLP)</div>
+                            <div class="settings-group-card mb-4">
+                                <div class="settings-row" title="Required for security — cannot be disabled">
+                                    <div class="settings-row-left">
+                                        <div class="settings-icon-badge settings-icon-rose" aria-hidden="true">
+                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                                        </div>
+                                        <div class="settings-row-text">
+                                            <h3 class="settings-row-title">Block Credentials</h3>
+                                            <p class="settings-row-desc">Blocks AWS, OpenAI, Anthropic, Groq, GitHub, JWTs &amp; DB URIs</p>
+                                        </div>
+                                    </div>
+                                    <div class="settings-row-right">
+                                        <label class="settings-switch opacity-60 cursor-not-allowed">
+                                            <input type="checkbox" class="settings-switch-input" checked disabled>
+                                            <span class="settings-switch-slider"></span>
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <div class="settings-row settings-row-clickable" onclick="if(!event.target.closest('.settings-switch') && !event.target.closest('label')){ document.getElementById('compliance-pii-masking-toggle')?.click(); }">
+                                    <div class="settings-row-left">
+                                        <div class="settings-icon-badge settings-icon-cyan" aria-hidden="true">
+                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                                        </div>
+                                        <div class="settings-row-text">
+                                            <label for="compliance-pii-masking-toggle" class="settings-row-title cursor-pointer">Mask PII</label>
+                                            <p class="settings-row-desc">Masks cards, SSNs, Aadhaar, PAN &amp; emails with reversible placeholders</p>
+                                        </div>
+                                    </div>
+                                    <div class="settings-row-right">
+                                        <label class="settings-switch">
+                                            <input type="checkbox" id="compliance-pii-masking-toggle" class="settings-switch-input" onchange="handlePiiMaskingToggle(this)">
+                                            <span class="settings-switch-slider"></span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="settings-section-label">TELEMETRY &amp; AUDIT LOG</div>
+                            <div class="settings-group-card mb-4">
+                                <div class="settings-row">
+                                    <div class="settings-row-left">
+                                        <div class="settings-icon-badge settings-icon-purple" aria-hidden="true">
+                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                                        </div>
+                                        <div class="settings-row-text">
+                                            <h3 class="settings-row-title">Telemetry Exporter</h3>
+                                            <p class="settings-row-desc" id="compliance-telemetry-status">
+                                                <span class="compliance-status-dot neutral"></span> Checking exporter...
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="p-3">
+                                    <div class="flex items-center justify-between mb-2">
+                                        <div>
+                                            <div class="text-xs font-semibold text-neutral-200">Local Diagnostics Log</div>
+                                            <div class="text-[11px] text-neutral-400">Ring buffer of last 100 events (Diagnostics aid, not SOC2-grade evidence)</div>
+                                        </div>
+                                        <div class="flex items-center gap-2">
+                                            <button id="btn-export-diagnostics" type="button" class="settings-chip-btn" onclick="exportComplianceDiagnostics()">Export JSON</button>
+                                            <button id="btn-clear-diagnostics" type="button" class="settings-danger-btn" onclick="clearComplianceDiagnosticsLog()">Clear</button>
+                                        </div>
+                                    </div>
+                                    <div id="compliance-audit-list" class="max-h-48 overflow-y-auto space-y-1 pr-1 custom-scrollbar">
+                                        <!-- populated dynamically -->
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             `;
 
@@ -7429,32 +7569,165 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             window.__currentSettingsView = viewName;
             currentSettingsView = viewName;
             const mainView = document.getElementById('settings-view-main');
-            const subView = document.getElementById('settings-view-custom-instructions');
-            if (!mainView || !subView) return;
+            const subViewCustom = document.getElementById('settings-view-custom-instructions');
+            const subViewCompliance = document.getElementById('settings-view-compliance');
+            if (!mainView) return;
 
             if (viewName === 'custom_instructions') {
                 mainView.style.display = 'none';
                 mainView.classList.remove('active');
-                subView.style.display = 'flex';
-                subView.classList.add('active');
-
-                const input = document.getElementById('custom-system-prompt-input');
-                if (input) {
-                    const currentVal = typeof customSystemPrompt === 'string' ? customSystemPrompt : (window.customSystemPrompt || '');
-                    input.value = currentVal.slice(0, 1200);
-                    updateCustomPromptCharCount(input);
+                if (subViewCompliance) {
+                    subViewCompliance.style.display = 'none';
+                    subViewCompliance.classList.remove('active');
                 }
-                const backBtn = subView.querySelector('.settings-subview-back-btn');
-                if (backBtn) backBtn.focus();
+                if (subViewCustom) {
+                    subViewCustom.style.display = 'flex';
+                    subViewCustom.classList.add('active');
+                    const input = document.getElementById('custom-system-prompt-input');
+                    if (input) {
+                        const currentVal = typeof customSystemPrompt === 'string' ? customSystemPrompt : (window.customSystemPrompt || '');
+                        input.value = currentVal.slice(0, 1200);
+                        updateCustomPromptCharCount(input);
+                    }
+                    const backBtn = subViewCustom.querySelector('.settings-subview-back-btn');
+                    if (backBtn) backBtn.focus();
+                }
+            } else if (viewName === 'compliance') {
+                mainView.style.display = 'none';
+                mainView.classList.remove('active');
+                if (subViewCustom) {
+                    subViewCustom.style.display = 'none';
+                    subViewCustom.classList.remove('active');
+                }
+                if (subViewCompliance) {
+                    subViewCompliance.style.display = 'flex';
+                    subViewCompliance.classList.add('active');
+                    if (typeof renderComplianceSettingsView === 'function') {
+                        renderComplianceSettingsView();
+                    }
+                    const backBtn = subViewCompliance.querySelector('.settings-subview-back-btn');
+                    if (backBtn) backBtn.focus();
+                }
             } else {
-                subView.style.display = 'none';
-                subView.classList.remove('active');
+                if (subViewCustom) {
+                    subViewCustom.style.display = 'none';
+                    subViewCustom.classList.remove('active');
+                }
+                if (subViewCompliance) {
+                    subViewCompliance.style.display = 'none';
+                    subViewCompliance.classList.remove('active');
+                }
                 mainView.style.display = 'flex';
                 mainView.classList.add('active');
 
                 updateCustomInstructionsStatus();
                 const rowBtn = document.getElementById('settings-row-custom-instructions');
                 if (rowBtn) rowBtn.focus();
+            }
+        }
+
+        async function renderComplianceSettingsView() {
+            const badgeEl = document.getElementById('compliance-policy-badge');
+            const statusPill = document.getElementById('compliance-policy-status-pill');
+            const piiToggle = document.getElementById('compliance-pii-masking-toggle');
+            const telemetryStatusEl = document.getElementById('compliance-telemetry-status');
+            const auditListEl = document.getElementById('compliance-audit-list');
+
+            let diagnostics = null;
+            try {
+                const res = await fetch('/api/diagnostics');
+                const json = await res.json();
+                diagnostics = json?.diagnostics || {};
+            } catch (_) {}
+
+            const complianceInfo = diagnostics?.compliance || {};
+            const policyMode = complianceInfo.policyMode || 'personal';
+            const isEnforced = policyMode === 'enforced';
+
+            if (badgeEl) {
+                badgeEl.textContent = isEnforced ? 'Enforced by organization' : 'Personal (User-controlled)';
+                badgeEl.className = isEnforced ? 'compliance-badge enforced' : 'compliance-badge personal';
+            }
+            if (statusPill) {
+                statusPill.textContent = isEnforced ? 'Enforced Policy' : 'DLP Active';
+            }
+
+            if (piiToggle) {
+                if (isEnforced) {
+                    piiToggle.checked = true;
+                    piiToggle.disabled = true;
+                    const container = piiToggle.closest('.settings-row');
+                    if (container) container.title = 'Managed by your organization';
+                } else {
+                    piiToggle.disabled = false;
+                    const savedPiiPref = localStorage.getItem('jarvis_pii_masking');
+                    piiToggle.checked = savedPiiPref !== 'false';
+                }
+            }
+
+            if (telemetryStatusEl) {
+                if (complianceInfo.exporterConfigured) {
+                    telemetryStatusEl.innerHTML = '<span class="compliance-status-dot green"></span> <span>OTel / Langfuse Exporter: Configured</span>';
+                } else {
+                    telemetryStatusEl.innerHTML = '<span class="compliance-status-dot neutral"></span> <span>OTel / Langfuse Exporter: Not configured</span>';
+                }
+            }
+
+            if (auditListEl) {
+                const events = window.JarvisObservability?.getRecentAuditEvents
+                    ? window.JarvisObservability.getRecentAuditEvents(10)
+                    : [];
+                if (!events.length) {
+                    auditListEl.innerHTML = '<div class="compliance-audit-empty text-center text-xs text-neutral-400 py-4">No recent DLP or feedback events recorded in this session.</div>';
+                } else {
+                    auditListEl.innerHTML = events.map(ev => {
+                        const timeStr = ev.timestamp ? new Date(ev.timestamp).toLocaleTimeString() : '';
+                        const actionBadgeClass = ev.action === 'BLOCK' ? 'badge-block' : (ev.action === 'MASK' ? 'badge-mask' : (ev.action === 'FEEDBACK' ? 'badge-feedback' : 'badge-allow'));
+                        const cats = Array.isArray(ev.categories) && ev.categories.length > 0 ? ev.categories.join(', ') : (ev.rules ? ev.rules.join(', ') : (ev.tags ? ev.tags.join(', ') : 'None'));
+                        return `
+                            <div class="compliance-audit-item flex items-center justify-between py-2 border-b border-white/5 text-xs">
+                                <div class="flex items-center gap-2">
+                                    <span class="compliance-audit-action ${actionBadgeClass}">${escapeHtml(ev.action || 'EVENT')}</span>
+                                    <span class="text-neutral-300 font-medium">${escapeHtml(ev.channel || ev.type || 'system')}</span>
+                                    <span class="text-neutral-400 truncate max-w-[160px]">${escapeHtml(cats)}</span>
+                                </div>
+                                <span class="text-neutral-400 font-mono text-[11px]">${timeStr}</span>
+                            </div>
+                        `;
+                    }).join('');
+                }
+            }
+        }
+
+        function handlePiiMaskingToggle(checkbox) {
+            if (!checkbox) return;
+            const enabled = checkbox.checked;
+            localStorage.setItem('jarvis_pii_masking', enabled ? 'true' : 'false');
+        }
+
+        function exportComplianceDiagnostics() {
+            if (!window.JarvisObservability?.exportLocalDiagnostics) {
+                alert('Diagnostics export unavailable.');
+                return;
+            }
+            const jsonStr = window.JarvisObservability.exportLocalDiagnostics();
+            const blob = new Blob([jsonStr], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `jarvis-diagnostics-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        function clearComplianceDiagnosticsLog() {
+            if (confirm('Are you sure you want to clear your local diagnostics audit log? This cannot be undone.')) {
+                if (window.JarvisObservability?.clearLocalDiagnostics) {
+                    window.JarvisObservability.clearLocalDiagnostics();
+                }
+                renderComplianceSettingsView();
             }
         }
 
@@ -9435,7 +9708,9 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 csv: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M3 9h18M3 15h18M9 3v18M15 3v18"></path></svg>',
                 html: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>',
                 json: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H6a2 2 0 0 0-2 2v3a2 2 0 0 1-2 2 2 2 0 0 1 2 2v3a2 2 0 0 0 2 2h2"></path><path d="M16 3h2a2 2 0 0 1 2 2v3a2 2 0 0 0 2 2 2 2 0 0 0-2 2v3a2 2 0 0 1-2 2h-2"></path></svg>',
-                txt: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="6" x2="20" y2="6"></line><line x1="4" y1="12" x2="14" y2="12"></line><line x1="4" y1="18" x2="18" y2="18"></line></svg>'
+                txt: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="6" x2="20" y2="6"></line><line x1="4" y1="12" x2="14" y2="12"></line><line x1="4" y1="18" x2="18" y2="18"></line></svg>',
+                thumb_up: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path></svg>',
+                thumb_down: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3"></path></svg>'
             };
             return icons[name] || icons.dots;
         }
@@ -9733,6 +10008,26 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                     <button type="button" class="assistant-action-icon" data-assistant-action="tts_speak" onclick="return handleAssistantActionInline(event, '${safeId}', 'tts_speak')" title="Read aloud" aria-label="Read aloud">${getActionIconSvg('speaker')}</button>
                     <button type="button" class="assistant-action-icon" data-assistant-action="share" onclick="return handleAssistantActionInline(event, '${safeId}', 'share')" title="Share" aria-label="Share">${getActionIconSvg('share')}</button>
                     <button type="button" class="assistant-action-icon" data-assistant-action="regenerate" onclick="return handleAssistantActionInline(event, '${safeId}', 'regenerate')" title="Regenerate" aria-label="Regenerate" ${regenAttr}>${getActionIconSvg('retry')}</button>
+                    <button type="button" class="assistant-action-icon" data-assistant-action="feedback_up" onclick="return handleAssistantActionInline(event, '${safeId}', 'feedback_up')" title="Helpful" aria-label="Helpful">${getActionIconSvg('thumb_up')}</button>
+                    <button type="button" class="assistant-action-icon" data-assistant-action="feedback_down" onclick="return handleAssistantActionInline(event, '${safeId}', 'feedback_down')" title="Not helpful" aria-label="Not helpful">${getActionIconSvg('thumb_down')}</button>
+                    <div id="assistant-feedback-popover-${safeId}" class="assistant-feedback-popover hidden" data-message-id="${safeId}">
+                        <div class="feedback-popover-header">
+                            <span class="feedback-popover-title">Why wasn't this helpful?</span>
+                            <button type="button" class="feedback-popover-close-btn" onclick="closeFeedbackPopover('${safeId}')" aria-label="Close feedback">&times;</button>
+                        </div>
+                        <div class="feedback-tags-grid">
+                            <button type="button" class="feedback-tag-chip" onclick="toggleFeedbackTag(this, 'Inaccurate')">Inaccurate</button>
+                            <button type="button" class="feedback-tag-chip" onclick="toggleFeedbackTag(this, 'Formatting')">Formatting</button>
+                            <button type="button" class="feedback-tag-chip" onclick="toggleFeedbackTag(this, 'Incomplete')">Incomplete</button>
+                            <button type="button" class="feedback-tag-chip" onclick="toggleFeedbackTag(this, 'Tone')">Tone</button>
+                            <button type="button" class="feedback-tag-chip" onclick="toggleFeedbackTag(this, 'Other')">Other</button>
+                        </div>
+                        <textarea id="feedback-comment-${safeId}" class="feedback-comment-input" maxlength="200" placeholder="Optional details (max 200 chars)..."></textarea>
+                        <div class="feedback-popover-actions">
+                            <button type="button" class="feedback-cancel-btn" onclick="closeFeedbackPopover('${safeId}')">Cancel</button>
+                            <button type="button" class="feedback-submit-btn" onclick="submitAssistantNegativeFeedback('${safeId}')">Submit</button>
+                        </div>
+                    </div>
                     <div class="assistant-action-menu-wrap">
                         <button type="button" class="assistant-action-icon assistant-action-dots" data-assistant-action="menu" onclick="return handleAssistantActionInline(event, '${safeId}', 'menu')" title="More" aria-label="More actions" aria-expanded="false">${getActionIconSvg('dots')}</button>
                         <div id="assistant-action-menu-${safeId}" class="assistant-action-menu hidden" role="menu" data-message-id="${safeId}"> 
@@ -9773,7 +10068,9 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             transform_deeper: messageId => transformAssistantAnswer(messageId, 'deeper'),
             transform_shorter: messageId => transformAssistantAnswer(messageId, 'shorter'),
             transform_examples: messageId => transformAssistantAnswer(messageId, 'examples'),
-            transform_steps: messageId => transformAssistantAnswer(messageId, 'steps')
+            transform_steps: messageId => transformAssistantAnswer(messageId, 'steps'),
+            feedback_up: messageId => handleAssistantPositiveFeedback(messageId),
+            feedback_down: messageId => handleAssistantNegativeFeedbackClick(messageId)
         };
 
         function handleAssistantActionInline(event, messageId, action) {
@@ -9784,6 +10081,115 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             const button = event?.currentTarget || event?.target?.closest?.('[data-assistant-action]');
             void dispatchAssistantAction(messageId, action, button);
             return false;
+        }
+
+        function handleAssistantPositiveFeedback(messageId) {
+            const row = document.querySelector(`.assistant-action-row[data-message-id="${messageId}"]`);
+            const btnUp = row?.querySelector('[data-assistant-action="feedback_up"]');
+            const btnDown = row?.querySelector('[data-assistant-action="feedback_down"]');
+            if (btnUp) btnUp.classList.add('is-active', 'text-emerald-400');
+            if (btnDown) btnDown.classList.remove('is-active', 'text-rose-400');
+            closeFeedbackPopover(messageId);
+
+            const meta = getAssistantMessageMeta(messageId) || {};
+            const turnId = meta.turnId || messageId;
+            if (window.JarvisObservability?.recordFeedbackAudit) {
+                window.JarvisObservability.recordFeedbackAudit({
+                    messageId,
+                    turnId,
+                    score: 1,
+                    tags: []
+                });
+            }
+
+            fetch('/api/feedback', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ turnId, score: 1, tags: [] })
+            }).catch(() => {});
+
+            window.dispatchEvent(new CustomEvent('jarvis:feedback-recorded', {
+                detail: { messageId, turnId, score: 1, tags: [] }
+            }));
+        }
+
+        function handleAssistantNegativeFeedbackClick(messageId) {
+            const popover = document.getElementById(`assistant-feedback-popover-${messageId}`);
+            if (!popover) return;
+            const isHidden = popover.classList.contains('hidden');
+            document.querySelectorAll('.assistant-feedback-popover').forEach(p => p.classList.add('hidden'));
+            if (isHidden) {
+                popover.classList.remove('hidden');
+                popover.querySelector('textarea')?.focus();
+            }
+        }
+
+        function closeFeedbackPopover(messageId) {
+            const popover = document.getElementById(`assistant-feedback-popover-${messageId}`);
+            if (popover) popover.classList.add('hidden');
+        }
+
+        function toggleFeedbackTag(btn, tagName) {
+            if (!btn) return;
+            btn.classList.toggle('is-selected');
+        }
+
+        function submitAssistantNegativeFeedback(messageId) {
+            const popover = document.getElementById(`assistant-feedback-popover-${messageId}`);
+            if (!popover) return;
+            const selectedTags = Array.from(popover.querySelectorAll('.feedback-tag-chip.is-selected')).map(el => el.textContent.trim());
+            const commentEl = document.getElementById(`feedback-comment-${messageId}`);
+            let commentText = String(commentEl?.value || '').trim().slice(0, 200);
+
+            let sanitizedComment = commentText;
+            if (window.JarvisDlp?.dlpGateway && commentText) {
+                const dlpRes = window.JarvisDlp.dlpGateway(commentText, { channel: 'feedback' });
+                sanitizedComment = dlpRes.text;
+            }
+
+            const row = document.querySelector(`.assistant-action-row[data-message-id="${messageId}"]`);
+            const btnUp = row?.querySelector('[data-assistant-action="feedback_up"]');
+            const btnDown = row?.querySelector('[data-assistant-action="feedback_down"]');
+            if (btnDown) btnDown.classList.add('is-active', 'text-rose-400');
+            if (btnUp) btnUp.classList.remove('is-active', 'text-emerald-400');
+
+            const meta = getAssistantMessageMeta(messageId) || {};
+            const turnId = meta.turnId || messageId;
+            if (window.JarvisObservability?.recordFeedbackAudit) {
+                window.JarvisObservability.recordFeedbackAudit({
+                    messageId,
+                    turnId,
+                    score: -1,
+                    tags: selectedTags,
+                    comment: sanitizedComment
+                });
+            }
+
+            fetch('/api/feedback', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    turnId,
+                    score: -1,
+                    tags: selectedTags,
+                    comment: sanitizedComment
+                })
+            }).catch(() => {});
+
+            window.dispatchEvent(new CustomEvent('jarvis:feedback-recorded', {
+                detail: { messageId, turnId, score: -1, tags: selectedTags, comment: sanitizedComment }
+            }));
+
+            if (selectedTags.includes('Inaccurate') || selectedTags.includes('Tone')) {
+                if (typeof JarvisSelfImprovingMemory !== 'undefined' && (typeof isPersonalizationEnabled !== 'function' || isPersonalizationEnabled())) {
+                    const directive = selectedTags.includes('Inaccurate')
+                        ? 'Be strictly factual, double check claims, and verify before asserting.'
+                        : 'Maintain an objective, neutral, professional tone without unnecessary repetition.';
+                    JarvisSelfImprovingMemory.learnExplicitRule?.(directive, 'feedback').catch(() => {});
+                }
+            }
+
+            closeFeedbackPopover(messageId);
         }
 
         function handleAssistantActionClick(event) {
@@ -11217,7 +11623,12 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             const allowEmptyAssistant = !isUser && meta?.allowEmpty === true;
             if (!isUser && !allowEmptyAssistant) hideThinkingIndicator();
             updateComposerPlaceholder();
-            const parsedThought = isUser ? { thought: '', answer: String(text ?? '') } : extractThoughtAndAnswer(text);
+            let messageText = String(text ?? '');
+            if (!isUser && window.JarvisDlp?.rehydrateText) {
+                const activeConvId = (typeof currentConversationId !== 'undefined' && currentConversationId) ? currentConversationId : 'default';
+                messageText = window.JarvisDlp.rehydrateText(messageText, activeConvId);
+            }
+            const parsedThought = isUser ? { thought: '', answer: messageText } : extractThoughtAndAnswer(messageText);
             const rawDisplayText = normalizeUiTokens(parsedThought.answer.trim());
             const hasAttachments = Array.isArray(meta?.attachments) && meta.attachments.length > 0;
             if (isUser && !rawDisplayText.trim() && !hasAttachments) return;
@@ -11837,7 +12248,11 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
         }
 
         function finalizeStreamingAssistantMessage(messageId, text, meta = {}) {
-            const cleanText = String(text || '').trim();
+            let cleanText = String(text || '').trim();
+            if (window.JarvisDlp?.rehydrateText) {
+                const activeConvId = (typeof currentConversationId !== 'undefined' && currentConversationId) ? currentConversationId : 'default';
+                cleanText = window.JarvisDlp.rehydrateText(cleanText, activeConvId);
+            }
             if (!messageId || !cleanText) return '';
             hideThinkingIndicator();
             updateStreamingAssistantMessage(messageId, cleanText, { ...meta, streaming: false });
@@ -14914,6 +15329,64 @@ ${code}
             }
         }
 
+        let currentComposerDlpState = null;
+
+        function showComposerDlpBanner(details = {}) {
+            const tray = document.getElementById('composer-dlp-tray');
+            if (!tray) return;
+            currentComposerDlpState = details;
+            const catList = Array.isArray(details.categories) && details.categories.length > 0
+                ? details.categories.join(', ')
+                : 'Credentials or Secrets';
+            tray.innerHTML = `
+                <div class="composer-dlp-banner flex items-center justify-between gap-3 p-3 rounded-lg bg-red-950/80 border border-red-500/60 text-red-200 text-xs shadow-lg backdrop-blur-md">
+                    <div class="flex items-center gap-2.5 min-w-0">
+                        <svg class="w-5 h-5 text-red-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                            <line x1="12" y1="8" x2="12" y2="12"/>
+                            <line x1="12" y1="16" x2="12.01" y2="16"/>
+                        </svg>
+                        <div class="truncate">
+                            <span class="font-semibold text-red-100">Sensitive credential detected (${escapeHtml(catList)}).</span>
+                            <span class="text-red-300 ml-1">To protect your security, raw credentials cannot be sent.</span>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2 shrink-0">
+                        <button type="button" class="dlp-banner-cancel-btn px-2.5 py-1 rounded bg-white/10 hover:bg-white/20 text-white font-medium transition-colors" onclick="hideComposerDlpBanner()">Cancel</button>
+                        <button type="button" class="dlp-banner-redact-btn px-2.5 py-1 rounded bg-red-600 hover:bg-red-500 text-white font-medium transition-colors shadow" onclick="redactAndSendComposer()">Redact &amp; Send</button>
+                    </div>
+                </div>
+            `;
+            tray.classList.remove('hidden');
+        }
+
+        function hideComposerDlpBanner() {
+            const tray = document.getElementById('composer-dlp-tray');
+            if (tray) {
+                tray.classList.add('hidden');
+                tray.innerHTML = '';
+            }
+            currentComposerDlpState = null;
+            document.getElementById('text-input')?.focus();
+        }
+
+        function redactAndSendComposer() {
+            if (!currentComposerDlpState) {
+                hideComposerDlpBanner();
+                return;
+            }
+            const state = currentComposerDlpState;
+            hideComposerDlpBanner();
+            const input = document.getElementById('text-input');
+            const redactedText = state.redactedText || (window.JarvisDlp?.scanDlp
+                ? window.JarvisDlp.scanDlp(state.rawText || input?.value || '', { redactCredentials: true }).sanitizedText
+                : '[REDACTED_SECRET]');
+            if (input) {
+                input.value = redactedText;
+            }
+            void sendTextInput({ text: redactedText, source: 'redacted_send' });
+        }
+
 async function sendTextInput(submission = {}) {
             const isVoice = submission?.source === 'vtt' || submission?.source === 'converse';
             const vttWave = document.getElementById('vtt-waveform-container');
@@ -15057,13 +15530,37 @@ async function sendTextInput(submission = {}) {
                         : `Analyze the attached files (${attachmentMeta.map(item => item.name).join(', ')}).`)
                     : '';
                 const effectiveOutgoingText = outgoingText || attachmentDefaultPrompt;
+
+                // Pre-flight DLP check on client
+                const activeConvId = (typeof currentConversationId !== 'undefined' && currentConversationId) ? currentConversationId : 'default';
+                let dlpCheckResult = { decision: 'ALLOW', text: effectiveOutgoingText, findings: [] };
+                if (window.JarvisDlp?.dlpGateway && effectiveOutgoingText) {
+                    const redactCreds = submission?.source === 'redacted_send';
+                    dlpCheckResult = window.JarvisDlp.dlpGateway(effectiveOutgoingText, {
+                        channel: 'composer',
+                        conversationId: activeConvId,
+                        redactCredentials: redactCreds
+                    });
+                }
+
+                if (dlpCheckResult.decision === 'BLOCK' && submission?.source !== 'redacted_send') {
+                    showComposerDlpBanner({
+                        categories: dlpCheckResult.findings.map(f => f.category),
+                        redactedText: dlpCheckResult.text,
+                        rawText: effectiveOutgoingText
+                    });
+                    return;
+                }
+                hideComposerDlpBanner();
+
+                const outgoingTextToSend = dlpCheckResult.text || effectiveOutgoingText;
                 const displayOutgoingText = outgoingText || (attachmentMeta.length
                     ? `Attached ${attachmentMeta.length} file${attachmentMeta.length === 1 ? '' : 's'}`
                     : '');
-                learnAnswerStyleFromUserMessage(effectiveOutgoingText);
-                const normalizedOutgoingText = effectiveOutgoingText && isLikelyCodeInput(effectiveOutgoingText)
-                    ? effectiveOutgoingText
-                    : (effectiveOutgoingText ? normalizeIntentTypos(effectiveOutgoingText) : displayOutgoingText);
+                learnAnswerStyleFromUserMessage(outgoingTextToSend);
+                const normalizedOutgoingText = outgoingTextToSend && isLikelyCodeInput(outgoingTextToSend)
+                    ? outgoingTextToSend
+                    : (outgoingTextToSend ? normalizeIntentTypos(outgoingTextToSend) : displayOutgoingText);
                 const turn = createConversationTurn(displayOutgoingText, normalizedOutgoingText, inputSource, {
                     sourceContext: {
                         transcriptId: String(submission?.transcriptId || ''),
