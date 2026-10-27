@@ -454,7 +454,7 @@
                         id="voice-to-text-btn"
                         type="button"
                         class="composer-icon-btn speech-input-btn vtt-shifted-left"
-                        onclick="toggleVoiceToText()"
+                        onclick="toggleVoiceToText(event)"
                         title="Voice typing (Dictation)" aria-label="Voice typing (Dictation)"
                         aria-pressed="false">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -8212,15 +8212,15 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             }
         }
 
-        function toggleVoiceToText() {
+        function toggleVoiceToText(event) {
             if (typeof window.__installedToggleVoiceToText === 'function') {
-                return window.__installedToggleVoiceToText();
+                return window.__installedToggleVoiceToText(event);
             }
             if (!window.JarvisSpeechInput && typeof window.initializeSpeechInput === 'function') {
                 window.initializeSpeechInput();
             }
             if (typeof window.__installedToggleVoiceToText === 'function') {
-                return window.__installedToggleVoiceToText();
+                return window.__installedToggleVoiceToText(event);
             }
             if (typeof window.JarvisSpeechInput?.toggleDictation === 'function') {
                 return window.JarvisSpeechInput.toggleDictation();
@@ -9157,7 +9157,24 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                     const header = cells(tableRows[0]);
                     const body = tableRows.slice(1).map(cells);
                     out.push(
-                        `<div class="assistant-md-table-wrap"><table class="assistant-md-table"><thead><tr>${header.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${body.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`
+                        `<div class="assistant-md-table-wrap">
+                            <div class="assistant-table-toolbar">
+                                <span class="assistant-table-badge">Data Table</span>
+                                <div class="assistant-table-actions">
+                                    <button type="button" class="assistant-table-btn" onclick="window.downloadTableCsv?.(this)" title="Download as CSV (Excel compatible)">
+                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                        <span>CSV</span>
+                                    </button>
+                                    <button type="button" class="assistant-table-btn" onclick="window.copyTableTsv?.(this)" title="Copy table for Excel or Sheets">
+                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                                        <span>Copy</span>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="assistant-table-scroll-container" tabindex="0" role="region" aria-label="Scrollable table">
+                                <table class="assistant-md-table"><thead><tr>${header.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${body.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table>
+                            </div>
+                        </div>`
                     );
                     continue;
                 }
