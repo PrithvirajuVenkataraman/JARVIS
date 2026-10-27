@@ -32,6 +32,7 @@ import * as JarvisUnifiedMemory from './unified-memory.js?v=2.0.5';
 import * as JarvisDocumentExporter from './document-exporter.js?v=2.0.5';
 import * as JarvisDlpGateway from './dlp-gateway.js?v=2.0.5';
 import * as JarvisDlpEngine from './dlp-engine.js?v=2.0.5';
+import * as JarvisConversationSearch from './conversation-search.js?v=2.0.5';
 
 import { createInteractionStateMachine, InteractionState } from './interaction-state.js?v=2.0.5';
 
@@ -78,6 +79,7 @@ globalThis.hasSearchableContent = JarvisQueryNormalizer.hasSearchableContent;
 globalThis.JarvisUnifiedMemory = JarvisUnifiedMemory;
 globalThis.JarvisDocumentExporter = JarvisDocumentExporter;
 globalThis.JarvisDlp = Object.freeze({ ...JarvisDlpGateway, ...JarvisDlpEngine });
+globalThis.JarvisConversationSearch = Object.freeze({ ...JarvisConversationSearch });
 try {
     JarvisUnifiedMemory.unifiedMemoryStore?.runIdempotentMigration();
 } catch (_) {}
