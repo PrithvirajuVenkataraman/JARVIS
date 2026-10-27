@@ -1,0 +1,592 @@
+[
+  {
+    "id": "temporal-01",
+    "category": "temporal",
+    "query": "What are the latest breaking updates in Next.js 15 as of late 2024?",
+    "temporal": true,
+    "expectedIntent": "needs_live_search",
+    "context": [],
+    "expectedKeyEntities": ["Next.js 15"],
+    "temporalAnchor": "late 2024",
+    "description": "Temporal software query with date qualifier"
+  },
+  {
+    "id": "temporal-02",
+    "query": "What is the current price of Bitcoin today?",
+    "category": "temporal",
+    "temporal": true,
+    "expectedIntent": "needs_live_search",
+    "context": [],
+    "expectedKeyEntities": ["Bitcoin", "price"],
+    "temporalAnchor": "today",
+    "description": "Fast-moving financial market price"
+  },
+  {
+    "id": "temporal-03",
+    "query": "Who won the latest FIFA World Cup championship?",
+    "category": "temporal",
+    "temporal": true,
+    "expectedIntent": "needs_live_search",
+    "context": [],
+    "expectedKeyEntities": ["FIFA World Cup"],
+    "temporalAnchor": "latest",
+    "description": "Recent championship tournament winner"
+  },
+  {
+    "id": "temporal-04",
+    "query": "What is the latest Federal Reserve interest rate decision this week?",
+    "category": "temporal",
+    "temporal": true,
+    "expectedIntent": "needs_live_search",
+    "context": [],
+    "expectedKeyEntities": ["Federal Reserve", "interest rate"],
+    "temporalAnchor": "this week",
+    "description": "Recent macroeconomic policy announcement"
+  },
+  {
+    "id": "temporal-05",
+    "query": "What are the newest features in Python 3.13 release notes?",
+    "category": "temporal",
+    "temporal": true,
+    "expectedIntent": "needs_live_search",
+    "context": [],
+    "expectedKeyEntities": ["Python 3.13", "release notes"],
+    "temporalAnchor": "newest",
+    "description": "Technical software release notes"
+  },
+  {
+    "id": "temporal-06",
+    "query": "Current status of Artemis II NASA launch schedule in 2026",
+    "category": "temporal",
+    "temporal": true,
+    "expectedIntent": "needs_live_search",
+    "context": [],
+    "expectedKeyEntities": ["Artemis II", "NASA launch schedule"],
+    "temporalAnchor": "2026",
+    "description": "Forward-looking space mission schedule"
+  },
+  {
+    "id": "temporal-07",
+    "query": "What are the latest updates on California wild fire containment yesterday?",
+    "category": "temporal",
+    "temporal": true,
+    "expectedIntent": "needs_live_search",
+    "context": [],
+    "expectedKeyEntities": ["California wild fire"],
+    "temporalAnchor": "yesterday",
+    "description": "Disaster breaking updates with relative time"
+  },
+  {
+    "id": "temporal-08",
+    "query": "Current weather forecast and storm warnings for Tokyo tonight",
+    "category": "temporal",
+    "temporal": true,
+    "expectedIntent": "needs_live_search",
+    "context": [],
+    "expectedKeyEntities": ["weather forecast", "Tokyo"],
+    "temporalAnchor": "tonight",
+    "description": "Immediate meteorological weather conditions"
+  },
+  {
+    "id": "regional-01",
+    "category": "regional",
+    "query": "What is the minimum wage in California vs Texas in 2026?",
+    "temporal": true,
+    "expectedIntent": "needs_live_search",
+    "context": [],
+    "expectedKeyEntities": ["minimum wage", "California", "Texas"],
+    "temporalAnchor": "2026",
+    "description": "State-level comparative statutory rates"
+  },
+  {
+    "id": "regional-02",
+    "query": "Congestion charge regulations in Central London as of 2025",
+    "category": "regional",
+    "temporal": true,
+    "expectedIntent": "needs_live_search",
+    "context": [],
+    "expectedKeyEntities": ["Congestion charge", "London"],
+    "temporalAnchor": "2025",
+    "description": "Municipal transportation policies"
+  },
+  {
+    "id": "regional-03",
+    "query": "Current solar panel net metering laws in Arizona for residential owners",
+    "category": "regional",
+    "temporal": true,
+    "expectedIntent": "needs_live_search",
+    "context": [],
+    "expectedKeyEntities": ["solar panel net metering", "Arizona"],
+    "temporalAnchor": "current",
+    "description": "Regional state energy regulatory policies"
+  },
+  {
+    "id": "regional-04",
+    "query": "What are the recycling rules and plastic bans in Germany under Verpackungsgesetz?",
+    "category": "regional",
+    "temporal": false,
+    "expectedIntent": "needs_live_search",
+    "context": [],
+    "expectedKeyEntities": ["recycling rules", "Germany", "Verpackungsgesetz"],
+    "description": "National environmental statutory framework"
+  },
+  {
+    "id": "regional-05",
+    "query": "Current stamp duty land tax thresholds in England and Northern Ireland",
+    "category": "regional",
+    "temporal": true,
+    "expectedIntent": "needs_live_search",
+    "context": [],
+    "expectedKeyEntities": ["stamp duty", "England", "Northern Ireland"],
+    "temporalAnchor": "current",
+    "description": "Regional property taxation thresholds"
+  },
+  {
+    "id": "regional-06",
+    "query": "Emergency evacuation zones and coastal warning centers in Queensland Australia",
+    "category": "regional",
+    "temporal": true,
+    "expectedIntent": "needs_live_search",
+    "context": [],
+    "expectedKeyEntities": ["Queensland Australia", "evacuation zones"],
+    "description": "Regional disaster emergency authority directives"
+  },
+  {
+    "id": "regional-07",
+    "query": "What are the paid family leave benefits in New York State in 2026?",
+    "category": "regional",
+    "temporal": true,
+    "expectedIntent": "needs_live_search",
+    "context": [],
+    "expectedKeyEntities": ["paid family leave", "New York State"],
+    "temporalAnchor": "2026",
+    "description": "State labor benefit entitlements"
+  },
+  {
+    "id": "regional-08",
+    "query": "Sales tax exemptions on food and groceries in Illinois counties",
+    "category": "regional",
+    "temporal": false,
+    "expectedIntent": "needs_live_search",
+    "context": [],
+    "expectedKeyEntities": ["sales tax", "groceries", "Illinois"],
+    "description": "County and state taxation rules"
+  },
+  {
+    "id": "comparison-01",
+    "category": "comparison",
+    "query": "Compare Bun vs Node.js 22 performance benchmarks and cold start times",
+    "temporal": true,
+    "expectedIntent": "needs_live_search",
+    "context": [],
+    "expectedKeyEntities": ["Bun", "Node.js 22"],
+    "description": "Technical software performance comparison"
+  },
+  {
+    "id": "comparison-02",
+    "query": "Comparison of Claude 3.5 Sonnet versus GPT-4o on coding evaluations",
+    "category": "comparison",
+    "temporal": true,
+    "expectedIntent": "needs_live_search",
+    "context": [],
+    "expectedKeyEntities": ["Claude 3.5 Sonnet", "GPT-4o"],
+    "description": "AI model benchmark comparison"
+  },
+  {
+    "id": "comparison-03",
+    "query": "Differences between OLED vs QD-OLED display technologies in 2025 TVs",
+    "category": "comparison",
+    "temporal": true,
+    "expectedIntent": "needs_live_search",
+    "context": [],
+    "expectedKeyEntities": ["OLED", "QD-OLED"],
+    "temporalAnchor": "2025",
+    "description": "Hardware panel tech comparison"
+  },
+  {
+    "id": "comparison-04",
+    "query": "Compare Porsche Taycan vs Tesla Model S Plaid charging speed and range",
+    "category": "comparison",
+    "temporal": true,
+    "expectedIntent": "needs_live_search",
+    "context": [],
+    "expectedKeyEntities": ["Porsche Taycan", "Tesla Model S Plaid"],
+    "description": "Automotive EV specifications comparison"
+  },
+  {
+    "id": "comparison-05",
+    "query": "Difference between Roth IRA vs Traditional IRA contribution limits for 2026",
+    "category": "comparison",
+    "temporal": true,
+    "expectedIntent": "needs_live_search",
+    "context": [],
+    "expectedKeyEntities": ["Roth IRA", "Traditional IRA"],
+    "temporalAnchor": "2026",
+    "description": "Tax and retirement account rules"
+  },
+  {
+    "id": "comparison-06",
+    "query": "Compare Rust vs Go memory management and garbage collection tradeoffs",
+    "category": "comparison",
+    "temporal": false,
+    "expectedIntent": "stable_answer",
+    "context": [],
+    "expectedKeyEntities": ["Rust", "Go", "memory management"],
+    "description": "Programming language architectural comparison"
+  },
+  {
+    "id": "comparison-07",
+    "query": "Comparison between PostgreSQL 16 and MySQL 8.4 JSON querying capabilities",
+    "category": "comparison",
+    "temporal": true,
+    "expectedIntent": "needs_live_search",
+    "context": [],
+    "expectedKeyEntities": ["PostgreSQL 16", "MySQL 8.4"],
+    "description": "Database feature comparison across versions"
+  },
+  {
+    "id": "comparison-08",
+    "query": "Compare iPhone 16 Pro Max vs Samsung Galaxy S25 Ultra camera zoom specs",
+    "category": "comparison",
+    "temporal": true,
+    "expectedIntent": "needs_live_search",
+    "context": [],
+    "expectedKeyEntities": ["iPhone 16 Pro Max", "Samsung Galaxy S25 Ultra"],
+    "description": "Consumer mobile hardware spec comparison"
+  },
+  {
+    "id": "topic-switch-01",
+    "category": "topic_switch",
+    "query": "Moving on to a new topic: What is the speed of light in vacuum?",
+    "temporal": false,
+    "expectedIntent": "stable_answer",
+    "context": [
+      { "role": "user", "content": "Who is the CEO of Apple?" },
+      { "role": "assistant", "content": "Tim Cook has served as CEO of Apple since 2011." }
+    ],
+    "expectedKeyEntities": ["speed of light"],
+    "forbiddenContaminants": ["Apple", "Tim Cook", "CEO"],
+    "description": "Explicit transition marker to stable physics question"
+  },
+  {
+    "id": "topic-switch-02",
+    "category": "topic_switch",
+    "query": "By the way, what are Kepler's three laws of planetary motion?",
+    "temporal": false,
+    "expectedIntent": "stable_answer",
+    "context": [
+      { "role": "user", "content": "How much does a Tesla Model 3 cost?" },
+      { "role": "assistant", "content": "The Tesla Model 3 starts around $38,990." }
+    ],
+    "expectedKeyEntities": ["Kepler", "planetary motion"],
+    "forbiddenContaminants": ["Tesla", "Model 3", "cost"],
+    "description": "Conversational tangent to educational astronomy"
+  },
+  {
+    "id": "topic-switch-03",
+    "category": "topic_switch",
+    "query": "Switch topic to: How does photosynthesis produce glucose in plants?",
+    "temporal": false,
+    "expectedIntent": "stable_answer",
+    "context": [
+      { "role": "user", "content": "What was the score in the Arsenal match?" },
+      { "role": "assistant", "content": "Arsenal defeated Chelsea 2-0 yesterday." }
+    ],
+    "expectedKeyEntities": ["photosynthesis", "glucose"],
+    "forbiddenContaminants": ["Arsenal", "Chelsea", "score"],
+    "description": "Switch keyword to biology foundation"
+  },
+  {
+    "id": "topic-switch-04",
+    "category": "topic_switch",
+    "query": "On another note, who wrote the novel Pride and Prejudice?",
+    "temporal": false,
+    "expectedIntent": "stable_answer",
+    "context": [
+      { "role": "user", "content": "What is the current price of Ethereum?" },
+      { "role": "assistant", "content": "Ethereum is currently trading around $3,400." }
+    ],
+    "expectedKeyEntities": ["Pride and Prejudice"],
+    "forbiddenContaminants": ["Ethereum", "trading", "price"],
+    "description": "Discourse marker switching to classic literature"
+  },
+  {
+    "id": "topic-switch-05",
+    "category": "topic_switch",
+    "query": "Let's talk about something else: What is the quadratic formula?",
+    "temporal": false,
+    "expectedIntent": "stable_answer",
+    "context": [
+      { "role": "user", "content": "Tell me about the recent French election results" },
+      { "role": "assistant", "content": "The legislative elections in France resulted in a divided parliament." }
+    ],
+    "expectedKeyEntities": ["quadratic formula"],
+    "forbiddenContaminants": ["French", "election", "parliament"],
+    "description": "Colloquial topic switch to algebra"
+  },
+  {
+    "id": "topic-switch-06",
+    "category": "topic_switch",
+    "query": "New question: How does quicksort algorithm achieve O(n log n) average complexity?",
+    "temporal": false,
+    "expectedIntent": "stable_answer",
+    "context": [
+      { "role": "user", "content": "Who is the Prime Minister of Japan?" },
+      { "role": "assistant", "content": "Shigeru Ishiba is the Prime Minister of Japan." }
+    ],
+    "expectedKeyEntities": ["quicksort", "O(n log n)"],
+    "forbiddenContaminants": ["Japan", "Prime Minister", "Ishiba"],
+    "description": "Fresh question marker to computer science algorithm"
+  },
+  {
+    "id": "topic-switch-07",
+    "category": "topic_switch",
+    "query": "Unrelated question: What is the chemical formula for caffeine?",
+    "temporal": false,
+    "expectedIntent": "stable_answer",
+    "context": [
+      { "role": "user", "content": "What is the latest GDP growth of India?" },
+      { "role": "assistant", "content": "India's real GDP grew by 7.8% according to official NSO data." }
+    ],
+    "expectedKeyEntities": ["chemical formula", "caffeine"],
+    "forbiddenContaminants": ["GDP", "India", "NSO"],
+    "description": "Unrelated prefix to chemistry fact"
+  },
+  {
+    "id": "topic-switch-08",
+    "category": "topic_switch",
+    "query": "Forget that: What is the capital city of Australia?",
+    "temporal": false,
+    "expectedIntent": "stable_answer",
+    "context": [
+      { "role": "user", "content": "What were Boeing's quarterly earnings?" },
+      { "role": "assistant", "content": "Boeing reported a quarterly net loss of $6 billion." }
+    ],
+    "expectedKeyEntities": ["capital city", "Australia"],
+    "forbiddenContaminants": ["Boeing", "earnings", "net loss"],
+    "description": "Topic discard marker to geography fact"
+  },
+  {
+    "id": "topic-switch-09",
+    "category": "topic_switch",
+    "query": "Different subject: What is Fermat's Last Theorem?",
+    "temporal": false,
+    "expectedIntent": "stable_answer",
+    "context": [
+      { "role": "user", "content": "Where is the new TSMC semiconductor plant being built in Arizona?" },
+      { "role": "assistant", "content": "TSMC is constructing its multi-billion fabrication facility in Phoenix, Arizona." }
+    ],
+    "expectedKeyEntities": ["Fermat's Last Theorem"],
+    "forbiddenContaminants": ["TSMC", "Arizona", "semiconductor"],
+    "description": "Different subject marker to mathematical theorem"
+  },
+  {
+    "id": "followup-01",
+    "category": "elliptical_follow_up",
+    "query": "Who is their current CEO?",
+    "temporal": true,
+    "expectedIntent": "needs_live_search",
+    "context": [
+      { "role": "user", "content": "Tell me about Microsoft Corporation." },
+      { "role": "assistant", "content": "Microsoft is an American multinational technology corporation headquartered in Redmond, Washington." }
+    ],
+    "expectedKeyEntities": ["Microsoft", "CEO"],
+    "temporalAnchor": "current",
+    "description": "Pronoun referent requiring company entity from prior turn"
+  },
+  {
+    "id": "followup-02",
+    "category": "elliptical_follow_up",
+    "query": "How much does it cost?",
+    "temporal": true,
+    "expectedIntent": "needs_live_search",
+    "context": [
+      { "role": "user", "content": "Tell me about the Apple Vision Pro headset." },
+      { "role": "assistant", "content": "The Apple Vision Pro is a spatial computing headset unveiled by Apple." }
+    ],
+    "expectedKeyEntities": ["Apple Vision Pro", "cost"],
+    "description": "Elliptical price question referring to product"
+  },
+  {
+    "id": "followup-03",
+    "category": "elliptical_follow_up",
+    "query": "And what about in Germany?",
+    "temporal": true,
+    "expectedIntent": "needs_live_search",
+    "context": [
+      { "role": "user", "content": "What is the legal drinking age in the United States?" },
+      { "role": "assistant", "content": "In the United States, the minimum legal drinking age is 21 nationwide." }
+    ],
+    "expectedKeyEntities": ["drinking age", "Germany"],
+    "description": "Elliptical regional comparison"
+  },
+  {
+    "id": "followup-04",
+    "category": "elliptical_follow_up",
+    "query": "When was he elected?",
+    "temporal": true,
+    "expectedIntent": "needs_live_search",
+    "context": [
+      { "role": "user", "content": "Who is Keir Starmer?" },
+      { "role": "assistant", "content": "Keir Starmer is the Prime Minister of the United Kingdom and leader of the Labour Party." }
+    ],
+    "expectedKeyEntities": ["Keir Starmer", "elected"],
+    "description": "Personal pronoun query regarding political tenure"
+  },
+  {
+    "id": "followup-05",
+    "category": "elliptical_follow_up",
+    "query": "What are its key safety ratings?",
+    "temporal": true,
+    "expectedIntent": "needs_live_search",
+    "context": [
+      { "role": "user", "content": "Tell me about the 2024 Volvo EX90 electric SUV." },
+      { "role": "assistant", "content": "The Volvo EX90 is a flagship 7-seat all-electric SUV featuring advanced lidar sensors." }
+    ],
+    "expectedKeyEntities": ["Volvo EX90", "safety ratings"],
+    "description": "Possessive pronoun referring to vehicle"
+  },
+  {
+    "id": "followup-06",
+    "category": "elliptical_follow_up",
+    "query": "Who is their head coach now?",
+    "temporal": true,
+    "expectedIntent": "needs_live_search",
+    "context": [
+      { "role": "user", "content": "Tell me about Liverpool FC." },
+      { "role": "assistant", "content": "Liverpool Football Club is an English professional football club based in Liverpool." }
+    ],
+    "expectedKeyEntities": ["Liverpool FC", "head coach"],
+    "temporalAnchor": "now",
+    "description": "Sports managerial follow-up"
+  },
+  {
+    "id": "followup-07",
+    "category": "elliptical_follow_up",
+    "query": "What are the latest updates on that case?",
+    "temporal": true,
+    "expectedIntent": "needs_live_search",
+    "context": [
+      { "role": "user", "content": "What happened in the US Department of Justice antitrust lawsuit against Google Search?" },
+      { "role": "assistant", "content": "In August 2024, a federal judge ruled that Google illegally maintained a monopoly in general search services." }
+    ],
+    "expectedKeyEntities": ["Google antitrust lawsuit", "latest updates"],
+    "temporalAnchor": "latest",
+    "description": "Demonstrative phrase referring to active legal lawsuit"
+  },
+  {
+    "id": "followup-08",
+    "category": "elliptical_follow_up",
+    "query": "What is their current market capitalization?",
+    "temporal": true,
+    "expectedIntent": "needs_live_search",
+    "context": [
+      { "role": "user", "content": "Tell me about Nvidia Corporation." },
+      { "role": "assistant", "content": "Nvidia is a prominent semiconductor and AI hardware company led by Jensen Huang." }
+    ],
+    "expectedKeyEntities": ["Nvidia", "market capitalization"],
+    "temporalAnchor": "current",
+    "description": "Financial equity attribute follow-up"
+  },
+  {
+    "id": "followup-09",
+    "category": "elliptical_follow_up",
+    "query": "Which one has better battery life?",
+    "temporal": true,
+    "expectedIntent": "needs_live_search",
+    "context": [
+      { "role": "user", "content": "I am deciding between the MacBook Air M3 and Dell XPS 13." },
+      { "role": "assistant", "content": "Both are ultraportable laptops with premium displays and strong build quality." }
+    ],
+    "expectedKeyEntities": ["MacBook Air M3", "Dell XPS 13", "battery life"],
+    "description": "Comparative selection referring to two previous items"
+  },
+  {
+    "id": "entity-state-01",
+    "category": "entity_state",
+    "query": "Who is the current Prime Minister of the United Kingdom?",
+    "temporal": true,
+    "expectedIntent": "needs_live_search",
+    "context": [],
+    "expectedKeyEntities": ["Prime Minister", "United Kingdom"],
+    "temporalAnchor": "current",
+    "description": "National head of government office holder"
+  },
+  {
+    "id": "entity-state-02",
+    "category": "entity_state",
+    "query": "Who is the current President of France?",
+    "temporal": true,
+    "expectedIntent": "needs_live_search",
+    "context": [],
+    "expectedKeyEntities": ["President", "France"],
+    "temporalAnchor": "current",
+    "description": "European sovereign state leader"
+  },
+  {
+    "id": "entity-state-03",
+    "category": "entity_state",
+    "query": "Who is the current Governor of California?",
+    "temporal": true,
+    "expectedIntent": "needs_live_search",
+    "context": [],
+    "expectedKeyEntities": ["Governor", "California"],
+    "temporalAnchor": "current",
+    "description": "State executive leadership"
+  },
+  {
+    "id": "entity-state-04",
+    "category": "entity_state",
+    "query": "Who is the current Chief Minister of Maharashtra in 2026?",
+    "temporal": true,
+    "expectedIntent": "needs_live_search",
+    "context": [],
+    "expectedKeyEntities": ["Chief Minister", "Maharashtra"],
+    "temporalAnchor": "2026",
+    "description": "Indian state chief minister"
+  },
+  {
+    "id": "entity-state-05",
+    "category": "entity_state",
+    "query": "Who is the current Chief Executive Officer of OpenAI?",
+    "temporal": true,
+    "expectedIntent": "needs_live_search",
+    "context": [],
+    "expectedKeyEntities": ["OpenAI", "Chief Executive Officer"],
+    "temporalAnchor": "current",
+    "description": "Major corporate executive leadership"
+  },
+  {
+    "id": "entity-state-06",
+    "category": "entity_state",
+    "query": "Who is the incumbent Chancellor of Germany?",
+    "temporal": true,
+    "expectedIntent": "needs_live_search",
+    "context": [],
+    "expectedKeyEntities": ["Chancellor", "Germany"],
+    "temporalAnchor": "incumbent",
+    "description": "Federal head of government"
+  },
+  {
+    "id": "entity-state-07",
+    "category": "entity_state",
+    "query": "Who is the current Secretary-General of the United Nations?",
+    "temporal": true,
+    "expectedIntent": "needs_live_search",
+    "context": [],
+    "expectedKeyEntities": ["Secretary-General", "United Nations"],
+    "temporalAnchor": "current",
+    "description": "International treaty organization leadership"
+  },
+  {
+    "id": "entity-state-08",
+    "category": "entity_state",
+    "query": "Who is the current Managing Director of the International Monetary Fund?",
+    "temporal": true,
+    "expectedIntent": "needs_live_search",
+    "context": [],
+    "expectedKeyEntities": ["Managing Director", "International Monetary Fund"],
+    "temporalAnchor": "current",
+    "description": "Multilateral financial organization chief"
+  }
+]
