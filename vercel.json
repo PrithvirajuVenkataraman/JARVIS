@@ -20,6 +20,10 @@
       "destination": "/manifest.json"
     },
     {
+      "source": "/api/feedback",
+      "destination": "/api/diagnostics"
+    },
+    {
       "source": "/",
       "destination": "/index.html"
     }
