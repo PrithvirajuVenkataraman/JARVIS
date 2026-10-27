@@ -454,6 +454,7 @@
                         id="voice-to-text-btn"
                         type="button"
                         class="composer-icon-btn speech-input-btn vtt-shifted-left"
+                        onclick="toggleVoiceToText()"
                         title="Voice typing (Dictation)" aria-label="Voice typing (Dictation)"
                         aria-pressed="false">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -8212,8 +8213,14 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
         }
 
         function toggleVoiceToText() {
+            if (typeof window.__installedToggleVoiceToText === 'function') {
+                return window.__installedToggleVoiceToText();
+            }
             if (!window.JarvisSpeechInput && typeof window.initializeSpeechInput === 'function') {
                 window.initializeSpeechInput();
+            }
+            if (typeof window.__installedToggleVoiceToText === 'function') {
+                return window.__installedToggleVoiceToText();
             }
             if (typeof window.JarvisSpeechInput?.toggleDictation === 'function') {
                 return window.JarvisSpeechInput.toggleDictation();
