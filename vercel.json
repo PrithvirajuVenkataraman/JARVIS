@@ -16,6 +16,10 @@
   ],
   "rewrites": [
     {
+      "source": "/manifest.webmanifest",
+      "destination": "/manifest.json"
+    },
+    {
       "source": "/",
       "destination": "/index.html"
     }
