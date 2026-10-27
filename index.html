@@ -117,7 +117,7 @@
             </button>
         </div>
         <div class="chat-sidebar-search-field">
-            <input id="chat-sidebar-search-input" type="search" placeholder="Search chats & messages..." aria-label="Search chats" oninput="renderChatSidebarList()">
+            <input id="chat-sidebar-search-input" type="search" placeholder="Search chats & messages..." aria-label="Search chats" oninput="onChatSidebarSearchInput()">
         </div>
     </div>
         <div id="chat-sidebar-section-title" class="chat-sidebar-section-title">Recents</div>
@@ -29926,12 +29926,16 @@ function restoreChatSession(sessionId) {
         isRestoringChatSession = false;
     }
     updateChatEmptyStateVisibility();
-    closeChatSidebar();
+    if (window.innerWidth < 1024) {
+        closeChatSidebar();
+    }
     renderChatSidebarList();
     persistActiveSessionSnapshot();
     const query = pendingChatRestoreSearchQuery;
+    const targetMsgId = pendingChatRestoreTargetMessageId;
     pendingChatRestoreSearchQuery = '';
-    if (query) setTimeout(() => scrollToRestoredChatMatch(query), 80);
+    pendingChatRestoreTargetMessageId = '';
+    if (query || targetMsgId) setTimeout(() => scrollToRestoredChatMatch(query, targetMsgId), 80);
 }
 
 function searchChatSessionText(session) {
@@ -29942,6 +29946,9 @@ function searchChatSessionText(session) {
 }
 
 function getChatSessionSearchSnippet(session, query) {
+    if (window.JarvisConversationSearch?.extractHighlightedSnippet) {
+        return window.JarvisConversationSearch.extractHighlightedSnippet(session, query);
+    }
     const q = String(query || '').toLowerCase().trim();
     if (!q) return '';
     const messages = Array.isArray(session?.messages) ? session.messages : [];
@@ -29957,15 +29964,103 @@ function getChatSessionSearchSnippet(session, query) {
     return `${prefix}${text.slice(start, end)}${suffix}`;
 }
 
-function scrollToRestoredChatMatch(query) {
+function highlightInPageSearchTerms(element, query) {
+    if (!element || !query) return;
+    const tokens = (window.JarvisConversationSearch?.tokenizeQuery ?
+        window.JarvisConversationSearch.tokenizeQuery(query) :
+        String(query).toLowerCase().split(/\s+/)).filter(t => t && t.length > 1);
+    if (!tokens.length) return;
+
+    const regexPattern = tokens.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+    if (!regexPattern) return;
+    const regex = new RegExp(`(${regexPattern})`, 'gi');
+
+    const bubble = element.querySelector('.chat-message-bubble') || element;
+    const textNodes = [];
+    const walker = document.createTreeWalker(
+        bubble,
+        NodeFilter.SHOW_TEXT,
+        {
+            acceptNode(node) {
+                if (node.parentElement && (node.parentElement.tagName === 'MARK' || node.parentElement.tagName === 'SCRIPT' || node.parentElement.tagName === 'STYLE')) {
+                    return NodeFilter.FILTER_REJECT;
+                }
+                regex.lastIndex = 0;
+                return node.nodeValue && regex.test(node.nodeValue) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+            }
+        }
+    );
+
+    let currNode;
+    while ((currNode = walker.nextNode())) {
+        textNodes.push(currNode);
+    }
+
+    const insertedMarks = [];
+    for (const node of textNodes) {
+        const text = node.nodeValue;
+        regex.lastIndex = 0;
+        const frag = document.createDocumentFragment();
+        let lastIndex = 0;
+        let match;
+        while ((match = regex.exec(text)) !== null) {
+            if (match.index > lastIndex) {
+                frag.appendChild(document.createTextNode(text.slice(lastIndex, match.index)));
+            }
+            const mark = document.createElement('mark');
+            mark.className = 'chat-in-page-search-hit';
+            mark.textContent = match[0];
+            frag.appendChild(mark);
+            insertedMarks.push(mark);
+            lastIndex = regex.lastIndex;
+        }
+        if (lastIndex < text.length) {
+            frag.appendChild(document.createTextNode(text.slice(lastIndex)));
+        }
+        if (node.parentNode) {
+            node.parentNode.replaceChild(frag, node);
+        }
+    }
+
+    setTimeout(() => {
+        for (const mark of insertedMarks) {
+            if (mark.parentNode) {
+                const textNode = document.createTextNode(mark.textContent || '');
+                mark.parentNode.replaceChild(textNode, mark);
+            }
+        }
+    }, 3200);
+}
+
+function scrollToRestoredChatMatch(query, targetMessageId = '') {
     const q = String(query || '').toLowerCase().trim();
-    if (!q) return;
-    const rows = Array.from(document.querySelectorAll('#chat-container .chat-row'));
-    const match = rows.find(row => String(row.textContent || '').toLowerCase().includes(q));
-    if (match) {
-        match.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        match.classList.add('chat-row-search-hit');
-        setTimeout(() => match.classList.remove('chat-row-search-hit'), 1400);
+    if (!q && !targetMessageId) return;
+
+    let matchRow = null;
+    if (targetMessageId) {
+        matchRow = document.querySelector(`#chat-container [data-message-id="${targetMessageId}"]`)?.closest('.chat-row') ||
+            document.querySelector(`#chat-container .chat-row[data-message-id="${targetMessageId}"]`);
+    }
+
+    if (!matchRow && q) {
+        const rows = Array.from(document.querySelectorAll('#chat-container .chat-row'));
+        const tokens = (window.JarvisConversationSearch?.tokenizeQuery ?
+            window.JarvisConversationSearch.tokenizeQuery(q) :
+            q.split(/\s+/)).filter(Boolean);
+        matchRow = rows.find(row => {
+            const rowText = String(row.textContent || '').toLowerCase();
+            return rowText.includes(q) || tokens.some(t => rowText.includes(t));
+        });
+    }
+
+    if (matchRow) {
+        matchRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        matchRow.classList.add('chat-row-search-hit');
+        setTimeout(() => matchRow.classList.remove('chat-row-search-hit'), 2000);
+
+        if (q) {
+            highlightInPageSearchTerms(matchRow, q);
+        }
     }
 }
 
@@ -29980,6 +30075,63 @@ function formatChatSessionDate(value) {
 }
 
 let currentSidebarViewTab = 'chats';
+let activeInlineRenamingSessionId = null;
+let chatSidebarSearchDebounceTimer = null;
+let pendingChatRestoreTargetMessageId = '';
+
+function onChatSidebarSearchInput() {
+    clearTimeout(chatSidebarSearchDebounceTimer);
+    chatSidebarSearchDebounceTimer = setTimeout(() => {
+        renderChatSidebarList();
+    }, 120);
+}
+
+function startInlineChatSessionRename(sessionId) {
+    activeInlineRenamingSessionId = sessionId;
+    closeChatSessionMenu();
+    renderChatSidebarList();
+    setTimeout(() => {
+        const input = document.getElementById(`chat-session-rename-input-${sessionId}`);
+        if (input) {
+            input.focus();
+            input.select();
+        }
+    }, 40);
+}
+
+function cancelInlineChatSessionRename() {
+    activeInlineRenamingSessionId = null;
+    renderChatSidebarList();
+}
+
+function commitInlineChatSessionRename(sessionId, nextTitle) {
+    if (activeInlineRenamingSessionId !== sessionId) return;
+    activeInlineRenamingSessionId = null;
+    const session = chatSessions.find(item => item && item.id === sessionId && !item.deleted);
+    if (!session) {
+        renderChatSidebarList();
+        return;
+    }
+    const cleanTitle = String(nextTitle || '').trim().slice(0, 80);
+    if (cleanTitle && cleanTitle !== session.title) {
+        session.title = cleanTitle;
+        session.titleEdited = true;
+        session.autoTitle = false;
+        session.updatedAt = new Date().toISOString();
+        saveChatSessions();
+    }
+    renderChatSidebarList();
+}
+
+function handleInlineRenameKeydown(event, sessionId) {
+    if (event.key === 'Enter') {
+        event.preventDefault();
+        commitInlineChatSessionRename(sessionId, event.target.value);
+    } else if (event.key === 'Escape') {
+        event.preventDefault();
+        cancelInlineChatSessionRename();
+    }
+}
 
 function setSidebarViewTab(tab) {
     currentSidebarViewTab = tab === 'bookmarks' ? 'bookmarks' : 'chats';
@@ -30003,30 +30155,68 @@ function setSidebarViewTab(tab) {
 function renderChatSidebarList() {
     const list = document.getElementById('chat-sidebar-list');
     if (!list) return;
-    const query = String(document.getElementById('chat-sidebar-search-input')?.value || '').toLowerCase().trim();
+    const query = String(document.getElementById('chat-sidebar-search-input')?.value || '').trim();
 
-    const sessions = getVisibleChatSessions()
-        .filter(session => !query || searchChatSessionText(session).includes(query))
-        .sort((a, b) => {
+    let searchHits = [];
+    if (query && window.JarvisConversationSearch?.hybridSearchConversations) {
+        searchHits = window.JarvisConversationSearch.hybridSearchConversations(getVisibleChatSessions(), query);
+    } else if (query) {
+        const qLower = query.toLowerCase();
+        searchHits = getVisibleChatSessions()
+            .filter(session => searchChatSessionText(session).includes(qLower))
+            .map(session => ({
+                session,
+                score: 1,
+                snippetHtml: getChatSessionSearchSnippet(session, query),
+                bestMessage: null
+            }));
+    } else {
+        const sorted = getVisibleChatSessions().sort((a, b) => {
             if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
             return new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime();
         });
+        searchHits = sorted.map(session => ({ session, score: 0, snippetHtml: '', bestMessage: null }));
+    }
 
-    if (!sessions.length) {
+    if (!searchHits.length) {
         list.innerHTML = `<p class="chat-sidebar-empty">${query ? 'No matching chats found.' : 'No saved chats yet.'}</p>`;
         return;
     }
 
-    const pinnedSessions = sessions.filter(s => s.pinned);
-    const recentSessions = sessions.filter(s => !s.pinned);
+    const pinnedHits = searchHits.filter(h => h.session.pinned);
+    const recentHits = searchHits.filter(h => !h.session.pinned);
 
-    const renderRow = session => {
-        const snippet = getChatSessionSearchSnippet(session, query);
+    const renderRow = hit => {
+        const session = hit.session;
+        const snippet = hit.snippetHtml || getChatSessionSearchSnippet(session, query);
+        const bestMsgId = hit.bestMessage?.id || '';
+
+        if (session.id === activeInlineRenamingSessionId) {
+            return `
+            <div class="chat-session-row ${session.id === activeChatSessionId ? 'is-active' : ''} is-renaming"
+                 role="listitem"
+                 data-chat-id="${escapeHtml(session.id)}">
+                <div class="chat-session-main">
+                    <input type="text"
+                           id="chat-session-rename-input-${escapeHtml(session.id)}"
+                           class="chat-session-title-input"
+                           value="${escapeHtml(session.title || 'New chat')}"
+                           maxlength="80"
+                           onclick="event.stopPropagation()"
+                           onkeydown="handleInlineRenameKeydown(event, '${escapeJsString(session.id)}')"
+                           onblur="commitInlineChatSessionRename('${escapeJsString(session.id)}', this.value)"
+                           aria-label="Rename chat title" />
+                    <span class="chat-session-meta" style="color:rgba(129, 140, 248, 0.9);">Press Enter to save, Esc to cancel</span>
+                </div>
+            </div>
+            `;
+        }
+
         return `
         <div class="chat-session-row ${session.id === activeChatSessionId ? 'is-active' : ''} ${session.pinned ? 'is-pinned' : ''}"
              role="listitem"
              data-chat-id="${escapeHtml(session.id)}"
-             onclick="restoreChatSessionFromSidebar('${escapeJsString(session.id)}')"
+             onclick="restoreChatSessionFromSidebar('${escapeJsString(session.id)}', '${escapeJsString(bestMsgId)}')"
              oncontextmenu="openChatSessionMenu(event, '${escapeJsString(session.id)}')"
              onpointerdown="beginChatSessionLongPress(event, '${escapeJsString(session.id)}')"
              onpointerup="cancelChatSessionLongPress()"
@@ -30035,9 +30225,15 @@ function renderChatSidebarList() {
             <div class="chat-session-main">
                 <span class="chat-session-title">${escapeHtml(session.title || 'New chat')}</span>
                 <span class="chat-session-meta">${session.pinned ? 'Pinned' : formatChatSessionDate(session.updatedAt)}</span>
-                ${snippet ? `<span class="chat-session-snippet">${escapeHtml(snippet)}</span>` : ''}
+                ${snippet ? `<span class="chat-session-snippet">${snippet}</span>` : ''}
             </div>
             <div class="chat-session-actions-group">
+                <button type="button" class="chat-session-rename-btn" onclick="event.stopPropagation(); startInlineChatSessionRename('${escapeJsString(session.id)}')" aria-label="Rename chat" title="Rename chat">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                    </svg>
+                </button>
                 <button type="button" class="chat-session-delete-btn" onclick="event.stopPropagation(); deleteChatSessionById('${escapeJsString(session.id)}')" aria-label="Delete chat" title="Delete chat">
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <polyline points="3 6 5 6 21 6"></polyline>
@@ -30059,21 +30255,22 @@ function renderChatSidebarList() {
     };
 
     let html = '';
-    if (pinnedSessions.length && !query) {
+    if (pinnedHits.length && !query) {
         html += '<div class="chat-sidebar-section-title" style="margin-top:4px;">Pinned</div>';
-        html += pinnedSessions.map(renderRow).join('');
-        if (recentSessions.length) {
+        html += pinnedHits.map(renderRow).join('');
+        if (recentHits.length) {
             html += '<div class="chat-sidebar-section-title" style="margin-top:12px;">Recents</div>';
-            html += recentSessions.map(renderRow).join('');
+            html += recentHits.map(renderRow).join('');
         }
     } else {
-        html += sessions.map(renderRow).join('');
+        html += searchHits.map(renderRow).join('');
     }
     list.innerHTML = html;
 }
 
-function restoreChatSessionFromSidebar(sessionId) {
+function restoreChatSessionFromSidebar(sessionId, targetMessageId = '') {
     pendingChatRestoreSearchQuery = String(document.getElementById('chat-sidebar-search-input')?.value || '').trim();
+    pendingChatRestoreTargetMessageId = String(targetMessageId || '').trim();
     restoreChatSession(sessionId);
 }
 
@@ -30619,16 +30816,8 @@ function handleChatSessionMenuAction(action) {
         return;
     }
     if (action === 'rename') {
-        const next = window.prompt('Rename chat:', session.title || 'New chat');
-        if (next !== null) {
-            const title = next.trim().slice(0, 80);
-            if (title) {
-                session.title = title;
-                session.titleEdited = true;
-                session.autoTitle = false;
-                session.updatedAt = new Date().toISOString();
-            }
-        }
+        startInlineChatSessionRename(sessionId);
+        return;
     } else if (action === 'pin') {
         session.pinned = !session.pinned;
         session.updatedAt = new Date().toISOString();
