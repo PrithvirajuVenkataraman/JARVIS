@@ -74,6 +74,7 @@ export default async function handler(req, res) {
 
 export function resolveRequestPath(req) {
     const candidates = [
+        req?.headers?.['x-matched-path'],
         req?.url,
         req?.headers?.['x-original-uri'],
         req?.headers?.['x-rewrite-url'],
