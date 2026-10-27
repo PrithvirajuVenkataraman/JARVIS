@@ -237,7 +237,9 @@ export function renderMarkdown(rawText = '', options = {}) {
                             </button>
                         </div>
                     </div>
-                    <table class="assistant-md-table"><thead><tr>${header.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${body.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table>
+                    <div class="assistant-table-scroll-container" tabindex="0" role="region" aria-label="Scrollable table">
+                        <table class="assistant-md-table"><thead><tr>${header.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${body.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table>
+                    </div>
                 </div>`
             );
             continue;
