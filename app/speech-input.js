@@ -351,7 +351,7 @@ export function createWhisperRecorder(options = {}) {
                                 body: JSON.stringify({
                                     audioBase64: base64Audio,
                                     mimeType: mime,
-                                    language: 'en-US',
+                                    language: language || options.language || 'en-US',
                                     model: options.model || 'whisper-large-v3-turbo'
                                 })
                             });
@@ -501,7 +501,7 @@ export function createSpeechInputController(options = {}) {
             const r = new Recognition();
             r.continuous = true;
             r.interimResults = true;
-            r.lang = 'en-US';
+            r.lang = language || 'en-US';
             r.maxAlternatives = 1;
 
             r.onresult = event => {
@@ -671,7 +671,7 @@ export function createSpeechInputController(options = {}) {
                     fallbackMode = true;
                     whisperRecorder.start(language);
                 } else {
-                    callbacks.onError('Microphone access is needed for Converse Mode.');
+                    callbacks.onError(mode === 'converse' ? 'Microphone access is needed for Converse Mode.' : 'Microphone access is needed for voice typing.');
                 }
             }
         }
@@ -1364,6 +1364,7 @@ export function installSpeechInputUI(options = {}) {
 
     globalThis.toggleConverseMode = async () => false;
 
+    globalThis.__installedToggleVoiceToText = globalThis.toggleVoiceToText;
     globalThis.JarvisSpeechInput = controller;
     globalThis.JarvisSpeechInput.toggleConverse = globalThis.toggleConverseMode;
     globalThis.JarvisSpeechInput.resetCommittedText = globalThis.resetSpeechInputCommittedText;
