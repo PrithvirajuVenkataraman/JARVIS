@@ -50,7 +50,7 @@ function setDefaultSecurityHeaders(res) {
     res.setHeader('Permissions-Policy', 'camera=(self), microphone=(self), geolocation=(self)');
     res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
     const csp = String(process.env.JARVIS_CSP || '').trim() ||
-        "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net data:; img-src 'self' data: blob: https:; media-src 'self' blob: data:; connect-src 'self' https: wss:; worker-src 'self' blob:; frame-src 'self' https://maps.google.com https://www.google.com https://openstreetmap.org; object-src 'none'; base-uri 'self'; form-action 'self';";
+        "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net data:; img-src 'self' data: blob: https:; media-src 'self' blob: data:; connect-src 'self' https: wss: data: blob:; worker-src 'self' blob: data:; frame-src 'self' https://maps.google.com https://www.google.com https://openstreetmap.org; object-src 'none'; base-uri 'self'; form-action 'self';";
     res.setHeader('Content-Security-Policy', csp);
 }
 
