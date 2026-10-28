@@ -7122,12 +7122,20 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             currentSettingsView = 'main';
             const modal = document.createElement('div');
             modal.id = 'help-modal';
-            modal.className = 'fixed inset-0 bg-black/75 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-4 md:p-6';
+            modal.className = 'fixed inset-0 bg-black/75 backdrop-blur-md z-[100] flex items-center justify-center p-3 sm:p-4 md:p-6';
+            modal.style.zIndex = '100';
+            modal.tabIndex = -1;
             modal.setAttribute('role', 'dialog');
             modal.setAttribute('aria-modal', 'true');
             modal.setAttribute('aria-labelledby', 'help-modal-title');
-            modal.onclick = (e) => {
-                if (e.target === modal) {
+
+            const modalOpenedAt = Date.now();
+            let isBackdropPointerDown = false;
+            modal.addEventListener('pointerdown', (e) => {
+                isBackdropPointerDown = (e.target === modal);
+            });
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal && isBackdropPointerDown && (Date.now() - modalOpenedAt > 250)) {
                     if (window.__currentSettingsView === 'custom_instructions') {
                         const input = document.getElementById('custom-system-prompt-input');
                         if (input) setCustomSystemPrompt(input.value, false);
@@ -7136,8 +7144,10 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                     }
                     closeHelpModal();
                 }
-            };
+                isBackdropPointerDown = false;
+            });
 
+            const currentSelectedModel = (typeof getSelectedModel === 'function' ? getSelectedModel() : 'auto') || 'auto';
             const currentPrompt = (typeof customSystemPrompt === 'string' ? customSystemPrompt : (window.customSystemPrompt || ''));
             const charCount = currentPrompt.length;
             const isPersonalized = typeof isPersonalizationEnabled === 'function' ? isPersonalizationEnabled() : true;
@@ -7736,7 +7746,8 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 });
             }
 
-            modal.querySelector('.help-modal-back-btn')?.focus(); 
+            const initialFocusTarget = modal.querySelector('.help-modal-ok-btn') || modal;
+            initialFocusTarget.focus();
             modal.addEventListener('keydown', trapModalFocus);
         }
 
@@ -30788,6 +30799,9 @@ function focusChatSidebarSearch() {
 }
 
 function openSidebarQuickAction(action) {
+    if (window.event?.stopPropagation) {
+        window.event.stopPropagation();
+    }
     closeChatSidebar();
     if (action === 'vision') {
         handleComposerAction('vision');
