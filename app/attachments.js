@@ -52,9 +52,10 @@ const vectorCosineSimilarity = typeof BM25Module.vectorCosineSimilarity === 'fun
     };
 
 const MAX_ATTACHMENTS = 12;
-const MAX_FILE_BYTES = 25 * 1024 * 1024;
-const MAX_EXTRACT_CHARS = 120000;
-const PDF_VISUAL_PAGE_LIMIT = 10;
+const MAX_FILE_BYTES = 50 * 1024 * 1024;
+const MAX_EXTRACT_CHARS = 500000;
+const PDF_DIGITAL_PAGE_LIMIT = 100;
+const PDF_VISUAL_PAGE_LIMIT = 25;
 const TEXT_EXTENSIONS = /\.(txt|md|markdown|json|jsonl|csv|tsv|xml|html|htm|css|js|mjs|cjs|ts|tsx|jsx|py|java|cpp|c|h|cs|go|rs|rb|php|sh|yaml|yml|toml|ini|log|sql|rtf|eml|msg)$/i;
 const IMAGE_EXTENSIONS = /\.(jpe?g|pjpeg|png|gif|webp|bmp|dib|tiff?|heic|heif|heics|heifs|avif|avifs|dng|raw|cr[23]|nef|nrw|arw|srf|sr2|raf|rw2|orf|pef|jp2|j2k|jpf|jpx|jpm|pict?|pct|pic|psd|ico|cur|svgz?)$/i;
 const XLSX_EXTENSIONS = /\.(xlsx|xls|ods)$/i;
@@ -542,7 +543,21 @@ async function extractLocally(attachment) {
 
 async function ingestOnServer(attachment, localResult = {}) {
     const clientText = hasUsefulExtractedText(localResult?.text) ? String(localResult.text || '') : '';
-    const base64 = await resolveAttachmentBase64(attachment, { allowEmpty: Boolean(clientText) });
+    let base64 = '';
+    const fileSize = attachment?.file?.size || 0;
+    if (!clientText) {
+        if (fileSize > 3.5 * 1024 * 1024) {
+            return {
+                ok: false,
+                text: '',
+                method: 'server_skipped_large_file',
+                provider: 'client',
+                message: 'File size exceeds serverless transfer threshold (3.5MB); proceeding with client visual pipeline.',
+                attempts: [{ stage: 'server', ok: false, method: 'server_skipped_large_file', error: 'File size exceeds serverless threshold' }]
+            };
+        }
+        base64 = await resolveAttachmentBase64(attachment, { allowEmpty: true }).catch(() => '');
+    }
     if (!clientText && !base64) {
         throw new Error(`Attachment payload is empty for ${attachment?.name || 'attachment'}. Please reattach the file and try again.`);
     }
@@ -1149,7 +1164,7 @@ async function extractPdfTextClient(file) {
     const buffer = await file.arrayBuffer();
     const doc = await pdfjs.getDocument({ data: buffer }).promise;
     const parts = [];
-    const pageCount = Math.min(doc.numPages || 0, 20);
+    const pageCount = Math.min(doc.numPages || 0, PDF_DIGITAL_PAGE_LIMIT);
     for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
         const page = await doc.getPage(pageNumber);
         const content = await page.getTextContent();
@@ -1190,15 +1205,21 @@ async function extractPdfViaVision(attachment) {
 async function processPdfPageVision(attachment, pdfjs, doc, pageNumber, totalPages = 1) {
     try {
         const page = await doc.getPage(pageNumber);
-        // High-resolution 2.0x DPI scale for crystal-clear character and table recognition
-        const viewport = page.getViewport({ scale: 2.0 });
+        // High-resolution DPI scale (up to 2.0x) for crystal-clear character and table recognition
+        let scale = 1.6;
+        let viewport = page.getViewport({ scale });
+        const MAX_PAGE_DIM = 1600;
+        if (viewport.width > MAX_PAGE_DIM || viewport.height > MAX_PAGE_DIM) {
+            scale = (MAX_PAGE_DIM / Math.max(viewport.width, viewport.height)) * scale;
+            viewport = page.getViewport({ scale });
+        }
         const canvas = document.createElement('canvas');
         canvas.width = Math.max(1, Math.floor(viewport.width));
         canvas.height = Math.max(1, Math.floor(viewport.height));
         const context = canvas.getContext('2d', { alpha: false });
         if (!context) return '';
         await page.render({ canvasContext: context, viewport }).promise;
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
         const base64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
         if (!base64) return '';
 
@@ -1208,7 +1229,7 @@ async function processPdfPageVision(attachment, pdfjs, doc, pageNumber, totalPag
                 prompt: `Transcribe all readable text from page ${pageNumber} of PDF "${attachment.name}". Preserve headings, bullet points, and render all tables in clean Markdown table format (| Col 1 | Col 2 |). For line items, capture labels, dates, and amounts accurately.`,
                 mimeType: 'image/jpeg',
                 imageBase64: base64
-            }, { timeoutMs: 8000 });
+            }, { timeoutMs: 25000 });
 
             const details = data?.details && typeof data.details === 'object' ? data.details : {};
             const fullText = String(details?.fullText || '').trim();
