@@ -154,9 +154,52 @@ Configured via the environment variable `DLP_POLICY_MODE`:
 
 ---
 
-## 7. Rollback & Feature Flags
+## 7. Bring Your Own Key (BYOK) Security & Asymmetric "Sealed Box" Cryptography
 
-Three environment / client configuration flags allow instantaneous rollback:
+Enterprise deployments require users or organizational departments to provide custom API keys (Groq, Google Gemini) to eliminate shared platform quota ceilings. Storing plaintext API keys in client-side storage (`localStorage`) introduces critical security risks:
+1. **Malicious Browser Extensions**: Rogue or compromised browser extensions with DOM or `localStorage` permissions can silently exfiltrate plaintext credentials.
+2. **Cross-Site Scripting (XSS)**: Any potential script execution vulnerability could read stored API tokens.
+3. **Physical Device Snooping**: Plaintext secrets in browser developer tools or application storage inspectable by third parties.
+
+To mathematically eliminate these attack vectors, Unify implements **GitHub Actions Secrets-style Asymmetric Envelope Sealing**:
+
+### 7.1 Architecture & Cryptographic Primitives
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      Client Browser                         │
+│ 1. Fetch Server Public Key (RSA-2048 / RSA-OAEP SHA-256)    │
+│ 2. Generate Ephemeral 256-bit AES-GCM Key                   │
+│ 3. Encrypt Plaintext Secret with AES-256-GCM (12-byte IV)   │
+│ 4. Encrypt Ephemeral AES Key with Server RSA-OAEP Public Key│
+│ 5. Save ONLY Sealed Token to localStorage (jarvis_sealed_v1)│
+│    Wipe raw plaintext key immediately from memory & DOM!    │
+└──────────────────────────────┬──────────────────────────────┘
+                               │ x-groq-api-key: jarvis_sealed_v1:...
+                               ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   Serverless Edge Memory                    │
+│ 6. Receive sealed token via HTTP Request Headers            │
+│ 7. Decrypt AES Key using Server Private RSA-OAEP Key        │
+│ 8. Decrypt Ciphertext using Recovered AES Key & GCM Tag     │
+│ 9. Forward unsealed key to Upstream Provider (Groq/Gemini)  │
+│ 10. Garbage collect unsealed token immediately from RAM     │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 7.2 Zero-Knowledge Invariants
+
+- **Write-Only Client Storage**: Once the user saves an API key, the browser cannot decrypt it. The input is wiped and replaced with a non-sensitive masked fingerprint (`gsk_••••••••3a9f`) and placeholder. No plaintext reveal toggle exists in the user interface.
+- **Asymmetric Boundary**: The private RSA key is never transmitted to or accessible by client browsers.
+- **Fail-Closed Tamper Rejection**: Any alteration to the ciphertext or 16-byte authentication tag causes AES-GCM or RSA-OAEP decryption to fail; [`unsealSecret()`](file:///c:/Users/drkan/Desktop/AI%20Projects/unify-assistant/api/_lib/security.js) safely returns `""`, ensuring tampered requests are rejected without leaking error details.
+- **Zero Disk Persistence**: Neither raw nor sealed secrets are stored in any database or server log file. Server-side unsealing occurs strictly in volatile execution memory for the microsecond duration of the upstream API dispatch.
+
+---
+
+## 8. Rollback & Feature Flags
+
+Four configuration flags allow instantaneous control and rollback:
 1. `DLP_ENABLED`: When `false` / `0`, bypasses DLP scanning and restores legacy pass-through.
 2. `FEEDBACK_ENABLED`: When `false` / `0`, hides message evaluation thumbs and popovers.
 3. `TELEMETRY_EXPORT_ENABLED`: When `false` / `0`, disables external OTel/Langfuse webhook dispatches.
+4. `JARVIS_BYOK_PRIVATE_KEY` / `JARVIS_BYOK_PUBLIC_KEY`: Optional persistent RSA keypair for serverless clusters (falls back automatically to in-memory ephemeral generation if unconfigured).
