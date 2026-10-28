@@ -212,5 +212,60 @@ console.log('--- Testing Authoritative Interaction State Machine ---');
     console.log('  [PASS] Events and backward-compatible payloads properly dispatched.');
 }
 
+// 8. Watchdog Heartbeat / Touch
+{
+    console.log('8. Testing watchdog heartbeat touch() keeping state alive...');
+    const sm = createInteractionStateMachine({ watchdogMs: 80 });
+    const req = sm.createRequestId('active_task');
+
+    sm.transition(InteractionState.ANALYZING, { requestId: req });
+    assert.equal(sm.getState(), InteractionState.ANALYZING);
+
+    // After 50ms (before 80ms timeout), call touch() to renew watchdog
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(sm.getState(), InteractionState.ANALYZING, 'Should still be ANALYZING before timeout');
+    sm.touch();
+
+    // Wait another 50ms (total 100ms from start, would have expired at 80ms without touch)
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(sm.getState(), InteractionState.ANALYZING, 'touch() should have prevented reset at 80ms');
+
+    // Clean up
+    sm.resetToIdle('task_complete');
+    assert.equal(sm.getState(), InteractionState.IDLE);
+    console.log('  [PASS] Watchdog heartbeat successfully renewed state deadline.');
+}
+
+// 9. Auto-Touch via Progress Events
+{
+    console.log('9. Testing auto-touch renewal on attachment progress events...');
+    const eventListeners = {};
+    const fakeWindow = {
+        addEventListener(type, cb) {
+            eventListeners[type] = cb;
+        },
+        dispatchEvent() {}
+    };
+
+    const sm = createInteractionStateMachine({ watchdogMs: 80, windowRef: fakeWindow });
+    const req = sm.createRequestId('ingesting_pdf');
+
+    sm.transition(InteractionState.ANALYZING, { requestId: req });
+    assert.equal(sm.getState(), InteractionState.ANALYZING);
+
+    // Simulate progress event at 50ms
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    if (typeof eventListeners['jarvis-attachment-progress'] === 'function') {
+        eventListeners['jarvis-attachment-progress']();
+    }
+
+    // Wait another 50ms
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(sm.getState(), InteractionState.ANALYZING, 'Attachment progress event must have renewed watchdog');
+
+    sm.resetToIdle('done');
+    console.log('  [PASS] Attachment progress events automatically touched watchdog.');
+}
+
 console.log('--- ALL INTERACTION STATE MACHINE TESTS PASSED ---');
 process.exit(0);
