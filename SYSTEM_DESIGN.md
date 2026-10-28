@@ -138,6 +138,57 @@ To handle spikes of 10–15 concurrent users without hitting rate limits (RPM / 
 * **Instant Fallback Cascade:**
   - If a key or model returns HTTP 429 or 503, the request cascades immediately to the next available key, and then to **Google Gemini 2.5 Flash**.
 
+### 4.1 Bring Your Own Key (BYOK) & GitHub-Style Asymmetric "Sealed Box" Cryptography
+
+To accommodate high-throughput enterprise users and eliminate shared provider rate ceilings (Groq RPM/TPM and Gemini quota limits), JARVIS implements a zero-trust **Bring Your Own Key (BYOK)** architecture protected by asymmetric envelope cryptography modeled after **GitHub Actions Secrets**:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as User Browser
+    participant WebCrypto as Web Crypto Subtle
+    participant Diagnostics as /api/diagnostics
+    participant LocalStorage as Local Storage (jarvis_sealed_v1)
+    participant Edge as Edge Function (/api/chat-groq)
+    participant Provider as LLM Provider (Groq / Gemini)
+
+    User->>Diagnostics: GET /api/diagnostics (Fetch RSA-2048 SPKI / JWK)
+    Diagnostics-->>User: Return Public Key (RSA-OAEP-256)
+    User->>WebCrypto: Generate Ephemeral AES-256-GCM Key
+    WebCrypto->>WebCrypto: Encrypt Raw Secret with AES-GCM (12-byte IV)
+    WebCrypto->>WebCrypto: Encrypt AES Key with Server RSA-OAEP Public Key
+    WebCrypto-->>User: Sealed Token (jarvis_sealed_v1:encKey:iv:cipher:fingerprint)
+    User->>LocalStorage: Store ONLY Sealed Ciphertext (Wipe raw input immediately)
+    Note over User,LocalStorage: Raw secret NEVER touches DOM, memory or cookies!
+
+    User->>Edge: POST /api/chat-groq (x-groq-api-key: jarvis_sealed_v1:...)
+    Edge->>Edge: unsealSecret() via Private RSA-OAEP Key in Ephemeral RAM
+    Edge->>Provider: Forward Unsealed Secret to Groq/Gemini API
+    Provider-->>Edge: Streamed Inference Response
+    Note over Edge: Token garbage collected immediately; zero persistence on disk
+    Edge-->>User: SSE Stream Tokens
+```
+
+#### Cryptographic Architecture & Security Guarantees:
+1. **Asymmetric Key Hierarchy**:
+   - The backend server maintains a 2048-bit RSA keypair (`JARVIS_BYOK_PRIVATE_KEY` / `JARVIS_BYOK_PUBLIC_KEY` in environment, or auto-generated at boot in ephemeral server memory).
+   - The server's public key is exported via [`api/diagnostics.js`](file:///c:/Users/drkan/Desktop/AI%20Projects/unify-assistant/api/diagnostics.js) in both standard SPKI PEM and RFC 7517 JWK (`alg: 'RSA-OAEP-256'`, `key_ops: ['encrypt']`).
+2. **Client-Side Envelope Sealing (`window.crypto.subtle`)**:
+   - The browser imports the JWK public key directly into Web Crypto.
+   - For every entered key, Web Crypto generates an ephemeral 256-bit AES-GCM key, encrypts the plaintext payload with a random 12-byte IV, and encrypts the AES key using RSA-OAEP (SHA-256).
+   - Output format: `jarvis_sealed_v1:<base64(encAesKey)>:<base64(iv)>:<base64(cipher+tag)>:<fingerprint>`.
+3. **Write-Only Client Storage (Zero-Knowledge Browser Invariant)**:
+   - Once sealed, the plaintext key is immediately expunged from the DOM input.
+   - Only the sealed ciphertext and a non-reversible masked fingerprint (e.g. `gsk_••••••••3a9f`) are saved to `localStorage`.
+   - The UI provides no plaintext reveal toggle (mimicking GitHub Secrets UX).
+   - Even in the event of an XSS vulnerability or malicious browser extension scraping `localStorage`, the attacker cannot decrypt the secret because the private key never leaves the server.
+4. **Ephemeral RAM Unsealing**:
+   - The client fetch interceptor automatically binds sealed tokens to `x-groq-api-key` and `x-gemini-api-key` request headers.
+   - Serverless handlers ([`api/chat-groq.js`](file:///c:/Users/drkan/Desktop/AI%20Projects/unify-assistant/api/chat-groq.js) and [`api/vision.js`](file:///c:/Users/drkan/Desktop/AI%20Projects/unify-assistant/api/vision.js)) invoke [`unsealSecret()`](file:///c:/Users/drkan/Desktop/AI%20Projects/unify-assistant/api/_lib/security.js) in ephemeral execution RAM.
+   - The unsealed token is used exclusively to authenticate outbound upstream requests and is never logged, stored in databases, or persisted on disk.
+5. **Tamper Rejection (Fail-Closed)**:
+   - AES-GCM 16-byte authentication tag verification ensures that any alteration of the sealed string immediately triggers cryptographic verification failure and safely returns an empty string, rejecting unauthorized tampering.
+
 ---
 
 ## 5. API Circuit Breaker State Machine
