@@ -8693,8 +8693,8 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                     watchdogTimer = null;
                 }
             };
-            const isBusy = () => ['TRANSCRIBING', 'SUBMITTING', 'THINKING', 'SEARCHING', 'GENERATING', 'SPEAKING'].includes(stateRecord.state);
-            const isProcessing = () => ['TRANSCRIBING', 'SUBMITTING', 'THINKING', 'SEARCHING', 'GENERATING'].includes(stateRecord.state);
+            const isBusy = () => ['TRANSCRIBING', 'SUBMITTING', 'ROUTING', 'ANALYZING', 'THINKING', 'SEARCHING', 'GENERATING', 'SPEAKING'].includes(stateRecord.state);
+            const isProcessing = () => ['TRANSCRIBING', 'SUBMITTING', 'ROUTING', 'ANALYZING', 'THINKING', 'SEARCHING', 'GENERATING'].includes(stateRecord.state);
             const isListening = () => stateRecord.state === 'LISTENING';
             const isSpeaking = () => stateRecord.state === 'SPEAKING';
             const isCurrentRequest = reqId => !reqId || !stateRecord.requestId || stateRecord.requestId === reqId;
@@ -8702,6 +8702,24 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 requestSequence += 1;
                 return `${prefix}_${Date.now().toString(36)}_${requestSequence}_${Math.random().toString(36).slice(2, 6)}`;
             };
+            const touch = (reqId = null, extendMs = null) => {
+                if (reqId && stateRecord.requestId && reqId !== stateRecord.requestId) return;
+                if (['IDLE', 'CANCELLED', 'INTERRUPTED'].includes(stateRecord.state)) return;
+                clearWatchdog();
+                const timeout = typeof extendMs === 'number' && extendMs > 0 ? extendMs : (stateRecord.state === 'SPEAKING' ? 25000 : (stateRecord.state === 'ANALYZING' ? 120000 : 35000));
+                watchdogTimer = setTimeout(() => {
+                    if (stateRecord.state !== 'IDLE') {
+                        console.warn(`[InteractionState] Auto-recovering from frozen state "${stateRecord.state}" to IDLE.`);
+                        resetToIdle('watchdog_timeout');
+                    }
+                }, timeout);
+            };
+            if (typeof globalThis.addEventListener === 'function') {
+                try {
+                    globalThis.addEventListener('jarvis-attachment-progress', () => touch());
+                    globalThis.addEventListener('jarvis:progress', () => touch());
+                } catch (_) {}
+            }
             const getSnapshot = () => ({
                 state: stateRecord.state,
                 previousState: stateRecord.previousState,
@@ -8739,7 +8757,9 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
 
                 clearWatchdog();
                 if (!['IDLE', 'CANCELLED', 'INTERRUPTED'].includes(nextState)) {
-                    const timeout = nextState === 'SPEAKING' ? 25000 : 35000;
+                    const timeout = typeof context.watchdogMs === 'number' && context.watchdogMs > 0
+                        ? context.watchdogMs
+                        : (nextState === 'SPEAKING' ? 25000 : (nextState === 'ANALYZING' ? 120000 : 35000));
                     watchdogTimer = setTimeout(() => {
                         if (stateRecord.state === nextState) {
                             console.warn(`[InteractionState] Auto-recovering from frozen state "${nextState}" to IDLE.`);
@@ -8782,6 +8802,8 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 isCurrentRequest,
                 createRequestId,
                 transition,
+                touch,
+                heartbeat: touch,
                 resetToIdle,
                 addStateListener
             };
@@ -16107,9 +16129,11 @@ async function sendTextInput(submission = {}) {
                     }
 
                     beginAssistantProcessing();
-                    window.JarvisInteractionState?.transition?.('ROUTING', {
+                    const hasAttachmentsForSend = attachmentsForSend && attachmentsForSend.length > 0;
+                    window.JarvisInteractionState?.transition?.(hasAttachmentsForSend ? 'ANALYZING' : 'ROUTING', {
                         requestId: sendTrace.requestId,
-                        turnId: turn.id
+                        turnId: turn.id,
+                        metadata: hasAttachmentsForSend ? { task: 'attachments', count: attachmentsForSend.length } : {}
                     });
                     showThinkingIndicator(attachmentsForSend.length ? (hasImageFiles ? 'Analyzing image...' : 'Analyzing document...') : 'Analyzing...');
                     if (attachmentsForSend.length) {
@@ -16245,6 +16269,11 @@ async function sendTextInput(submission = {}) {
                             }
                             if (searchQuery) {
                                 showThinkingIndicator('Checking live web sources...');
+                                window.JarvisInteractionState?.transition?.('SEARCHING', {
+                                    requestId: sendTrace.requestId,
+                                    turnId: turn.id,
+                                    metadata: { query: searchQuery }
+                                });
                                 try {
                                     const webController = new AbortController();
                                     const webTimer = setTimeout(() => webController.abort(), 6000);
@@ -16266,7 +16295,7 @@ async function sendTextInput(submission = {}) {
                         }
 
                         const nonImageDocText = (attachmentContext.combinedText && !attachmentContext.combinedText.startsWith('[Attached Image:'))
-                            ? String(attachmentContext.combinedText).slice(0, 28000)
+                            ? String(attachmentContext.combinedText).slice(0, 500000)
                             : '';
 
                         const attachmentPrompt = hasImageAttachments
@@ -16284,9 +16313,14 @@ async function sendTextInput(submission = {}) {
                                 'GROUNDING RULE: Base all extracted data strictly on the provided document text. Do not hallucinate line items, amounts, or facts not present in the text.',
                                 webSearchContext ? `\nVerified external facts to compare/verify against:\n${webSearchContext}\nSynthesize external facts cleanly in natural prose without bracket citations.` : '',
                                 '',
-                                String(attachmentContext.combinedText || '').slice(0, 28000)
+                                String(attachmentContext.combinedText || '').slice(0, 500000)
                             ].filter(Boolean).join('\n');
                         if (hasImageAttachments) showThinkingIndicator('Analyzing image...');
+                        window.JarvisInteractionState?.transition?.('THINKING', {
+                            requestId: sendTrace.requestId,
+                            turnId: turn.id,
+                            metadata: { task: hasImageAttachments ? 'image_analysis' : 'document_analysis' }
+                        });
                         let result = await askGeminiAI(attachmentPrompt, {
                             intent: 'selection_custom',
                             grounding: attachmentContext.grounding,
@@ -16304,6 +16338,11 @@ async function sendTextInput(submission = {}) {
                             const shouldRetry = hasValidImageData || hasValidTextData;
                             if (shouldRetry) {
                                 showThinkingIndicator(hasImageAttachments ? 'Analyzing the image directly...' : 'Re-reading the document...');
+                                window.JarvisInteractionState?.transition?.('THINKING', {
+                                    requestId: sendTrace.requestId,
+                                    turnId: turn.id,
+                                    metadata: { task: hasImageAttachments ? 'retry_image_analysis' : 'retry_document_analysis' }
+                                });
                                 const retryPrompt = hasImageAttachments
                                     ? [
                                         `Inspect the attached image to answer: ${attachmentRequest}`,
@@ -16314,7 +16353,7 @@ async function sendTextInput(submission = {}) {
                                         'Do not ask for the file, paste, upload, or text again.',
                                         `User request: ${attachmentRequest}`,
                                         '',
-                                        String(attachmentContext.combinedText || '').slice(0, 28000)
+                                        String(attachmentContext.combinedText || '').slice(0, 500000)
                                     ].join('\n');
                                 result = await askGeminiAI(retryPrompt, {
                                     intent: 'selection_custom',
