@@ -99,7 +99,7 @@ export function classifyMultimodalFollowup(text) {
 
 export function buildMultimodalFollowupPrompt(text, grounding) {
     const kind = String(grounding?.kind || 'multimodal');
-    const documentText = String(grounding?.selectedText || '').trim().slice(0, 28000);
+    const documentText = String(grounding?.selectedText || '').trim().slice(0, 500000);
     const priorNote = String(grounding?.summary || grounding?.sourceAnswer || '').trim().slice(0, 1800);
     const action = classifyMultimodalFollowup(text);
     const isAttachment = kind === 'attachment';
