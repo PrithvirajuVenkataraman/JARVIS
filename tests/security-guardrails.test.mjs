@@ -109,8 +109,8 @@ assert.ok(csp.includes("style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.ne
 assert.ok(csp.includes("font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net data:"), 'CSP must allow font sources');
 assert.ok(csp.includes("img-src 'self' data: blob: https:"), 'CSP must allow image sources');
 assert.ok(csp.includes("media-src 'self' blob: data:"), 'CSP must allow media sources');
-assert.ok(csp.includes("connect-src 'self' https: wss:"), 'CSP must allow connect sources');
-assert.ok(csp.includes("worker-src 'self' blob:"), 'CSP must allow worker sources');
+assert.ok(csp.includes("connect-src 'self' https: wss: data: blob:"), 'CSP must allow connect sources including data: and blob:');
+assert.ok(csp.includes("worker-src 'self' blob: data:"), 'CSP must allow worker sources including blob: and data:');
 assert.ok(csp.includes("object-src 'none'"), 'CSP must block object-src');
 assert.ok(csp.includes("base-uri 'self'"), 'CSP must restrict base-uri');
 assert.ok(csp.includes("form-action 'self'"), 'CSP must restrict form-action');
