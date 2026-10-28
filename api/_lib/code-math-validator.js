@@ -1,0 +1,224 @@
+/**
+ * Fast Inline Code & Math Validator & Self-Correction Module
+ * Validates markdown fences, syntax integrity, LaTeX delimiters,
+ * and speculative arithmetic correctness, automatically applying instant repairs.
+ */
+
+/**
+ * Safely evaluates an arithmetic expression without global code execution.
+ * @param {string} expr
+ * @returns {number | null}
+ */
+export function safeEvaluateArithmetic(expr) {
+    let raw = String(expr || '').trim()
+        .replace(/\\times|×/g, '*')
+        .replace(/\\cdot/g, '*')
+        .replace(/\\div|÷/g, '/')
+        .replace(/\\sqrt\{([^}]+)\}/g, 'Math.sqrt($1)')
+        .replace(/\\sqrt\(([^)]+)\)/g, 'Math.sqrt($1)')
+        .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, '(($1)/($2))')
+        .replace(/\\pi|\bpi\b/gi, 'Math.PI')
+        .replace(/\\log\(([^)]+)\)/g, 'Math.log($1)')
+        .replace(/\^/g, '**');
+
+    // Handle implicit multiplication: e.g. "3 Math.sqrt(13)" or "3(5)" -> "3 * Math.sqrt"
+    raw = raw.replace(/(\d+)\s*(Math\.sqrt|Math\.PI|\()/g, '$1 * $2');
+    raw = raw.replace(/\)\s*(\d+|Math\.sqrt|Math\.PI|\()/g, ') * $1');
+
+    // Percentage conversion: "15% of 80", "15% * 80", or "15%"
+    raw = raw.replace(/(\d+(?:\.\d+)?)\s*%\s*(?:of|\*)\s*(\d+(?:\.\d+)?)/gi, '($1/100)*$2');
+    raw = raw.replace(/(\d+(?:\.\d+)?)\s*%/g, '($1/100)');
+
+    // Only allow safe arithmetic characters
+    if (!/^[\d\s+\-*/().%<>=,MathPIsqrtlog]+$/.test(raw)) return null;
+
+    try {
+        const fn = new Function('Math', `"use strict"; return (${raw});`);
+        const res = fn(Math);
+        return typeof res === 'number' && Number.isFinite(res) ? Math.round(res * 1e6) / 1e6 : null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * P2: Verifies inline arithmetic equality claims and auto-repairs calculation hallucinations.
+ * @param {string} text
+ * @returns {{ text: string, repaired: boolean, repairs: Array<{ expr: string, claimed: number, actual: number }> }}
+ */
+export function verifyAndRepairMathClaims(text = '') {
+    let result = String(text || '');
+    if (!result.trim()) return { text: result, repaired: false, repairs: [] };
+
+    const repairs = [];
+
+    // Match deterministic calculation execution blocks: e.g. ```calc \n 3 * Math.sqrt(13) \n ```
+    result = result.replace(/```(?:calc|math-eval)\s*[\r\n]+([\s\S]*?)```/gi, (match, code) => {
+        const lines = code.split('\n');
+        const evaluatedLines = lines.map(line => {
+            const trimmed = line.trim();
+            if (!trimmed) return '';
+            const eqMatch = trimmed.match(/^([^=]+)=(.*)$/);
+            if (eqMatch) {
+                const varName = eqMatch[1].trim();
+                const evalVal = safeEvaluateArithmetic(eqMatch[2]);
+                if (evalVal !== null) return `${varName} = ${evalVal}`;
+            }
+            const directVal = safeEvaluateArithmetic(trimmed);
+            if (directVal !== null) return `${trimmed} = ${directVal}`;
+            return trimmed;
+        });
+        repairs.push({ expr: code.trim(), claimed: 0, actual: 0 });
+        return evaluatedLines.filter(Boolean).join('\n');
+    });
+
+    // Match delimited LaTeX formulas: e.g., "$3 \times \sqrt{13} \approx 10.82$", "\(\frac{1}{2} + \frac{1}{4} = 0.75\)"
+    const latexDelimitedPattern = /(\$|\\\()([^\$=]+?)\s*(?:=|\\approx|≈)\s*(-?[\d.]+)(\$|\\\))/g;
+    result = result.replace(latexDelimitedPattern, (fullMatch, openDelim, leftExpr, claimedValStr, closeDelim) => {
+        const claimedVal = parseFloat(claimedValStr);
+        if (isNaN(claimedVal)) return fullMatch;
+        const evaluated = safeEvaluateArithmetic(leftExpr);
+        if (evaluated === null) return fullMatch;
+
+        const tolerance = Math.max(0.015, Math.abs(claimedVal) * 0.005);
+        if (Math.abs(evaluated - claimedVal) > tolerance) {
+            repairs.push({ expr: leftExpr.trim(), claimed: claimedVal, actual: evaluated });
+            return `${openDelim}${leftExpr.trim()} = ${evaluated}${closeDelim}`;
+        }
+        return fullMatch;
+    });
+
+    // Match standard arithmetic equality patterns: e.g., "12 * 15 = 175", "15% of 80 = 14", "\(25 + 5\) = 30", "$144 / 12 = 13$"
+    const mathEqualityPattern = /(?:\$|\\\(|\b)((?:\d+(?:\.\d+)?\s*%\s*(?:of|\*)\s*\d+(?:\.\d+)?|[\d\s+\-*/().^%×÷\\])+?)\s*(?:=|\\approx|≈)\s*(-?[\d.]+)(?:\$|\\\)|\b)/g;
+
+    result = result.replace(mathEqualityPattern, (fullMatch, leftExpr, claimedValStr) => {
+        const claimedVal = parseFloat(claimedValStr);
+        if (isNaN(claimedVal)) return fullMatch;
+
+        const evaluated = safeEvaluateArithmetic(leftExpr);
+        if (evaluated === null) return fullMatch;
+
+        // If the calculation differs by more than 1e-4 from the claimed value, auto-repair it!
+        if (Math.abs(evaluated - claimedVal) > 1e-4) {
+            repairs.push({ expr: leftExpr.trim(), claimed: claimedVal, actual: evaluated });
+            const leadingSpace = fullMatch.match(/^\s*/)[0] || '';
+            const trailingSpace = fullMatch.match(/\s*$/)[0] || '';
+            const prefix = fullMatch.startsWith('$') ? '$' : (fullMatch.startsWith('\\(') ? '\\(' : '');
+            const suffix = fullMatch.endsWith('$') ? '$' : (fullMatch.endsWith('\\)') ? '\\)' : '');
+            return `${leadingSpace}${prefix}${leftExpr.trim()} = ${evaluated}${suffix}${trailingSpace}`;
+        }
+        return fullMatch;
+    });
+
+    return {
+        text: result,
+        repaired: repairs.length > 0,
+        repairs
+    };
+}
+
+export function validateAndRepairCodeAndMath(text = '') {
+    let result = String(text || '');
+    if (!result.trim()) return { text: result, modified: false, issues: [] };
+
+    const issues = [];
+
+    // 1. Unclosed Markdown Code Blocks (odd number of ```)
+    const codeBlockMatches = result.match(/```/g);
+    if (codeBlockMatches && codeBlockMatches.length % 2 !== 0) {
+        result += '\n```';
+        issues.push('unclosed_code_fence_repaired');
+    }
+
+    // 2. Unclosed Display Math ($$...$$ or \[...\])
+    const displayMathMatches = result.match(/\$\$/g);
+    if (displayMathMatches && displayMathMatches.length % 2 !== 0) {
+        result += '\n$$';
+        issues.push('unclosed_display_math_repaired');
+    }
+
+    // 3. Unclosed Inline LaTeX Brackets \( and \[
+    const openParenMath = (result.match(/\\\(/g) || []).length;
+    const closeParenMath = (result.match(/\\\)/g) || []).length;
+    if (openParenMath > closeParenMath) {
+        result += '\\)'.repeat(openParenMath - closeParenMath);
+        issues.push('unclosed_latex_inline_math_repaired');
+    }
+
+    const openBracketMath = (result.match(/\\\[/g) || []).length;
+    const closeBracketMath = (result.match(/\\\]/g) || []).length;
+    if (openBracketMath > closeBracketMath) {
+        result += '\n\\]'.repeat(openBracketMath - closeBracketMath);
+        issues.push('unclosed_latex_display_math_repaired');
+    }
+
+    // 4. Broken JSON trailing commas in JSON code blocks
+    result = result.replace(/(```(?:json)?\s*[\r\n]+[\s\S]*?)(,\s*[\r\n]+\s*([}\]]))([\s\S]*?```)/gi, (match, prefix, commaGroup, closingBrace, suffix) => {
+        issues.push('json_trailing_comma_repaired');
+        return prefix + '\n' + closingBrace + suffix;
+    });
+
+    // 5. P2: Speculative Math Arithmetic Auto-Repair
+    const mathRepairResult = verifyAndRepairMathClaims(result);
+    if (mathRepairResult.repaired) {
+        result = mathRepairResult.text;
+        issues.push('hallucinated_arithmetic_repaired');
+    }
+
+    return {
+        text: result,
+        modified: issues.length > 0,
+        issues
+    };
+}
+
+/**
+ * StreamingSpeculativeGuard: Buffers token chunks along sentence & block boundaries,
+ * verifying and auto-repairing arithmetic, LaTeX math, and syntax before emitting to SSE stream.
+ */
+export class StreamingSpeculativeGuard {
+    constructor(options = {}) {
+        this.buffer = '';
+        this.fullAccumulated = '';
+        this.onVerifiedChunk = typeof options.onVerifiedChunk === 'function' ? options.onVerifiedChunk : null;
+    }
+
+    /**
+     * Ingests a new streaming token chunk and yields any verified sentence blocks.
+     * @param {string} chunk
+     * @returns {string} Verified clean text to emit immediately.
+     */
+    ingest(chunk = '') {
+        const str = String(chunk || '');
+        this.buffer += str;
+        this.fullAccumulated += str;
+
+        // Split buffer along safe sentence/paragraph delimiters or math line endings
+        const delimiterMatch = this.buffer.match(/^(.*?(?:[.!?]\s+|\n\n|```[\w]*\n|\n|\$\$))([\s\S]*)$/);
+        if (delimiterMatch && delimiterMatch[1]) {
+            const sentenceToVerify = delimiterMatch[1];
+            const remaining = delimiterMatch[2] || '';
+
+            const repaired = validateAndRepairCodeAndMath(sentenceToVerify);
+            this.buffer = remaining;
+            const output = repaired.text;
+            if (this.onVerifiedChunk) this.onVerifiedChunk(output);
+            return output;
+        }
+
+        return '';
+    }
+
+    /**
+     * Flushes any remaining tokens in buffer at stream completion with full terminal validation.
+     * @returns {string} Final verified trailing text.
+     */
+    flushRemaining() {
+        if (!this.buffer) return '';
+        const finalRepaired = validateAndRepairCodeAndMath(this.buffer);
+        const remainingToEmit = finalRepaired.text;
+        this.buffer = '';
+        if (this.onVerifiedChunk && remainingToEmit) this.onVerifiedChunk(remainingToEmit);
+        return remainingToEmit;
+    }
+}
