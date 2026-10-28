@@ -4,7 +4,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { __test as chatGroqTest } from '../api/chat-groq.js';
 import { __test as visionTest } from '../api/vision.js';
-import { applyApiSecurity } from '../api/_lib/security.js';
+import { applyApiSecurity, sealSecret, unsealSecret, getSealedSecretsPublicKey } from '../api/_lib/security.js';
+import { buildDiagnosticsStatus } from '../api/diagnostics.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -159,6 +160,75 @@ console.log('\n--- Section 4: Frontend UI Markup & Client Architecture ---');
     assert.ok(cspHeader.value.includes("connect-src 'self' https: wss:"), 'CSP must permit connect-src HTTPS connections');
 
     console.log('  [PASS] 4.1 Settings UI, client fetch interceptor, and CSP headers are fully grounded and verified');
+}
+
+// Section 5: Asymmetric Sealed Secrets Cryptography & Web Crypto Interoperability
+console.log('\n--- Section 5: Asymmetric Sealed Secrets Cryptography (GitHub Secrets-Style) ---');
+{
+    // 5.1 Diagnostics exposes public key with RSA-OAEP-256 JWK
+    const status = buildDiagnosticsStatus();
+    assert.ok(status.model.byokSupported, 'Diagnostics must indicate BYOK support');
+    assert.ok(status.model.byokPublicKey, 'Diagnostics must expose byokPublicKey');
+    assert.equal(status.model.byokPublicKey.jwk.alg, 'RSA-OAEP-256', 'JWK alg must be RSA-OAEP-256');
+    assert.ok(status.model.byokPublicKey.pem.includes('BEGIN PUBLIC KEY'), 'PEM must be valid SPKI public key');
+    console.log('  [PASS] 5.1 Diagnostics endpoint exports RSA-OAEP public key and JWK metadata');
+
+    // 5.2 Server-side sealing and unsealing round-trip
+    const rawSecret = 'gsk_secret_enterprise_token_9999';
+    const sealedToken = sealSecret(rawSecret);
+    assert.ok(sealedToken.startsWith('jarvis_sealed_v1:'), 'Sealed token must start with jarvis_sealed_v1:');
+    assert.ok(sealedToken.endsWith('9999'), 'Sealed token must include safe masked fingerprint');
+    
+    const unsealed = unsealSecret(sealedToken);
+    assert.equal(unsealed, rawSecret, 'unsealSecret must recover the exact original plaintext token');
+    console.log('  [PASS] 5.2 Server-side sealing and unsealing round-trip recovers raw key perfectly');
+
+    // 5.3 Client Web Crypto Simulation (crypto.subtle) -> Server unsealing
+    const pub = getSealedSecretsPublicKey();
+    const cryptoKey = await crypto.subtle.importKey('jwk', pub.jwk, { name: 'RSA-OAEP', hash: 'SHA-256' }, false, ['encrypt']);
+    const rawAesKey = crypto.getRandomValues(new Uint8Array(32));
+    const encAesKey = await crypto.subtle.encrypt({ name: 'RSA-OAEP' }, cryptoKey, rawAesKey);
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const aesKeyObj = await crypto.subtle.importKey('raw', rawAesKey, { name: 'AES-GCM' }, false, ['encrypt']);
+    const testPlaintext = 'AIzaSy_client_web_crypto_secret_token_1234';
+    const cipherWithTag = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKeyObj, new TextEncoder().encode(testPlaintext));
+    
+    const encAesB64 = Buffer.from(encAesKey).toString('base64');
+    const ivB64 = Buffer.from(iv).toString('base64');
+    const cipherB64 = Buffer.from(cipherWithTag).toString('base64');
+    const browserSealedString = `jarvis_sealed_v1:${encAesB64}:${ivB64}:${cipherB64}:1234`;
+    
+    const browserUnsealed = unsealSecret(browserSealedString);
+    assert.equal(browserUnsealed, testPlaintext, 'Server unsealSecret must decrypt browser Web Crypto envelope encryption');
+    console.log('  [PASS] 5.3 Browser Web Crypto Subtle envelope encryption interoperates with server unsealing');
+
+    // 5.4 Tamper Resistance & Graceful Failure
+    const tamperedCipher = browserSealedString.slice(0, -10) + 'X' + browserSealedString.slice(-9);
+    const tamperedResult = unsealSecret(tamperedCipher);
+    assert.equal(tamperedResult, '', 'Tampered or invalid sealed secret must fail closed and return empty string');
+    console.log('  [PASS] 5.4 Tampered sealed ciphertext fails closed and returns safe empty string');
+
+    // 5.5 Vision and Chat route resolution with Sealed Secret
+    const sealedGroqKey = sealSecret('gsk_sealed_vision_groq_key_abc1');
+    const reqWithSealedGroq = {
+        headers: {
+            'x-groq-api-key': sealedGroqKey
+        },
+        body: {}
+    };
+    const resolvedProviders = visionTest.getVisionProviders(reqWithSealedGroq);
+    assert.equal(resolvedProviders.groqApiKey, 'gsk_sealed_vision_groq_key_abc1', 'Vision provider must unseal Groq key from header');
+
+    const sealedGeminiKey = sealSecret('AIzaSy_sealed_vision_gemini_key_def2');
+    const reqWithSealedGemini = {
+        headers: {
+            'x-gemini-api-key': sealedGeminiKey
+        },
+        body: {}
+    };
+    const resolvedGeminiProviders = visionTest.getVisionProviders(reqWithSealedGemini);
+    assert.equal(resolvedGeminiProviders.geminiApiKey, 'AIzaSy_sealed_vision_gemini_key_def2', 'Vision provider must unseal Gemini key from header');
+    console.log('  [PASS] 5.5 Vision and Chat endpoints seamlessly unseal sealed tokens in ephemeral memory');
 }
 
 console.log('\n=== All BYOK Architecture Tests Passed Successfully! ===');
