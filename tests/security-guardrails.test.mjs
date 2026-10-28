@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { inspectPromptSecurity } from '../api/_lib/prompt-guard.js';
 import { redactSensitiveData } from '../api/_lib/pii-redactor.js';
 
@@ -87,6 +88,34 @@ assert.ok(redacted.text.includes('[REDACTED_SSN]'));
 assert.ok(redacted.redactedCount >= 7);
 
 console.log(`  [PASS] 2.1 ${redacted.redactedCount} credentials masked with surrogate tokens`);
+
+// Section 3: HTTP Content Security Policy & Production Headers Verification
+console.log('\n--- Section 3: Content Security Policy & Production Headers Verification ---');
+
+const vercelConfig = JSON.parse(fs.readFileSync(new URL('../vercel.json', import.meta.url), 'utf8'));
+const rootHeaderRule = vercelConfig.headers?.find(h => h.source === '/(.*)');
+assert.ok(rootHeaderRule, 'vercel.json must define root headers for /(.*)');
+
+const headerMap = Object.fromEntries(rootHeaderRule.headers.map(h => [h.key.toLowerCase(), h.value]));
+assert.equal(headerMap['x-content-type-options'], 'nosniff');
+assert.equal(headerMap['x-frame-options'], 'DENY');
+assert.equal(headerMap['referrer-policy'], 'no-referrer');
+assert.ok(headerMap['content-security-policy'], 'Content-Security-Policy must be present');
+
+const csp = headerMap['content-security-policy'];
+assert.ok(csp.includes("default-src 'self'"), 'CSP must define default-src');
+assert.ok(csp.includes("script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://cdn.jsdelivr.net"), 'CSP must allow required script sources');
+assert.ok(csp.includes("style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com"), 'CSP must allow required style sources');
+assert.ok(csp.includes("font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net data:"), 'CSP must allow font sources');
+assert.ok(csp.includes("img-src 'self' data: blob: https:"), 'CSP must allow image sources');
+assert.ok(csp.includes("media-src 'self' blob: data:"), 'CSP must allow media sources');
+assert.ok(csp.includes("connect-src 'self' https: wss:"), 'CSP must allow connect sources');
+assert.ok(csp.includes("worker-src 'self' blob:"), 'CSP must allow worker sources');
+assert.ok(csp.includes("object-src 'none'"), 'CSP must block object-src');
+assert.ok(csp.includes("base-uri 'self'"), 'CSP must restrict base-uri');
+assert.ok(csp.includes("form-action 'self'"), 'CSP must restrict form-action');
+
+console.log('  [PASS] 3.1 Content-Security-Policy & production security headers validated in vercel.json');
 
 console.log('\n================================================================');
 console.log('=== All Enterprise Chatbot Security Guardrails Tests PASSED ===');
