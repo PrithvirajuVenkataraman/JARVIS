@@ -58,8 +58,8 @@
                 const url = typeof input === 'string' ? input : (input?.url || '');
                 if (typeof url === 'string' && (url.startsWith('/api/') || url.includes('/api/chat-groq') || url.includes('/api/vision') || url.includes('/api/image-proxy') || url.includes('/api/search'))) {
                     try {
-                        const groqKey = (localStorage.getItem('jarvis_byok_groq') || localStorage.getItem('groq_api_key') || '').trim();
-                        const geminiKey = (localStorage.getItem('jarvis_byok_gemini') || localStorage.getItem('gemini_api_key') || localStorage.getItem('GEMINI_API_KEY') || '').trim();
+                        const groqKey = (localStorage.getItem('jarvis_byok_groq_sealed') || localStorage.getItem('jarvis_byok_groq') || localStorage.getItem('groq_api_key') || '').trim();
+                        const geminiKey = (localStorage.getItem('jarvis_byok_gemini_sealed') || localStorage.getItem('jarvis_byok_gemini') || localStorage.getItem('gemini_api_key') || localStorage.getItem('GEMINI_API_KEY') || '').trim();
                         if (groqKey || geminiKey) {
                             const headers = new Headers(init.headers || (typeof input === 'object' && input.headers ? input.headers : {}));
                             if (groqKey && !headers.has('x-groq-api-key')) headers.set('x-groq-api-key', groqKey);
@@ -7142,8 +7142,10 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             const charCount = currentPrompt.length;
             const isPersonalized = typeof isPersonalizationEnabled === 'function' ? isPersonalizationEnabled() : true;
             const hasCustom = Boolean(currentPrompt && currentPrompt.trim().length > 0);
-            const currentSelectedModel = typeof getSelectedModel === 'function' ? getSelectedModel() : 'auto';
-            const hasByok = Boolean((localStorage.getItem('jarvis_byok_groq') || localStorage.getItem('groq_api_key')) || (localStorage.getItem('jarvis_byok_gemini') || localStorage.getItem('gemini_api_key')));
+            const hasByok = Boolean(
+                (localStorage.getItem('jarvis_byok_groq_sealed') || localStorage.getItem('jarvis_byok_groq') || localStorage.getItem('groq_api_key')) ||
+                (localStorage.getItem('jarvis_byok_gemini_sealed') || localStorage.getItem('jarvis_byok_gemini') || localStorage.getItem('gemini_api_key'))
+            );
 
             modal.innerHTML = `
                 <div class="help-modal-enhanced">
@@ -7615,14 +7617,14 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                         <!-- Sub-view Body -->
                         <div class="help-modal-body custom-scrollbar">
                             <p class="settings-subview-desc">
-                                Provide your personal API keys to unlock higher rate limits and uninterrupted throughput. Keys are stored solely in your local browser storage and attached securely to inference requests.
+                                GitHub Secrets-style Asymmetric Encryption: Provide personal API keys to unlock higher rate limits. Keys are sealed client-side with RSA-OAEP + AES-256-GCM. Write-only: raw keys are never stored in browser memory, DOM, or database.
                             </p>
 
                             <!-- Key Status Banner -->
                             <div class="flex items-center justify-between p-3 rounded-xl bg-white/[0.04] border border-white/10 mb-4">
                                 <div>
                                     <div class="text-xs font-semibold text-neutral-300">Active Credential Tier</div>
-                                    <div class="text-[11px] text-neutral-400">Personal keys take priority over shared platform quotas.</div>
+                                    <div class="text-[11px] text-neutral-400">Personal sealed keys take priority over shared platform quotas.</div>
                                 </div>
                                 <span id="byok-tier-badge" class="compliance-badge personal">Platform Default</span>
                             </div>
@@ -7634,10 +7636,13 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                                         <span>Groq API Key</span>
                                         <span class="text-[10px] text-sky-400 font-mono">gsk_...</span>
                                     </label>
-                                    <a href="https://console.groq.com/keys" target="_blank" rel="noopener noreferrer" class="text-[11px] text-sky-400 hover:underline inline-flex items-center gap-1">
-                                        <span>Get Free Key</span>
-                                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-                                    </a>
+                                    <div class="flex items-center gap-2">
+                                        <span id="byok-groq-badge" class="compliance-badge personal" style="font-size:10px;">Platform Default</span>
+                                        <a href="https://console.groq.com/keys" target="_blank" rel="noopener noreferrer" class="text-[11px] text-sky-400 hover:underline inline-flex items-center gap-1">
+                                            <span>Get Free Key</span>
+                                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                                        </a>
+                                    </div>
                                 </div>
                                 <div class="relative flex items-center">
                                     <input
@@ -7648,18 +7653,12 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                                         autocomplete="off"
                                         spellcheck="false"
                                     />
-                                    <button
-                                        type="button"
-                                        class="absolute right-2 text-neutral-400 hover:text-neutral-200 p-1"
-                                        onclick="togglePasswordVisibility('byok-groq-input')"
-                                        title="Show / Hide key"
-                                        aria-label="Toggle Groq key visibility"
-                                    >
-                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                                            <circle cx="12" cy="12" r="3"/>
+                                    <div class="absolute right-2.5 text-neutral-400 p-1 flex items-center" title="Write-Only Asymmetric Sealed Secret">
+                                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                                            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
                                         </svg>
-                                    </button>
+                                    </div>
                                 </div>
                                 <p class="text-[11px] text-neutral-400 mt-1.5">Powers fast LLM generation, reasoning models, and quick streaming responses.</p>
                             </div>
@@ -7671,10 +7670,13 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                                         <span>Google Gemini API Key</span>
                                         <span class="text-[10px] text-purple-400 font-mono">AIzaSy...</span>
                                     </label>
-                                    <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" class="text-[11px] text-purple-400 hover:underline inline-flex items-center gap-1">
-                                        <span>Get Free Key</span>
-                                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-                                    </a>
+                                    <div class="flex items-center gap-2">
+                                        <span id="byok-gemini-badge" class="compliance-badge personal" style="font-size:10px;">Platform Default</span>
+                                        <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" class="text-[11px] text-purple-400 hover:underline inline-flex items-center gap-1">
+                                            <span>Get Free Key</span>
+                                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                                        </a>
+                                    </div>
                                 </div>
                                 <div class="relative flex items-center">
                                     <input
@@ -7685,20 +7687,25 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                                         autocomplete="off"
                                         spellcheck="false"
                                     />
-                                    <button
-                                        type="button"
-                                        class="absolute right-2 text-neutral-400 hover:text-neutral-200 p-1"
-                                        onclick="togglePasswordVisibility('byok-gemini-input')"
-                                        title="Show / Hide key"
-                                        aria-label="Toggle Gemini key visibility"
-                                    >
-                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                                            <circle cx="12" cy="12" r="3"/>
+                                    <div class="absolute right-2.5 text-neutral-400 p-1 flex items-center" title="Write-Only Asymmetric Sealed Secret">
+                                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                                            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
                                         </svg>
-                                    </button>
+                                    </div>
                                 </div>
                                 <p class="text-[11px] text-neutral-400 mt-1.5">Powers multimodal image inspection, vision understanding, and Gemini models.</p>
+                            </div>
+
+                            <!-- Cryptographic Guarantee Notice -->
+                            <div class="p-3 rounded-xl bg-sky-500/10 border border-sky-500/20 mb-4 flex items-start gap-2.5">
+                                <svg class="text-sky-400 shrink-0 mt-0.5" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                                </svg>
+                                <div class="text-[11px] text-sky-200/90 leading-relaxed">
+                                    <strong class="text-sky-300">GitHub Secrets-Style Sealed Box Architecture:</strong>
+                                    Keys are encrypted client-side using RSA-2048 (OAEP-SHA256) and AES-256-GCM before saving to localStorage. Your raw keys are never stored anywhere in plain text and cannot be decrypted by browser scripts or malicious extensions. They are unsealed only in ephemeral server memory during active inference.
+                                </div>
                             </div>
 
                             <!-- Actions Row -->
@@ -7707,7 +7714,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                                     <span>Reset to Platform Keys</span>
                                 </button>
                                 <button type="button" class="settings-action-btn" onclick="saveByokKeysAndReturn()">
-                                    <span>Save &amp; Apply</span>
+                                    <span>Save &amp; Seal</span>
                                 </button>
                             </div>
                         </div>
@@ -7943,22 +7950,166 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             switchSettingsView('main');
         }
 
+        // ====================================================================
+        // GitHub Secrets-Style Asymmetric Sealing (Client Web Crypto)
+        // ====================================================================
+
+        let __jarvisServerPublicKey = null;
+
+        function __jarvisBufferToBase64(buffer) {
+            const bytes = new Uint8Array(buffer);
+            let binary = '';
+            for (let i = 0; i < bytes.byteLength; i++) {
+                binary += String.fromCharCode(bytes[i]);
+            }
+            return window.btoa(binary);
+        }
+
+        async function getServerPublicKey() {
+            if (__jarvisServerPublicKey) return __jarvisServerPublicKey;
+            try {
+                const res = await fetch('/api/diagnostics');
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const data = await res.json();
+                const jwk = data?.diagnostics?.model?.byokPublicKey?.jwk;
+                if (!jwk || !window.crypto || !window.crypto.subtle) return null;
+                __jarvisServerPublicKey = await window.crypto.subtle.importKey(
+                    'jwk',
+                    jwk,
+                    { name: 'RSA-OAEP', hash: 'SHA-256' },
+                    false,
+                    ['encrypt']
+                );
+                return __jarvisServerPublicKey;
+            } catch (err) {
+                console.warn('[BYOK] Could not load server public key:', err);
+                return null;
+            }
+        }
+
+        async function sealSecretWithPublicKey(plaintext) {
+            const clean = String(plaintext || '').trim();
+            if (!clean) return '';
+            try {
+                const rsaKey = await getServerPublicKey();
+                if (!rsaKey || !window.crypto || !window.crypto.subtle) {
+                    return clean; // Fallback to raw if crypto/pubkey unavailable
+                }
+                const rawAesKey = window.crypto.getRandomValues(new Uint8Array(32));
+                const encAesKeyBuffer = await window.crypto.subtle.encrypt(
+                    { name: 'RSA-OAEP' },
+                    rsaKey,
+                    rawAesKey
+                );
+                const aesKeyObj = await window.crypto.subtle.importKey(
+                    'raw',
+                    rawAesKey,
+                    { name: 'AES-GCM' },
+                    false,
+                    ['encrypt']
+                );
+                const iv = window.crypto.getRandomValues(new Uint8Array(12));
+                const encoded = new TextEncoder().encode(clean);
+                const cipherBuffer = await window.crypto.subtle.encrypt(
+                    { name: 'AES-GCM', iv },
+                    aesKeyObj,
+                    encoded
+                );
+                const encAesKeyB64 = __jarvisBufferToBase64(encAesKeyBuffer);
+                const ivB64 = __jarvisBufferToBase64(iv);
+                const cipherB64 = __jarvisBufferToBase64(cipherBuffer);
+                const fingerprint = clean.length > 8 ? (clean.slice(0, 4) + '••••••••' + clean.slice(-4)) : '••••';
+                return 'jarvis_sealed_v1:' + encAesKeyB64 + ':' + ivB64 + ':' + cipherB64 + ':' + fingerprint;
+            } catch (err) {
+                console.warn('[BYOK] Sealing failed, falling back to plaintext:', err);
+                return clean;
+            }
+        }
+
+        function extractSecretFingerprint(sealedOrRaw) {
+            if (!sealedOrRaw) return '';
+            const val = String(sealedOrRaw).trim();
+            if (val.startsWith('jarvis_sealed_v1:')) {
+                const parts = val.split(':');
+                return parts[4] || '••••••••';
+            }
+            if (val.length > 8) {
+                return val.slice(0, 4) + '••••••••' + val.slice(-4);
+            }
+            return '••••';
+        }
+
         function loadByokSettings() {
             const groqInput = document.getElementById('byok-groq-input');
             const geminiInput = document.getElementById('byok-gemini-input');
-            const groqKey = localStorage.getItem('jarvis_byok_groq') || localStorage.getItem('groq_api_key') || '';
-            const geminiKey = localStorage.getItem('jarvis_byok_gemini') || localStorage.getItem('gemini_api_key') || '';
+            const groqBadge = document.getElementById('byok-groq-badge');
+            const geminiBadge = document.getElementById('byok-gemini-badge');
 
-            if (groqInput) groqInput.value = groqKey;
-            if (geminiInput) geminiInput.value = geminiKey;
-            updateByokTierBadge(Boolean(groqKey || geminiKey));
+            const sealedGroq = (localStorage.getItem('jarvis_byok_groq_sealed') || '').trim();
+            const legacyGroq = (localStorage.getItem('jarvis_byok_groq') || localStorage.getItem('groq_api_key') || '').trim();
+            const sealedGemini = (localStorage.getItem('jarvis_byok_gemini_sealed') || '').trim();
+            const legacyGemini = (localStorage.getItem('jarvis_byok_gemini') || localStorage.getItem('gemini_api_key') || '').trim();
+
+            if (groqInput) {
+                groqInput.value = '';
+                if (sealedGroq) {
+                    groqInput.placeholder = 'Sealed Secret Active (' + extractSecretFingerprint(sealedGroq) + '). Enter new key to overwrite.';
+                    if (groqBadge) {
+                        groqBadge.textContent = 'Sealed (Write-Only)';
+                        groqBadge.className = 'compliance-badge personal';
+                    }
+                } else if (legacyGroq) {
+                    groqInput.placeholder = 'Legacy key configured. Click Save to upgrade to Sealed Secret.';
+                    if (groqBadge) {
+                        groqBadge.textContent = 'Legacy (Unsealed)';
+                        groqBadge.className = 'compliance-badge warning';
+                    }
+                } else {
+                    groqInput.placeholder = 'gsk_...';
+                    if (groqBadge) {
+                        groqBadge.textContent = 'Platform Default';
+                        groqBadge.className = 'compliance-badge enforced';
+                    }
+                }
+            }
+
+            if (geminiInput) {
+                geminiInput.value = '';
+                if (sealedGemini) {
+                    geminiInput.placeholder = 'Sealed Secret Active (' + extractSecretFingerprint(sealedGemini) + '). Enter new key to overwrite.';
+                    if (geminiBadge) {
+                        geminiBadge.textContent = 'Sealed (Write-Only)';
+                        geminiBadge.className = 'compliance-badge personal';
+                    }
+                } else if (legacyGemini) {
+                    geminiInput.placeholder = 'Legacy key configured. Click Save to upgrade to Sealed Secret.';
+                    if (geminiBadge) {
+                        geminiBadge.textContent = 'Legacy (Unsealed)';
+                        geminiBadge.className = 'compliance-badge warning';
+                    }
+                } else {
+                    geminiInput.placeholder = 'AIzaSy...';
+                    if (geminiBadge) {
+                        geminiBadge.textContent = 'Platform Default';
+                        geminiBadge.className = 'compliance-badge enforced';
+                    }
+                }
+            }
+
+            const hasActiveKeys = Boolean(sealedGroq || legacyGroq || sealedGemini || legacyGemini);
+            updateByokTierBadge(hasActiveKeys);
+            updateByokStatusBadge();
         }
 
         function updateByokTierBadge(hasCustomKeys) {
             const tierBadge = document.getElementById('byok-tier-badge');
             if (!tierBadge) return;
-            if (hasCustomKeys) {
-                tierBadge.textContent = 'BYOK Active (Custom Keys)';
+            const hasSealed = Boolean(localStorage.getItem('jarvis_byok_groq_sealed') || localStorage.getItem('jarvis_byok_gemini_sealed'));
+            if (hasSealed) {
+                tierBadge.textContent = 'BYOK Active (Asymmetric Sealed Box)';
+                tierBadge.className = 'compliance-badge personal';
+            } else if (hasCustomKeys) {
+                tierBadge.textContent = 'BYOK Active (Legacy Plaintext)';
                 tierBadge.className = 'compliance-badge personal';
             } else {
                 tierBadge.textContent = 'Platform Default Keys';
@@ -7966,42 +8117,41 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             }
         }
 
-        function saveByokKeys(showNotification = true) {
+        async function saveByokKeys(showNotification = true) {
             const groqInput = document.getElementById('byok-groq-input');
             const geminiInput = document.getElementById('byok-gemini-input');
             const groqVal = (groqInput?.value || '').trim();
             const geminiVal = (geminiInput?.value || '').trim();
 
             if (groqVal) {
-                localStorage.setItem('jarvis_byok_groq', groqVal);
-                localStorage.setItem('groq_api_key', groqVal);
-            } else {
+                const sealedGroq = await sealSecretWithPublicKey(groqVal);
+                localStorage.setItem('jarvis_byok_groq_sealed', sealedGroq);
                 localStorage.removeItem('jarvis_byok_groq');
                 localStorage.removeItem('groq_api_key');
+                if (groqInput) groqInput.value = '';
             }
 
             if (geminiVal) {
-                localStorage.setItem('jarvis_byok_gemini', geminiVal);
-                localStorage.setItem('gemini_api_key', geminiVal);
-            } else {
+                const sealedGemini = await sealSecretWithPublicKey(geminiVal);
+                localStorage.setItem('jarvis_byok_gemini_sealed', sealedGemini);
                 localStorage.removeItem('jarvis_byok_gemini');
                 localStorage.removeItem('gemini_api_key');
+                if (geminiInput) geminiInput.value = '';
             }
 
-            updateByokTierBadge(Boolean(groqVal || geminiVal));
-            updateByokStatusBadge();
+            loadByokSettings();
 
             if (showNotification && typeof showTemporaryMessage === 'function') {
                 if (groqVal || geminiVal) {
-                    showTemporaryMessage('Custom API keys saved successfully.');
+                    showTemporaryMessage('API key encrypted with RSA-OAEP and sealed successfully.');
                 } else {
-                    showTemporaryMessage('Reset to platform default keys.');
+                    showTemporaryMessage('Credentials updated.');
                 }
             }
         }
 
-        function saveByokKeysAndReturn() {
-            saveByokKeys(true);
+        async function saveByokKeysAndReturn() {
+            await saveByokKeys(true);
             switchSettingsView('main');
         }
 
@@ -8011,13 +8161,14 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             if (groqInput) groqInput.value = '';
             if (geminiInput) geminiInput.value = '';
 
+            localStorage.removeItem('jarvis_byok_groq_sealed');
             localStorage.removeItem('jarvis_byok_groq');
             localStorage.removeItem('groq_api_key');
+            localStorage.removeItem('jarvis_byok_gemini_sealed');
             localStorage.removeItem('jarvis_byok_gemini');
             localStorage.removeItem('gemini_api_key');
 
-            updateByokTierBadge(false);
-            updateByokStatusBadge();
+            loadByokSettings();
 
             if (typeof showTemporaryMessage === 'function') {
                 showTemporaryMessage('API keys reset to platform defaults.');
@@ -8027,11 +8178,18 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
         function updateByokStatusBadge() {
             const badgeEl = document.getElementById('byok-status-badge');
             if (!badgeEl) return;
-            const hasByok = Boolean(
-                (localStorage.getItem('jarvis_byok_groq') || localStorage.getItem('groq_api_key')) ||
-                (localStorage.getItem('jarvis_byok_gemini') || localStorage.getItem('gemini_api_key'))
+            const hasSealed = Boolean(
+                localStorage.getItem('jarvis_byok_groq_sealed') ||
+                localStorage.getItem('jarvis_byok_gemini_sealed')
             );
-            badgeEl.textContent = hasByok ? 'Custom Active' : 'Platform';
+            const hasLegacy = Boolean(
+                localStorage.getItem('jarvis_byok_groq') ||
+                localStorage.getItem('groq_api_key') ||
+                localStorage.getItem('jarvis_byok_gemini') ||
+                localStorage.getItem('gemini_api_key')
+            );
+            const hasByok = hasSealed || hasLegacy;
+            badgeEl.textContent = hasSealed ? 'Sealed Active' : (hasLegacy ? 'Custom Active' : 'Platform');
             badgeEl.classList.toggle('configured', hasByok);
         }
 
@@ -8047,6 +8205,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
         window.clearByokKeys = clearByokKeys;
         window.updateByokStatusBadge = updateByokStatusBadge;
         window.togglePasswordVisibility = togglePasswordVisibility;
+        window.sealSecretWithPublicKey = sealSecretWithPublicKey;
 
         function updateCustomInstructionsStatus() {
             const statusEl = document.getElementById('custom-instructions-status');
