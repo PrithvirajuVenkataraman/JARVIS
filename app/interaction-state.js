@@ -42,9 +42,12 @@ export function getInteractionStateLabel(state) {
 
 const DEFAULT_STATE_WATCHDOG_MS = 35000;
 const SPEAKING_WATCHDOG_MS = 25000;
+const ANALYZING_WATCHDOG_MS = 120000;
 
 export function createInteractionStateMachine(options = {}) {
-    const watchdogMs = Number(options.watchdogMs) || DEFAULT_STATE_WATCHDOG_MS;
+    const customWatchdogMs = Number(options.watchdogMs) || null;
+    const watchdogMs = customWatchdogMs || DEFAULT_STATE_WATCHDOG_MS;
+    const analyzingWatchdogMs = customWatchdogMs ? customWatchdogMs : (Number(options.analyzingWatchdogMs) || ANALYZING_WATCHDOG_MS);
     const listeners = new Set();
     let watchdogTimer = null;
     let requestSequence = 0;
@@ -67,14 +70,22 @@ export function createInteractionStateMachine(options = {}) {
         }
     }
 
-    function scheduleWatchdog(currentState, reqId) {
+    function scheduleWatchdog(currentState, reqId, overrideMs = null) {
         clearWatchdog();
         // IDLE, INTERRUPTED, CANCELLED do not require an active execution timeout
         if ([InteractionState.IDLE, InteractionState.CANCELLED, InteractionState.INTERRUPTED].includes(currentState)) {
             return;
         }
 
-        const timeout = currentState === InteractionState.SPEAKING ? SPEAKING_WATCHDOG_MS : watchdogMs;
+        let timeout = watchdogMs;
+        if (typeof overrideMs === 'number' && overrideMs > 0) {
+            timeout = overrideMs;
+        } else if (currentState === InteractionState.SPEAKING) {
+            timeout = customWatchdogMs || SPEAKING_WATCHDOG_MS;
+        } else if (currentState === InteractionState.ANALYZING) {
+            timeout = analyzingWatchdogMs;
+        }
+
         watchdogTimer = setTimeout(() => {
             if (stateRecord.state === currentState && stateRecord.requestId === reqId) {
                 console.warn(`[InteractionState] Watchdog timeout in state "${currentState}" for request "${reqId}". Forcing reset to IDLE.`);
@@ -84,6 +95,16 @@ export function createInteractionStateMachine(options = {}) {
         if (typeof watchdogTimer?.unref === 'function') {
             watchdogTimer.unref();
         }
+    }
+
+    function touch(reqId = null, extendMs = null) {
+        if (reqId && stateRecord.requestId && reqId !== stateRecord.requestId) {
+            return;
+        }
+        if ([InteractionState.IDLE, InteractionState.CANCELLED, InteractionState.INTERRUPTED].includes(stateRecord.state)) {
+            return;
+        }
+        scheduleWatchdog(stateRecord.state, stateRecord.requestId, extendMs);
     }
 
     function isBusy() {
@@ -164,7 +185,7 @@ export function createInteractionStateMachine(options = {}) {
             stateRecord.startedAt = null;
         }
 
-        scheduleWatchdog(nextState, stateRecord.requestId);
+        scheduleWatchdog(nextState, stateRecord.requestId, context.watchdogMs);
 
         const snapshot = getSnapshot();
 
@@ -205,6 +226,19 @@ export function createInteractionStateMachine(options = {}) {
         }
 
         return nextState;
+    }
+
+    // Automatically touch/extend watchdog whenever attachment progress or processing progress is signaled
+    const eventTarget = options.windowRef || (typeof globalThis !== 'undefined' ? globalThis : null);
+    if (eventTarget && typeof eventTarget.addEventListener === 'function') {
+        try {
+            eventTarget.addEventListener('jarvis-attachment-progress', () => {
+                touch();
+            });
+            eventTarget.addEventListener('jarvis:progress', () => {
+                touch();
+            });
+        } catch (_) {}
     }
 
     function resetToIdle(reason = 'manual_reset') {
@@ -260,6 +294,8 @@ export function createInteractionStateMachine(options = {}) {
         isCurrentRequest,
         createRequestId,
         transition,
+        touch,
+        heartbeat: touch,
         resetToIdle,
         addStateListener,
         subscribe: addStateListener
