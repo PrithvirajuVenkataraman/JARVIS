@@ -443,3 +443,25 @@ To ensure zero hardcoding across the test harness itself, the test suites operat
   - **🗺️ Live Map**: Embedded OpenStreetMap preview pin focused directly on the acquired coordinates.
 - **Conversational Triggers**:
   - Autonomous intent detection in `isEmergencySosIntentText` recognizing `"emergency"`, `"sos"`, `"distress"`, `"call police"`, `"in danger"`, and `"send help"`.
+
+---
+
+## 18. High-Capacity Document Processing & Resilient Interaction Lifecycle
+
+### 18.1 Document Capacity Upgrade
+To leverage the full free-tier capabilities of modern LLM APIs (specifically Google Gemini 2.5 Flash / 3.7 Flash):
+- **Max File Size**: Raised to **50 MB** (`MAX_FILE_BYTES = 50 * 1024 * 1024`), supporting dense reports, scanned PDFs, and e-books up to the Gemini API free file ceiling.
+- **Digital Extraction Limit**: Raised to **100 pages** (`PDF_DIGITAL_PAGE_LIMIT = 100`) via PDF.js text layer streaming.
+- **Visual OCR Limit**: Raised to **25 pages** (`PDF_VISUAL_PAGE_LIMIT = 25`) with client-side canvas rasterization at 1600px max dimension and 0.82 JPEG quality.
+- **Context Extraction Window**: Raised to **500,000 characters** (~125,000 tokens) across client attachment ingestors, server extraction APIs, and prompt assemblers, fitting comfortably inside Gemini's 1,000,000-token free context window.
+
+### 18.2 Serverless 413 Payload Protection
+- **Vercel 4.5MB Body Limit Safeguard**: Serverless function invocations (`/api/ingest-attachment`) abort with HTTP 413 if the payload exceeds 4.5MB. JARVIS detects files over 3.5MB and routes them immediately to client-side extraction and chunked visual OCR, omitting redundant base64 strings when client text is extracted.
+- **CSP Tesseract WASM Conformance**: `data: blob:` allowed in `connect-src` and `worker-src` to permit local Tesseract OCR fallback without security policy violations.
+
+### 18.3 Resilient Interaction State Machine Lifecycle
+- **Authoritative States**: Explicit lifecycle management across `IDLE`, `LISTENING`, `TRANSCRIBING`, `SUBMITTING`, `ROUTING`, `ANALYZING`, `THINKING`, `SEARCHING`, `GENERATING`, `SPEAKING`, `INTERRUPTED`, `CANCELLED`, and `ERROR`.
+- **Extended Analyzing Watchdog**: State machine applies a **120-second watchdog** for `ANALYZING` (`ANALYZING_WATCHDOG_MS = 120000`), preventing premature timeout resets during heavy multi-page OCR or document extraction.
+- **Progress-Driven Heartbeat (`touch()`)**: State machine subscribes to `jarvis-attachment-progress` and `jarvis:progress` events, renewing the watchdog timer each time a page is processed or progress is reported.
+- **Semantic State Transitions**: When messages include attachments, `sendTextInput` transitions directly to `ANALYZING`, followed by `SEARCHING` (if live verification is needed), `THINKING` (while waiting for the LLM), and `GENERATING` (during streaming).
+
