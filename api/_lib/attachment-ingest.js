@@ -1,6 +1,6 @@
 import { extractTextFromImage } from './vision-extract.js';
 
-const MAX_EXTRACT_CHARS = 120000;
+const MAX_EXTRACT_CHARS = 500000;
 const TEXT_EXTENSIONS = /\.(txt|md|markdown|json|jsonl|csv|tsv|xml|html|htm|css|js|mjs|cjs|ts|tsx|jsx|py|java|cpp|c|h|cs|go|rs|rb|php|sh|yaml|yml|toml|ini|log|sql|rtf)$/i;
 const IMAGE_MIMES = new Set([
     'image/jpeg', 'image/jpg', 'image/pjpeg', 'image/png', 'image/x-png', 'image/x-apple-ios-png',
