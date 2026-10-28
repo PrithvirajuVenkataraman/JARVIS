@@ -49,6 +49,28 @@
                 });
             }).catch(() => {});
         }
+
+        // Enterprise BYOK (Bring Your Own Key) Fetch Interceptor
+        (function installByokFetchInterceptor() {
+            if (typeof window === 'undefined' || !window.fetch) return;
+            const originalFetch = window.fetch;
+            window.fetch = function(input, init = {}) {
+                const url = typeof input === 'string' ? input : (input?.url || '');
+                if (typeof url === 'string' && (url.startsWith('/api/') || url.includes('/api/chat-groq') || url.includes('/api/vision') || url.includes('/api/image-proxy') || url.includes('/api/search'))) {
+                    try {
+                        const groqKey = (localStorage.getItem('jarvis_byok_groq') || localStorage.getItem('groq_api_key') || '').trim();
+                        const geminiKey = (localStorage.getItem('jarvis_byok_gemini') || localStorage.getItem('gemini_api_key') || localStorage.getItem('GEMINI_API_KEY') || '').trim();
+                        if (groqKey || geminiKey) {
+                            const headers = new Headers(init.headers || (typeof input === 'object' && input.headers ? input.headers : {}));
+                            if (groqKey && !headers.has('x-groq-api-key')) headers.set('x-groq-api-key', groqKey);
+                            if (geminiKey && !headers.has('x-gemini-api-key')) headers.set('x-gemini-api-key', geminiKey);
+                            init = { ...init, headers };
+                        }
+                    } catch (_) {}
+                }
+                return originalFetch.call(this, input, init);
+            };
+        })();
     </script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -7109,6 +7131,8 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                     if (window.__currentSettingsView === 'custom_instructions') {
                         const input = document.getElementById('custom-system-prompt-input');
                         if (input) setCustomSystemPrompt(input.value, false);
+                    } else if (window.__currentSettingsView === 'byok') {
+                        if (typeof saveByokKeys === 'function') saveByokKeys(false);
                     }
                     closeHelpModal();
                 }
@@ -7119,6 +7143,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             const isPersonalized = typeof isPersonalizationEnabled === 'function' ? isPersonalizationEnabled() : true;
             const hasCustom = Boolean(currentPrompt && currentPrompt.trim().length > 0);
             const currentSelectedModel = typeof getSelectedModel === 'function' ? getSelectedModel() : 'auto';
+            const hasByok = Boolean((localStorage.getItem('jarvis_byok_groq') || localStorage.getItem('groq_api_key')) || (localStorage.getItem('jarvis_byok_gemini') || localStorage.getItem('gemini_api_key')));
 
             modal.innerHTML = `
                 <div class="help-modal-enhanced">
@@ -7171,6 +7196,29 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                                         </select>
                                     </div>
                                 </div>
+
+                                <!-- Bring Your Own Key (BYOK) Row -->
+                                <button type="button" class="settings-row settings-row-interactive" id="settings-row-byok" onclick="switchSettingsView('byok')" aria-label="API Keys (BYOK)">
+                                    <div class="settings-row-left">
+                                        <div class="settings-icon-badge settings-icon-amber" aria-hidden="true">
+                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                <circle cx="7.5" cy="15.5" r="4.5"/>
+                                                <path d="m21 3-9.5 9.5"/>
+                                                <path d="m15.5 7.5 3 3"/>
+                                            </svg>
+                                        </div>
+                                        <div class="settings-row-text">
+                                            <h3 class="settings-row-title">API Keys (BYOK)</h3>
+                                            <p class="settings-row-desc">Bring your own Groq &amp; Gemini keys for high rate limits</p>
+                                        </div>
+                                    </div>
+                                    <div class="settings-row-right">
+                                        <span id="byok-status-badge" class="settings-row-status ${hasByok ? 'configured' : ''}">${hasByok ? 'Custom Active' : 'Platform'}</span>
+                                        <svg class="settings-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                            <path d="M9 18l6-6-6-6"/>
+                                        </svg>
+                                    </div>
+                                </button>
                             </div>
 
                             <!-- Section 1: PERSONALIZATION & BEHAVIOR -->
@@ -7544,6 +7592,126 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                             </div>
                         </div>
                     </div>
+
+                    <!-- Sub-View: API Keys (BYOK) -->
+                    <div id="settings-view-byok" class="settings-view-panel settings-subview-panel" style="display:none;">
+                        <!-- Sub-view Header -->
+                        <div class="help-modal-header">
+                            <button type="button" onclick="switchSettingsView('main')" class="help-modal-back-btn settings-subview-back-btn" aria-label="Back to settings">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <path d="M19 12H5"></path>
+                                    <path d="M12 19l-7-7 7-7"></path>
+                                </svg>
+                                <span class="settings-back-label">Settings</span>
+                            </button>
+                            <div class="help-modal-title-block">
+                                <h2 class="settings-modal-heading">Bring Your Own Key (BYOK)</h2>
+                            </div>
+                            <button type="button" onclick="saveByokKeysAndReturn()" class="help-modal-ok-btn" aria-label="Save and return" style="background:#ffffff!important;color:#000000!important;-webkit-text-fill-color:#000000!important;font-weight:750!important;">
+                                Save
+                            </button>
+                        </div>
+
+                        <!-- Sub-view Body -->
+                        <div class="help-modal-body custom-scrollbar">
+                            <p class="settings-subview-desc">
+                                Provide your personal API keys to unlock higher rate limits and uninterrupted throughput. Keys are stored solely in your local browser storage and attached securely to inference requests.
+                            </p>
+
+                            <!-- Key Status Banner -->
+                            <div class="flex items-center justify-between p-3 rounded-xl bg-white/[0.04] border border-white/10 mb-4">
+                                <div>
+                                    <div class="text-xs font-semibold text-neutral-300">Active Credential Tier</div>
+                                    <div class="text-[11px] text-neutral-400">Personal keys take priority over shared platform quotas.</div>
+                                </div>
+                                <span id="byok-tier-badge" class="compliance-badge personal">Platform Default</span>
+                            </div>
+
+                            <!-- Groq Key Card -->
+                            <div class="settings-group-card mb-4" style="padding:14px;">
+                                <div class="flex items-center justify-between mb-2">
+                                    <label for="byok-groq-input" class="text-xs font-semibold text-neutral-200 flex items-center gap-2">
+                                        <span>Groq API Key</span>
+                                        <span class="text-[10px] text-sky-400 font-mono">gsk_...</span>
+                                    </label>
+                                    <a href="https://console.groq.com/keys" target="_blank" rel="noopener noreferrer" class="text-[11px] text-sky-400 hover:underline inline-flex items-center gap-1">
+                                        <span>Get Free Key</span>
+                                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                                    </a>
+                                </div>
+                                <div class="relative flex items-center">
+                                    <input
+                                        type="password"
+                                        id="byok-groq-input"
+                                        class="w-full bg-neutral-900/90 text-neutral-100 text-xs font-mono rounded-lg px-3 py-2.5 border border-white/10 focus:border-sky-500/60 focus:outline-none pr-10"
+                                        placeholder="gsk_..."
+                                        autocomplete="off"
+                                        spellcheck="false"
+                                    />
+                                    <button
+                                        type="button"
+                                        class="absolute right-2 text-neutral-400 hover:text-neutral-200 p-1"
+                                        onclick="togglePasswordVisibility('byok-groq-input')"
+                                        title="Show / Hide key"
+                                        aria-label="Toggle Groq key visibility"
+                                    >
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                                            <circle cx="12" cy="12" r="3"/>
+                                        </svg>
+                                    </button>
+                                </div>
+                                <p class="text-[11px] text-neutral-400 mt-1.5">Powers fast LLM generation, reasoning models, and quick streaming responses.</p>
+                            </div>
+
+                            <!-- Google Gemini Key Card -->
+                            <div class="settings-group-card mb-4" style="padding:14px;">
+                                <div class="flex items-center justify-between mb-2">
+                                    <label for="byok-gemini-input" class="text-xs font-semibold text-neutral-200 flex items-center gap-2">
+                                        <span>Google Gemini API Key</span>
+                                        <span class="text-[10px] text-purple-400 font-mono">AIzaSy...</span>
+                                    </label>
+                                    <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" class="text-[11px] text-purple-400 hover:underline inline-flex items-center gap-1">
+                                        <span>Get Free Key</span>
+                                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                                    </a>
+                                </div>
+                                <div class="relative flex items-center">
+                                    <input
+                                        type="password"
+                                        id="byok-gemini-input"
+                                        class="w-full bg-neutral-900/90 text-neutral-100 text-xs font-mono rounded-lg px-3 py-2.5 border border-white/10 focus:border-purple-500/60 focus:outline-none pr-10"
+                                        placeholder="AIzaSy..."
+                                        autocomplete="off"
+                                        spellcheck="false"
+                                    />
+                                    <button
+                                        type="button"
+                                        class="absolute right-2 text-neutral-400 hover:text-neutral-200 p-1"
+                                        onclick="togglePasswordVisibility('byok-gemini-input')"
+                                        title="Show / Hide key"
+                                        aria-label="Toggle Gemini key visibility"
+                                    >
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                                            <circle cx="12" cy="12" r="3"/>
+                                        </svg>
+                                    </button>
+                                </div>
+                                <p class="text-[11px] text-neutral-400 mt-1.5">Powers multimodal image inspection, vision understanding, and Gemini models.</p>
+                            </div>
+
+                            <!-- Actions Row -->
+                            <div class="flex items-center justify-between pt-2">
+                                <button type="button" class="settings-danger-btn" onclick="clearByokKeys()">
+                                    <span>Reset to Platform Keys</span>
+                                </button>
+                                <button type="button" class="settings-action-btn" onclick="saveByokKeysAndReturn()">
+                                    <span>Save &amp; Apply</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             `;
 
@@ -7571,6 +7739,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             const mainView = document.getElementById('settings-view-main');
             const subViewCustom = document.getElementById('settings-view-custom-instructions');
             const subViewCompliance = document.getElementById('settings-view-compliance');
+            const subViewByok = document.getElementById('settings-view-byok');
             if (!mainView) return;
 
             if (viewName === 'custom_instructions') {
@@ -7579,6 +7748,10 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 if (subViewCompliance) {
                     subViewCompliance.style.display = 'none';
                     subViewCompliance.classList.remove('active');
+                }
+                if (subViewByok) {
+                    subViewByok.style.display = 'none';
+                    subViewByok.classList.remove('active');
                 }
                 if (subViewCustom) {
                     subViewCustom.style.display = 'flex';
@@ -7599,6 +7772,10 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                     subViewCustom.style.display = 'none';
                     subViewCustom.classList.remove('active');
                 }
+                if (subViewByok) {
+                    subViewByok.style.display = 'none';
+                    subViewByok.classList.remove('active');
+                }
                 if (subViewCompliance) {
                     subViewCompliance.style.display = 'flex';
                     subViewCompliance.classList.add('active');
@@ -7606,6 +7783,26 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                         renderComplianceSettingsView();
                     }
                     const backBtn = subViewCompliance.querySelector('.settings-subview-back-btn');
+                    if (backBtn) backBtn.focus();
+                }
+            } else if (viewName === 'byok') {
+                mainView.style.display = 'none';
+                mainView.classList.remove('active');
+                if (subViewCustom) {
+                    subViewCustom.style.display = 'none';
+                    subViewCustom.classList.remove('active');
+                }
+                if (subViewCompliance) {
+                    subViewCompliance.style.display = 'none';
+                    subViewCompliance.classList.remove('active');
+                }
+                if (subViewByok) {
+                    subViewByok.style.display = 'flex';
+                    subViewByok.classList.add('active');
+                    if (typeof loadByokSettings === 'function') {
+                        loadByokSettings();
+                    }
+                    const backBtn = subViewByok.querySelector('.settings-subview-back-btn');
                     if (backBtn) backBtn.focus();
                 }
             } else {
@@ -7617,10 +7814,17 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                     subViewCompliance.style.display = 'none';
                     subViewCompliance.classList.remove('active');
                 }
+                if (subViewByok) {
+                    subViewByok.style.display = 'none';
+                    subViewByok.classList.remove('active');
+                }
                 mainView.style.display = 'flex';
                 mainView.classList.add('active');
 
                 updateCustomInstructionsStatus();
+                if (typeof updateByokStatusBadge === 'function') {
+                    updateByokStatusBadge();
+                }
                 const rowBtn = document.getElementById('settings-row-custom-instructions');
                 if (rowBtn) rowBtn.focus();
             }
@@ -7738,6 +7942,111 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             }
             switchSettingsView('main');
         }
+
+        function loadByokSettings() {
+            const groqInput = document.getElementById('byok-groq-input');
+            const geminiInput = document.getElementById('byok-gemini-input');
+            const groqKey = localStorage.getItem('jarvis_byok_groq') || localStorage.getItem('groq_api_key') || '';
+            const geminiKey = localStorage.getItem('jarvis_byok_gemini') || localStorage.getItem('gemini_api_key') || '';
+
+            if (groqInput) groqInput.value = groqKey;
+            if (geminiInput) geminiInput.value = geminiKey;
+            updateByokTierBadge(Boolean(groqKey || geminiKey));
+        }
+
+        function updateByokTierBadge(hasCustomKeys) {
+            const tierBadge = document.getElementById('byok-tier-badge');
+            if (!tierBadge) return;
+            if (hasCustomKeys) {
+                tierBadge.textContent = 'BYOK Active (Custom Keys)';
+                tierBadge.className = 'compliance-badge personal';
+            } else {
+                tierBadge.textContent = 'Platform Default Keys';
+                tierBadge.className = 'compliance-badge enforced';
+            }
+        }
+
+        function saveByokKeys(showNotification = true) {
+            const groqInput = document.getElementById('byok-groq-input');
+            const geminiInput = document.getElementById('byok-gemini-input');
+            const groqVal = (groqInput?.value || '').trim();
+            const geminiVal = (geminiInput?.value || '').trim();
+
+            if (groqVal) {
+                localStorage.setItem('jarvis_byok_groq', groqVal);
+                localStorage.setItem('groq_api_key', groqVal);
+            } else {
+                localStorage.removeItem('jarvis_byok_groq');
+                localStorage.removeItem('groq_api_key');
+            }
+
+            if (geminiVal) {
+                localStorage.setItem('jarvis_byok_gemini', geminiVal);
+                localStorage.setItem('gemini_api_key', geminiVal);
+            } else {
+                localStorage.removeItem('jarvis_byok_gemini');
+                localStorage.removeItem('gemini_api_key');
+            }
+
+            updateByokTierBadge(Boolean(groqVal || geminiVal));
+            updateByokStatusBadge();
+
+            if (showNotification && typeof showTemporaryMessage === 'function') {
+                if (groqVal || geminiVal) {
+                    showTemporaryMessage('Custom API keys saved successfully.');
+                } else {
+                    showTemporaryMessage('Reset to platform default keys.');
+                }
+            }
+        }
+
+        function saveByokKeysAndReturn() {
+            saveByokKeys(true);
+            switchSettingsView('main');
+        }
+
+        function clearByokKeys() {
+            const groqInput = document.getElementById('byok-groq-input');
+            const geminiInput = document.getElementById('byok-gemini-input');
+            if (groqInput) groqInput.value = '';
+            if (geminiInput) geminiInput.value = '';
+
+            localStorage.removeItem('jarvis_byok_groq');
+            localStorage.removeItem('groq_api_key');
+            localStorage.removeItem('jarvis_byok_gemini');
+            localStorage.removeItem('gemini_api_key');
+
+            updateByokTierBadge(false);
+            updateByokStatusBadge();
+
+            if (typeof showTemporaryMessage === 'function') {
+                showTemporaryMessage('API keys reset to platform defaults.');
+            }
+        }
+
+        function updateByokStatusBadge() {
+            const badgeEl = document.getElementById('byok-status-badge');
+            if (!badgeEl) return;
+            const hasByok = Boolean(
+                (localStorage.getItem('jarvis_byok_groq') || localStorage.getItem('groq_api_key')) ||
+                (localStorage.getItem('jarvis_byok_gemini') || localStorage.getItem('gemini_api_key'))
+            );
+            badgeEl.textContent = hasByok ? 'Custom Active' : 'Platform';
+            badgeEl.classList.toggle('configured', hasByok);
+        }
+
+        function togglePasswordVisibility(inputId) {
+            const el = document.getElementById(inputId);
+            if (!el) return;
+            el.type = el.type === 'password' ? 'text' : 'password';
+        }
+
+        window.loadByokSettings = loadByokSettings;
+        window.saveByokKeys = saveByokKeys;
+        window.saveByokKeysAndReturn = saveByokKeysAndReturn;
+        window.clearByokKeys = clearByokKeys;
+        window.updateByokStatusBadge = updateByokStatusBadge;
+        window.togglePasswordVisibility = togglePasswordVisibility;
 
         function updateCustomInstructionsStatus() {
             const statusEl = document.getElementById('custom-instructions-status');
