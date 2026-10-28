@@ -1,8 +1,12 @@
 # JARVIS
-JARVIS is a browser-based assistant for chat, writing, planning, translation, weather, attachments, and everyday help.
+
+JARVIS is a browser-based assistant for chat, writing, planning, translation, weather, live vision, saved chats, local memory, source checking, attachments, and everyday help.
+
+Static frontend + Node/Vercel API routes. No frontend build step.
 
 ## File Map
 
+- `.gitignore` - Ignores local dependencies and generated files.
 - `README.md` - Documents features, setup notes, environment variables, and this file map.
 - `models.md` - Technical specification of all AI models, provider hierarchies, Vision/Voice/RAG cascades, and token speeds.
 - `system_design.md` - System architecture specification, concurrency models, circuit breakers, and RAG pipelines.
@@ -44,7 +48,11 @@ JARVIS is a browser-based assistant for chat, writing, planning, translation, we
 - `app/converse-state.js` - Converse/voice state tracker.
 - `app/emergency-sos.js` - Satellite-style Emergency SOS and distress dispatch system with precision GPS and battery telemetry.
 - `app/failure-policy.js` - Failure classification and recovery-card policy helpers.
-- `app/frontend-routing.js` - Client-side route decisions for fast answers, live search, and sensitive requests.
+- `app/frontend-routing.js` - Client-side route decisions for fast answers, live search, image generation, and sensitive requests.
+- `app/image-generation-config.js` - Dynamic configuration engine for zero-cost WebGPU image generation and client fallback.
+- `app/image-storage.js` - Local IndexedDB persistence for generated AI images and history gallery.
+- `app/image-generator-worker.js` - Background Web Worker for non-blocking WebGPU diffusion and procedural canvas rendering.
+- `app/image-generator.js` - Main-thread image generation orchestrator, worker lifecycle manager, and WebGPU detector.
 - `app/instant-replies.js` - Local instant replies for simple app/about/greeting prompts.
 - `app/memory-quality.js` - Memory cleanup, forgetting, and used-memory display helpers.
 - `app/observability.js` - Lightweight client event and diagnostic logging helpers.
@@ -60,6 +68,7 @@ JARVIS is a browser-based assistant for chat, writing, planning, translation, we
 - `tests/deterministic-checks.mjs` - Deterministic source-contract checks for key app behavior and regressions.
 - `tests/emergency-sos.test.mjs` - Unit tests for emergency contacts CRUD, distress telemetry, and dispatch URL formatting.
 - `tests/hygiene-scanner.test.mjs` - Tests for hardcoded-content hygiene scanning.
+- `tests/image-generator.test.mjs` - Unit tests for image generation routing, config, storage, and tool dispatching.
 - `tests/speech-input.test.mjs` - Unit tests for speech input behavior.
 - `tools/hardcoded-content-allowlist.mjs` - Allowlist for intentional hardcoded content scanner matches.
 - `tools/hardcoded-content-scanner.mjs` - Scanner for unwanted hardcoded user-facing content.
@@ -71,6 +80,7 @@ JARVIS is a browser-based assistant for chat, writing, planning, translation, we
 - Streaming answers, with JSON fallback for reviewed or structured routes
 - Enterprise Voice-to-Text (VTT / Dictation) with spoken punctuation parsing and tech acronym auto-capitalization
 - Modern circular send button (32px disc with vertical upward arrow `↑` and dynamic active/disabled/stop states)
+- **Zero-Cost Local & Fallback AI Image Generation**: 100% on-device WebGPU diffusion (`LCM-Dreamshaper-v7` / `SD-Turbo`, 4-step distilled diffusion, 512x512) running in a dedicated background Web Worker without blocking the 60 FPS UI thread. Zero API cost, unlimited generation, local model weight caching in IndexedDB/CacheStorage, click-to-zoom Lightbox, action bar (Regenerate, Download, Copy, Zoom, Edit), and a slide-out Image History gallery modal. Graceful zero-cost client fallback for devices without WebGPU with 0 Vercel server compute hours used.
 - Emergency SOS with emergency contacts management, precision GPS & battery telemetry, and multi-channel distress dispatch (SMS, WhatsApp, Phone, Web Share)
 - Live Vision, and file attachments (PDF, DOCX, PPTX, images, text)
 - Saved chats with search, restore, rename, pin, share, and delete
@@ -149,9 +159,18 @@ Set vars in Vercel (or local `.env`). Keep API keys server-side.
 - `JARVIS_QUALITY_CRITIC_ENABLED`, `JARVIS_STREAM_QUALITY_REVIEW`
 - `JARVIS_DEFAULT_MAX_TOKENS`, `JARVIS_FAST_MAX_TOKENS`, `JARVIS_STREAM_MAX_TOKENS`
 - `CORS_ALLOWED_ORIGINS`, `JARVIS_CSP`, `RATE_LIMIT_WINDOW_MS`, `RATE_LIMIT_MAX`, `NODE_ENV`
+- `JARVIS_BYOK_PRIVATE_KEY`, `JARVIS_BYOK_PUBLIC_KEY` (optional persistent RSA keypair for BYOK sealed box)
+
+## Bring Your Own Key (BYOK) & Sealed Secrets
+
+Users can configure personal Groq and Google Gemini API keys in Settings to unlock dedicated rate limits and bypass platform quotas:
+- **GitHub Secrets-Style Asymmetric Sealing**: Raw keys are never stored in browser storage. The browser encrypts keys client-side using native Web Crypto (`window.crypto.subtle`) with envelope encryption (ephemeral AES-256-GCM + RSA-OAEP SHA-256 with the server's public key).
+- **Write-Only UX**: Once saved, the secret cannot be read back by client scripts, extensions, or DevTools. Only a masked preview (`gsk_••••••••3a9f`) is shown.
+- **Ephemeral RAM Unsealing**: Keys are decrypted exclusively in ephemeral server execution RAM for the single inference request, with zero persistence on disk or database.
 
 ## Privacy Notes
 
 - Chat history, memory, preferences, and feedback use browser localStorage when persistence is enabled
 - Camera, microphone, and location need browser permission
-- Provider API keys must stay server-side
+- Provider API keys configured via BYOK are cryptographically sealed with RSA-OAEP + AES-256-GCM before saving
+- Platform provider API keys remain strictly server-side
