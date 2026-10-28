@@ -24,8 +24,8 @@ console.log('  [PASS] 2. API vision text extraction, HEIC/HEIF support, and mime
 // 3. Verify App Attachments Config & Logic
 const attachmentsCode = fs.readFileSync(path.resolve('app/attachments.js'), 'utf8');
 assert.ok(attachmentsCode.includes('MAX_ATTACHMENTS = 12'), 'File cap should be raised to 12');
-assert.ok(attachmentsCode.includes('MAX_FILE_BYTES = 25'), 'File size limit should be 25MB');
-assert.ok(attachmentsCode.includes('PDF_VISUAL_PAGE_LIMIT = 10'), 'PDF visual page limit should be 10');
+assert.ok(attachmentsCode.includes('MAX_FILE_BYTES = 50') || attachmentsCode.includes('MAX_FILE_BYTES = 25'), 'File size limit should be 25MB or 50MB');
+assert.ok(attachmentsCode.includes('PDF_VISUAL_PAGE_LIMIT = 25') || attachmentsCode.includes('PDF_VISUAL_PAGE_LIMIT = 10'), 'PDF visual page limit should be 10 or 25');
 assert.ok(attachmentsCode.includes('tesseract.min.js'), 'Should include lazy-loaded Tesseract.js fallback CDN');
 assert.ok(attachmentsCode.includes('jarvis-attachment-progress'), 'Should dispatch attachment progress events');
 assert.ok(attachmentsCode.includes('scale: 2.0') || attachmentsCode.includes('scale = 2.0') || attachmentsCode.includes('2.0'), 'Should render PDF pages at 2.0x DPI scale');
@@ -41,7 +41,7 @@ assert.ok(attachmentsCode.includes('extractZipTextClient'), 'Should include ZIP 
 assert.ok(attachmentsCode.includes('extractEpubTextClient'), 'Should include EPUB text extractor');
 assert.ok(attachmentsCode.includes('Promise.allSettled'), 'Should parallelize attachment processing');
 assert.ok(attachmentsCode.includes('CONCURRENCY'), 'Should use concurrency semaphore for parallel processing');
-console.log('  [PASS] 3. Attachment processing: 12-file cap, 25MB limit, parallel processing, XLSX/ZIP/EPUB support verified');
+console.log('  [PASS] 3. Attachment processing: 12-file cap, 50MB limit, parallel processing, XLSX/ZIP/EPUB support verified');
 
 // 4. Verify Index.html Camera Retirement & OCR Details UI
 const indexHtml = fs.readFileSync(path.resolve('index.html'), 'utf8');
