@@ -250,6 +250,16 @@ assert.ok(stylesCss.includes('.chat-sidebar-panel.is-dragging'), 'is-dragging CS
 assert.ok(stylesCss.includes('var(--sidebar-docked-width, 280px)'), 'Dynamic --sidebar-docked-width CSS must exist');
 console.log('  [PASS] 14. Enterprise Sidebar interaction verified (outside-click dismissal, drag handle, swipe gestures, and dynamic width)');
 
+// 15. Verify Edit Message Modal Focus Retention & Accidental Dismiss Protection
+assert.ok(indexHtml.includes('handleTextInputDialogBackdropClick'), 'handleTextInputDialogBackdropClick must be defined');
+assert.ok(indexHtml.includes('handleTextInputDialogCardClick'), 'handleTextInputDialogCardClick must be defined');
+assert.ok(indexHtml.includes('onclick="handleTextInputDialogBackdropClick(event)"'), 'Backdrop must use handleTextInputDialogBackdropClick');
+assert.ok(!indexHtml.includes('id="text-input-dialog-backdrop" class="text-input-dialog-backdrop hidden" role="presentation" onclick="if (event.target === this) closeTextInputDialog(null)"'), 'Backdrop must not directly close on accidental click');
+assert.ok(stylesCss.includes('modalAttentionPulse'), 'modalAttentionPulse animation must exist in styles.css');
+assert.ok(stylesCss.includes('.text-input-dialog.modal-attention-pulse'), '.text-input-dialog.modal-attention-pulse class must exist');
+console.log('  [PASS] 15. Edit message modal focus retention and accidental dismiss protection verified');
+
 console.log('=== All Modern AI Workspace UI Architecture Tests PASSED ===');
+
 
 
