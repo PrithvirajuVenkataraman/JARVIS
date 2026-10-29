@@ -922,6 +922,16 @@ option {
     color: #ffffff;
     box-shadow: 0 22px 70px rgba(0, 0, 0, 0.55);
     padding: 18px;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+@keyframes modalAttentionPulse {
+    0%, 100% { transform: scale(1); box-shadow: 0 22px 70px rgba(0, 0, 0, 0.55); }
+    50% { transform: scale(1.015); box-shadow: 0 22px 70px rgba(59, 130, 246, 0.45), 0 0 0 2px rgba(59, 130, 246, 0.6); }
+}
+
+.text-input-dialog.modal-attention-pulse {
+    animation: modalAttentionPulse 0.28s ease-in-out;
 }
 
 .text-input-dialog h2 {
