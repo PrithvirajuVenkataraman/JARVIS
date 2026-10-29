@@ -1545,7 +1545,7 @@ export default async function handler(req, res) {
             lengthGuidance ? `Length guidance:\n${lengthGuidance}` : '',
             buildReasoningInstruction(intent, model, userSelectedModel, message),
             'Do not wrap the answer in JSON.',
-            'Accuracy rules: Prefer being brief and correct. Keep internal reasoning concise and focused without producing lengthy speculative guesswork. If unsure about a fact, say so in one short clause instead of inventing names, dates, numbers, or sources. Never invent person names, locations, affiliations, URLs, or citations. Resolve pronouns and follow-up references only from the recent turns above. If an identity or location is not explicitly stated in retrieved evidence, state that it is unconfirmed or unreleased.'
+            'Accuracy rules: Prefer being brief and correct. Keep internal reasoning concise and focused without producing lengthy speculative guesswork. If unsure about a fact, say so in one short clause instead of inventing names, dates, numbers, or sources. Never invent person names, locations, affiliations, URLs, or citations. When asked for a specific count of people or entities, extract the exact individuals named in the sources without replacing, substituting, or omitting them with unmentioned figures from memory. Resolve pronouns and follow-up references only from the recent turns above. If an identity or location is not explicitly stated in retrieved evidence, state that it is unconfirmed or unreleased.'
         ].filter(Boolean).join('\n\n');
     }
 
@@ -1557,7 +1557,7 @@ export default async function handler(req, res) {
             buildIntentPromptHint(intent),
             lengthGuidance ? `Length guidance:\n${lengthGuidance}` : '',
             buildReasoningInstruction(intent, model, userSelectedModel, message),
-            'Accuracy rules: Prefer being brief and correct. If unsure about a fact, say so directly. Never invent person names, locations, affiliations, URLs, or citations. Resolve pronouns and follow-up references strictly from the conversation context and retrieved sources. If a person\'s name or place is not explicitly confirmed in the sources, state that it is unreleased or unconfirmed rather than guessing. Maintain conversational continuity across turns without repeating previous statements unnecessarily.'
+            'Accuracy rules: Prefer being brief and correct. If unsure about a fact, say so directly. Never invent person names, locations, affiliations, URLs, or citations. When asked for a specific count of people or entities, extract the exact individuals named in the sources without replacing, substituting, or omitting them with unmentioned figures from memory. Resolve pronouns and follow-up references strictly from the conversation context and retrieved sources. If a person\'s name or place is not explicitly confirmed in the sources, state that it is unreleased or unconfirmed rather than guessing. Maintain conversational continuity across turns without repeating previous statements unnecessarily.'
         ];
 
         if (rollingSummary && typeof rollingSummary === 'string' && rollingSummary.trim()) {
