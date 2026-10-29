@@ -1,9 +1,14 @@
 import assert from 'node:assert/strict';
-import { BoundedLiveResearchController, distillSearchQuery as distillFrontend } from '../app/bounded-live-research.js';
+import {
+    BoundedLiveResearchController,
+    distillSearchQuery as distillFrontend,
+    isRawToolCallJson as isRawToolCallJsonFront,
+    isSubstantiveLiveAnswer
+} from '../app/bounded-live-research.js';
 import { distillSearchQuery as distillBackend } from '../api/search.js';
 import { __test } from '../api/chat-groq.js';
 
-const { buildServerSystemPrompt, normalizeChatRequest } = __test || {};
+const { buildServerSystemPrompt, normalizeChatRequest, isRawToolCallJson: isRawToolCallJsonBack } = __test || {};
 
 console.log('=== Testing Deep-Synthesis Reasoning Engine Protocol Suite ===');
 
@@ -141,4 +146,30 @@ if (typeof normalizeChatRequest === 'function') {
     console.log('  [PASS] 4.1 normalizeChatRequest handles all configurations of webMode and isWebForced');
 }
 
+// Test 5: Raw Tool Call JSON Emission Detection and Validation
+console.log('\n--- Section 5: Raw Tool Call JSON Emission Detection & Fallback ---');
+const sampleToolSnippet = `{\n"tool": "web_search",\n"arguments": {\n"query": "three royals who don't need a passport"\n}\n}`;
+const markdownToolSnippet = `\`\`\`json\n{\n  "tool": "web_search",\n  "arguments": {\n    "query": "three royals who don't need a passport"\n  }\n}\n\`\`\``;
+const tagToolSnippet = `<tool_call>{"name": "web_search", "arguments": {"query": "sample"}}</tool_call>`;
+const functionToolSnippet = `<function=web_search>{"query": "sample"}</function>`;
+const validProseAnswer = `The British monarch (currently King Charles III) does not need a passport to travel internationally because British passports are issued in his name. Additionally, the Emperor and Empress of Japan (currently Emperor Naruhito and Empress Masako) do not hold or require passports under established diplomatic convention.`;
+
+for (const [name, fn] of Object.entries({ frontend: isRawToolCallJsonFront, backend: isRawToolCallJsonBack })) {
+    if (typeof fn === 'function') {
+        assert.equal(fn(sampleToolSnippet), true, `${name} failed to detect raw tool call JSON snippet`);
+        assert.equal(fn(markdownToolSnippet), true, `${name} failed to detect markdown-wrapped tool call snippet`);
+        assert.equal(fn(tagToolSnippet), true, `${name} failed to detect tool_call tag snippet`);
+        assert.equal(fn(functionToolSnippet), true, `${name} failed to detect function tag snippet`);
+        assert.equal(fn(validProseAnswer), false, `${name} falsely flagged valid prose answer as tool call`);
+        console.log(`  [PASS] 5.1 ${name} isRawToolCallJson correctly classifies raw tool calls and prose`);
+    }
+}
+
+// Ensure isSubstantiveLiveAnswer rejects tool call JSON and accepts valid prose
+assert.equal(isSubstantiveLiveAnswer(sampleToolSnippet, 'web_grounded'), false, 'isSubstantiveLiveAnswer should reject raw tool call JSON');
+assert.equal(isSubstantiveLiveAnswer(markdownToolSnippet, 'web_grounded'), false, 'isSubstantiveLiveAnswer should reject markdown-wrapped tool call JSON');
+assert.equal(isSubstantiveLiveAnswer(validProseAnswer, 'web_grounded'), true, 'isSubstantiveLiveAnswer should accept substantive prose');
+console.log('  [PASS] 5.2 isSubstantiveLiveAnswer rejects raw tool calls and accepts valid grounded prose');
+
 console.log('\n=== All Deep-Synthesis Protocol Tests Passed Successfully! ===');
+
