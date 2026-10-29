@@ -1023,6 +1023,7 @@ export default async function handler(req, res) {
             if (shouldStreamChatRequest(req.body, intent, grounding, routeDecision, isInternalSummary)) {
                 return await handleStreamingChatRequest(res, {
                     requestId,
+                    req,
                     timing,
                     systemPrompt,
                     contextBlock,
@@ -1039,7 +1040,9 @@ export default async function handler(req, res) {
                     forceReasoning: req.body?.forceReasoning === true || preferences?.forceReasoning === true,
                     selectedModel: preferences?.selectedModel || null,
                     sources: Array.isArray(req.body?.sources) ? req.body.sources : (Array.isArray(grounding?.sources) ? grounding.sources : null),
-                    ragText: typeof req.body?.ragText === 'string' ? req.body.ragText : null
+                    ragText: typeof req.body?.ragText === 'string' ? req.body.ragText : null,
+                    customGroqKey,
+                    customGeminiKey
                 });
             }
 
@@ -1606,6 +1609,7 @@ export default async function handler(req, res) {
     async function handleStreamingChatRequest(res, options = {}) {
         const {
             requestId,
+            req = null,
             timing,
             systemPrompt,
             contextBlock,
@@ -1618,7 +1622,9 @@ export default async function handler(req, res) {
             images,
             routeDecision,
             lengthPolicy,
-            selectedModel
+            selectedModel,
+            customGroqKey = '',
+            customGeminiKey = ''
         } = options;
         try {
             if (typeof res.setHeader === 'function') {
@@ -1686,7 +1692,7 @@ export default async function handler(req, res) {
         } else if (requiresLiveRetrievalBeforeStream) {
             const searchStartedAt = Date.now();
             writeSse(res, 'status', { state: 'SEARCHING', label: 'Searching...' });
-            liveRag = await buildLiveRagContext(effectiveMessage, null, context);
+            liveRag = await buildLiveRagContext(effectiveMessage, req, context);
             timing.searchMs = Date.now() - searchStartedAt;
             writeSse(res, 'status', { state: 'ANALYZING', label: 'Analyzing...' });
         }
@@ -1888,9 +1894,10 @@ export default async function handler(req, res) {
             });
             return res.end();
         } catch (error) {
+            console.error('[chat-groq] handleStreamingChatRequest error:', error);
             writeSse(res, 'error', {
-                code: 'stream_error',
-                message: 'The streaming response failed. Please try again.'
+                code: error?.code || 'stream_error',
+                message: error?.message || 'The streaming response failed. Please try again.'
             });
             return res.end();
         }
