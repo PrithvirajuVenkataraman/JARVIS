@@ -23451,8 +23451,8 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                     mode: 'rag',
                     forceLive: true,
                     chronological: true,
-                    allowDeepCrawl: true,
-                    skipAutoDeepCrawl: false,
+                    allowDeepCrawl: false,
+                    skipAutoDeepCrawl: true,
                     context: effectiveSearchContext,
                     threadState: activeLedger,
                     timeoutMs: timeoutMs || controller.searchTimeoutMs || 4500
@@ -23523,15 +23523,37 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                     const hasSources = Array.isArray(sources) && sources.length > 0;
                     const isWebGrounded = provenance === 'web_grounded' && hasSources;
 
-                    // Seamless Model Fallback: If live web search returned 0 sources or failed,
-                    // NEVER leave the user with a dead-end "Please try rephrasing" rejection.
-                    // Immediately stream the full answer using model knowledge.
-                    if (!hasSources && (provenance === 'no_sources' || provenance === 'synthesis_fallback')) {
+                    // Seamless Model Fallback: If live web search returned 0 sources, failed synthesis,
+                    // timed out, or returned only disjointed snippet fragments/disclaimers, NEVER leave
+                    // the user with an incomplete teaser or non-answer.
+                    // Seamlessly stream the full, verified answer using model knowledge while preserving sources!
+                    const isSubstantiveAnswer = isWebGrounded &&
+                        typeof content === 'string' &&
+                        content.trim().length >= 40 &&
+                        !content.includes('did not contain sufficient substantive detail') &&
+                        !content.includes('contain only headline references') &&
+                        !content.includes('could not be completed') &&
+                        !content.includes('did not return verified records');
+
+                    if (!isSubstantiveAnswer) {
                         try {
                             const currentModel = typeof getSelectedModel === 'function' ? getSelectedModel() : 'auto';
                             const selectedModel = currentModel && currentModel !== 'auto' ? currentModel : undefined;
                             let streamedFallbackText = '';
-                            const fallbackPrompt = `You are a helpful AI assistant. The live web search did not return additional external records for this request. Please answer the user's question directly, comprehensively, and accurately using your knowledge. Fulfill all requested formatting (such as Markdown tables, columns, or structured points) completely.`;
+
+                            // If we have verified sources, provide them so model can synthesize using both sources and knowledge
+                            const sourcesContext = hasSources
+                                ? sources.map((s, idx) => `[Source ${idx + 1}: ${s.title || s.domain || 'Web'}] ${s.snippet || s.extract || s.fullArticleText || ''}`).join('\n\n')
+                                : '';
+                            const fallbackPrompt = hasSources
+                                ? `You are a helpful AI assistant. Answer the user's question directly, comprehensively, and accurately using your knowledge and any relevant facts from the verified web sources below. Fulfill all requested formatting completely.\n\nVerified Web Sources:\n${sourcesContext}`
+                                : `You are a helpful AI assistant. The live web search did not return additional external records for this request. Please answer the user's question directly, comprehensively, and accurately using your knowledge. Fulfill all requested formatting (such as Markdown tables, columns, or structured points) completely.`;
+
+                            // Show sources carousel immediately if sources are present
+                            if (row && hasSources && window.JarvisLiveResearch?.renderOrUpdateSourcesCarousel) {
+                                row.style.display = '';
+                                window.JarvisLiveResearch.renderOrUpdateSourcesCarousel(row, sources);
+                            }
 
                             const streamPromise = streamChatCompletion({
                                 message: rawUserText || query,
@@ -23543,20 +23565,20 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                                     selectedModel
                                 },
                                 selectedModel,
-                                sources: [],
+                                sources: hasSources ? sources : [],
                                 intent: 'chat'
                             }, {
                                 assistantMessageId,
                                 userMessage: rawUserText || query,
-                                sources: [],
+                                sources: hasSources ? sources : [],
                                 onToken: (token) => {
                                     streamedFallbackText += token;
                                     updateStreamingAssistantMessage(assistantMessageId, streamedFallbackText, {
                                         turnId: controller.turnId,
                                         streaming: true,
-                                        sources: [],
-                                        sourceType: 'model',
-                                        provenance: 'model_fallback'
+                                        sources: hasSources ? sources : [],
+                                        sourceType: hasSources ? 'verified' : 'model',
+                                        provenance: hasSources ? 'web_grounded' : 'model_fallback'
                                     });
                                 },
                                 preserveMessageOnAbort: true
@@ -23567,14 +23589,17 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                             }
 
                             if (streamedFallbackText.trim()) {
+                                if (row && hasSources && window.JarvisLiveResearch?.renderOrUpdateSourcesCarousel) {
+                                    window.JarvisLiveResearch.renderOrUpdateSourcesCarousel(row, sources);
+                                }
                                 updateStreamingAssistantMessage(assistantMessageId, streamedFallbackText, {
                                     turnId: controller.turnId,
                                     streaming: false,
-                                    sources: [],
-                                    sourceType: 'model',
-                                    sourceLabel: 'Model knowledge',
-                                    provenance: 'model_fallback',
-                                    isFallback: true
+                                    sources: hasSources ? sources : [],
+                                    sourceType: hasSources ? 'verified' : 'model',
+                                    sourceLabel: hasSources ? `${sources.length} verified sources` : 'Model knowledge',
+                                    provenance: hasSources ? 'web_grounded' : 'model_fallback',
+                                    isFallback: !hasSources
                                 });
                                 window.JarvisInteractionState?.transition?.('IDLE');
                                 saveToHistory(rawUserText || query, streamedFallbackText);
