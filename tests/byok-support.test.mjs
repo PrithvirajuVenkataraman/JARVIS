@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { __test as chatGroqTest } from '../api/chat-groq.js';
+import chatGroqHandler, { __test as chatGroqTest } from '../api/chat-groq.js';
 import { __test as visionTest } from '../api/vision.js';
 import { applyApiSecurity, sealSecret, unsealSecret, getSealedSecretsPublicKey } from '../api/_lib/security.js';
 import { buildDiagnosticsStatus } from '../api/diagnostics.js';
@@ -229,6 +229,100 @@ console.log('\n--- Section 5: Asymmetric Sealed Secrets Cryptography (GitHub Sec
     const resolvedGeminiProviders = visionTest.getVisionProviders(reqWithSealedGemini);
     assert.equal(resolvedGeminiProviders.geminiApiKey, 'AIzaSy_sealed_vision_gemini_key_def2', 'Vision provider must unseal Gemini key from header');
     console.log('  [PASS] 5.5 Vision and Chat endpoints seamlessly unseal sealed tokens in ephemeral memory');
+}
+
+// Section 6: Streaming Chat End-to-End Handshake & BYOK Propagation
+console.log('\n--- Section 6: Streaming Chat End-to-End Handshake & BYOK Propagation ---');
+{
+    // 6.1 Stream request with sealed BYOK key should establish SSE and not throw ReferenceError
+    const chunks = [];
+    let endCalled = false;
+    const responseHeaders = {};
+    const res = {
+        setHeader(name, value) {
+            responseHeaders[name.toLowerCase()] = value;
+            return this;
+        },
+        status(code) {
+            this.statusCode = code;
+            return this;
+        },
+        json(data) {
+            this.jsonData = data;
+            return this;
+        },
+        write(chunk) {
+            chunks.push(String(chunk));
+        },
+        end() {
+            endCalled = true;
+            return this;
+        }
+    };
+
+    const sealedKey = sealSecret('gsk_streaming_byok_test_key_xyz9');
+    const req = {
+        method: 'POST',
+        headers: {
+            'content-type': 'application/json',
+            'host': 'localhost',
+            'x-groq-api-key': sealedKey
+        },
+        body: {
+            message: 'What is the capital of France?',
+            stream: true,
+            tier: 'instant'
+        }
+    };
+
+    await chatGroqHandler(req, res);
+    assert.ok(endCalled, 'Streaming response must end cleanly');
+    assert.equal(responseHeaders['content-type'], 'text/event-stream; charset=utf-8', 'Streaming must set text/event-stream');
+    const fullSse = chunks.join('');
+    assert.ok(fullSse.includes('event: meta'), 'Streaming response must include event: meta');
+    assert.ok(!fullSse.includes('"stream_error"'), 'Must not crash with unhandled stream_error / ReferenceError');
+    console.log('  [PASS] 6.1 Streaming chat endpoint unpacks BYOK key and streams SSE without ReferenceError');
+
+    // 6.2 Stream request with no keys returns clean missing_credentials event, not stream_error
+    const noKeyChunks = [];
+    const noKeyRes = {
+        setHeader() { return this; },
+        status(code) { this.statusCode = code; return this; },
+        json(data) { this.jsonData = data; return this; },
+        write(chunk) { noKeyChunks.push(String(chunk)); },
+        end() { return this; }
+    };
+    const savedKeys = process.env.GROQ_API_KEYS;
+    const savedKey = process.env.GROQ_API_KEY;
+    const savedGemini = process.env.GEMINI_API_KEY;
+    const savedGoogle = process.env.GOOGLE_API_KEY;
+    delete process.env.GROQ_API_KEYS;
+    delete process.env.GROQ_API_KEY;
+    delete process.env.GEMINI_API_KEY;
+    delete process.env.GOOGLE_API_KEY;
+
+    try {
+        const unauthenticatedReq = {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+                'host': 'localhost'
+            },
+            body: {
+                message: 'Hello assistant',
+                stream: true
+            }
+        };
+        await chatGroqHandler(unauthenticatedReq, noKeyRes);
+        const noKeySse = noKeyChunks.join('');
+        assert.ok(noKeySse.includes('"missing_credentials"'), 'Zero-key streaming request must return missing_credentials');
+        console.log('  [PASS] 6.2 Zero-key streaming request returns explicit missing_credentials event instead of stream_error');
+    } finally {
+        if (savedKeys) process.env.GROQ_API_KEYS = savedKeys;
+        if (savedKey) process.env.GROQ_API_KEY = savedKey;
+        if (savedGemini) process.env.GEMINI_API_KEY = savedGemini;
+        if (savedGoogle) process.env.GOOGLE_API_KEY = savedGoogle;
+    }
 }
 
 console.log('\n=== All BYOK Architecture Tests Passed Successfully! ===');
