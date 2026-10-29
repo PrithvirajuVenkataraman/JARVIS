@@ -192,6 +192,7 @@ export function getDomainFromUrl(url) {
 
 export function cleanTextSnippet(text) {
     return String(text || '')
+        .replace(/[\u200B-\u200D\uFEFF]/g, ' ')
         .replace(/<[^>]+>/g, ' ')
         .replace(/&nbsp;/gi, ' ')
         .replace(/&amp;/gi, '&')
@@ -645,13 +646,32 @@ export function generateSnippetFallback(query, sources = []) {
             if (/\b(?:404|500|502|503)\b/.test(sentence)) continue;
             if (sentence.replace(/[^a-zA-Z0-9]/g, '').length < 3) continue;
 
-            // Reject interrogative questions, rhetorical questions, or clickbait teasers
-            if (/[?]/.test(sentence) || /^(?:who\s+(?:are|is|was|were)|what\s+(?:are|is|was|were)|how\s+to|can\s+you\s+guess)\b/i.test(sentence)) continue;
+            // Reject fragments under 2 words or standalone publisher/domain tokens
+            const sentenceWords = sentence.split(/\s+/).filter(Boolean);
+            if (sentenceWords.length < 2) continue;
+            if (sentenceWords.length <= 2 && /\.[a-z]{2,6}\.?$/i.test(sentence.replace(/\.$/, ''))) continue;
 
-            // Reject sentence echoing the user query
+            // Strip trailing publisher / brand / domain suffix from the end of a sentence
+            sentence = sentence
+                .replace(/\s+[-—–|·:]\s+[A-Za-z0-9\s.]{2,40}\.?$/, '')
+                .replace(/\s+[a-z0-9_-]+\.[a-z]{2,6}\.?$/i, '')
+                .trim();
+
+            // Reject interrogative questions, rhetorical questions, or clickbait teasers
+            if (/[?]/.test(sentence) || /^(?:who|what|where|when|why|how|can|could|did|do|does|will|would|is|are|was|were)\b/i.test(sentence)) continue;
+
+            // Reject sentence echoing the user query without adding substantive facts
             const normQ = cleanQ.toLowerCase().replace(/[^a-z0-9]/g, '');
             const normalizedSentence = sentence.toLowerCase().replace(/[^a-z0-9]/g, '');
             if (normQ && (normalizedSentence === normQ || normQ.includes(normalizedSentence) || (normalizedSentence.length > 20 && normQ.length > 20 && normalizedSentence.includes(normQ)))) continue;
+
+            const stopWords = new Set(['the', 'a', 'an', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'as', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'can', 'could', 'should', 'would', 'may', 'might', 'must', 'will', 'shall', 'that', 'this', 'these', 'those', 'it', 'its', 'only', 'some', 'any', 'who', 'what', 'where', 'when', 'why', 'how', 'they', 'them', 'their', 'we', 'you', 'he', 'she', 'without', 'about']);
+            const sentenceContentWords = sentence.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length >= 2 && !stopWords.has(w));
+            const queryContentWords = new Set(cleanQ.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length >= 2 && !stopWords.has(w)));
+            if (sentenceContentWords.length > 0 && sentenceContentWords.length <= 8) {
+                const newWords = sentenceContentWords.filter(w => !queryContentWords.has(w));
+                if (newWords.length === 0) continue;
+            }
 
             // Reject standalone publisher names or domain labels
             if (dynamicPublishers.has(normalizedSentence) || dynamicPublishers.has(sentence.toLowerCase().trim())) continue;
@@ -663,7 +683,7 @@ export function generateSnippetFallback(query, sources = []) {
             })) continue;
 
             // Reject clickbait / call-to-action
-            if (/\b(?:read more|click here|find out here|full article|details inside|watch video|image credit|photo:)\b/i.test(sentence)) continue;
+            if (/\b(?:read more|click here|find out here|learn more|see more|discover more|explore more|subscribe|newsletter|sign up|full article|details inside|watch video|image credit|photo:|telegram channel|follow us)\b/i.test(sentence)) continue;
 
             // Reject any sentence that matches or closely resembles a source title
             if (sources.some(s => {
@@ -708,35 +728,63 @@ export function generateSnippetFallback(query, sources = []) {
 }
 
 /**
+ * Evaluates whether a live search synthesis response is complete, substantive, and verified.
+ * Rejects teaser fragments, query echoes, and limitation disclaimers.
+ */
+export function isSubstantiveLiveAnswer(content, provenance = PROVENANCE_MODES.WEB_GROUNDED) {
+    if (provenance !== PROVENANCE_MODES.WEB_GROUNDED) return false;
+    if (!content || typeof content !== 'string') return false;
+    const trimmed = content.trim();
+    if (trimmed.length < 40) return false;
+    if (trimmed.endsWith('?')) return false;
+    const lower = trimmed.toLowerCase();
+    if (lower.includes('did not contain sufficient substantive detail')) return false;
+    if (lower.includes('contain only headline references')) return false;
+    if (lower.includes('could not be completed')) return false;
+    if (lower.includes('did not return verified records')) return false;
+    if (lower.includes('no verified live web records were returned')) return false;
+    return true;
+}
+
+/**
  * Dynamically extracts publisher names, domain labels, and title brand tags from candidate sources.
  * Replaces static hardcoded publisher lists with zero-hardcoding metadata extraction.
  */
 export function extractDynamicPublisherBlocklist(sources = []) {
     const publisherBlocklist = new Set();
+    const addClean = (str) => {
+        if (!str || typeof str !== 'string') return;
+        const s = str.toLowerCase().trim();
+        if (s.length >= 3) {
+            publisherBlocklist.add(s);
+            const alphanumericOnly = s.replace(/[^a-z0-9]/g, '');
+            if (alphanumericOnly.length >= 3) publisherBlocklist.add(alphanumericOnly);
+        }
+    };
+
     for (const s of sources) {
         if (!s) continue;
         if (s.domain) {
             const dom = s.domain.toLowerCase().replace(/^www\./, '');
-            publisherBlocklist.add(dom);
+            addClean(dom);
             const noTld = dom.replace(/\.[a-z]{2,}$/i, '');
-            if (noTld.length >= 3) publisherBlocklist.add(noTld);
+            addClean(noTld);
             const parts = dom.split('.');
             for (const p of parts) {
                 if (p.length >= 4 && !['com', 'org', 'net', 'gov', 'edu', 'io'].includes(p)) {
-                    publisherBlocklist.add(p);
+                    addClean(p);
                 }
             }
         }
-        if (s.sourceLabel) publisherBlocklist.add(String(s.sourceLabel).toLowerCase().trim());
-        if (s.source) publisherBlocklist.add(String(s.source).toLowerCase().trim());
-        if (s.publisher) publisherBlocklist.add(String(s.publisher).toLowerCase().trim());
+        addClean(s.sourceLabel);
+        addClean(s.source);
+        addClean(s.publisher);
 
         // Extract publisher suffix from title (e.g. "Title - Brand Name", "Title | Brand Name")
         const title = String(s.title || '');
         const brandMatch = title.match(/(?:[-–—|·:]\s*)([A-Za-z0-9\s.]{2,40})$/);
         if (brandMatch) {
-            const brand = brandMatch[1].toLowerCase().trim();
-            if (brand.length >= 3) publisherBlocklist.add(brand);
+            addClean(brandMatch[1]);
         }
     }
     return publisherBlocklist;
@@ -1308,6 +1356,7 @@ export class BoundedLiveResearchController {
                 this.telemetry.totalDurationMs = this.telemetry.t_start
                     ? Math.round(this.telemetry.t_completed - this.telemetry.t_start)
                     : 0;
+                this.telemetry.degradedAnomaly = Boolean(fallback || !isSubstantiveLiveAnswer(content, provenance));
                 this.transition(RESEARCH_STATES.COMPLETE, { provenance }, uiCallbacks);
 
                 const finalPayload = {
@@ -1714,6 +1763,7 @@ if (typeof window !== 'undefined') {
         isAuthoritativeResearchSource,
         evaluateSourceQualityForEarlySynthesis,
         generateSnippetFallback,
+        isSubstantiveLiveAnswer,
         generateRelatedResearchQuestions,
         classifyQueryDomainSemantic,
         extractCoreTopicSemantic,
