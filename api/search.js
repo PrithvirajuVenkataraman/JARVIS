@@ -2505,16 +2505,30 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
             rerankModel = rerankResult.model || rerankModel;
             allResults = rerankResult.ranked.slice(0, Math.max(limit, 8));
             const queryDateIntent = extractQueryDateIntent(normalizedQuery);
-            if (isLiveRag || queryDateIntent.type !== 'neutral' || /\b(?:today|tonight|yesterday|yesterday's|today's|latest|current|recently|recent|breaking|newest|what('?s|\s+is)\s+new|updates?|hours?\s+ago|days?\s+ago|past\s+24\s+hours?|past\s+48\s+hours?|this\s+week|past\s+week|last\s+week|this\s+month|past\s+month|news|rate\s+cut|inflation|stocks?|markets?|ceasefire|war|election)\b/i.test(normalizedQuery)) {
+            if (options.forceChronological === true || queryDateIntent.type !== 'neutral' || /\b(?:today|tonight|yesterday|yesterday's|today's|latest|current|recently|recent|breaking|newest|what('?s|\s+is)\s+new|updates?|hours?\s+ago|days?\s+ago|past\s+24\s+hours?|past\s+48\s+hours?|this\s+week|past\s+week|last\s+week|this\s+month|past\s+month|news|rate\s+cut|inflation|stocks?|markets?|ceasefire|war|election)\b/i.test(normalizedQuery)) {
                 const now = Date.now();
                 const NINETY_DAYS_MS = 90 * 24 * 3600 * 1000;
                 allResults.sort((a, b) => {
+                    const scoreA = Number(a.score ?? a.rrfScore ?? 0);
+                    const scoreB = Number(b.score ?? b.rrfScore ?? 0);
                     const timeA = a.publishedMs || parseDocumentDate(a) || 0;
                     const timeB = b.publishedMs || parseDocumentDate(b) || 0;
-                    if (timeA && timeB) return timeB - timeA;
-                    if (timeA && !timeB) return (now - timeA) < NINETY_DAYS_MS ? -1 : 1;
-                    if (!timeA && timeB) return (now - timeB) < NINETY_DAYS_MS ? 1 : -1;
-                    return 0;
+                    if (timeA && timeB) {
+                        if (Math.abs(scoreA - scoreB) >= 10 || (scoreA > 0 && scoreB > 0 && (scoreA >= scoreB * 1.3 || scoreB >= scoreA * 1.3))) {
+                            return scoreB - scoreA;
+                        }
+                        if (timeA !== timeB) return timeB - timeA;
+                        return scoreB - scoreA;
+                    }
+                    if (timeA && !timeB) {
+                        if (scoreB >= scoreA + 10 || (scoreB > 0 && scoreA > 0 && scoreB >= scoreA * 1.3)) return scoreB - scoreA;
+                        return (now - timeA) < NINETY_DAYS_MS ? -1 : 1;
+                    }
+                    if (!timeA && timeB) {
+                        if (scoreA >= scoreB + 10 || (scoreA > 0 && scoreB > 0 && scoreA >= scoreB * 1.3)) return scoreB - scoreA;
+                        return (now - timeB) < NINETY_DAYS_MS ? 1 : -1;
+                    }
+                    return scoreB - scoreA;
                 });
             }
         }
@@ -4508,6 +4522,10 @@ STRICT ANTI-HEDGING & DIRECT FACT GROUNDING RULES:
 - Never invent missing dates: If the available evidence establishes the person's identity and current role but does not establish when they took office, omit the date. Never substitute a previous officeholder's start date or assume a term began in a particular year.
 - Preserve temporal context: Distinguish between appointment, election, oath-taking, and the actual start of a term when those dates differ.
 - Do not add unnecessary numbers: Answer directly. Do not add numbered citations, arbitrary numbering, tenure durations, statistics, or other numerical details unless they are necessary and supported.
+10. COUNTED LIST FIDELITY & ZERO SUBSTITUTION:
+- When a query asks for a specific count of individuals or entities (e.g. "Three persons...", "Five countries..."), extract the EXACT entities explicitly named in the evidence blocks to satisfy that count.
+- NEVER substitute, replace, or drop an explicitly named individual (such as an Empress, spouse, consort, co-leader, or minister) in favor of an unmentioned external figure from memory.
+- If the evidence does not provide the identities, set "verified": false, "confidence": 0.0, "answer": "". NEVER invent or assume different names based on external general knowledge.
 
 User question: ${JSON.stringify(query)}
 Evidence JSON:
@@ -5254,14 +5272,10 @@ export function rankSources(query, results, options = {}) {
     );
 
     const isChronological = Boolean(
-        options.chronological === true ||
         options.forceChronological === true ||
-        options.liveMode === true ||
-        options.forceLive === true ||
         (!isHistorical && (
             (dateIntent && (dateIntent.type === 'immediate' || dateIntent.type === 'recent_week' || dateIntent.type === 'current' || dateIntent.type === 'target_month')) ||
-            /\b(?:today|tonight|yesterday|yesterday's|today's|latest|current|recently|recent|breaking|newest|what('?s|\s+is)\s+new|updates?|hours?\s+ago|days?\s+ago|past\s+24\s+hours?|past\s+48\s+hours?|this\s+week|past\s+week|last\s+week|this\s+month|past\s+month|this\s+year|news|rate\s+cut|inflation|stocks?|markets?|ceasefire|war|election)\b/i.test(query) ||
-            scored.some(s => s.publishedMs && (now - s.publishedMs) < 30 * 24 * 3600 * 1000)
+            /\b(?:today|tonight|yesterday|yesterday's|today's|latest|current|recently|recent|breaking|newest|what('?s|\s+is)\s+new|updates?|hours?\s+ago|days?\s+ago|past\s+24\s+hours?|past\s+48\s+hours?|this\s+week|past\s+week|last\s+week|this\s+month|past\s+month|this\s+year|news|rate\s+cut|inflation|stocks?|markets?|ceasefire|war|election)\b/i.test(query)
         ))
     );
 
@@ -5293,19 +5307,20 @@ export function rankSources(query, results, options = {}) {
                 const timeB = b.publishedMs || 0;
                 if (timeA && timeB) {
                     const scoreDiff = Math.abs(a.score - b.score);
-                    const isSameWindow = Math.abs(timeA - timeB) < 7 * 24 * 3600 * 1000;
-                    if (scoreDiff >= 10 && (isSameWindow || a.score >= b.score * 2 || b.score >= a.score * 2)) {
+                    if (scoreDiff >= 10 || (a.score > 0 && b.score > 0 && (a.score >= b.score * 1.3 || b.score >= a.score * 1.3))) {
                         return b.score - a.score;
                     }
                     if (timeA !== timeB) return timeB - timeA;
                     return b.score - a.score;
                 }
                 if (timeA && !timeB) {
+                    if (b.score >= a.score + 10 || (b.score > 0 && a.score > 0 && b.score >= a.score * 1.3)) return b.score - a.score;
                     const isRecentA = (now - timeA) < NINETY_DAYS_MS;
                     if (isRecentA) return -1;
                     return b.score - a.score;
                 }
                 if (!timeA && timeB) {
+                    if (a.score >= b.score + 10 || (a.score > 0 && b.score > 0 && a.score >= b.score * 1.3)) return b.score - a.score;
                     const isRecentB = (now - timeB) < NINETY_DAYS_MS;
                     if (isRecentB) return 1;
                     return b.score - a.score;
@@ -5569,7 +5584,11 @@ function isRelatedToQuery(query, item) {
         return isRelatedCurrentTopicSource(query, hay);
     }
     if (/^(trusted_news|public_news)$/i.test(String(item?.sourceType || '')) && item?.date) {
-        return terms.some(term => hay.includes(term));
+        const meaningful = terms.filter(t => !/^(?:the|and|for|from|with|are|was|were|today|yesterday|news|latest|current|recent|who|what|where|when|why|how|can|could|will|would|world|people|person|persons|about)$/i.test(t) && t.length >= 3);
+        const testTerms = meaningful.length >= 2 ? meaningful : terms.filter(t => t.length >= 3);
+        if (!testTerms.length) return true;
+        const matched = testTerms.filter(term => hay.includes(term));
+        return matched.length >= Math.min(testTerms.length, Math.max(2, Math.ceil(testTerms.length * 0.5)));
     }
     return isStrongGenericQuerySourceMatch(query, hay);
 }
