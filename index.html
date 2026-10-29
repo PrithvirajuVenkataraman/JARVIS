@@ -4591,6 +4591,9 @@ function sanitizeWeakModelAnswer(answerText, userMessage) {
     if (!raw) return '';
     const normUser = String(userMessage || '').trim().toLowerCase();
     if (raw.toLowerCase() === normUser) return '';
+    if (window.JarvisLiveResearch?.isRawToolCallJson?.(raw) || /^\s*(?:```(?:json)?\s*)?\{\s*"(?:tool|function|tool_name)"\s*:\s*"[^"]+"/i.test(raw)) {
+        return '';
+    }
     const rawLower = raw.toLowerCase();
     const directQuery = isDirectExplainerQuery(userMessage) || isConciseDirectFactQuery(userMessage);
     const freshnessQuery = hasExplicitFreshnessLanguage(userMessage) ||
@@ -4643,6 +4646,9 @@ function answerAsksForMissingAttachment(answerText) {
 function isWeakAssistantAnswerForRetry(answerText, userMessage = '') {
     const answer = String(answerText || '').trim();
     if (!answer) return true;
+    if (window.JarvisLiveResearch?.isRawToolCallJson?.(answer) || /^\s*(?:```(?:json)?\s*)?\{\s*"(?:tool|function|tool_name)"\s*:\s*"[^"]+"/i.test(answer)) {
+        return true;
+    }
     const lower = answer.toLowerCase();
     if (answerAsksForMissingAttachment(answer)) return true;
 
@@ -4677,7 +4683,8 @@ async function resolveFinalAssistantAnswer(userMessage, answerText) {
     const raw = String(answerText || '').trim();
     const normUser = String(userMessage || '').trim().toLowerCase();
     const isEcho = Boolean(raw && raw.toLowerCase() === normUser);
-    if (raw && !isEcho && !asksUserToProvideSources(raw)) return raw;
+    const isToolCall = Boolean(window.JarvisLiveResearch?.isRawToolCallJson?.(raw) || /^\s*(?:```(?:json)?\s*)?\{\s*"(?:tool|function|tool_name)"\s*:\s*"[^"]+"/i.test(raw));
+    if (raw && !isEcho && !asksUserToProvideSources(raw) && !isToolCall) return raw;
 
     const safeAnswer = sanitizeWeakModelAnswer(answerText, userMessage);
     if (safeAnswer && safeAnswer.toLowerCase() !== normUser) return safeAnswer;
@@ -23516,6 +23523,9 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                 },
                 onToken: ({ streamedText }) => {
                     if (window.JarvisLiveResearch?.activeController !== controller || controller.isTerminal) return;
+                    if (window.JarvisLiveResearch?.isRawToolCallJson?.(streamedText) || /^\s*\{\s*"(?:tool|function|tool_name)"\s*:\s*"[^"]+"/i.test(String(streamedText || '').trim())) {
+                        return;
+                    }
                     hideThinkingIndicator();
                     const row = getRow();
                     if (row) row.style.display = '';
@@ -23543,6 +23553,8 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                         : (isWebGrounded &&
                             typeof content === 'string' &&
                             content.trim().length >= 40 &&
+                            !window.JarvisLiveResearch?.isRawToolCallJson?.(content) &&
+                            !/^\s*\{\s*"(?:tool|function|tool_name)"\s*:\s*"[^"]+"/i.test(content.trim()) &&
                             !content.includes('did not contain sufficient substantive detail') &&
                             !content.includes('contain only headline references') &&
                             !content.includes('could not be completed') &&
@@ -23599,6 +23611,9 @@ Act as a deep-synthesis reasoning engine. Answer the user's input by performing 
                                 sources: hasSources ? sources : [],
                                 onToken: (token) => {
                                     streamedFallbackText += token;
+                                    if (window.JarvisLiveResearch?.isRawToolCallJson?.(streamedFallbackText) || /^\s*(?:```(?:json)?\s*)?\{\s*"(?:tool|function|tool_name)"\s*:\s*"[^"]+"/i.test(streamedFallbackText.trim())) {
+                                        return;
+                                    }
                                     updateStreamingAssistantMessage(assistantMessageId, streamedFallbackText, {
                                         turnId: controller.turnId,
                                         streaming: true,
@@ -23614,7 +23629,11 @@ Act as a deep-synthesis reasoning engine. Answer the user's input by performing 
                                 await streamPromise;
                             }
 
-                            if (streamedFallbackText.trim()) {
+                            const validFallback = streamedFallbackText.trim() &&
+                                !window.JarvisLiveResearch?.isRawToolCallJson?.(streamedFallbackText) &&
+                                !/^\s*(?:```(?:json)?\s*)?\{\s*"(?:tool|function|tool_name)"\s*:\s*"[^"]+"/i.test(streamedFallbackText.trim());
+
+                            if (validFallback) {
                                 if (row && hasSources && window.JarvisLiveResearch?.renderOrUpdateSourcesCarousel) {
                                     window.JarvisLiveResearch.renderOrUpdateSourcesCarousel(row, sources);
                                 }
