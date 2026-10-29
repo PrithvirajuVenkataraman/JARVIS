@@ -5161,7 +5161,8 @@ async function streamChatCompletion(payload, options = {}) {
         signal,
         body: JSON.stringify({
             ...payload,
-            webMode: typeof getWebSearchMode === 'function' ? getWebSearchMode() : 'auto',
+            webMode: payload?.webMode || (typeof getWebSearchMode === 'function' ? getWebSearchMode() : 'auto'),
+            isWebForced: Boolean(payload?.isWebForced ?? ((payload?.webMode || (typeof getWebSearchMode === 'function' ? getWebSearchMode() : 'auto')) === 'force')),
             stream: true
         })
     });
@@ -5863,8 +5864,12 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
                 })(),
                 selectedModel: ((Array.isArray(requestOptions?.images) && requestOptions.images.length > 0) || (Array.isArray(requestOptions?.grounding?.images) && requestOptions.grounding.images.length > 0)) && (window.APP_CONFIG || APP_CONFIG)?.models?.find(m => m.id === selectedModel)?.supportsMedia === false
                     ? 'gemini-2.5-flash'
-                    : (requestOptions?.selectedModel || (selectedModel !== 'auto' ? selectedModel : undefined))
+                    : (requestOptions?.selectedModel || (selectedModel !== 'auto' ? selectedModel : undefined)),
+                webMode: typeof getWebSearchMode === 'function' ? getWebSearchMode() : _composerWebMode,
+                isWebForced: (typeof getWebSearchMode === 'function' ? getWebSearchMode() : _composerWebMode) === 'force'
             },
+            webMode: typeof getWebSearchMode === 'function' ? getWebSearchMode() : _composerWebMode,
+            isWebForced: (typeof getWebSearchMode === 'function' ? getWebSearchMode() : _composerWebMode) === 'force',
             intent: requestOptions?.intent || (isDeepReasoningActive ? 'deep_reasoning' : (requestOptions?.fastExplainer === true ? 'fast_explainer' : (isFastSimpleRequest ? 'fast_simple' : 'chat'))),
             tier: effectiveTier,
             forceReasoning: shouldForceReasoning,
@@ -15727,8 +15732,8 @@ ${code}
             if (_composerWebMode === 'force') {
                 btn.classList.add('is-web-forced');
                 if (label) label.textContent = 'ON';
-                btn.title = 'Live Web Search (ON — click to turn off)';
-                btn.setAttribute('aria-label', 'Live Web Search ON');
+                btn.title = 'Live Web Search: Deep-Synthesis Research (ON — click to turn off)';
+                btn.setAttribute('aria-label', 'Live Web Search ON — Deep-Synthesis Research');
             } else {
                 btn.classList.add('is-web-disabled');
                 if (label) label.textContent = 'OFF';
@@ -16467,7 +16472,7 @@ Answer the user directly and conversationally based on the quoted context.`;
                         sendTrace.routeStartedAt = performance.now();
                         const isWebForced = (typeof getWebSearchMode === 'function' ? getWebSearchMode() === 'force' : _composerWebMode === 'force') || Boolean(submission?.forceWebSearch);
                         if (isWebForced && isFactSearchEnabled()) {
-                            const webHandled = await handleBoundedLiveResearchQuery(normalizedOutgoingText, outgoingText, { submission });
+                            const webHandled = await handleBoundedLiveResearchQuery(normalizedOutgoingText, outgoingText, { submission, isWebForced });
                             if (webHandled) {
                                 sendTrace.routeEndedAt = performance.now();
                                 return;
@@ -23435,12 +23440,14 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
         return activeRow;
     };
 
+    const isWebForced = Boolean(options?.isWebForced ?? (typeof getWebSearchMode === 'function' ? getWebSearchMode() === 'force' : _composerWebMode === 'force'));
     return new Promise((resolve) => {
         controller.execute({
             query,
             userText: userDisplayQuery,
             context: conversationContext || window.JarvisConversation?.buildContext?.({ maxTurns: 6 }) || [],
             assistantMessageId,
+            isWebForced,
             fetchSearchFn: async ({ query: fetchQuery, context: searchContext, signal, timeoutMs, threadState }) => {
                 const effectiveSearchContext = searchContext || conversationContext || window.JarvisConversation?.buildContext?.({ maxTurns: 6 }) || [];
                 const activeLedger = threadState || window.JarvisConversation?.getActiveLedger?.() || null;
@@ -23470,12 +23477,16 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                         userName: typeof userName !== 'undefined' ? userName : '',
                         responseLength: typeof responseMode !== 'undefined' ? responseMode : 'normal',
                         customSystemPrompt: prompt,
-                        selectedModel
+                        selectedModel,
+                        webMode: isWebForced ? 'force' : 'auto',
+                        isWebForced
                     },
                     selectedModel,
                     sources: sources || [],
                     ragText: prompt,
-                    intent: 'chat'
+                    intent: isWebForced ? 'deep_reasoning' : 'chat',
+                    webMode: isWebForced ? 'force' : 'auto',
+                    isWebForced
                 }, {
                     signal,
                     assistantMessageId,
@@ -23547,9 +23558,18 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                             const sourcesContext = hasSources
                                 ? sources.map((s, idx) => `[Source ${idx + 1}: ${s.title || s.domain || 'Web'}] ${s.snippet || s.extract || s.fullArticleText || ''}`).join('\n\n')
                                 : '';
+                            const deepSynthesisFallback = isWebForced ? `
+
+DEEP-SYNTHESIS REASONING ENGINE PROTOCOL (MANUAL WEB SEARCH ACTIVATED):
+Act as a deep-synthesis reasoning engine. Answer the user's input by performing comprehensive cross-referencing, multi-hop lookups, and logical deduction:
+1. DECONSTRUCT THE INPUT: Never rely on a single source or a single surface-level match. Break the query down into its core parameters, underlying logic, and distinct sub-components. Address each part thoroughly.
+2. PIVOT ON INCOMPLETE DATA: If initial findings or evidence reference a count, a category, an error code, a doctrine, or a structural concept without providing the specific contents, names, or values, do not halt execution. Treat those surface findings as clues and scour all available evidence and knowledge to deduce and extract the missing data points.
+3. DEDUCTIVE SYNTHESIS: Connect independent datasets logically. If Dataset A defines a structural rule, system architecture, or conditional logic, and Dataset B contains the live variables or current entities that fit into that logic, synthesize them to deliver the final, specific solution.
+4. EPISTEMIC COMPLETENESS: Never conclude that an answer is "unavailable" or "unverifiable" simply because a single summary source or initial data layer lacks the complete picture. Drill down and synthesize across primary documentation and adjacent verified frameworks to fully resolve the query.` : '';
+
                             const fallbackPrompt = hasSources
-                                ? `You are a helpful AI assistant. Answer the user's question directly, comprehensively, and accurately using your knowledge and any relevant facts from the verified web sources below. Fulfill all requested formatting completely.\n\nVerified Web Sources:\n${sourcesContext}`
-                                : `You are a helpful AI assistant. The live web search did not return additional external records for this request. Please answer the user's question directly, comprehensively, and accurately using your knowledge. Fulfill all requested formatting (such as Markdown tables, columns, or structured points) completely.`;
+                                ? `You are a helpful AI assistant. Answer the user's question directly, comprehensively, and accurately using your knowledge and any relevant facts from the verified web sources below. Fulfill all requested formatting completely.${deepSynthesisFallback}\n\nVerified Web Sources:\n${sourcesContext}`
+                                : `You are a helpful AI assistant. The live web search did not return additional external records for this request. Please answer the user's question directly, comprehensively, and accurately using your knowledge. Fulfill all requested formatting (such as Markdown tables, columns, or structured points) completely.${deepSynthesisFallback}`;
 
                             // Show sources carousel immediately if sources are present
                             if (row && hasSources && window.JarvisLiveResearch?.renderOrUpdateSourcesCarousel) {
@@ -23564,11 +23584,15 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                                     userName: typeof userName !== 'undefined' ? userName : '',
                                     responseLength: typeof responseMode !== 'undefined' ? responseMode : 'normal',
                                     customSystemPrompt: fallbackPrompt,
-                                    selectedModel
+                                    selectedModel,
+                                    webMode: isWebForced ? 'force' : 'auto',
+                                    isWebForced
                                 },
                                 selectedModel,
                                 sources: hasSources ? sources : [],
-                                intent: 'chat'
+                                intent: isWebForced ? 'deep_reasoning' : 'chat',
+                                webMode: isWebForced ? 'force' : 'auto',
+                                isWebForced
                             }, {
                                 assistantMessageId,
                                 userMessage: rawUserText || query,
@@ -24974,7 +24998,8 @@ function isWakeGreetingText(text) {
                     frontendRoute
                 });
                 const handled = await handleBoundedLiveResearchQuery(cleanText, text, {
-                    routeDecision: frontendRoute
+                    routeDecision: frontendRoute,
+                    isWebForced: _activeWebMode === 'force' || Boolean(frontendRoute?.explicitWeb)
                 });
                 if (handled) return;
             }
