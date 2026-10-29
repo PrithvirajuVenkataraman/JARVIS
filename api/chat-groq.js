@@ -2358,6 +2358,47 @@ export default async function handler(req, res) {
         }
     }
 
+    function isRawToolCallJson(text) {
+        if (!text || typeof text !== 'string') return false;
+        const trimmed = text.trim();
+        if (!trimmed) return false;
+        const clean = trimmed
+            .replace(/^```(?:json)?\s*/i, '')
+            .replace(/\s*```$/i, '')
+            .trim();
+
+        if (/^<tool_call>[\s\S]*<\/tool_call>$/i.test(clean)) return true;
+        if (/^<function=[^>]+>[\s\S]*<\/function>$/i.test(clean)) return true;
+
+        if (clean.startsWith('{') && clean.endsWith('}')) {
+            try {
+                const parsed = JSON.parse(clean);
+                if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                    if (typeof parsed.tool === 'string' && (parsed.arguments || parsed.args || parsed.input || parsed.query)) {
+                        return true;
+                    }
+                    if (typeof parsed.tool_name === 'string' || typeof parsed.function === 'string') {
+                        return true;
+                    }
+                    if (typeof parsed.name === 'string' && (parsed.arguments || parsed.parameters)) {
+                        return true;
+                    }
+                    if (Array.isArray(parsed.tool_calls) || Array.isArray(parsed.tools)) {
+                        return true;
+                    }
+                }
+            } catch (_) {
+                if (/^\{\s*"(?:tool|function|tool_name|name)"\s*:\s*"[^"]+"/i.test(clean)) {
+                    return true;
+                }
+            }
+        }
+        if (/^\{\s*"(?:tool|tool_name|function)"\s*:\s*"[^"]+"/i.test(clean)) {
+            return true;
+        }
+        return false;
+    }
+
     function logUpstreamModelFailure(provider, model, error) {
         console.warn('[chat-groq] upstream model attempt failed', {
             provider,
@@ -2492,7 +2533,7 @@ export default async function handler(req, res) {
                             if (reasoning) {
                                 text = '<think>\n' + reasoning + '\n</think>\n' + text;
                             }
-                            if (text) {
+                            if (text && !isRawToolCallJson(text)) {
                                 recordKeySuccess(key);
                                 advanceGroqKeyRotation();
                                 return { ok: true, parsedResponse: parseModelText(text), modelUsed: model, provider: 'groq' };
@@ -2710,7 +2751,7 @@ export default async function handler(req, res) {
                         onDelta: perModelDelta,
                         options
                     });
-                    if (result.ok) {
+                    if (result?.ok && !isRawToolCallJson(result?.text)) {
                         advanceGroqKeyRotation();
                         return result;
                     }
@@ -2942,7 +2983,8 @@ export default async function handler(req, res) {
             const isIncompleteHeaderOrList = /(?:^|\n)\s*(?:\d+\.|\*|-|#{1,4})\s+[^\n]{0,60}$/.test(cleanContent) && finishReason === 'length';
             const isTruncatedShort = finishReason === 'length' && cleanContent.length < 200;
             const isUnclosedMarkdownFragment = /^[*#_`"']{1,4}[^*#_`"'\n]+$/.test(cleanContent) && cleanContent.length < 60;
-            if (cleanContent.length > 0 && !isIncompleteHeaderOrList && !isTruncatedShort && !isUnclosedMarkdownFragment) {
+            const isToolCallJson = isRawToolCallJson(cleanContent);
+            if (cleanContent.length > 0 && !isIncompleteHeaderOrList && !isTruncatedShort && !isUnclosedMarkdownFragment && !isToolCallJson) {
                 recordKeySuccess(apiKey);
                 return { ok: true, provider: 'groq', modelUsed: model, text };
             }
@@ -4814,9 +4856,8 @@ Capabilities:
 
 Style & Language Rules:
 - Languages: Kannada (ಕನ್ನಡ), Tamil (தமிழ்), Telugu (తెలుగు), Malayalam (മലയാളം), Hindi (हिन्दी), English, and phonetic forms (Kanglish, Tanglish). Match input language naturally.
-- Start directly with the answer. Avoid greeting preambles and meta-talk.
-- NO META-TALK RULE: Never start with commentary about search snippets. State the direct answer immediately.
-- Conversational Closure: Conclude with at most one contextual follow-up step when useful; for short factual queries, answer directly without closing questions. NEVER end with generic robotic phrases like "Would you like to know more?", "Is there anything else I can help with?", or "Hope that helps!".
+- Start directly with the answer. Avoid greeting preambles. NO META-TALK RULE: Never start with commentary about search snippets. State the direct answer immediately.
+- Conversational Closure: Conclude with at most one contextual follow-up when useful; for short facts, answer directly. NEVER end with generic robotic phrases like "Would you like to know more?", "Is there anything else I can help with?", or "Hope that helps!".
 - Standalone Entity Queries: For standalone names/concepts, provide a direct 2-4 sentence factual overview.
 - Continuity: Seamlessly continue discussions on follow-ups ("explain more", "why", "it").
 - Word Count: Follow explicit word-count constraints strictly. Do not use em dashes or en dashes.
@@ -4825,11 +4866,11 @@ ZERO-HALLUCINATION & EPISTEMIC GROUNDING (CRITICAL):
 - Never invent people, dates, prices, statistics, quotes, URLs, citations, code APIs, model versions, or event outcomes. If uncertain, state "I am not sure" rather than guessing.
 - Ground answers strictly in retrieved source text. When answering conversational follow-ups (e.g. suspects, names, locations, updates), stay anchored to context facts and never fabricate unstated identities or places; if unreleased, explicitly state it. Present facts in natural prose without emitting bracket citations (e.g. [1], [2]).
 - Music, Songs & Lyrics (CRITICAL):
-  * NEVER fabricate or hallucinate song lyrics, lines, or verses. When asked about songs or lyrics, provide verified credits (film/album, composer, singers, lyricist) and brief thematic context. NEVER dump full transliterated verses, line-by-line lyric breakdowns, or stanzas from memory. Instead, embed a clean markdown link [View Full Lyrics](url) using the top verified lyrics URL from retrieved search results or falling back to a structured Google search link (https://www.google.com/search?q=<song>+<artist>+lyrics).
+  * NEVER fabricate or hallucinate song lyrics, lines, or verses. Provide verified credits and brief context. NEVER dump full transliterated verses, line-by-line breakdowns, or stanzas from memory. Instead, embed a clean markdown link [View Full Lyrics](url) using the top verified lyrics URL from search results or a structured Google search link (https://www.google.com/search?q=<song>+<artist>+lyrics).
   * Strict music credits & soundtrack attribution: NEVER guess or conflate composers, singers, lyricists, or soundtracks across films or albums (e.g. Chinna Chinna Aasai is by A.R. Rahman for Roja, not Deva). Every music credit must be strictly accurate; if unsure, state uncertainty rather than guessing.
 - For OCR/attachments: base data strictly on provided text; flag unreadable or missing fields.
 - Image Descriptions & Portraits: Base descriptions strictly on visible pixels. NEVER perform facial recognition or guess personal identities; describe visible appearance, attire, and surroundings respectfully.
-- Parallel Search MCP Tools: Invoke web_search and web_fetch when external facts are needed.
+- Zero Tool Emitters (CRITICAL): Never emit raw tool calls or schemas (such as {"tool": "web_search", ...} or <tool_call>). External web evidence and live context are already retrieved and provided directly in prompt. Output the factual prose answer directly.
 
 Tone, Safety & Boundaries:
 - Match tone: rigorous for engineering/math; conversational for chat.
@@ -5330,6 +5371,7 @@ Respond conversationally and naturally.`;
     }
 
 export const __test = {
+        isRawToolCallJson,
         buildGroundedUserMessage,
         buildServerSystemPrompt,
         composeFinalPrompt,
