@@ -966,6 +966,8 @@ export default async function handler(req, res) {
                 sanitizedMessage = piiCheck.text;
             }
 
+            preferences.webMode = preferences.webMode || String(req.body?.webMode || '').trim().toLowerCase();
+            preferences.isWebForced = Boolean(preferences.isWebForced || req.body?.isWebForced || req.body?.webMode === 'force' || preferences.webMode === 'force');
             const systemPrompt = buildServerSystemPrompt(preferences, intent);
             const contextBlock = buildCompactedContextBlock(context, {
                 rollingSummary: req.body?.rollingSummary || null,
@@ -4769,8 +4771,9 @@ export default async function handler(req, res) {
     function buildServerSystemPrompt(preferences = {}, intent = '') {
         const userName = String(preferences?.userName || '').trim().slice(0, 80);
         const customSystemPrompt = normalizeCustomSystemPrompt(preferences?.customSystemPrompt);
+        const isWebForced = Boolean(preferences?.isWebForced || preferences?.webMode === 'force');
 
-        if (String(intent || '') === 'fast_simple') {
+        if (String(intent || '') === 'fast_simple' && !isWebForced) {
             return `You are JARVIS, a helpful text-first assistant.${userName ? ` The user's name is ${userName}.` : ''}
 
 Style: Direct, accurate, natural, and concise. State facts directly without greeting preambles, meta-talk, or filler. Never end with generic robotic offers like "Would you like to know more?".
@@ -4840,6 +4843,13 @@ ${customSystemPrompt ? `- User custom reply instructions: ${customSystemPrompt}
 ${learnedDirectives.length > 0 ? `
 LEARNED USER PREFERENCES & HEURISTICS (ADAPTIVE MEMORY):
 ${learnedDirectives.map(d => `- ${d}`).join('\n')}` : ''}
+${isWebForced ? `
+DEEP-SYNTHESIS REASONING ENGINE PROTOCOL (MANUAL LIVE WEB SEARCH ACTIVE):
+Act as a deep-synthesis reasoning engine. Answer the user's input by performing comprehensive cross-referencing, multi-hop lookups, and logical deduction:
+1. DECONSTRUCT THE INPUT: Never rely on a single source or a single surface-level match. Break the query down into its core parameters, underlying logic, and distinct sub-components. Address each part thoroughly.
+2. PIVOT ON INCOMPLETE DATA: If your initial search or knowledge retrieval yields an incomplete framework—such as referencing a count, a category, an error code, a doctrine, or a structural concept without providing the specific contents, names, or values—do not halt execution. Treat those surface findings as new search parameters and clues. Pivot immediately across all evidence layers to extract the missing data points.
+3. DEDUCTIVE SYNTHESIS: Connect independent datasets logically. If Dataset A defines a structural rule, system architecture, or conditional logic, and Dataset B contains the live variables or current entities that fit into that logic, synthesize them to deliver the final, specific solution.
+4. EPISTEMIC RESOLUTION: Never conclude that an answer is "unavailable" or "unverifiable" simply because a single summary source or initial data layer lacks the complete picture. Drill down to primary documentation, distinct data layers, or adjacent verified frameworks to fully resolve the query.` : ''}
 ${intent === 'deep_reasoning' ? `
 DEEP REASONING & RECURSIVE VERIFICATION DIRECTIVE:
 - Execute rigorous step-by-step deduction.
@@ -4914,9 +4924,14 @@ Respond conversationally and naturally.`;
                 selectedModel: normalizeSelectedModel(body.preferences.selectedModel),
                 learnedDirectives: Array.isArray(body.preferences.learnedDirectives)
                     ? body.preferences.learnedDirectives.filter(d => typeof d === 'string' && d.trim()).slice(0, 8)
-                    : []
+                    : [],
+                webMode: String(body.preferences.webMode || body.webMode || '').trim().toLowerCase(),
+                isWebForced: Boolean(body.preferences.isWebForced ?? body.isWebForced ?? (body.preferences.webMode === 'force' || body.webMode === 'force'))
             }
-            : {};
+            : {
+                webMode: String(body?.webMode || '').trim().toLowerCase(),
+                isWebForced: Boolean(body?.isWebForced || body?.webMode === 'force')
+            };
         const intent = normalizeIntent(body.intent);
         const grounding = normalizeGrounding(body.grounding, intent);
         if ((intent.startsWith('selection_') || intent === 'verify_answer') && !grounding) {
