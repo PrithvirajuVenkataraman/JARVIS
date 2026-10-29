@@ -616,6 +616,7 @@ export function generateSnippetFallback(query, sources = []) {
 
     const facts = [];
     const seenSentences = new Set();
+    const dynamicPublishers = extractDynamicPublisherBlocklist(sources);
 
     for (const s of effectiveSources.slice(0, 6)) {
         const textParts = [];
@@ -644,8 +645,27 @@ export function generateSnippetFallback(query, sources = []) {
             if (/\b(?:404|500|502|503)\b/.test(sentence)) continue;
             if (sentence.replace(/[^a-zA-Z0-9]/g, '').length < 3) continue;
 
-            // Reject any sentence that matches or closely resembles a source title
+            // Reject interrogative questions, rhetorical questions, or clickbait teasers
+            if (/[?]/.test(sentence) || /^(?:who\s+(?:are|is|was|were)|what\s+(?:are|is|was|were)|how\s+to|can\s+you\s+guess)\b/i.test(sentence)) continue;
+
+            // Reject sentence echoing the user query
+            const normQ = cleanQ.toLowerCase().replace(/[^a-z0-9]/g, '');
             const normalizedSentence = sentence.toLowerCase().replace(/[^a-z0-9]/g, '');
+            if (normQ && (normalizedSentence === normQ || normQ.includes(normalizedSentence) || (normalizedSentence.length > 20 && normQ.length > 20 && normalizedSentence.includes(normQ)))) continue;
+
+            // Reject standalone publisher names or domain labels
+            if (dynamicPublishers.has(normalizedSentence) || dynamicPublishers.has(sentence.toLowerCase().trim())) continue;
+            if (sources.some(s => {
+                const domainBase = String(s.domain || '').toLowerCase().replace(/^www\./, '').split('.')[0];
+                const publisher = String(s.publisher || s.source || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+                return (domainBase && normalizedSentence === domainBase) ||
+                       (publisher && normalizedSentence === publisher);
+            })) continue;
+
+            // Reject clickbait / call-to-action
+            if (/\b(?:read more|click here|find out here|full article|details inside|watch video|image credit|photo:)\b/i.test(sentence)) continue;
+
+            // Reject any sentence that matches or closely resembles a source title
             if (sources.some(s => {
                 const normTitle = cleanTextSnippet(s.title || '').toLowerCase().replace(/[^a-z0-9]/g, '');
                 return normTitle && (normalizedSentence === normTitle || normalizedSentence.includes(normTitle));
