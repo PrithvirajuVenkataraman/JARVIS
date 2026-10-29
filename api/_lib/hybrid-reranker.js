@@ -392,14 +392,10 @@ export async function hybridRerank(query, documents = [], options = {}) {
     );
 
     const isChronological = Boolean(
-        options.chronological === true ||
         options.forceChronological === true ||
-        options.liveMode === true ||
-        options.forceLive === true ||
         (!isHistorical && (
             (dateIntent && (dateIntent.type === 'immediate' || dateIntent.type === 'recent_week' || dateIntent.type === 'current' || dateIntent.type === 'target_month')) ||
-            /\b(?:today|tonight|yesterday|yesterday's|today's|latest|current|recently|recent|breaking|newest|what('?s|\s+is)\s+new|updates?|hours?\s+ago|days?\s+ago|past\s+24\s+hours?|past\s+48\s+hours?|this\s+week|past\s+week|last\s+week|this\s+month|past\s+month|this\s+year|news|rate\s+cut|inflation|stocks?|markets?|ceasefire|war|election)\b/i.test(queryText) ||
-            fused.some(f => f.publishedMs && (now - f.publishedMs) < 30 * 24 * 3600 * 1000)
+            /\b(?:today|tonight|yesterday|yesterday's|today's|latest|current|recently|recent|breaking|newest|what('?s|\s+is)\s+new|updates?|hours?\s+ago|days?\s+ago|past\s+24\s+hours?|past\s+48\s+hours?|this\s+week|past\s+week|last\s+week|this\s+month|past\s+month|this\s+year|news|rate\s+cut|inflation|stocks?|markets?|ceasefire|war|election)\b/i.test(queryText)
         ))
     );
 
@@ -430,20 +426,21 @@ export async function hybridRerank(query, documents = [], options = {}) {
                     return bSubstantive ? 1 : -1;
                 }
                 if (timeA && timeB) {
-                    const isSameWindow = Math.abs(timeA - timeB) < 7 * 24 * 3600 * 1000;
                     const rrfRatio = a.rrfScore > 0 && b.rrfScore > 0 ? (b.rrfScore / a.rrfScore) : 1;
-                    if (isSameWindow && (rrfRatio >= 1.25 || rrfRatio <= 0.8)) {
+                    if (rrfRatio >= 1.25 || rrfRatio <= 0.8) {
                         return b.rrfScore - a.rrfScore;
                     }
                     if (timeA !== timeB) return timeB - timeA;
                     return b.rrfScore - a.rrfScore;
                 }
                 if (timeA && !timeB) {
+                    if (b.rrfScore >= a.rrfScore * 1.2) return b.rrfScore - a.rrfScore;
                     const isRecentA = (now - timeA) < NINETY_DAYS_MS;
                     if (isRecentA) return -1;
                     return b.rrfScore - a.rrfScore;
                 }
                 if (!timeA && timeB) {
+                    if (a.rrfScore >= b.rrfScore * 1.2) return b.rrfScore - a.rrfScore;
                     const isRecentB = (now - timeB) < NINETY_DAYS_MS;
                     if (isRecentB) return 1;
                     return b.rrfScore - a.rrfScore;
@@ -468,19 +465,26 @@ export async function hybridRerank(query, documents = [], options = {}) {
                     candidatePool.sort((a, b) => {
                         const timeA = a.publishedMs || 0;
                         const timeB = b.publishedMs || 0;
+                        const scoreA = Number(a.score ?? a.rrfScore ?? 0);
+                        const scoreB = Number(b.score ?? b.rrfScore ?? 0);
                         if (timeA && timeB) {
+                            if (Math.abs(scoreA - scoreB) >= 10 || (scoreA > 0 && scoreB > 0 && (scoreA >= scoreB * 1.3 || scoreB >= scoreA * 1.3))) {
+                                return scoreB - scoreA;
+                            }
                             if (timeA !== timeB) return timeB - timeA;
-                            return (b.score ?? b.rrfScore ?? 0) - (a.score ?? a.rrfScore ?? 0);
+                            return scoreB - scoreA;
                         }
                         if (timeA && !timeB) {
+                            if (scoreB >= scoreA + 10 || (scoreB > 0 && scoreA > 0 && scoreB >= scoreA * 1.3)) return scoreB - scoreA;
                             const isRecentA = (now - timeA) < NINETY_DAYS_MS;
                             return isRecentA ? -1 : 1;
                         }
                         if (!timeA && timeB) {
+                            if (scoreA >= scoreB + 10 || (scoreA > 0 && scoreB > 0 && scoreA >= scoreB * 1.3)) return scoreB - scoreA;
                             const isRecentB = (now - timeB) < NINETY_DAYS_MS;
                             return isRecentB ? 1 : -1;
                         }
-                        return (b.score ?? b.rrfScore ?? 0) - (a.score ?? a.rrfScore ?? 0);
+                        return scoreB - scoreA;
                     });
                 }
                 return candidatePool;
