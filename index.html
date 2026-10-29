@@ -23527,13 +23527,15 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                     // timed out, or returned only disjointed snippet fragments/disclaimers, NEVER leave
                     // the user with an incomplete teaser or non-answer.
                     // Seamlessly stream the full, verified answer using model knowledge while preserving sources!
-                    const isSubstantiveAnswer = isWebGrounded &&
-                        typeof content === 'string' &&
-                        content.trim().length >= 40 &&
-                        !content.includes('did not contain sufficient substantive detail') &&
-                        !content.includes('contain only headline references') &&
-                        !content.includes('could not be completed') &&
-                        !content.includes('did not return verified records');
+                    const isSubstantiveAnswer = typeof window.JarvisLiveResearch?.isSubstantiveLiveAnswer === 'function'
+                        ? window.JarvisLiveResearch.isSubstantiveLiveAnswer(content, provenance) && hasSources
+                        : (isWebGrounded &&
+                            typeof content === 'string' &&
+                            content.trim().length >= 40 &&
+                            !content.includes('did not contain sufficient substantive detail') &&
+                            !content.includes('contain only headline references') &&
+                            !content.includes('could not be completed') &&
+                            !content.includes('did not return verified records'));
 
                     if (!isSubstantiveAnswer) {
                         try {
@@ -23641,6 +23643,7 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                         totalDurationMs: telemetry.t_completed ? Math.round(telemetry.t_completed - telemetry.t_start) : null,
                         searchCutoffMs: telemetry.t_search_cutoff ? Math.round(telemetry.t_search_cutoff - telemetry.t_start) : null,
                         sourcesCount: sources ? sources.length : 0,
+                        degradedAnomaly: Boolean(telemetry?.degradedAnomaly || !isSubstantiveAnswer),
                         searchError: telemetry.searchError || null,
                         httpStatus: telemetry.httpStatus || null,
                         providerTiming: telemetry.providerTiming || null,
