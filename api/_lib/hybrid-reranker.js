@@ -424,7 +424,17 @@ export async function hybridRerank(query, documents = [], options = {}) {
             fused.sort((a, b) => {
                 const timeA = a.publishedMs || 0;
                 const timeB = b.publishedMs || 0;
+                const aSubstantive = Boolean(a.fullArticleText && a.fullArticleText.length >= 80);
+                const bSubstantive = Boolean(b.fullArticleText && b.fullArticleText.length >= 80);
+                if (aSubstantive !== bSubstantive) {
+                    return bSubstantive ? 1 : -1;
+                }
                 if (timeA && timeB) {
+                    const isSameWindow = Math.abs(timeA - timeB) < 7 * 24 * 3600 * 1000;
+                    const rrfRatio = a.rrfScore > 0 && b.rrfScore > 0 ? (b.rrfScore / a.rrfScore) : 1;
+                    if (isSameWindow && (rrfRatio >= 1.25 || rrfRatio <= 0.8)) {
+                        return b.rrfScore - a.rrfScore;
+                    }
                     if (timeA !== timeB) return timeB - timeA;
                     return b.rrfScore - a.rrfScore;
                 }
