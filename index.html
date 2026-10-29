@@ -16872,6 +16872,8 @@ async function fetchLiveSearchJson(query, options = {}) {
                 chronological: options.chronological !== undefined ? Boolean(options.chronological) : true,
                 dateContext: options.dateContext || undefined,
                 dateFilter: options.dateFilter || undefined,
+                allowDeepCrawl: options.allowDeepCrawl !== undefined ? Boolean(options.allowDeepCrawl) : true,
+                skipAutoDeepCrawl: Boolean(options.skipAutoDeepCrawl),
                 timeoutMs: searchTimeout
             })
         });
@@ -23465,8 +23467,8 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                     mode: 'rag',
                     forceLive: true,
                     chronological: true,
-                    allowDeepCrawl: false,
-                    skipAutoDeepCrawl: true,
+                    allowDeepCrawl: true,
+                    skipAutoDeepCrawl: false,
                     context: effectiveSearchContext,
                     threadState: activeLedger,
                     timeoutMs: timeoutMs || controller.searchTimeoutMs || 4500
