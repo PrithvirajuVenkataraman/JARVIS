@@ -228,7 +228,7 @@ export function computeBM25Scores(query, documents = [], options = {}) {
         const doc = list[i];
         const text = typeof doc === 'string'
             ? doc
-            : `${doc.title || ''} ${doc.description || ''} ${doc.text || ''} ${doc.fullArticleText || ''}`;
+            : `${doc.title || ''} ${doc.snippet || ''} ${doc.description || ''} ${doc.extract || ''} ${doc.text || ''} ${doc.fullArticleText || ''}`;
         index.addDocument(i, text, doc);
     }
 
