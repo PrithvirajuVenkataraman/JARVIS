@@ -178,8 +178,8 @@
             </div>
         </section>
     </div>
-    <div id="text-input-dialog-backdrop" class="text-input-dialog-backdrop hidden" role="presentation" onclick="if (event.target === this) closeTextInputDialog(null)">
-        <section class="text-input-dialog" role="dialog" aria-modal="true" aria-labelledby="text-input-dialog-title">
+    <div id="text-input-dialog-backdrop" class="text-input-dialog-backdrop hidden" role="presentation" onclick="handleTextInputDialogBackdropClick(event)">
+        <section class="text-input-dialog" role="dialog" aria-modal="true" aria-labelledby="text-input-dialog-title" onclick="handleTextInputDialogCardClick(event)">
             <h2 id="text-input-dialog-title">Edit message</h2>
             <textarea id="text-input-dialog-value" rows="4" aria-label="Edit message"></textarea>
             <div class="text-input-dialog-actions">
@@ -29332,6 +29332,35 @@ function closeConfirmActionDialog(confirmed = false) {
     if (resolver) resolver(confirmed === true);
 }
 
+let textInputKeyHandler = null;
+
+function handleTextInputDialogBackdropClick(event) {
+    if (event.target !== event.currentTarget) return;
+    event.preventDefault();
+    event.stopPropagation();
+    // Prevent accidental dismiss: refocus the textarea so the user's cursor remains in the edit box
+    const input = document.getElementById('text-input-dialog-value');
+    const dialog = document.querySelector('.text-input-dialog');
+    if (input) {
+        input.focus();
+    }
+    if (dialog) {
+        dialog.classList.remove('modal-attention-pulse');
+        void dialog.offsetWidth; // trigger reflow
+        dialog.classList.add('modal-attention-pulse');
+    }
+}
+
+function handleTextInputDialogCardClick(event) {
+    // If the click is on an action button, let it trigger normally
+    if (event.target.closest('.text-input-dialog-btn')) return;
+    // Otherwise, ensure the textarea retains focus so accidental clicks on card padding/title don't blur the edit box
+    const input = document.getElementById('text-input-dialog-value');
+    if (input && document.activeElement !== input) {
+        input.focus();
+    }
+}
+
 function openTextInputDialog(options = {}) {
     const backdrop = document.getElementById('text-input-dialog-backdrop');
     const title = document.getElementById('text-input-dialog-title');
@@ -29341,6 +29370,38 @@ function openTextInputDialog(options = {}) {
     input.value = String(options.value || '');
     input.setAttribute('aria-label', String(options.label || options.title || 'Edit message'));
     backdrop.classList.remove('hidden');
+
+    if (textInputKeyHandler) {
+        document.removeEventListener('keydown', textInputKeyHandler, true);
+    }
+
+    textInputKeyHandler = (e) => {
+        if (backdrop.classList.contains('hidden')) return;
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            e.stopPropagation();
+            closeTextInputDialog(null);
+        } else if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+            e.preventDefault();
+            e.stopPropagation();
+            submitTextInputDialog();
+        } else if (e.key === 'Tab') {
+            const focusable = backdrop.querySelectorAll('textarea, button');
+            if (focusable.length > 0) {
+                const first = focusable[0];
+                const last = focusable[focusable.length - 1];
+                if (e.shiftKey && document.activeElement === first) {
+                    e.preventDefault();
+                    last?.focus();
+                } else if (!e.shiftKey && document.activeElement === last) {
+                    e.preventDefault();
+                    first?.focus();
+                }
+            }
+        }
+    };
+    document.addEventListener('keydown', textInputKeyHandler, true);
+
     return new Promise(resolve => {
         textInputDialogResolver = resolve;
         setTimeout(() => {
@@ -29351,6 +29412,10 @@ function openTextInputDialog(options = {}) {
 }
 
 function closeTextInputDialog(value) {
+    if (textInputKeyHandler) {
+        document.removeEventListener('keydown', textInputKeyHandler, true);
+        textInputKeyHandler = null;
+    }
     const backdrop = document.getElementById('text-input-dialog-backdrop');
     backdrop?.classList.add('hidden');
     const resolver = textInputDialogResolver;
@@ -29361,6 +29426,20 @@ function closeTextInputDialog(value) {
 function submitTextInputDialog() {
     const input = document.getElementById('text-input-dialog-value');
     closeTextInputDialog(input ? input.value : '');
+}
+
+// Global safeguard: prevent background prompt box from stealing focus while edit dialog is active
+if (typeof document !== 'undefined') {
+    document.addEventListener('focusin', (e) => {
+        const editBackdrop = document.getElementById('text-input-dialog-backdrop');
+        if (editBackdrop && !editBackdrop.classList.contains('hidden')) {
+            const editDialog = editBackdrop.querySelector('.text-input-dialog');
+            if (editDialog && !editDialog.contains(e.target)) {
+                e.preventDefault();
+                document.getElementById('text-input-dialog-value')?.focus();
+            }
+        }
+    }, true);
 }
 
 async function editMessage(button) {
