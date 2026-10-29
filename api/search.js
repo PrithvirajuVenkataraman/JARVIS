@@ -1749,7 +1749,8 @@ export function extractCleanArticleText(html, url = '') {
         .replace(/<footer\b[^<]*(?:(?!<\/footer>)<[^<]*)*<\/footer>/gi, ' ')
         .replace(/<svg\b[^<]*(?:(?!<\/svg>)<[^<]*)*<\/svg>/gi, ' ')
         .replace(/<form\b[^<]*(?:(?!<\/form>)<[^<]*)*<\/form>/gi, ' ')
-        .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, ' ');
+        .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, ' ')
+        .replace(/<div\b[^>]*class=["'][^"']*\b(?:nav|navbar|menu|header|topbar|sidebar|footer|language|lang-picker|social-share|cookie|banner)\b[^"']*["'][^>]*>[\s\S]*?<\/div>/gi, ' ');
 
     let bodyText = '';
     const articleMatch = cleaned.match(/<article\b[^>]*>([\s\S]*?)<\/article>/i)
@@ -1761,12 +1762,18 @@ export function extractCleanArticleText(html, url = '') {
     if (pMatches.length > 0) {
         const paragraphs = pMatches.map(p => {
             return p.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-        }).filter(p => p.length > 30);
+        }).filter(p => p.length > 30 && !/\b(?:phone|call us|advertise|contact us|\+\d{1,4}\s*\(\d+\)|all rights reserved|terms of service|privacy policy)\b/i.test(p));
         bodyText = paragraphs.slice(0, 10).join('\n\n');
     }
 
     if (!bodyText) {
-        bodyText = sourceHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+        const textBlocks = sourceHtml
+            .replace(/<div\b[^>]*class=["'][^"']*\b(?:nav|navbar|menu|header|topbar|sidebar|footer|language|lang-picker|social-share|cookie|banner)\b[^"']*["'][^>]*>[\s\S]*?<\/div>/gi, ' ')
+            .replace(/<[^>]+>/g, ' ')
+            .split(/\s{3,}|\n+/)
+            .map(b => b.replace(/\s+/g, ' ').trim())
+            .filter(b => b.length >= 60 && /[.!?]/.test(b) && !/\b(?:call us|advertise|contact us|\+\d{1,4}\s*\(\d+\)|all rights reserved)\b/i.test(b));
+        bodyText = textBlocks.slice(0, 8).join('\n\n');
     }
 
     bodyText = bodyText.slice(0, 2500).trim();
@@ -1809,25 +1816,30 @@ export async function enrichSearchResultsWithDeepCrawl(results, limit = 3, optio
         const item = candidates[i];
         if (!item) return;
         if (res.status === 'fulfilled' && res.value?.bodyText && res.value.bodyText.length >= 80) {
-            item.fullArticleText = res.value.bodyText;
-            item.extract = res.value.bodyText;
-            item.snippet = res.value.bodyText.slice(0, 1200);
-            item.description = res.value.bodyText.slice(0, 1200);
-            if (res.value.pubDate && !item.date) {
-                item.date = res.value.pubDate;
-            }
-            item.deepCrawled = true;
-            item.accessible = true;
+            const cleanBody = res.value.bodyText.trim();
+            const hasSentences = cleanBody.split(/[.!?]\s+/).length >= 2;
+            const isBoilerplate = /\b(?:contact us|advertise|call us|jobs|subscribe|telegram channel|\+\d{2,4}\s*\(\d+\))\b/i.test(cleanBody.slice(0, 200));
+            if (!isBoilerplate && hasSentences) {
+                item.fullArticleText = cleanBody;
+                item.extract = cleanBody;
+                item.snippet = cleanBody.slice(0, 1200);
+                item.description = cleanBody.slice(0, 1200);
+                if (res.value.pubDate && !item.date) {
+                    item.date = res.value.pubDate;
+                }
+                item.deepCrawled = true;
+                item.accessible = true;
 
-            // Backpropagate rich content to matching headline wrappers in results
-            for (const r of results) {
-                if (r !== item && (r.domain === item.domain || (r.title && item.title && (r.title.includes(item.domain) || item.title.includes(r.domain))))) {
-                    if (!r.fullArticleText || r.fullArticleText.length < 80) {
-                        r.fullArticleText = res.value.bodyText;
-                        r.extract = res.value.bodyText;
-                        r.snippet = res.value.bodyText.slice(0, 1200);
-                        r.description = res.value.bodyText.slice(0, 1200);
-                        r.deepCrawled = true;
+                // Backpropagate rich content to matching headline wrappers in results
+                for (const r of results) {
+                    if (r !== item && (r.domain === item.domain || (r.title && item.title && (r.title.includes(item.domain) || item.title.includes(r.domain))))) {
+                        if (!r.fullArticleText || r.fullArticleText.length < 80) {
+                            r.fullArticleText = cleanBody;
+                            r.extract = cleanBody;
+                            r.snippet = cleanBody.slice(0, 1200);
+                            r.description = cleanBody.slice(0, 1200);
+                            r.deepCrawled = true;
+                        }
                     }
                 }
             }
@@ -5324,7 +5336,7 @@ export function scoreSearchResult(item, terms, query = '') {
     if (item?.sourceType === 'reference_lookup') score -= 12;
     if (item?.sourceType === 'archive_lookup') score -= 16;
     if (item?.fullArticleText && item.fullArticleText.length >= 80) score += 20;
-    if (item?.url && item.url.includes('news.google.com/rss/articles/')) score -= 8;
+    if (item?.url && item.url.includes('news.google.com/rss/articles/') && (!item?.fullArticleText || item.fullArticleText.length < 80)) score -= 20;
 
     // Tier 0: Direct Primary Source Engine.
     // If the search result domain belongs directly to the subject/brand/entity being asked about,
@@ -6194,12 +6206,21 @@ export function isLeadershipOrRoleTerm(term = '') {
     return /\b(?:c[efot]o|chief\s+(?:executive|financial|operating|technology)\s+officer|managing\s+director|chair(?:person|man)?|(?:prime|chief)\s+minister|[cp]m|president|governor|mayor|chancellor|premier|minister|director|head\s+of\s+(?:state|government)|leader|civic\s+leader|captain|coach|commander|founder|co-founder|secretary[\s-]+general|monarch|king|queen|emperor|pope)\b/i.test(term);
 }
 
+const NON_ANCHOR_WORDS = new Set([
+    'what', 'which', 'how', 'why', 'who', 'whom', 'whose', 'where', 'when',
+    'does', 'did', 'do', 'the', 'and', 'for', 'with', 'new', 'can', 'could',
+    'would', 'should', 'will', 'are', 'was', 'were', 'is', 'am', 'been', 'being',
+    'they', 'them', 'their', 'theirs', 'this', 'that', 'these', 'those',
+    'there', 'here', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
+    'first', 'second', 'third', 'last', 'next', 'many', 'much', 'some', 'any', 'all', 'both', 'each'
+]);
+
 export function cleanSubQueryClause(clause) {
     if (!clause) return '';
     let text = String(clause).trim();
     text = text.replace(/^(?:(?:can|could|would)\s+you\s+(?:please\s+)?(?:tell\s+me|show\s+me|find|explain)|please\s+(?:tell\s+me|find|explain)|tell\s+me\s+about|explain\s+how|explain\s+what|describe\s+how|describe)\s+/i, '');
-    text = text.replace(/^(?:(?:and|or)\s+)?(?:what|which|how|why|when|where)\s+(?:(?:\w+)\s+)?(?:did|do|does|is|are|was|were|can|will|would|could)\s+(?:the\s+)?/i, '');
-    text = text.replace(/^(?:(?:and|or)\s+)?(?:which|what|how|why|when|where|does|do|did|is|are|was|were|can|could|will|would)\s+(?:the\s+)?/i, '');
+    text = text.replace(/^(?:(?:and|or)\s+)?(?:who|whom|whose|which|what|how|why|when|where)\s+(?:(?:\w+)\s+)?(?:did|do|does|is|are|was|were|can|will|would|could)\s+(?:the\s+)?/i, '');
+    text = text.replace(/^(?:(?:and|or)\s+)?(?:who|whom|whose|which|what|how|why|when|where|does|do|did|is|are|was|were|can|could|will|would)\s+(?:the\s+)?/i, '');
     text = text.replace(/^(?:the\s+|a\s+|an\s+)/i, '');
     text = text.replace(/[?.!,:;]+$/g, '').trim();
     return text.replace(/\s+/g, ' ').trim();
@@ -6215,8 +6236,18 @@ export function extractTopicAnchors(query) {
     for (const token of prominent) {
         const lower = token.toLowerCase();
         const isMonth = /^(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)$/i.test(lower);
-        if (!isMonth && token.length >= 3 && !/^(?:what|which|how|why|does|did|the|and|for|with|new|can)$/i.test(lower) && !anchors.some(a => a.toLowerCase().includes(lower))) {
+        if (!isMonth && token.length >= 3 && !NON_ANCHOR_WORDS.has(lower) && !anchors.some(a => a.toLowerCase().includes(lower))) {
             anchors.push(token);
+        }
+    }
+    if (anchors.length === 0) {
+        const words = distilled.split(/\s+/).map(w => w.replace(/[^a-zA-Z0-9]/g, '')).filter(Boolean);
+        for (const w of words) {
+            const lower = w.toLowerCase();
+            if (lower.length >= 4 && !NON_ANCHOR_WORDS.has(lower) && !anchors.some(a => a.toLowerCase().includes(lower))) {
+                anchors.push(w);
+                if (anchors.length >= 3) break;
+            }
         }
     }
     return anchors;
@@ -6241,6 +6272,12 @@ export function decomposeMultiPartQuery(rawQuery) {
         let cleaned = cleanSubQueryClause(seg);
         if (!cleaned || cleaned.split(/\s+/).length < 2) continue;
 
+        // Check if cleaned segment is solely anaphoric pronouns or question filler (e.g. "who they are", "what is it")
+        const contentTokens = cleaned.toLowerCase().split(/\s+/).filter(w => !NON_ANCHOR_WORDS.has(w) && w.length >= 3);
+        if (contentTokens.length === 0) {
+            continue;
+        }
+
         if (i > 0 && anchors.length > 0) {
             const hasAnchor = anchors.some(a => cleaned.toLowerCase().includes(a.toLowerCase()));
             if (!hasAnchor) {
@@ -6250,6 +6287,7 @@ export function decomposeMultiPartQuery(rawQuery) {
         }
         decomposed.push(cleaned.replace(/\s+/g, ' ').trim());
     }
+    if (decomposed.length <= 1) return [];
     return Array.from(new Set(decomposed));
 }
 
@@ -6387,17 +6425,19 @@ export function buildDeterministicSearchQueries(query) {
 
     // 5. Dynamic question aspect and temporal queries
     const aspect = extractQuestionAspect(normalized, subject);
-    const cleanCore = aspect && aspect !== 'overview' ? `${subject} ${aspect}` : subject;
+    const hasAspectInSubject = Boolean(aspect && aspect !== 'overview' && subject.toLowerCase().includes(aspect.toLowerCase()));
+    const aspectSuffix = hasAspectInSubject ? '' : (aspect && aspect !== 'overview' ? ` ${aspect}` : '');
+    const cleanCore = `${subject}${aspectSuffix}`.trim();
     const temporalPlan = planTemporalSearchQueries(cleanCore);
 
     const candidates = [
-        `${subject} ${aspect}`.trim(),
-        `${subject} official ${aspect}`.trim(),
-        `${subject} ${aspect} verified`.trim(),
+        `${subject}${aspectSuffix}`.trim(),
+        hasAspectInSubject ? `${subject} official`.trim() : `${subject} official ${aspect}`.trim(),
+        hasAspectInSubject ? `${subject} verified`.trim() : `${subject} ${aspect} verified`.trim(),
         ...temporalPlan.queries
     ];
 
-    if (aspect !== 'overview') {
+    if (aspect !== 'overview' && !hasAspectInSubject) {
         candidates.push(`${subject} ${aspect} details`.trim());
     }
 
@@ -6428,7 +6468,8 @@ function isDatedChangingFactSearchQuery(query) {
 }
 
 function extractSearchSubject(query) {
-    const normalized = normalizeSearchQuery(query);
+    let normalized = normalizeSearchQuery(query);
+    normalized = normalized.replace(/[.?!;]\s*(?:who|what|which|where|when|how|why|tell\s+me)\b.*$/i, '').trim() || normalized;
     const releaseOfMatch = normalized.match(/(?:(?:latest|current|newest|recent|stable)\s+(?:release|version|update|build)\s+of|changes?\s+in\s+(?:the\s+)?(?:latest\s+)?(?:release|version)\s+of)\s+([a-z0-9_.-]+(?:\s+[a-z0-9_.-]+){0,3}?)(?=\s+(?:compared|versus|vs\.?|difference|between|as\s+of|in\s+\d{4}|$|[?.!]))/i)
         || normalized.match(/(?:(?:latest|current|newest|recent|stable)\s+(?:release|version|update|build)\s+of|changes?\s+in\s+(?:the\s+)?(?:latest\s+)?(?:release|version)\s+of)\s+([a-z0-9_.-]+)/i);
     if (releaseOfMatch && releaseOfMatch[1]) {
