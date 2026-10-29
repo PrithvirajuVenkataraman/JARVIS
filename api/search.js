@@ -1419,7 +1419,7 @@ export async function searchPublicSources(query, options = {}) {
     const earlyExitActive = isEarlyExitEnabled(options);
 
     const getFastCount = () => (liveNews.length + ddgWeb.length + searxngWeb.length + wiki.length + wikidata.length + liveWeb.length + governmentRoleResults.length + geminiGroundingResults.length);
-    const getGeneralWebCount = () => (ddgWeb.length + searxngWeb.length + wiki.length + wikidata.length + liveWeb.length + geminiGroundingResults.length);
+    const getGeneralWebCount = () => (ddgWeb.length + searxngWeb.length + geminiGroundingResults.length + liveWeb.length);
 
     // Create an early-exit resolver promise
     let triggerEarlyExitResolve;
@@ -1441,8 +1441,9 @@ export async function searchPublicSources(query, options = {}) {
         ].filter(Boolean);
 
         const evalResult = evaluateDeepCorroboration(currentPool);
+        const hasSubstantiveSnippets = currentPool.some(item => item.snippet && item.snippet !== item.title && item.snippet.length >= 70);
         const hasGeneralWeb = isLeadership || getGeneralWebCount() >= 1;
-        if (evalResult.satisfied && hasGeneralWeb) {
+        if (evalResult.satisfied && hasGeneralWeb && hasSubstantiveSnippets) {
             earlyExitTriggered = true;
             earlyExitCorroboration = evalResult;
             exitReason = 'early_exit';
@@ -1528,8 +1529,14 @@ export async function searchPublicSources(query, options = {}) {
         });
         if (deduped.length >= Math.max(limit, 8)) break;
     }
-    const hasInsufficientEvidence = deduped.slice(0, 3).some(item => !item.fullArticleText && (!item.snippet || item.snippet === item.title || item.snippet.length < 60));
-    if (options.skipAutoDeepCrawl !== true && (options.allowDeepCrawl === true || hasInsufficientEvidence)) {
+    const hasIncompleteOrTeaserSnippet = deduped.slice(0, 3).some(item => {
+        if (item.fullArticleText && item.fullArticleText.length >= 200) return false;
+        const snip = String(item.snippet || '').trim();
+        if (!snip || snip === item.title || snip.length < 120) return true;
+        if (/(?::\s*$|\.\.\.\s*$|\b(?:these individuals are|who are they|the three are|they are:|include:|namely:|such as:|here they are)\s*:?\s*$)/i.test(snip)) return true;
+        return false;
+    });
+    if (options.skipAutoDeepCrawl !== true || hasIncompleteOrTeaserSnippet || options.allowDeepCrawl === true) {
         await enrichSearchResultsWithDeepCrawl(deduped, 3).catch(() => {});
     }
 
@@ -1772,7 +1779,21 @@ export function extractCleanArticleText(html, url = '') {
 export async function enrichSearchResultsWithDeepCrawl(results, limit = 3) {
     if (!Array.isArray(results) || !results.length) return results;
     
-    const candidates = results.slice(0, limit);
+    // Prioritize direct, crawlable article URLs (avoiding redirect wrappers and encyclopedia lookups)
+    const directCandidates = results.filter(item => {
+        const u = String(item?.url || '');
+        return u.startsWith('http') &&
+            !u.includes('news.google.com') &&
+            !u.includes('vertexaisearch.cloud.google.com') &&
+            !u.includes('wikipedia.org') &&
+            !u.includes('wikidata.org') &&
+            !u.includes('.example');
+    });
+
+    const candidates = directCandidates.length > 0
+        ? directCandidates.slice(0, limit)
+        : results.slice(0, limit);
+
     const crawlPromises = candidates.map(item => {
         const u = String(item?.url || '');
         if (!u || !u.startsWith('http') || u.includes('wikipedia.org') || u.includes('wikidata.org') || u.includes('.example')) return Promise.resolve(null);
@@ -1781,20 +1802,45 @@ export async function enrichSearchResultsWithDeepCrawl(results, limit = 3) {
 
     const settled = await Promise.allSettled(crawlPromises);
     settled.forEach((res, i) => {
-        if (res.status === 'fulfilled' && res.value?.bodyText) {
-            candidates[i].fullArticleText = res.value.bodyText;
-            candidates[i].extract = res.value.bodyText;
-            if (!candidates[i].snippet || candidates[i].snippet === candidates[i].title || candidates[i].snippet.length < 60) {
-                candidates[i].snippet = res.value.bodyText.slice(0, 1000);
-                candidates[i].description = res.value.bodyText.slice(0, 1000);
+        const item = candidates[i];
+        if (!item) return;
+        if (res.status === 'fulfilled' && res.value?.bodyText && res.value.bodyText.length >= 80) {
+            item.fullArticleText = res.value.bodyText;
+            item.extract = res.value.bodyText;
+            item.snippet = res.value.bodyText.slice(0, 1200);
+            item.description = res.value.bodyText.slice(0, 1200);
+            if (res.value.pubDate && !item.date) {
+                item.date = res.value.pubDate;
             }
-            if (res.value.pubDate && !candidates[i].date) {
-                candidates[i].date = res.value.pubDate;
+            item.deepCrawled = true;
+            item.accessible = true;
+
+            // Backpropagate rich content to matching headline wrappers in results
+            for (const r of results) {
+                if (r !== item && (r.domain === item.domain || (r.title && item.title && (r.title.includes(item.domain) || item.title.includes(r.domain))))) {
+                    if (!r.fullArticleText || r.fullArticleText.length < 80) {
+                        r.fullArticleText = res.value.bodyText;
+                        r.extract = res.value.bodyText;
+                        r.snippet = res.value.bodyText.slice(0, 1200);
+                        r.description = res.value.bodyText.slice(0, 1200);
+                        r.deepCrawled = true;
+                    }
+                }
             }
-            candidates[i].deepCrawled = true;
-            candidates[i].accessible = true;
+        } else if (res.status === 'fulfilled' && res.value?.bodyText) {
+            item.fullArticleText = res.value.bodyText;
+            item.extract = res.value.bodyText;
+            if (!item.snippet || item.snippet === item.title || item.snippet.length < 60) {
+                item.snippet = res.value.bodyText.slice(0, 1000);
+                item.description = res.value.bodyText.slice(0, 1000);
+            }
+            if (res.value.pubDate && !item.date) {
+                item.date = res.value.pubDate;
+            }
+            item.deepCrawled = true;
+            item.accessible = true;
         } else if (res.status === 'rejected' || (res.status === 'fulfilled' && !res.value)) {
-            candidates[i].accessible = false;
+            item.accessible = false;
         }
     });
 
@@ -5230,6 +5276,11 @@ export function rankSources(query, results, options = {}) {
                 const timeA = a.publishedMs || 0;
                 const timeB = b.publishedMs || 0;
                 if (timeA && timeB) {
+                    const scoreDiff = Math.abs(a.score - b.score);
+                    const isSameWindow = Math.abs(timeA - timeB) < 7 * 24 * 3600 * 1000;
+                    if (scoreDiff >= 10 && (isSameWindow || a.score >= b.score * 2 || b.score >= a.score * 2)) {
+                        return b.score - a.score;
+                    }
                     if (timeA !== timeB) return timeB - timeA;
                     return b.score - a.score;
                 }
