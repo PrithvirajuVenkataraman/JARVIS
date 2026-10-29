@@ -207,6 +207,10 @@ export function cleanTextSnippet(text) {
 export function distillSearchQuery(rawQuery) {
     if (!rawQuery) return '';
     let text = String(rawQuery).trim();
+    // Strip persona and roleplay preambles (e.g. "Act as a deep-synthesis reasoning engine...: [question]")
+    text = text.replace(/^(?:(?:act\s+as|you\s+are)\s+(?:a|an)\s+[^.:\n]+[.:\n]\s*)*(?:answer\s+the\s+(?:following\s+)?(?:query|question|input)(?:\s+by\s+[^:\n]+)?[:\-]\s*)/i, '');
+    text = text.replace(/^(?:(?:act\s+as|you\s+are)\s+(?:a|an)\s+[^.:\n]+[.:\n]\s*)/i, '');
+
     const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
     if (lines.length > 1) {
         const contentLines = [];
@@ -1287,11 +1291,13 @@ export class BoundedLiveResearchController {
         fetchSearchFn,
         streamSynthesisFn,
         uiCallbacks = {},
-        threadState = null
+        threadState = null,
+        isWebForced = false
     }) {
         return new Promise((resolve) => {
             this._resolveExecution = resolve;
             this.threadState = threadState;
+            this.isWebForced = Boolean(isWebForced);
             const query = normalizeUserQuery(rawQuery);
             this.telemetry.t_start = performance.now();
 
@@ -1639,10 +1645,23 @@ export class BoundedLiveResearchController {
                     ? `\nPRIOR CONVERSATION CONTEXT:\n${contextLines}\n`
                     : '';
 
-                const prompt = `You are an expert real-time research assistant. Answer the user's question directly, comprehensively, and factually using ONLY the verified web content below.
+                const deepSynthesisBlock = this.isWebForced ? `
+DEEP-SYNTHESIS REASONING ENGINE PROTOCOL (MANUAL WEB SEARCH ACTIVATED):
+Act as a deep-synthesis reasoning engine. Answer the user's input by performing comprehensive cross-referencing, multi-hop lookups, and logical deduction:
+1. DECONSTRUCT THE INPUT: Never rely on a single source or a single surface-level match. Break the query down into its core parameters, underlying logic, and distinct sub-components. Address each part thoroughly.
+2. PIVOT ON INCOMPLETE DATA: If initial search findings or evidence reference a count, a category, an error code, a doctrine, or a structural concept without providing the specific contents, names, or values, do not halt execution. Treat those surface findings as clues and scour all available excerpts and adjacent records to extract the missing data points.
+3. DEDUCTIVE SYNTHESIS: Connect independent datasets logically. If Dataset A defines a structural rule, system architecture, or conditional logic, and Dataset B contains the live variables or current entities that fit into that logic, synthesize them to deliver the final, specific solution.
+4. EPISTEMIC COMPLETENESS: Never conclude that an answer is "unavailable" or "unverifiable" simply because a single summary source or initial data layer lacks the complete picture. Drill down to primary documentation, distinct data layers, or adjacent verified frameworks across the excerpts to fully resolve the query.
+` : '';
+
+                const systemRole = this.isWebForced
+                    ? 'You are a deep-synthesis reasoning engine and expert real-time research assistant.'
+                    : 'You are an expert real-time research assistant.';
+
+                const prompt = `${systemRole} Answer the user's question directly, comprehensively, and factually using ONLY the verified web content below.
 TEMPORAL ANCHOR:
 Today's Date: ${currentDateStr}. Use this exact date as your reference point for phrases like 'today', 'this month', 'recently', 'latest', 'current', or 'this year'.
-
+${deepSynthesisBlock}
 RULES:
 1. COMPLETE COVERAGE: Identify and answer every distinct question, sub-question, and requested detail in the user prompt using the retrieved evidence. If the prompt contains multiple parts (such as status, affected entities, requirements, comparisons, or timelines), address each part thoroughly in a dedicated explanation or structured breakdown.
 2. SUBSTANTIVE DETAILS: Never return only headlines, source titles, or a list of links as an answer. Extract and explain substantive facts, operational impacts, context, and concrete details from the source excerpts.
