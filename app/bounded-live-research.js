@@ -1714,12 +1714,16 @@ ${sourcesContext}`;
                     } catch (err) {
                         if (this.isTerminal) return;
                         this.telemetry.synthesisError = err?.message || String(err);
-                        if (attempt === 0) {
+                        const isPermanentError = err?.code === 'missing_credentials' || err?.code === 'service_unavailable';
+                        if (attempt === 0 && !isPermanentError) {
                             console.warn(`[BoundedLiveResearch:${this.turnId}] Synthesis attempt 1 failed (${err?.message || err}), attempting controlled retry...`);
                             this.streamedText = '';
                             await new Promise(r => setTimeout(r, 80));
                         } else {
-                            console.error(`[BoundedLiveResearch:${this.turnId}] Synthesis retry failed:`, err);
+                            if (attempt > 0) {
+                                console.error(`[BoundedLiveResearch:${this.turnId}] Synthesis retry failed:`, err);
+                            }
+                            break;
                         }
                     }
                 }
