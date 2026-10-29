@@ -56,14 +56,20 @@
             const originalFetch = window.fetch;
             window.fetch = function(input, init = {}) {
                 const url = typeof input === 'string' ? input : (input?.url || '');
-                if (typeof url === 'string' && (url.startsWith('/api/') || url.includes('/api/chat-groq') || url.includes('/api/vision') || url.includes('/api/image-proxy') || url.includes('/api/search'))) {
+                if (typeof url === 'string' && (url.includes('/api/') || url.startsWith('api/') || url.startsWith('/api/'))) {
                     try {
                         const groqKey = (localStorage.getItem('jarvis_byok_groq_sealed') || localStorage.getItem('jarvis_byok_groq') || localStorage.getItem('groq_api_key') || '').trim();
                         const geminiKey = (localStorage.getItem('jarvis_byok_gemini_sealed') || localStorage.getItem('jarvis_byok_gemini') || localStorage.getItem('gemini_api_key') || localStorage.getItem('GEMINI_API_KEY') || '').trim();
                         if (groqKey || geminiKey) {
                             const headers = new Headers(init.headers || (typeof input === 'object' && input.headers ? input.headers : {}));
-                            if (groqKey && !headers.has('x-groq-api-key')) headers.set('x-groq-api-key', groqKey);
-                            if (geminiKey && !headers.has('x-gemini-api-key')) headers.set('x-gemini-api-key', geminiKey);
+                            if (groqKey && !headers.has('x-groq-api-key')) {
+                                headers.set('x-groq-api-key', groqKey);
+                                headers.set('x-byok-groq', groqKey);
+                            }
+                            if (geminiKey && !headers.has('x-gemini-api-key')) {
+                                headers.set('x-gemini-api-key', geminiKey);
+                                headers.set('x-byok-gemini', geminiKey);
+                            }
                             init = { ...init, headers };
                         }
                     } catch (_) {}
@@ -662,7 +668,8 @@ function isStructuredCurrentFactsEnabled() {
     return globalThis.JARVIS_STRUCTURED_CURRENT_FACTS_ENABLED !== false;
 }
 
-function isFactSearchEnabled() {
+function isFactSearchEnabled(query) {
+    if (query && (isExplicitWebSearchRequest(query) || isStrictLatestQuery(query))) return true;
     if (typeof getWebSearchMode === 'function' && getWebSearchMode() === 'off') return false;
     return isLiveRetrievalEnabled() || isPublicFactSearchEnabled();
 }
@@ -3441,7 +3448,7 @@ async function processUserQuery(text, options = {}) {
         riskLevel,
         broadFactualWeb
     });
-    if (isFactSearchEnabled() && isExplicitWebSearchRequest(t)) {
+    if (isFactSearchEnabled(t) && isExplicitWebSearchRequest(t)) {
         logRoutingDebug('processUserQuery -> live_retrieval explicit_web', t, {
             selectedHandler: 'handleLiveRetrievalQuery',
             normalizedQuery: normalizeExplicitWebSearchQuery(t),
@@ -3452,7 +3459,7 @@ async function processUserQuery(text, options = {}) {
         const handled = await handleLiveRetrievalQuery(normalizeExplicitWebSearchQuery(t));
         if (handled) return { intent: 'live_retrieval' };
     }
-    if (isFactSearchEnabled() && isStrictLatestQuery(t)) {
+    if (isFactSearchEnabled(t) && isStrictLatestQuery(t)) {
         logRoutingDebug('processUserQuery -> strict_latest', t, {
             selectedHandler: 'handleStrictLatestQuery',
             liveIntent,
@@ -3463,7 +3470,7 @@ async function processUserQuery(text, options = {}) {
         if (handled) return { intent: 'strict_latest' };
     }
 
-    if (isFactSearchEnabled() && isEntityAttributionQuery(t)) {
+    if (isFactSearchEnabled(t) && isEntityAttributionQuery(t)) {
         logRoutingDebug('processUserQuery -> entity_attribution live_retrieval', t, {
             selectedHandler: 'handleLiveRetrievalQuery',
             liveIntent,
@@ -24933,7 +24940,7 @@ function isWakeGreetingText(text) {
             }
 
             // Authoritative bounded live research dispatch — when user toggled Live Web Search ON or route requires live sources
-            if ((_activeWebMode === 'force' || frontendRoute?.route === 'live_required' || frontendRoute?.requiresSources) && isFactSearchEnabled()) {
+            if ((_activeWebMode === 'force' || frontendRoute?.route === 'live_required' || frontendRoute?.requiresSources || frontendRoute?.explicitWeb) && isFactSearchEnabled(cleanText)) {
                 logRoutingDebug('processCommand -> bounded live research', cleanText, {
                     selectedHandler: 'handleBoundedLiveResearchQuery',
                     frontendRoute
@@ -25047,7 +25054,7 @@ function isWakeGreetingText(text) {
                 if (handled) return;
             }
 
-            if (isFactSearchEnabled() && liveSourceRequired) {
+            if (isFactSearchEnabled(cleanText) && liveSourceRequired) {
                 logRoutingDebug('processCommand -> live_source_required', cleanText, {
                     selectedHandler: 'handleLiveRetrievalQuery',
                     answerPath,
@@ -25061,7 +25068,7 @@ function isWakeGreetingText(text) {
                 if (handled) return;
             }
 
-            if (isFactSearchEnabled() && isStrictLatestQuery(cleanText)) {
+            if (isFactSearchEnabled(cleanText) && isStrictLatestQuery(cleanText)) {
                 logRoutingDebug('processCommand -> strict_latest', cleanText, {
                     selectedHandler: 'handleStrictLatestQuery',
                     answerPath,
@@ -25072,7 +25079,7 @@ function isWakeGreetingText(text) {
                 if (handled) return;
             }
 
-            if (isFactSearchEnabled() && isEntityAttributionQuery(cleanText)) {
+            if (isFactSearchEnabled(cleanText) && isEntityAttributionQuery(cleanText)) {
                 logRoutingDebug('processCommand -> entity_attribution', cleanText, {
                     selectedHandler: 'handleLiveRetrievalQuery',
                     answerPath,
@@ -28325,8 +28332,10 @@ function buildFrontendRouteContext(text, options = {}) {
     const value = String(text || '').trim();
     const isMcq = isMultipleChoiceQuestion(value);
     const webMode = typeof getWebSearchMode === 'function' ? getWebSearchMode() : (options?.webMode || 'auto');
-    const isWebOff = webMode === 'off';
-    const isExplicitWeb = !isWebOff && (webMode === 'force' || isExplicitWebSearchRequest(value));
+    const isExplicit = isExplicitWebSearchRequest(value);
+    const isStrictLatest = isStrictLatestQuery(value);
+    const isExplicitWeb = webMode === 'force' || isExplicit;
+    const isWebOff = webMode === 'off' && !isExplicit && !isStrictLatest;
     const liveIntent = (isWebOff || (isMcq && !isExplicitWeb)) ? { requiresLive: false } : extractLiveQueryIntent(value);
     const entityIntent = (isWebOff || (isMcq && !isExplicitWeb)) ? { isLiveRequired: false } : extractUniversalEntityIntent(value, liveIntent);
     const risk = getRiskTierForQuery(value, liveIntent, entityIntent);
@@ -28337,10 +28346,10 @@ function buildFrontendRouteContext(text, options = {}) {
         entityIntent,
         risk,
         explicitWeb: isExplicitWeb,
-        strictLatest: !isWebOff && !isMcq && isStrictLatestQuery(value),
+        strictLatest: !isMcq && (isStrictLatest || (!isWebOff && isStrictLatestQuery(value))),
         currentInfo: !isWebOff && !isMcq && isCurrentInfoQuery(value),
-        liveRetrieval: !isWebOff && !isMcq && isLiveRetrievalQuery(value),
-        requiresSources: isExplicitWeb || (!isWebOff && !isMcq && (isStrictLatestQuery(value) || isCurrentInfoQuery(value) || isEntityAttributionQuery(value) || requiresLiveSourceAnswer(value, liveIntent, entityIntent))),
+        liveRetrieval: (isExplicit || !isWebOff) && !isMcq && isLiveRetrievalQuery(value),
+        requiresSources: isExplicitWeb || (!isMcq && (isStrictLatest || isExplicit || (!isWebOff && (isCurrentInfoQuery(value) || isEntityAttributionQuery(value) || requiresLiveSourceAnswer(value, liveIntent, entityIntent))))),
         safetySensitive: isMedicalAdviceIntent(value) || isMedicalEmergencyIntent(value),
         placeGrounded: !isWebOff && !isMcq && (isLikelyLocationOrTravelQuery(value) || /\b(museum|museums|landmark|attraction|restaurant|hotel|nearby|near me|open now|places to visit)\b/i.test(value)),
         toolAction: !!options?.toolAction,
