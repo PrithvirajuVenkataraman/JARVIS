@@ -2441,3 +2441,57 @@ test('Regression 18.2: Synthesis prompt contains Counted List Fidelity and Zero-
     assert.ok(generatedPrompt.includes('ZERO PARAMETRIC INTRUSION'), 'Prompt must contain ZERO PARAMETRIC INTRUSION instruction');
 });
 
+test('Regression 19.1: isValidCitationSource rejects news articles matching only single generic tokens', async () => {
+    const { isValidCitationSource } = await import('../api/search.js');
+    const query = 'Three persons in the world can travel without the passport.';
+
+    // Off-topic article that only contains the generic word "travel"
+    const offTopicNews = {
+        title: 'Bolsonaro is granted a U.S. visa after travel',
+        description: 'Former Brazilian President Jair Bolsonaro was granted a six-month visitor visa to stay in the United States after travel abroad.',
+        url: 'https://www.washingtonpost.com/world/2023/01/30/bolsonaro-visa-us/',
+        domain: 'washingtonpost.com',
+        sourceType: 'trusted_news',
+        date: 'Jan 30, 2023'
+    };
+
+    // On-topic article matching multiple substantive query tokens
+    const onTopicNews = {
+        title: "These are the only three royals in the world who don't need a passport",
+        description: "King Charles is among just three royals in the world who can travel internationally without a passport, joined by Japan's Emperor Naruhito and Empress Masako.",
+        url: 'https://royalcentral.co.uk/features/three-royals-passport/',
+        domain: 'royalcentral.co.uk',
+        sourceType: 'trusted_news',
+        date: 'Oct 28, 2026'
+    };
+
+    assert.equal(isValidCitationSource(offTopicNews, query), false, 'Off-topic news article matching single generic word must be rejected');
+    assert.equal(isValidCitationSource(onTopicNews, query), true, 'On-topic news article matching multiple query tokens must be accepted');
+});
+
+test('Regression 19.2: rankSources preserves topical relevance over chronological timestamps', async () => {
+    const { rankSources } = await import('../api/search.js');
+    const query = 'Three persons in the world can travel without the passport.';
+
+    const highRelevanceOlder = {
+        title: "These 3 People Can Travel Without A Passport Around The World",
+        description: "Emperor Naruhito, Empress Masako, and King Charles III are the only individuals who travel internationally without a passport.",
+        domain: 'travelandleisureasia.com',
+        url: 'https://travelandleisureasia.com/people-without-passport',
+        sourceType: 'live_web',
+        publishedMs: Date.now() - (60 * 24 * 3600 * 1000) // 60 days ago
+    };
+
+    const lowRelevanceRecent = {
+        title: "New travel guidelines and passport processing delays",
+        description: "General travel advice regarding passport renewal queues and airport processing.",
+        domain: 'travelnews.example',
+        url: 'https://travelnews.example/delays',
+        sourceType: 'trusted_news',
+        publishedMs: Date.now() - (1 * 24 * 3600 * 1000) // 1 day ago
+    };
+
+    const ranked = rankSources(query, [lowRelevanceRecent, highRelevanceOlder], { forceLive: true, chronological: true });
+    assert.equal(ranked[0].domain, 'travelandleisureasia.com', 'Highly relevant topical source must rank #1 over recent generic source');
+});
+
