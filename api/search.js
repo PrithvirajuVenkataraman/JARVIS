@@ -2473,7 +2473,10 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
     // Stage 4: Fast LLM synthesis if deterministic didn't match but evidence passed gate
     if (!finalAnswer?.verified && finalGate.pass) {
         const llmStart = performance.now();
-        finalAnswer = await buildGroundedRagAnswer(query, allResults, finalGate, { skipDeepCrawl: true })
+        finalAnswer = await buildGroundedRagAnswer(query, allResults, finalGate, {
+            skipDeepCrawl: true,
+            isWebForced: Boolean(options?.isWebForced || options?.webMode === 'force')
+        })
             .catch(error => {
                 warnings.push(`rag_answer_failed:${String(error?.code || error?.message || 'unknown')}`);
                 return null;
@@ -2576,7 +2579,10 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
             finalAnswer = fallbackDirectAnswer;
         } else if (finalGate.pass) {
             const llmStart = performance.now();
-            finalAnswer = await buildGroundedRagAnswer(query, allResults, finalGate, { allowDeepCrawl: false })
+            finalAnswer = await buildGroundedRagAnswer(query, allResults, finalGate, {
+                allowDeepCrawl: false,
+                isWebForced: Boolean(options?.isWebForced || options?.webMode === 'force')
+            })
                 .catch(error => {
                     warnings.push(`rag_fallback_answer_failed:${String(error?.code || error?.message || 'unknown')}`);
                     return null;
@@ -4413,10 +4419,18 @@ async function buildGroundedRagAnswer(query, results, gate, options = {}) {
         }));
         const todayStr = new Date().toISOString().slice(0, 10);
         const currentYear = new Date().getFullYear();
+        const isWebForced = Boolean(options?.isWebForced || options?.webMode === 'force');
+        const deepSynthesisBlock = isWebForced ? `
+DEEP-SYNTHESIS REASONING ENGINE PROTOCOL (MANUAL WEB SEARCH ACTIVATED):
+1. DECONSTRUCT THE INPUT: Break the question down into its core parameters, underlying logic, and distinct sub-components. Address every required part.
+2. PIVOT ON INCOMPLETE DATA: If initial evidence references a count, a category, an error code, a doctrine, or a structural concept without providing specific contents or names, treat those surface findings as clues and scour all available evidence to extract the missing data points.
+3. DEDUCTIVE SYNTHESIS: Connect independent datasets logically. If Dataset A defines a structural rule or condition, and Dataset B contains the live variables or current entities that fit into that logic, synthesize them to deliver the final, specific solution.
+4. EPISTEMIC COMPLETENESS: Never conclude that an answer is "unavailable" or "unverifiable" simply because a single summary source or initial data layer lacks the complete picture. Synthesize across distinct evidence layers to fully resolve the query.
+` : '';
         const prompt = `Return strict JSON only.
 Task: Answer the user's question directly and factually using ONLY the retrieved web evidence below.
 Current Date: ${todayStr} (Year ${currentYear}).
-
+${deepSynthesisBlock}
 STRICT ANTI-HEDGING & DIRECT FACT GROUNDING RULES:
 1. DIRECT ANSWER FIRST: The first sentence must directly and authoritatively state the specific verified answer, entity, quantity, status, date, or outcome requested.
 2. EXACT ATTRIBUTE & ENTITY GROUNDING: Ground the answer strictly on the exact attribute, metric, role, or property requested (e.g. if the question asks for a specific role, version, date, metric, or policy, answer ONLY with evidence for that exact attribute; never substitute related or adjacent attributes).
@@ -5602,6 +5616,10 @@ function cleanSearchTargetPhrase(value) {
 export function distillSearchQuery(rawQuery) {
     if (!rawQuery) return '';
     let text = String(rawQuery).trim();
+    // Strip persona and roleplay preambles (e.g. "Act as a deep-synthesis reasoning engine...: [question]" or "You are a master investigative researcher...")
+    text = text.replace(/^(?:(?:act\s+as|you\s+are)\s+(?:a|an)\s+[^.:\n]+[.:\n]\s*)*(?:answer\s+the\s+(?:following\s+)?(?:query|question|input)(?:\s+by\s+[^:\n]+)?[:\-]\s*)/i, '');
+    text = text.replace(/^(?:(?:act\s+as|you\s+are)\s+(?:a|an)\s+[^.:\n]+[.:\n]\s*)/i, '');
+
     // 1. If multi-line, separate the primary question/topic from following instruction blocks
     const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
     if (lines.length > 1) {
