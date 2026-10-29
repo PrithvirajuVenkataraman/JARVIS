@@ -731,6 +731,47 @@ export function generateSnippetFallback(query, sources = []) {
     return facts.slice(0, 4).join(' ');
 }
 
+export function isRawToolCallJson(text) {
+    if (!text || typeof text !== 'string') return false;
+    const trimmed = text.trim();
+    if (!trimmed) return false;
+    const clean = trimmed
+        .replace(/^```(?:json)?\s*/i, '')
+        .replace(/\s*```$/i, '')
+        .trim();
+
+    if (/^<tool_call>[\s\S]*<\/tool_call>$/i.test(clean)) return true;
+    if (/^<function=[^>]+>[\s\S]*<\/function>$/i.test(clean)) return true;
+
+    if (clean.startsWith('{') && clean.endsWith('}')) {
+        try {
+            const parsed = JSON.parse(clean);
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                if (typeof parsed.tool === 'string' && (parsed.arguments || parsed.args || parsed.input || parsed.query)) {
+                    return true;
+                }
+                if (typeof parsed.tool_name === 'string' || typeof parsed.function === 'string') {
+                    return true;
+                }
+                if (typeof parsed.name === 'string' && (parsed.arguments || parsed.parameters)) {
+                    return true;
+                }
+                if (Array.isArray(parsed.tool_calls) || Array.isArray(parsed.tools)) {
+                    return true;
+                }
+            }
+        } catch (_) {
+            if (/^\{\s*"(?:tool|function|tool_name|name)"\s*:\s*"[^"]+"/i.test(clean)) {
+                return true;
+            }
+        }
+    }
+    if (/^\{\s*"(?:tool|tool_name|function)"\s*:\s*"[^"]+"/i.test(clean)) {
+        return true;
+    }
+    return false;
+}
+
 /**
  * Evaluates whether a live search synthesis response is complete, substantive, and verified.
  * Rejects teaser fragments, query echoes, and limitation disclaimers.
@@ -741,6 +782,7 @@ export function isSubstantiveLiveAnswer(content, provenance = PROVENANCE_MODES.W
     const trimmed = content.trim();
     if (trimmed.length < 40) return false;
     if (trimmed.endsWith('?')) return false;
+    if (isRawToolCallJson(trimmed)) return false;
     const lower = trimmed.toLowerCase();
     if (lower.includes('did not contain sufficient substantive detail')) return false;
     if (lower.includes('contain only headline references')) return false;
@@ -1673,6 +1715,7 @@ RULES:
    - For proper nouns, suspect identities, person names, places, and organizations: report ONLY names and places explicitly stated in the retrieved sources below.
    - If a person's name, suspect identity, or specific location is unstated, unconfirmed, or has not been publicly released in the verified sources, explicitly state that authorities or reports have not released the name/location. NEVER guess, assume, or invent person names, places, or affiliations.
    - When answering follow-up questions, stay anchored to the specific event, location, and entities established in the conversation history. Do not conflate or substitute names or locations from unrelated search excerpts.
+8. ZERO TOOL EMISSION (CRITICAL): Never emit tool calls, function calls, or JSON objects (such as {"tool": "web_search", ...} or <tool_call>). All required web search has already been performed and all verified sources are provided below. Output the final, synthesized factual response directly in prose.
 ${conversationHistoryBlock}
 User question: "${effectiveUserPrompt}"
 
@@ -1725,10 +1768,13 @@ ${sourcesContext}`;
                         }
 
                         const cleanStreamed = (this.streamedText || '').trim();
-                        // Invariant: empty/trivial output protection — 10 chars minimum to distinguish real output from blank
-                        if (cleanStreamed.length >= 10) {
+                        // Invariant: empty/trivial output protection & tool call JSON rejection
+                        if (cleanStreamed.length >= 10 && !isRawToolCallJson(cleanStreamed)) {
                             synthesisSucceeded = true;
                             break;
+                        }
+                        if (isRawToolCallJson(cleanStreamed)) {
+                            this.streamedText = '';
                         }
                     } catch (err) {
                         if (this.isTerminal) return;
@@ -1787,6 +1833,7 @@ if (typeof window !== 'undefined') {
         evaluateSourceQualityForEarlySynthesis,
         generateSnippetFallback,
         isSubstantiveLiveAnswer,
+        isRawToolCallJson,
         generateRelatedResearchQuestions,
         classifyQueryDomainSemantic,
         extractCoreTopicSemantic,
