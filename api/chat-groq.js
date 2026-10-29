@@ -1083,12 +1083,12 @@ export default async function handler(req, res) {
             if (Array.isArray(req.body?.sources) && req.body.sources.length > 0) {
                 preloadedLiveRag = {
                     sources: req.body.sources,
-                    ragText: req.body.ragText || req.body.sources.map((s, idx) => `[${s.id || idx + 1}] ${s.title || ''}: ${s.snippet || s.text || s.description || ''} (${s.url || ''})`).join('\n\n')
+                    ragText: req.body.ragText || req.body.sources.map((s, idx) => `[${s.id || idx + 1}] ${s.title || ''}: ${s.fullArticleText || s.extract || s.snippet || s.text || s.description || ''} (${s.url || ''})`).join('\n\n')
                 };
             } else if (Array.isArray(grounding?.sources) && grounding.sources.length > 0) {
                 preloadedLiveRag = {
                     sources: grounding.sources,
-                    ragText: grounding.sources.map((s, idx) => `[${s.id || idx + 1}] ${s.title || ''}: ${s.snippet || s.text || s.description || ''} (${s.url || ''})`).join('\n\n')
+                    ragText: grounding.sources.map((s, idx) => `[${s.id || idx + 1}] ${s.title || ''}: ${s.fullArticleText || s.extract || s.snippet || s.text || s.description || ''} (${s.url || ''})`).join('\n\n')
                 };
             } else if (routeDecision.strategy === 'live_first' && !isAttachmentGrounding) {
                 const searchStart = Date.now();
@@ -1689,7 +1689,7 @@ export default async function handler(req, res) {
         if (Array.isArray(options?.sources) && options.sources.length > 0) {
             liveRag = {
                 sources: options.sources,
-                ragText: options.ragText || options.sources.map((s, idx) => `[${s.id || idx + 1}] ${s.title || ''}: ${s.snippet || s.text || s.description || ''} (${s.url || ''})`).join('\n\n')
+                ragText: options.ragText || options.sources.map((s, idx) => `[${s.id || idx + 1}] ${s.title || ''}: ${s.fullArticleText || s.extract || s.snippet || s.text || s.description || ''} (${s.url || ''})`).join('\n\n')
             };
         } else if (requiresLiveRetrievalBeforeStream) {
             const searchStartedAt = Date.now();
