@@ -23580,7 +23580,7 @@ Act as a deep-synthesis reasoning engine. Answer the user's input by performing 
 4. EPISTEMIC COMPLETENESS: Never conclude that an answer is "unavailable" or "unverifiable" simply because a single summary source or initial data layer lacks the complete picture. Drill down and synthesize across primary documentation and adjacent verified frameworks to fully resolve the query.` : '';
 
                             const fallbackPrompt = hasSources
-                                ? `You are a helpful AI assistant. Answer the user's question directly, comprehensively, and accurately using your knowledge and any relevant facts from the verified web sources below. Fulfill all requested formatting completely.${deepSynthesisFallback}\n\nVerified Web Sources:\n${sourcesContext}`
+                                ? `You are a helpful AI assistant. Answer the user's question directly, comprehensively, and accurately using the verified web sources below. Ground all individuals, names, and titles strictly in the verified source evidence. Never guess, assume, or invent unstated identities or entities.${deepSynthesisFallback}\n\nVerified Web Sources:\n${sourcesContext}`
                                 : `You are a helpful AI assistant. The live web search did not return additional external records for this request. Please answer the user's question directly, comprehensively, and accurately using your knowledge. Fulfill all requested formatting (such as Markdown tables, columns, or structured points) completely.${deepSynthesisFallback}`;
 
                             // Show sources carousel immediately if sources are present
