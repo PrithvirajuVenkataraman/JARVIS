@@ -773,8 +773,8 @@ export default async function handler(req, res) {
                 limit,
                 answer,
                 timeoutMs: Math.min(Number(req.body?.timeoutMs) || maxBudget, maxBudget),
-                allowDeepCrawl: answer ? (req.body?.allowDeepCrawl !== false) : (req.body?.allowDeepCrawl === true),
-                skipAutoDeepCrawl: req.body?.skipAutoDeepCrawl === true || !answer,
+                allowDeepCrawl: req.body?.allowDeepCrawl !== undefined ? Boolean(req.body.allowDeepCrawl) : true,
+                skipAutoDeepCrawl: req.body?.skipAutoDeepCrawl === true,
                 dateContext: rewrite.dateContext,
                 rewrittenQuery: rewrite.query,
                 dateFilter: req.body?.dateFilter || null,
@@ -1250,6 +1250,7 @@ export async function searchPublicSources(query, options = {}) {
     const maxCeiling = options.answer === false ? 3500 : 4000;
     const boundedTimeoutMs = Math.min(Number(options.timeoutMs) || maxCeiling, maxCeiling);
     const tracker = options.tracker || (isObservabilityEnabled(options) ? createSearchTelemetryTracker(normalizedQuery, options) : null);
+    const startTime = performance.now();
 
     let liveNews = [];
     let wiki = [];
@@ -1536,8 +1537,10 @@ export async function searchPublicSources(query, options = {}) {
         if (/(?::\s*$|\.\.\.\s*$|\b(?:these individuals are|who are they|the three are|they are:|include:|namely:|such as:|here they are)\s*:?\s*$)/i.test(snip)) return true;
         return false;
     });
-    if (options.skipAutoDeepCrawl !== true || hasIncompleteOrTeaserSnippet || options.allowDeepCrawl === true) {
-        await enrichSearchResultsWithDeepCrawl(deduped, 3).catch(() => {});
+    const elapsedPublicMs = performance.now() - startTime;
+    const remainingCrawlBudget = Math.max(0, boundedTimeoutMs - elapsedPublicMs - 150);
+    if ((options.skipAutoDeepCrawl !== true || hasIncompleteOrTeaserSnippet || options.allowDeepCrawl === true) && remainingCrawlBudget >= 400) {
+        await enrichSearchResultsWithDeepCrawl(deduped, 3, { timeoutMs: Math.min(2000, remainingCrawlBudget) }).catch(() => {});
     }
 
     if (tracker) {
@@ -1776,8 +1779,9 @@ export function extractCleanArticleText(html, url = '') {
     };
 }
 
-export async function enrichSearchResultsWithDeepCrawl(results, limit = 3) {
+export async function enrichSearchResultsWithDeepCrawl(results, limit = 3, options = {}) {
     if (!Array.isArray(results) || !results.length) return results;
+    const crawlTimeout = Math.min(Number(options?.timeoutMs) || 2000, 2500);
     
     // Prioritize direct, crawlable article URLs (avoiding redirect wrappers and encyclopedia lookups)
     const directCandidates = results.filter(item => {
@@ -1797,7 +1801,7 @@ export async function enrichSearchResultsWithDeepCrawl(results, limit = 3) {
     const crawlPromises = candidates.map(item => {
         const u = String(item?.url || '');
         if (!u || !u.startsWith('http') || u.includes('wikipedia.org') || u.includes('wikidata.org') || u.includes('.example')) return Promise.resolve(null);
-        return crawlArticleBody(item.url, { timeoutMs: 2500 }).catch(() => null);
+        return crawlArticleBody(item.url, { timeoutMs: crawlTimeout }).catch(() => null);
     });
 
     const settled = await Promise.allSettled(crawlPromises);
@@ -4021,7 +4025,7 @@ function isStrongRagEvidenceSource(item) {
     if (item?.evidenceLevel === 'structured_claim') return true;
     if (sourceType === 'official_source' && item?.pageFetched) return true;
     if (item?.trusted && !/reddit|archive\.(today|ph|is)/i.test(domain)) return true;
-    return isTrustedDomain(domain) || /wikipedia\.org$|wikidata\.org$/i.test(domain);
+    return isTrustedLiveSource(domain) || /wikipedia\.org$|wikidata\.org$/i.test(domain);
 }
 
 export function hasObviousRagConflict(evidence = [], query = '') {
@@ -5319,6 +5323,8 @@ export function scoreSearchResult(item, terms, query = '') {
     if (item?.sourceType === 'community_discussion') score -= 6;
     if (item?.sourceType === 'reference_lookup') score -= 12;
     if (item?.sourceType === 'archive_lookup') score -= 16;
+    if (item?.fullArticleText && item.fullArticleText.length >= 80) score += 20;
+    if (item?.url && item.url.includes('news.google.com/rss/articles/')) score -= 8;
 
     // Tier 0: Direct Primary Source Engine.
     // If the search result domain belongs directly to the subject/brand/entity being asked about,
