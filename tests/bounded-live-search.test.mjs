@@ -2386,3 +2386,58 @@ test('Regression 17.3: Live search indicator in CSS uses interior text shimmer a
     assert.ok(/@keyframes\s+liveSearchTextShimmer/i.test(css),
         'liveSearchTextShimmer keyframe animation must exist');
 });
+
+test('Regression 18.1: Anaphoric query clauses do not decompose into standalone interrogative queries', () => {
+    const anaphoricQuery = 'Three persons in the world can travel without the passport. Who are they';
+    const decomposed = decomposeMultiPartQuery(anaphoricQuery);
+
+    // Anaphoric pronoun question clause must not produce a standalone split query
+    assert.deepEqual(decomposed, [], 'Anaphoric trailing question must return empty decomposition');
+
+    const deterministic = buildDeterministicSearchQueries(anaphoricQuery);
+    assert.ok(Array.isArray(deterministic));
+    assert.ok(deterministic.length >= 1);
+    // Sub-queries must not be isolated "Who are they" or duplicate aspects
+    assert.ok(!deterministic.some(q => /^who are they$/i.test(q.trim())));
+    assert.ok(!deterministic.some(q => /three persons.*three persons/i.test(q)));
+});
+
+test('Regression 18.2: Synthesis prompt contains Counted List Fidelity and Zero-Substitution rules', async () => {
+    const controller = new BoundedLiveResearchController({
+        searchCutoffMs: 200,
+        fallbackWarningMs: 800,
+        hardDeadlineMs: 2000
+    });
+
+    let generatedPrompt = '';
+    await controller.execute({
+        query: 'Three items with specific exemptions',
+        userText: 'Three items with specific exemptions',
+        assistantMessageId: 'msg_counted_list_test',
+        fetchSearchFn: async () => ({
+            results: [
+                {
+                    id: 1,
+                    title: 'Exemption list verified',
+                    snippet: 'The three exemptions are Item Alpha, Item Beta, and Item Gamma.',
+                    domain: 'example.org',
+                    url: 'https://example.org/exemptions'
+                }
+            ]
+        }),
+        streamSynthesisFn: async ({ prompt }) => {
+            generatedPrompt = prompt;
+        },
+        uiCallbacks: {
+            onStateChange: () => {},
+            onSourcesUpdated: () => {},
+            onProgress: () => {},
+            onWarning: () => {}
+        }
+    });
+
+    assert.ok(generatedPrompt.includes('COUNTED LIST EXTRACTION'), 'Prompt must contain COUNTED LIST EXTRACTION instruction');
+    assert.ok(generatedPrompt.includes('ZERO SUBSTITUTION'), 'Prompt must contain ZERO SUBSTITUTION instruction');
+    assert.ok(generatedPrompt.includes('ZERO PARAMETRIC INTRUSION'), 'Prompt must contain ZERO PARAMETRIC INTRUSION instruction');
+});
+
