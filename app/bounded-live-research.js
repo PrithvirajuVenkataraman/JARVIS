@@ -10,9 +10,9 @@
  * - T + 9000ms: HARD APPLICATION DEADLINE. Abort stream. Render verified snippet answer. Lock turn state.
  */
 
-import { normalizeUserQuery, hasSearchableContent } from './query-normalizer.js?v=2.0.5';
-import { BM25Index, computeBM25Scores, tokenizeText } from './bm25.js?v=2.0.5';
-import { textToEmbeddingVector, vectorCosineSimilarity } from './frontend-routing.js?v=2.0.5';
+import { normalizeUserQuery, hasSearchableContent } from './query-normalizer.js?v=2.0.6';
+import { BM25Index, computeBM25Scores, tokenizeText } from './bm25.js?v=2.0.6';
+import { textToEmbeddingVector, vectorCosineSimilarity } from './frontend-routing.js?v=2.0.6';
 
 export {
     normalizeUserQuery,
@@ -1691,8 +1691,8 @@ export class BoundedLiveResearchController {
 DEEP-SYNTHESIS REASONING ENGINE PROTOCOL (MANUAL WEB SEARCH ACTIVATED):
 Act as a deep-synthesis reasoning engine. Answer the user's input by performing comprehensive cross-referencing, multi-hop lookups, and logical deduction:
 1. DECONSTRUCT THE INPUT: Never rely on a single source or a single surface-level match. Break the query down into its core parameters, underlying logic, and distinct sub-components. Address each part thoroughly.
-2. PIVOT ON INCOMPLETE DATA: If initial search findings or evidence reference a count, a category, an error code, a doctrine, or a structural concept without providing the specific contents, names, or values, do not halt execution. Treat those surface findings as clues and scour all available excerpts and adjacent records to extract the missing data points.
-3. DEDUCTIVE SYNTHESIS: Connect independent datasets logically. If Dataset A defines a structural rule, system architecture, or conditional logic, and Dataset B contains the live variables or current entities that fit into that logic, synthesize them to deliver the final, specific solution. However, NEVER use deductive synthesis to substitute, swap out, or override concrete entities, people, or items explicitly named in the source excerpts with external unmentioned entities.
+2. PIVOT ON INCOMPLETE DATA: If initial search findings or evidence reference a count, a category, an error code, a doctrine, or a structural concept without providing the specific contents, names, or values, do not halt execution. Treat those surface findings as clues and scour all available excerpts and adjacent records across the verified sources below to extract the missing data points. Never invent or recall unmentioned entities from parametric memory.
+3. DEDUCTIVE SYNTHESIS: Connect independent datasets logically across the excerpts. If Dataset A defines a structural rule, system architecture, or conditional logic, and Dataset B contains the live variables or current entities that fit into that logic, synthesize them to deliver the final, specific solution. However, NEVER use deductive synthesis to substitute, swap out, or override concrete entities, people, or items explicitly named in the source excerpts with external unmentioned entities, and NEVER recall or introduce external trivia from memory.
 4. EPISTEMIC COMPLETENESS: Never conclude that an answer is "unavailable" or "unverifiable" simply because a single summary source or initial data layer lacks the complete picture. Drill down to primary documentation, distinct data layers, or adjacent verified frameworks across the excerpts to fully resolve the query.
 ` : '';
 
