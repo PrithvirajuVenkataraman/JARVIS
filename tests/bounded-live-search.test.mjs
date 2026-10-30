@@ -2495,3 +2495,27 @@ test('Regression 19.2: rankSources preserves topical relevance over chronologica
     assert.equal(ranked[0].domain, 'travelandleisureasia.com', 'Highly relevant topical source must rank #1 over recent generic source');
 });
 
+test('Regression 19.3: normalizeResearchSources promotes substantive snippets over headline-only teasers', () => {
+    const query = 'Three persons in the world can travel without the passport.';
+    const headlineOnlyTeaser = {
+        title: "Three persons in the world can travel without passport",
+        snippet: "Three persons in the world can travel without passport",
+        domain: 'tengrinews.kz',
+        url: 'https://en.tengrinews.kz/world/three-persons-travel-without-passport-12345/',
+        sourceType: 'trusted_news'
+    };
+    const substantiveSnippetSource = {
+        title: "3 People in the World Who Can Travel Without a Passport",
+        snippet: "Only three people in the world can travel anywhere without a passport: King Charles III of the United Kingdom, Emperor Naruhito and Empress Masako of Japan.",
+        domain: 'travelandleisure.com',
+        url: 'https://travelandleisure.com/people-travel-without-passport-12345',
+        sourceType: 'live_web'
+    };
+
+    const normalized = normalizeResearchSources([headlineOnlyTeaser, substantiveSnippetSource], query);
+    assert.equal(normalized[0].domain, 'travelandleisure.com', 'Substantive snippet source must be promoted to Tier 1 over headline-only teaser');
+
+    const formattedPrompt = formatSourcesForPrompt(normalized);
+    assert.ok(formattedPrompt.includes('Excerpt: Only three people in the world can travel anywhere without a passport: King Charles III'), 'Prompt excerpt must contain the substantive snippet');
+});
+
