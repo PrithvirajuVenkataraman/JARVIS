@@ -83,9 +83,9 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous">
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
-    <link rel="stylesheet" href="styles.css?v=2.0.6">
+    <link rel="stylesheet" href="styles.css?v=2.0.7">
     <script src="science-format.js?v=2.0.1"></script>
-    <script type="module" src="app/bootstrap.js?v=2.0.5"></script>
+    <script type="module" src="app/bootstrap.js?v=2.0.6"></script>
 </head>
 <body class="dark min-h-screen bg-black text-white">
 
@@ -23648,8 +23648,9 @@ COUNTED LIST FIDELITY & ZERO SUBSTITUTION (CRITICAL):
                                     provenance: hasSources ? 'web_grounded' : 'model_fallback',
                                     isFallback: !hasSources
                                 });
+                                recordActiveChatMessage('assistant', streamedFallbackText, controller.turnId);
                                 window.JarvisInteractionState?.transition?.('IDLE');
-                                saveToHistory(rawUserText || query, streamedFallbackText);
+                                saveToHistory(rawUserText || query, streamedFallbackText, { turnId: controller.turnId });
                                 if (typeof setWebSearchMode === 'function') setWebSearchMode('off');
                                 resolve(true);
                                 return;
@@ -23678,11 +23679,12 @@ COUNTED LIST FIDELITY & ZERO SUBSTITUTION (CRITICAL):
                         provenance,
                         isFallback: provenance !== 'web_grounded'
                     });
+                    recordActiveChatMessage('assistant', content, controller.turnId);
 
                     // Live web search follow-up questions section completely removed per user request
 
                     window.JarvisInteractionState?.transition?.('IDLE');
-                    saveToHistory(rawUserText || query, content);
+                    saveToHistory(rawUserText || query, content, { turnId: controller.turnId });
                     if (typeof setWebSearchMode === 'function') setWebSearchMode('off');
                     resolve(true);
                 }
@@ -30505,11 +30507,28 @@ function recordActiveChatMessage(role, text, turnId = '', extra = {}) {
     const normalizedRole = role === 'assistant' ? 'assistant' : 'user';
     if (normalizedRole === 'assistant' && !chatSessionHasUserMessage(session)) return;
     const now = new Date().toISOString();
+    const effectiveTurnId = String(turnId || '').trim();
+
+    // Deduplication: if the last message in the session matches this role and turn, update it instead of adding a duplicate
+    const lastMsg = Array.isArray(session.messages) && session.messages.length ? session.messages[session.messages.length - 1] : null;
+    if (lastMsg && lastMsg.role === normalizedRole) {
+        if (effectiveTurnId && lastMsg.turnId === effectiveTurnId) {
+            lastMsg.text = cleanText;
+            lastMsg.timestamp = now;
+            saveChatSessions();
+            persistActiveSessionSnapshot(effectiveTurnId);
+            return;
+        }
+        if (lastMsg.text === cleanText) {
+            return;
+        }
+    }
+
     session.messages.push({
         role: normalizedRole,
         text: cleanText || (attachments.length ? `Attached ${attachments.length} file${attachments.length === 1 ? '' : 's'}` : ''),
         timestamp: now,
-        turnId: String(turnId || '').trim(),
+        turnId: effectiveTurnId,
         attachments
     });
     session.messages = session.messages.slice(-CHAT_SESSION_MAX_MESSAGES);
@@ -32132,9 +32151,12 @@ function sanitizeConversationHistoryRecords(historyItems) {
 }
 
 function saveToHistory(userMessage, aiResponse, options = {}) {
-    const turnId = String(activeResponseRenderContext?.turnId || '');
+    const turnId = String(activeResponseRenderContext?.turnId || options?.turnId || '');
     const cleanUser = stripLargeBase64ForHistory(normalizeHistoryUserMessage(userMessage));
     const cleanAi = stripLargeBase64ForHistory(normalizeHistoryAssistantMessage(aiResponse));
+    if (cleanAi && options?.recordSession !== false) {
+        recordActiveChatMessage('assistant', cleanAi, turnId);
+    }
     conversationHistory.push({
         timestamp: new Date().toISOString(),
         user: cleanUser,
