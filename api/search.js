@@ -1530,7 +1530,7 @@ export async function searchPublicSources(query, options = {}) {
         });
         if (deduped.length >= Math.max(limit, 8)) break;
     }
-    const hasIncompleteOrTeaserSnippet = deduped.slice(0, 3).some(item => {
+    const hasIncompleteOrTeaserSnippet = deduped.slice(0, 5).some(item => {
         if (item.fullArticleText && item.fullArticleText.length >= 200) return false;
         const snip = String(item.snippet || '').trim();
         if (!snip || snip === item.title || snip.length < 120) return true;
@@ -1540,7 +1540,9 @@ export async function searchPublicSources(query, options = {}) {
     const elapsedPublicMs = performance.now() - startTime;
     const remainingCrawlBudget = Math.max(0, boundedTimeoutMs - elapsedPublicMs - 150);
     if ((options.skipAutoDeepCrawl !== true || hasIncompleteOrTeaserSnippet || options.allowDeepCrawl === true) && remainingCrawlBudget >= 400) {
-        await enrichSearchResultsWithDeepCrawl(deduped, 3, { timeoutMs: Math.min(2000, remainingCrawlBudget) }).catch(() => {});
+        // Use a larger candidate pool when snippets are teaser-only so articles ranked lower also get crawled
+        const crawlLimit = hasIncompleteOrTeaserSnippet ? 6 : 3;
+        await enrichSearchResultsWithDeepCrawl(deduped, crawlLimit, { timeoutMs: Math.min(2000, remainingCrawlBudget) }).catch(() => {});
     }
 
     if (tracker) {
@@ -2460,7 +2462,6 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
         .filter(item => isValidCitationSource(item, normalizedQuery)), {
             skipEmbedding: options.skipEmbedding === true || options.answer === false,
             chronological: isLiveRag,
-            forceChronological: isLiveRag,
             forceLive: options.forceLive,
             liveMode: options.liveMode
         }).catch(() => rankSources(normalizedQuery, dedupeSearchResults(allResults).filter(item => isValidCitationSource(item, normalizedQuery)), {
@@ -2473,7 +2474,12 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
     if (options.answer === false) {
         timing.totalMs = Number((performance.now() - totalStart).toFixed(1));
         timing.totalLatencyMs = timing.totalMs;
-        const results = allResults.slice(0, limit);
+        // Stable-promote items with deep-crawled full article text so LLM gets substantive content.
+        // Items with fullArticleText go first; within each tier, preserve existing rank order.
+        const withContent = allResults.filter(item => item.fullArticleText && item.fullArticleText.length >= 80);
+        const withoutContent = allResults.filter(item => !item.fullArticleText || item.fullArticleText.length < 80);
+        const reordered = [...withContent, ...withoutContent];
+        const results = reordered.slice(0, limit);
         return {
             provider: 'web_rag',
             results,
@@ -5260,6 +5266,8 @@ export function rankSources(query, results, options = {}) {
 
     const scored = list.map(item => {
         const score = scoreSearchResult(item, terms, query);
+        // Write score back so downstream comparators (hybridRerank, post-rerank sort) can read item.score
+        item.score = score;
         const publishedMs = item.publishedMs || parseDocumentDate(item) || 0;
         return { item, score, publishedMs };
     });
