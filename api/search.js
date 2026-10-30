@@ -5393,8 +5393,12 @@ export function scoreSearchResult(item, terms, query = '') {
     if (item?.sourceType === 'community_discussion') score -= 6;
     if (item?.sourceType === 'reference_lookup') score -= 12;
     if (item?.sourceType === 'archive_lookup') score -= 16;
-    if (item?.fullArticleText && item.fullArticleText.length >= 80) score += 20;
-    if (item?.url && item.url.includes('news.google.com/rss/articles/') && (!item?.fullArticleText || item.fullArticleText.length < 80)) score -= 50;
+    const hasSubstantiveSnippet = Boolean(item?.snippet && item.snippet !== item.title && item.snippet.length >= 60);
+    const hasSubstantiveFull = Boolean(item?.fullArticleText && item.fullArticleText.length >= 80);
+    if (hasSubstantiveFull) score += 20;
+    else if (hasSubstantiveSnippet) score += 10;
+    else score -= 35;
+    if (item?.url && item.url.includes('news.google.com/rss/articles/') && !hasSubstantiveFull) score -= 50;
 
     // Tier 0: Direct Primary Source Engine.
     // If the search result domain belongs directly to the subject/brand/entity being asked about,
