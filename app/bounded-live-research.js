@@ -484,34 +484,33 @@ export function normalizeResearchSources(results = [], query = '', limit = 8) {
 
     scoreSourcesBM25AndSemantic(candidates, query);
 
-    if (isFreshnessQuery || candidates.some(c => c.parsedDateMs)) {
-        const now = Date.now();
-        const NINETY_DAYS_MS = 90 * 24 * 3600 * 1000;
-        candidates.sort((a, b) => {
+    // Two-tier sort: items with deep-crawled full article text are always promoted before snippet-only items.
+    // Within each tier, freshness queries sort by date (newest first); all other queries sort by hybrid relevance.
+    const now = Date.now();
+    const NINETY_DAYS_MS = 90 * 24 * 3600 * 1000;
+    candidates.sort((a, b) => {
+        // Tier 1: substantive content wins over teaser-only snippets
+        const aHasFull = Boolean(a.fullArticleText && a.fullArticleText.length >= 200);
+        const bHasFull = Boolean(b.fullArticleText && b.fullArticleText.length >= 200);
+        if (aHasFull !== bHasFull) return bHasFull ? 1 : -1;
+
+        // Tier 2 (same content tier): for freshness queries, sort newest-first; otherwise by relevance
+        if (isFreshnessQuery) {
             const timeA = a.parsedDateMs || 0;
             const timeB = b.parsedDateMs || 0;
             if (timeA && timeB) {
                 if (timeB !== timeA) return timeB - timeA;
                 return ((b.hybridScore || 0) - (a.hybridScore || 0)) || (a._initialIndex - b._initialIndex);
             }
-            if (timeA && !timeB) {
-                const isRecentA = (now - timeA) < NINETY_DAYS_MS;
-                return isRecentA ? -1 : 1;
-            }
-            if (!timeA && timeB) {
-                const isRecentB = (now - timeB) < NINETY_DAYS_MS;
-                return isRecentB ? 1 : -1;
-            }
-            return ((b.hybridScore || 0) - (a.hybridScore || 0)) || (a._initialIndex - b._initialIndex);
-        });
-    } else {
-        candidates.sort((a, b) => {
-            const authA = isAuthoritativeResearchSource(a, query) ? 1 : 0;
-            const authB = isAuthoritativeResearchSource(b, query) ? 1 : 0;
-            if (authA !== authB) return authB - authA;
-            return a._initialIndex - b._initialIndex;
-        });
-    }
+            if (timeA && !timeB) return (now - timeA) < NINETY_DAYS_MS ? -1 : 1;
+            if (!timeA && timeB) return (now - timeB) < NINETY_DAYS_MS ? 1 : -1;
+        }
+
+        // For non-freshness queries: sort by hybrid relevance score, preserve backend rank order as tiebreaker
+        const scoreDiff = (b.hybridScore || 0) - (a.hybridScore || 0);
+        if (Math.abs(scoreDiff) > 0.01) return scoreDiff;
+        return a._initialIndex - b._initialIndex;
+    });
 
     const selected = candidates.slice(0, limit);
     return selected.map((item, idx) => ({
