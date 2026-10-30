@@ -489,10 +489,10 @@ export function normalizeResearchSources(results = [], query = '', limit = 8) {
     const now = Date.now();
     const NINETY_DAYS_MS = 90 * 24 * 3600 * 1000;
     candidates.sort((a, b) => {
-        // Tier 1: substantive content wins over teaser-only snippets
-        const aHasFull = Boolean(a.fullArticleText && a.fullArticleText.length >= 200);
-        const bHasFull = Boolean(b.fullArticleText && b.fullArticleText.length >= 200);
-        if (aHasFull !== bHasFull) return bHasFull ? 1 : -1;
+        // Tier 1: substantive content (full article or informative excerpt distinct from title) wins over headline-only teasers
+        const aSubstantive = Boolean((a.fullArticleText && a.fullArticleText.length >= 100) || (a.snippet && a.snippet !== a.title && a.snippet.length >= 60));
+        const bSubstantive = Boolean((b.fullArticleText && b.fullArticleText.length >= 100) || (b.snippet && b.snippet !== b.title && b.snippet.length >= 60));
+        if (aSubstantive !== bSubstantive) return bSubstantive ? 1 : -1;
 
         // Tier 2 (same content tier): for freshness queries, sort newest-first; otherwise by relevance
         if (isFreshnessQuery) {
@@ -527,7 +527,7 @@ export function formatSourcesForPrompt(sources = []) {
     if (!Array.isArray(sources) || !sources.length) return '';
     return sources.map(s => {
         const substantive = String(s.fullArticleText || s.extract || s.snippet || s.description || s.text || '').trim();
-        const excerpt = (substantive && substantive !== s.title) ? substantive : (s.snippet || 'No excerpt available.');
+        const excerpt = (substantive && substantive !== s.title) ? substantive : (s.snippet && s.snippet !== s.title ? s.snippet : 'No excerpt available.');
         const publisherStr = s.publisher || s.source ? ` (${s.publisher || s.source})` : '';
         const accessibilityNote = s.accessible === false ? ' [Note: Web page was inaccessible; excerpt from index metadata]' : '';
         return `[${s.id}] Title: ${s.title}${publisherStr}${accessibilityNote}\nDomain: ${s.domain}\nURL: ${s.url}\nExcerpt: ${excerpt}${s.date ? `\nDate: ${s.date}` : ''}`;
