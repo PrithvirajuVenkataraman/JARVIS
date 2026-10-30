@@ -506,9 +506,10 @@ export function normalizeResearchSources(results = [], query = '', limit = 8) {
             if (!timeA && timeB) return (now - timeB) < NINETY_DAYS_MS ? 1 : -1;
         }
 
-        // For non-freshness queries: sort by hybrid relevance score, preserve backend rank order as tiebreaker
-        const scoreDiff = (b.hybridScore || 0) - (a.hybridScore || 0);
-        if (Math.abs(scoreDiff) > 0.01) return scoreDiff;
+        // For non-freshness queries: authoritative sources first, then preserve incoming search engine rank order
+        const authA = isAuthoritativeResearchSource(a, query) ? 1 : 0;
+        const authB = isAuthoritativeResearchSource(b, query) ? 1 : 0;
+        if (authA !== authB) return authB - authA;
         return a._initialIndex - b._initialIndex;
     });
 
