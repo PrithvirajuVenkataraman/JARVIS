@@ -12453,7 +12453,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 
                 maybeAutoScroll(chatContainer);
                 updateChatEmptyStateVisibility();
-                if (!meta?.skipRecord) {
+                if (!meta?.skipRecord && !meta?.restored) {
                     chatHistory.push({ text: displayText, isUser });
                     recordActiveChatMessage('assistant', displayText, messageTurnId);
                 }
@@ -12474,7 +12474,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 });
             }
             updateChatEmptyStateVisibility();
-            if (!meta?.skipRecord) {
+            if (!meta?.skipRecord && !meta?.restored) {
                 chatHistory.push({ text: displayText, isUser });
                 recordActiveChatMessage(isUser ? 'user' : 'assistant', displayText, messageTurnId, {
                     attachments: meta?.attachments
@@ -12764,6 +12764,13 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 sourcePolicy: meta?.sourcePolicy || existing.sourcePolicy || '',
                 riskFlags: analyzeAnswerRiskFlags(priorUserPrompt, cleanText)
             });
+            if (meta?.streaming === false && !meta?.restored && !isRestoringChatSession && cleanText) {
+                recordActiveChatMessage('assistant', cleanText, turnId);
+                const userPromptForHistory = String(priorUserPrompt || meta?.userMessage || activeResponseRenderContext?.userPrompt || '').trim();
+                if (userPromptForHistory) {
+                    saveToHistory(userPromptForHistory, cleanText, { turnId, recordSession: false });
+                }
+            }
             maybeAutoScroll(document.getElementById('chat-container'));
         }
 
@@ -23462,6 +23469,7 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                     answer: false,
                     mode: 'rag',
                     forceLive: true,
+                    skipCache: true,
                     chronological: true,
                     allowDeepCrawl: true,
                     skipAutoDeepCrawl: false,
@@ -29568,7 +29576,81 @@ function normalizeChatSession(raw) {
 }
 
 function chatSessionHasUserMessage(session) {
-    return Array.isArray(session?.messages) && session.messages.some(item => item?.role === 'user' && String(item?.text || '').trim());
+    return Array.isArray(session?.messages) && session.messages.some(item =>
+        item?.role === 'user' && (String(item?.text || '').trim() || (Array.isArray(item?.attachments) && item.attachments.length > 0))
+    );
+}
+
+function hydrateSessionMessagesFromHistory(session) {
+    if (!session || !Array.isArray(session.messages)) return false;
+    let modified = false;
+    const allHistory = [];
+    if (Array.isArray(conversationHistory)) allHistory.push(...conversationHistory);
+    try {
+        const keys = typeof getLegacyHistoryStorageKeys === 'function' ? getLegacyHistoryStorageKeys() : ['unify_history_default'];
+        for (const k of keys) {
+            const val = localStorage.getItem(k);
+            if (val) {
+                const parsed = JSON.parse(val);
+                if (Array.isArray(parsed)) allHistory.push(...parsed);
+            }
+        }
+    } catch (_) {}
+
+    // Also collect completed turns from other chat sessions in memory
+    try {
+        if (Array.isArray(chatSessions)) {
+            for (const s of chatSessions) {
+                if (s && Array.isArray(s.messages) && s !== session) {
+                    for (let j = 0; j < s.messages.length; j++) {
+                        const m = s.messages[j];
+                        const nextM = s.messages[j + 1];
+                        if (m?.role === 'user' && nextM?.role === 'assistant' && nextM.text) {
+                            allHistory.push({
+                                user: m.text,
+                                ai: nextM.text,
+                                turnId: m.turnId || nextM.turnId || '',
+                                timestamp: nextM.timestamp || m.timestamp
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    } catch (_) {}
+
+    const newMessages = [];
+    for (let i = 0; i < session.messages.length; i++) {
+        const msg = session.messages[i];
+        newMessages.push(msg);
+        if (msg.role === 'user') {
+            const next = session.messages[i + 1];
+            if (!next || next.role !== 'assistant') {
+                const userText = String(msg.text || '').trim().toLowerCase().replace(/\s+/g, ' ');
+                const turnId = String(msg.turnId || '').trim();
+                const match = allHistory.find(h => {
+                    if (!h?.ai || !String(h.ai).trim()) return false;
+                    if (turnId && h.turnId === turnId) return true;
+                    const hUser = String(h.user || '').trim().toLowerCase().replace(/\s+/g, ' ');
+                    if (userText && hUser && (hUser === userText || hUser.includes(userText) || userText.includes(hUser))) return true;
+                    return false;
+                });
+                if (match && match.ai) {
+                    newMessages.push({
+                        role: 'assistant',
+                        text: String(match.ai).trim(),
+                        timestamp: match.timestamp || msg.timestamp || new Date().toISOString(),
+                        turnId: match.turnId || msg.turnId || ''
+                    });
+                    modified = true;
+                }
+            }
+        }
+    }
+    if (modified) {
+        session.messages = newMessages;
+    }
+    return modified;
 }
 
 function getVisibleChatSessions() {
@@ -29633,8 +29715,11 @@ function loadChatSessions() {
         chatSessions = Array.isArray(parsed)
             ? parsed.map(session => {
                 const normalized = normalizeChatSession(session);
-                if (normalized && session && (normalized.title !== session.title || normalized.titleEdited !== session.titleEdited)) {
-                    repairedAny = true;
+                if (normalized) {
+                    if (hydrateSessionMessagesFromHistory(normalized)) repairedAny = true;
+                    if (session && (normalized.title !== session.title || normalized.titleEdited !== session.titleEdited)) {
+                        repairedAny = true;
+                    }
                 }
                 return normalized;
             }).filter(session => session && !isDeletedChatSession(session) && chatSessionHasUserMessage(session))
@@ -30592,6 +30677,9 @@ function restoreChatSession(sessionId) {
     stopActiveGeneration('manual');
     closeChatSessionMenu();
     activeChatSessionId = session.id;
+    if (hydrateSessionMessagesFromHistory(session)) {
+        saveChatSessions();
+    }
     conversationHistory = buildHistoryFromChatSession(session);
     restoreConversationEngineForSession(session);
     const chatContainer = document.getElementById('chat-container');
@@ -30604,6 +30692,7 @@ function restoreChatSession(sessionId) {
                 turnId: item.turnId || '',
                 detached: true,
                 restored: true,
+                skipRecord: true,
                 attachments: Array.isArray(item.attachments) ? item.attachments : []
             });
         });
@@ -32157,13 +32246,21 @@ function saveToHistory(userMessage, aiResponse, options = {}) {
     if (cleanAi && options?.recordSession !== false) {
         recordActiveChatMessage('assistant', cleanAi, turnId);
     }
-    conversationHistory.push({
-        timestamp: new Date().toISOString(),
-        user: cleanUser,
-        ai: cleanAi,
-        date: new Date().toLocaleDateString(),
-        turnId
-    });
+    const existingHistoryIndex = turnId ? conversationHistory.findIndex(item => item.turnId === turnId) : -1;
+    if (existingHistoryIndex >= 0) {
+        conversationHistory[existingHistoryIndex].ai = cleanAi || conversationHistory[existingHistoryIndex].ai;
+        if (cleanUser && !conversationHistory[existingHistoryIndex].user) {
+            conversationHistory[existingHistoryIndex].user = cleanUser;
+        }
+    } else {
+        conversationHistory.push({
+            timestamp: new Date().toISOString(),
+            user: cleanUser,
+            ai: cleanAi,
+            date: new Date().toLocaleDateString(),
+            turnId
+        });
+    }
 
     if (conversationHistory.length > 40) {
         conversationHistory = conversationHistory.slice(-40);
@@ -32194,17 +32291,18 @@ async function loadHistory() {
     const historyKey = getHistoryStorageKey();
     let saved = null;
     try {
-        saved = localStorage.getItem(historyKey);
+        saved = await JarvisIndexedDbStorage.getItem(historyKey);
     } catch (_) {}
     if (!saved) {
         try {
-            saved = await JarvisIndexedDbStorage.getItem(historyKey);
+            saved = localStorage.getItem(historyKey);
         } catch (_) {}
     }
     if (saved) {
         try {
-            conversationHistory = JSON.parse(saved);
-            if (Array.isArray(conversationHistory) && conversationHistory.length) {
+            const parsed = typeof saved === 'string' ? JSON.parse(saved) : saved;
+            if (Array.isArray(parsed) && parsed.length) {
+                conversationHistory = parsed;
                 conversationContext = conversationHistory.slice(-16).flatMap(item => [
                     item.user ? { role: 'user', text: item.user, turnId: item.turnId || '' } : null,
                     item.ai ? { role: 'assistant', text: item.ai, turnId: item.turnId || '' } : null
@@ -33351,6 +33449,31 @@ initializeActiveChatSessionForStartup();
 if (!document.getElementById('chat-empty-state')) {
     ensureStartupGreeting(false);
     setTimeout(() => ensureStartupGreeting(false), 900);
+}
+
+if (typeof loadHistory === 'function') {
+    loadHistory().then(() => {
+        let repaired = false;
+        if (Array.isArray(chatSessions)) {
+            chatSessions.forEach(session => {
+                if (session && hydrateSessionMessagesFromHistory(session)) {
+                    repaired = true;
+                }
+            });
+        }
+        if (repaired) {
+            saveChatSessions();
+            renderChatSidebarList();
+            const activeSession = getActiveChatSession();
+            if (activeSession && activeSession.id === activeChatSessionId) {
+                const container = document.getElementById('chat-container');
+                const rows = container ? container.querySelectorAll('.chat-row') : [];
+                if (rows.length <= 1 && activeSession.messages && activeSession.messages.length > 1) {
+                    restoreChatSession(activeSession.id);
+                }
+            }
+        }
+    }).catch(() => {});
 }
 
 globalThis.sendTextInput = sendTextInput;
