@@ -6830,7 +6830,7 @@ export const __test = {
     distillSearchQuery,
     extractComparisonEntities,
     decomposeMultiPartQuery,
-    cleanSubQueryClause,
+    cleanSubQueryClause, 
     extractTopicAnchors,
     MCP_TOOL_DEFINITIONS,
     planDynamicSearchQueries,
