@@ -1247,7 +1247,7 @@ export async function searchPublicSources(query, options = {}) {
         ...targetQueries
     ])).slice(0, 2);
 
-    const maxCeiling = options.answer === false ? 3500 : 4000;
+    const maxCeiling = options.answer === false ? Math.max(4500, Number(options.timeoutMs) || 4500) : 4000;
     const boundedTimeoutMs = Math.min(Number(options.timeoutMs) || maxCeiling, maxCeiling);
     const tracker = options.tracker || (isObservabilityEnabled(options) ? createSearchTelemetryTracker(normalizedQuery, options) : null);
     const startTime = performance.now();
@@ -1443,13 +1443,14 @@ export async function searchPublicSources(query, options = {}) {
 
         const evalResult = evaluateDeepCorroboration(currentPool);
         const hasSubstantiveSnippets = currentPool.some(item => item.snippet && item.snippet !== item.title && item.snippet.length >= 70);
-        const hasGeneralWeb = isLeadership || getGeneralWebCount() >= 1;
+        const genCount = getGeneralWebCount();
+        const hasGeneralWeb = (isLeadership && (governmentRoleResults.length > 0 || wikidata.length > 0)) || genCount >= 1;
         if (evalResult.satisfied && hasGeneralWeb && hasSubstantiveSnippets) {
             earlyExitTriggered = true;
             earlyExitCorroboration = evalResult;
             exitReason = 'early_exit';
             timeToExitMs = Date.now() - raceStartMs;
-            console.log(`[SearchEarlyExit] exitReason="early_exit" timeToExitMs=${timeToExitMs} sources=${evalResult.verifiedCount} domains=${evalResult.domainCount}`);
+            console.log(`[SearchEarlyExit] exitReason="early_exit" timeToExitMs=${timeToExitMs} sources=${evalResult.verifiedCount} domains=${evalResult.domainCount} (ddg=${ddgWeb.length}, searx=${searxngWeb.length}, news=${liveNews.length}, wiki=${wiki.length})`);
             triggerEarlyExitResolve(evalResult);
         }
     };
@@ -1742,6 +1743,13 @@ export function extractCleanArticleText(html, url = '') {
         }
     }
 
+    let metaDescription = '';
+    const metaDescMatch = html.match(/<meta\s+(?:property|name)=["'](?:og:description|description|twitter:description)["']\s+content=["']([^"']+)["']/i)
+        || html.match(/<meta\s+content=["']([^"']+)["']\s+(?:property|name)=["'](?:og:description|description|twitter:description)["']/i);
+    if (metaDescMatch?.[1]) {
+        metaDescription = cleanXmlEntities(metaDescMatch[1]).trim();
+    }
+
     let cleaned = html
         .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, ' ')
         .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, ' ')
@@ -1751,31 +1759,50 @@ export function extractCleanArticleText(html, url = '') {
         .replace(/<footer\b[^<]*(?:(?!<\/footer>)<[^<]*)*<\/footer>/gi, ' ')
         .replace(/<svg\b[^<]*(?:(?!<\/svg>)<[^<]*)*<\/svg>/gi, ' ')
         .replace(/<form\b[^<]*(?:(?!<\/form>)<[^<]*)*<\/form>/gi, ' ')
-        .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, ' ')
-        .replace(/<div\b[^>]*class=["'][^"']*\b(?:nav|navbar|menu|header|topbar|sidebar|footer|language|lang-picker|social-share|cookie|banner)\b[^"']*["'][^>]*>[\s\S]*?<\/div>/gi, ' ');
+        .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, ' ');
 
     let bodyText = '';
-    const articleMatch = cleaned.match(/<article\b[^>]*>([\s\S]*?)<\/article>/i)
-        || cleaned.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i);
-    
-    const sourceHtml = articleMatch?.[1] || cleaned;
-    const pMatches = sourceHtml.match(/<p\b[^>]*>([\s\S]*?)<\/p>/gi) || [];
-    
-    if (pMatches.length > 0) {
-        const paragraphs = pMatches.map(p => {
-            return p.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-        }).filter(p => p.length > 30 && !/\b(?:phone|call us|advertise|contact us|\+\d{1,4}\s*\(\d+\)|all rights reserved|terms of service|privacy policy)\b/i.test(p));
-        bodyText = paragraphs.slice(0, 10).join('\n\n');
+    const articleMatch = cleaned.match(/<article\b[^>]*>([\s\S]*?)<\/article>/i);
+    const mainMatch = !articleMatch ? cleaned.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i) : null;
+    const scopedHtml = articleMatch?.[1] || mainMatch?.[1] || '';
+
+    if (scopedHtml) {
+        const scopedPMatches = scopedHtml.match(/<p\b[^>]*>([\s\S]*?)<\/p>/gi) || [];
+        if (scopedPMatches.length > 0) {
+            const paragraphs = scopedPMatches.map(p => {
+                return p.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+            }).filter(p => p.length > 30 && !/\b(?:phone|call us|advertise|contact us|\+\d{1,4}\s*\(\d+\)|all rights reserved|terms of service|privacy policy)\b/i.test(p));
+            if (paragraphs.length > 0) {
+                bodyText = paragraphs.slice(0, 10).join('\n\n');
+            }
+        }
     }
 
-    if (!bodyText) {
-        const textBlocks = sourceHtml
-            .replace(/<div\b[^>]*class=["'][^"']*\b(?:nav|navbar|menu|header|topbar|sidebar|footer|language|lang-picker|social-share|cookie|banner)\b[^"']*["'][^>]*>[\s\S]*?<\/div>/gi, ' ')
+    if (!bodyText || bodyText.length < 100) {
+        const allPMatches = cleaned.match(/<p\b[^>]*>([\s\S]*?)<\/p>/gi) || [];
+        if (allPMatches.length > 0) {
+            const paragraphs = allPMatches.map(p => {
+                return p.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+            }).filter(p => p.length > 30 && !/\b(?:phone|call us|advertise|contact us|\+\d{1,4}\s*\(\d+\)|all rights reserved|terms of service|privacy policy)\b/i.test(p));
+            if (paragraphs.length > 0) {
+                bodyText = paragraphs.slice(0, 10).join('\n\n');
+            }
+        }
+    }
+
+    if (!bodyText || bodyText.length < 80) {
+        const textBlocks = cleaned
             .replace(/<[^>]+>/g, ' ')
             .split(/\s{3,}|\n+/)
             .map(b => b.replace(/\s+/g, ' ').trim())
             .filter(b => b.length >= 60 && /[.!?]/.test(b) && !/\b(?:call us|advertise|contact us|\+\d{1,4}\s*\(\d+\)|all rights reserved)\b/i.test(b));
-        bodyText = textBlocks.slice(0, 8).join('\n\n');
+        if (textBlocks.length > 0) {
+            bodyText = textBlocks.slice(0, 8).join('\n\n');
+        }
+    }
+
+    if ((!bodyText || bodyText.length < 80) && metaDescription && metaDescription.length >= 40) {
+        bodyText = metaDescription;
     }
 
     bodyText = bodyText.slice(0, 2500).trim();
@@ -2292,9 +2319,10 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
 
     // Cache Check: Sub-25ms L1/L2 Distributed Edge Cache
     const cacheKey = buildCacheKey('web_rag', normalizedQuery, { limit, hasNvidia: Boolean(process.env.NVIDIA_API_KEY) });
-    if (options.skipCache !== true) {
+    const shouldSkipCache = options.skipCache === true || options.forceLive === true || options.chronological === true;
+    if (!shouldSkipCache) {
         const cached = await getCachedRAGEntry(cacheKey).catch(() => null);
-        if (cached && cached.data) {
+        if (cached && cached.data && Array.isArray(cached.data.results) && cached.data.results.some(r => r.fullArticleText && r.fullArticleText.length > 100)) {
             timing.totalMs = Number((performance.now() - totalStart).toFixed(1));
             timing.totalLatencyMs = timing.totalMs;
             return {
@@ -2937,15 +2965,22 @@ export function parseGovernmentRoleQuery(query) {
     let roleText = '';
 
     // 1. "[Who/What is/was the] [Predicate] of/for/in [Subject]?"
+    const hasWhoWhatLead = /^(?:who|what)\s+(?:is|was|are|were)\b/i.test(raw);
     const ofMatch = raw.match(/^(?:(?:who|what)\s+(?:is|was|are|were)\s+)?(?:the\s+)?(?:current\s+|latest\s+)?(.+?)\s+(?:of|for|in|during)\s+(.+?)[?.!]*$/i);
     if (ofMatch && ofMatch[1] && ofMatch[2]) {
         const candidatePred = cleanPredicateText(ofMatch[1]);
         const candidateSubj = cleanSubjectText(ofMatch[2]);
-        if (!/\b(news|updates?|price|prices|reviews?|photos?|pictures?|images?|features?|specs?|specifications?|meaning|definition|weather|temperature|stock|shares?|lyrics|trailer)\b/i.test(candidatePred)) {
-            if (!/\b(?:score|scored|scores|scoring|did|do|does|play|played|playing|happen|happened|win|won|winning|make|made|making|run|ran|build|built)\b/i.test(candidatePred) && candidatePred.split(/\s+/).length <= 5) {
-                predicate = candidatePred;
-                subject = candidateSubj;
-                roleText = ofMatch[1].trim();
+        const isQuantifierPhrase = /^(?:one|two|three|four|five|six|seven|eight|nine|ten|\d+|many|several|few|all|some)\s+(?:people|persons|things|reasons|ways|places|items|countries|cities|states|rules)\b/i.test(candidatePred);
+        const hasVerbInSubject = /\b(?:can|could|would|should|may|might|must|shall|travel|travels|traveled|traveling|walk|fly|drive|swim|sing|eat|sleep|live|die|cost|costs|happen|happens|work|works)\b/i.test(candidateSubj);
+        const isValidPredRole = isLeadershipOrRoleTerm(candidatePred) || hasWhoWhatLead;
+
+        if (!isQuantifierPhrase && !hasVerbInSubject && isValidPredRole) {
+            if (!/\b(news|updates?|price|prices|reviews?|photos?|pictures?|images?|features?|specs?|specifications?|meaning|definition|weather|temperature|stock|shares?|lyrics|trailer)\b/i.test(candidatePred)) {
+                if (!/\b(?:score|scored|scores|scoring|did|do|does|play|played|playing|happen|happened|win|won|winning|make|made|making|run|ran|build|built)\b/i.test(candidatePred) && candidatePred.split(/\s+/).length <= 5) {
+                    predicate = candidatePred;
+                    subject = candidateSubj;
+                    roleText = ofMatch[1].trim();
+                }
             }
         }
     }
@@ -5359,7 +5394,7 @@ export function scoreSearchResult(item, terms, query = '') {
     if (item?.sourceType === 'reference_lookup') score -= 12;
     if (item?.sourceType === 'archive_lookup') score -= 16;
     if (item?.fullArticleText && item.fullArticleText.length >= 80) score += 20;
-    if (item?.url && item.url.includes('news.google.com/rss/articles/') && (!item?.fullArticleText || item.fullArticleText.length < 80)) score -= 20;
+    if (item?.url && item.url.includes('news.google.com/rss/articles/') && (!item?.fullArticleText || item.fullArticleText.length < 80)) score -= 50;
 
     // Tier 0: Direct Primary Source Engine.
     // If the search result domain belongs directly to the subject/brand/entity being asked about,
@@ -5444,7 +5479,7 @@ export function scoreSearchResult(item, terms, query = '') {
         }
 
         const roleIntent = parseGovernmentRoleQuery(query);
-        if (roleIntent && roleIntent.role && roleIntent.jurisdiction) {
+        if (roleIntent && roleIntent.role && roleIntent.jurisdiction && isLeadershipOrRoleTerm(roleIntent.role)) {
             const fullText = `${title} ${description}`.toLowerCase();
             const hasRole = fullText.includes(roleIntent.role.toLowerCase()) || (roleIntent.roleText && fullText.includes(roleIntent.roleText.toLowerCase()));
             const hasSubject = fullText.includes(roleIntent.jurisdiction.toLowerCase());
@@ -6830,7 +6865,7 @@ export const __test = {
     distillSearchQuery,
     extractComparisonEntities,
     decomposeMultiPartQuery,
-    cleanSubQueryClause, 
+    cleanSubQueryClause,
     extractTopicAnchors,
     MCP_TOOL_DEFINITIONS,
     planDynamicSearchQueries,
