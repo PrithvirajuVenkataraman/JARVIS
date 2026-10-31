@@ -180,8 +180,16 @@ export function isParagraphRelevant(paragraphText, queryTokens) {
         if (hasNumbers || hasCapitalizedEntity) return true;
     }
 
+    // Numeric-count query path: the user query contains a numeric count ("3", "three", "five", etc.)
+    // but the article body uses proper-noun named-entity language (e.g. "King Charles III").
+    // Accept the paragraph if it contains BOTH a number AND at least one multi-word proper noun.
+    // This prevents rejection of entity-rich articles whose vocabulary doesn't overlap the count query.
+    const hasProperNounPhrase = /[A-Z][a-z]{2,}(?:\s+[A-Z][a-z]{2,})+/.test(text);
+    if (hasProperNounPhrase && /\b\d+\b/.test(text)) return true;
+
     return false;
 }
+
 
 /**
  * Applies paragraph-level relevance gating to a list of candidate paragraphs.
