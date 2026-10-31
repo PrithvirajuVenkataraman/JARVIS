@@ -68,7 +68,25 @@ const regularArticleHtml = `
 `;
 
 assert.equal(isBotChallengeHtml(regularArticleHtml), false, 'Should not flag valid article HTML as challenge');
-console.log('   ✓ Anti-bot challenge detection passed.');
+
+const cloudflareHostedArticleHtml = `
+<!DOCTYPE html>
+<html>
+<head><title>Important Research on Passport Travel - European Times</title></head>
+<body>
+  <article>
+    <p>A full substantive report on sovereign rights and diplomatic travel.</p>
+    <p>Passports are legally issued in the sovereign name across multiple jurisdictions worldwide.</p>
+  </article>
+  <footer>
+    <script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script>
+    <div id="captcha-notice">Protected by reCAPTCHA v3 on comment submissions.</div>
+  </footer>
+</body>
+</html>
+`;
+assert.equal(isBotChallengeHtml(cloudflareHostedArticleHtml), false, 'Should not flag Cloudflare-hosted article with analytics script as challenge');
+console.log('   ✓ Anti-bot challenge detection and false-positive immunity passed.');
 
 // =========================================================================
 // Test 3: Paragraph Relevance Gating (Sidebar Pollution Elimination)
