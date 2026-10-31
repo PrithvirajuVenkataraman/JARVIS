@@ -601,9 +601,31 @@ export async function searchGoogleNewsRss(query, options = {}) {
 export async function searchYahooFinanceQuotes(query, options = {}) {
     const rawQ = String(query || '').trim();
     if (!rawQ) return [];
-    const match = rawQ.match(/\b([A-Za-z]{1,5}|[A-Za-z]{1,5}-[A-Za-z]{2,4})\b/);
-    if (!match) return [];
-    const symbol = match[1].toUpperCase();
+
+    // Financial intent guards: only query Yahoo Finance if the query explicitly mentions
+    // stocks, ticker, price, quote, shares, market cap, or contains an explicit $TICKER,
+    // or is strictly a standalone ticker symbol (1-5 chars).
+    // This prevents generic words like "can", "in", "to", "for" from querying Canaan Inc. or other stocks.
+    const hasFinancialContext = /\b(?:stock|stocks|ticker|quote|quotes|shares?|price|pricing|market\s+cap|nyse|nasdaq|crypto|dividend|earnings|etf|forex|valuation|trading)\b/i.test(rawQ);
+    const dollarMatch = rawQ.match(/\$([A-Za-z]{1,5})\b/);
+    const isStandaloneTicker = /^[A-Za-z]{1,5}(?:\.[A-Za-z]{1,3})?$/i.test(rawQ) && !/^(?:the|and|for|with|what|who|how|when|where|this|that|can|are|was|were|will|have|has|had|not|yes|all|any|our|you|she|his|her|its|one|two|six|ten)$/i.test(rawQ);
+
+    if (!hasFinancialContext && !dollarMatch && !isStandaloneTicker) {
+        return [];
+    }
+
+    let symbol = '';
+    if (dollarMatch) {
+        symbol = dollarMatch[1].toUpperCase();
+    } else if (isStandaloneTicker) {
+        symbol = rawQ.trim().toUpperCase();
+    } else {
+        const contextMatch = rawQ.match(/\b([A-Z]{1,5}|[A-Z]{1,5}-[A-Z]{2,4})\b/)
+            || rawQ.match(/(?:stock|shares?|quote|price\s+of)\s+([A-Za-z]{1,5})\b/i)
+            || rawQ.match(/\b([A-Za-z]{1,5})\s+(?:stock|shares?|quote|price)\b/i);
+        if (!contextMatch) return [];
+        symbol = (contextMatch[1] || contextMatch[0]).toUpperCase();
+    }
     const timeoutMs = Math.min(options.timeoutMs || 1800, 2200);
     try {
         const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=1d`;
