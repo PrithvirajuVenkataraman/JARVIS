@@ -518,6 +518,96 @@ export async function searchSearXNGRacer(query, options = {}) {
 
 export const searchSearXNGJson = searchSearXNGRacer;
 
+const GOOGLE_NEWS_URL_CACHE = new Map();
+const GOOGLE_NEWS_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
+const MAX_GOOGLE_NEWS_CACHE_ENTRIES = 500;
+
+/**
+ * Decodes an opaque Google News redirect URL (/rss/articles/CBMi... or /articles/CBMi...)
+ * into the direct original publisher URL using Google's batchExecute RPC.
+ *
+ * @param {string} googleNewsUrl - The redirect URL to decode
+ * @param {Object} [options={}] - Options including timeoutMs and signal
+ * @returns {Promise<string>} Direct publisher URL, or original URL if decoding fails
+ */
+export async function decodeGoogleNewsUrl(googleNewsUrl, options = {}) {
+    const rawUrl = String(googleNewsUrl || '').trim();
+    if (!rawUrl || !rawUrl.includes('news.google.com')) return rawUrl;
+
+    const idMatch = rawUrl.match(/\/(?:rss\/)?articles\/([a-zA-Z0-9\-_]+)/);
+    if (!idMatch) return rawUrl;
+    const base64Str = idMatch[1];
+
+    const cached = GOOGLE_NEWS_URL_CACHE.get(base64Str);
+    if (cached && Date.now() - cached.cachedAt < GOOGLE_NEWS_CACHE_TTL_MS) {
+        return cached.resolvedUrl;
+    }
+
+    const timeoutMs = Math.min(Number(options.timeoutMs) || 1800, 2500);
+
+    try {
+        const pageUrl = `https://news.google.com/rss/articles/${base64Str}`;
+        const pageResp = await fetchWithTimeout(pageUrl, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9'
+            },
+            signal: options.signal
+        }, timeoutMs);
+
+        if (!pageResp || !pageResp.ok) return rawUrl;
+        const html = await pageResp.text();
+
+        const sgMatch = html.match(/data-n-a-sg="([^"]+)"/);
+        const tsMatch = html.match(/data-n-a-ts="([^"]+)"/);
+        if (!sgMatch || !tsMatch) return rawUrl;
+
+        const signature = sgMatch[1];
+        const timestamp = tsMatch[1];
+
+        const payload = [
+            "Fbv4je",
+            `["garturlreq",[["X","X",["X","X"],null,null,1,1,"US:en",null,1,null,null,null,null,null,0,1],"X","X",1,[1,1,1],1,1,null,0,0,null,0],"${base64Str}",${timestamp},"${signature}"]`
+        ];
+        const reqData = `f.req=${encodeURIComponent(JSON.stringify([[payload]]))}`;
+
+        const rpcResp = await fetchWithTimeout("https://news.google.com/_/DotsSplashUi/data/batchexecute", {
+            method: 'POST',
+            headers: {
+                "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Referer": "https://news.google.com/"
+            },
+            body: reqData,
+            signal: options.signal
+        }, timeoutMs);
+
+        if (!rpcResp || !rpcResp.ok) return rawUrl;
+        const text = await rpcResp.text();
+        const splitParts = text.split("\n\n");
+        if (splitParts.length >= 2) {
+            const parsedData = JSON.parse(splitParts[1]);
+            const batchResponses = parsedData.filter(d => (d[0] === "wrb.fr" || d[0] === "w779db") && d[1] === "Fbv4je");
+            if (batchResponses.length > 0) {
+                const inner = JSON.parse(batchResponses[0][2]);
+                const decodedUrl = inner[1];
+                if (decodedUrl && typeof decodedUrl === 'string' && decodedUrl.startsWith('http')) {
+                    if (GOOGLE_NEWS_URL_CACHE.size >= MAX_GOOGLE_NEWS_CACHE_ENTRIES) {
+                        const oldest = GOOGLE_NEWS_URL_CACHE.keys().next().value;
+                        GOOGLE_NEWS_URL_CACHE.delete(oldest);
+                    }
+                    GOOGLE_NEWS_URL_CACHE.set(base64Str, { cachedAt: Date.now(), resolvedUrl: decodedUrl });
+                    return decodedUrl;
+                }
+            }
+        }
+        return rawUrl;
+    } catch (_) {
+        return rawUrl;
+    }
+}
+
 export function parseGoogleNewsRssXml(xml, query, limit = 8) {
     const items = [];
     const itemRegex = /<item>([\s\S]*?)<\/item>/gi;
@@ -579,7 +669,7 @@ export async function searchGoogleNewsRss(query, options = {}) {
     const rawQ = String(query || '').trim();
     if (!rawQ) return [];
     const limit = clampInt(options.limit, 8, 1, 20);
-    const timeoutMs = Math.min(options.timeoutMs || 2200, 2500);
+    const timeoutMs = Math.min(options.timeoutMs || 2200, 2800);
     try {
         const url = `https://news.google.com/rss/search?q=${encodeURIComponent(rawQ)}&hl=en&gl=US&ceid=US:en`;
         const response = await fetchWithTimeout(url, {
@@ -588,11 +678,205 @@ export async function searchGoogleNewsRss(query, options = {}) {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
             },
             signal: options.signal
+        }, Math.min(timeoutMs, 2000));
+        if (!response || !response.ok) return [];
+        const xml = await response.text();
+        if (!xml || !xml.includes('<item>')) return [];
+        const items = parseGoogleNewsRssXml(xml, rawQ, limit);
+
+        // Concurrently decode Google News JS-redirect URLs into direct publisher links
+        if (options.decodeUrls !== false && items.length > 0) {
+            const decodeTimeout = Math.min(1800, timeoutMs);
+            await Promise.allSettled(items.map(async (item) => {
+                if (item.url && item.url.includes('news.google.com')) {
+                    const resolved = await decodeGoogleNewsUrl(item.url, { timeoutMs: decodeTimeout, signal: options.signal });
+                    if (resolved && resolved.startsWith('http') && !resolved.includes('news.google.com')) {
+                        item.url = resolved;
+                        const host = getDomainFromUrl(resolved);
+                        if (host) item.domain = host;
+                    }
+                }
+            }));
+        }
+
+        return items;
+    } catch (_) {
+        return [];
+    }
+}
+
+export function parseYahooNewsRssXml(xml, query, limit = 6) {
+    const items = [];
+    const itemRegex = /<item>([\s\S]*?)<\/item>/gi;
+    let match;
+
+    const queryTokens = query ? String(query).toLowerCase().split(/\s+/).filter(t => t.length >= 3) : [];
+
+    while ((match = itemRegex.exec(xml)) !== null && items.length < limit * 3) {
+        const itemBlock = match[1];
+        const titleMatch = /<title>([\s\S]*?)<\/title>/i.exec(itemBlock);
+        const linkMatch = /<link>([\s\S]*?)<\/link>/i.exec(itemBlock);
+        const pubDateMatch = /<pubDate>([\s\S]*?)<\/pubDate>/i.exec(itemBlock);
+        const descMatch = /<description>([\s\S]*?)<\/description>/i.exec(itemBlock);
+        const sourceMatch = /<source\s+url="([^"]*)"[^>]*>([\s\S]*?)<\/source>/i.exec(itemBlock);
+
+        let rawTitle = cleanSnippetText(titleMatch?.[1] || '');
+        let link = decodeHtmlEntities(linkMatch?.[1] || '').trim();
+        const pubDate = cleanSnippetText(pubDateMatch?.[1] || '');
+        let desc = cleanSnippetText(descMatch?.[1] || '');
+        const sourceUrl = decodeHtmlEntities(sourceMatch?.[1] || '').trim();
+        const sourceName = cleanSnippetText(sourceMatch?.[2] || '');
+
+        if (!rawTitle || !link) continue;
+
+        let publisher = sourceName || 'Yahoo News';
+        if (rawTitle.includes(' - ')) {
+            const parts = rawTitle.split(' - ');
+            if (parts.length > 1) publisher = parts[parts.length - 1].trim();
+        }
+
+        const domain = sourceUrl ? getDomainFromUrl(sourceUrl) : (getDomainFromUrl(link) || 'yahoo.com');
+
+        let relevance = 0;
+        if (queryTokens.length > 0) {
+            const textToScore = `${rawTitle} ${desc}`.toLowerCase();
+            for (const token of queryTokens) {
+                if (textToScore.includes(token)) relevance += 1;
+            }
+        }
+
+        items.push({
+            title: rawTitle,
+            description: desc || rawTitle,
+            snippet: desc || rawTitle,
+            url: link,
+            domain,
+            publisher,
+            source: publisher ? `${publisher} (Yahoo News)` : 'Yahoo News',
+            sourceType: 'trusted_news',
+            sourceLabel: publisher ? `Yahoo News / ${publisher}` : 'Yahoo News',
+            date: pubDate,
+            freshness: pubDate || 'live_news',
+            trusted: true,
+            qualitySignals: ['yahoo_news_rss', 'live_news'],
+            confidence: 0.93,
+            relevance,
+            query
+        });
+    }
+
+    if (queryTokens.length > 0) {
+        const matching = items.filter(it => it.relevance > 0);
+        if (matching.length > 0) {
+            matching.sort((a, b) => b.relevance - a.relevance);
+            return matching.slice(0, limit);
+        }
+    }
+
+    return items.slice(0, limit);
+}
+
+export async function searchYahooNewsRss(query, options = {}) {
+    const rawQ = String(query || '').trim();
+    const limit = clampInt(options.limit, 6, 1, 15);
+    const timeoutMs = Math.min(Number(options.timeoutMs) || 2200, 3000);
+    try {
+        const url = 'https://news.yahoo.com/rss/';
+        const response = await fetchWithTimeout(url, {
+            headers: {
+                'Accept': 'application/rss+xml, application/xml, text/xml, */*',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
+            },
+            signal: options.signal
         }, timeoutMs);
         if (!response || !response.ok) return [];
         const xml = await response.text();
         if (!xml || !xml.includes('<item>')) return [];
-        return parseGoogleNewsRssXml(xml, rawQ, limit);
+        return parseYahooNewsRssXml(xml, rawQ, limit);
+    } catch (_) {
+        return [];
+    }
+}
+
+export function parseWorldWireRssXml(xml, query, limit = 6, providerName = 'BBC News', defaultDomain = 'bbc.co.uk') {
+    const items = [];
+    const itemRegex = /<item>([\s\S]*?)<\/item>/gi;
+    let match;
+
+    const queryTokens = query ? String(query).toLowerCase().split(/\s+/).filter(t => t.length >= 3) : [];
+
+    while ((match = itemRegex.exec(xml)) !== null && items.length < limit * 3) {
+        const itemBlock = match[1];
+        const titleMatch = /<title>([\s\S]*?)<\/title>/i.exec(itemBlock);
+        const linkMatch = /<link>([\s\S]*?)<\/link>/i.exec(itemBlock);
+        const pubDateMatch = /<pubDate>([\s\S]*?)<\/pubDate>/i.exec(itemBlock);
+        const descMatch = /<description>([\s\S]*?)<\/description>/i.exec(itemBlock);
+
+        let rawTitle = cleanSnippetText(titleMatch?.[1] || '');
+        let link = decodeHtmlEntities(linkMatch?.[1] || '').trim();
+        const pubDate = cleanSnippetText(pubDateMatch?.[1] || '');
+        let desc = cleanSnippetText(descMatch?.[1] || '');
+
+        if (!rawTitle || !link) continue;
+
+        const domain = getDomainFromUrl(link) || defaultDomain;
+
+        let relevance = 0;
+        if (queryTokens.length > 0) {
+            const textToScore = `${rawTitle} ${desc}`.toLowerCase();
+            for (const token of queryTokens) {
+                if (textToScore.includes(token)) relevance += 1;
+            }
+        }
+
+        items.push({
+            title: rawTitle,
+            description: desc || rawTitle,
+            snippet: desc || rawTitle,
+            url: link,
+            domain,
+            publisher: providerName,
+            source: `${providerName} World News`,
+            sourceType: 'trusted_news',
+            sourceLabel: `${providerName} / World News`,
+            date: pubDate,
+            freshness: pubDate || 'live_news',
+            trusted: true,
+            qualitySignals: ['world_wire_rss', 'live_news'],
+            confidence: 0.94,
+            relevance,
+            query
+        });
+    }
+
+    if (queryTokens.length > 0) {
+        const matching = items.filter(it => it.relevance > 0);
+        if (matching.length > 0) {
+            matching.sort((a, b) => b.relevance - a.relevance);
+            return matching.slice(0, limit);
+        }
+    }
+
+    return items.slice(0, limit);
+}
+
+export async function searchWorldWireRss(query, options = {}) {
+    const rawQ = String(query || '').trim();
+    const limit = clampInt(options.limit, 6, 1, 15);
+    const timeoutMs = Math.min(Number(options.timeoutMs) || 2000, 2500);
+    try {
+        const url = 'http://feeds.bbci.co.uk/news/world/rss.xml';
+        const response = await fetchWithTimeout(url, {
+            headers: {
+                'Accept': 'application/rss+xml, application/xml, text/xml, */*',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
+            },
+            signal: options.signal
+        }, timeoutMs);
+        if (!response || !response.ok) return [];
+        const xml = await response.text();
+        if (!xml || !xml.includes('<item>')) return [];
+        return parseWorldWireRssXml(xml, rawQ, limit, 'BBC News', 'bbc.co.uk');
     } catch (_) {
         return [];
     }
@@ -1397,6 +1681,9 @@ export const __test = {
     searchSearXNGJson,
     searchSearXNGRacer,
     searchGoogleNewsRss,
+    decodeGoogleNewsUrl,
+    searchYahooNewsRss,
+    searchWorldWireRss,
     searchYahooFinanceQuotes,
     getCircuitBreakerDebugState
 };
