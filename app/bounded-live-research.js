@@ -452,12 +452,17 @@ export function computeCrossSourceAgreement(candidate, allCandidates, currentIdx
     if (!text || allCandidates.length <= 1) return 0;
 
     // Extract candidate entity phrases (multi-word names, single capitalized names, numbers, acronyms)
-    const matches = text.match(/\b(?:[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+|[A-Z][a-z]{3,}|\d{2,}|\b[A-Z]{2,}\b)\b/g) || [];
+    const phrases = text.match(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b/g) || [];
+    const singleWords = text.match(/\b[A-Z][a-z]{3,}\b/g) || [];
+    const numbers = text.match(/\b\d{1,4}\b/g) || [];
+    const acronyms = text.match(/\b[A-Z]{2,5}\b/g) || [];
+
+    const matches = [...phrases, ...singleWords, ...numbers, ...acronyms];
     const uniqueEntities = Array.from(new Set(
         matches
             .map(m => m.trim().toLowerCase())
             .filter(m => !AGREEMENT_IGNORE_WORDS.has(m) && m.length >= 3)
-    )).slice(0, 10);
+    )).slice(0, 14);
 
     if (!uniqueEntities.length) return 0;
 
