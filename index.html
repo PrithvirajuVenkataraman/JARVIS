@@ -9548,7 +9548,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             const existingTextEl = blinker ? blinker.querySelector('.synthesizing-blinker-text') : null;
             const fallback = (existingTextEl && existingTextEl.textContent.trim()) ? existingTextEl.textContent.trim() : 'Thinking...';
             let label = (typeof customLabel === 'string' && customLabel.trim()) ? customLabel.trim() : fallback;
-            if (/\bsearch(?:ing)?\b/i.test(label) || /\b(searching the web|sources?|retriev|web search)\b/i.test(label)) {
+            if (/\bsearch(?:ing)?\b/i.test(label) || /\b(searching the web|sources?|retriev|web search|synthesiz)\b/i.test(label)) {
                 label = 'SEARCHING';
             }
             if (blinker) {
@@ -9584,7 +9584,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
         function updateSynthesizingBlinker(newLabel) {
             if (!newLabel) return;
             let label = String(newLabel).trim();
-            if (/\bsearch(?:ing)?\b/i.test(label) || /\b(searching the web|sources?|retriev|web search)\b/i.test(label)) {
+            if (/\bsearch(?:ing)?\b/i.test(label) || /\b(searching the web|sources?|retriev|web search|synthesiz)\b/i.test(label)) {
                 label = 'SEARCHING';
             }
             const blinker = document.getElementById('chat-synthesizing-blinker');
@@ -16708,7 +16708,7 @@ async function buildVerifiedSearchSummary(query, options = {}) {
             };
         }
 
-        showThinkingIndicator('Synthesizing answer...');
+        showThinkingIndicator('SEARCHING');
         let summaryText = (searchData?.verified && !isVerificationRefusalText(searchData?.answer))
             ? cleanLiveAnswerText(String(searchData?.answer || '').trim())
             : '';
@@ -23897,7 +23897,7 @@ ${snippets}`;
         // Gemini grounding unavailable), fall back to the model regardless of failClosed.
         // "Could not verify" should only fire when we found results but confidence is low.
         if (answerResults.length === 0) {
-            showThinkingIndicator('Synthesizing answer...');
+            showThinkingIndicator('SEARCHING');
             const fallbackPublished = await publishUniversalModelFallback({ userText: query, intent, entityIntent }, 'Model answer');
             if (fallbackPublished) {
                 hideThinkingIndicator();
@@ -23906,7 +23906,7 @@ ${snippets}`;
         }
 
         if (!failClosed && !requiresStrictLiveVerification(query, intent, entityIntent)) {
-            showThinkingIndicator('Synthesizing answer...');
+            showThinkingIndicator('SEARCHING');
             const fallbackPublished = await publishUniversalModelFallback({ userText: query, intent, entityIntent }, 'Model answer');
             if (fallbackPublished) {
                 hideThinkingIndicator();
@@ -32883,7 +32883,7 @@ function resolveThinkingPhase(message = '') {
     if (/\b(searching\s+the\s+web)\b/i.test(lower)) {
         return { key: 'searching', label: 'SEARCHING' };
     }
-    if (/\b(web search|search(?:ing)?|sources?|retriev|fetch|look(?:ing)?\s+up|checking verified|checking reliable|checking current|finding|lookup)\b/i.test(lower)) {
+    if (/\b(web search|search(?:ing)?|sources?|retriev|fetch|look(?:ing)?\s+up|checking verified|checking reliable|checking current|finding|lookup|synthesiz)\b/i.test(lower)) {
         return { key: 'searching', label: 'SEARCHING' };
     }
     if (/\b(generating|drafting|writing)\b/i.test(lower)) {
