@@ -111,21 +111,55 @@ const SCRIPT_STYLE_REGEX = /<(?:script|style|noscript|svg|form|iframe|nav|footer
 
 const WIDGET_CLASS_REGEX = /<(?:div|section|aside|ul|p)\b[^>]*(?:class|id)=["'][^"']*\b(?:sidebar|widget|trending|popular|related|recommended|comments|advert|ad-|banner|newsletter|social-share|cookie-consent|modal)\b[^"']*["'][^>]*>[\s\S]*?<\/(?:div|section|aside|ul|p)>/gi;
 
-const COMMON_BOT_CHALLENGE_PATTERNS = [
-    /<title>\s*(?:Just a moment\.\.\.|Attention Required!|Cloudflare|Security Check|Access Denied|Robot or Human\?)\s*<\/title>/i,
-    /cf-browser-verification/i,
-    /challenge-platform/i,
-    /ray-id/i,
-    /captcha/i
+const BOT_CHALLENGE_TITLE_REGEX = /<title[^>]*>\s*(?:Just a moment\.\.\.|Attention Required!|Cloudflare|Security Check|Access Denied|Robot or Human\?|DDOS-GUARD|Security Verification)\s*<\/title>/i;
+
+const BOT_CHALLENGE_STAGE_REGEX = /(?:id|class)=["'](?:challenge-stage|cf-browser-verification|cf-challenge-running|challenge-form|challenge-body-text)["']/i;
+
+const BOT_CHALLENGE_INTERSTITIAL_PHRASES = [
+    /checking your browser before accessing/i,
+    /please complete the security check/i,
+    /verify you are human/i,
+    /enable javascript and cookies to continue/i,
+    /cf-turnstile-wrapper/i
 ];
 
 /**
  * Determines whether raw HTML represents an anti-bot challenge or captcha.
+ * Avoids false positives on authentic articles that load Cloudflare analytics
+ * scripts (/cdn-cgi/challenge-platform/) or contain comment-form captchas.
  */
 export function isBotChallengeHtml(html) {
     if (!html || typeof html !== 'string') return true;
-    if (html.length < 500 && /403 Forbidden|Access Denied/i.test(html)) return true;
-    return COMMON_BOT_CHALLENGE_PATTERNS.some(p => p.test(html));
+
+    // Check title tag for explicit challenge titles
+    if (BOT_CHALLENGE_TITLE_REGEX.test(html)) {
+        return true;
+    }
+
+    // Short error pages (403/Access Denied)
+    if (html.length < 1500 && /403 Forbidden|Access Denied/i.test(html)) {
+        return true;
+    }
+
+    // Active challenge stage container
+    if (BOT_CHALLENGE_STAGE_REGEX.test(html)) {
+        return true;
+    }
+
+    // Interstitial challenge phrases on non-substantive pages
+    const hasArticleContainer = /<article\b[^>]*>[\s\S]{300,}<\/article>/i.test(html)
+        || /<main\b[^>]*>[\s\S]{300,}<\/main>/i.test(html);
+
+    if (!hasArticleContainer) {
+        if (BOT_CHALLENGE_INTERSTITIAL_PHRASES.some(p => p.test(html))) {
+            return true;
+        }
+        if (html.length < 12000 && (html.includes('challenge-platform') || /captcha/i.test(html)) && /Checking your browser|Ray ID:|cf-browser/i.test(html)) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 // =========================================================================
