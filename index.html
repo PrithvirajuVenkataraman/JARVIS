@@ -23515,23 +23515,25 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                         window.JarvisInteractionState?.transition?.('SEARCHING', { metadata: { query, turnId: controller.turnId } });
                         showThinkingIndicator('SEARCHING');
                     } else if (state === 'SOURCE_GROUNDED_SYNTHESIS') {
-                        window.JarvisInteractionState?.transition?.('GENERATING', { metadata: { turnId: controller.turnId } });
-                        // Keep SEARCHING continuous without intermediate status text transitions
+                        // Keep SEARCHING active continuously right up to the n-1 moment before the answer starts streaming!
+                        showThinkingIndicator('SEARCHING');
                     }
                 },
                 onSourcesValidated: ({ sources, provenance }) => {
-                    // Do not hide progress indicator here; keep active continuously until first token
-                    // Do not display source links or source cards before the answer
+                    // Keep SEARCHING indicator visible and active until first token arrives.
+                    // Keep the empty assistant row hidden so no empty blinking box is shown before synthesis.
                     const row = getRow();
                     if (row) {
-                        row.style.display = '';
+                        row.style.display = 'none';
                     }
+                    showThinkingIndicator('SEARCHING');
                 },
                 onToken: ({ streamedText }) => {
                     if (window.JarvisLiveResearch?.activeController !== controller || controller.isTerminal) return;
                     if (window.JarvisLiveResearch?.isRawToolCallJson?.(streamedText) || /^\s*\{\s*"(?:tool|function|tool_name)"\s*:\s*"[^"]+"/i.test(String(streamedText || '').trim())) {
                         return;
                     }
+                    window.JarvisInteractionState?.transition?.('GENERATING', { metadata: { turnId: controller.turnId } });
                     hideThinkingIndicator();
                     const row = getRow();
                     if (row) row.style.display = '';
