@@ -1309,27 +1309,43 @@ export async function searchPublicSources(query, options = {}) {
     ])).slice(0, webParallelCount);
 
     if (tracker) tracker.startProvider('duckduckgo');
-    const taskDdg = Promise.allSettled(webQueries.map(candidate => searchDuckDuckGoHtml(candidate, { limit, timeoutMs: webSearchTimeoutMs, signal: options.signal, dateFilter: effectiveDateFilter })))
-        .then(s => {
-            ddgWeb = s.flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []);
-            ddgWeb.forEach(item => { item.__provider = 'duckduckgo'; });
-            if (tracker) tracker.finishProvider('duckduckgo', { resultCount: ddgWeb.length, status: ddgWeb.length ? 200 : 204 });
-        }).catch(err => {
-            if (tracker) tracker.finishProvider('duckduckgo', { resultCount: 0, status: 500, error: err?.message });
-        });
+    const ddgTasks = webQueries.slice(0, 2).map(candidate =>
+        searchDuckDuckGoHtml(candidate, { limit, timeoutMs: Math.min(webSearchTimeoutMs, 2500), signal: options.signal, dateFilter: effectiveDateFilter })
+            .then(res => {
+                if (Array.isArray(res) && res.length) {
+                    res.forEach(item => { item.__provider = 'duckduckgo'; });
+                    ddgWeb.push(...res);
+                    if (earlyExitActive) checkEarlyExit();
+                }
+            })
+            .catch(() => {})
+    );
+    const taskDdg = Promise.all(ddgTasks).then(() => {
+        if (tracker) tracker.finishProvider('duckduckgo', { resultCount: ddgWeb.length, status: ddgWeb.length ? 200 : 204 });
+    }).catch(err => {
+        if (tracker) tracker.finishProvider('duckduckgo', { resultCount: 0, status: 500, error: err?.message });
+    });
 
     // SearXNG: zero-config metasearch (aggregates Google, Bing, Brave, DuckDuckGo, 70+ engines).
     // Uses SEARXNG_URL env if configured (own/hosted instance); otherwise races 4 public fallback instances.
     // No API key required. Works on Vercel free tier out of the box.
     if (tracker) tracker.startProvider('searxng');
-    const taskSearXNG = Promise.allSettled(webQueries.map(candidate => searchSearXNGRacer(candidate, { limit: 6, timeoutMs: webSearchTimeoutMs, signal: options.signal, dateFilter: effectiveDateFilter })))
-        .then(s => {
-            searxngWeb = s.flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []);
-            searxngWeb.forEach(item => { item.__provider = 'searxng'; });
-            if (tracker) tracker.finishProvider('searxng', { resultCount: searxngWeb.length, status: searxngWeb.length ? 200 : 204 });
-        }).catch(err => {
-            if (tracker) tracker.finishProvider('searxng', { resultCount: 0, status: 500, error: err?.message });
-        });
+    const searxngTasks = webQueries.map(candidate =>
+        searchSearXNGRacer(candidate, { limit: 6, timeoutMs: webSearchTimeoutMs, signal: options.signal, dateFilter: effectiveDateFilter })
+            .then(res => {
+                if (Array.isArray(res) && res.length) {
+                    res.forEach(item => { item.__provider = 'searxng'; });
+                    searxngWeb.push(...res);
+                    if (earlyExitActive) checkEarlyExit();
+                }
+            })
+            .catch(() => {})
+    );
+    const taskSearXNG = Promise.all(searxngTasks).then(() => {
+        if (tracker) tracker.finishProvider('searxng', { resultCount: searxngWeb.length, status: searxngWeb.length ? 200 : 204 });
+    }).catch(err => {
+        if (tracker) tracker.finishProvider('searxng', { resultCount: 0, status: 500, error: err?.message });
+    });
 
     if (tracker) tracker.startProvider('wikipedia');
     const taskWiki = Promise.allSettled(targetQueries.slice(0, 2).map(candidate => searchWikipedia(candidate, { limit: 2, timeoutMs: Math.min(boundedTimeoutMs, 2000) })))
@@ -1423,7 +1439,7 @@ export async function searchPublicSources(query, options = {}) {
     const earlyExitActive = isEarlyExitEnabled(options);
 
     const getFastCount = () => (liveNews.length + ddgWeb.length + searxngWeb.length + wiki.length + wikidata.length + liveWeb.length + governmentRoleResults.length + geminiGroundingResults.length);
-    const getGeneralWebCount = () => (ddgWeb.length + searxngWeb.length + geminiGroundingResults.length + liveWeb.length);
+    const getGeneralWebCount = () => (ddgWeb.length + searxngWeb.length + geminiGroundingResults.length);
 
     // Create an early-exit resolver promise
     let triggerEarlyExitResolve;
@@ -1541,12 +1557,27 @@ export async function searchPublicSources(query, options = {}) {
         if (/(?::\s*$|\.\.\.\s*$|\b(?:these individuals are|who are they|the three are|they are:|include:|namely:|such as:|here they are)\s*:?\s*$)/i.test(snip)) return true;
         return false;
     });
+
+    // Entity-void detection: if the combined top-5 snippets contain no proper-noun phrases
+    // (e.g. "King Charles", "Emperor Naruhito"), treat the entire batch as teaser-level and
+    // trigger deep crawl with a wider candidate pool to find sources that actually name entities.
+    const combinedTop5Text = deduped.slice(0, 5)
+        .map(item => `${item.title || ''} ${item.snippet || ''} ${item.fullArticleText || ''}`)
+        .join(' ');
+    const hasNamedEntitiesInTop5 = /[A-Z][a-z]{2,}(?:\s+[A-Z][a-z]{2,})+/.test(combinedTop5Text);
+    const isEntityVoidBatch = !hasNamedEntitiesInTop5 && /\b(?:who|which|name|person|people|individual|they|their|three|two|four|five|six|seven|eight|nine|ten|\d+)\b/i.test(normalizedQuery);
+
     const elapsedPublicMs = performance.now() - startTime;
     const remainingCrawlBudget = Math.max(0, boundedTimeoutMs - elapsedPublicMs - 150);
-    if ((options.skipAutoDeepCrawl !== true || hasIncompleteOrTeaserSnippet || options.allowDeepCrawl === true) && remainingCrawlBudget >= 400) {
-        // Use a larger candidate pool when snippets are teaser-only so articles ranked lower also get crawled
-        const crawlLimit = hasIncompleteOrTeaserSnippet ? 6 : 3;
-        await enrichSearchResultsWithDeepCrawl(deduped, crawlLimit, { timeoutMs: Math.min(2000, remainingCrawlBudget) }).catch(() => {});
+    if ((options.skipAutoDeepCrawl !== true || hasIncompleteOrTeaserSnippet || isEntityVoidBatch || options.allowDeepCrawl === true) && remainingCrawlBudget >= 400) {
+        // Use a larger candidate pool when snippets are teaser-only or entity-void so articles ranked
+        // further down the list also get deep-crawled. Pass the query so the relevance gate in
+        // article-extractor.js can evaluate paragraphs against the actual search intent.
+        const crawlLimit = isEntityVoidBatch ? 8 : (hasIncompleteOrTeaserSnippet ? 6 : 3);
+        await enrichSearchResultsWithDeepCrawl(deduped, crawlLimit, {
+            timeoutMs: Math.min(2000, remainingCrawlBudget),
+            query: normalizedQuery
+        }).catch(() => {});
     }
 
     if (tracker) {
