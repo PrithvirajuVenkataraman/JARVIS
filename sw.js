@@ -47,6 +47,8 @@ self.addEventListener('fetch', (event) => {
 
     // Network-First for HTML documents, scripts, and modules so code updates deploy immediately
     const isCodeOrDocument = request.mode === 'navigate' ||
+        url.pathname === '/' ||
+        url.pathname === '' ||
         url.pathname.endsWith('.js') ||
         url.pathname.endsWith('.mjs') ||
         url.pathname.endsWith('.html') ||
@@ -67,7 +69,7 @@ self.addEventListener('fetch', (event) => {
                 .catch(() => {
                     return caches.match(request).then((cached) => {
                         if (cached) return cached;
-                        if (request.mode === 'navigate') {
+                        if (request.mode === 'navigate' || url.pathname === '/' || url.pathname === '') {
                             return caches.match('/index.html') || caches.match('/404.html');
                         }
                         return new Response('Network error and no cache available', { status: 503 });
@@ -92,7 +94,11 @@ self.addEventListener('fetch', (event) => {
                     cache.put(request, responseToCache);
                 });
                 return networkResponse;
+            }).catch(() => {
+                return caches.match(request).then((cached) => cached || new Response('Asset unavailable offline', { status: 503 }));
             });
+        }).catch(() => {
+            return new Response('Network error and no cache available', { status: 503 });
         })
     );
 });
