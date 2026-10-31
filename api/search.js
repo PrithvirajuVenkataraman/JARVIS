@@ -5,7 +5,7 @@ import { applyApiSecurity, unsealSecret } from './_lib/security.js';
 import { classifyFreeLiveIntent, routeMessage } from './_lib/latest/router.js';
 import { searchItems } from './_lib/latest/latest-cache.js';
 import { ingestLatestSources } from './_lib/latest/latest-ingest.js';
-import { runFreeLiveSearch, searchDuckDuckGoHtml, searchSearXNGJson, searchSearXNGRacer, searchYahooFinanceQuotes, fetchWikipediaInfobox } from './_lib/free-live/providers.js';
+import { runFreeLiveSearch, searchDuckDuckGoHtml, searchSearXNGJson, searchSearXNGRacer, searchYahooFinanceQuotes, fetchWikipediaInfobox, decodeGoogleNewsUrl, searchYahooNewsRss, searchWorldWireRss } from './_lib/free-live/providers.js';
 import { extractWithCrawl4Ai } from './_lib/crawl4ai-client.js';
 import { rankTextsByEmbedding, chunkTextForEmbedding, hasNvidiaEmbeddingKey, rerankTexts, getNvidiaRerankModel } from './_lib/embeddings.js';
 import { cleanQueryTarget, extractQueryTargetMetadata } from './_lib/query-target-cleanup.js';
@@ -25,7 +25,7 @@ import { getCircuitBreakerDebugState } from '../app/search/circuitBreaker.mjs';
 import { scanDlp } from '../app/dlp-engine.js';
 import { classifySearchIntent, expandQueryDeterministically, rewriteSearchPrompt } from './_lib/query-rewriter.js';
 import { crawlArticleResilient, extractArticleFromHtml, isDomainTemporarilyBlocked, recordDomainFailure } from './_lib/article-extractor.js';
-export { classifySearchIntent, expandQueryDeterministically, rewriteSearchPrompt, crawlArticleResilient, extractArticleFromHtml, isDomainTemporarilyBlocked, recordDomainFailure };
+export { classifySearchIntent, expandQueryDeterministically, rewriteSearchPrompt, crawlArticleResilient, extractArticleFromHtml, isDomainTemporarilyBlocked, recordDomainFailure, decodeGoogleNewsUrl, searchYahooNewsRss, searchWorldWireRss };
 
 const SERPER_SEARCH_URL = 'https://google.serper.dev/search';
 const WIKIPEDIA_SEARCH_URL = 'https://en.wikipedia.org/w/api.php';
@@ -1256,6 +1256,8 @@ export async function searchPublicSources(query, options = {}) {
     const startTime = performance.now();
 
     let liveNews = [];
+    let liveYahooNews = [];
+    let liveWireNews = [];
     let wiki = [];
     let wikidata = [];
     let liveWeb = [];
@@ -1281,6 +1283,30 @@ export async function searchPublicSources(query, options = {}) {
                 if (tracker) tracker.finishProvider('google_news_rss', { resultCount: liveNews.length, status: liveNews.length ? 200 : 204 });
             }).catch(err => {
                 if (tracker) tracker.finishProvider('google_news_rss', { resultCount: 0, status: 500, error: err?.message });
+            });
+
+    if (tracker) tracker.startProvider('yahoo_news_rss');
+    const taskYahooNews = isTechDocs
+        ? Promise.resolve().then(() => { if (tracker) tracker.finishProvider('yahoo_news_rss', { resultCount: 0, status: 204 }); })
+        : Promise.allSettled(newsQueries.slice(0, 1).map(candidate => searchYahooNewsRss(candidate, { limit: 4, timeoutMs: Math.min(boundedTimeoutMs, 2000) })))
+            .then(s => {
+                liveYahooNews = s.flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []);
+                liveYahooNews.forEach(item => { item.__provider = 'yahoo_news_rss'; });
+                if (tracker) tracker.finishProvider('yahoo_news_rss', { resultCount: liveYahooNews.length, status: liveYahooNews.length ? 200 : 204 });
+            }).catch(err => {
+                if (tracker) tracker.finishProvider('yahoo_news_rss', { resultCount: 0, status: 500, error: err?.message });
+            });
+
+    if (tracker) tracker.startProvider('world_wire_rss');
+    const taskWorldWire = isTechDocs
+        ? Promise.resolve().then(() => { if (tracker) tracker.finishProvider('world_wire_rss', { resultCount: 0, status: 204 }); })
+        : Promise.allSettled(newsQueries.slice(0, 1).map(candidate => searchWorldWireRss(candidate, { limit: 4, timeoutMs: Math.min(boundedTimeoutMs, 2000) })))
+            .then(s => {
+                liveWireNews = s.flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []);
+                liveWireNews.forEach(item => { item.__provider = 'world_wire_rss'; });
+                if (tracker) tracker.finishProvider('world_wire_rss', { resultCount: liveWireNews.length, status: liveWireNews.length ? 200 : 204 });
+            }).catch(err => {
+                if (tracker) tracker.finishProvider('world_wire_rss', { resultCount: 0, status: 500, error: err?.message });
             });
     
     // General web search (DuckDuckGo & SearXNG) given full 3800ms individual budget
@@ -1427,7 +1453,7 @@ export async function searchPublicSources(query, options = {}) {
         });
 
     // Gemini is now a fast-path provider: runs in parallel with News/DDG/SearXNG/Wikipedia/Wikidata/Yahoo.
-    const fastTasks = [taskNews, taskDdg, taskSearXNG, taskWiki, taskWikidata, taskYahoo, taskGov, taskGemini];
+    const fastTasks = [taskNews, taskYahooNews, taskWorldWire, taskDdg, taskSearXNG, taskWiki, taskWikidata, taskYahoo, taskGov, taskGemini];
     const allTasks = [...fastTasks, taskGdelt];
 
     const raceStartMs = Date.now();
@@ -1438,7 +1464,7 @@ export async function searchPublicSources(query, options = {}) {
 
     const earlyExitActive = isEarlyExitEnabled(options);
 
-    const getFastCount = () => (liveNews.length + ddgWeb.length + searxngWeb.length + wiki.length + wikidata.length + liveWeb.length + governmentRoleResults.length + geminiGroundingResults.length);
+    const getFastCount = () => (liveNews.length + liveYahooNews.length + liveWireNews.length + ddgWeb.length + searxngWeb.length + wiki.length + wikidata.length + liveWeb.length + governmentRoleResults.length + geminiGroundingResults.length);
     const getGeneralWebCount = () => (ddgWeb.length + searxngWeb.length + geminiGroundingResults.length);
 
     // Create an early-exit resolver promise
@@ -1446,6 +1472,12 @@ export async function searchPublicSources(query, options = {}) {
     const earlyExitPromise = new Promise(resolve => {
         triggerEarlyExitResolve = resolve;
     });
+
+    let newsSettled = isTechDocs;
+    Promise.allSettled([taskNews, taskYahooNews, taskWorldWire]).then(() => {
+        newsSettled = true;
+        checkEarlyExit();
+    }).catch(() => {});
 
     const checkEarlyExit = () => {
         if (!earlyExitActive || earlyExitTriggered) return;
@@ -1457,19 +1489,24 @@ export async function searchPublicSources(query, options = {}) {
             ...searxngWeb,
             ...ddgWeb,
             ...liveWeb,
-            ...liveNews
+            ...liveNews,
+            ...liveYahooNews,
+            ...liveWireNews
         ].filter(Boolean);
 
         const evalResult = evaluateDeepCorroboration(currentPool);
         const hasSubstantiveSnippets = currentPool.some(item => item.snippet && item.snippet !== item.title && item.snippet.length >= 70);
         const genCount = getGeneralWebCount();
         const hasGeneralWeb = (isLeadership && (governmentRoleResults.length > 0 || wikidata.length > 0)) || genCount >= 1;
-        if (evalResult.satisfied && hasGeneralWeb && hasSubstantiveSnippets) {
+        const hasNews = (liveNews.length + liveYahooNews.length + liveWireNews.length) > 0;
+        const newsReady = isTechDocs || hasNews || newsSettled;
+
+        if (evalResult.satisfied && hasGeneralWeb && hasSubstantiveSnippets && newsReady) {
             earlyExitTriggered = true;
             earlyExitCorroboration = evalResult;
             exitReason = 'early_exit';
             timeToExitMs = Date.now() - raceStartMs;
-            console.log(`[SearchEarlyExit] exitReason="early_exit" timeToExitMs=${timeToExitMs} sources=${evalResult.verifiedCount} domains=${evalResult.domainCount} (ddg=${ddgWeb.length}, searx=${searxngWeb.length}, news=${liveNews.length}, wiki=${wiki.length})`);
+            console.log(`[SearchEarlyExit] exitReason="early_exit" timeToExitMs=${timeToExitMs} sources=${evalResult.verifiedCount} domains=${evalResult.domainCount} (ddg=${ddgWeb.length}, searx=${searxngWeb.length}, news=${liveNews.length + liveYahooNews.length + liveWireNews.length}, wiki=${wiki.length})`);
             triggerEarlyExitResolve(evalResult);
         }
     };
@@ -1530,6 +1567,8 @@ export async function searchPublicSources(query, options = {}) {
         ...ddgWeb,
         ...liveWeb,
         ...(isLeadership ? liveNews.slice(0, 3) : liveNews),
+        ...liveYahooNews,
+        ...liveWireNews,
         ...gdelt
     ].filter(Boolean);
 
@@ -1573,7 +1612,7 @@ export async function searchPublicSources(query, options = {}) {
         // Use a larger candidate pool when snippets are teaser-only or entity-void so articles ranked
         // further down the list also get deep-crawled. Pass the query so the relevance gate in
         // article-extractor.js can evaluate paragraphs against the actual search intent.
-        const crawlLimit = isEntityVoidBatch ? 8 : (hasIncompleteOrTeaserSnippet ? 6 : 3);
+        const crawlLimit = isEntityVoidBatch ? 8 : (hasIncompleteOrTeaserSnippet ? 6 : 5);
         await enrichSearchResultsWithDeepCrawl(deduped, crawlLimit, {
             timeoutMs: Math.min(2000, remainingCrawlBudget),
             query: normalizedQuery
@@ -1650,7 +1689,23 @@ export async function searchGoogleNewsRss(query, options = {}) {
     const xml = await response.text().catch(() => '');
     if (!xml || !xml.includes('<item>')) return [];
 
-    return parseGoogleNewsRssXml(xml, rawQ, limit);
+    const items = parseGoogleNewsRssXml(xml, rawQ, limit);
+
+    // Concurrently decode Google News JS-redirect URLs into direct publisher links
+    if (options.decodeUrls !== false && items.length > 0) {
+        await Promise.allSettled(items.map(async (item) => {
+            if (item.url && item.url.includes('news.google.com')) {
+                const resolved = await decodeGoogleNewsUrl(item.url, { timeoutMs: 1800, signal: options.signal });
+                if (resolved && resolved.startsWith('http') && !resolved.includes('news.google.com')) {
+                    item.url = resolved;
+                    const host = getDomainFromUrl(resolved);
+                    if (host) item.domain = host;
+                }
+            }
+        }));
+    }
+
+    return items;
 }
 
 function cleanXmlEntities(str) {
@@ -1742,6 +1797,19 @@ export function extractCleanArticleText(html, url = '', query = '') {
 export async function enrichSearchResultsWithDeepCrawl(results, limit = 3, options = {}) {
     if (!Array.isArray(results) || !results.length) return results;
     const crawlTimeout = Math.min(Number(options?.timeoutMs) || 2000, 2500);
+
+    // Decode any remaining Google News wrapper URLs so direct publisher URLs can be crawled
+    await Promise.allSettled(results.slice(0, limit + 4).map(async (item) => {
+        const u = String(item?.url || '');
+        if (u.includes('news.google.com')) {
+            const decoded = await decodeGoogleNewsUrl(u, { timeoutMs: Math.min(crawlTimeout, 1500) });
+            if (decoded && decoded.startsWith('http') && !decoded.includes('news.google.com')) {
+                item.url = decoded;
+                const host = getDomainFromUrl(decoded);
+                if (host) item.domain = host;
+            }
+        }
+    }));
     
     // Prioritize direct, crawlable article URLs (avoiding redirect wrappers and encyclopedia lookups)
     const directCandidates = results.filter(item => {
@@ -1782,6 +1850,7 @@ export async function enrichSearchResultsWithDeepCrawl(results, limit = 3, optio
                 }
                 item.deepCrawled = true;
                 item.accessible = true;
+                item.isScraped = true;
 
                 // Backpropagate rich content to matching headline wrappers in results
                 for (const r of results) {
@@ -1792,6 +1861,7 @@ export async function enrichSearchResultsWithDeepCrawl(results, limit = 3, optio
                             r.snippet = cleanBody.slice(0, 1200);
                             r.description = cleanBody.slice(0, 1200);
                             r.deepCrawled = true;
+                            r.isScraped = true;
                         }
                     }
                 }
@@ -6752,6 +6822,9 @@ export const __test = {
     runVerifiedWebSearch,
     runEvidenceFirstWebRag,
     searchGoogleNewsRss,
+    decodeGoogleNewsUrl,
+    searchYahooNewsRss,
+    searchWorldWireRss,
     crawlArticleBody,
     extractCleanArticleText,
     enrichSearchResultsWithDeepCrawl,
