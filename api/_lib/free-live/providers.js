@@ -1131,23 +1131,41 @@ export async function runFreeLiveSearch(query, route = {}, options = {}) {
     if (category === 'crypto') return searchCrypto(query, { limit });
     if (category === 'disasters') return searchDisasters(query, { limit });
     if (category === 'sports') return searchSports(query, { limit });
-    if (category === 'tourism_food_places') return searchTourismFoodPlaces(query, { limit });
+    if (category === 'tourism_food_places') {
+        const placeRes = await searchTourismFoodPlaces(query, { limit });
+        if (Array.isArray(placeRes?.results) && placeRes.results.length > 0) {
+            return placeRes;
+        }
+    }
 
     // Universal Zero-Key Multi-Engine Parallel Fast-Race
-    // Note: SearXNG public instances are intentionally excluded — they block Vercel datacenter IPs.
-    // Web coverage comes from Wikipedia + GDELT + Gemini Grounding in searchPublicSources.
-    const [wikiResults, gdeltResults] = await Promise.allSettled([
+    // Parallel race across resilient search engines: Google News RSS, Yahoo News RSS, BBC World Wire, DuckDuckGo Lite, Wikipedia, and GDELT.
+    const [googleNewsResults, yahooResults, worldWireResults, ddgResults, wikiResults, gdeltResults] = await Promise.allSettled([
+        searchGoogleNewsRss(query, { limit: 5 }),
+        searchYahooNewsRss(query, { limit: 4 }),
+        searchWorldWireRss(query, { limit: 4 }),
+        searchDuckDuckGoHtml(query, { limit: 6 }),
         searchWikipediaApi(query, { limit: 3 }),
         searchGdeltNews(query, { limit: 3 })
     ]);
 
     const results = [];
-    if (wikiResults.status === 'fulfilled' && Array.isArray(wikiResults.value)) {
-        results.push(...wikiResults.value);
-    }
-    if (gdeltResults.status === 'fulfilled' && Array.isArray(gdeltResults.value)) {
-        results.push(...gdeltResults.value);
-    }
+    const seenUrls = new Set();
+    const addUnique = (items) => {
+        if (!Array.isArray(items)) return;
+        for (const item of items) {
+            const u = String(item?.url || '').trim().toLowerCase();
+            if (!u || seenUrls.has(u)) continue;
+            seenUrls.add(u);
+            results.push(item);
+        }
+    };
+    if (googleNewsResults.status === 'fulfilled') addUnique(googleNewsResults.value);
+    if (yahooResults.status === 'fulfilled') addUnique(yahooResults.value);
+    if (worldWireResults.status === 'fulfilled') addUnique(worldWireResults.value);
+    if (ddgResults.status === 'fulfilled') addUnique(ddgResults.value);
+    if (wikiResults.status === 'fulfilled') addUnique(wikiResults.value);
+    if (gdeltResults.status === 'fulfilled') addUnique(gdeltResults.value);
 
     if (results.length > 0) {
         return {
@@ -1578,8 +1596,8 @@ function inferCategory(query) {
     if (/\bbitcoin|btc|ethereum|eth|crypto\b/.test(t)) return 'crypto';
     if (/\bsports?|score|fixture|standings|ipl|nba|nfl|epl\b/.test(t)) return 'sports';
     if (/\bearthquake|wildfire|flood|cyclone|hurricane|tsunami|volcano\b/.test(t)) return 'disasters';
-    if (/\btourism|tourist|travel|places to visit|attractions?|temple|museum|hotel\b/.test(t)) return 'tourism_food_places';
-    return 'unsupported_free_live';
+    if (/\b(?:places to visit|tourist attractions?|sightseeing|things to do in|hotels? in|museums? in|temples? in)\b/i.test(t)) return 'tourism_food_places';
+    return 'general_live_web';
 }
 
 function extractLocation(query) {
