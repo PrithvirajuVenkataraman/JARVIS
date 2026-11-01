@@ -40,15 +40,7 @@
     </script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
-        if ('caches' in window) {
-            caches.keys().then((keys) => {
-                keys.forEach((key) => {
-                    if (key.startsWith('jarvis-cache-') && key !== 'jarvis-cache-v12') {
-                        caches.delete(key).catch(() => {});
-                    }
-                });
-            }).catch(() => {});
-        }
+        // The service worker removes obsolete app caches during activation.
 
         // Enterprise BYOK (Bring Your Own Key) Fetch Interceptor
         (function installByokFetchInterceptor() {
@@ -85,7 +77,7 @@
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
     <link rel="stylesheet" href="styles.css?v=2.0.7">
     <script src="science-format.js?v=2.0.1"></script>
-    <script type="module" src="app/bootstrap.js?v=2.0.6"></script>
+    <script type="module" src="app/bootstrap.js?v=2.2.0"></script>
 </head>
 <body class="dark min-h-screen bg-black text-white">
 
@@ -5512,6 +5504,7 @@ async function streamChatCompletion(payload, options = {}) {
             const summary = thoughtLines.slice(-3).join(' ') || parsed.thought;
             finalDisplay = `${finalDisplay}\n\n${summary}`;
         }
+        hideThinkingIndicator();
         updateStreamingAssistantMessage(assistantMessageId, finalDisplay, {
             userMessage,
             streaming: false,
@@ -7001,7 +6994,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
         }
 
         function resetCapabilityPillsUi() {
-            _activeCapabilityPill = null;
+            _activeCapabilityPill = typeof getWebSearchMode === 'function' && getWebSearchMode() === 'force' ? 'live_search' : null;
             if (!_isDeepReasoningEnabled) {
                 _preferredModelTier = 'standard';
             }
@@ -9090,11 +9083,17 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
 
 
         function stopActiveGeneration(reason = 'manual') {
+            const liveResearch = window.JarvisLiveResearch?.activeController;
+            const hadLiveResearch = Boolean(liveResearch && !liveResearch.isTerminal);
+            if (hadLiveResearch) {
+                liveResearch.jarvisAbortReason = reason;
+                try { liveResearch.abort(); } catch (_) {}
+            }
             const hadRequest = activeRequestControllers.size > 0 || !!activeRequestController;
             const hadTypewriter = activeTypewriterRuns.size > 0 || activeTypewriterTimeouts.size > 0;
             const hadSpeech = isConverseSpeechActive();
             const hadStateBusy = Boolean(window.JarvisInteractionState?.isBusy?.());
-            if (!hadRequest && !hadTypewriter && !hadSpeech && !isAssistantProcessing() && !hadStateBusy) {
+            if (!hadLiveResearch && !hadRequest && !hadTypewriter && !hadSpeech && !isAssistantProcessing() && !hadStateBusy) {
                 resetComposerToIdle();
                 return;
             }
@@ -10185,6 +10184,8 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 turnId: String(meta?.turnId || activeResponseRenderContext?.turnId || '').trim(),
                 sourceType: String(meta?.sourceType || 'default').trim(), 
                 sourceLabel: String(meta?.sourceLabel || meta?.sourceType || 'Assistant answer').trim(), 
+                answerStatus: String(meta?.answerStatus || ''),
+                verified: meta?.answerStatus === 'complete' && meta?.verified === true,
                 routing: meta?.routing || null, 
                 route: String(meta?.route || meta?.routing?.route || '').trim(),
                 routeReason: String(meta?.routeReason || meta?.routing?.reason || '').trim(),
@@ -11135,6 +11136,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
         function commitRegenerationCandidate(renderContext) {
             const candidate = renderContext?.replacementCandidate;
             if (!candidate?.replaceTarget?.isConnected) return false;
+            if (candidate.requiresEvidenceValidation && !candidate.researchValidated) return false;
             document.querySelectorAll('.feedback-container').forEach(feedback => {
                 if (feedback.dataset.assistantMessageId === candidate.replaceMessageId) feedback.remove();
             });
@@ -12249,6 +12251,8 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                     turnId: messageTurnId, 
                     sourceType, 
                     sourceLabel, 
+                    answerStatus: meta?.answerStatus || '',
+                    verified: meta?.answerStatus === 'complete' && meta?.verified === true,
                     sources: sourcePresentation.sources || [],
                     routing: meta?.routing || null, 
                     route: meta?.route || meta?.routing?.route || '',
@@ -12497,6 +12501,8 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
         function findAssistantMessageRow(messageId) {
             const id = String(messageId || '');
             if (!id) return null;
+            const candidate = activeResponseRenderContext?.replacementCandidate;
+            if (candidate?.messageId === id) return candidate.messageDiv;
             return Array.from(document.querySelectorAll('.chat-row[data-message-id]'))
                 .find(row => row.dataset.messageId === id) || null;
         }
@@ -12754,6 +12760,8 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 thought: thoughtText,
                 sourceType: meta?.sourceType || existing.sourceType || 'model',
                 sourceLabel: meta?.sourceLabel || existing.sourceLabel || 'Model answer',
+                answerStatus: meta?.answerStatus || existing.answerStatus || '',
+                verified: meta?.verified === true && meta?.answerStatus === 'complete',
                 sources: presentation.sources || existing.sources || [],
                 routing: meta?.routing || existing.routing || null,
                 route: meta?.route || existing.route || '',
@@ -12765,7 +12773,9 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 riskFlags: analyzeAnswerRiskFlags(priorUserPrompt, cleanText)
             });
             if (meta?.streaming === false && !meta?.restored && !isRestoringChatSession && cleanText) {
-                recordActiveChatMessage('assistant', cleanText, turnId);
+                recordActiveChatMessage('assistant', cleanText, turnId, {
+                    answerStatus: meta?.answerStatus, verified: meta?.verified, sources: presentation.sources
+                });
                 const userPromptForHistory = String(priorUserPrompt || meta?.userMessage || activeResponseRenderContext?.userPrompt || '').trim();
                 if (userPromptForHistory) {
                     saveToHistory(userPromptForHistory, cleanText, { turnId, recordSession: false });
@@ -14615,7 +14625,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                             </svg>
                             Sources
                         </span>
-                        <span class="source-carousel-count">${sources.length} verified</span>
+                        <span class="source-carousel-count">${sources.length} sources</span>
                     </div>
                     <div class="source-carousel-track">
                         ${sources.map((s, i) => {
@@ -14627,13 +14637,13 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                             const domainText = dateLabel ? `${domain} • ${dateLabel}` : domain;
                             const fullTitle = dateLabel ? `[${dateLabel}] ${title}` : title;
                             return `
-                                <a href="${url}" target="_blank" rel="noopener noreferrer" class="source-card-pill" title="${fullTitle}">
+                                <a href="${url}" target="_blank" rel="noopener noreferrer" class="source-card-pill" data-source-id="${Number.isInteger(s.id) ? s.id : i + 1}" title="${fullTitle}">
                                     <img class="source-card-favicon" src="${favicon}" alt="" loading="lazy" onerror="this.style.display='none'" />
                                     <div class="source-card-info">
                                         <span class="source-card-domain">${domainText}</span>
                                         <span class="source-card-title">${title}</span>
                                     </div>
-                                    <span class="source-card-badge">${i + 1}</span>
+                                    <span class="source-card-badge">${Number.isInteger(s.id) ? s.id : i + 1}</span>
                                 </a>
                             `;
                         }).join('')}
@@ -15720,11 +15730,24 @@ ${code}
             return _composerWebMode || 'off';
         }
 
-        function setWebSearchMode(mode = 'off') {
+        function setWebSearchMode(mode = 'off', options = {}) {
             // Normalize: 'auto' treated as 'off' — classifier no longer auto-triggers live search
             const normalized = mode === 'force' ? 'force' : 'off';
             _composerWebMode = normalized;
+            if (normalized === 'force') _activeCapabilityPill = 'live_search';
+            else if (_activeCapabilityPill === 'live_search') _activeCapabilityPill = null;
+            if (options.persist !== false) {
+                try {
+                    const session = chatSessions.find(item => item.id === activeChatSessionId && !item.deleted);
+                    if (session) {
+                        session.webSearchMode = normalized;
+                        saveChatSessions();
+                        rememberActiveEmptyChatDraft(session);
+                    }
+                } catch (_) { /* Session storage may not be initialized during bootstrap. */ }
+            }
             updateWebSearchToggleUi();
+            updateCapabilityPillsUi();
         }
 
         function cycleWebSearchMode() {
@@ -16519,9 +16542,6 @@ Answer the user directly and conversationally based on the quoted context.`;
                     clearSubmittedPromptBox(outgoingText, normalizedOutgoingText);
                     window.JarvisSessionRecovery?.clearComposerDraft?.();
                     restoreResponseRenderContext(previousRenderContext);
-                    if (typeof setWebSearchMode === 'function') {
-                        setWebSearchMode('off'); // Reset to OFF after each message — user must re-enable
-                    }
                     if (typeof resetCapabilityPillsUi === 'function') {
                         resetCapabilityPillsUi();
                     }
@@ -19405,13 +19425,14 @@ function isLiveRetrievalQuery(text) {
 function isExplicitWebSearchRequest(text) {
     const t = String(text || '').toLowerCase().trim();
     if (!t) return false;
-    return /\b(live search|web research|search (?:the )?(?:web|internet)|web search|search online|search web|browse (?:the )?(?:web|internet)|look ?up (?:on|in)? ?(?:the )?(?:web|internet)|find (?:on|in)? ?(?:the )?(?:web|internet)|google (?:for|about)|check online|online sources?|with sources?)\b/.test(t);
+    return /^\/(?:search|live|web)\b/i.test(t) || /\b(live search|web research|search (?:the )?(?:web|internet)|web search|search online|search web|browse (?:the )?(?:web|internet)|look ?up (?:on|in)? ?(?:the )?(?:web|internet)|find (?:on|in)? ?(?:the )?(?:web|internet)|google (?:for|about)|check online|online sources?|with sources?)\b/.test(t);
 }
 
 function normalizeExplicitWebSearchQuery(text) {
     const raw = String(text || '').trim();
     if (!raw) return raw;
     const normalized = raw
+        .replace(/^\/(?:search|live|web)\s*/i, '')
         .replace(/^(?:please\s+)?(?:can you|could you|would you)?\s*(?:search|find|look ?up|browse|check)\s+(?:the\s+)?(?:web|internet)\s+(?:for|about|on)?\s*/i, '')
         .replace(/^(?:please\s+)?(?:google|web search)\s+(?:for|about)?\s*/i, '')
         .replace(/\b(?:from|using)\s+(?:the\s+)?(?:web|internet)\b/gi, ' ')
@@ -23376,6 +23397,42 @@ async function handleUniversalEntityFactQuery(userText, liveIntent = null) {
 }
 
 
+function getActiveResearchContext(currentQuery = '', maxTurns = 6) {
+    const session = chatSessions.find(item => item.id === activeChatSessionId && !item.deleted);
+    let messages = Array.isArray(session?.messages) ? session.messages : [];
+    if (activeResponseRenderContext?.isRegeneration) {
+        const sourceIndex = messages.findIndex(item => item.role === 'user' && (
+            (item.turnId && item.turnId === activeResponseRenderContext.turnId) || item.text === currentQuery
+        ));
+        if (sourceIndex >= 0) messages = messages.slice(0, sourceIndex);
+    } else if (messages.at(-1)?.role === 'user' && messages.at(-1)?.text === currentQuery) {
+        messages = messages.slice(0, -1);
+    }
+    return messages.slice(-Math.max(1, maxTurns) * 2).map(item => ({
+        role: item.role === 'assistant' ? 'assistant' : 'user',
+        content: String(item.text || ''),
+        turnId: String(item.turnId || '')
+    })).filter(item => item.content.trim());
+}
+
+function renderLiveResearchAnswerStatus(row, answerStatus) {
+    if (!row) return;
+    row.dataset.answerStatus = answerStatus;
+    let label = row.querySelector('.live-research-answer-status');
+    if (!label) {
+        label = document.createElement('div');
+        label.className = 'live-research-answer-status text-xs text-slate-500 mt-2';
+        label.setAttribute('role', 'status');
+        row.appendChild(label);
+    }
+    label.textContent = {
+        complete: 'All requested facts supported by retrieved sources',
+        partial: 'Partial answer: some requested facts could not be verified',
+        unavailable: 'Live evidence unavailable',
+        clarification: 'More information needed'
+    }[answerStatus] || 'Live evidence unavailable';
+}
+
 async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = {}) {
     // Robust polymorphic argument normalization: guarantees rawUserText never becomes "[object Object]"
     let effectiveCleanText = '';
@@ -23432,6 +23489,10 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
     if (window.JarvisLiveResearch) {
         window.JarvisLiveResearch.activeController = controller;
     }
+    const researchSessionId = activeChatSessionId;
+    const researchContext = getActiveResearchContext(query);
+    const renderContext = activeResponseRenderContext;
+    const isCurrentResearch = () => window.JarvisLiveResearch?.activeController === controller && activeChatSessionId === researchSessionId;
 
     window.JarvisInteractionState?.transition?.('SEARCHING', { metadata: { query, turnId: controller.turnId } });
     showThinkingIndicator('SEARCHING');
@@ -23442,13 +23503,13 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
         turnId: controller.turnId,
         sourceType: 'model'
     });
+    const replacement = renderContext?.replacementCandidate;
+    if (replacement?.messageId === assistantMessageId) replacement.requiresEvidenceValidation = true;
 
     let activeRow = null;
     const getRow = () => {
-        if (activeRow && activeRow.isConnected) return activeRow;
-        activeRow = document.querySelector(`.chat-row[data-turn-id="${controller.turnId}"]`) ||
-            (assistantMessageId ? document.querySelector(`[data-message-id="${assistantMessageId}"]`) : null) ||
-            document.getElementById('chat-container')?.lastElementChild;
+        if (activeRow && (activeRow.isConnected || replacement?.messageDiv === activeRow)) return activeRow;
+        activeRow = replacement?.messageId === assistantMessageId ? replacement.messageDiv : findAssistantMessageRow(assistantMessageId);
         return activeRow;
     };
 
@@ -23457,7 +23518,7 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
         controller.execute({
             query,
             userText: userDisplayQuery,
-            context: conversationContext || window.JarvisConversation?.buildContext?.({ maxTurns: 6 }) || [],
+            context: researchContext,
             assistantMessageId,
             isWebForced,
             researchStreamFn: ({ query: researchQuery, context: researchContext, signal, timeoutMs, onEvent }) => {
@@ -23471,7 +23532,7 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                 }, { signal, timeoutMs, onEvent });
             },
             fetchSearchFn: async ({ query: fetchQuery, context: searchContext, signal, timeoutMs, threadState }) => {
-                const effectiveSearchContext = searchContext || conversationContext || window.JarvisConversation?.buildContext?.({ maxTurns: 6 }) || [];
+                const effectiveSearchContext = Array.isArray(searchContext) ? searchContext : researchContext;
                 const activeLedger = threadState || window.JarvisConversation?.getActiveLedger?.() || null;
                 return fetchLiveSearchJson(fetchQuery || query, {
                     signal,
@@ -23521,17 +23582,20 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
             },
             uiCallbacks: {
                 onStateTransition: ({ state, meta }) => {
+                    if (!isCurrentResearch() || controller.searchAbortController.signal.aborted) return;
                     if (state === 'SEARCHING') {
                         window.JarvisInteractionState?.transition?.('SEARCHING', { metadata: { query, turnId: controller.turnId } });
                         showThinkingIndicator('SEARCHING');
                         const label = document.querySelector('#chat-thinking-indicator .thinking-timer');
                         if (label && meta?.message) label.textContent = meta.message;
                     } else if (state === 'SOURCE_GROUNDED_SYNTHESIS') {
-                        // Keep SEARCHING active continuously right up to the n-1 moment before the answer starts streaming!
                         showThinkingIndicator('SEARCHING');
+                        const label = document.querySelector('#chat-thinking-indicator .thinking-timer');
+                        if (label) label.textContent = meta?.message || 'Checking the answer against retrieved evidence…';
                     }
                 },
                 onSourcesValidated: ({ sources, provenance }) => {
+                    if (!isCurrentResearch() || controller.isTerminal) return;
                     // Keep SEARCHING indicator visible and active until first token arrives.
                     // Keep the empty assistant row hidden so no empty blinking box is shown before synthesis.
                     const row = getRow();
@@ -23541,32 +23605,30 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                     showThinkingIndicator('SEARCHING');
                 },
                 onToken: ({ streamedText }) => {
-                    if (window.JarvisLiveResearch?.activeController !== controller || controller.isTerminal) return;
-                    if (window.JarvisLiveResearch?.isRawToolCallJson?.(streamedText) || /^\s*\{\s*"(?:tool|function|tool_name)"\s*:\s*"[^"]+"/i.test(String(streamedText || '').trim())) {
-                        return;
-                    }
-                    window.JarvisInteractionState?.transition?.('GENERATING', { metadata: { turnId: controller.turnId } });
-                    hideThinkingIndicator();
-                    const row = getRow();
-                    if (row) row.style.display = '';
-                    updateStreamingAssistantMessage(assistantMessageId, streamedText, {
-                        turnId: controller.turnId,
-                        streaming: true,
-                        sources: controller.sources,
-                        sourceType: 'verified',
-                        provenance: 'web_grounded'
-                    });
+                    if (!isCurrentResearch() || controller.isTerminal) return;
+                    // Tokens are provisional. Keep the previous answer visible until canonical completion.
+                    const label = document.querySelector('#chat-thinking-indicator .thinking-timer');
+                    if (label) label.textContent = 'Checking the answer against retrieved evidence…';
                 },
-                onComplete: async ({ content, sources, provenance, telemetry }) => {
-                    if (window.JarvisLiveResearch?.activeController !== controller) return;
+                onComplete: ({ content, sources, provenance, telemetry, answerStatus, verified }) => {
+                    if (!isCurrentResearch() || controller.searchAbortController.signal.aborted) { resolve(false); return; }
                     hideThinkingIndicator();
                     const row = getRow();
                     const hasSources = Array.isArray(sources) && sources.length > 0;
-                    const isWebGrounded = provenance === 'web_grounded' && hasSources;
+                    const isVerified = answerStatus === 'complete' && verified === true && hasSources;
+                    const hasValidatedAnswer = (answerStatus === 'complete' || answerStatus === 'partial') && hasSources && Boolean(content?.trim());
+                    if (replacement?.requiresEvidenceValidation) {
+                        replacement.researchValidated = hasValidatedAnswer;
+                        if (!hasValidatedAnswer) {
+                            window.JarvisInteractionState?.transition?.('IDLE');
+                            resolve(false);
+                            return;
+                        }
+                    }
 
                     if (row) {
                         row.style.display = '';
-                        if (provenance !== 'web_grounded') {
+                        if (!isVerified) {
                             row.dataset.boundedResearchTerminal = 'true';
                         }
                         if (hasSources && window.JarvisLiveResearch?.renderOrUpdateSourcesCarousel) {
@@ -23578,24 +23640,35 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                         turnId: controller.turnId,
                         streaming: false,
                         sources: sources || [],
-                        sourceType: isWebGrounded ? 'verified' : (hasSources ? 'retrieved' : (provenance === 'no_sources' ? 'no_sources' : 'model')),
-                        sourceLabel: hasSources ? `${sources.length} retrieved sources` : (provenance === 'clarification' ? 'Clarification needed' : 'No live evidence'),
+                        sourceType: isVerified ? 'verified' : (hasSources ? 'retrieved' : 'no_sources'),
+                        sourceLabel: hasSources ? `${sources.length} retrieved sources` : (answerStatus === 'clarification' ? 'Clarification needed' : 'No live evidence'),
+                        answerStatus,
+                        verified: isVerified,
                         provenance,
-                        isFallback: provenance !== 'web_grounded'
+                        isFallback: !isVerified
                     });
-                    recordActiveChatMessage('assistant', content, controller.turnId);
+                    renderLiveResearchAnswerStatus(row, answerStatus);
+                    recordActiveChatMessage('assistant', content, controller.turnId, { answerStatus, verified: isVerified, sources });
 
                     // Live web search follow-up questions section completely removed per user request
 
                     window.JarvisInteractionState?.transition?.('IDLE');
                     saveToHistory(rawUserText || query, content, { turnId: controller.turnId });
-                    if (typeof setWebSearchMode === 'function') setWebSearchMode('off');
                     resolve(true);
                 }
             }
+        }).then(result => {
+            if (result?.aborted && isCurrentResearch()) {
+                getRow()?.remove();
+                hideThinkingIndicator();
+            }
+            // Abort resolves controller.execute without invoking onComplete.
+            resolve(!result?.aborted && isCurrentResearch() && result?.success === true);
         }).catch((err) => {
-            hideThinkingIndicator();
-            window.JarvisInteractionState?.transition?.('IDLE');
+            if (isCurrentResearch()) {
+                hideThinkingIndicator();
+                window.JarvisInteractionState?.transition?.('IDLE');
+            }
             resolve(false);
         });
     });
@@ -23623,7 +23696,7 @@ async function handleLiveRetrievalQuery(userText, options = {}) {
     window.JarvisInteractionState?.transition?.('ANALYZING', { metadata: { userText } });
     showThinkingIndicator('Analyzing...');
     const controller = beginAbortableRequest();
-    const verificationBudgetMs = 8000;
+    const verificationBudgetMs = 15000;
     let didBudgetTimeout = false;
     const budgetTimer = setTimeout(() => {
         didBudgetTimeout = true;
@@ -23655,7 +23728,7 @@ async function handleLiveRetrievalQuery(userText, options = {}) {
                 domain: intent.domain || '',
                 factType: intent.factType || '',
                 mustContain: getLiveSearchMustContainHints(intent, query),
-                timeoutMs: 7800
+                timeoutMs: 14000
             });
             clearTimeout(budgetTimer);
         } catch (searchErr) {
@@ -23756,7 +23829,7 @@ ${snippets}`;
                     stream: true,
                     displayUserMessage: userText,
                     routingMessage: userText,
-                    timeoutMs: 9000
+                    timeoutMs: 18000
                 });
             } catch (synthErr) {
                 logRoutingDebug('handler fallback: live_synthesis_stream_error', query, {
@@ -29421,6 +29494,7 @@ function createChatSession(title = 'New chat') {
         autoTitle: true,
         titleEdited: false,
         pinned: false,
+        webSearchMode: 'off',
         deleted: false
     };
 }
@@ -29440,6 +29514,9 @@ function normalizeChatSession(raw) {
                 text: String(item?.text || '').trim(),
                 timestamp: String(item?.timestamp || raw.updatedAt || new Date().toISOString()),
                 turnId: String(item?.turnId || '').trim(),
+                answerStatus: ['complete', 'partial', 'unavailable', 'clarification'].includes(item?.answerStatus) ? item.answerStatus : '',
+                verified: item?.answerStatus === 'complete' && item?.verified === true,
+                sources: Array.isArray(item?.sources) ? item.sources.slice(0, 8) : [],
                 attachments: Array.isArray(item?.attachments)
                     ? item.attachments.map(att => ({
                         name: String(att?.name || 'attachment'),
@@ -29467,6 +29544,7 @@ function normalizeChatSession(raw) {
         autoTitle: titleIsInvalid ? true : (raw.autoTitle !== false && raw.titleEdited !== true),
         titleEdited: titleIsInvalid ? false : (raw.titleEdited === true),
         pinned: raw.pinned === true,
+        webSearchMode: raw.webSearchMode === 'force' ? 'force' : 'off',
         deleted: raw.deleted === true
     };
 }
@@ -29665,6 +29743,11 @@ function compactChatSessionForStorage(session, options = {}) {
                 text: String(item?.text || '').slice(0, maxChars),
                 timestamp: String(item?.timestamp || ''),
                 turnId: String(item?.turnId || ''),
+                answerStatus: item?.answerStatus || '',
+                verified: item?.answerStatus === 'complete' && item?.verified === true,
+                sources: (Array.isArray(item?.sources) ? item.sources : []).slice(0, 8).map(source => ({
+                    id: source.id, title: source.title, url: source.url, domain: source.domain
+                })),
                 attachments: Array.isArray(item?.attachments)
                     ? item.attachments.map(att => ({
                         name: String(att?.name || 'attachment').slice(0, 180),
@@ -29679,6 +29762,7 @@ function compactChatSessionForStorage(session, options = {}) {
         autoTitle: session.autoTitle !== false,
         titleEdited: session.titleEdited === true,
         pinned: session.pinned === true,
+        webSearchMode: session.webSearchMode === 'force' ? 'force' : 'off',
         deleted: false
     };
 }
@@ -29734,7 +29818,8 @@ function rememberActiveEmptyChatDraft(session) {
             createdAt: session.createdAt,
             updatedAt: session.updatedAt,
             autoTitle: session.autoTitle !== false,
-            titleEdited: session.titleEdited === true
+            titleEdited: session.titleEdited === true,
+            webSearchMode: session.webSearchMode === 'force' ? 'force' : 'off'
         }));
     } catch (_) {}
 }
@@ -29757,6 +29842,7 @@ function loadActiveEmptyChatDraft() {
         session.updatedAt = String(parsed?.updatedAt || session.updatedAt);
         session.autoTitle = parsed?.autoTitle !== false;
         session.titleEdited = parsed?.titleEdited === true;
+        session.webSearchMode = parsed?.webSearchMode === 'force' ? 'force' : 'off';
         return session;
     } catch (_) {
         return null;
@@ -29907,6 +29993,9 @@ function migrateLegacyHistoryToChatSession() {
 }
 
 function startNewChatSession(options = {}) {
+    stopActiveGeneration('new_chat');
+    conversationContext = [];
+    setWebSearchMode('off', { persist: false });
     const existingEmptySession = chatSessions.find(item =>
         item &&
         item.id === activeChatSessionId &&
@@ -29914,6 +30003,7 @@ function startNewChatSession(options = {}) {
         !chatSessionHasUserMessage(item)
     );
     if (existingEmptySession && options.forceNew !== true) {
+        existingEmptySession.webSearchMode = 'off';
         conversationHistory = [];
         if (!options.keepVisible) {
             const chatContainer = document.getElementById('chat-container');
@@ -29977,7 +30067,9 @@ function initializeActiveChatSessionForStartup() {
         activeChatSessionId = draft.id;
         chatSessions.push(draft);
         conversationHistory = [];
+        conversationContext = [];
         chatHistory = [];
+        setWebSearchMode(draft.webSearchMode, { persist: false });
         renderChatSidebarList();
         return draft;
     }
@@ -30489,6 +30581,11 @@ function recordActiveChatMessage(role, text, turnId = '', extra = {}) {
     if (normalizedRole === 'assistant' && !chatSessionHasUserMessage(session)) return;
     const now = new Date().toISOString();
     const effectiveTurnId = String(turnId || '').trim();
+    const researchMeta = ['complete', 'partial', 'unavailable', 'clarification'].includes(extra?.answerStatus) ? {
+        answerStatus: extra.answerStatus,
+        verified: extra.answerStatus === 'complete' && extra.verified === true,
+        sources: Array.isArray(extra.sources) ? extra.sources.slice(0, 8) : []
+    } : {};
 
     // Deduplication: if the last message in the session matches this role and turn, update it instead of adding a duplicate
     const lastMsg = Array.isArray(session.messages) && session.messages.length ? session.messages[session.messages.length - 1] : null;
@@ -30496,6 +30593,7 @@ function recordActiveChatMessage(role, text, turnId = '', extra = {}) {
         if (effectiveTurnId && lastMsg.turnId === effectiveTurnId) {
             lastMsg.text = cleanText;
             lastMsg.timestamp = now;
+            Object.assign(lastMsg, researchMeta);
             saveChatSessions();
             persistActiveSessionSnapshot(effectiveTurnId);
             return;
@@ -30510,6 +30608,7 @@ function recordActiveChatMessage(role, text, turnId = '', extra = {}) {
         text: cleanText || (attachments.length ? `Attached ${attachments.length} file${attachments.length === 1 ? '' : 's'}` : ''),
         timestamp: now,
         turnId: effectiveTurnId,
+        ...researchMeta,
         attachments
     });
     session.messages = session.messages.slice(-CHAT_SESSION_MAX_MESSAGES);
@@ -30570,13 +30669,15 @@ function restoreConversationEngineForSession(session) {
 function restoreChatSession(sessionId) {
     const session = chatSessions.find(item => item.id === sessionId && !item.deleted);
     if (!session) return;
-    stopActiveGeneration('manual');
+    stopActiveGeneration('switch_chat');
     closeChatSessionMenu();
     activeChatSessionId = session.id;
+    setWebSearchMode(session.webSearchMode, { persist: false });
     if (hydrateSessionMessagesFromHistory(session)) {
         saveChatSessions();
     }
     conversationHistory = buildHistoryFromChatSession(session);
+    conversationContext = session.messages.map(item => ({ role: item.role, text: item.text, turnId: item.turnId || '' }));
     restoreConversationEngineForSession(session);
     const chatContainer = document.getElementById('chat-container');
     if (chatContainer) chatContainer.innerHTML = '';
@@ -30584,13 +30685,18 @@ function restoreChatSession(sessionId) {
     isRestoringChatSession = true;
     try {
         session.messages.forEach(item => {
-            addChatMessage(item.text, item.role === 'user', false, {
+            const restoredMessageId = addChatMessage(item.text, item.role === 'user', false, {
                 turnId: item.turnId || '',
                 detached: true,
                 restored: true,
                 skipRecord: true,
+                answerStatus: item.answerStatus || '',
+                verified: item.answerStatus === 'complete' && item.verified === true,
+                sourceType: item.answerStatus === 'complete' && item.verified === true ? 'verified' : item.answerStatus ? 'retrieved' : 'default',
+                sources: item.sources || [],
                 attachments: Array.isArray(item.attachments) ? item.attachments : []
             });
+            if (item.answerStatus) renderLiveResearchAnswerStatus(findAssistantMessageRow(restoredMessageId), item.answerStatus);
         });
     } finally {
         isRestoringChatSession = false;
@@ -32810,6 +32916,9 @@ function resolveThinkingPhase(message = '') {
     if (/\b(translat|language)\b/i.test(lower)) {
         return { key: 'translating', label: 'Translating text...' };
     }
+    if (/\b(verif|critic|fact-check|checking\s+facts?)\b/i.test(lower)) {
+        return { key: 'verifying', label: raw.includes('...') ? raw : 'Verifying answer facts...' };
+    }
     return { key: 'analyzing', label: 'Analyzing...' };
 }
 
@@ -33731,18 +33840,15 @@ function addTravelHintsToPlan(places){
    ========================================================================== */
 if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
     window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js').then((registration) => {
-            try { registration.update(); } catch (_) {}
-            registration.addEventListener('updatefound', () => {
-                const installingWorker = registration.installing;
-                if (installingWorker) {
-                    installingWorker.addEventListener('statechange', () => {
-                        if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                            window.location.reload();
-                        }
-                    });
-                }
-            });
+        const hadController = Boolean(navigator.serviceWorker.controller);
+        let refreshed = false;
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+            if (!hadController || refreshed) return;
+            refreshed = true;
+            window.location.reload();
+        });
+        navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).then((registration) => {
+            registration.update().catch(() => {});
         }).catch(() => {});
     });
 }
