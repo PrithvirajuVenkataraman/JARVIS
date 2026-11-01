@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import handler, { isDirectPrimarySource, isValidCitationSource, enrichSearchResultsWithDeepCrawl, buildDeterministicSearchQueries, searchGeminiGrounding } from '../api/search.js';
-import { runResearch, deterministicResearchPlan, cachedResearchSearch, planResearch } from '../api/_lib/research-engine.js';
+import { runResearch, deterministicResearchPlan, cachedResearchSearch, planResearch, isResearchableClaim } from '../api/_lib/research-engine.js';
 import { normalizeEvidence, assessSourceRelevance, evaluateResearchCoverage, rankResearchEvidence, selectResearchExcerpt, formatResearchEvidence } from '../api/_lib/research-evidence.js';
 import { normalizeResearchSources, BoundedLiveResearchController } from '../app/bounded-live-research.js';
 import { streamResearchRequest } from '../app/search/research-stream.mjs';
@@ -277,4 +277,65 @@ test('a provider stream without a normal finish cannot be accepted as a complete
         assert.equal(result, null);
         assert.match(partial, /interrupted/);
     } finally { globalThis.fetch = original; }
+});
+
+const passportClaim = '3 persons on the world can travel without the passport.';
+const mistakenPassportPlan = () => ({ query: passportClaim, originalQuery: passportClaim, queries: [passportClaim, 'What categories of individuals are exempt from passport requirements?'], facets: ['Legal exemptions', 'Diplomatic passport holders', 'Stateless persons'], ambiguous: true, clarification: 'Who are the three specific individuals claimed to be able to travel worldwide without a passport?', interpretations: ['The question seeks the names of three specific people', 'The question asks for types of persons', 'The question refers to a myth and wants verification'] });
+
+test('the exact passport claim cannot become a names-versus-categories clarification menu', async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = async () => Response.json({ choices: [{ message: { content: JSON.stringify(mistakenPassportPlan()) } }] });
+    try {
+        const result = await planResearch(passportClaim, [], { customGroqKey: 'fixture-key', budget: { calls: 0, maxCalls: 1 } });
+        assert.equal(result.ambiguous, false);
+        assert.equal(result.researchIntent, 'verify_claim');
+        assert.deepEqual(result.interpretations, []);
+        assert.equal(result.clarification, '');
+        assert.deepEqual(result.facets, [passportClaim]);
+        assert.ok(result.queries.every(q => !q.includes('categories')));
+    } finally { globalThis.fetch = original; }
+});
+
+test('execution researches the exact claim even if an injected planner still marks it ambiguous', async () => {
+    let searches = 0;
+    const report = 'The passport-free travel claim refers to three specific individuals: Fixture Monarch, Fixture Emperor and Fixture Empress. The report describes how these people travel internationally without a passport under special arrangements.';
+    const answer = 'The three individuals named in the retrieved report are Fixture Monarch, Fixture Emperor and Fixture Empress. [1]';
+    const events = [];
+    const result = await runResearch(passportClaim, { timeoutMs: 6000, onEvent: (event, data) => events.push([event, data]) }, {
+        plan: async () => mistakenPassportPlan(),
+        search: async () => { searches++; return [{ title: 'Three people who can travel without a passport', url: 'https://publisher.example.com/passport-claim', snippet: report, sourceType: 'live_web' }]; },
+        extract: async url => ({ bodyText: report, url }),
+        review: async () => ({ sufficient: true, gaps: [], queries: [] }),
+        synthesize: async ({ prompt, onToken }) => { assert.match(prompt, /Fixture Empress/); onToken(answer); return answer; }
+    });
+    assert.ok(searches > 0);
+    assert.ok(result.research.rounds > 0);
+    assert.equal(result.provenance, 'web_grounded');
+    assert.equal(result.content, answer);
+    assert.equal(result.clarification, undefined);
+    assert.ok(events.some(([event]) => event === 'sources'));
+    assert.ok(!result.content.includes('The question seeks'));
+});
+
+test('factual claim uncertainty and grammar do not require choosing a research intent', () => {
+    for (const claim of [passportClaim, 'Three countries in the world have no rivers.', '5 animals can survive without oxygen.', 'Humans use only ten percent of their brains.', 'Who are the three people who can travel without a passport?', 'Next.js 15 has breaking changes.', 'This year India has a new president.']) {
+        assert.equal(isResearchableClaim(claim), true, claim);
+    }
+    for (const unresolved of ['They can travel without a passport.', 'Who won yesterday?', 'The price is high.', 'What are the three things that can cause this?', 'Three of them can travel without a passport.']) assert.equal(isResearchableClaim(unresolved), false, unresolved);
+    assert.equal(deterministicResearchPlan('This year India has a new president.').ambiguous, false);
+});
+
+test('a failed search for a factual claim reports missing evidence rather than returning interpretations', async () => {
+    let searches = 0;
+    const result = await runResearch(passportClaim, { timeoutMs: 3000 }, { plan: async () => mistakenPassportPlan(), search: async () => { searches++; return []; }, extract: async () => null, review: async () => null });
+    assert.ok(searches > 0);
+    assert.equal(result.provenance, 'no_sources');
+    assert.ok(!result.content.includes('categories'));
+});
+
+test('the current user message is not treated as its own missing-reference context', async () => {
+    const q = 'They can travel without a passport.';
+    const result = await runResearch(q, { timeoutMs: 3000, context: [{ role: 'user', content: q }] }, { plan: async () => deterministicResearchPlan(q, [{ role: 'user', content: q }]), search: async () => assert.fail('The absent subject still needs clarification') });
+    assert.equal(result.provenance, 'clarification');
+    assert.equal(result.research.rounds, 0);
 });
