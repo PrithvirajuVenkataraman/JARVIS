@@ -1,0 +1,55 @@
+{
+  "timestamp": "2026-10-26T18:46:31.467Z",
+  "benchmarkVersion": "1.0.0",
+  "totalQueries": 50,
+  "emptyResultRatePct": 0,
+  "latencyP50Ms": 0.01,
+  "latencyP95Ms": 2.45,
+  "meanRelevanceScore": 0.81,
+  "meanFreshnessScore": 0.445,
+  "topicSwitchContaminationPct": 11.1,
+  "categories": {
+    "temporal": {
+      "totalQueries": 8,
+      "emptyResults": 0,
+      "latencyP50Ms": 0.01,
+      "relevanceScore": 0.75,
+      "freshnessScore": 0.3
+    },
+    "regional": {
+      "totalQueries": 8,
+      "emptyResults": 0,
+      "latencyP50Ms": 0,
+      "relevanceScore": 0.729,
+      "freshnessScore": 0.417
+    },
+    "comparison": {
+      "totalQueries": 8,
+      "emptyResults": 0,
+      "latencyP50Ms": 0,
+      "relevanceScore": 0.958,
+      "freshnessScore": 0.336
+    },
+    "topic_switch": {
+      "totalQueries": 9,
+      "emptyResults": 0,
+      "latencyP50Ms": 0.19,
+      "relevanceScore": 0.944,
+      "freshnessScore": null
+    },
+    "elliptical_follow_up": {
+      "totalQueries": 9,
+      "emptyResults": 0,
+      "latencyP50Ms": 0.08,
+      "relevanceScore": 0.556,
+      "freshnessScore": 0.302
+    },
+    "entity_state": {
+      "totalQueries": 8,
+      "emptyResults": 0,
+      "latencyP50Ms": 0,
+      "relevanceScore": 0.938,
+      "freshnessScore": 0.722
+    }
+  }
+}
