@@ -25,9 +25,11 @@ export function comparisonParts(query) {
     if (!isComparison(query)) return { entities: [], attributes: [] };
     const attributes = [...new Set((String(query).match(COMPARISON_ATTRIBUTE) || []).map(s => s.toLowerCase()))];
     let subject = normalizeResearchAliases(query).replace(/^.*?\b(?:between|compare)\s+/i, '').replace(/^.*?\bof\s+(?=.+\b(?:vs\.?|versus)\b)/i, '');
-    const prefix = subject.match(/^(.*?)\bof\s+/i);
-    if (prefix && (prefix[1].match(COMPARISON_ATTRIBUTE) || []).length) subject = subject.slice(prefix[0].length);
     subject = subject.split(/\s+(?:for|on|in terms of|with respect to|with|including)\s+|,\s*(?:with|including)\s+/i)[0];
+    const prefix = subject.match(/^(.*?)\bof\s+/i);
+    if (prefix && !/\b(?:and|versus|vs\.?)\b/i.test(prefix[1]) && (prefix[1].match(COMPARISON_ATTRIBUTE) || []).length) {
+        subject = subject.slice(prefix[0].length);
+    }
     const parts = subject.split(/\s+(?:versus|vs\.?)\s+|\s+and\s+/i).slice(0, 2);
     const entities = parts.map(p => cleanText(p.replace(COMPARISON_ATTRIBUTE, '').replace(/^(?:the\s+)?(?:difference(?:s)?|comparison)\s+(?:of|between)\s*/i, '').replace(/^(?:(?:the|of)\s+)+/i, '').replace(/^[\s,:]+|[\s,?.:]+$/g, ''))).filter(Boolean);
     return { entities: entities.length === 2 ? entities : [], attributes };
@@ -273,10 +275,11 @@ export function validateResearchAnswer(data, requirements, sources) {
     // Render only the validated spans. This also keeps an interrupted/rejected generation invisible.
     const lines = [];
     for (const fact of facts) {
-        if (lines.some(line => line.value === normalizedText(fact.value))) continue;
         const requirement = requested.find(r => r.id === fact.requirementId);
         const label = requirement?.entities?.length && requirement.attribute ? `${requirement.entities.join(', ')} (${requirement.attribute}): ` : '';
-        lines.push({ value: normalizedText(fact.value), text: `${label}${fact.value} [${fact.sourceId}]` });
+        const lineKey = `${label}${normalizedText(fact.value)}`;
+        if (lines.some(line => line.key === lineKey)) continue;
+        lines.push({ key: lineKey, value: normalizedText(fact.value), text: `${label}${fact.value} [${fact.sourceId}]` });
     }
     let content = lines.map(line => line.text).join('\n\n');
     if (gaps.length) {
