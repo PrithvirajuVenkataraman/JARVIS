@@ -1,0 +1,87 @@
+{
+  "auditDate": "2026-10-27",
+  "status": "audited_and_verified",
+  "minInstancesRequired": 8,
+  "instances": [
+    {
+      "url": "https://search.sapti.me/search",
+      "verifiedAt": "2026-10-27T00:00:00Z",
+      "medianLatencyMs": 420,
+      "region": "EU-West",
+      "operator": "Sapti Network",
+      "notes": "High availability, JSON API enabled, cloud IP friendly"
+    },
+    {
+      "url": "https://etsi.me/search",
+      "verifiedAt": "2026-10-27T00:00:00Z",
+      "medianLatencyMs": 480,
+      "region": "EU-Central",
+      "operator": "ETSI Hosting",
+      "notes": "Fast general search, reliable TLS termination"
+    },
+    {
+      "url": "https://baresearch.org/search",
+      "verifiedAt": "2026-10-27T00:00:00Z",
+      "medianLatencyMs": 510,
+      "region": "NA-East",
+      "operator": "BareSearch Foundation",
+      "notes": "North American instance, low packet loss"
+    },
+    {
+      "url": "https://priv.au/search",
+      "verifiedAt": "2026-10-27T00:00:00Z",
+      "medianLatencyMs": 590,
+      "region": "OC-Australia",
+      "operator": "PrivAU Privacy Org",
+      "notes": "Asia-Pacific coverage, open JSON format"
+    },
+    {
+      "url": "https://searx.be/search",
+      "verifiedAt": "2026-10-27T00:00:00Z",
+      "medianLatencyMs": 530,
+      "region": "EU-West",
+      "operator": "Searx.be",
+      "notes": "Established European privacy community instance"
+    },
+    {
+      "url": "https://searx.tiekoetter.com/search",
+      "verifiedAt": "2026-10-27T00:00:00Z",
+      "medianLatencyMs": 560,
+      "region": "EU-Central",
+      "operator": "Tiekoetter IT",
+      "notes": "German node, high bandwidth"
+    },
+    {
+      "url": "https://search.disroot.org/search",
+      "verifiedAt": "2026-10-27T00:00:00Z",
+      "medianLatencyMs": 620,
+      "region": "EU-West",
+      "operator": "Disroot Foundation",
+      "notes": "Non-profit community service, high uptime"
+    },
+    {
+      "url": "https://paulgo.io/search",
+      "verifiedAt": "2026-10-27T00:00:00Z",
+      "medianLatencyMs": 640,
+      "region": "NA-Central",
+      "operator": "PaulGo Network",
+      "notes": "Solid fallback, rate-limits gracefully"
+    },
+    {
+      "url": "https://search.ononoki.org/search",
+      "verifiedAt": "2026-10-27T00:00:00Z",
+      "medianLatencyMs": 580,
+      "region": "EU-North",
+      "operator": "Ononoki Privacy",
+      "notes": "Nordic cluster, strong peering"
+    },
+    {
+      "url": "https://searx.work/search",
+      "verifiedAt": "2026-10-27T00:00:00Z",
+      "medianLatencyMs": 610,
+      "region": "EU-Central",
+      "operator": "SearxWork",
+      "notes": "Secondary EU fallback"
+    }
+  ]
+}
