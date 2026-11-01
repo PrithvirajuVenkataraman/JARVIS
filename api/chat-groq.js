@@ -1001,7 +1001,7 @@ export default async function handler(req, res) {
                     isInternalSummary,
                     isAttachmentGrounding
                 });
-            if (req.body?.webMode === 'force') {
+            if (req.body?.webMode === 'force' || req.body?.isWebForced === true || /^\/(?:search|live|web)\b/i.test(routingMessage)) {
                 routeDecision.webEligible = true;
                 routeDecision.strategy = 'search';
                 routeDecision.reason = 'forced_by_user';
@@ -1818,15 +1818,29 @@ export default async function handler(req, res) {
                         externalVerification: false
                     }
                 }
-                : await reviewAnswerIfNeeded({
-                    message: effectiveMessage,
-                    answer: evaluationText,
-                    intent,
-                    contextBlock,
-                    routeDecision,
-                    webEscalation: { reason: 'stream_fast_path' },
-                    forceReview: false
-                });
+                : await (async () => {
+                    writeSse(res, 'status', { state: 'VERIFYING', label: 'Verifying answer facts...' });
+                    try {
+                        const reviewPromise = reviewAnswerIfNeeded({
+                            message: effectiveMessage,
+                            answer: evaluationText,
+                            intent,
+                            contextBlock,
+                            routeDecision,
+                            webEscalation: { reason: 'stream_fast_path' },
+                            forceReview: false
+                        });
+                        const timeoutPromise = new Promise((resolve) =>
+                            setTimeout(() => resolve({
+                                correctedResponse: '',
+                                metadata: { performed: false, verdict: 'review_timeout', elapsedMs: 4500 }
+                            }), 4500)
+                        );
+                        return await Promise.race([reviewPromise, timeoutPromise]);
+                    } catch (_) {
+                        return { correctedResponse: '', metadata: { performed: false, verdict: 'review_error' } };
+                    }
+                })();
             timing.qualityMs = Date.now() - qualityStartedAt;
             // For streaming completions, tokens were already rendered to the user.
             // Omit post-stream correction rewrites to keep the user's displayed answer stable.
