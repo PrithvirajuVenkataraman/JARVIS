@@ -503,7 +503,7 @@ export async function searchResearchSources(query, options = {}) {
                 await stage([['duckduckgo', searchDuckDuckGoHtml], ['searxng', searchSearXNGRacer]], buildOfficialDocumentationQuery(query), remaining, 'official_documentation');
             } else {
                 await stage([
-                    ['google_news', searchGoogleNewsRss, { decodeUrls: false }],
+                    ['google_news', searchGoogleNewsRss, { decodeUrls: true }],
                     ['yahoo_news', searchYahooNewsRss], ['gdelt', searchGdeltNews]
                 ], query, remaining, 'supplementary_news');
             }
@@ -1561,6 +1561,24 @@ export async function searchPublicSources(query, options = {}) {
         });
         if (deduped.length >= Math.max(limit, 8)) break;
     }
+
+    if (deduped.length < 2 && !options.signal?.aborted) {
+        try {
+            const fallbackRes = await runFreeLiveSearch(normalizedQuery, { limit: Math.max(limit, 4), timeoutMs: 2500 });
+            if (Array.isArray(fallbackRes?.results)) {
+                for (const item of fallbackRes.results) {
+                    if (item.url && !seenUrls.has(item.url)) {
+                        seenUrls.add(item.url);
+                        deduped.push({
+                            ...item,
+                            query: normalizedQuery
+                        });
+                    }
+                }
+            }
+        } catch (_) {}
+    }
+
     const hasIncompleteOrTeaserSnippet = deduped.slice(0, 5).some(item => {
         if (item.fullArticleText && item.fullArticleText.length >= 200) return false;
         const snip = String(item.snippet || '').trim();
