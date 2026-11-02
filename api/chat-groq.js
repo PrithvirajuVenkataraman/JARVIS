@@ -32,6 +32,7 @@ import {
     buildRefinementPrompt,
     synthesizeSelfCritiqueMetadata
 } from './_lib/self-critique-loop.js';
+import { resolveEntityVisuals, discoverNotableWorks } from './_lib/visual-answer-engine.js';
 
 /* ── Image MIME normalizer ────────────────────────────────── */
 // Gemini and Groq only accept jpeg/png/webp/gif.
@@ -1643,6 +1644,13 @@ export default async function handler(req, res) {
         } catch (_) {}
         writeSse(res, 'meta', { requestId });
 
+        const visualPromise = resolveEntityVisuals(effectiveMessage, { timeoutMs: 2500 }).catch(() => null);
+        visualPromise.then(visualData => {
+            if (visualData?.entity && !res.writableEnded) {
+                writeSse(res, 'entity', visualData);
+            }
+        }).catch(() => {});
+
         const cached = edgeResponseCache.get(effectiveMessage, contextBlock, intent, selectedModel);
         if (cached) {
             if (cached.thought) {
@@ -1864,6 +1872,15 @@ export default async function handler(req, res) {
             }
 
             timing.totalMs = Date.now() - timing.startedAt;
+            let visualData = await visualPromise.catch(() => null);
+            if (visualData?.entity && (!visualData.notableWorks || !visualData.notableWorks.length) && finalText && finalText.length > 50) {
+                try {
+                    const extraWorks = await discoverNotableWorks(visualData.entity.fullName || visualData.entity.name, visualData.entity.type, null, undefined, finalText);
+                    if (extraWorks?.length) {
+                        visualData.notableWorks = extraWorks;
+                    }
+                } catch (_) {}
+            }
             if (Array.isArray(liveRag.sources) && liveRag.sources.length > 0) {
                 writeSse(res, 'sources', { sources: liveRag.sources });
             }
@@ -1873,6 +1890,8 @@ export default async function handler(req, res) {
                 intent: 'casual_chat',
                 response: finalText,
                 selfCritique: streamCritiqueMetadata || undefined,
+                entity: visualData?.entity || null,
+                notableWorks: visualData?.notableWorks || [],
                 sources: (Array.isArray(liveRag.sources) && liveRag.sources.length > 0)
                     ? liveRag.sources
                     : (Array.isArray(streamResult.sources) && streamResult.sources.length > 0 ? streamResult.sources : undefined),
