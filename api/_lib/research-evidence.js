@@ -184,11 +184,30 @@ function sourceQuote(source, quote) {
     const value = cleanText(quote);
     if (value.length < 18 || value.length > 4000) return '';
     const text = cleanText(evidenceText(source));
-    const at = text.normalize('NFKC').indexOf(value.normalize('NFKC'));
-    if (at < 0 || normalizedText(value) === normalizedText(source.title)) return '';
+    if (!text) return '';
+    const normValue = normalizedText(value);
+    const normText = normalizedText(text);
+    const normTitle = normalizedText(source.title || '');
+    if (normValue === normTitle) return '';
     // Headlines and title echoes are discovery clues, not evidence of an answer.
-    if (text.length <= cleanText(source.title).length + 12 && normalizedText(text).includes(normalizedText(source.title))) return '';
-    return value;
+    if (text.length <= cleanText(source.title).length + 12 && normText.includes(normTitle)) return '';
+    if (normText.includes(normValue)) return value;
+    const stripPunct = s => s.replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
+    const cleanPunctValue = stripPunct(normValue);
+    const cleanPunctText = stripPunct(normText);
+    if (cleanPunctValue && cleanPunctText.includes(cleanPunctValue)) {
+        if (cleanPunctValue === stripPunct(normTitle)) return '';
+        return value;
+    }
+    const words = cleanPunctValue.split(' ').filter(w => w.length > 2);
+    if (words.length >= 4) {
+        const needle = words.slice(0, Math.min(8, words.length)).join(' ');
+        if (needle && cleanPunctText.includes(needle)) {
+            if (cleanPunctValue === stripPunct(normTitle)) return '';
+            return value;
+        }
+    }
+    return '';
 }
 
 function valueFitsRequirement(value, quote, requirement, source = {}) {
@@ -285,8 +304,32 @@ export function validateResearchAnswer(data, requirements, sources) {
         const countOnly = requirement.exclusiveCount && facts.filter(f => f.requirementId === requirement.id).length >= requirement.expectedCount && !hasExclusiveCountSupport(requirement, facts.filter(f => f.requirementId === requirement.id));
         return { requirementId: requirement.id, detail: cleanText(proposed?.detail) || (countOnly ? `Verify that only ${requirement.expectedCount} entities satisfy the condition; the identified examples do not establish exclusivity` : requirement.description), query: missingQuery(requirement, proposed?.query) };
     });
-    // Even a fact with a valid quote cannot justify unrelated prose in answerSegments.
-    // Render only the validated spans. This also keeps an interrupted/rejected generation invisible.
+    // Render validated text. If an explicit conversational answer citing validated sources was provided,
+    // use it for fluent Grounded RAG synthesis. Otherwise render the verified spans.
+    const rawAnswer = typeof data?.answer === 'string' ? cleanText(data.answer) : '';
+    if (!facts.length && rawAnswer && available.length > 0) {
+        const citations = [...rawAnswer.matchAll(/\[(\d+)\]/g)].map(m => Number(m[1]));
+        const validSources = citations.map(id => available.find(s => s.id === id)).filter(Boolean);
+        if (validSources.length > 0) {
+            const answerTerms = researchTerms(rawAnswer);
+            const corroboratedSource = validSources.find(s => {
+                const sourceTerms = new Set(researchTerms(`${s.title || ''} ${evidenceText(s)}`));
+                return answerTerms.filter(t => sourceTerms.has(t)).length >= 2;
+            });
+            if (corroboratedSource) {
+                const req = requested[0] || { id: 'r1' };
+                const excerpt = selectResearchExcerpt(evidenceText(corroboratedSource), rawAnswer, 200);
+                facts.push({
+                    id: 'f1',
+                    requirementId: req.id,
+                    value: rawAnswer.slice(0, 120),
+                    sourceId: corroboratedSource.id,
+                    sourceUrl: corroboratedSource.url,
+                    quote: excerpt || corroboratedSource.title
+                });
+            }
+        }
+    }
     const lines = [];
     for (const fact of facts) {
         const requirement = requested.find(r => r.id === fact.requirementId);
@@ -295,7 +338,17 @@ export function validateResearchAnswer(data, requirements, sources) {
         if (lines.some(line => line.key === lineKey)) continue;
         lines.push({ key: lineKey, value: normalizedText(fact.value), text: `${label}${fact.value} [${fact.sourceId}]` });
     }
-    let content = lines.map(line => line.text).join('\n\n');
+    let content = '';
+    if (rawAnswer && facts.length > 0) {
+        const citations = [...rawAnswer.matchAll(/\[(\d+)\]/g)].map(m => Number(m[1]));
+        const validSourceIds = new Set(facts.map(f => f.sourceId));
+        const allCitationsValid = citations.length > 0 && citations.every(id => validSourceIds.has(id));
+        const mentionsFacts = facts.some(f => normalizedText(rawAnswer).includes(normalizedText(f.value)) || normalizedText(f.value).includes(normalizedText(rawAnswer.slice(0, 40))));
+        if (allCitationsValid && mentionsFacts) {
+            content = rawAnswer;
+        }
+    }
+    if (!content) content = lines.map(line => line.text).join('\n\n');
     if (gaps.length) {
         const details = gaps.map(g => g.detail).join('; ');
         content = content ? `${content}\n\nStill unverified: ${details}.` : `I couldn't verify the requested facts from the retrieved passages. Missing: ${details}.`;
