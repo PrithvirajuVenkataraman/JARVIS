@@ -1300,7 +1300,7 @@ export function classifyQueryShape(text) {
 
     // Entity with verb or descriptor context (e.g. "iPhone 16 release date", "Tesla stock today", "Nenjukkul peidhidum song")
     if (tokenCount <= 8 && !hasInterrogative && (titleCaseRatio >= 0.4 || hasNonLatinScript || hasMediaContext || hasDescriptorOrTopic)) {
-        return { shape: 'entity_with_verb', entityCandidate: null, tokenCount, titleCaseRatio, hasQueryVerb: true, hasMediaContext, hasNonLatinScript };
+        return { shape: 'entity_with_verb', entityCandidate: null, tokenCount, titleCaseRatio, hasQueryVerb: true, hasMediaContext, hasNonLatinScript, hasDescriptorOrTopic };
     }
 
     return { shape: 'conceptual', entityCandidate: null, tokenCount, titleCaseRatio, hasQueryVerb: true, hasMediaContext, hasNonLatinScript };
@@ -1431,18 +1431,6 @@ export function decideFrontendRoute(text, context = {}) {
                 ...base,
                 route: 'live_required',
                 reason: 'entity_lookup',
-                risk: 'low_risk',
-                requiresSources: true,
-                sourcePolicy: 'required'
-            };
-            FRONTEND_ROUTE_CACHE.set(cacheKey, res);
-            return res;
-        }
-        if (qShape.shape === 'entity_question' && qShape.hasMediaContext) {
-            const res = {
-                ...base,
-                route: 'live_required',
-                reason: 'entity_media_question',
                 risk: 'low_risk',
                 requiresSources: true,
                 sourcePolicy: 'required'
