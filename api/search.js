@@ -486,10 +486,17 @@ export async function searchResearchSources(query, options = {}) {
     try {
         // Broad web indexes lead. News indexes cannot substitute a flood of headlines
         // for answer-bearing general results, especially on conceptual software questions.
-        const generalProviders = [
+        const generalProviders = [];
+        if (process.env.SEARCH_GEMINI_GROUNDING_FREE_ALLOWANCE === 'true' && hasGeminiKey(options.customGeminiKey)) {
+            generalProviders.push(['gemini_grounding', async (q, cfg) => {
+                const res = await searchGeminiGrounding(q, { ...cfg, customGeminiKey: options.customGeminiKey });
+                return res?.results || [];
+            }]);
+        }
+        generalProviders.push(
             ['duckduckgo', searchDuckDuckGoHtml], ['searxng', searchSearXNGRacer],
             ['wikipedia', searchWikipedia, { limit: 2 }]
-        ];
+        );
         for (const [index, candidate] of buildComparisonSearchQueries(query).entries()) {
             generalProviders.push([`duckduckgo_subject_${index + 1}`, (_, config) => searchDuckDuckGoHtml(candidate, config)]);
         }
