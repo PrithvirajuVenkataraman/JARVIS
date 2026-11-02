@@ -656,6 +656,47 @@ test('independent named examples do not establish an alleged exclusive count', (
     assert.equal(supported.answerStatus, 'complete');
 });
 
+test('role and office-holder queries correctly identify person requirement and validate office holders', () => {
+    const queries = ['CM of Tamil Nadu', 'CEO of Apple', 'President of France', 'Mayor of London'];
+    for (const q of queries) {
+        const reqs = buildResearchRequirements(q);
+        assert.equal(reqs[0].type, 'names', `Query "${q}" should produce requirement type "names"`);
+        assert.equal(reqs[0].entityKind, 'person');
+    }
+    const q = 'CM of Tamil Nadu';
+    const reqs = buildResearchRequirements(q);
+    const body = 'M. K. Stalin is the Chief Minister of Tamil Nadu since May 2021.';
+    const s = source(body, { title: 'Chief Minister of Tamil Nadu', url: 'https://tn.gov.in/cm' });
+    const result = validateResearchAnswer({ facts: [{ id: 'f1', requirementId: 'r1', value: 'M. K. Stalin', sourceId: 1, quote: body }] }, reqs, [s]);
+    assert.equal(result.answerStatus, 'complete');
+    assert.equal(result.rejectedFacts.length, 0);
+    assert.equal(result.content, 'M. K. Stalin [1]');
+});
+
+test('entity and numerical lookups establish appropriate requirements without false explanation fallback', () => {
+    const capitalReqs = buildResearchRequirements('capital of France');
+    assert.equal(capitalReqs[0].type, 'names');
+    assert.equal(capitalReqs[0].entityKind, 'place');
+    const capitalBody = 'Paris is the capital of France and its largest city.';
+    const capitalSource = source(capitalBody, { title: 'France Overview', url: 'https://france.test' });
+    const capitalResult = validateResearchAnswer({ facts: [{ id: 'f1', requirementId: 'r1', value: 'Paris', sourceId: 1, quote: capitalBody }] }, capitalReqs, [capitalSource]);
+    assert.equal(capitalResult.answerStatus, 'complete');
+    assert.equal(capitalResult.content, 'Paris [1]');
+
+    const popReqs = buildResearchRequirements('population of Tokyo');
+    assert.equal(popReqs[0].type, 'value');
+    const popBody = 'The population of Tokyo metropolitan area is approximately 37 million people.';
+    const popSource = source(popBody, { title: 'Tokyo Demographics', url: 'https://tokyo.test' });
+    const popResult = validateResearchAnswer({ facts: [{ id: 'f1', requirementId: 'r1', value: '37 million', sourceId: 1, quote: popBody }] }, popReqs, [popSource]);
+    assert.equal(popResult.answerStatus, 'complete');
+    assert.equal(popResult.content, '37 million [1]');
+
+    const explainReqs = buildResearchRequirements('How does a CEO get appointed');
+    assert.equal(explainReqs[0].type, 'explanation');
+    const historyReqs = buildResearchRequirements('History of the Prime Minister of UK');
+    assert.equal(historyReqs[0].type, 'explanation');
+});
+
 });
 
 describe('Research Model Budget & Failover', () => {
