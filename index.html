@@ -12540,7 +12540,8 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             const hasSources = (Array.isArray(presentation.sources) && presentation.sources.length > 0) ||
                                (Array.isArray(options?.meta?.sources) && options.meta.sources.length > 0);
             const rawAnswerNoImages = stripStreamedImageTags(rawAnswer);
-            const cleanTextForDisplay = stripInlineCitationMarkers(rawAnswerNoImages);
+            const isResearchTurn = hasSources || Boolean(options?.meta?.research || options?.meta?.provenance === 'web_grounded' || options?.meta?.liveResearch || options?.meta?.isLiveSearch);
+            const cleanTextForDisplay = isResearchTurn ? rawAnswerNoImages : stripInlineCitationMarkers(rawAnswerNoImages);
             const readableText = formatAssistantTextForReadability(normalizeAssistantTextStyle(cleanTextForDisplay));
             const formatted = sanitizeAssistantMarkup(renderAssistantMarkdown(readableText, linkClass, options));
             textElement.classList.toggle('is-streaming', options?.streaming === true);
@@ -23418,19 +23419,8 @@ function getActiveResearchContext(currentQuery = '', maxTurns = 6) {
 function renderLiveResearchAnswerStatus(row, answerStatus) {
     if (!row) return;
     row.dataset.answerStatus = answerStatus;
-    let label = row.querySelector('.live-research-answer-status');
-    if (!label) {
-        label = document.createElement('div');
-        label.className = 'live-research-answer-status text-xs text-slate-500 mt-2';
-        label.setAttribute('role', 'status');
-        row.appendChild(label);
-    }
-    label.textContent = {
-        complete: 'All requested facts supported by retrieved sources',
-        partial: 'Partial answer: some requested facts could not be verified',
-        unavailable: 'Live evidence unavailable',
-        clarification: 'More information needed'
-    }[answerStatus] || 'Live evidence unavailable';
+    const existing = row.querySelector('.live-research-answer-status');
+    if (existing) existing.remove();
 }
 
 async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = {}) {
