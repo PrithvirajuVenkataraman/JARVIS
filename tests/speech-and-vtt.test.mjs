@@ -279,6 +279,35 @@ assert.equal(textInput.value, 'What is the capital of france', 'Prompt box retai
 assert.equal(submittedTranscripts.length, 0, 'VTT words must not auto-submit to chat window');
 await globalThis.toggleVoiceToText(); // stop
 
+// Test Noise & Silence Suppression: random acoustic noise or empty speech leaves prompt box untouched
+textInput.value = '';
+textInput.dispatchEvent({ type: 'input' });
+await globalThis.toggleVoiceToText(); // start listening again
+const noiseUiRec = FakeRecognition.instances.at(-1);
+
+// Emit acoustic noise interim
+noiseUiRec.onresult?.({
+    resultIndex: 0,
+    results: [{ 0: { transcript: '[noise]' }, isFinal: false }]
+});
+assert.equal(textInput.value, '', 'Prompt box remains completely empty when random noise [noise] occurs');
+
+// Emit silence / dead acoustic cough final
+noiseUiRec.onresult?.({
+    resultIndex: 0,
+    results: [{ 0: { transcript: '(cough) ...' }, isFinal: true }]
+});
+assert.equal(textInput.value, '', 'Prompt box remains completely empty when acoustic artifacts occur');
+
+// Now user actually speaks
+noiseUiRec.onresult?.({
+    resultIndex: 0,
+    results: [{ 0: { transcript: 'Tell me about quantum computing' }, isFinal: true }]
+});
+assert.equal(textInput.value, 'Tell me about quantum computing', 'Valid speech correctly appears in prompt box');
+
+await globalThis.toggleVoiceToText(); // stop
+
 // 15. Test Whisper Recorder FileReader Onloadend Network Error Resilience
 {
     class MockFileReader {
