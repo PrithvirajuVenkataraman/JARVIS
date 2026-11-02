@@ -1450,6 +1450,18 @@ export function decideFrontendRoute(text, context = {}) {
             FRONTEND_ROUTE_CACHE.set(cacheKey, res);
             return res;
         }
+        if (qShape.shape === 'entity_question' && qShape.hasMediaContext) {
+            const res = {
+                ...base,
+                route: 'live_required',
+                reason: 'entity_media_question',
+                risk: 'low_risk',
+                requiresSources: true,
+                sourcePolicy: 'required'
+            };
+            FRONTEND_ROUTE_CACHE.set(cacheKey, res);
+            return res;
+        }
     }
 
     if (isTransformFastQuery(raw) || isStudyCommand(raw)) {
