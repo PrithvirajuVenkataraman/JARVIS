@@ -422,6 +422,25 @@ console.log('--- Section 10: Code Highlighter, Math & Markdown Renderers ---');
     assert.ok(sciHtml.includes('science-value-sci'));
     assert.equal(science.normalizeScienceText('0xFF 255.'), 'hex F F 255.');
     assert.ok(science.normalizeScienceText('C2H6 + O2 -> CO2 + H2O').includes('yields'));
+
+    // Bullet point trailing citation / fact number removal contracts
+    const testBullet1 = '- Popularized the Gaana style in movies, earning the nickname "Thenisai Thendral" 【f1】 .';
+    const testBullet2 = '- Breakthrough came with "Maattukara Mannaru" (1986) and "Baasha" (1995) 【f2】 .';
+    const testBullet3 = '- Legendary figure in South-Indian cinema 【f3】 .';
+    const testBullet4 = '- Released albums in 2024 [1] .';
+    const testBullet5 = '- Watched Top Gun 2.';
+    const testBullet6 = '- Born in (1950).';
+    const bulletMd = `${testBullet1}\n${testBullet2}\n${testBullet3}\n${testBullet4}\n${testBullet5}\n${testBullet6}`;
+    const bulletRendered = renderMarkdown(bulletMd);
+    assert.ok(!bulletRendered.includes('【f1】'), 'Must strip 【f1】 fact tag from bullet');
+    assert.ok(!bulletRendered.includes('【f2】'), 'Must strip 【f2】 fact tag from bullet');
+    assert.ok(!bulletRendered.includes('【f3】'), 'Must strip 【f3】 fact tag from bullet');
+    assert.ok(!bulletRendered.includes('[1]'), 'Must strip [1] citation number from bullet end');
+    assert.ok(bulletRendered.includes('Thenisai Thendral') && bulletRendered.includes('.</li>'), 'Must cleanly attach period after removing 【f1】');
+    assert.ok(bulletRendered.includes('(1995).'), 'Must preserve 4-digit release years');
+    assert.ok(bulletRendered.includes('Top Gun 2.'), 'Must preserve title numbers like Top Gun 2');
+    assert.ok(bulletRendered.includes('(1950).'), 'Must preserve 4-digit birth years');
+
     console.log('  [PASS] Code highlighting, math expressions, markdown, and science formatting verified');
 }
 
