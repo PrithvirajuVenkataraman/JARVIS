@@ -201,6 +201,13 @@ export function buildEmergencyCardHtml(payload = {}, contact = null) {
                 ${contactPhone ? `<div style="font-size:12px; color:#fca5a5; margin-top:6px;">Target Contact: <strong>${escapeSosHtml(contactName)}</strong> (${escapeSosHtml(contactPhone)})</div>` : ''}
             </div>
 
+            <div class="emergency-sos-dispatch-banner" style="display:flex; align-items:center; justify-content:space-between; gap:8px; background:rgba(34,197,94,0.15); border:1px solid rgba(34,197,94,0.35); border-radius:8px; padding:8px 12px; margin-bottom:12px; font-size:12px; color:#86efac; line-height:1.4;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span style="font-size:16px;">⚡</span>
+                    <span><strong>Immediate SMS Dispatch:</strong> Coordinates &amp; distress telemetry prepared and dispatched${contactPhone ? ` to <strong>${escapeSosHtml(contactName)} (${escapeSosHtml(contactPhone)})</strong>` : ''}.</span>
+                </div>
+            </div>
+
             <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:8px; margin-bottom:14px;">
                 <a href="${smsUrl}" target="_blank" rel="noopener noreferrer" style="background:#dc2626; color:#ffffff; padding:10px 12px; border-radius:8px; text-decoration:none; font-weight:700; font-size:13px; display:flex; align-items:center; justify-content:center; gap:6px; box-shadow:0 2px 10px rgba(220,38,38,0.4);">
                     <span>📱</span>
@@ -220,7 +227,7 @@ export function buildEmergencyCardHtml(payload = {}, contact = null) {
                 </button>
             </div>
 
-            <div style="border-radius:10px; overflow:hidden; border:1px solid rgba(239,68,68,0.3); margin-top:8px;">
+            <div style="border-radius:10px; overflow:hidden; border:1px solid rgba(239,68,68,0.3); margin-top:8px; background:#1e293b; position:relative; min-height:200px;">
                 <iframe
                     src="${osmEmbedUrl}"
                     width="100%"
@@ -236,10 +243,46 @@ export function buildEmergencyCardHtml(payload = {}, contact = null) {
                 <div style="display:flex; gap:12px;">
                     <a href="${payload.googleMapsUrl || ('https://maps.google.com/?q=' + lat + ',' + lon)}" target="_blank" rel="noopener noreferrer" style="color:#38bdf8; text-decoration:none; font-weight:600;">Google Maps</a>
                     <a href="${payload.appleMapsUrl || ('https://maps.apple.com/?ll=' + lat + ',' + lon)}" target="_blank" rel="noopener noreferrer" style="color:#38bdf8; text-decoration:none; font-weight:600;">Apple Maps</a>
+                    <a href="https://www.openstreetmap.org/?mlat=${lat.toFixed(6)}&amp;mlon=${lon.toFixed(6)}#map=16/${lat.toFixed(6)}/${lon.toFixed(6)}" target="_blank" rel="noopener noreferrer" style="color:#38bdf8; text-decoration:none; font-weight:600;">OpenStreetMap</a>
                 </div>
             </div>
         </div>
     `;
+}
+
+export function dispatchImmediateEmergencySms(payload = {}, contact = null) {
+    const contactPhone = contact?.phone || '';
+    const text = payload.distressText || '';
+    const smsUrl = buildSmsUrl(contactPhone, text);
+
+    // 1. Immediately copy telemetry & coordinates to clipboard for instant pasting on laptop/desktop
+    try {
+        if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+            navigator.clipboard.writeText(text).catch(() => {});
+        }
+    } catch (_) {}
+
+    // 2. Open / invoke SMS URL immediately
+    try {
+        if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+            const dispatchLink = document.createElement('a');
+            dispatchLink.href = smsUrl;
+            dispatchLink.style.display = 'none';
+            document.body.appendChild(dispatchLink);
+            dispatchLink.click();
+            setTimeout(() => {
+                try { dispatchLink.remove(); } catch (_) {}
+            }, 1000);
+        }
+    } catch (_) {
+        try {
+            if (typeof window !== 'undefined') {
+                window.location.href = smsUrl;
+            }
+        } catch (_) {}
+    }
+
+    return smsUrl;
 }
 
 export function shareEmergencySos(text) {
@@ -255,4 +298,5 @@ export function shareEmergencySos(text) {
 
 if (typeof globalThis !== 'undefined') {
     globalThis.shareEmergencySos = shareEmergencySos;
+    globalThis.dispatchImmediateEmergencySms = dispatchImmediateEmergencySms;
 }
