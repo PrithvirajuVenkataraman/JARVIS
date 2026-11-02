@@ -50,7 +50,8 @@ import { renderMarkdown } from '../app/markdown-renderer.js';
 import {
     extractCandidateEntity,
     isValidImageUrl,
-    classifyEntityTypeFromDescription
+    classifyEntityTypeFromDescription,
+    isSemanticCreativeWork
 } from '../api/_lib/visual-answer-engine.js';
 
 // Load science formatter
@@ -501,7 +502,20 @@ console.log('--- Section 12: Dynamic Visual Answer Engine & SSRF Security Contra
     assert.equal(classifyEntityTypeFromDescription('American multinational technology company', 'Apple Inc.'), 'company');
     assert.equal(classifyEntityTypeFromDescription('1995 Indian Tamil-language action film', 'Baashha'), 'movie');
 
-    console.log('  [PASS] Dynamic Visual Answer Engine and SSRF security contracts verified');
+    // Universal Semantic Classification for Notable Works vs Awards / Honors / Non-works
+    assert.equal(isSemanticCreativeWork({ title: 'Baashha', description: '1995 Indian film by Suresh Krissna', extract: 'Baashha is a 1995 Indian action film...' }), true);
+    assert.equal(isSemanticCreativeWork({ title: 'Annaamalai', description: '1992 film by Suresh Krissna', extract: 'Annaamalai is a 1992 Indian drama film...' }), true);
+    assert.equal(isSemanticCreativeWork({ title: 'Inception', description: '2010 film by Christopher Nolan', extract: 'Inception is a 2010 sci-fi film...' }), true);
+    assert.equal(isSemanticCreativeWork({ title: 'To Kill a Mockingbird', description: '1960 novel by Harper Lee', extract: 'To Kill a Mockingbird is a 1960 novel...' }), true);
+    // Universal rejection of awards, honors, ceremonies, lists, and people without hardcoded rules
+    assert.equal(isSemanticCreativeWork({ title: 'Padma Shri', description: 'Fourth highest civilian award of India', extract: 'The Padma Shri is the fourth-highest civilian award...' }), false);
+    assert.equal(isSemanticCreativeWork({ title: 'Kalaimamani', description: 'Highest civilian award in Tamil Nadu', extract: 'The Kalaimamani is the highest civilian award...' }), false);
+    assert.equal(isSemanticCreativeWork({ title: 'Filmfare Awards', description: 'Annual film awards in India', extract: 'The Filmfare Awards are annual awards...' }), false);
+    assert.equal(isSemanticCreativeWork({ title: 'Nobel Prize in Literature', description: 'Prize established in 1895', extract: 'The Nobel Prize in Literature is a Swedish prize...' }), false);
+    assert.equal(isSemanticCreativeWork({ title: 'Dhanraj Master', description: 'Indian music teacher', extract: 'Dhanraj was an Indian classical teacher...' }), false);
+    assert.equal(isSemanticCreativeWork({ title: 'List of Deva songs', description: 'Wikipedia list article', extract: 'This is a list of songs...' }), false);
+
+    console.log('  [PASS] Dynamic Visual Answer Engine, Semantic Classification and SSRF security contracts verified');
 }
 
 console.log('deterministic-checks-ok');
