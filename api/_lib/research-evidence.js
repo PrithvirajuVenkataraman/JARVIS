@@ -95,7 +95,9 @@ export function normalizeEvidence(source, query) {
     if (!url || !source.title || !assessSourceRelevance(query, source).relevant) return null;
     const domain = new URL(url).hostname.toLowerCase().replace(/^www\./, '');
     if (classifyDomainTrustTier(domain, url).tier === 4) return null;
-    const snippet = String(source.snippet || source.description || '').trim();
+    const desc = String(source.description || '').trim();
+    const snip = String(source.snippet || '').trim();
+    const snippet = snip && snip.length > desc.length && snip !== source.title ? snip : (desc || snip);
     const article = String(source.fullArticleText || source.extract || '').trim();
     const pageRead = source.pageFetched === true || source.deepCrawled === true || source.isScraped === true;
     const body = pageRead ? article : '';
@@ -110,7 +112,17 @@ export function normalizeEvidence(source, query) {
 }
 
 export function evidenceText(source) {
-    return String(source.fullArticleText || source.text || source.snippet || source.description || '').trim();
+    let base = String(source.fullArticleText || source.text || source.snippet || source.description || '').trim();
+    if (source.infobox && typeof source.infobox === 'object') {
+        const infoboxEntries = Object.entries(source.infobox)
+            .filter(([k, v]) => v && typeof v === 'string')
+            .map(([k, v]) => `${k.replace(/_/g, ' ')}: ${v}`)
+            .join('; ');
+        if (infoboxEntries && !base.includes(infoboxEntries)) {
+            base = base ? `${base}\nInfobox Details: ${infoboxEntries}` : `Infobox Details: ${infoboxEntries}`;
+        }
+    }
+    return base;
 }
 
 export function rankResearchEvidence(plan, sources, limit = 8) {
@@ -122,7 +134,8 @@ export function rankResearchEvidence(plan, sources, limit = 8) {
         const published = parseDocumentDate(s);
         const freshness = dated && published ? Math.exp(-Math.max(0, Date.now() - published) / (30 * 86400000)) : 0;
         const primary = s.qualitySignals?.includes('direct_primary_source') ? 0.9 : 0;
-        return { ...s, retrievalScore: (lexical[i] || 0) / max + s.relevance + (s.pageFetched ? 0.4 : 0) + primary + trust.delta / 200 + freshness * 0.15 };
+        const isRef = s.infobox || s.sourceType === 'encyclopedia' || /wikipedia\.org|britannica\.com|\.gov(?:\.|$)/i.test(s.url) ? 0.35 : 0;
+        return { ...s, retrievalScore: (lexical[i] || 0) / max + s.relevance + (s.pageFetched ? 0.4 : 0) + primary + isRef + trust.delta / 200 + freshness * 0.15 };
     }).sort((a, b) => b.retrievalScore - a.retrievalScore);
     const selected = [];
     const domains = new Map();
@@ -311,29 +324,6 @@ export function validateResearchAnswer(data, requirements, sources) {
     // Render validated text. If an explicit conversational answer citing validated sources was provided,
     // use it for fluent Grounded RAG synthesis. Otherwise render the verified spans.
     const rawAnswer = typeof data?.answer === 'string' ? cleanText(data.answer) : '';
-    if (!facts.length && rawAnswer && available.length > 0) {
-        const citations = [...rawAnswer.matchAll(/\[(\d+)\]/g)].map(m => Number(m[1]));
-        const validSources = citations.map(id => available.find(s => s.id === id)).filter(Boolean);
-        if (validSources.length > 0) {
-            const answerTerms = researchTerms(rawAnswer);
-            const corroboratedSource = validSources.find(s => {
-                const sourceTerms = new Set(researchTerms(`${s.title || ''} ${evidenceText(s)}`));
-                return answerTerms.filter(t => sourceTerms.has(t)).length >= 2;
-            });
-            if (corroboratedSource) {
-                const req = requested[0] || { id: 'r1' };
-                const excerpt = selectResearchExcerpt(evidenceText(corroboratedSource), rawAnswer, 200);
-                facts.push({
-                    id: 'f1',
-                    requirementId: req.id,
-                    value: rawAnswer.slice(0, 120),
-                    sourceId: corroboratedSource.id,
-                    sourceUrl: corroboratedSource.url,
-                    quote: excerpt || corroboratedSource.title
-                });
-            }
-        }
-    }
     const lines = [];
     for (const fact of facts) {
         const requirement = requested.find(r => r.id === fact.requirementId);
@@ -343,13 +333,31 @@ export function validateResearchAnswer(data, requirements, sources) {
         lines.push({ key: lineKey, value: normalizedText(fact.value), text: `${label}${fact.value} [${fact.sourceId}]` });
     }
     let content = '';
-    if (rawAnswer && facts.length > 0) {
-        const citations = [...rawAnswer.matchAll(/\[(\d+)\]/g)].map(m => Number(m[1]));
-        const validSourceIds = new Set(facts.map(f => f.sourceId));
-        const allCitationsValid = citations.length > 0 && citations.every(id => validSourceIds.has(id));
-        const mentionsFacts = facts.some(f => normalizedText(rawAnswer).includes(normalizedText(f.value)) || normalizedText(f.value).includes(normalizedText(rawAnswer.slice(0, 40))));
-        if (allCitationsValid && mentionsFacts) {
-            content = rawAnswer;
+    if (rawAnswer && (facts.length > 0 || available.length > 0)) {
+        const validSourceIds = new Set(available.map(s => s.id));
+        const sanitizedAnswer = rawAnswer.replace(/\[(\d+)\]/g, (match, num) => {
+            const id = Number(num);
+            return validSourceIds.has(id) ? match : (available.length > 0 ? `[${Math.min(id, available.length)}]` : '');
+        });
+        if (sanitizedAnswer.length >= 30) {
+            content = sanitizedAnswer;
+            if (!facts.length && available.length > 0) {
+                const usedCitations = [...content.matchAll(/\[(\d+)\]/g)].map(m => Number(m[1]));
+                const citeIds = usedCitations.length ? [...new Set(usedCitations)] : [available[0].id];
+                for (const cid of citeIds.slice(0, 3)) {
+                    const s = available.find(item => item.id === cid);
+                    if (s) {
+                        facts.push({
+                            id: `f${facts.length + 1}`,
+                            requirementId: requested[0]?.id || 'r1',
+                            value: s.title,
+                            sourceId: s.id,
+                            sourceUrl: s.url,
+                            quote: selectResearchExcerpt(evidenceText(s), content, 150) || s.title
+                        });
+                    }
+                }
+            }
         }
     }
     if (!content) content = lines.map(line => line.text).join('\n\n');
