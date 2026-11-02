@@ -219,6 +219,11 @@ export async function runResearch(query, options = {}, dependencies = {}) {
     try {
         status('searching', 'Searching for the specific facts you asked for…');
         const visualPromise = resolveEntityVisuals(query, { signal: scope.signal, timeoutMs: 2500 }).catch(() => null);
+        visualPromise.then(visualData => {
+            if (visualData?.entity && !scope.signal.aborted) {
+                emit('entity', { entity: visualData.entity, notableWorks: visualData.notableWorks || [] });
+            }
+        }).catch(() => {});
         // Planning is deterministic on the production path. Optional injected plans support regression tests.
         if (dependencies.plan) plan = await bounded(signal => dependencies.plan(query, context, { signal }), Math.min(500, timeLeft()), scope.signal).catch(() => plan);
         plan = resolveResearchAmbiguity(plan, query, context);
