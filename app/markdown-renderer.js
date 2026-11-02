@@ -299,7 +299,11 @@ export function renderMarkdown(rawText = '', options = {}) {
     html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
     html = html.replace(/\[\^(\d+)\]\((https?:\/\/[^)]+)\)/g, `<a href="$2" target="_blank" rel="noopener noreferrer" class="citation-badge" title="Source [$1]"><sup>[$1]</sup></a>`);
     html = html.replace(/\[\^(\d+)\]/g, `<span class="citation-badge-static" title="Citation [$1]"><sup>[$1]</sup></span>`);
-    html = html.replace(/\[(\d+)\]\((https?:\/\/[^)]+)\)/g, `<a href="$2" target="_blank" rel="noopener noreferrer" class="citation-badge" title="Source [$1]"><sup>[$1]</sup></a>`);
+    html = html.replace(/\[(\d+)\]\((https?:\/\/[^)]+)\)/g, `<a href="$2" target="_blank" rel="noopener noreferrer" class="citation-badge" data-source-id="$1" title="Source [$1]"><sup>[$1]</sup></a>`);
+    html = html.replace(/(?<![\[\w`])\[(\d+(?:\s*,\s*\d+)*)\](?![\]\(])/g, (match, idsStr) => {
+        const ids = idsStr.split(',').map(s => s.trim()).filter(Boolean);
+        return ids.map(id => `<button type="button" class="citation-badge" data-source-id="${id}" onclick="window.JarvisLiveResearch?.highlightSource('${id}')" title="Source [${id}]"><sup>[${id}]</sup></button>`).join('');
+    });
     html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, `<a href="$2" target="_blank" rel="noopener noreferrer" class="assistant-link">$1</a>`);
 
     // Step 3: Re-inject display math blocks with clean notebook styling (NO code container / copy buttons)
