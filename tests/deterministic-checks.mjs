@@ -42,7 +42,8 @@ import {
     buildSmsUrl,
     buildWhatsAppUrl,
     buildTelUrl,
-    deleteEmergencyContact
+    deleteEmergencyContact,
+    dispatchImmediateEmergencySms
 } from '../app/emergency-sos.js';
 import { highlightCode } from '../app/code-highlighter.js';
 import { renderMathInText, formatLatexExpression } from '../app/math-renderer.js';
@@ -366,7 +367,7 @@ console.log('--- Section 9: Satellite Emergency SOS (app/emergency-sos.js) ---')
     assert.ok(payload.googleMapsUrl.includes('12.969286'));
     assert.ok(payload.distressText.includes('85%'));
 
-    // Dispatch URLs
+    // Dispatch URLs & Immediate SMS Transmission
     const smsUrl = buildSmsUrl('+15551234567', payload.distressText);
     const waUrl = buildWhatsAppUrl('+15551234567', payload.distressText);
     const telUrl = buildTelUrl('+15551234567');
@@ -374,9 +375,13 @@ console.log('--- Section 9: Satellite Emergency SOS (app/emergency-sos.js) ---')
     assert.ok(waUrl.startsWith('https://api.whatsapp.com/send?phone='));
     assert.equal(telUrl, 'tel:+15551234567');
 
+    const dispatchedUrl = dispatchImmediateEmergencySms(payload, contact);
+    assert.ok(dispatchedUrl.startsWith('sms:+15551234567?body='));
+    assert.ok(dispatchedUrl.includes(encodeURIComponent('12.969286')));
+
     // Cleanup
     deleteEmergencyContact(contact.id);
-    console.log('  [PASS] Emergency SOS contacts, distress telemetry, and dispatch channels verified');
+    console.log('  [PASS] Emergency SOS contacts, distress telemetry, and immediate dispatch channels verified');
 }
 
 console.log('--- Section 10: Code Highlighter, Math & Markdown Renderers ---');
