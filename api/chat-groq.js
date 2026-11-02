@@ -1644,7 +1644,7 @@ export default async function handler(req, res) {
         } catch (_) {}
         writeSse(res, 'meta', { requestId });
 
-        const visualPromise = resolveEntityVisuals(effectiveMessage, { timeoutMs: 2500 }).catch(() => null);
+        const visualPromise = resolveEntityVisuals(effectiveMessage, { timeoutMs: 4500 }).catch(() => null);
         visualPromise.then(visualData => {
             if (visualData?.entity && !res.writableEnded) {
                 writeSse(res, 'entity', visualData);
