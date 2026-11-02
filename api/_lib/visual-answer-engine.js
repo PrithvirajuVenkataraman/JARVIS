@@ -166,6 +166,46 @@ async function searchWikipediaTitle(query, signal) {
 }
 
 /**
+ * Universal semantic classification for notable creative works.
+ * Distinguishes genuine creative, cultural, or commercial works (films, albums, books, songs, games)
+ * from awards, honors, ceremonies, human biographies, lists, or institutions using Wikipedia's
+ * structured metadata (type, description, extract) with ZERO hardcoded entity or award names.
+ */
+export function isSemanticCreativeWork(summary) {
+    if (!summary || !summary.title) return false;
+    const desc = (summary.description || '').toLowerCase();
+    const extract = (summary.extract || '').toLowerCase().slice(0, 300);
+    const title = (summary.title || '').toLowerCase();
+    const combined = `${title} ${desc} ${extract}`;
+
+    // Disqualify Wikipedia list articles, discographies, portals, and indexes
+    if (/^(?:list of|discography of|filmography of|bibliography of|awards and nominations)\b/i.test(title)) return false;
+    if (/\b(?:list of|discography of|filmography of)\b/i.test(desc)) return false;
+
+    // Disqualify awards, honors, medals, prizes, accolades, and award ceremonies
+    const isAwardOrHonorOrCeremony = /\b(?:award|awards|prize|prizes|medal|medals|order of|trophy|fellowship|hall of fame|nomination|nominations|ceremony|ceremonies|accolade|accolades|festival|festivals)\b/i.test(title) ||
+        /\b(?:award|awards|prize|prizes|medal|medals|order of|trophy|fellowship|hall of fame|nomination|ceremony|ceremonies|accolade|state honor|state honour|civilian award|annual award)\b/i.test(desc);
+    
+    if (isAwardOrHonorOrCeremony) {
+        // Only allow if desc explicitly indicates it is a creative work (e.g. film/novel/album named after an award)
+        const isExplicitCreativeWork = /\b(?:film|movie|album|soundtrack|novel|book|single|song)\s+(?:by|directed by|written by|composed by|starring)\b/i.test(desc) ||
+            /\b(?:19\d\d|20[0-2]\d)\s+(?:[a-z-]+\s+)*(?:film|movie|album|soundtrack|novel|book)\b/i.test(desc);
+        if (!isExplicitCreativeWork) return false;
+    }
+
+    // Disqualify people and biographies (e.g. teachers, actors, collaborators)
+    const isPerson = /\b(?:actor|actress|musician|singer|director|composer|writer|author|teacher|master|guru|politician|player|instrumentalist|producer|artist)\b/i.test(desc);
+    if (isPerson && !/\b(?:film|movie|album|song|soundtrack|novel|book|single|series|play)\s+(?:by|directed|written|composed|starring)\b/i.test(desc)) {
+        return false;
+    }
+
+    // Must match positive creative work semantic concepts (media, literature, compositions, games, art)
+    const isCreativeWork = /\b(?:film|movie|soundtrack|album|song|single|novel|book|series|play|musical|composition|opera|symphony|ep|track|opus|video game|miniseries|television series|show|drama|broadcast|painting|sculpture)\b/i.test(combined);
+
+    return isCreativeWork;
+}
+
+/**
  * Resolves verified notable works for creative figures and organizations.
  * Universal: Queries Wikipedia articles for mentioned titles, films, books, or albums
  * and fetches their verified posters/covers and release years.
@@ -192,15 +232,15 @@ export async function discoverNotableWorks(entityTitle, entityType, summaryData,
         }
     }
 
-    // Filter out common non-title words and entity name itself
-    const stopWords = new Set(['the', 'a', 'an', 'yes', 'no', 'and', 'or', 'in', 'of', 'for', 'with', 'by', 'as', 'to', 'thenisai thendral', 'godfather of gaana', 'padma shri', 'kalaimamani']);
-    const entityNameTokens = entityTitle.toLowerCase().split(/\s+/);
+    // Universal filter for non-title stop words and entity name itself
+    const stopWords = new Set(['the', 'a', 'an', 'yes', 'no', 'and', 'or', 'in', 'of', 'for', 'with', 'by', 'as', 'to', 'from', 'at', 'on', 'into', 'is', 'was', 'are', 'were']);
+    const entityNameTokens = entityTitle.toLowerCase().split(/\s+/).filter(t => t.length > 2);
 
     const filteredTitles = [...new Set(candidateWorkTitles)].filter(t => {
-        const lower = t.toLowerCase();
+        const lower = t.toLowerCase().trim();
         if (stopWords.has(lower)) return false;
-        if (/\b(?:thenisai\s+thendral|godfather\s+of\s+gaana|padma\s+shri|kalaimamani|national\s+award|filmfare|best\s+music\s+director)\b/i.test(lower)) return false;
-        if (entityNameTokens.length > 1 && lower === entityTitle.toLowerCase()) return false;
+        if (lower === entityTitle.toLowerCase()) return false;
+        if (entityNameTokens.length > 1 && entityNameTokens.every(tok => lower.includes(tok))) return false;
         if (t.length < 2 || t.length > 50) return false;
         return true;
     });
@@ -240,6 +280,14 @@ export async function discoverNotableWorks(entityTitle, entityType, summaryData,
                 }
             }
             if (!workSummary || !workSummary.title || workSummary.type === 'disambiguation') return;
+
+            // Reject if the retrieved article is the entity itself
+            const cleanTitle = workSummary.title.replace(/\s*\([^)]*\)$/, '').trim().toLowerCase();
+            const cleanEntity = entityTitle.replace(/\s*\([^)]*\)$/, '').trim().toLowerCase();
+            if (cleanTitle === cleanEntity) return;
+
+            // Universal semantic classification: must be a genuine creative work
+            if (!isSemanticCreativeWork(workSummary)) return;
 
             const imageUrl = workSummary.thumbnail?.source || workSummary.originalimage?.source;
             const validImage = isValidImageUrl(imageUrl) ? imageUrl : null;
