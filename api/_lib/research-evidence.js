@@ -35,8 +35,11 @@ export function comparisonParts(query) {
     return { entities: entities.length === 2 ? entities : [], attributes };
 }
 
+const TWO_LETTER_STOP = new Set('of in to on at by as is or an we he it so no my up me if am be do re vs'.split(' '));
+
 export function researchTerms(text = '') {
-    return [...new Set((normalizeResearchAliases(text).toLowerCase().match(/[\p{L}\p{N}]+/gu) || []).filter(t => t.length > 2 && !STOP.has(t)))];
+    return [...new Set((normalizeResearchAliases(text).toLowerCase().match(/[\p{L}\p{N}]+/gu) || [])
+        .filter(t => (t.length > 2 || (t.length === 2 && !TWO_LETTER_STOP.has(t))) && !STOP.has(t)))];
 }
 
 export function protectedEntities(query = '') {
@@ -138,7 +141,8 @@ export function rankResearchEvidence(plan, sources, limit = 8) {
 export function buildResearchRequirements(query, _context = []) {
     const q = cleanText(query).slice(0, 1000);
     const count = q.match(/\b(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+(people|persons?|individuals?|countries|nations|animals?|species|names|items|reasons|ways|steps|things)\b/i);
-    const isExplanationIntent = /^(?:how|why|explain|describe)\b|\b(?:history|evolution|timeline|overview|summary|mechanism|process|guide|tutorial)\s+of\b/i.test(q);
+    const isExplanationIntent = /^(?:how|why|explain|describe)\b|\b(?:history|evolution|timeline|overview|summary|mechanism|process|guide|tutorial)\s+of\b/i.test(q)
+        || (/^what\s+(?:is|are)\s+(?:an?\s+)?(?:[a-z\s]+)$/i.test(q) && !/\b(?:price|cost|population|rate|score|temperature|height|weight|depth|distance|revenue|market\s*cap|valuation|number|amount|percentage|figure|date|year)\b/i.test(q));
     const isRole = !isExplanationIntent && /\b(?:c[efot]o|chief\s+(?:executive|financial|operating|technology|information)\s+officer|managing\s+director|chair(?:person|man|woman)?|(?:prime|chief)\s+minister|[cp]m|president|vice\s+president|vp|governor|mayor|chancellor|premier|minister|director|head\s+of\s+(?:state|government)|leader|civic\s+leader|captain|coach|commander|founder|co-founder|secretary[\s-]+general|monarch|king|queen|emperor|empress|pope|author|writer|novelist|actor|actress|inventor|creator|discoverer|discoverers|winner|champion)\b/i.test(q);
     const isEntityLookup = !isExplanationIntent && /\b(?:capital|headquarters|hq|birthplace|currency|symbol|mascot|national\s+(?:animal|bird|flower|anthem|tree|fruit|sport|flag)|official\s+language)\b/i.test(q);
     const entityKind = count?.[2]?.toLowerCase() || (/\b(?:who|people|persons?|individuals?)\b/i.test(q) || isRole ? 'person' : /\bcountries|nations\b/i.test(q) ? 'country' : isEntityLookup ? (/\bcapital|headquarters|hq|birthplace\b/i.test(q) ? 'place' : /\bcurrency\b/i.test(q) ? 'currency' : 'entity') : 'entity');
@@ -158,9 +162,9 @@ export function buildResearchRequirements(query, _context = []) {
             || isEntityLookup
             || (count && !/^(?:reasons|ways|steps)$/i.test(count[2]));
         const date = /\bwhen\b|\b(?:what|which)\s+(?:is\s+the\s+)?(?:date|year)|\b(?:release|birth|publication|election|founding|launch|start|end)?\s*dates?\b/i.test(q);
-        const value = /\bhow (?:many|much|old|long|far|fast|large|big|tall|deep|wide)\b/i.test(q)
+        const value = !isExplanationIntent && (/\bhow (?:many|much|old|long|far|fast|large|big|tall|deep|wide)\b/i.test(q)
             || /\b(?:what(?:'s| is)?|current|latest)?\s*(?:the\s+)?(?:price|cost|population|rate|score|temperature|gdp|net\s*worth|height|weight|depth|distance|revenue|market\s*cap|valuation|inflation)\b/i.test(q)
-            || /\b(?:what(?:'s| is)?|current|latest)\s+(?:the\s+)?value\b/i.test(q);
+            || /\b(?:what(?:'s| is)?|current|latest)\s+(?:the\s+)?value\b/i.test(q));
         if (names) {
             const description = isRole
                 ? `Identify the specific ${/person|people|individual/.test(entityKind) ? 'individuals' : entityKind} satisfying the stated role or condition; verify the official office holder`
@@ -237,8 +241,8 @@ function valueFitsRequirement(value, quote, requirement, source = {}) {
     } else {
         if (val.length < 24 || !/[\p{L}]/u.test(val)) return false;
         const terms = researchTerms(requirement.entities?.join(' ') || requirement.query);
-        const matching = researchTerms(val).filter(term => terms.includes(term));
-        if (terms.length && matching.length < Math.min(3, Math.max(1, Math.ceil(terms.length * 0.5)))) return false;
+        const words = new Set(researchTerms(`${source.title || ''} ${quote} ${val}`));
+        if (terms.length && !terms.some(term => words.has(term))) return false;
         if (/^(?:what|who|which|how|why|when|where)\b/i.test(val)) return false;
         if (requirement.type === 'explanation' && /^(?:what (?:is|are)|explain|how .+ works?\b)/i.test(requirement.query) && protectedEntities(requirement.query).length && !/\b(?:is|are|means|refers?|allows?|enables?|renders?|runs?|executes?|functions?|uses?|supports?|processes?|represents?|makes?|can|designed|built)\b/i.test(val)) return false;
     }
