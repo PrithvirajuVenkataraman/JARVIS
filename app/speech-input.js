@@ -69,6 +69,13 @@ export function cleanSpeechFillers(text = '') {
     let s = String(text || '').replace(/^[ \t]+|[ \t]+$/g, '');
     if (!s.trim()) return '';
 
+    // Discard standard acoustic noise tokens: [noise], (cough), *applause*, etc.
+    s = s.replace(/\[[^\]]*\]/g, ' ').replace(/\([^)]*\)/g, ' ').replace(/\*[^*]*\*/g, ' ');
+
+    // Discard common dead-silence Whisper / STT hallucinations
+    s = s.replace(/^(?:thank\s+you\s+for\s+watching|thanks\s+for\s+watching|subtitles\s+by\s+[^\n]+|amara\.org|silence|blank[_\s]audio)[\.\s]*$/gi, '');
+    if (!s.trim()) return '';
+
     // 0. Spoken Punctuation & Line Breaks (Enterprise Dictation)
     s = s.replace(/\b(?:new line|newline)\b/gi, '\n');
     s = s.replace(/\b(?:new paragraph)\b/gi, '\n\n');
@@ -166,7 +173,19 @@ export function cleanSpeechFillers(text = '') {
     s = s.replace(/^[ \t]+|[ \t]+$/g, '');
     s = s.replace(/\n+$/, '');
 
+    // 9. Pure noise / acoustic punctuation suppression:
+    // If no alphanumeric word tokens remain, discard completely as acoustic noise/silence
+    if (!/[\p{L}\p{N}]/u.test(s)) {
+        return '';
+    }
+
     return s;
+}
+
+export function isGenuineSpeech(text = '') {
+    if (!text || typeof text !== 'string') return false;
+    const cleaned = cleanSpeechFillers(text);
+    return Boolean(cleaned && /[\p{L}\p{N}]/u.test(cleaned));
 }
 
 export function normalizeVoiceInputLanguage(language = '') {
@@ -1207,7 +1226,16 @@ export function installSpeechInputUI(options = {}) {
             // Strictly clear any live speech rows on the chat window
             globalThis.clearLiveSpeechTranscriptionOnScreen?.();
 
-            if (!cleaned) return;
+            if (!cleaned) {
+                // If user spoke nothing or random noise was captured, leave prompt window clean
+                input.value = committedText || '';
+                delete input.dataset.inputSource;
+                options.onComposerChanged?.();
+                globalThis.handleComposerInput?.();
+                globalThis.autoResizeComposerTextarea?.();
+                globalThis.toggleSendButton?.();
+                return;
+            }
 
             if (isConverse && typeof options.onSubmit === 'function' && event?.autoSubmit !== false) {
                 input.value = '';
@@ -1253,9 +1281,7 @@ export function installSpeechInputUI(options = {}) {
                 lastInterimText = '';
                 if (input && state.mode === 'idle') {
                     const cleaned = cleanSpeechFillers(input.value);
-                    if (cleaned) {
-                        input.value = cleaned;
-                    }
+                    input.value = cleaned || committedText || '';
                     try {
                         input.focus();
                         if (typeof input.setSelectionRange === 'function') {
@@ -1349,6 +1375,8 @@ export function installSpeechInputUI(options = {}) {
                 if (cleaned) {
                     input.value = cleaned;
                     committedText = cleaned;
+                } else {
+                    input.value = committedText || '';
                 }
                 try {
                     input.focus();
