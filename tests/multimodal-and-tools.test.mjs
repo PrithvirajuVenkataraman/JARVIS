@@ -66,7 +66,8 @@ import {
     buildSmsUrl,
     buildWhatsAppUrl,
     buildTelUrl,
-    buildEmergencyCardHtml
+    buildEmergencyCardHtml,
+    dispatchImmediateEmergencySms
 } from '../app/emergency-sos.js';
 import {
     calculateHaversineDistance,
@@ -2062,7 +2063,11 @@ assert.equal(telUrl, 'tel:+15551112222');
 
 const defaultTelUrl = buildTelUrl('');
 assert.equal(defaultTelUrl, 'tel:112');
-console.log('  [PASS] 4.1 SMS, WhatsApp, and Phone dialer URLs formatted accurately');
+
+const dispatchedSms = dispatchImmediateEmergencySms(payload, c2);
+assert.ok(dispatchedSms.startsWith('sms:+15551112222?body='));
+assert.ok(dispatchedSms.includes(encodeURIComponent('12.969286')));
+console.log('  [PASS] 4.1 SMS, WhatsApp, Phone dialer URLs, and immediate SMS dispatch formatted accurately');
 
 // Section 5: Emergency Distress Card HTML Generation
 console.log('\n--- Section 5: Emergency Distress Card HTML ---');
