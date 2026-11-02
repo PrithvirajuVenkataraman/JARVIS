@@ -6,6 +6,36 @@
 import { highlightCode } from './code-highlighter.js';
 import { renderMathInText, formatLatexExpression } from './math-renderer.js';
 
+/**
+ * Strips fact tags, lenticular brackets, and trailing citation numbers / bracket markers from bullet points.
+ * Ensures that lines ending with e.g. "【f1】 .", "[1] .", "(1).", "1." have those citation markers removed
+ * and trailing punctuation cleanly preserved.
+ */
+export function cleanBulletEndCitations(text, isItem = false) {
+    if (!text || typeof text !== 'string') return '';
+    return text.split('\n').map(line => {
+        let cleaned = line
+            .replace(/\s*【[^】]*】\s*([.,;!?]?)/g, '$1')
+            .replace(/\s*\[f\d+(?:\s*,\s*f?\d+)*\]\s*([.,;!?]?)/g, '$1');
+
+        const bulletMatch = cleaned.match(/^(\s*(?:[-*•+]|\d+\.)\s+)(.*)$/);
+        if (bulletMatch) {
+            const prefix = bulletMatch[1];
+            let body = bulletMatch[2];
+            body = body.replace(/(?:[\s\u00A0]*(?:【[^】]*】|\[f?\d+(?:\s*,\s*f?\d+)*\]|\([1-9]\d{0,1}\)))+[\s\u00A0]*([.,;!?]?)$/g, '$1');
+            body = body.replace(/[\s\u00A0]+([.,;!?])/g, '$1').trimEnd();
+            return `${prefix}${body}`;
+        }
+
+        if (isItem) {
+            cleaned = cleaned.replace(/(?:[\s\u00A0]*(?:【[^】]*】|\[f?\d+(?:\s*,\s*f?\d+)*\]|\([1-9]\d{0,1}\)))+[\s\u00A0]*([.,;!?]?)$/g, '$1');
+            cleaned = cleaned.replace(/[\s\u00A0]+([.,;!?])/g, '$1').trimEnd();
+        }
+
+        return cleaned;
+    }).join('\n');
+}
+
 function escapeHtml(text) {
     return String(text || '')
         .replace(/&/g, '&amp;')
@@ -192,7 +222,9 @@ export function renderMarkdown(rawText = '', options = {}) {
         if (/^\s*[-*]\s+/.test(line)) {
             const items = [];
             while (i < lines.length && /^\s*[-*]\s+/.test(String(lines[i] || ''))) {
-                items.push(String(lines[i]).replace(/^\s*[-*]\s+/, ''));
+                let item = String(lines[i]).replace(/^\s*[-*]\s+/, '');
+                item = cleanBulletEndCitations(item, true);
+                items.push(item);
                 i += 1;
             }
             out.push(`<ul class="assistant-md-list">${items.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`);
@@ -202,7 +234,9 @@ export function renderMarkdown(rawText = '', options = {}) {
         if (/^\s*\d+\.\s+/.test(line)) {
             const items = [];
             while (i < lines.length && /^\s*\d+\.\s+/.test(String(lines[i] || ''))) {
-                items.push(String(lines[i]).replace(/^\s*\d+\.\s+/, ''));
+                let item = String(lines[i]).replace(/^\s*\d+\.\s+/, '');
+                item = cleanBulletEndCitations(item, true);
+                items.push(item);
                 i += 1;
             }
             out.push(`<ol class="assistant-md-olist">${items.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ol>`);
