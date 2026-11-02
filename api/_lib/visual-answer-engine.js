@@ -199,6 +199,7 @@ export async function discoverNotableWorks(entityTitle, entityType, summaryData,
     const filteredTitles = [...new Set(candidateWorkTitles)].filter(t => {
         const lower = t.toLowerCase();
         if (stopWords.has(lower)) return false;
+        if (/\b(?:thenisai\s+thendral|godfather\s+of\s+gaana|padma\s+shri|kalaimamani|national\s+award|filmfare|best\s+music\s+director)\b/i.test(lower)) return false;
         if (entityNameTokens.length > 1 && lower === entityTitle.toLowerCase()) return false;
         if (t.length < 2 || t.length > 50) return false;
         return true;
@@ -214,7 +215,12 @@ export async function discoverNotableWorks(entityTitle, entityType, summaryData,
 
         const searchResults = await searchWikipediaTitle(`${entityTitle} ${searchContext}`, signal);
         if (searchResults && searchResults !== entityTitle) {
-            filteredTitles.push(searchResults);
+            const checkSummary = await fetchWikiSummary(searchResults, signal);
+            const lowerEntity = entityTitle.toLowerCase();
+            const lowerText = `${checkSummary?.title || ''} ${checkSummary?.extract || ''}`.toLowerCase();
+            if (checkSummary && (lowerText.includes(lowerEntity) || entityNameTokens.some(token => token.length >= 4 && lowerText.includes(token)))) {
+                filteredTitles.push(searchResults);
+            }
         }
     }
 
