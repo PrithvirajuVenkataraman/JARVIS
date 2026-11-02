@@ -47,6 +47,11 @@ import {
 import { highlightCode } from '../app/code-highlighter.js';
 import { renderMathInText, formatLatexExpression } from '../app/math-renderer.js';
 import { renderMarkdown } from '../app/markdown-renderer.js';
+import {
+    extractCandidateEntity,
+    isValidImageUrl,
+    classifyEntityTypeFromDescription
+} from '../api/_lib/visual-answer-engine.js';
 
 // Load science formatter
 import '../science-format.js';
@@ -441,6 +446,16 @@ console.log('--- Section 10: Code Highlighter, Math & Markdown Renderers ---');
     assert.ok(bulletRendered.includes('Top Gun 2.'), 'Must preserve title numbers like Top Gun 2');
     assert.ok(bulletRendered.includes('(1950).'), 'Must preserve 4-digit birth years');
 
+    // Double-bullet dash stripping (e.g. "• - " or "- - ")
+    const doubleDashMd = '- - First Item\n• - Second Item\n* - Third Item\n+ - Fourth Item';
+    const doubleDashRendered = renderMarkdown(doubleDashMd);
+    assert.ok(doubleDashRendered.includes('<li>First Item</li>'), 'Must cleanly strip duplicate leading dash');
+    assert.ok(doubleDashRendered.includes('<li>Second Item</li>'), 'Must cleanly strip bullet-dash combinations');
+    assert.ok(doubleDashRendered.includes('<li>Third Item</li>'), 'Must cleanly strip asterisk-dash combinations');
+    assert.ok(doubleDashRendered.includes('<li>Fourth Item</li>'), 'Must cleanly strip plus-dash combinations');
+    assert.ok(!doubleDashRendered.includes('- First Item'), 'Must not retain dash inside list item');
+    assert.ok(!doubleDashRendered.includes('- Second Item'), 'Must not retain dash inside list item');
+
     console.log('  [PASS] Code highlighting, math expressions, markdown, and science formatting verified');
 }
 
@@ -457,6 +472,36 @@ console.log('--- Section 11: Zero-Cost Image Generation Architecture Contracts -
     const notImg = decideFrontendRoute('how to draw a line chart in chart.js');
     assert.notEqual(notImg.route, 'image_generation');
     console.log('  [PASS] Zero-cost image generation routing and prompt extraction contracts verified');
+}
+
+console.log('--- Section 12: Dynamic Visual Answer Engine & SSRF Security Contracts ---');
+{
+    // Universal candidate entity extraction
+    assert.equal(extractCandidateEntity('Music composer Deva'), 'Music composer Deva');
+    assert.equal(extractCandidateEntity('who is Marie Curie?'), 'Marie Curie');
+    assert.equal(extractCandidateEntity('tell me about Quantum Computing in detail'), 'Quantum Computing');
+    assert.equal(extractCandidateEntity('What is 2 + 2?'), '', 'Math queries must not trigger entity visual searches');
+    assert.equal(extractCandidateEntity('10 * 50'), '', 'Math queries must not trigger entity visual searches');
+    assert.equal(extractCandidateEntity('hello'), '', 'Greetings must not trigger entity visual searches');
+
+    // Secure image CDN domain validation and SSRF guards
+    assert.equal(isValidImageUrl('https://upload.wikimedia.org/wikipedia/commons/thumb/a/a4/Deva.jpg/220px-Deva.jpg'), true);
+    assert.equal(isValidImageUrl('https://thumb.wikimedia.org/image.png'), true);
+    assert.equal(isValidImageUrl('https://images.unsplash.com/photo-12345'), true);
+    assert.equal(isValidImageUrl('http://upload.wikimedia.org/test.jpg'), false, 'Insecure HTTP must be rejected');
+    assert.equal(isValidImageUrl('https://192.168.1.1/test.jpg'), false, 'Private IP addresses must be rejected (SSRF)');
+    assert.equal(isValidImageUrl('https://127.0.0.1/test.jpg'), false, 'Loopback IP addresses must be rejected (SSRF)');
+    assert.equal(isValidImageUrl('https://169.254.169.254/latest/meta-data'), false, 'Cloud metadata IP must be rejected (SSRF)');
+    assert.equal(isValidImageUrl('https://evil-domain.com/avatar.png'), false, 'Untrusted third-party hosts must be rejected');
+
+    // Dynamic entity classification
+    assert.equal(classifyEntityTypeFromDescription('Indian film score composer and singer', 'Deva'), 'musician');
+    assert.equal(classifyEntityTypeFromDescription('American actor and film producer', 'Leonardo DiCaprio'), 'actor');
+    assert.equal(classifyEntityTypeFromDescription('British theoretical physicist', 'Stephen Hawking'), 'scientist');
+    assert.equal(classifyEntityTypeFromDescription('American multinational technology company', 'Apple Inc.'), 'company');
+    assert.equal(classifyEntityTypeFromDescription('1995 Indian Tamil-language action film', 'Baashha'), 'movie');
+
+    console.log('  [PASS] Dynamic Visual Answer Engine and SSRF security contracts verified');
 }
 
 console.log('deterministic-checks-ok');
