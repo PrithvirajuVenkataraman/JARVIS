@@ -138,7 +138,10 @@ export function rankResearchEvidence(plan, sources, limit = 8) {
 export function buildResearchRequirements(query, _context = []) {
     const q = cleanText(query).slice(0, 1000);
     const count = q.match(/\b(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+(people|persons?|individuals?|countries|nations|animals?|species|names|items|reasons|ways|steps|things)\b/i);
-    const entityKind = count?.[2]?.toLowerCase() || (/\b(?:who|people|persons?|individuals?)\b/i.test(q) ? 'person' : /\bcountries|nations\b/i.test(q) ? 'country' : 'entity');
+    const isExplanationIntent = /^(?:how|why|explain|describe)\b|\b(?:history|evolution|timeline|overview|summary|mechanism|process|guide|tutorial)\s+of\b/i.test(q);
+    const isRole = !isExplanationIntent && /\b(?:c[efot]o|chief\s+(?:executive|financial|operating|technology|information)\s+officer|managing\s+director|chair(?:person|man|woman)?|(?:prime|chief)\s+minister|[cp]m|president|vice\s+president|vp|governor|mayor|chancellor|premier|minister|director|head\s+of\s+(?:state|government)|leader|civic\s+leader|captain|coach|commander|founder|co-founder|secretary[\s-]+general|monarch|king|queen|emperor|empress|pope|author|writer|novelist|actor|actress|inventor|creator|discoverer|discoverers|winner|champion)\b/i.test(q);
+    const isEntityLookup = !isExplanationIntent && /\b(?:capital|headquarters|hq|birthplace|currency|symbol|mascot|national\s+(?:animal|bird|flower|anthem|tree|fruit|sport|flag)|official\s+language)\b/i.test(q);
+    const entityKind = count?.[2]?.toLowerCase() || (/\b(?:who|people|persons?|individuals?)\b/i.test(q) || isRole ? 'person' : /\bcountries|nations\b/i.test(q) ? 'country' : isEntityLookup ? (/\bcapital|headquarters|hq|birthplace\b/i.test(q) ? 'place' : /\bcurrency\b/i.test(q) ? 'currency' : 'entity') : 'entity');
     const expectedCount = count ? countValue(count[1]) : undefined;
     const comparison = comparisonParts(q);
     const requirements = [];
@@ -150,11 +153,22 @@ export function buildResearchRequirements(query, _context = []) {
             }
         }
     } else {
-        const names = /\b(?:who|name(?:s)?|which (?:people|persons?|individuals?|countries|nations|animals?))\b/i.test(q)
+        const names = /\b(?:who|name(?:s)?|which (?:people|persons?|individuals?|countries|nations|animals?|teams?|cities|companies|brands?))\b/i.test(q)
+            || isRole
+            || isEntityLookup
             || (count && !/^(?:reasons|ways|steps)$/i.test(count[2]));
-        const date = /\bwhen\b|\b(?:what|which)\s+(?:is\s+the\s+)?(?:date|year)|\b(?:release|birth|publication|election) dates?\b/i.test(q);
-        const value = /\bhow (?:many|much|old|long|far|fast|large|big)\b|\b(?:what(?:'s| is)?|current|latest)\s+(?:the\s+)?(?:price|cost|population|value|rate|score|temperature)\b/i.test(q);
-        if (names) add('names', `Identify the specific ${/person|people|individual/.test(entityKind) ? 'individuals' : entityKind} satisfying the stated condition; verify the alleged count`, { entityKind, expectedCount, countIsClaim: Boolean(count), exclusiveCount: Boolean(count && /\b(?:only|exactly|just)\s+(?:\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b/i.test(q)) });
+        const date = /\bwhen\b|\b(?:what|which)\s+(?:is\s+the\s+)?(?:date|year)|\b(?:release|birth|publication|election|founding|launch|start|end)?\s*dates?\b/i.test(q);
+        const value = /\bhow (?:many|much|old|long|far|fast|large|big|tall|deep|wide)\b/i.test(q)
+            || /\b(?:what(?:'s| is)?|current|latest)?\s*(?:the\s+)?(?:price|cost|population|rate|score|temperature|gdp|net\s*worth|height|weight|depth|distance|revenue|market\s*cap|valuation|inflation)\b/i.test(q)
+            || /\b(?:what(?:'s| is)?|current|latest)\s+(?:the\s+)?value\b/i.test(q);
+        if (names) {
+            const description = isRole
+                ? `Identify the specific ${/person|people|individual/.test(entityKind) ? 'individuals' : entityKind} satisfying the stated role or condition; verify the official office holder`
+                : isEntityLookup
+                    ? `Identify the specific ${entityKind} requested for ${q}`
+                    : `Identify the specific ${/person|people|individual/.test(entityKind) ? 'individuals' : entityKind} satisfying the stated condition; verify the alleged count`;
+            add('names', description, { entityKind, expectedCount, countIsClaim: Boolean(count), exclusiveCount: Boolean(count && /\b(?:only|exactly|just)\s+(?:\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b/i.test(q)) });
+        }
         if (date) add('date', `Establish the requested date or year for ${q}`, { expectedCount: names && /\bdates\b/i.test(q) ? expectedCount : undefined });
         if (value) add('value', `Establish the requested numerical value for ${q}`);
         if (!requirements.length) add('explanation', `Explain or verify: ${q}`, { expectedCount: /^(?:reasons|ways|steps)$/i.test(count?.[2] || '') ? expectedCount : undefined });
@@ -185,22 +199,22 @@ function valueFitsRequirement(value, quote, requirement, source = {}) {
     if (requirement.entities?.some(entity => !normalizedText(normalizeResearchAliases(quote)).includes(normalizedText(normalizeResearchAliases(entity))))) return false;
     if (requirement.type === 'names') {
         // Entity values are explicitly extracted spans, never counts of capitalized phrases.
-        if (val.length > 100 || val.split(SPACE).length > 12 || /[?!:;]/.test(val)) return false;
+        if (val.length > 120 || val.split(SPACE).length > 16 || /[?!:;]/.test(val)) return false;
         if (/^(?:the\s+)?(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:people|persons?|individuals?|countries|names)\b/i.test(val)) return false;
         if (/person|people|individual/.test(requirement.entityKind || '') && /\b(?:passport|travel|control|kingdom|family|requirements?|exemptions?|countries|government|people|persons?|individuals?)\b/i.test(val)) return false;
-        if (/^(?:the\s+)?(?:monarch|emperor|empress|king|queen|president|pope|prince|leader)$/i.test(val)) return false;
+        if (/^(?:the\s+)?(?:monarch|emperor|empress|king|queen|president|vice\s+president|vp|pope|prince|leader|chief\s+minister|prime\s+minister|[cp]m|c[efot]o|governor|mayor|chancellor|premier|minister|director|head\s+of\s+state|founder|author|actor|actress|inventor|coach|captain)$/i.test(val)) return false;
         const terms = researchTerms(requirement.query).filter(t => !/^\d+$/.test(t) && !/^(?:world|countries|country|individuals|persons|person|only|claim|claimed)$/.test(t));
-        const words = new Set(researchTerms(quote));
+        const words = new Set(researchTerms(`${source.title || ''} ${quote}`));
         if (terms.length && !terms.some(t => words.has(t))) return false;
     } else if (requirement.type === 'date') {
         if (!/\b(?:\d{1,4}|January|February|March|April|May|June|July|August|September|October|November|December|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\b/i.test(val)) return false;
     } else if (requirement.type === 'value') {
-        if (!/\d|\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|hundred|thousand|million|billion)\b/i.test(val)) return false;
+        if (!/\d|\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|hundred|thousand|million|billion|trillion)\b/i.test(val)) return false;
     } else if (requirement.type === 'qualification') {
         if (!/\b(?:entry|enter|visa|permission|restrictions?|countries|every|all)\b/i.test(val)) return false;
         if (!/\b(?:not|only|require|requires|required|subject|arrangements?|permission|restricted|restrictions?|exempt|exemption|every|all|any)\b/i.test(val)) return false;
     } else if (requirement.type === 'comparison' && /\b(?:population|area|price|cost|speed|latency|GDP|life expectancy|literacy|tax|fees)\b/i.test(requirement.attribute || '')) {
-        if (!/\d|\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|hundred|thousand|million|billion)\b/i.test(val)) return false;
+        if (!/\d|\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|hundred|thousand|million|billion|trillion)\b/i.test(val)) return false;
     } else {
         if (val.length < 24 || !/[\p{L}]/u.test(val)) return false;
         const terms = researchTerms(requirement.entities?.join(' ') || requirement.query);
