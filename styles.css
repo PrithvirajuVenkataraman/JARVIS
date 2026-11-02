@@ -2607,9 +2607,47 @@ button[aria-label^="Back"],
     animation: jarvis-input-pulse 1.35s ease-in-out infinite;
 }
 
-.speech-input-btn.is-listening svg {
-    stroke: #ef4444 !important;
-    filter: drop-shadow(0 0 5px rgba(239, 68, 68, 0.55));
+.speech-input-btn.is-listening svg,
+.speech-input-btn.is-listening .vtt-mic-icon {
+    display: none !important;
+}
+
+.vtt-loader-spinner {
+    display: none;
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(239, 68, 68, 0.28);
+    border-top-color: #ef4444;
+    border-radius: 50%;
+    animation: vtt-loader-spin 0.75s linear infinite;
+    box-sizing: border-box;
+    flex-shrink: 0;
+}
+
+.speech-input-btn.is-listening .vtt-loader-spinner {
+    display: inline-block !important;
+}
+
+.speech-input-btn.is-listening:not(:has(.vtt-loader-spinner))::after {
+    content: '';
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(239, 68, 68, 0.28);
+    border-top-color: #ef4444;
+    border-radius: 50%;
+    animation: vtt-loader-spin 0.75s linear infinite;
+    box-sizing: border-box;
+    flex-shrink: 0;
+}
+
+@keyframes vtt-loader-spin {
+    0% {
+        transform: rotate(0deg);
+    }
+    100% {
+        transform: rotate(360deg);
+    }
 }
 
 
