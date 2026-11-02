@@ -493,6 +493,9 @@ export async function searchResearchSources(query, options = {}) {
                 return res?.results || [];
             }]);
         }
+        if (parseGovernmentRoleQuery(query)) {
+            generalProviders.push(['government_role', searchGovernmentRole]);
+        }
         generalProviders.push(
             ['duckduckgo', searchDuckDuckGoHtml], ['searxng', searchSearXNGRacer],
             ['wikipedia', searchWikipedia, { limit: 2 }]
