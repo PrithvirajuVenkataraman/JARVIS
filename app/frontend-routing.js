@@ -1287,12 +1287,12 @@ export function classifyQueryShape(text) {
     const hasDescriptorOrTopic = /\b(?:hits?|songs?|tracks?|soundtracks?|albums?|lyrics?|singers?|composer|composers|composed|discography|movies?|films?|cinemas?|architecture|history|construction|date|geology|formation|erosion|definition|meaning|code|array|algorithm)\b/i.test(lower);
 
     // Bare entity: short, no interrogative, no command verb, no topic/descriptor
-    // High confidence when: token count <= 6 AND (title-cased OR non-Latin)
+    // High confidence when: token count <= 6 AND (title-cased OR non-Latin OR bare entity <= 4 tokens)
     const isBareEntity = tokenCount <= 6
         && !hasCommandVerb
         && !hasInterrogative
         && !hasDescriptorOrTopic
-        && (isMostlyNonLatin || titleCaseRatio >= 0.5 || (tokenCount <= 3 && titleCaseRatio > 0));
+        && (isMostlyNonLatin || titleCaseRatio >= 0.5 || tokenCount <= 4);
 
     if (isBareEntity) {
         return { shape: 'entity_bare', entityCandidate: raw, tokenCount, titleCaseRatio, hasQueryVerb: false, hasMediaContext, hasNonLatinScript };
