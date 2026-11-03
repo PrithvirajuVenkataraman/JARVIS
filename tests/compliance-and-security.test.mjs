@@ -1151,7 +1151,8 @@ console.log('\n--- Section 5: Asymmetric Sealed Secrets Cryptography (GitHub Sec
     console.log('  [PASS] 5.3 Browser Web Crypto Subtle envelope encryption interoperates with server unsealing');
 
     // 5.4 Tamper Resistance & Graceful Failure
-    const tamperedCipher = browserSealedString.slice(0, -10) + 'X' + browserSealedString.slice(-9);
+    const charToSwap = browserSealedString.slice(-10, -9) === 'X' ? 'Y' : 'X';
+    const tamperedCipher = browserSealedString.slice(0, -10) + charToSwap + browserSealedString.slice(-9);
     const tamperedResult = unsealSecret(tamperedCipher);
     assert.equal(tamperedResult, '', 'Tampered or invalid sealed secret must fail closed and return empty string');
     console.log('  [PASS] 5.4 Tampered sealed ciphertext fails closed and returns safe empty string');
