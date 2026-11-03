@@ -18,7 +18,7 @@ import visionHandler, { __test as visionTest } from '../api/vision.js';
 import diagnosticsHandler from '../api/diagnostics.js';
 import rankTextsHandler from '../api/rank-texts.js';
 import ingestAttachmentHandler from '../api/ingest-attachment.js';
-import extractUrlHandler, { __test as extractUrlTest } from '../api/extract-url.js';
+import extractUrlHandler, { __test as extractUrlTest } from '../api/_lib/crawl4ai-client.js';
 import { clearItems, saveItems } from '../api/_lib/latest/latest-cache.js';
 import {
     isStableGeographyOrGeneralFactQuery as frontendIsStable,
