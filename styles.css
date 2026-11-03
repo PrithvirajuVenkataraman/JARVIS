@@ -7488,7 +7488,9 @@ body:not(.dark) .notable-work-year {
 
 /* Inline Superscript Citation Badges */
 .citation-badge,
-.citation-badge-static {
+.citation-badge-static,
+a.citation-badge,
+a.citation-badge-static {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -7500,33 +7502,41 @@ body:not(.dark) .notable-work-year {
     border-radius: 4px;
     padding: 0 0.25rem;
     margin: 0 0.15rem;
-    text-decoration: none;
+    text-decoration: none !important;
     vertical-align: super;
     line-height: 1.3;
     transition: all 0.18s ease;
 }
 
 .citation-badge:hover,
-.citation-badge-static:hover {
+.citation-badge-static:hover,
+a.citation-badge:hover,
+a.citation-badge-static:hover {
     color: #ffffff;
     background: #0284c7;
     border-color: #38bdf8;
     transform: scale(1.08);
+    text-decoration: none !important;
 }
 
-body:not(.dark) .citation-badge {
+body:not(.dark) .citation-badge,
+body:not(.dark) a.citation-badge {
     color: #0284c7;
     background: rgba(2, 132, 199, 0.08);
     border-color: rgba(2, 132, 199, 0.25);
+    text-decoration: none !important;
 }
 
-body:not(.dark) .citation-badge:hover {
+body:not(.dark) .citation-badge:hover,
+body:not(.dark) a.citation-badge:hover {
     color: #ffffff;
     background: #0284c7;
+    text-decoration: none !important;
 }
 
 /* In-Text Citation Source Logo Badge */
-.citation-source-logo {
+.citation-source-logo,
+a.citation-source-logo {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -7540,8 +7550,13 @@ body:not(.dark) .citation-badge:hover {
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
     overflow: hidden;
     cursor: pointer;
-    text-decoration: none;
+    text-decoration: none !important;
     transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.citation-source-logo:hover,
+a.citation-source-logo:hover {
+    text-decoration: none !important;
 }
 
 .citation-source-logo:hover {
