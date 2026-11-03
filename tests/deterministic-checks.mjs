@@ -47,7 +47,7 @@ import {
 } from '../app/emergency-sos.js';
 import { highlightCode } from '../app/code-highlighter.js';
 import { renderMathInText, formatLatexExpression } from '../app/math-renderer.js';
-import { renderMarkdown, cleanBulletEndCitations } from '../app/markdown-renderer.js';
+import { renderMarkdown, cleanBulletEndCitations, splitReadableSentences, deBulletizePseudoListIfNeeded } from '../app/markdown-renderer.js';
 import {
     cleanAnswerText,
     validateResearchAnswer,
@@ -486,6 +486,25 @@ console.log('--- Section 10: Code Highlighter, Math & Markdown Renderers ---');
     assert.ok(!doubleDashRendered.includes('- First Item'), 'Must not retain dash inside list item');
     assert.ok(!doubleDashRendered.includes('- Second Item'), 'Must not retain dash inside list item');
 
+    // Markdown inline styling: italics, bold, bold-italic, strikethrough
+    const italicMd = 'Popularised the *Gaana* style, earning the nicknames *"Godfather of Gaana music"* and _Thenisai Thendral_.';
+    const italicRendered = renderMarkdown(italicMd);
+    assert.ok(italicRendered.includes('<em>Gaana</em>'), 'Must parse single asterisk italics');
+    assert.ok(italicRendered.includes('<em>&quot;Godfather of Gaana music&quot;</em>'), 'Must parse quoted single asterisk italics with safe html encoding');
+    assert.ok(italicRendered.includes('<em>Thenisai Thendral</em>'), 'Must parse underscore italics');
+
+    const boldItalicMd = 'This is ***crucial fact*** and ~~deprecated note~~.';
+    const boldItalicRendered = renderMarkdown(boldItalicMd);
+    assert.ok(boldItalicRendered.includes('<strong><em>crucial fact</em></strong>'), 'Must parse bold italic');
+    assert.ok(boldItalicRendered.includes('<del>deprecated note</del>'), 'Must parse strikethrough');
+
+    // List item initial merging (healing broken initialisms in bulleted lists)
+    const brokenInitialsListMd = '- Studied Indian classical harmonium under J.\n- B.\n- Krishna.';
+    const healedInitialsHtml = renderMarkdown(brokenInitialsListMd);
+    assert.ok(healedInitialsHtml.includes('under J. B. Krishna.'), 'Must heal broken initials J. B. Krishna into a single list item');
+    assert.ok(!healedInitialsHtml.includes('<li>B.</li>'), 'Must not leave orphaned B. bullet');
+    assert.ok(!healedInitialsHtml.includes('<li>Krishna.</li>'), 'Must not leave orphaned Krishna. bullet');
+
     console.log('  [PASS] Code highlighting, math expressions, markdown, and science formatting verified');
 }
 
@@ -595,6 +614,28 @@ console.log('--- Section 13: Response Formatting, Markdown Hierarchy & Paragraph
     const rawList = `- First point in discussion [1].\n- Second point in discussion (2).\n- Third point in discussion 【f3】 .`;
     const cleanedList = cleanBulletEndCitations(rawList);
     assert.equal(cleanedList, '- First point in discussion.\n- Second point in discussion.\n- Third point in discussion.', 'Trailing citation markers cleanly stripped from bullet points');
+
+    // Test 7: splitReadableSentences preserves initials, dates, and decimals
+    const sampleBioText = 'Deva was born on Nov 20, 1950. He studied Indian classical harmonium under J. B. Krishna. His score was 3.14 on Next.js.';
+    const sentences = splitReadableSentences(sampleBioText);
+    assert.equal(sentences.length, 3, 'Must split into exactly 3 sentences');
+    assert.ok(sentences[0].includes('Nov 20, 1950'), 'Must preserve date without splitting at Nov');
+    assert.ok(sentences[1].includes('J. B. Krishna'), 'Must preserve initials without splitting at J. or B.');
+    assert.ok(sentences[2].includes('3.14 on Next.js'), 'Must preserve decimals and dot-syntax without splitting');
+
+    // Test 8: deBulletizePseudoListIfNeeded converts narrative lists into prose paragraphs
+    const pseudoNarrativeList = `- Devanesan Chokkalingam, popularly known as Deva, was a prolific Indian music composer and singer best known for his work in Tamil cinema.\n- Over a career that spanned nearly four decades he composed music for more than 400 films and is widely credited with popularising the Gaana style.\n- Deva's breakthrough came with the 1986 Tamil film Maattukara Mannaru, and he later created iconic scores including Baasha and Annamalai.\n- Tributes poured in from industry peers confirming his status as a legendary figure in South-Indian cinema.`;
+    const deBulletized = deBulletizePseudoListIfNeeded(pseudoNarrativeList);
+    assert.ok(!deBulletized.startsWith('- '), 'Pseudo-list must not start with bullet dash');
+    assert.ok(deBulletized.includes('\n\n'), 'Pseudo-list must be grouped into natural paragraphs');
+    assert.ok(!/^\s*[-*•+]\s+/m.test(deBulletized), 'Pseudo-list must have bullet dashes removed');
+
+    // Test 9: deBulletizePseudoListIfNeeded strictly preserves genuine procedural lists and key-value specs
+    const genuineProcedure = `- Step 1: Clone the repository.\n- Step 2: Run npm install.\n- Step 3: Run npm test.`;
+    assert.equal(deBulletizePseudoListIfNeeded(genuineProcedure), genuineProcedure, 'Must preserve genuine procedural step lists');
+
+    const genuineSpecs = `- **Processor**: Apple M3 Max\n- **Memory**: 36GB Unified\n- **Storage**: 1TB NVMe SSD`;
+    assert.equal(deBulletizePseudoListIfNeeded(genuineSpecs), genuineSpecs, 'Must preserve genuine key-value specifications');
 
     console.log('  [PASS] Response Formatting, Markdown Hierarchy & Paragraph Preservation verified');
 }
