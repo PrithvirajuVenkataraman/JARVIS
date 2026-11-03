@@ -7488,15 +7488,18 @@ body:not(.dark) .notable-work-year {
 
 /* Inline Superscript Citation Badges */
 .assistant-message-text .citation-badge,
+.assistant-message-text button.citation-badge,
 .assistant-message-text a.citation-badge,
 .assistant-message-text .citation-badge-static,
 .assistant-message-text a.citation-badge-static,
 .assistant-message-text a.citation-source-logo,
 .citation-badge,
+button.citation-badge,
 .citation-badge-static,
 a.citation-badge,
 a.citation-badge-static,
 .citation-badge sup,
+button.citation-badge sup,
 a.citation-badge sup {
     display: inline-flex;
     align-items: center;
@@ -7512,9 +7515,21 @@ a.citation-badge sup {
     text-decoration: none !important;
     text-decoration-line: none !important;
     border-bottom: none !important;
+    box-shadow: none !important;
+    outline: none !important;
+    cursor: pointer;
     vertical-align: super;
     line-height: 1.3;
     transition: all 0.18s ease;
+}
+
+.assistant-message-text a.citation-badge *,
+.assistant-message-text button.citation-badge *,
+.citation-badge *,
+.citation-source-logo * {
+    text-decoration: none !important;
+    text-decoration-line: none !important;
+    border-bottom: none !important;
 }
 
 .citation-badge:hover,
