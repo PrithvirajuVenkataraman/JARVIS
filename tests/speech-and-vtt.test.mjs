@@ -22,6 +22,9 @@ import { createConversationEngine } from '../app/context-engine.js';
 import { __test } from '../api/chat-groq.js';
 import handler from '../api/stt.js';
 import rootApiHandler from '../api/_lib/api-router.js';
+import { classifyQueryShape } from '../app/frontend-routing.js';
+import { buildResearchRequirements } from '../api/_lib/research-evidence.js';
+import { splitReadableSentences } from '../app/markdown-renderer.js';
 
 test('Speech Input Controller & Voice Turn Detection', async () => {
 
@@ -1989,5 +1992,41 @@ assert.equal(rootRes.data?.error?.code, 'missing_audio');
 
 console.log('stt-api-tests-ok');
 
+});
+
+test('Full Entity Name Speech Readout & Query Understanding', async () => {
+    console.log('--- Testing Full Entity Name Speech Readout & Query Understanding ---');
+
+    // 1. Lowercase Bare Entity Recognition
+    const hans = classifyQueryShape('hans zimmer');
+    assert.equal(hans.shape, 'entity_bare', 'Lowercase bare name "hans zimmer" must be classified as entity_bare');
+
+    const rahman = classifyQueryShape('a. r. rahman');
+    assert.equal(rahman.shape, 'entity_bare', 'Name with initials "a. r. rahman" must be classified as entity_bare');
+
+    const curie = classifyQueryShape('marie curie');
+    assert.equal(curie.shape, 'entity_bare', 'Bare entity "marie curie" must be classified as entity_bare');
+
+    // 2. Comprehensive 3-Phase Biographical Research Requirements for Person Entities
+    const reqsHans = buildResearchRequirements('Hans Zimmer', [{ entityKind: 'person' }]);
+    assert.equal(reqsHans.length, 3, 'Person query "Hans Zimmer" must yield 3 research requirements');
+    assert.ok(reqsHans.some(r => r.description.includes('Core identity')), 'Must include core identity');
+    assert.ok(reqsHans.some(r => r.description.includes('Notable works')), 'Must include notable works');
+    assert.ok(reqsHans.some(r => r.description.includes('Awards')), 'Must include awards/developments');
+
+    const reqsBio = buildResearchRequirements('Hans Zimmer composer');
+    assert.equal(reqsBio.length, 3, 'Biographical query "Hans Zimmer composer" must also yield 3 requirements');
+
+    // 3. Sentence Protection on Initials, Abbreviations, and Decimals
+    const sampleBio = 'A. R. Rahman was born on Jan. 6, 1967. He collaborated with Dr. A. P. J. Abdul Kalam on several national compositions. His soundtrack for Slumdog Millionaire earned $3.14 million in opening royalties. J. K. Rowling also praised his global themes.';
+    const sentences = splitReadableSentences(sampleBio);
+
+    assert.equal(sentences.length, 4, `Initials and abbreviations must not cause false sentence breaks (found ${sentences.length})`);
+    assert.ok(sentences[0].startsWith('A. R. Rahman was born'), 'First sentence starts with full name');
+    assert.ok(sentences[1].includes('Dr. A. P. J. Abdul Kalam'), 'Second sentence preserves honorifics and initials');
+    assert.ok(sentences[2].includes('$3.14 million'), 'Third sentence preserves decimals');
+    assert.ok(sentences[3].startsWith('J. K. Rowling'), 'Fourth sentence preserves initials');
+
+    console.log('  [PASS] Full entity name query understanding, biographical requirements, and sentence protection verified');
 });
 
