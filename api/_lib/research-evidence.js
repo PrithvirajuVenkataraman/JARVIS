@@ -199,7 +199,9 @@ export function buildResearchRequirements(query, _context = []) {
         if (date) add('date', `Establish the requested date or year for ${q}`, { expectedCount: names && /\bdates\b/i.test(q) ? expectedCount : undefined });
         if (value) add('value', `Establish the requested numerical value for ${q}`);
         if (!requirements.length) {
-            const isBiographicalOrCreative = /\b(?:composer|musician|music\s+director|singer|lyricist|songwriter|director|filmmaker|producer|artist|painter|sculptor|actor|actress|author|writer|poet|novelist|scientist|physicist|chemist|biologist|mathematician|astronomer|inventor|architect|philosopher|historian|economist|scholar|athlete|player|coach)\b/i.test(q);
+            const isBiographicalOrCreative = (Array.isArray(_context) && _context.some(c => c?.entityKind === 'person' || c?.type === 'person'))
+                || /\b(?:biography|bio|life\s+of|career\s+of|born|composer|musician|music\s+director|singer|lyricist|songwriter|director|filmmaker|producer|artist|painter|sculptor|actor|actress|author|writer|poet|novelist|scientist|physicist|chemist|biologist|mathematician|astronomer|inventor|architect|philosopher|historian|economist|scholar|athlete|player|coach)\b/i.test(q)
+                || /^(?:dr|prof|mr|mrs|ms|sir|lord)\.?\s+[A-Za-z]/i.test(q);
             if (isBiographicalOrCreative) {
                 add('explanation', `Core identity, background, and significance of ${q}`);
                 add('explanation', `Notable works, career milestones, contributions, and achievements of ${q}`);
