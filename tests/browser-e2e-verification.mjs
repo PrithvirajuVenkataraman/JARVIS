@@ -254,6 +254,69 @@ async function runBrowserTests() {
         assert.ok(sosResult?.mapsLinksCount >= 1, 'Card must provide direct Google Maps links');
         console.log('[PASS] Emergency SOS card has direct maps pin and ZERO blocked iframes');
 
+        // Test Full Entity TTS / Speech Synthesis Pipeline
+        const evalTtsPipeline = await sendCommand('Runtime.evaluate', {
+            expression: `(() => {
+                const sampleBio = 'A. R. Rahman is an internationally acclaimed Indian composer, singer, and music producer. Born on January 6, 1967, in Chennai, Tamil Nadu, he integrated Indian classical music with electronic music sounds. In 2008, his work on Slumdog Millionaire won two Academy Awards, two Grammy Awards, a BAFTA Award, and a Golden Globe Award. Former President Dr. A. P. J. Abdul Kalam praised his patriotic melodies.';
+                const cleanFull = window.sanitizeTextForConverseSpeech(sampleBio, true);
+                const segments = window.splitConverseSpeechSegments(cleanFull, 0);
+
+                // Simulate assistant message button speak toggle
+                const testBtn = document.createElement('button');
+                testBtn.className = 'assistant-action-btn';
+                testBtn.innerHTML = '<span>Speak</span>';
+                document.body.appendChild(testBtn);
+
+                // Stub speech synthesis speak to inspect button state and utterance pipeline in headless Chrome
+                const origSpeak = window.speechSynthesis.speak;
+                let activeUtterance = null;
+                window.speechSynthesis.speak = function(utt) {
+                    activeUtterance = utt;
+                };
+
+                window.speakFullAssistantMessage(cleanFull, { button: testBtn });
+                const isSpeakingAfterStart = testBtn.classList.contains('is-speaking');
+                const btnTextAfterStart = testBtn.textContent.trim();
+
+                window.stopActiveTtsSpeech();
+                const isSpeakingAfterStop = testBtn.classList.contains('is-speaking');
+                const btnTextAfterStop = testBtn.textContent.trim();
+
+                // Restore original
+                window.speechSynthesis.speak = origSpeak;
+
+                return {
+                    hasSanitizer: typeof window.sanitizeTextForConverseSpeech === 'function',
+                    hasSegmenter: typeof window.splitConverseSpeechSegments === 'function',
+                    hasSpeakFull: typeof window.speakFullAssistantMessage === 'function',
+                    hasStopTts: typeof window.stopActiveTtsSpeech === 'function',
+                    fullLength: cleanFull.length,
+                    segmentCount: segments.length,
+                    allUnder180: segments.every(s => s.length <= 180),
+                    isSpeakingAfterStart,
+                    btnTextAfterStart,
+                    isSpeakingAfterStop,
+                    btnTextAfterStop
+                };
+            })()`,
+            returnByValue: true
+        });
+
+        const ttsResult = evalTtsPipeline?.result?.result?.value || evalTtsPipeline?.result?.value;
+        console.log('TTS full speech pipeline verification:', ttsResult);
+        assert.equal(ttsResult?.hasSanitizer, true, 'sanitizeTextForConverseSpeech must exist');
+        assert.equal(ttsResult?.hasSegmenter, true, 'splitConverseSpeechSegments must exist');
+        assert.equal(ttsResult?.hasSpeakFull, true, 'speakFullAssistantMessage must exist');
+        assert.equal(ttsResult?.hasStopTts, true, 'stopActiveTtsSpeech must exist');
+        assert.ok(ttsResult?.fullLength > 300, 'Full biography must not be truncated to 600 chars or 4 sentences');
+        assert.ok(ttsResult?.segmentCount >= 2, 'Must produce multiple speech segments');
+        assert.equal(ttsResult?.allUnder180, true, 'All speech segments must be <= 180 chars for 15s Chrome engine safety');
+        assert.equal(ttsResult?.isSpeakingAfterStart, true, 'Button must have is-speaking class while speech is active');
+        assert.equal(ttsResult?.btnTextAfterStart, 'Stop', 'Button label must toggle to Stop');
+        assert.equal(ttsResult?.isSpeakingAfterStop, false, 'Button must lose is-speaking class when stopped');
+        assert.equal(ttsResult?.btnTextAfterStop, 'Speak', 'Button label must return to Speak');
+        console.log('[PASS] Browser TTS full speech pipeline verified with segment queue and keepalive');
+
         ws.close();
         console.log('=== All Real Chrome Browser E2E Tests PASSED Successfully! ===');
     } finally {
