@@ -4619,7 +4619,7 @@ User question: ${JSON.stringify(query)}
 Evidence JSON:
 ${JSON.stringify(compact, null, 2)}
 JSON shape: {"verified":true,"confidence":0.0,"answer":"...","evidenceIndexes":[0],"conflict":false,"reason":"..."}`;
-        const json = await callGeminiJson(prompt, { maxOutputTokens: 700, temperature: 0 });
+        const json = await callGeminiJson(prompt, { maxOutputTokens: 1400, temperature: 0 });
         const verified = json?.verified === true && Number(json?.confidence) >= 0.86;
         const rawAnswer = sanitizeRagAnswerText(json?.answer || '');
         const temporalCheck = validateAndSanitizeTemporalClaims(rawAnswer, query, orderedEvidence);
@@ -4764,7 +4764,7 @@ async function callGeminiJson(prompt, options = {}) {
                         contents: [{ parts: [{ text: prompt }] }],
                         generationConfig: {
                             temperature: Number.isFinite(Number(options.temperature)) ? Number(options.temperature) : 0.1,
-                            maxOutputTokens: clampInt(options.maxOutputTokens, 700, 100, 1600)
+                            maxOutputTokens: clampInt(options.maxOutputTokens, 1400, 100, 2400)
                         }
                     })
                 }, GEMINI_SEARCH_TIMEOUT_MS);
@@ -4811,7 +4811,7 @@ async function callGeminiJson(prompt, options = {}) {
                             { role: 'user', content: prompt }
                         ],
                         temperature: 0.1,
-                        max_tokens: clampInt(options.maxOutputTokens, 700, 100, 1600),
+                        max_tokens: clampInt(options.maxOutputTokens, 1400, 100, 2400),
                         response_format: { type: 'json_object' }
                     })
                 }, 4500);
