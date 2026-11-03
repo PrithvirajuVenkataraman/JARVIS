@@ -10,12 +10,68 @@
  * - T + 9000ms: HARD APPLICATION DEADLINE. Abort stream. Render verified snippet answer. Lock turn state.
  */
 
-import { normalizeUserQuery, hasSearchableContent } from './query-normalizer.js?v=2.0.6';
-import { BM25Index, computeBM25Scores, tokenizeText } from './bm25.js?v=2.0.6';
-import { textToEmbeddingVector, vectorCosineSimilarity } from './frontend-routing.js?v=2.0.6';
+import { normalizeUserQuery, hasSearchableContent } from './query-normalizer.js?v=2.2.3';
+import { BM25Index, computeBM25Scores, tokenizeText } from './bm25.js?v=2.2.3';
+import { textToEmbeddingVector, vectorCosineSimilarity } from './frontend-routing.js?v=2.2.3';
 import { executeRemoteResearch, streamResearchRequest } from './search/research-stream.mjs';
-import { getDomainMonogramSvg, findSourceById, renderSourceLogoBadge } from './markdown-renderer.js';
 export { streamResearchRequest } from './search/research-stream.mjs';
+
+
+export function findSourceById(sources, id) {
+    if (!Array.isArray(sources) || !id) return null;
+    const cleanId = String(id).trim().replace(/^[f#]/i, '');
+    const numId = Number(cleanId);
+    return sources.find(s => String(s.id) === String(id) || String(s.id) === cleanId || s.id === numId)
+        || (!isNaN(numId) && numId >= 1 && numId <= sources.length ? sources[numId - 1] : null);
+}
+
+
+export function isSubstantiveLiveAnswer(text, provenance) {
+    if (!text || typeof text !== 'string') return false;
+    if (provenance !== PROVENANCE_MODES.WEB_GROUNDED && provenance !== 'web_grounded') return false;
+    const clean = text.trim();
+    if (clean.length < 40) return false;
+    if (isRawToolCallJson(clean)) return false;
+    if (/^(?:who|what|where|when|why|how)\b.*\?$/i.test(clean)) return false;
+    if (/^who are they\?/i.test(clean)) return false;
+    if (/verified live sources were gathered regarding.*did not contain sufficient substantive detail/i.test(clean)) return false;
+    if (/\?\.\s+[A-Za-z0-9]+\.?$/i.test(clean)) return false;
+    return true;
+}
+
+export function isRawToolCallJson(text) {
+    if (!text || typeof text !== 'string') return false;
+    const trimmed = text.trim();
+    if (!trimmed) return false;
+    const clean = trimmed
+        .replace(/^```(?:json)?\s*/i, '')
+        .replace(/\s*```$/i, '')
+        .trim();
+
+    if (/^<tool_call>[\s\S]*<\/tool_call>$/i.test(clean)) return true;
+    if (/^<function=[^>]+>[\s\S]*<\/function>$/i.test(clean)) return true;
+
+    if (clean.startsWith('{') && clean.endsWith('}')) {
+        try {
+            const parsed = JSON.parse(clean);
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                if (typeof parsed.tool === 'string' && (parsed.arguments || parsed.args || parsed.input || parsed.query)) {
+                    return true;
+                }
+                if (typeof parsed.tool_name === 'string' || typeof parsed.function === 'string') {
+                    return true;
+                }
+                if (typeof parsed.name === 'string' && (parsed.arguments || parsed.parameters)) {
+                    return true;
+                }
+                if (Array.isArray(parsed.tool_calls) || Array.isArray(parsed.tools)) {
+                    return true;
+                }
+            }
+        } catch (_) {}
+    }
+    return false;
+}
 
 export {
     normalizeUserQuery,
@@ -195,7 +251,6 @@ export function getDomainFromUrl(url) {
 
 export function cleanTextSnippet(text) {
     return String(text || '')
-        .replace(/[\u200B-\u200D\uFEFF]/g, ' ')
         .replace(/<[^>]+>/g, ' ')
         .replace(/&nbsp;/gi, ' ')
         .replace(/&amp;/gi, '&')
@@ -210,10 +265,6 @@ export function cleanTextSnippet(text) {
 export function distillSearchQuery(rawQuery) {
     if (!rawQuery) return '';
     let text = String(rawQuery).trim();
-    // Strip persona and roleplay preambles (e.g. "Act as a deep-synthesis reasoning engine...: [question]")
-    text = text.replace(/^(?:(?:act\s+as|you\s+are)\s+(?:a|an)\s+[^.:\n]+[.:\n]\s*)*(?:answer\s+the\s+(?:following\s+)?(?:query|question|input)(?:\s+by\s+[^:\n]+)?[:\-]\s*)/i, '');
-    text = text.replace(/^(?:(?:act\s+as|you\s+are)\s+(?:a|an)\s+[^.:\n]+[.:\n]\s*)/i, '');
-
     const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
     if (lines.length > 1) {
         const contentLines = [];
@@ -387,144 +438,15 @@ export function formatSourceDate(parsedMs, now = Date.now()) {
 }
 
 /**
- * Calculates token-set Jaccard similarity between two strings.
+ * Scores candidate research sources using hybrid lexical BM25 and dense semantic cosine similarity.
  */
-export function tokenJaccardSimilarity(textA, textB) {
-    const tokenize = (t) => new Set(
-        String(t || '')
-            .toLowerCase()
-            .replace(/[^\p{L}\p{N}\s]/gu, ' ')
-            .split(/\s+/)
-            .filter(w => w.length > 2 && !/^(the|and|for|with|about|what|which|who|where|how|this|that|from|can|are|was|were)\b/.test(w))
-    );
-    const setA = tokenize(textA);
-    const setB = tokenize(textB);
-    if (!setA.size || !setB.size) return 0;
-    let intersection = 0;
-    for (const item of setA) {
-        if (setB.has(item)) intersection++;
-    }
-    const union = setA.size + setB.size - intersection;
-    return union > 0 ? intersection / union : 0;
-}
-
-/**
- * Computes entity density (D_entity): ratio of entity signals (numbers, capitalized proper nouns, acronyms)
- * to total words in the text. Informative content carries high entity density; clickbait teasers do not.
- */
-export function computeEntityDensity(text) {
-    const raw = String(text || '').trim();
-    if (!raw) return 0;
-    const words = raw.split(/\s+/).filter(Boolean);
-    if (words.length < 5) return 0;
-
-    let entityTokens = 0;
-    for (let i = 0; i < words.length; i++) {
-        const w = words[i].replace(/[^\w]/g, '');
-        // Numbers, years, percentages, measurements
-        if (/^\d+(?:\.\d+)?%?$/.test(w)) {
-            entityTokens += 1.5;
-            continue;
-        }
-        // Capitalized proper noun (not first word of sentence)
-        if (i > 0 && /^[A-Z][a-z]{2,}$/.test(w) && !/^(The|And|For|With|What|Who|How|When|Where|This|That)\b/.test(w)) {
-            entityTokens += 1.0;
-            continue;
-        }
-        // Acronyms (e.g. NASA, UK, EU, CEO)
-        if (/^[A-Z]{2,5}$/.test(w)) {
-            entityTokens += 1.5;
-        }
-    }
-
-    return Math.min(1.0, entityTokens / Math.max(10, words.length));
-}
-
-const AGREEMENT_IGNORE_WORDS = new Set([
-    'under', 'their', 'about', 'these', 'those', 'after', 'before', 'there',
-    'where', 'which', 'when', 'what', 'other', 'nearly', 'almost', 'around',
-    'first', 'every', 'monarch', 'rules', 'passport', 'passports'
-]);
-
-/**
- * Computes cross-source agreement (A_agree): checks if named entities or numbers in this source
- * appear in other retrieved sources. True factual claims correlate across independent publishers.
- */
-export function computeCrossSourceAgreement(candidate, allCandidates, currentIdx) {
-    const text = `${candidate.title || ''} ${candidate.snippet || ''} ${candidate.fullArticleText || ''}`.trim();
-    if (!text || allCandidates.length <= 1) return 0;
-
-    // Extract candidate entity phrases (multi-word names, single capitalized names, numbers, acronyms)
-    const phrases = text.match(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b/g) || [];
-    const singleWords = text.match(/\b[A-Z][a-z]{3,}\b/g) || [];
-    const numbers = text.match(/\b\d{1,4}\b/g) || [];
-    const acronyms = text.match(/\b[A-Z]{2,5}\b/g) || [];
-
-    const matches = [...phrases, ...singleWords, ...numbers, ...acronyms];
-    const uniqueEntities = Array.from(new Set(
-        matches
-            .map(m => m.trim().toLowerCase())
-            .filter(m => !AGREEMENT_IGNORE_WORDS.has(m) && m.length >= 3)
-    )).slice(0, 14);
-
-    if (!uniqueEntities.length) return 0;
-
-    let corroboratedPoints = 0;
-    for (const ent of uniqueEntities) {
-        let otherSourceCount = 0;
-        for (let j = 0; j < allCandidates.length; j++) {
-            if (j === currentIdx) continue;
-            const other = allCandidates[j];
-            const otherText = `${other.title || ''} ${other.snippet || ''} ${other.fullArticleText || ''}`.toLowerCase();
-            if (otherText.includes(ent)) {
-                otherSourceCount++;
-            }
-        }
-        if (otherSourceCount >= 1) {
-            corroboratedPoints += otherSourceCount >= 2 ? 1.0 : 0.6;
-        }
-    }
-
-    return Math.min(1.0, (corroboratedPoints / Math.max(1, uniqueEntities.length)) * 1.5);
-}
-
-/**
- * Computes query echo penalty (P_echo): measures token-set Jaccard similarity between snippet
- * and user query, plus an exact near-title match check.
- * P_echo = 1.0 if Jaccard >= 0.70 or snippet ~ title, else 0.
- */
-export function computeQueryEchoPenalty(snippet, title, query) {
-    const snip = String(snippet || '').trim();
-    const titl = String(title || '').trim();
-    const q = String(query || '').trim();
-    if (!snip) return 1.0;
-
-    const jaccard = tokenJaccardSimilarity(snip, q);
-    const isNearTitle = snip.length > 0 && snip.toLowerCase() === titl.toLowerCase();
-
-    if (jaccard >= 0.60 || isNearTitle) {
-        return 1.0;
-    }
-    return 0.0;
-}
-
-/**
- * Milestone 3: Scores candidate research sources using the Information-Gain Reranking Formula:
- * S_final = S_lexical + beta * D_entity + delta * A_agree + epsilon * R_source - gamma * P_echo
- */
-export function scoreSourcesBM25AndSemantic(candidates = [], query = '', weights = {}) {
+export function scoreSourcesBM25AndSemantic(candidates = [], query = '') {
     if (!Array.isArray(candidates) || candidates.length === 0 || !query) return candidates;
-
-    // Coefficients fit on tuning split
-    const beta = weights.beta ?? 0.35;
-    const delta = weights.delta ?? 0.25;
-    const epsilon = weights.epsilon ?? 0.15;
-    const gamma = weights.gamma ?? 0.40;
 
     // 1. Build in-memory BM25 index over candidate sources
     const bm25Index = new BM25Index({ k1: 1.2, b: 0.75 });
     candidates.forEach((c, idx) => {
-        const text = `${c.title || ''} ${c.snippet || ''} ${c.fullArticleText || ''} ${c.domain || ''}`.trim();
+        const text = `${c.title || ''} ${c.snippet || ''} ${c.domain || ''}`.trim();
         bm25Index.addDocument(idx, text, c);
     });
 
@@ -534,30 +456,27 @@ export function scoreSourcesBM25AndSemantic(candidates = [], query = '', weights
         if (s > maxBm25) maxBm25 = s;
     }
 
-    // 2. Compute Information-Gain signals for each candidate
+    // 2. Dense vector embedding for query
+    const queryVector = textToEmbeddingVector(query, 512);
+
+    // 3. Compute hybrid score for each candidate
     for (let i = 0; i < candidates.length; i++) {
         const c = candidates[i];
-        const sLexical = (rawBm25Scores[i] || 0) / maxBm25;
-
-        const contentText = c.fullArticleText && c.fullArticleText.length >= 100
-            ? c.fullArticleText
-            : (c.snippet || '');
-
-        const dEntity = computeEntityDensity(contentText);
-        const aAgree = computeCrossSourceAgreement(c, candidates, i);
+        const docText = `${c.title || ''} ${c.snippet || ''} ${c.domain || ''}`.trim();
+        const docVector = textToEmbeddingVector(docText, 512);
+        const cosSim = vectorCosineSimilarity(queryVector, docVector);
+        const normBm25 = (rawBm25Scores[i] || 0) / maxBm25;
         const isAuth = isAuthoritativeResearchSource(c, query);
-        const rSource = isAuth ? 1.0 : (c.trusted ? 0.70 : 0.35);
-        const pEcho = computeQueryEchoPenalty(c.snippet, c.title, query);
 
-        // Information-Gain Formula (pseudo-semantic hash vector dropped)
-        const sFinal = (sLexical * 0.45) + (beta * dEntity) + (delta * aAgree) + (epsilon * rSource) - (gamma * pEcho);
+        // Hybrid formula: lexical BM25 (40%) + dense semantic cosine (40%) + authoritative bonus (15%) + trusted bonus (5%)
+        const hybridRelevance = (0.40 * normBm25) +
+                                (0.40 * Math.max(0, cosSim)) +
+                                (isAuth ? 0.15 : 0) +
+                                (c.trusted ? 0.05 : 0);
 
         c.bm25Score = Number((rawBm25Scores[i] || 0).toFixed(4));
-        c.entityDensity = Number(dEntity.toFixed(4));
-        c.crossSourceAgreement = Number(aAgree.toFixed(4));
-        c.domainTrustScore = Number(rSource.toFixed(4));
-        c.echoPenalty = Number(pEcho.toFixed(2));
-        c.hybridScore = Number(sFinal.toFixed(4));
+        c.semanticSim = Number(cosSim.toFixed(4));
+        c.hybridScore = Number(hybridRelevance.toFixed(4));
     }
 
     return candidates;
@@ -601,10 +520,8 @@ export function normalizeResearchSources(results = [], query = '', limit = 8) {
         candidates.push({
             title,
             snippet,
-            fullArticleText: fullArticle,
-            extract: fullArticle,
-            evidenceKind: r.evidenceKind || (fullArticle ? 'article' : 'snippet'),
-            extractionStatus: r.extractionStatus || (fullArticle ? 'extracted' : 'not_fetched'),
+            fullArticleText: fullArticle || '',
+            extract: fullArticle || snippet,
             url: cleanUrl,
             domain,
             favicon: `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`,
@@ -621,36 +538,37 @@ export function normalizeResearchSources(results = [], query = '', limit = 8) {
 
     scoreSourcesBM25AndSemantic(candidates, query);
 
-    // Two-tier sort: items with deep-crawled full article text are always promoted before snippet-only items.
-    // Within each tier, freshness queries sort by date (newest first); all other queries sort by hybrid relevance.
-    const now = Date.now();
-    const NINETY_DAYS_MS = 90 * 24 * 3600 * 1000;
-    candidates.sort((a, b) => {
-        // Tier 1: substantive content (full article or informative excerpt distinct from title) wins over headline-only teasers
-        const aSubstantive = Boolean((a.fullArticleText && a.fullArticleText.length >= 100) || (a.snippet && a.snippet !== a.title && a.snippet.length >= 60));
-        const bSubstantive = Boolean((b.fullArticleText && b.fullArticleText.length >= 100) || (b.snippet && b.snippet !== b.title && b.snippet.length >= 60));
-        if (aSubstantive !== bSubstantive) return bSubstantive ? 1 : -1;
-
-        // Tier 2 (same content tier): for freshness queries, sort newest-first; otherwise by relevance
-        if (isFreshnessQuery) {
+    if (isFreshnessQuery || candidates.some(c => c.parsedDateMs)) {
+        const now = Date.now();
+        const NINETY_DAYS_MS = 90 * 24 * 3600 * 1000;
+        candidates.sort((a, b) => {
             const timeA = a.parsedDateMs || 0;
             const timeB = b.parsedDateMs || 0;
             if (timeA && timeB) {
                 if (timeB !== timeA) return timeB - timeA;
                 return ((b.hybridScore || 0) - (a.hybridScore || 0)) || (a._initialIndex - b._initialIndex);
             }
-            if (timeA && !timeB) return (now - timeA) < NINETY_DAYS_MS ? -1 : 1;
-            if (!timeA && timeB) return (now - timeB) < NINETY_DAYS_MS ? 1 : -1;
-        }
-
-        // For non-freshness queries: rank primarily by Information-Gain score
-        const scoreDiff = (b.hybridScore || 0) - (a.hybridScore || 0);
-        if (Math.abs(scoreDiff) > 0.001) return scoreDiff;
-        const authA = isAuthoritativeResearchSource(a, query) ? 1 : 0;
-        const authB = isAuthoritativeResearchSource(b, query) ? 1 : 0;
-        if (authA !== authB) return authB - authA;
-        return a._initialIndex - b._initialIndex;
-    });
+            if (timeA && !timeB) {
+                const isRecentA = (now - timeA) < NINETY_DAYS_MS;
+                return isRecentA ? -1 : 1;
+            }
+            if (!timeA && timeB) {
+                const isRecentB = (now - timeB) < NINETY_DAYS_MS;
+                return isRecentB ? 1 : -1;
+            }
+            return ((b.hybridScore || 0) - (a.hybridScore || 0)) || (a._initialIndex - b._initialIndex);
+        });
+    } else {
+        candidates.sort((a, b) => {
+            const authA = isAuthoritativeResearchSource(a, query) ? 1 : 0;
+            const authB = isAuthoritativeResearchSource(b, query) ? 1 : 0;
+            const subA = (a.snippet && a.snippet !== a.title && a.snippet.length >= 60) ? 1 : 0;
+            const subB = (b.snippet && b.snippet !== b.title && b.snippet.length >= 60) ? 1 : 0;
+            if (subA !== subB) return subB - subA;
+            if (authA !== authB) return authB - authA;
+            return a._initialIndex - b._initialIndex;
+        });
+    }
 
     const selected = candidates.slice(0, limit);
     return selected.map((item, idx) => ({
@@ -666,7 +584,7 @@ export function formatSourcesForPrompt(sources = []) {
     if (!Array.isArray(sources) || !sources.length) return '';
     return sources.map(s => {
         const substantive = String(s.fullArticleText || s.extract || s.snippet || s.description || s.text || '').trim();
-        const excerpt = (substantive && substantive !== s.title) ? substantive : (s.snippet && s.snippet !== s.title ? s.snippet : 'No excerpt available.');
+        const excerpt = (substantive && substantive !== s.title) ? substantive : (s.snippet || 'No excerpt available.');
         const publisherStr = s.publisher || s.source ? ` (${s.publisher || s.source})` : '';
         const accessibilityNote = s.accessible === false ? ' [Note: Web page was inaccessible; excerpt from index metadata]' : '';
         return `[${s.id}] Title: ${s.title}${publisherStr}${accessibilityNote}\nDomain: ${s.domain}\nURL: ${s.url}\nExcerpt: ${excerpt}${s.date ? `\nDate: ${s.date}` : ''}`;
@@ -760,7 +678,6 @@ export function generateSnippetFallback(query, sources = []) {
 
     const facts = [];
     const seenSentences = new Set();
-    const dynamicPublishers = extractDynamicPublisherBlocklist(sources);
 
     for (const s of effectiveSources.slice(0, 6)) {
         const textParts = [];
@@ -789,46 +706,8 @@ export function generateSnippetFallback(query, sources = []) {
             if (/\b(?:404|500|502|503)\b/.test(sentence)) continue;
             if (sentence.replace(/[^a-zA-Z0-9]/g, '').length < 3) continue;
 
-            // Reject fragments under 2 words or standalone publisher/domain tokens
-            const sentenceWords = sentence.split(/\s+/).filter(Boolean);
-            if (sentenceWords.length < 2) continue;
-            if (sentenceWords.length <= 2 && /\.[a-z]{2,6}\.?$/i.test(sentence.replace(/\.$/, ''))) continue;
-
-            // Strip trailing publisher / brand / domain suffix from the end of a sentence
-            sentence = sentence
-                .replace(/\s+[-—–|·:]\s+[A-Za-z0-9\s.]{2,40}\.?$/, '')
-                .replace(/\s+[a-z0-9_-]+\.[a-z]{2,6}\.?$/i, '')
-                .trim();
-
-            // Reject interrogative questions, rhetorical questions, or clickbait teasers
-            if (/[?]/.test(sentence) || /^(?:who|what|where|when|why|how|can|could|did|do|does|will|would|is|are|was|were)\b/i.test(sentence)) continue;
-
-            // Reject sentence echoing the user query without adding substantive facts
-            const normQ = cleanQ.toLowerCase().replace(/[^a-z0-9]/g, '');
-            const normalizedSentence = sentence.toLowerCase().replace(/[^a-z0-9]/g, '');
-            if (normQ && (normalizedSentence === normQ || normQ.includes(normalizedSentence) || (normalizedSentence.length > 20 && normQ.length > 20 && normalizedSentence.includes(normQ)))) continue;
-
-            const stopWords = new Set(['the', 'a', 'an', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'as', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'can', 'could', 'should', 'would', 'may', 'might', 'must', 'will', 'shall', 'that', 'this', 'these', 'those', 'it', 'its', 'only', 'some', 'any', 'who', 'what', 'where', 'when', 'why', 'how', 'they', 'them', 'their', 'we', 'you', 'he', 'she', 'without', 'about']);
-            const sentenceContentWords = sentence.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length >= 2 && !stopWords.has(w));
-            const queryContentWords = new Set(cleanQ.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length >= 2 && !stopWords.has(w)));
-            if (sentenceContentWords.length > 0 && sentenceContentWords.length <= 8) {
-                const newWords = sentenceContentWords.filter(w => !queryContentWords.has(w));
-                if (newWords.length === 0) continue;
-            }
-
-            // Reject standalone publisher names or domain labels
-            if (dynamicPublishers.has(normalizedSentence) || dynamicPublishers.has(sentence.toLowerCase().trim())) continue;
-            if (sources.some(s => {
-                const domainBase = String(s.domain || '').toLowerCase().replace(/^www\./, '').split('.')[0];
-                const publisher = String(s.publisher || s.source || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-                return (domainBase && normalizedSentence === domainBase) ||
-                       (publisher && normalizedSentence === publisher);
-            })) continue;
-
-            // Reject clickbait / call-to-action
-            if (/\b(?:read more|click here|find out here|learn more|see more|discover more|explore more|subscribe|newsletter|sign up|full article|details inside|watch video|image credit|photo:|telegram channel|follow us)\b/i.test(sentence)) continue;
-
             // Reject any sentence that matches or closely resembles a source title
+            const normalizedSentence = sentence.toLowerCase().replace(/[^a-z0-9]/g, '');
             if (sources.some(s => {
                 const normTitle = cleanTextSnippet(s.title || '').toLowerCase().replace(/[^a-z0-9]/g, '');
                 return normTitle && (normalizedSentence === normTitle || normalizedSentence.includes(normTitle));
@@ -870,106 +749,36 @@ export function generateSnippetFallback(query, sources = []) {
     return facts.slice(0, 4).join(' ');
 }
 
-export function isRawToolCallJson(text) {
-    if (!text || typeof text !== 'string') return false;
-    const trimmed = text.trim();
-    if (!trimmed) return false;
-    const clean = trimmed
-        .replace(/^```(?:json)?\s*/i, '')
-        .replace(/\s*```$/i, '')
-        .trim();
-
-    if (/^<tool_call>[\s\S]*<\/tool_call>$/i.test(clean)) return true;
-    if (/^<function=[^>]+>[\s\S]*<\/function>$/i.test(clean)) return true;
-
-    if (clean.startsWith('{') && clean.endsWith('}')) {
-        try {
-            const parsed = JSON.parse(clean);
-            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-                if (typeof parsed.tool === 'string' && (parsed.arguments || parsed.args || parsed.input || parsed.query)) {
-                    return true;
-                }
-                if (typeof parsed.tool_name === 'string' || typeof parsed.function === 'string') {
-                    return true;
-                }
-                if (typeof parsed.name === 'string' && (parsed.arguments || parsed.parameters)) {
-                    return true;
-                }
-                if (Array.isArray(parsed.tool_calls) || Array.isArray(parsed.tools)) {
-                    return true;
-                }
-            }
-        } catch (_) {
-            if (/^\{\s*"(?:tool|function|tool_name|name)"\s*:\s*"[^"]+"/i.test(clean)) {
-                return true;
-            }
-        }
-    }
-    if (/^\{\s*"(?:tool|tool_name|function)"\s*:\s*"[^"]+"/i.test(clean)) {
-        return true;
-    }
-    return false;
-}
-
-/**
- * Evaluates whether a live search synthesis response is complete, substantive, and verified.
- * Rejects teaser fragments, query echoes, and limitation disclaimers.
- */
-export function isSubstantiveLiveAnswer(content, provenance = PROVENANCE_MODES.WEB_GROUNDED) {
-    if (provenance !== PROVENANCE_MODES.WEB_GROUNDED) return false;
-    if (!content || typeof content !== 'string') return false;
-    const trimmed = content.trim();
-    if (trimmed.length < 40) return false;
-    if (trimmed.endsWith('?')) return false;
-    if (isRawToolCallJson(trimmed)) return false;
-    const lower = trimmed.toLowerCase();
-    if (lower.includes('did not contain sufficient substantive detail')) return false;
-    if (lower.includes('contain only headline references')) return false;
-    if (lower.includes('could not be completed')) return false;
-    if (lower.includes('did not return verified records')) return false;
-    if (lower.includes('no verified live web records were returned')) return false;
-    return true;
-}
-
 /**
  * Dynamically extracts publisher names, domain labels, and title brand tags from candidate sources.
  * Replaces static hardcoded publisher lists with zero-hardcoding metadata extraction.
  */
 export function extractDynamicPublisherBlocklist(sources = []) {
     const publisherBlocklist = new Set();
-    const addClean = (str) => {
-        if (!str || typeof str !== 'string') return;
-        const s = str.toLowerCase().trim();
-        if (s.length >= 3) {
-            publisherBlocklist.add(s);
-            const alphanumericOnly = s.replace(/[^a-z0-9]/g, '');
-            if (alphanumericOnly.length >= 3) publisherBlocklist.add(alphanumericOnly);
-        }
-    };
-
     for (const s of sources) {
         if (!s) continue;
         if (s.domain) {
             const dom = s.domain.toLowerCase().replace(/^www\./, '');
-            addClean(dom);
+            publisherBlocklist.add(dom);
             const noTld = dom.replace(/\.[a-z]{2,}$/i, '');
-            addClean(noTld);
+            if (noTld.length >= 3) publisherBlocklist.add(noTld);
             const parts = dom.split('.');
             for (const p of parts) {
                 if (p.length >= 4 && !['com', 'org', 'net', 'gov', 'edu', 'io'].includes(p)) {
-                    addClean(p);
+                    publisherBlocklist.add(p);
                 }
             }
         }
-        addClean(s.sourceLabel);
-        addClean(s.source);
-        addClean(s.publisher);
+        if (s.sourceLabel) publisherBlocklist.add(String(s.sourceLabel).toLowerCase().trim());
+        if (s.source) publisherBlocklist.add(String(s.source).toLowerCase().trim());
+        if (s.publisher) publisherBlocklist.add(String(s.publisher).toLowerCase().trim());
 
         // Extract publisher suffix from title (e.g. "Title - Brand Name", "Title | Brand Name")
         const title = String(s.title || '');
         const brandMatch = title.match(/(?:[-–—|·:]\s*)([A-Za-z0-9\s.]{2,40})$/);
         if (brandMatch) {
-            addClean(brandMatch[1]);
+            const brand = brandMatch[1].toLowerCase().trim();
+            if (brand.length >= 3) publisherBlocklist.add(brand);
         }
     }
     return publisherBlocklist;
@@ -1207,126 +1016,23 @@ export function generateRelatedResearchQuestions(optionsOrQuery, sourcesArg = []
 /**
  * Replaces inline citation patterns like [1], [2], [1, 2] with interactive citation badges.
  */
-export function parseCitationsInHtml(html = '', sources = []) {
+export function parseCitationsInHtml(html = '') {
     if (!html || typeof html !== 'string') return '';
-    const hasSources = Array.isArray(sources) && sources.length > 0;
 
     // Replace [1](url) markdown link citations first if present
     let result = html.replace(/\[(\d+)\]\((https?:\/\/[^)]+)\)/g, (match, id, url) => {
-        if (hasSources) {
-            const src = findSourceById(sources, id) || { id, url };
-            return renderSourceLogoBadge(src, id);
-        }
         return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="citation-badge" data-source-id="${id}" title="Source [${id}]"><sup>[${id}]</sup></a>`;
     });
 
     // Replace bare [1], [2], or [1, 2] citations (not part of markdown links or code)
-    result = result.replace(/(?<![\[\w`])(?:\[|【)((?:f?\d+)(?:\s*,\s*f?\d+)*)(?:\]|】)(?![\]\(])/g, (match, idsStr) => {
+    result = result.replace(/(?<![\[\w`])\[(\d+(?:\s*,\s*\d+)*)\](?![\]\(])/g, (match, idsStr) => {
         const ids = idsStr.split(',').map(s => s.trim()).filter(Boolean);
         return ids.map(id => {
-            if (hasSources) {
-                const src = findSourceById(sources, id);
-                if (src) return renderSourceLogoBadge(src, id);
-            }
             return `<button type="button" class="citation-badge" data-source-id="${id}" onclick="window.JarvisLiveResearch?.highlightSource('${id}')" title="View Source [${id}]"><sup>[${id}]</sup></button>`;
         }).join('');
     });
 
     return result;
-}
-
-function escapeHtmlText(text) {
-    return String(text || '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-}
-
-/**
- * Renders or updates the dynamic entity hero card and notable works tray inside an assistant bubble.
- */
-export function renderOrUpdateVisualEntityHeader(rowElement, entity = null, notableWorks = []) {
-    if (!rowElement) return;
-    const bubble = rowElement.querySelector('.chat-bubble-assistant') || rowElement.querySelector('.min-w-0');
-    if (!bubble) return;
-
-    let visualContainer = bubble.querySelector('.chat-entity-visual-container');
-
-    if (!entity || !entity.name) {
-        if (visualContainer) visualContainer.remove();
-        return;
-    }
-
-    const typeLabel = entity.type ? entity.type.replace(/_/g, ' ') : 'Verified Reference';
-    const avatarHtml = entity.image?.url ? `
-        <div class="entity-hero-avatar-wrap">
-            <img src="${entity.image.url}" class="entity-hero-avatar" alt="${escapeHtmlText(entity.name)}" loading="lazy" onerror="this.parentElement.style.display='none'" />
-        </div>
-    ` : '';
-
-    const works = Array.isArray(notableWorks) ? notableWorks.filter(w => w && w.title) : [];
-    const worksHtml = works.length ? `
-        <div class="notable-works-tray">
-            <div class="notable-works-title">Notable Works & Creations</div>
-            <div class="notable-works-scroll">
-                ${works.map(w => `
-                    <a href="${w.image?.sourceUrl || '#'}" target="_blank" rel="noopener noreferrer" class="notable-work-card" title="${escapeHtmlText(w.title)}">
-                        ${w.image?.url ? `
-                        <div class="notable-work-thumb-wrap">
-                            <img src="${w.image.url}" class="notable-work-thumb" alt="${escapeHtmlText(w.title)}" loading="lazy" onerror="this.parentElement.style.display='none'" />
-                        </div>
-                        ` : ''}
-                        <div class="notable-work-info">
-                            <span class="notable-work-name">${escapeHtmlText(w.title)}</span>
-                            ${w.year ? `<span class="notable-work-year">${escapeHtmlText(w.year)}</span>` : ''}
-                        </div>
-                    </a>
-                `).join('')}
-            </div>
-        </div>
-    ` : '';
-
-    const cardHtml = `
-        <div class="entity-hero-card">
-            ${avatarHtml}
-            <div class="entity-hero-body">
-                <div class="entity-hero-header">
-                    <span class="entity-hero-name">${escapeHtmlText(entity.name)}</span>
-                    <span class="entity-hero-badge">${escapeHtmlText(typeLabel)}</span>
-                </div>
-                ${entity.description ? `<p class="entity-hero-desc">${escapeHtmlText(entity.description)}</p>` : ''}
-                ${entity.pageUrl ? `
-                <div class="entity-hero-footer">
-                    <a href="${entity.pageUrl}" target="_blank" rel="noopener noreferrer" class="entity-hero-source-btn">
-                        <span>Wikipedia</span>
-                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
-                    </a>
-                </div>
-                ` : ''}
-            </div>
-        </div>
-        ${worksHtml}
-    `;
-
-    const textEl = bubble.querySelector('.assistant-message-text');
-
-    if (visualContainer) {
-        visualContainer.innerHTML = cardHtml;
-        if (textEl && visualContainer.nextSibling !== textEl) {
-            textEl.before(visualContainer);
-        }
-    } else {
-        const newVisualContainer = document.createElement('div');
-        newVisualContainer.className = 'chat-entity-visual-container';
-        newVisualContainer.innerHTML = cardHtml;
-        if (textEl) {
-            textEl.before(newVisualContainer);
-        } else {
-            bubble.prepend(newVisualContainer);
-        }
-    }
 }
 
 /**
@@ -1342,11 +1048,10 @@ export function renderOrUpdateSourcesCarousel(rowElement, sources = []) {
         const domain = s.domain || 'web';
         const title = s.title || domain;
         const favicon = s.favicon || `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`;
-        const fallbackSvg = getDomainMonogramSvg(domain);
         const url = s.url || '#';
         return `
             <a href="${url}" target="_blank" rel="noopener noreferrer" class="source-card-pill" data-source-id="${s.id}" title="${title}">
-                <img class="source-card-favicon" src="${favicon}" alt="" loading="lazy" onerror="this.onerror=null;this.src='${fallbackSvg}';" />
+                <img class="source-card-favicon" src="${favicon}" alt="" loading="lazy" onerror="this.style.display='none'" />
                 <div class="source-card-info">
                     <span class="source-card-domain">${domain}</span>
                     <span class="source-card-title">${title}</span>
@@ -1366,7 +1071,7 @@ export function renderOrUpdateSourcesCarousel(rowElement, sources = []) {
                 </svg>
                 Sources
             </span>
-            <span class="source-carousel-count">${sources.length} verified sources</span>
+            <span class="source-carousel-count">${sources.length} verified</span>
         </div>
         <div class="source-carousel-track">
             ${cardsHtml}
@@ -1550,8 +1255,6 @@ export class BoundedLiveResearchController {
             this._resolveExecution({
                 success: false,
                 aborted: true,
-                answerStatus: 'unavailable',
-                verified: false,
                 state: RESEARCH_STATES.ABORTED,
                 provenance: PROVENANCE_MODES.ABORTED,
                 turnId: this.turnId,
@@ -1569,28 +1272,28 @@ export class BoundedLiveResearchController {
         this.timers = [];
     }
 
-    execute({
-        query: rawQuery,
-        userText,
-        context = [],
-        conversationHistory = [],
-        assistantMessageId,
-        fetchSearchFn,
-        streamSynthesisFn,
-        uiCallbacks = {},
-        threadState = null,
-        isWebForced = false,
-        researchStreamFn = null
-    }) {
-        if (typeof researchStreamFn === 'function') {
-            return executeRemoteResearch(this, { query: normalizeUserQuery(rawQuery), userText, context, assistantMessageId, researchStreamFn, uiCallbacks }, {
-                states: RESEARCH_STATES, provenanceModes: PROVENANCE_MODES, normalizeSources: normalizeResearchSources, fallback: generateSnippetFallback
+    execute(options = {}) {
+        if (typeof options.researchStreamFn === 'function') {
+            return executeRemoteResearch(this, options, {
+                states: RESEARCH_STATES,
+                provenanceModes: PROVENANCE_MODES,
+                normalizeSources: normalizeResearchSources
             });
         }
+        const {
+            query: rawQuery,
+            userText,
+            context = [],
+            conversationHistory = [],
+            assistantMessageId,
+            fetchSearchFn,
+            streamSynthesisFn,
+            uiCallbacks = {},
+            threadState = null
+        } = options;
         return new Promise((resolve) => {
             this._resolveExecution = resolve;
             this.threadState = threadState;
-            this.isWebForced = Boolean(isWebForced);
             const query = normalizeUserQuery(rawQuery);
             this.telemetry.t_start = performance.now();
 
@@ -1655,7 +1358,6 @@ export class BoundedLiveResearchController {
                 this.telemetry.totalDurationMs = this.telemetry.t_start
                     ? Math.round(this.telemetry.t_completed - this.telemetry.t_start)
                     : 0;
-                this.telemetry.degradedAnomaly = Boolean(fallback || !isSubstantiveLiveAnswer(content, provenance));
                 this.transition(RESEARCH_STATES.COMPLETE, { provenance }, uiCallbacks);
 
                 const finalPayload = {
@@ -1850,18 +1552,15 @@ export class BoundedLiveResearchController {
                     if (searchCutoffTriggered || this.isTerminal) return;
                     const errStr = String(err?.message || err || '').toLowerCase();
                     const isTimeout = err?.name === 'TimeoutError' ||
-                        err?.name === 'AbortError' ||
-                        Boolean(err?.isTimeout) ||
                         errStr.includes('timed out') ||
                         errStr.includes('timeout') ||
-                        errStr.includes('abort') ||
                         this.searchAbortController.signal.aborted;
                     const timeoutBound = this.searchTimeoutMs || 4500;
                     this.telemetry.searchError = isTimeout
                         ? `client_search_timeout (${timeoutBound}ms)`
                         : (err?.message || String(err));
                     this.telemetry.httpStatus = err?.status || null;
-                    console.warn(`[BoundedLiveResearch:${this.turnId}] Search failed or timed out:`, err?.message || err);
+                    console.error(`[BoundedLiveResearch:${this.turnId}] Search failed (status: ${err?.status || 'N/A'}):`, err);
                     clearTimeout(cutoffTimer);
                     onSearchDeadline();
                     return;
@@ -1938,23 +1637,10 @@ export class BoundedLiveResearchController {
                     ? `\nPRIOR CONVERSATION CONTEXT:\n${contextLines}\n`
                     : '';
 
-                const deepSynthesisBlock = this.isWebForced ? `
-DEEP-SYNTHESIS REASONING ENGINE PROTOCOL (MANUAL WEB SEARCH ACTIVATED):
-Act as a deep-synthesis reasoning engine. Answer the user's input by performing comprehensive cross-referencing, multi-hop lookups, and logical deduction:
-1. DECONSTRUCT THE INPUT: Never rely on a single source or a single surface-level match. Break the query down into its core parameters, underlying logic, and distinct sub-components. Address each part thoroughly.
-2. PIVOT ON INCOMPLETE DATA: If initial search findings or evidence reference a count, a category, an error code, a doctrine, or a structural concept without providing the specific contents, names, or values, do not halt execution. Treat those surface findings as clues and scour all available excerpts and adjacent records across the verified sources below to extract the missing data points. Never invent or recall unmentioned entities from parametric memory.
-3. DEDUCTIVE SYNTHESIS: Connect independent datasets logically across the excerpts. If Dataset A defines a structural rule, system architecture, or conditional logic, and Dataset B contains the live variables or current entities that fit into that logic, synthesize them to deliver the final, specific solution. However, NEVER use deductive synthesis to substitute, swap out, or override concrete entities, people, or items explicitly named in the source excerpts with external unmentioned entities, and NEVER recall or introduce external trivia from memory.
-4. EPISTEMIC COMPLETENESS: Never conclude that an answer is "unavailable" or "unverifiable" simply because a single summary source or initial data layer lacks the complete picture. Drill down to primary documentation, distinct data layers, or adjacent verified frameworks across the excerpts to fully resolve the query.
-` : '';
-
-                const systemRole = this.isWebForced
-                    ? 'You are a deep-synthesis reasoning engine and expert real-time research assistant.'
-                    : 'You are an expert real-time research assistant.';
-
-                const prompt = `${systemRole} Answer the user's question directly, comprehensively, and factually using ONLY the verified web content below.
+                const prompt = `You are an expert real-time research assistant. Answer the user's question directly, comprehensively, and factually using ONLY the verified web content below.
 TEMPORAL ANCHOR:
 Today's Date: ${currentDateStr}. Use this exact date as your reference point for phrases like 'today', 'this month', 'recently', 'latest', 'current', or 'this year'.
-${deepSynthesisBlock}
+
 RULES:
 1. COMPLETE COVERAGE: Identify and answer every distinct question, sub-question, and requested detail in the user prompt using the retrieved evidence. If the prompt contains multiple parts (such as status, affected entities, requirements, comparisons, or timelines), address each part thoroughly in a dedicated explanation or structured breakdown.
 2. SUBSTANTIVE DETAILS: Never return only headlines, source titles, or a list of links as an answer. Extract and explain substantive facts, operational impacts, context, and concrete details from the source excerpts.
@@ -1964,12 +1650,12 @@ RULES:
 6. CHRONOLOGICAL PRIORITY: Sources are ordered chronologically with the newest/most recent updates listed first ([1], [2], ...). For questions about current status, updates, or recent developments, prioritize the latest sources over older sources.
 7. ENTITY INTEGRITY & ZERO HALLUCINATION (CRITICAL):
    - For proper nouns, suspect identities, person names, places, and organizations: report ONLY names and places explicitly stated in the retrieved sources below.
-   - COUNTED LIST EXTRACTION: When a query asks for a specific count of individuals, entities, or items (e.g. "Three persons...", "Five countries..."), extract the EXACT entities explicitly named in the source excerpts to satisfy that count.
-   - ZERO SUBSTITUTION: NEVER substitute, replace, or drop an explicitly named individual (such as an Empress, spouse, consort, deputy, co-leader, or minister named in the text) in favor of an unmentioned external figure from memory.
-   - ZERO PARAMETRIC INTRUSION: If the sources list specific individuals who hold a privilege, title, or status, do NOT invent or guess different individuals based on theoretical classifications (such as assuming all listed individuals must be reigning heads of state). Ground the exact list strictly in the source evidence.
-   - If an entity or identity is not explicitly named in the sources, explicitly state that the sources do not provide the identity. NEVER guess, assume, or invent names, places, titles, or affiliations.
+   - If a person's name, suspect identity, or specific location is unstated, unconfirmed, or has not been publicly released in the verified sources, explicitly state that authorities or reports have not released the name/location. NEVER guess, assume, or invent person names, places, or affiliations.
    - When answering follow-up questions, stay anchored to the specific event, location, and entities established in the conversation history. Do not conflate or substitute names or locations from unrelated search excerpts.
-8. ZERO TOOL EMISSION (CRITICAL): Never emit tool calls, function calls, or JSON objects (such as {"tool": "web_search", ...} or <tool_call>). All required web search has already been performed and all verified sources are provided below. Output the final, synthesized factual response directly in prose.
+8. COUNTED LIST EXTRACTION, ZERO SUBSTITUTION & ZERO PARAMETRIC INTRUSION:
+   - When extracting specific lists, counts, or entities, report EXACTLY what the retrieved sources state.
+   - Enforce ZERO SUBSTITUTION: do not replace entities found in sources with alternative entities.
+   - Enforce ZERO PARAMETRIC INTRUSION: rely strictly on the provided web evidence rather than model pre-training memory.
 ${conversationHistoryBlock}
 User question: "${effectiveUserPrompt}"
 
@@ -2022,27 +1708,20 @@ ${sourcesContext}`;
                         }
 
                         const cleanStreamed = (this.streamedText || '').trim();
-                        // Invariant: empty/trivial output protection & tool call JSON rejection
-                        if (cleanStreamed.length >= 10 && !isRawToolCallJson(cleanStreamed)) {
+                        // Invariant: empty/trivial output protection — 10 chars minimum to distinguish real output from blank
+                        if (cleanStreamed.length >= 10) {
                             synthesisSucceeded = true;
                             break;
-                        }
-                        if (isRawToolCallJson(cleanStreamed)) {
-                            this.streamedText = '';
                         }
                     } catch (err) {
                         if (this.isTerminal) return;
                         this.telemetry.synthesisError = err?.message || String(err);
-                        const isPermanentError = err?.code === 'missing_credentials' || err?.code === 'service_unavailable';
-                        if (attempt === 0 && !isPermanentError) {
+                        if (attempt === 0) {
                             console.warn(`[BoundedLiveResearch:${this.turnId}] Synthesis attempt 1 failed (${err?.message || err}), attempting controlled retry...`);
                             this.streamedText = '';
                             await new Promise(r => setTimeout(r, 80));
                         } else {
-                            if (attempt > 0) {
-                                console.error(`[BoundedLiveResearch:${this.turnId}] Synthesis retry failed:`, err);
-                            }
-                            break;
+                            console.error(`[BoundedLiveResearch:${this.turnId}] Synthesis retry failed:`, err);
                         }
                     }
                 }
@@ -2082,13 +1761,10 @@ if (typeof window !== 'undefined') {
         RESEARCH_STATES,
         PROVENANCE_MODES,
         BoundedLiveResearchController,
-        streamResearchRequest,
         normalizeResearchSources,
         isAuthoritativeResearchSource,
         evaluateSourceQualityForEarlySynthesis,
         generateSnippetFallback,
-        isSubstantiveLiveAnswer,
-        isRawToolCallJson,
         generateRelatedResearchQuestions,
         classifyQueryDomainSemantic,
         extractCoreTopicSemantic,
@@ -2101,7 +1777,6 @@ if (typeof window !== 'undefined') {
         vectorCosineSimilarity,
         parseCitationsInHtml,
         renderOrUpdateSourcesCarousel,
-        renderOrUpdateVisualEntityHeader,
         highlightSource: (id) => highlightSourceCard(id, document),
         renderRelatedQuestionsTray,
         normalizeUserQuery,
