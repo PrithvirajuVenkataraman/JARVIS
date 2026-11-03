@@ -143,6 +143,25 @@ console.log('--- Section 1: Real Serverless API Router & Dispatch (api/index.js)
     assert.equal(diagRes.statusCode, 200);
     assert.equal(diagRes.body?.ok, true);
     assert.equal(diagRes.body?.diagnostics?.streaming?.available, true);
+
+    // Vercel Hobby Plan Compliance: root api/*.js functions strictly <= 12
+    const rootApiJsFiles = fs.readdirSync('api').filter(f => f.endsWith('.js'));
+    assert.ok(rootApiJsFiles.length <= 12, `Vercel Hobby plan allows at most 12 Serverless Functions, found ${rootApiJsFiles.length}`);
+    assert.ok(rootApiJsFiles.length <= 11, `Safety margin: expected <= 11 root API functions, found ${rootApiJsFiles.length}`);
+
+    // Aux route dispatch through diagnostics
+    const smsRouteRes = await callHandler(diagnosticsHandler, { url: '/api/diagnostics?__route=send-sms', method: 'POST', body: {} });
+    assert.equal(smsRouteRes.statusCode, 400);
+    assert.equal(smsRouteRes.body?.error?.code, 'invalid_recipient');
+
+    const faviconRouteRes = await callHandler(diagnosticsHandler, { url: '/api/diagnostics?__route=favicon', method: 'GET' });
+    assert.equal(faviconRouteRes.statusCode, 200);
+    assert.equal(faviconRouteRes.headers['content-type'], 'image/svg+xml');
+
+    const extractRouteRes = await callHandler(diagnosticsHandler, { url: '/api/diagnostics?__route=extract-url', method: 'POST', body: {} });
+    assert.equal(extractRouteRes.statusCode, 400);
+    assert.equal(extractRouteRes.body?.error?.code, 'invalid_url');
+
     console.log('  [PASS] Top-level API router correctly routes 404, 410, and live sub-endpoints');
 }
 
