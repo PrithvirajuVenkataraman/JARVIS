@@ -4948,9 +4948,11 @@ Respond conversationally and naturally.`;
         const rawImages = Array.isArray(body.images) ? body.images : (Array.isArray(body.grounding?.images) ? body.grounding.images : undefined);
         const images = Array.isArray(rawImages) ? rawImages.filter(img => img && (img.base64 || img.url)) : undefined;
         const hasImages = Array.isArray(images) && images.length > 0;
-        const message = String(body.message || '').trim();
+        let message = String(body.message || '').trim();
         if (!message && !hasImages) return { ok: false, error: 'Message is required.' };
-        if (message.length > 16000) return { ok: false, error: 'Message is too long.' };
+        if (message.length > 250000) {
+            message = message.slice(0, 250000);
+        }
 
         let contextChars = 0;
         const context = Array.isArray(body.context)
