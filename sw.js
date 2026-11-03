@@ -3,12 +3,16 @@
  * @description Service Worker for JARVIS PWA & Offline Shell Caching
  */
 
-const CACHE_NAME = 'jarvis-cache-v14';
+const CACHE_NAME = 'jarvis-cache-v16';
 const STATIC_ASSETS = [
     '/',
     '/index.html',
     '/styles.css',
-    '/app/bounded-live-research.js',
+    '/app/bootstrap.js?v=2.2.1',
+    '/app/bounded-live-research.js?v=2.2.1',
+    '/app/markdown-renderer.js?v=2.2.1',
+    '/app/search/research-stream.mjs',
+    '/app/search/research-contract.mjs',
     '/404.html',
     '/manifest.json'
 ];
@@ -27,7 +31,7 @@ self.addEventListener('activate', (event) => {
         caches.keys().then((keys) => {
             return Promise.all(
                 keys.map((key) => {
-                    if (key !== CACHE_NAME) {
+                    if (key.startsWith('jarvis-cache-') && key !== CACHE_NAME) {
                         return caches.delete(key);
                     }
                 })
@@ -56,7 +60,7 @@ self.addEventListener('fetch', (event) => {
 
     if (isCodeOrDocument) {
         event.respondWith(
-            fetch(request)
+            fetch(request, { cache: 'no-cache' })
                 .then((networkResponse) => {
                     if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
                         const responseToCache = networkResponse.clone();
@@ -67,10 +71,13 @@ self.addEventListener('fetch', (event) => {
                     return networkResponse;
                 })
                 .catch(() => {
-                    return caches.match(request).then((cached) => {
+                    return caches.open(CACHE_NAME).then(cache => cache.match(request)).then((cached) => {
                         if (cached) return cached;
                         if (request.mode === 'navigate' || url.pathname === '/' || url.pathname === '') {
-                            return caches.match('/index.html') || caches.match('/404.html');
+                            return caches.open(CACHE_NAME).then(async cache =>
+                                (await cache.match('/index.html')) || (await cache.match('/404.html')) ||
+                                new Response('Page unavailable offline', { status: 503 })
+                            );
                         }
                         return new Response('Network error and no cache available', { status: 503 });
                     });
