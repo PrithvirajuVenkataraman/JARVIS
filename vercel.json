@@ -34,6 +34,18 @@
       "destination": "/api/diagnostics?__route=favicon"
     },
     {
+      "source": "/api/favicons",
+      "destination": "/api/diagnostics?__route=favicon"
+    },
+    {
+      "source": "/favicons",
+      "destination": "/api/diagnostics?__route=favicon"
+    },
+    {
+      "source": "/favicon",
+      "destination": "/api/diagnostics?__route=favicon"
+    },
+    {
       "source": "/api/extract-url",
       "destination": "/api/diagnostics?__route=extract-url"
     },
