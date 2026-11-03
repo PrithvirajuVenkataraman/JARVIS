@@ -1,0 +1,48 @@
+{
+  "timestamp": "2026-10-31T12:34:27.218Z",
+  "benchmarkVersion": "2.0.0",
+  "totalQueries": 16,
+  "splitSummary": {
+    "tuningCount": 0,
+    "tuningRecallK4": 0,
+    "heldOutCount": 16,
+    "heldOutRecallK4": 0.294
+  },
+  "metrics": {
+    "goldEntityRecallAt4": 0.25,
+    "goldEntityRecallAt6": 0.286,
+    "tier1PrecisionAt4": 0.938,
+    "tier1PrecisionAt6": 0.894,
+    "echoPenaltiesTriggered": 2,
+    "teasersDetected": 4,
+    "latencyP50Ms": 2909,
+    "latencyP95Ms": 3813
+  },
+  "categoryMetrics": {
+    "declarative_claim": {
+      "count": 4,
+      "meanRecallK4": 0.063,
+      "meanPrecisionK4": 1
+    },
+    "wh_question": {
+      "count": 3,
+      "meanRecallK4": 0.667,
+      "meanPrecisionK4": 1
+    },
+    "comparison": {
+      "count": 3,
+      "meanRecallK4": 0.067,
+      "meanPrecisionK4": 0.667
+    },
+    "definition_policy": {
+      "count": 3,
+      "meanRecallK4": 0.333,
+      "meanPrecisionK4": 1
+    },
+    "recency_sensitive": {
+      "count": 3,
+      "meanRecallK4": 0.417,
+      "meanPrecisionK4": 1
+    }
+  }
+}
