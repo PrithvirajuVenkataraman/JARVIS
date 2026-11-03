@@ -93,8 +93,8 @@ export function splitReadableSentences(text) {
         // Lookahead: cannot be a date remainder like '20, 1950' or '17, 2026'
         const remainder = raw.slice(i + 1).trim();
         if (/^\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4}/.test(remainder)) continue;
-        // Don't split if followed by an initial or single capital letter: e.g. "J." followed by "B."
-        if (/^[A-Z]\.\s+/i.test(remainder)) continue;
+        // Don't split if current word is a single initial/abbreviation followed by an initial: e.g. "J." followed by "B." or "Dr." followed by "A."
+        if (lastWordMatch && (/^[A-Za-z]$/.test(lastWordMatch[1].replace(/\.$/, '')) || ABBRS.has(lastWordMatch[1].replace(/\.$/, '').toLowerCase())) && /^[A-Z]\.\s+/i.test(remainder)) continue;
         // Lookahead: must be followed by an uppercase letter, quote, bracket, or end of string
         if (remainder && !/^[A-Z\"“'‘(\[]/.test(remainder)) continue;
 
