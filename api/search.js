@@ -639,7 +639,7 @@ export default async function handler(req, res) {
     const guard = applyApiSecurity(req, res, {
         methods: ['POST'],
         routeKey: 'search',
-        maxBodyBytes: 4 * 1024 * 1024,
+        maxBodyBytes: 10 * 1024 * 1024,
         rateLimit: { max: 60, windowMs: 60 * 1000 }
     });
     if (guard.handled) return;
