@@ -7532,6 +7532,17 @@ a.citation-badge sup {
     border-bottom: none !important;
 }
 
+.assistant-link {
+    color: #38bdf8;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    transition: color 0.15s ease;
+}
+
+.assistant-link:hover {
+    color: #7dd3fc;
+}
+
 .citation-badge:hover,
 .citation-badge-static:hover,
 a.citation-badge:hover,
