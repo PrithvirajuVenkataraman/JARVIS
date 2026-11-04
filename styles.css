@@ -7543,6 +7543,20 @@ a.citation-badge sup {
     color: #7dd3fc;
 }
 
+/* Ensure citations and badge links never have underlines */
+.assistant-link:has(.citation-logo-icon),
+.assistant-link:has(sup),
+.assistant-message-text a[href^="#source-"],
+.assistant-message-text a:has(sup),
+.assistant-message-text sup a,
+a.citation-source-logo,
+a.citation-badge,
+a[data-source-id] {
+    text-decoration: none !important;
+    text-decoration-line: none !important;
+    border-bottom: none !important;
+}
+
 .citation-badge:hover,
 .citation-badge-static:hover,
 a.citation-badge:hover,
@@ -8494,6 +8508,90 @@ body:not(.dark) .assistant-followup-chip:hover {
     display: flex;
     align-items: center;
     gap: 6px;
+    position: relative;
+}
+
+/* Single Corner Table Pencil Dropdown */
+.table-pencil-dropdown-wrapper {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+}
+
+.table-pencil-trigger-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    color: #94a3b8;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.table-pencil-trigger-btn:hover {
+    color: #ffffff;
+    background: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.25);
+}
+
+.table-pencil-trigger-btn svg {
+    stroke: #e2e8f0;
+}
+
+.table-pencil-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    z-index: 50;
+    min-width: 130px;
+    padding: 4px;
+    background: #18181b;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 8px;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.6), 0 8px 10px -6px rgba(0, 0, 0, 0.6);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.table-pencil-menu.hidden {
+    display: none !important;
+}
+
+.table-pencil-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 6px 10px;
+    font-size: 12px;
+    font-weight: 500;
+    color: #e2e8f0;
+    background: transparent;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.12s ease, color 0.12s ease;
+}
+
+.table-pencil-menu-item:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #ffffff;
+}
+
+.table-pencil-menu-item svg {
+    stroke: #94a3b8;
+    flex-shrink: 0;
+}
+
+.table-pencil-menu-item:hover svg {
+    stroke: #38bdf8;
 }
 
 .assistant-table-btn {
