@@ -228,6 +228,60 @@ async function runBrowserTests() {
         assert.ok(citationResult?.firstLogoSrc.includes('domain=abbeyroad.com'), 'Logo src must request domain favicon');
         console.log('[PASS] In-text citation logos rendered in place of [1] and [2]');
 
+        // Test Citation Link Underline: citations must NOT have underline text decoration
+        const evalCitationUnderline = await sendCommand('Runtime.evaluate', {
+            expression: `(() => {
+                const testDiv = document.createElement('div');
+                testDiv.className = 'assistant-message-text';
+                const sampleMarkdown = 'Recorded at Abbey Road [1](https://abbeyroad.com) and mastered in London [2].';
+                testDiv.innerHTML = window.JarvisMarkdownRenderer.renderMarkdown(sampleMarkdown, {
+                    sources: [
+                        { id: 1, title: 'Abbey Road', domain: 'abbeyroad.com', url: 'https://abbeyroad.com' },
+                        { id: 2, title: 'Mastering Studio', domain: 'mastering.com', url: 'https://mastering.com' }
+                    ]
+                });
+                document.body.appendChild(testDiv);
+                const logos = testDiv.querySelectorAll('.citation-source-logo');
+                let hasUnderline = false;
+                logos.forEach(logo => {
+                    const style = window.getComputedStyle(logo);
+                    if (style.textDecorationLine === 'underline' || style.textDecoration.includes('underline')) {
+                        hasUnderline = true;
+                    }
+                });
+                return {
+                    logoCount: logos.length,
+                    hasUnderline
+                };
+            })()`,
+            returnByValue: true
+        });
+        const citationUnderlineResult = evalCitationUnderline?.result?.result?.value || evalCitationUnderline?.result?.value;
+        console.log('Citation underline check:', citationUnderlineResult);
+        assert.equal(citationUnderlineResult?.logoCount, 2, 'Must render citation badges as logo icons');
+        assert.equal(citationUnderlineResult?.hasUnderline, false, 'Citation logo badge must NEVER have an underline');
+        console.log('[PASS] Verified citations have ZERO underlines');
+
+        // Test Favicon Endpoint (mixonline.com must return 200 OK, never 404)
+        const evalFaviconFetch = await sendCommand('Runtime.evaluate', {
+            expression: `(async () => {
+                const res = await fetch('/favicons?domain=mixonline.com&sz=64');
+                const contentType = res.headers.get('content-type') || '';
+                return {
+                    status: res.status,
+                    ok: res.ok,
+                    isSvgOrPng: contentType.includes('svg') || contentType.includes('png') || contentType.includes('image')
+                };
+            })()`,
+            awaitPromise: true,
+            returnByValue: true
+        });
+        const faviconResult = evalFaviconFetch?.result?.result?.value || evalFaviconFetch?.result?.value;
+        console.log('Favicon proxy endpoint test:', faviconResult);
+        assert.equal(faviconResult?.status, 200, 'Favicon endpoint must return 200 OK (never 404)');
+        assert.equal(faviconResult?.isSvgOrPng, true, 'Favicon endpoint must return valid image/svg/png');
+        console.log('[PASS] Favicon endpoint returns 200 OK with valid image');
+
         // Test Emergency SOS Card Rendering (No blocked iframe)
         const evalSosRender = await sendCommand('Runtime.evaluate', {
             expression: `(() => {
@@ -326,6 +380,112 @@ async function runBrowserTests() {
         assert.equal(ttsResult?.isSpeakingAfterStop, false, 'Button must lose is-speaking class when stopped');
         assert.equal(ttsResult?.btnTextAfterStop, 'Speak', 'Button label must return to Speak');
         console.log('[PASS] Browser TTS full speech pipeline verified with segment queue and keepalive');
+
+        // Test Table Single Corner Pencil Icon & Dropdown Menu
+        const evalTablePencil = await sendCommand('Runtime.evaluate', {
+            expression: `(() => {
+                const tableMd = '| Drive Letter | Typical Use | Current Status |\\n|---|---|---|\\n| A: | First floppy | Reserved |\\n| C: | Primary OS | Default |';
+                const rendered = window.JarvisMarkdownRenderer.renderMarkdown(tableMd);
+                const div = document.createElement('div');
+                div.innerHTML = rendered;
+                document.body.appendChild(div);
+
+                const toolbar = div.querySelector('.assistant-table-toolbar');
+                const triggerBtn = toolbar?.querySelector('.table-pencil-trigger-btn');
+                const dropdownWrap = toolbar?.querySelector('.table-pencil-dropdown-wrapper');
+                const menu = dropdownWrap?.querySelector('.table-pencil-menu');
+                const cornerTriggerButtons = toolbar?.querySelectorAll('.assistant-table-actions > .table-pencil-dropdown-wrapper > .table-pencil-trigger-btn');
+                const oldDirectButtons = toolbar?.querySelectorAll('.assistant-table-actions > button, .assistant-table-btn');
+                const menuItems = menu?.querySelectorAll('.table-pencil-menu-item');
+
+                const hasPencilSvg = Boolean(triggerBtn?.querySelector('svg'));
+                const hasCopy = Array.from(menuItems || []).some(b => b.textContent.includes('Copy'));
+                const hasDownload = Array.from(menuItems || []).some(b => b.textContent.includes('Download'));
+
+                // Verify menu toggle
+                const initialHidden = menu?.classList.contains('hidden');
+                window.toggleTablePencilMenu(triggerBtn);
+                const openAfterToggle = !menu?.classList.contains('hidden');
+                window.toggleTablePencilMenu(triggerBtn, false);
+                const closedAfterToggle = menu?.classList.contains('hidden');
+
+                div.remove();
+
+                return {
+                    hasToolbar: Boolean(toolbar),
+                    hasTriggerBtn: Boolean(triggerBtn),
+                    hasPencilSvg,
+                    onlyOneCornerButton: cornerTriggerButtons?.length === 1 && oldDirectButtons?.length === 0,
+                    hasCopy,
+                    hasDownload,
+                    initialHidden,
+                    openAfterToggle,
+                    closedAfterToggle
+                };
+            })()`,
+            returnByValue: true
+        });
+
+        const tableResult = evalTablePencil?.result?.result?.value || evalTablePencil?.result?.value;
+        console.log('Table pencil menu verification:', tableResult);
+        assert.equal(tableResult?.hasToolbar, true, 'Table toolbar must exist');
+        assert.equal(tableResult?.hasTriggerBtn, true, 'Pencil trigger button must exist');
+        assert.equal(tableResult?.hasPencilSvg, true, 'Pencil SVG icon must exist');
+        assert.equal(tableResult?.onlyOneCornerButton, true, 'There must be only ONE button in corner (the pencil button)');
+        assert.equal(tableResult?.hasCopy, true, 'Pencil menu must have Copy');
+        assert.equal(tableResult?.hasDownload, true, 'Pencil menu must have Download');
+        assert.equal(tableResult?.openAfterToggle, true, 'Pencil menu must toggle open');
+        assert.equal(tableResult?.closedAfterToggle, true, 'Pencil menu must toggle closed');
+        console.log('[PASS] Table corner has only one pencil icon with Copy and Download inside');
+
+        // Test VTT Prompt Box Deduping: spoken prompt must appear only ONCE in the prompt box
+        const evalVttDedup = await sendCommand('Runtime.evaluate', {
+            expression: `(async () => {
+                const textInput = document.getElementById('text-input');
+                textInput.value = '';
+                textInput.dispatchEvent(new Event('input', { bubbles: true }));
+
+                // Start dictation
+                await window.toggleVoiceToText();
+                const ctrl = window.JarvisSpeechInput;
+
+                // Simulate interim speech
+                ctrl?._callbacks?.onInterim?.('what is the capital of france', ctrl.getState());
+                const valAfterInterim = textInput.value;
+
+                // Simulate final speech
+                await ctrl?._callbacks?.onFinal?.('what is the capital of france', { source: 'vtt', autoSubmit: false });
+                const valAfterFinal = textInput.value;
+
+                // Stop dictation
+                await window.toggleVoiceToText();
+                const valAfterStop = textInput.value;
+
+                return {
+                    valAfterInterim,
+                    valAfterFinal,
+                    valAfterStop,
+                    isCleanSingle: valAfterStop.toLowerCase() === 'what is the capital of france'
+                };
+            })()`,
+            awaitPromise: true,
+            returnByValue: true
+        });
+
+        const vttResult = evalVttDedup?.result?.result?.value || evalVttDedup?.result?.value;
+        console.log('VTT prompt dedup verification:', vttResult);
+        assert.equal(vttResult?.isCleanSingle, true, 'Spoken prompt must appear only once in prompt box, never duplicated');
+        assert.notEqual(vttResult?.valAfterStop, 'What is the capital of france What is the capital of france', 'Prompt must not be duplicated');
+        console.log('[PASS] VTT prompt deduping verified: prompt appears exactly once');
+
+        // Test Vercel Serverless Function Count limit (must be <= 12 on Hobby plan)
+        const fs = await import('node:fs');
+        const path = await import('node:path');
+        const apiDir = path.resolve(process.cwd(), 'api');
+        const apiFiles = fs.readdirSync(apiDir).filter(f => f.endsWith('.js') && !f.startsWith('_'));
+        console.log(`Vercel function count: ${apiFiles.length} functions (${apiFiles.join(', ')})`);
+        assert.ok(apiFiles.length <= 12, `Vercel Hobby plan allows max 12 functions, found ${apiFiles.length}`);
+        console.log('[PASS] Vercel function count is within Hobby plan limit (<= 12)');
 
         ws.close();
         console.log('=== All Real Chrome Browser E2E Tests PASSED Successfully! ===');
