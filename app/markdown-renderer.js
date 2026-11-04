@@ -229,17 +229,14 @@ export function findSourceById(sources, id) {
 }
 
 export function renderSourceLogoBadge(source, id) {
-    if (!source) {
-        return `<button type="button" class="citation-badge" data-source-id="${id}" onclick="window.JarvisLiveResearch?.highlightSource?.('${id}')" title="Source [${id}]"><sup>[${id}]</sup></button>`;
-    }
-    let domain = source.domain;
-    if (!domain && source.url) {
+    let domain = source?.domain;
+    if (!domain && source?.url) {
         try { domain = new URL(source.url).hostname.replace(/^www\./i, ''); } catch { domain = 'web'; }
     }
-    domain = escapeHtml(domain || 'web');
-    const title = escapeHtml(source.title || domain);
-    const url = escapeHtml(source.url || '#');
-    const favicon = escapeHtml(source.favicon || `/api/favicon?domain=${encodeURIComponent(domain)}`);
+    domain = escapeHtml(domain || (id ? `src-${id}` : 'web'));
+    const title = escapeHtml(source?.title || domain);
+    const url = escapeHtml(source?.url || '#');
+    const favicon = escapeHtml(source?.favicon || `/api/favicon?domain=${encodeURIComponent(domain)}`);
     const fallbackSvg = getDomainMonogramSvg(domain);
 
     return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="citation-source-logo" data-source-id="${id}" title="${title} (${domain})" onclick="window.JarvisLiveResearch?.highlightSource?.('${id}')"><img class="citation-logo-icon" src="${favicon}" alt="${domain}" loading="lazy" onerror="this.onerror=null;this.src='${fallbackSvg}';" /></a>`;
@@ -578,23 +575,23 @@ export function renderMarkdown(rawText = '', options = {}) {
     // Italics (*italic* and _italic_)
     html = html.replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '<em>$1</em>');
     html = html.replace(/(?<![\w\\])_(?![\s_])([^\n_]+?)(?<![\s_])_(?![\w])/g, '<em>$1</em>');
-    html = html.replace(/\[\^(\d+)\]\((https?:\/\/[^)]+)\)/g, `<a href="$2" target="_blank" rel="noopener noreferrer" class="citation-badge" title="Source [$1]"><sup>[$1]</sup></a>`);
-    html = html.replace(/\[\^(\d+)\]/g, `<span class="citation-badge-static" title="Citation [$1]"><sup>[$1]</sup></span>`);
+    html = html.replace(/\[\^(\d+)\]\((https?:\/\/[^)]+)\)/g, (match, id, url) => {
+        const source = findSourceById(sources, id) || { id, url };
+        return renderSourceLogoBadge(source, id);
+    });
+    html = html.replace(/\[\^(\d+)\]/g, (match, id) => {
+        const source = findSourceById(sources, id);
+        return renderSourceLogoBadge(source, id);
+    });
     html = html.replace(/\[(\d+)\]\((https?:\/\/[^)]+)\)/g, (match, id, url) => {
-        const source = findSourceById(sources, id) || (url ? { id, url } : null);
-        if (sources.length > 0 && source) {
-            return renderSourceLogoBadge(source, id);
-        }
-        return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="citation-badge" data-source-id="${id}" title="Source [${id}]"><sup>[${id}]</sup></a>`;
+        const source = findSourceById(sources, id) || { id, url };
+        return renderSourceLogoBadge(source, id);
     });
     html = html.replace(/(?<![\[\w`])(?:\[|【)((?:f?\d+)(?:\s*,\s*f?\d+)*)(?:\]|】)(?![\]\(])/g, (match, idsStr) => {
         const ids = idsStr.split(',').map(s => s.trim()).filter(Boolean);
         return ids.map(id => {
             const source = findSourceById(sources, id);
-            if (sources.length > 0 && source) {
-                return renderSourceLogoBadge(source, id);
-            }
-            return `<button type="button" class="citation-badge" data-source-id="${id}" onclick="window.JarvisLiveResearch?.highlightSource('${id}')" title="Source [${id}]"><sup>[${id}]</sup></button>`;
+            return renderSourceLogoBadge(source, id);
         }).join('');
     });
     html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, `<a href="$2" target="_blank" rel="noopener noreferrer" class="assistant-link">$1</a>`);
