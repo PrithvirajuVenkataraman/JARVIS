@@ -490,14 +490,24 @@ export function renderMarkdown(rawText = '', options = {}) {
                     <div class="assistant-table-toolbar">
                         <span class="assistant-table-badge">Data Table</span>
                         <div class="assistant-table-actions">
-                            <button type="button" class="assistant-table-btn" onclick="window.downloadTableCsv?.(this)" title="Download as CSV (Excel compatible)">
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                                <span>CSV</span>
-                            </button>
-                            <button type="button" class="assistant-table-btn" onclick="window.copyTableTsv?.(this)" title="Copy table for Excel or Sheets">
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                                <span>Copy</span>
-                            </button>
+                            <div class="table-pencil-dropdown-wrapper">
+                                <button type="button" class="table-pencil-trigger-btn" onclick="window.toggleTablePencilMenu?.(this)" title="Table options (Copy, Download)" aria-label="Table options">
+                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                        <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path>
+                                        <path d="m15 5 4 4"></path>
+                                    </svg>
+                                </button>
+                                <div class="table-pencil-menu hidden">
+                                    <button type="button" class="table-pencil-menu-item" onclick="window.copyTableTsv?.(this); window.toggleTablePencilMenu?.(this, false)" title="Copy table for Excel or Sheets">
+                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                                        <span>Copy</span>
+                                    </button>
+                                    <button type="button" class="table-pencil-menu-item" onclick="window.downloadTableCsv?.(this); window.toggleTablePencilMenu?.(this, false)" title="Download as CSV (Excel compatible)">
+                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                                        <span>Download</span>
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                     </div>
                     <div class="assistant-table-scroll-container" tabindex="0" role="region" aria-label="Scrollable table">
@@ -583,6 +593,10 @@ export function renderMarkdown(rawText = '', options = {}) {
         const source = findSourceById(sources, id);
         return renderSourceLogoBadge(source, id);
     });
+    html = html.replace(/\[\[(\d+)\]\]\((https?:\/\/[^)]+)\)/g, (match, id, url) => {
+        const source = findSourceById(sources, id) || { id, url };
+        return renderSourceLogoBadge(source, id);
+    });
     html = html.replace(/\[(\d+)\]\((https?:\/\/[^)]+)\)/g, (match, id, url) => {
         const source = findSourceById(sources, id) || { id, url };
         return renderSourceLogoBadge(source, id);
@@ -594,7 +608,16 @@ export function renderMarkdown(rawText = '', options = {}) {
             return renderSourceLogoBadge(source, id);
         }).join('');
     });
-    html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, `<a href="$2" target="_blank" rel="noopener noreferrer" class="assistant-link">$1</a>`);
+    html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, (match, linkText, url) => {
+        const trimmedText = String(linkText || '').trim();
+        const citeMatch = trimmedText.match(/^\[?(?:f?\d+)\]?$/);
+        if (citeMatch) {
+            const id = trimmedText.replace(/[\[\]f#]/gi, '');
+            const source = findSourceById(sources, id) || { id, url };
+            return renderSourceLogoBadge(source, id);
+        }
+        return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="assistant-link">${linkText}</a>`;
+    });
 
     // Step 3: Re-inject display math blocks with clean notebook styling (NO code container / copy buttons)
     html = html.replace(/__MATH_BLOCK_(\d+)__/g, (_, idx) => {
@@ -682,4 +705,33 @@ export function renderMarkdown(rawText = '', options = {}) {
     });
 
     return html;
+}
+
+export function toggleTablePencilMenu(triggerOrItem, forceState) {
+    const wrap = triggerOrItem?.closest?.('.table-pencil-dropdown-wrapper');
+    const menu = wrap?.querySelector?.('.table-pencil-menu');
+    if (!menu) return;
+    const shouldOpen = typeof forceState === 'boolean' ? forceState : menu.classList.contains('hidden');
+    if (typeof document !== 'undefined') {
+        document.querySelectorAll('.table-pencil-menu:not(.hidden)').forEach(m => {
+            if (m !== menu) m.classList.add('hidden');
+        });
+    }
+    if (shouldOpen) {
+        menu.classList.remove('hidden');
+    } else {
+        menu.classList.add('hidden');
+    }
+}
+
+if (typeof window !== 'undefined') {
+    window.toggleTablePencilMenu = toggleTablePencilMenu;
+    if (typeof document !== 'undefined' && !window.__jarvisTablePencilListenerAdded) {
+        window.__jarvisTablePencilListenerAdded = true;
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.table-pencil-dropdown-wrapper')) {
+                document.querySelectorAll('.table-pencil-menu:not(.hidden)').forEach(m => m.classList.add('hidden'));
+            }
+        });
+    }
 }
