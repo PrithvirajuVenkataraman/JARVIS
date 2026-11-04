@@ -10,9 +10,9 @@
  * - T + 9000ms: HARD APPLICATION DEADLINE. Abort stream. Render verified snippet answer. Lock turn state.
  */
 
-import { normalizeUserQuery, hasSearchableContent } from './query-normalizer.js?v=2.3.0';
-import { BM25Index, computeBM25Scores, tokenizeText } from './bm25.js?v=2.3.0';
-import { textToEmbeddingVector, vectorCosineSimilarity } from './frontend-routing.js?v=2.3.0';
+import { normalizeUserQuery, hasSearchableContent } from './query-normalizer.js?v=2.3.1';
+import { BM25Index, computeBM25Scores, tokenizeText } from './bm25.js?v=2.3.1';
+import { textToEmbeddingVector, vectorCosineSimilarity } from './frontend-routing.js?v=2.3.1';
 import { executeRemoteResearch, streamResearchRequest } from './search/research-stream.mjs';
 export { streamResearchRequest } from './search/research-stream.mjs';
 
@@ -524,7 +524,7 @@ export function normalizeResearchSources(results = [], query = '', limit = 8) {
             extract: fullArticle || snippet,
             url: cleanUrl,
             domain,
-            favicon: `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`,
+            favicon: `/api/favicon?domain=${encodeURIComponent(domain)}`,
             sourceLabel: r.sourceLabel || r.source || domain,
             date: dateStr,
             parsedDateMs,
@@ -1047,7 +1047,7 @@ export function renderOrUpdateSourcesCarousel(rowElement, sources = []) {
     const cardsHtml = sources.map((s) => {
         const domain = s.domain || 'web';
         const title = s.title || domain;
-        const favicon = s.favicon || `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`;
+        const favicon = s.favicon || `/api/favicon?domain=${encodeURIComponent(domain)}`;
         const url = s.url || '#';
         return `
             <a href="${url}" target="_blank" rel="noopener noreferrer" class="source-card-pill" data-source-id="${s.id}" title="${title}">
@@ -1429,6 +1429,8 @@ export class BoundedLiveResearchController {
                     sources: [],
                     turnId: this.turnId,
                     assistantMessageId,
+                    entity: this.entity || null,
+                    notableWorks: this.notableWorks || [],
                     telemetry: this.telemetry
                 };
                 if (typeof uiCallbacks.onComplete === 'function') {
@@ -1486,6 +1488,8 @@ export class BoundedLiveResearchController {
                     sources: sources || [],
                     turnId: this.turnId,
                     assistantMessageId,
+                    entity: this.entity || null,
+                    notableWorks: this.notableWorks || [],
                     sourcesCount: this.telemetry.sourcesCount,
                     totalDurationMs: this.telemetry.totalDurationMs,
                     telemetry: this.telemetry
@@ -1505,6 +1509,8 @@ export class BoundedLiveResearchController {
                                 content,
                                 sources: finalPayload.sources,
                                 assistantMessageId,
+                    entity: this.entity || null,
+                    notableWorks: this.notableWorks || [],
                                 telemetry: this.telemetry,
                                 provenance
                             });
@@ -1519,6 +1525,8 @@ export class BoundedLiveResearchController {
                                 content,
                                 sources: finalPayload.sources,
                                 assistantMessageId,
+                    entity: this.entity || null,
+                    notableWorks: this.notableWorks || [],
                                 telemetry: this.telemetry,
                                 provenance
                             });
@@ -1663,6 +1671,19 @@ export class BoundedLiveResearchController {
                         }
                         if (Array.isArray(searchRes?.results)) {
                             this.rawSearchResults.push(...searchRes.results);
+                        }
+                        if (searchRes?.entity) {
+                            this.entity = searchRes.entity;
+                            this.notableWorks = searchRes.notableWorks || [];
+                            if (typeof uiCallbacks.onEntityResolved === 'function') {
+                                try {
+                                    uiCallbacks.onEntityResolved({
+                                        entity: this.entity,
+                                        notableWorks: this.notableWorks,
+                                        assistantMessageId
+                                    });
+                                } catch (_) {}
+                            }
                         }
                     }
                 } catch (err) {
