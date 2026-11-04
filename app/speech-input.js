@@ -72,9 +72,15 @@ export function cleanSpeechFillers(text = '') {
     // Discard standard acoustic noise tokens: [noise], (cough), *applause*, etc.
     s = s.replace(/\[[^\]]*\]/g, ' ').replace(/\([^)]*\)/g, ' ').replace(/\*[^*]*\*/g, ' ');
 
+    // Strip leading punctuation, ellipsis, or dots resulting from acoustic coughs or hesitation
+    s = s.replace(/^[\s.·…\-–—]+/, '').trimStart();
+
+    // Discard noise artifacts, ellipsis, dots, or symbols that have no alphanumeric speech
+    if (!s.trim() || !/[a-zA-Z0-9]/.test(s)) return '';
+
     // Discard common dead-silence Whisper / STT hallucinations
     s = s.replace(/^(?:thank\s+you\s+for\s+watching|thanks\s+for\s+watching|subtitles\s+by\s+[^\n]+|amara\.org|silence|blank[_\s]audio)[\.\s]*$/gi, '');
-    if (!s.trim()) return '';
+    if (!s.trim() || !/[a-zA-Z0-9]/.test(s)) return '';
 
     // 0. Spoken Punctuation & Line Breaks (Enterprise Dictation)
     s = s.replace(/\b(?:new line|newline)\b/gi, '\n');
@@ -481,6 +487,8 @@ export function createSpeechInputController(options = {}) {
     let restartTimer = null;
     let adaptiveTurnTimer = null;
     let accumulatedTranscript = '';
+    let lastLiveCandidate = '';
+    let lastEmittedFinal = '';
     let explicitlyStopped = false;
 
     const whisperRecorder = createWhisperRecorder({
@@ -489,7 +497,8 @@ export function createSpeechInputController(options = {}) {
         },
         onTranscribed(text) {
             const clean = cleanSpeechFillers(text);
-            if (!clean) return;
+            if (!clean || clean === lastEmittedFinal) return;
+            lastEmittedFinal = clean;
             callbacks.onFinal(clean, {
                 autoSubmit: false,
                 source: 'vtt',
@@ -574,10 +583,14 @@ export function createSpeechInputController(options = {}) {
                 }
 
                 if (currentFinal) {
-                    accumulatedTranscript = (accumulatedTranscript ? (accumulatedTranscript + ' ' + currentFinal) : currentFinal).replace(/^[ \t]+|[ \t]+$/g, '');
+                    const cleanChunk = cleanSpeechFillers(currentFinal);
+                    if (cleanChunk) {
+                        accumulatedTranscript = (accumulatedTranscript ? (accumulatedTranscript + ' ' + cleanChunk) : cleanChunk).replace(/^[ \t]+|[ \t]+$/g, '');
+                    }
                 }
 
                 const liveCandidate = (accumulatedTranscript ? (accumulatedTranscript + ' ' + currentInterim) : currentInterim).replace(/^[ \t]+|[ \t]+$/g, '');
+                lastLiveCandidate = liveCandidate;
                 const cleanedInterim = cleanSpeechFillers(liveCandidate);
 
                 if (cleanedInterim) {
@@ -597,8 +610,8 @@ export function createSpeechInputController(options = {}) {
 
                 if (currentFinal && !converseEnabled && mode === 'dictation' && !options.adaptiveDictation) {
                     const cleanedFinal = cleanSpeechFillers(accumulatedTranscript || currentFinal);
-                    accumulatedTranscript = '';
-                    if (cleanedFinal) {
+                    if (cleanedFinal && cleanedFinal !== lastEmittedFinal) {
+                        lastEmittedFinal = cleanedFinal;
                         callbacks.onFinal(cleanedFinal, {
                             autoSubmit: false,
                             source: 'vtt',
@@ -609,15 +622,15 @@ export function createSpeechInputController(options = {}) {
                     return;
                 }
 
-                if (converseEnabled || mode === 'dictation') {
+                if (converseEnabled) {
                     adaptiveTurnTimer = setTimeout(() => {
                         const targetText = accumulatedTranscript || liveCandidate;
                         const cleanedFinal = cleanSpeechFillers(targetText);
                         accumulatedTranscript = '';
                         if (cleanedFinal) {
                             callbacks.onFinal(cleanedFinal, {
-                                autoSubmit: false,
-                                source: 'vtt',
+                                autoSubmit: true,
+                                source: 'converse',
                                 transcriptFinal: true,
                                 interrupt: false
                             });
@@ -732,6 +745,9 @@ export function createSpeechInputController(options = {}) {
         }
         stop();
         explicitlyStopped = false;
+        accumulatedTranscript = '';
+        lastLiveCandidate = '';
+        lastEmittedFinal = '';
         mode = 'dictation';
         converseEnabled = false;
 
@@ -755,6 +771,9 @@ export function createSpeechInputController(options = {}) {
             return false;
         }
         explicitlyStopped = false;
+        accumulatedTranscript = '';
+        lastLiveCandidate = '';
+        lastEmittedFinal = '';
         if (converseEnabled || options.converse) {
             mode = 'converse';
             converseEnabled = true;
@@ -871,9 +890,10 @@ export function createSpeechInputController(options = {}) {
             clearTimeout(adaptiveTurnTimer);
             adaptiveTurnTimer = null;
         }
-        if (mode === 'dictation' && accumulatedTranscript) {
-            const pendingText = cleanSpeechFillers(accumulatedTranscript);
-            if (pendingText) {
+        if (mode === 'dictation' && (accumulatedTranscript || lastLiveCandidate)) {
+            const pendingText = cleanSpeechFillers(accumulatedTranscript || lastLiveCandidate);
+            if (pendingText && pendingText !== lastEmittedFinal) {
+                lastEmittedFinal = pendingText;
                 callbacks.onFinal(pendingText, {
                     autoSubmit: false,
                     source: 'vtt',
@@ -883,6 +903,8 @@ export function createSpeechInputController(options = {}) {
             }
         }
         accumulatedTranscript = '';
+        lastLiveCandidate = '';
+        lastEmittedFinal = '';
         if (processingTimer) {
             clearTimeout(processingTimer);
             processingTimer = null;
@@ -936,7 +958,8 @@ export function createSpeechInputController(options = {}) {
         toggleConverse,
         setProcessing,
         resumeListening,
-        stop
+        stop,
+        _callbacks: callbacks
     };
 }
 
@@ -1172,22 +1195,21 @@ export function installSpeechInputUI(options = {}) {
 
     const visualizer = vttWaveform ? createAudioVisualizer(vttWaveform) : null;
     const Recognition = globalThis.SpeechRecognition || globalThis.webkitSpeechRecognition;
-    let committedText = '';
-    let lastInterimText = '';
+    let sessionPrefix = '';
+    let sessionSpokenText = '';
 
     input.addEventListener('input', () => {
         delete input.dataset.inputSource;
         const currentVal = input.value;
-        if (lastInterimText && currentVal.endsWith(lastInterimText)) {
-            committedText = currentVal.slice(0, currentVal.length - lastInterimText.length).trim();
-        } else {
-            committedText = currentVal.trim();
+        if (!controller?.getState?.()?.listening) {
+            sessionPrefix = currentVal.trim();
+            sessionSpokenText = '';
         }
     });
 
     globalThis.resetSpeechInputCommittedText = () => {
-        committedText = '';
-        lastInterimText = '';
+        sessionPrefix = '';
+        sessionSpokenText = '';
     };
 
     function setStatusText(message = '') {
@@ -1202,12 +1224,14 @@ export function installSpeechInputUI(options = {}) {
         onInterim(text, state) {
             const isConverse = Boolean(state?.converseEnabled);
             const cleaned = cleanSpeechFillers(text);
-            lastInterimText = cleaned;
+            sessionSpokenText = cleaned;
 
             if (!isConverse) {
                 // VTT Dictation: words stream directly into the chatbox (input textarea), NOT on the chat window
-                const base = committedText ? `${committedText}${cleaned.startsWith('\n') ? '' : ' '}` : '';
-                input.value = cleaned ? `${base}${cleaned}` : committedText;
+                const fullText = sessionPrefix
+                    ? `${sessionPrefix}${cleaned ? (cleaned.startsWith('\n') ? '' : ' ') + cleaned : ''}`
+                    : cleaned;
+                input.value = fullText;
                 delete input.dataset.inputSource;
                 options.onComposerChanged?.();
                 globalThis.handleComposerInput?.();
@@ -1219,7 +1243,6 @@ export function installSpeechInputUI(options = {}) {
             visualizer?.pulse?.(0.9);
         },
         async onFinal(text, event) {
-            lastInterimText = '';
             const cleaned = cleanSpeechFillers(text);
             const isConverse = Boolean(event?.converseEnabled || event?.source === 'converse');
 
@@ -1228,12 +1251,14 @@ export function installSpeechInputUI(options = {}) {
 
             if (!cleaned) {
                 // If user spoke nothing or random noise was captured, leave prompt window clean
-                input.value = committedText || '';
-                delete input.dataset.inputSource;
-                options.onComposerChanged?.();
-                globalThis.handleComposerInput?.();
-                globalThis.autoResizeComposerTextarea?.();
-                globalThis.toggleSendButton?.();
+                if (!isConverse) {
+                    input.value = sessionPrefix || '';
+                    delete input.dataset.inputSource;
+                    options.onComposerChanged?.();
+                    globalThis.handleComposerInput?.();
+                    globalThis.autoResizeComposerTextarea?.();
+                    globalThis.toggleSendButton?.();
+                }
                 return;
             }
 
@@ -1250,10 +1275,11 @@ export function installSpeechInputUI(options = {}) {
                 });
             } else {
                 // Enterprise VTT Dictation: Words appear in the chatbox, NOT on the chat window!
-                const base = committedText ? `${committedText}${cleaned.startsWith('\n') ? '' : ' '}` : '';
-                const finalStr = cleaned ? `${base}${cleaned}` : committedText;
-                committedText = finalStr.trim();
-                input.value = committedText;
+                sessionSpokenText = cleaned;
+                const fullText = sessionPrefix
+                    ? `${sessionPrefix}${cleaned.startsWith('\n') ? '' : ' '}${cleaned}`
+                    : cleaned;
+                input.value = fullText.trim();
                 delete input.dataset.inputSource;
 
                 try {
@@ -1278,10 +1304,14 @@ export function installSpeechInputUI(options = {}) {
         },
         onState(state) {
             if (!state.listening) {
-                lastInterimText = '';
                 if (input && state.mode === 'idle') {
-                    const cleaned = cleanSpeechFillers(input.value);
-                    input.value = cleaned || committedText || '';
+                    const fullCandidate = sessionPrefix
+                        ? `${sessionPrefix}${sessionSpokenText ? ' ' + sessionSpokenText : ''}`
+                        : (sessionSpokenText || input.value);
+                    const cleaned = cleanSpeechFillers(fullCandidate);
+                    input.value = cleaned ? cleaned.trim() : (sessionPrefix || '');
+                    sessionPrefix = input.value;
+                    sessionSpokenText = '';
                     try {
                         input.focus();
                         if (typeof input.setSelectionRange === 'function') {
@@ -1289,7 +1319,6 @@ export function installSpeechInputUI(options = {}) {
                         }
                     } catch (_) {}
                 }
-                committedText = String(input ? input.value : '').trim();
                 if (!state.processing) {
                     globalThis.clearLiveSpeechTranscriptionOnScreen?.();
                 }
@@ -1336,7 +1365,6 @@ export function installSpeechInputUI(options = {}) {
             globalThis.updateComposerPlaceholder?.();
         },
         onError(message) {
-            lastInterimText = '';
             globalThis.clearLiveSpeechTranscriptionOnScreen?.();
             if (vttWaveform) {
                 vttWaveform.classList.add('hidden');
@@ -1369,15 +1397,14 @@ export function installSpeechInputUI(options = {}) {
         if (isCurrentlyDictating) {
             // Second press: user stops dictation (ChatGPT style)
             const res = await controller.toggleDictation();
-            lastInterimText = '';
             if (input) {
-                const cleaned = cleanSpeechFillers(input.value);
-                if (cleaned) {
-                    input.value = cleaned;
-                    committedText = cleaned;
-                } else {
-                    input.value = committedText || '';
-                }
+                const fullCandidate = sessionPrefix
+                    ? `${sessionPrefix}${sessionSpokenText ? ' ' + sessionSpokenText : ''}`
+                    : (sessionSpokenText || input.value);
+                const cleaned = cleanSpeechFillers(fullCandidate);
+                input.value = cleaned ? cleaned.trim() : (sessionPrefix || '');
+                sessionPrefix = input.value;
+                sessionSpokenText = '';
                 try {
                     input.focus();
                     if (typeof input.setSelectionRange === 'function') {
@@ -1396,8 +1423,8 @@ export function installSpeechInputUI(options = {}) {
             return res;
         } else {
             // First press: user starts dictation
-            committedText = input ? input.value.trim() : '';
-            lastInterimText = '';
+            sessionPrefix = input ? input.value.trim() : '';
+            sessionSpokenText = '';
             return controller.toggleDictation();
         }
     };
