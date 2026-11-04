@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import assert from 'node:assert/strict';
+import { server, startLocalDevServer } from '../tools/local-dev-server.mjs';
 
 const CHROME_PATH = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
 const CDP_PORT = 9222;
@@ -15,6 +16,15 @@ async function fetchJson(url) {
 
 async function runBrowserTests() {
     console.log('=== Starting Real Chrome Browser E2E Verification ===');
+
+    let devServerStarted = false;
+    try {
+        await fetch('http://127.0.0.1:3000');
+    } catch (_) {
+        startLocalDevServer();
+        devServerStarted = true;
+        await sleep(500);
+    }
 
     // 1. Spawn Chrome in headless mode with remote debugging
     const chromeProc = spawn(CHROME_PATH, [
@@ -320,7 +330,10 @@ async function runBrowserTests() {
         ws.close();
         console.log('=== All Real Chrome Browser E2E Tests PASSED Successfully! ===');
     } finally {
-        chromeProc.kill('SIGKILL');
+        try { chromeProc.kill('SIGKILL'); } catch (_) {}
+        if (devServerStarted) {
+            try { server.close(); } catch (_) {}
+        }
     }
 }
 
