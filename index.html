@@ -75,9 +75,9 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous">
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
-    <link rel="stylesheet" href="styles.css?v=2.0.8">
+    <link rel="stylesheet" href="styles.css?v=2.4.1">
     <script src="science-format.js?v=2.0.1"></script>
-    <script type="module" src="app/bootstrap.js?v=2.3.4"></script>
+    <script type="module" src="app/bootstrap.js?v=2.4.1"></script>
 </head>
 <body class="dark min-h-screen bg-black text-white">
 
@@ -5154,6 +5154,18 @@ function postProcessAssistantResponse(rawText, userMessage = '') {
     // Keep tense accurate for historical "When did ... release?" questions.
     text = fixHistoricalReleaseWording(text, userMessage);
 
+    // Ensure medical, clinical, and health responses always carry the required professional disclaimer
+    const isMedicalQuery = (typeof isMedicalAdviceIntent === 'function' && isMedicalAdviceIntent(userMessage)) ||
+        (typeof isMedicalEmergencyIntent === 'function' && isMedicalEmergencyIntent(userMessage)) ||
+        /\b(symptom|symptoms|doctor|patient|disease|syndrome|illness|fever|cough|chest pain|headache|migraine|infection|medication|drug|dose|dosage|pathology|pathophysiology|etiology|differential diagnosis|treatment|prognosis|clinic|clinical)\b/i.test(String(userMessage || ''));
+
+    const hasClinicalContent = /\b(pathophysiology|differential diagnos|treatment protocol|clinical management|contraindications?|pharmacokinetics?|pharmacology|symptoms?|prognosis|dosage|etiology)\b/i.test(text);
+
+    if ((isMedicalQuery || hasClinicalContent) && !/disclaimer.*(?:consult a doctor|basic idea)/i.test(text)) {
+        const medicalDisclaimer = '*Disclaimer: Please consult a doctor for confirmed diagnosis and personalized evaluation. This information is provided to give you a basic idea and educational overview.*';
+        text = `${text.trim()}\n\n${medicalDisclaimer}`;
+    }
+
     return ensureCompleteAssistantResponse(text);
 }
 
@@ -5177,7 +5189,7 @@ function ensureCompleteAssistantResponse(text) {
     if (/^https?:\/\//i.test(lastRawLine) || /\[[^\]]+\]\(https?:\/\/[^)]+\)$/i.test(lastRawLine)) return out;
     if (/(?:^|\n)\s*Sources:\s*/i.test(out) && /(https?:\/\/|\[[^\]]+\]\(https?:\/\/)/i.test(lastRawLine)) return out;
 
-    if (/[.!?。！？)"'\]}]$/.test(visible)) return out;
+    if (/[.!?。！？)"'\]}*_]$/.test(visible)) return out;
 
     const lastLine = visible.toLowerCase().split('\n').map(line => line.trim()).filter(Boolean).pop() || '';
     const hangingClause = /(?:[,;:]|\.\.\.|[\-–—(])$/.test(lastLine) ||
@@ -5863,20 +5875,20 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
                 'Conversational guidelines: Maintain continuity with previous dialogue, resolve pronouns and retrospective references naturally, and avoid repeating information already stated. Never end responses with generic hollow offers like "Would you like to know more?", "Is there anything else I can help with?", "Feel free to ask", or "Hope that helps!" — these are robotic filler and add no value. For substantive answers, one specific contextual follow-up question or concrete next step is acceptable only when it genuinely advances the discussion; for short or factual queries, answer directly and stop.'
             ].filter(Boolean).join('\n\n');
 
-        // Multi-tier conversational context (Tier 1 verbatim window, Tier 2 semantic retrieval, Tier 3 rolling milestone summary)
+        // Multi-tier conversational context across entire conversation thread (Tier 1 verbatim window, Tier 2 semantic retrieval, Tier 3 rolling milestone summary)
         let multiTierContext = null;
         if (typeof window.JarvisConversation?.buildMultiTierContext === 'function') {
             multiTierContext = window.JarvisConversation.buildMultiTierContext({
                 message: normalizedUserMessage,
-                maxRecentTurns: 10,
-                maxContextChars: 12000,
+                maxRecentTurns: 40,
+                maxContextChars: 64000,
                 systemPrompt: systemDirectives
             });
         }
 
         let engineContext = multiTierContext?.context || window.JarvisConversation?.buildContext({
-            maxTurns: 12,
-            maxContextChars: 12000
+            maxTurns: 40,
+            maxContextChars: 64000
         }) || [];
 
         const hasAssistantInContext = engineContext.some(t => t && t.role === 'assistant');
@@ -17195,7 +17207,7 @@ async function fetchLiveSearchJson(query, options = {}) {
     const { signal, cleanup } = createSafeTimeoutSignal(searchTimeout, options.signal);
     try {
         const safeContext = Array.isArray(options.context)
-            ? options.context.slice(-8).map(c => ({
+            ? options.context.map(c => ({
                 role: c?.role === 'assistant' ? 'assistant' : 'user',
                 content: String(c?.content || c?.text || '').replace(/data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/g, '[image]').slice(0, 2500)
             }))
@@ -20733,8 +20745,7 @@ function decideAnswerPath(classification) {
 
     if (flags.inappropriate) return 'moderation';
     if (flags.highRiskMentalHealth) return 'high_risk_mental_health';
-    if (flags.medicalEmergency) return 'medical_emergency';
-    if (flags.medicalAdvice) return 'medical_advice';
+    if (flags.medicalEmergency || flags.medicalAdvice) return 'medical_qa';
     if (flags.pureHowToCoding) return 'default_model';
     if (flags.artistSong) return 'artist_song';
     if (flags.explicitWebSearch) return 'web_search';
@@ -23719,7 +23730,7 @@ async function handleUniversalEntityFactQuery(userText, liveIntent = null) {
 }
 
 
-function getActiveResearchContext(currentQuery = '', maxTurns = 16) {
+function getActiveResearchContext(currentQuery = '', maxTurns = Infinity) {
     const session = chatSessions.find(item => item.id === activeChatSessionId && !item.deleted);
     let messages = Array.isArray(session?.messages) ? session.messages : [];
     if (activeResponseRenderContext?.isRegeneration) {
@@ -23730,11 +23741,17 @@ function getActiveResearchContext(currentQuery = '', maxTurns = 16) {
     } else if (messages.at(-1)?.role === 'user' && messages.at(-1)?.text === currentQuery) {
         messages = messages.slice(0, -1);
     }
-    return messages.slice(-Math.max(1, maxTurns) * 2).map(item => {
+    const targetMessages = Number.isFinite(maxTurns) && maxTurns > 0
+        ? messages.slice(-Math.max(1, maxTurns) * 2)
+        : messages;
+    const totalCount = targetMessages.length;
+    return targetMessages.map((item, idx) => {
         let content = String(item.text || '').trim();
         content = content.replace(/data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/g, '[attached image]');
-        if (content.length > 1500) {
-            content = content.slice(0, 1500) + '...';
+        const isRecent = idx >= totalCount - 16;
+        const charLimit = isRecent ? 1500 : 600;
+        if (content.length > charLimit) {
+            content = content.slice(0, charLimit) + '...';
         }
         return {
             role: item.role === 'assistant' ? 'assistant' : 'user',
@@ -25812,15 +25829,29 @@ If the user asks for Andhra-style, Hyderabadi, Tamil, etc., respect that style.`
                 return;
             }
 
-            if (answerPath === 'medical_emergency') {
-                await deliverApiReply('medical_emergency', {
-                    userMessage: cleanText,
-                    emergencyGuidance: [
-                        'Call emergency services right now for chest pain, trouble breathing, severe bleeding, stroke symptoms, or loss of consciousness',
-                        'Go to the nearest emergency room if available',
-                        'If safe, keep the person still and do not give food, drink, or medicine unless already instructed by a clinician'
-                    ]
-                }, { historyKey: text });
+            if (answerPath === 'medical_qa' || answerPath === 'medical_emergency' || answerPath === 'medical_advice') {
+                const clinicalPrompt = `Answer this medical, clinical, pharmacological, or physiological inquiry thoroughly, accurately, and professionally, matching the user's clinical or general level of inquiry: "${text}"
+
+Rules:
+1. Provide comprehensive, evidence-based medical mechanisms, differential diagnoses, pharmacology, clinical management, and emergency considerations. Answer whatever or however the prompt is framed without deflecting or refusing.
+2. Maintain clinical precision and rigor for medical professionals, while keeping explanations structured and clear.
+3. Conclude the response with this exact disclaimer:
+"*Disclaimer: Please consult a doctor for confirmed diagnosis and personalized evaluation. This information is provided to give you a basic idea and educational overview.*"`;
+                const medicalResponse = await callAIWithTyping(clinicalPrompt, 'Consulting clinical knowledge...', {
+                    directModel: true,
+                    stream: true,
+                    displayUserMessage: text,
+                    routingMessage: text
+                });
+                if (medicalResponse?.aborted) return;
+                const processed = postProcessAssistantResponse(medicalResponse.response || '', text);
+                await publishResolvedModelMessage(text, processed, {
+                    label: 'Clinical answer',
+                    summaryText: "Clinical overview and educational guidance.",
+                    routing: medicalResponse?.routing || null,
+                    existingAssistantMessageId: medicalResponse?.assistantMessageId || '',
+                    fastFinalizeStreamed: true
+                });
                 return;
             }
 
@@ -25841,38 +25872,6 @@ If the user asks for Andhra-style, Hyderabadi, Tamil, etc., respect that style.`
                     fastFinalizeStreamed: true
                 });
                 return;
-            }
-
-            if (answerPath === 'medical_advice') { 
-                const medicalPrompt = `The user is asking for medical or symptom advice: "${text}". 
- 
-Respond with these rules: 
-1. Clearly state you are not a doctor and this is general guidance only
-2. Do not give a diagnosis or claim certainty
-3. Give safe, practical self-care steps that are commonly appropriate
-4. Mention red-flag symptoms that mean they should seek urgent medical care
-5. If the request is about medicine, dosing, pregnancy, infants, severe symptoms, or multiple conditions, tell them to confirm with a licensed clinician or pharmacist
-6. Keep the tone calm, direct, and concise
-7. Do not invent prescriptions, dosages, or treatment plans
-
-Format:
-- What it might mean: <brief, cautious statement>
-- What you can do now: <2-4 practical steps>
-- Get urgent help if: <red flags>
-- Safer next step: <when to contact a doctor/pharmacist>`;
-                const medicalResponse = await callAIWithTyping(medicalPrompt, 'Preparing safe medical guidance...', {
-                    directModel: true,
-                    stream: true,
-                    displayUserMessage: text,
-                    routingMessage: text
-                });
-                if (medicalResponse?.aborted) return;
-                await publishResolvedModelMessage(text, medicalResponse.response, {
-                    label: 'Model answer',
-                    summaryText: "Here is some general medical guidance.",
-                    routing: medicalResponse?.routing || null
-                }); 
-                return; 
             } 
 
             if (answerPath === 'motivation_story') {
