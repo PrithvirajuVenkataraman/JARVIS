@@ -1,48 +1,48 @@
-import { createConversationEngine } from './context-engine.js?v=2.3.4';
-import { ApiError, postJson } from './api-client.js?v=2.3.4';
+import { createConversationEngine } from './context-engine.js?v=2.4.1';
+import { ApiError, postJson } from './api-client.js?v=2.4.1';
 
 // Expose JarvisApi immediately so downstream modules always have access
 globalThis.JarvisApi = Object.freeze({ ApiError, postJson });
-import { createApplicationState } from './state.js?v=2.3.4';
-import { createSafeStorage } from './storage.js?v=2.3.4';
-import { installSpeechInputUI } from './speech-input.js?v=2.3.4';
-import * as JarvisFrontendRouting from './frontend-routing.js?v=2.3.4';
-import * as JarvisFailurePolicy from './failure-policy.js?v=2.3.4';
-import * as JarvisPlaceGrounding from './place-grounding.js?v=2.3.4';
-import * as JarvisObservability from './observability.js?v=2.3.4';
-import * as JarvisSessionRecovery from './session-recovery.js?v=2.3.4';
-import * as JarvisInstantReplies from './instant-replies.js?v=2.3.4';
-import * as JarvisSourceTransparency from './source-transparency.js?v=2.3.4';
-import * as JarvisContextCopilotUi from './context-copilot-ui.js?v=2.3.4';
-import * as JarvisMemoryQuality from './memory-quality.js?v=2.3.4';
-import * as JarvisAttachments from './attachments.js?v=2.3.4';
-import * as JarvisAgentWorkflows from './agent-workflows.js?v=2.3.4';
-import JarvisDataVerification from './data-tracking-verification.js?v=2.3.4';
-import * as JarvisToolDispatcher from './tool-dispatcher.js?v=2.3.4';
-import { highlightCode, normalizeLang } from './code-highlighter.js?v=2.3.4';
-import { renderMathInText, formatLatexExpression } from './math-renderer.js?v=2.3.4';
-import * as JarvisMarkdownRenderer from './markdown-renderer.js?v=2.3.4';
-import * as JarvisAgentOrchestrator from './agent-orchestrator.js?v=2.3.4';
-import * as JarvisLocationSuite from './location-suite.js?v=2.3.4';
-import * as JarvisEmergencySOS from './emergency-sos.js?v=2.3.4';
-import * as JarvisImageConfig from './image-generation-config.js?v=2.3.4';
-import * as JarvisImageStorage from './image-storage.js?v=2.3.4';
-import * as JarvisImageGenerator from './image-generator.js?v=2.3.4';
-import { selfImprovingMemory } from './self-improving-memory.js?v=2.3.4';
-import * as JarvisLiveResearch from './bounded-live-research.js?v=2.3.4';
-import * as JarvisQueryNormalizer from './query-normalizer.js?v=2.3.4';
-import * as JarvisUnifiedMemory from './unified-memory.js?v=2.3.4';
-import * as JarvisDocumentExporter from './document-exporter.js?v=2.3.4';
-import * as JarvisDlpGateway from './dlp-gateway.js?v=2.3.4';
-import * as JarvisDlpEngine from './dlp-engine.js?v=2.3.4';
-import * as JarvisConversationSearch from './conversation-search.js?v=2.3.4';
+import { createApplicationState } from './state.js?v=2.4.1';
+import { createSafeStorage } from './storage.js?v=2.4.1';
+import { installSpeechInputUI } from './speech-input.js?v=2.4.1';
+import * as JarvisFrontendRouting from './frontend-routing.js?v=2.4.1';
+import * as JarvisFailurePolicy from './failure-policy.js?v=2.4.1';
+import * as JarvisPlaceGrounding from './place-grounding.js?v=2.4.1';
+import * as JarvisObservability from './observability.js?v=2.4.1';
+import * as JarvisSessionRecovery from './session-recovery.js?v=2.4.1';
+import * as JarvisInstantReplies from './instant-replies.js?v=2.4.1';
+import * as JarvisSourceTransparency from './source-transparency.js?v=2.4.1';
+import * as JarvisContextCopilotUi from './context-copilot-ui.js?v=2.4.1';
+import * as JarvisMemoryQuality from './memory-quality.js?v=2.4.1';
+import * as JarvisAttachments from './attachments.js?v=2.4.1';
+import * as JarvisAgentWorkflows from './agent-workflows.js?v=2.4.1';
+import JarvisDataVerification from './data-tracking-verification.js?v=2.4.1';
+import * as JarvisToolDispatcher from './tool-dispatcher.js?v=2.4.1';
+import { highlightCode, normalizeLang } from './code-highlighter.js?v=2.4.1';
+import { renderMathInText, formatLatexExpression } from './math-renderer.js?v=2.4.1';
+import * as JarvisMarkdownRenderer from './markdown-renderer.js?v=2.4.1';
+import * as JarvisAgentOrchestrator from './agent-orchestrator.js?v=2.4.1';
+import * as JarvisLocationSuite from './location-suite.js?v=2.4.1';
+import * as JarvisEmergencySOS from './emergency-sos.js?v=2.4.1';
+import * as JarvisImageConfig from './image-generation-config.js?v=2.4.1';
+import * as JarvisImageStorage from './image-storage.js?v=2.4.1';
+import * as JarvisImageGenerator from './image-generator.js?v=2.4.1';
+import { selfImprovingMemory } from './self-improving-memory.js?v=2.4.1';
+import * as JarvisLiveResearch from './bounded-live-research.js?v=2.4.1';
+import * as JarvisQueryNormalizer from './query-normalizer.js?v=2.4.1';
+import * as JarvisUnifiedMemory from './unified-memory.js?v=2.4.1';
+import * as JarvisDocumentExporter from './document-exporter.js?v=2.4.1';
+import * as JarvisDlpGateway from './dlp-gateway.js?v=2.4.1';
+import * as JarvisDlpEngine from './dlp-engine.js?v=2.4.1';
+import * as JarvisConversationSearch from './conversation-search.js?v=2.4.1';
 
-import { createInteractionStateMachine, InteractionState } from './interaction-state.js?v=2.3.4';
+import { createInteractionStateMachine, InteractionState } from './interaction-state.js?v=2.4.1';
 
 const engine = createConversationEngine({
-    maxTurns: 30,
+    maxTurns: 50,
     maxTurnHistory: 200,
-    maxContextChars: 16000,
+    maxContextChars: 64000,
     maxThreads: 8
 });
 
