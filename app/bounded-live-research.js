@@ -1153,17 +1153,6 @@ export function renderOrUpdateVisualEntityHeader(rowElement, entity, notableWork
         </div>
     ` : '';
 
-    const sourceBtnHtml = pageUrl ? `
-        <a href="${escapeHtmlText(pageUrl)}" target="_blank" rel="noopener noreferrer" class="entity-hero-source-btn" title="View reference on Wikipedia">
-            <span>Verified Reference</span>
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
-                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
-                <polyline points="15 3 21 3 21 9"></polyline>
-                <line x1="10" y1="14" x2="21" y2="3"></line>
-            </svg>
-        </a>
-    ` : '';
-
     let notableWorksHtml = '';
     if (validWorks.length > 0) {
         const workCardsHtml = validWorks.map(w => {
@@ -1205,9 +1194,6 @@ export function renderOrUpdateVisualEntityHeader(rowElement, entity, notableWork
                     <span class="entity-hero-badge">${safeType}</span>
                 </div>
                 ${safeDesc ? `<div class="entity-hero-desc">${safeDesc}</div>` : ''}
-                <div class="entity-hero-footer">
-                    ${sourceBtnHtml}
-                </div>
             </div>
         </div>
         ${notableWorksHtml}
