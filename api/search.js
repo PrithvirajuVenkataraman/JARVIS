@@ -573,6 +573,14 @@ export async function handleStreamingWebRag(req, res, { rawQuery, limit = 8, cus
             timeoutMs: RESEARCH_LIMITS.TOTAL_MS,
             signal: controller.signal,
             onEvent: async (event, data) => {
+                if (event === 'entity') {
+                    const sameEntity = resolvedVisuals?.entity && data?.entity && (resolvedVisuals.entity.id === data.entity.id || resolvedVisuals.entity.name === data.entity.name);
+                    const sameWorksCount = (resolvedVisuals?.notableWorks?.length || 0) === (data?.notableWorks?.length || 0);
+                    if (sameEntity && sameWorksCount) {
+                        return; // Drop redundant duplicate entity SSE event
+                    }
+                    resolvedVisuals = data;
+                }
                 if (event === 'done') {
                     const visuals = resolvedVisuals || await Promise.race([visualsPromise, new Promise(r => setTimeout(r, 600))]);
                     if (visuals?.entity) {
