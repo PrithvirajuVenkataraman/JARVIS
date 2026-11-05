@@ -1149,7 +1149,7 @@ export function renderOrUpdateVisualEntityHeader(rowElement, entity, notableWork
 
     const avatarHtml = imageUrl ? `
         <div class="entity-hero-avatar-wrap">
-            <img class="entity-hero-avatar" src="${escapeHtmlText(imageUrl)}" alt="${safeName}" loading="lazy" onerror="this.closest('.entity-hero-avatar-wrap').style.display='none';" />
+            <img class="entity-hero-avatar" src="${escapeHtmlText(imageUrl)}" alt="${safeName}" loading="eager" decoding="async" onerror="this.closest('.entity-hero-avatar-wrap').style.display='none';" />
         </div>
     ` : '';
 
@@ -1161,7 +1161,7 @@ export function renderOrUpdateVisualEntityHeader(rowElement, entity, notableWork
             const wUrl = w.image?.sourceUrl || w.sourceUrl || (pageUrl ? pageUrl : `https://en.wikipedia.org/wiki/${encodeURIComponent((w.title || w.name || '').replace(/\s+/g, '_'))}`);
             const wImg = w.image?.url ? `
                 <div class="notable-work-thumb-wrap">
-                    <img class="notable-work-thumb" src="${escapeHtmlText(w.image.url)}" alt="${wTitle}" loading="lazy" onerror="this.closest('.notable-work-thumb-wrap').style.display='none';" />
+                    <img class="notable-work-thumb" src="${escapeHtmlText(w.image.url)}" alt="${wTitle}" loading="eager" decoding="async" onerror="this.closest('.notable-work-thumb-wrap').style.display='none';" />
                 </div>
             ` : '';
             return `
@@ -1202,13 +1202,48 @@ export function renderOrUpdateVisualEntityHeader(rowElement, entity, notableWork
     let visualContainer = bubble.querySelector('.chat-entity-visual-container');
     const textEl = bubble.querySelector('.assistant-message-text');
 
+    const entityKey = String(entity.id || entity.name || '').trim().toLowerCase();
+    const worksHash = validWorks.map(w => `${w.title || w.name}:${w.image?.url || ''}`).join('|');
+    const imgKey = String(imageUrl || '').trim();
+
     if (visualContainer) {
+        const currentEntityKey = visualContainer.dataset.entityKey || '';
+        const currentImgKey = visualContainer.dataset.imageUrl || '';
+        const currentWorksHash = visualContainer.dataset.worksHash || '';
+
+        // Idempotency: if same entity & same works already mounted, preserve DOM completely (zero flicker)
+        if (currentEntityKey === entityKey && currentImgKey === imgKey && currentWorksHash === worksHash) {
+            return;
+        }
+
+        // If entity matches but notable works tray arrived/updated, patch ONLY the works tray
+        if (currentEntityKey === entityKey && currentImgKey === imgKey) {
+            visualContainer.dataset.worksHash = worksHash;
+            let existingTray = visualContainer.querySelector('.notable-works-tray');
+            if (notableWorksHtml) {
+                if (existingTray) {
+                    existingTray.outerHTML = notableWorksHtml;
+                } else {
+                    visualContainer.insertAdjacentHTML('beforeend', notableWorksHtml);
+                }
+            } else if (existingTray) {
+                existingTray.remove();
+            }
+            return;
+        }
+
         visualContainer.innerHTML = containerHtml;
+        visualContainer.dataset.entityKey = entityKey;
+        visualContainer.dataset.imageUrl = imgKey;
+        visualContainer.dataset.worksHash = worksHash;
     } else {
         visualContainer = document.createElement('div');
         visualContainer.className = 'chat-entity-visual-container';
         visualContainer.setAttribute('role', 'region');
         visualContainer.setAttribute('aria-label', `${safeName} Entity Details`);
+        visualContainer.dataset.entityKey = entityKey;
+        visualContainer.dataset.imageUrl = imgKey;
+        visualContainer.dataset.worksHash = worksHash;
         visualContainer.innerHTML = containerHtml;
         if (textEl) {
             textEl.before(visualContainer);
