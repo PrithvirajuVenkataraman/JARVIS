@@ -10,9 +10,9 @@
  * - T + 9000ms: HARD APPLICATION DEADLINE. Abort stream. Render verified snippet answer. Lock turn state.
  */
 
-import { normalizeUserQuery, hasSearchableContent } from './query-normalizer.js?v=2.3.1';
-import { BM25Index, computeBM25Scores, tokenizeText } from './bm25.js?v=2.3.1';
-import { textToEmbeddingVector, vectorCosineSimilarity } from './frontend-routing.js?v=2.3.1';
+import { normalizeUserQuery, hasSearchableContent } from './query-normalizer.js?v=2.4.1';
+import { BM25Index, computeBM25Scores, tokenizeText } from './bm25.js?v=2.4.1';
+import { textToEmbeddingVector, vectorCosineSimilarity } from './frontend-routing.js?v=2.4.1';
 import { executeRemoteResearch, streamResearchRequest } from './search/research-stream.mjs';
 export { streamResearchRequest } from './search/research-stream.mjs';
 
