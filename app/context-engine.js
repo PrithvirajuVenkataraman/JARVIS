@@ -1302,8 +1302,8 @@ export function retrievePastTurns(turns = [], query = '', options = {}) {
  */
 export function buildMultiTierContext(state, options = {}) {
     const currentMessage = cleanText(options.message || '');
-    const maxRecentTurns = clamp(options.maxRecentTurns || options.maxVerbatimTurns, 8, 2, 20);
-    const maxContextChars = clamp(options.maxContextChars, 12000, 1000, 24000);
+    const maxRecentTurns = clamp(options.maxRecentTurns || options.maxVerbatimTurns, 40, 2, 100);
+    const maxContextChars = clamp(options.maxContextChars, 64000, 1000, 64000);
 
     const allTurns = Array.isArray(state?.turns) ? state.turns : [];
     const threadId = cleanText(options.threadId) || state?.activeThreadId || '';
