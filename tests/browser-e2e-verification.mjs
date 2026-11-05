@@ -105,7 +105,18 @@ async function runBrowserTests() {
         // Navigate to local dev server
         console.log('[Navigating to http://127.0.0.1:3000]');
         await sendCommand('Page.navigate', { url: 'http://127.0.0.1:3000' });
-        await sleep(2500);
+        
+        // Wait for page to finish loading modules
+        for (let i = 0; i < 30; i++) {
+            const check = await sendCommand('Runtime.evaluate', {
+                expression: `Boolean(window.JarvisLiveResearch && window.JarvisMarkdownRenderer && window.JarvisApi)`,
+                returnByValue: true
+            });
+            if (check?.result?.result?.value || check?.result?.value) {
+                break;
+            }
+            await sleep(250);
+        }
 
         // Check for JS SyntaxErrors / module errors
         console.log(`Console error count during load: ${consoleErrors.length}`);
@@ -168,6 +179,7 @@ async function runBrowserTests() {
                 const badge = row.querySelector('.entity-hero-badge')?.textContent;
                 const worksTray = row.querySelector('.notable-works-tray');
                 const workCards = row.querySelectorAll('.notable-work-card');
+                const sourceBtn = row.querySelector('.entity-hero-source-btn');
 
                 return {
                     hasHeroCard: Boolean(heroCard),
@@ -175,7 +187,8 @@ async function runBrowserTests() {
                     name,
                     badge,
                     hasWorksTray: Boolean(worksTray),
-                    worksCount: workCards.length
+                    worksCount: workCards.length,
+                    hasSourceBtn: Boolean(sourceBtn)
                 };
             })()`,
             returnByValue: true
@@ -189,6 +202,7 @@ async function runBrowserTests() {
         assert.equal(visualResult?.badge, 'Musician', 'Badge must match entity type');
         assert.equal(visualResult?.hasWorksTray, true, 'Notable works tray must be present');
         assert.equal(visualResult?.worksCount, 3, 'Must render 3 notable work cards');
+        assert.equal(visualResult?.hasSourceBtn, false, 'Verified Reference button must be removed per user specification');
         console.log('[PASS] Real browser visual entity hero card & notable works tray verified');
 
         // Test In-Text Citation Source Logo Rendering
