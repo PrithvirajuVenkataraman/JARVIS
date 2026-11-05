@@ -169,6 +169,64 @@ test('context is used to resolve a follow-up without rewriting a new standalone 
     assert.equal(deterministicResearchPlan('Ocean salinity', context).query, 'Ocean salinity');
 });
 
+test('deterministic research plan resolves ordinal follow-up references across multiple conversation turns', () => {
+    const multiTurnContext = [
+        { role: 'user', content: 'Who is the CEO of Microsoft?' },
+        { role: 'assistant', content: 'The CEO of Microsoft is Satya Nadella.' },
+        { role: 'user', content: 'Where was he born?' },
+        { role: 'assistant', content: 'He was born in Hyderabad, India.' },
+        { role: 'user', content: 'What degrees does he hold?' },
+        { role: 'assistant', content: 'He holds a bachelor degree from Manipal Institute of Technology.' }
+    ];
+    const plan1 = deterministicResearchPlan('And when was the first question company founded?', multiTurnContext);
+    assert.match(plan1.query, /Who is the CEO of Microsoft/i);
+
+    const plan2 = deterministicResearchPlan('Going back to the first question, when was that company founded?', multiTurnContext);
+    assert.match(plan2.query, /Who is the CEO of Microsoft/i);
+
+    const plan3 = deterministicResearchPlan('And what year was the second question about?', multiTurnContext);
+    assert.match(plan3.query, /Where was he born/i);
+});
+
+test('ChatGPT-grade full thread memory: resolves distant 4th, 5th, and arbitrary N-th questions across 20+ turns without forgetting Turn 1', () => {
+    const extendedContext = [
+        { role: 'user', content: 'Who founded Apple Inc.?' }, // Turn 1
+        { role: 'assistant', content: 'Steve Jobs, Steve Wozniak, and Ronald Wayne founded Apple.' },
+        { role: 'user', content: 'Where is Oxford University located?' }, // Turn 2
+        { role: 'assistant', content: 'Oxford University is located in Oxford, England.' },
+        { role: 'user', content: 'What is quantum superposition?' }, // Turn 3
+        { role: 'assistant', content: 'Quantum superposition is a fundamental principle of quantum mechanics.' },
+        { role: 'user', content: 'When was the Eiffel Tower constructed?' }, // Turn 4
+        { role: 'assistant', content: 'The Eiffel Tower was constructed between 1887 and 1889.' },
+        { role: 'user', content: 'Who directed the movie Inception?' }, // Turn 5
+        { role: 'assistant', content: 'Christopher Nolan directed Inception.' }
+    ];
+    // Add additional turns up to 24 turns
+    for (let i = 6; i <= 20; i++) {
+        extendedContext.push({ role: 'user', content: `Routine question number ${i} about science topic ${i}` });
+        extendedContext.push({ role: 'assistant', content: `Factual answer explaining science topic ${i}` });
+    }
+
+    // 1st question resolution across 20+ turns
+    const planFirst = deterministicResearchPlan('What about the 1st question?', extendedContext);
+    assert.match(planFirst.query, /Apple Inc/i);
+
+    // 4th question resolution
+    const planFourth = deterministicResearchPlan('And what was the height in the 4th question?', extendedContext);
+    assert.match(planFourth.query, /Eiffel Tower/i);
+
+    // 5th query resolution
+    const planFifth = deterministicResearchPlan('What awards did the 5th query win?', extendedContext);
+    assert.match(planFifth.query, /Inception/i);
+
+    // Category coreference across long thread
+    const planCompany = deterministicResearchPlan('When did that company go public?', extendedContext);
+    assert.match(planCompany.query, /Apple Inc/i);
+
+    const planUniversity = deterministicResearchPlan('How old is that university?', extendedContext);
+    assert.match(planUniversity.query, /Oxford University/i);
+});
+
 test('headline-only evidence fails coverage even when many domains are returned', async () => {
     const records = Array.from({ length: 8 }, (_, i) => normalizeEvidence(source({ url: `https://publisher${i}.example.com/article`, snippet: 'Orbital telescope calibration' }), query));
     assert.equal(evaluateResearchCoverage(plan(), records).sufficient, false);
