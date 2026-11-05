@@ -75,9 +75,9 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous">
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
-    <link rel="stylesheet" href="styles.css?v=2.0.7">
+    <link rel="stylesheet" href="styles.css?v=2.0.8">
     <script src="science-format.js?v=2.0.1"></script>
-    <script type="module" src="app/bootstrap.js?v=2.2.0"></script>
+    <script type="module" src="app/bootstrap.js?v=2.3.4"></script>
 </head>
 <body class="dark min-h-screen bg-black text-white">
 
@@ -478,12 +478,13 @@
                         onclick="toggleVoiceToText(event)"
                         title="Voice typing (Dictation)" aria-label="Voice typing (Dictation)"
                         aria-pressed="false">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <svg class="vtt-mic-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                             <rect x="9" y="2" width="6" height="12" rx="3"></rect>
                             <path d="M5 10a7 7 0 0 0 14 0"></path>
                             <path d="M12 17v5"></path>
                             <path d="M8 22h8"></path>
                         </svg>
+                        <span class="vtt-loader-spinner" aria-hidden="true"></span>
                     </button>
                     <button
                         id="send-message-btn"
@@ -525,6 +526,30 @@
         register(name, api) {
             if (!name) return;
             this.modules[name] = api || {};
+        }
+    };
+
+    window.JarvisApi = window.JarvisApi || {
+        ApiError: class ApiError extends Error {
+            constructor(message, status = 500, details = null) {
+                super(message);
+                this.name = 'ApiError';
+                this.status = status;
+                this.details = details;
+            }
+        },
+        async postJson(path, payload, options = {}) {
+            const res = await fetch(path, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+                body: JSON.stringify(payload),
+                signal: options.signal
+            });
+            if (!res.ok) {
+                const errData = await res.json().catch(() => ({}));
+                throw new Error(errData?.error?.message || `HTTP error ${res.status}`);
+            }
+            return res.json();
         }
     };
 })();
@@ -3827,6 +3852,38 @@ function buildVerificationSnapshot(items, domain = 'general', riskLevel = 'mediu
     };
 }
 
+function cleanBulletEndCitations(text, isItem = false) {
+    if (!text || typeof text !== 'string') return '';
+    return text.split('\n').map(line => {
+        line = line.replace(/^[\s\-*•+–—]+\s*(#{1,6}\s+)/, '$1');
+        line = line.replace(/^[\s\-*•+–—]{2,}\s*/, '- ');
+
+        let cleaned = line
+            .replace(/\s*【[^】]*】\s*([.,;!?]?)/g, '$1')
+            .replace(/\s*\[f\d+(?:\s*,\s*f?\d+)*\]\s*([.,;!?]?)/g, '$1');
+
+        const bulletMatch = cleaned.match(/^(\s*(?:[-*•+]|\d+\.)\s+)(.*)$/);
+        if (bulletMatch) {
+            const prefix = bulletMatch[1];
+            let body = bulletMatch[2];
+            body = body.replace(/^[\s\-*•+–—]+(?:\s+|$)/, '');
+            body = body.replace(/(?:[\s\u00A0]*(?:【[^】]*】|\[f?\d+(?:\s*,\s*f?\d+)*\]|\([1-9]\d{0,1}\)))+[\s\u00A0]*([.,;!?]?)$/g, '$1');
+            body = body.replace(/([.,;!?])\s*(?:【[^】]*】|\[f?\d+(?:\s*,\s*f?\d+)*\]|\([1-9]\d{0,1}\))\s*$/g, '$1');
+            body = body.replace(/[\s\u00A0]+([.,;!?])/g, '$1').trimEnd();
+            return isItem ? body : `${prefix}${body}`;
+        }
+
+        if (isItem) {
+            cleaned = cleaned.replace(/^[\s\-*•+–—]+(?:\s+|$)/, '');
+            cleaned = cleaned.replace(/(?:[\s\u00A0]*(?:【[^】]*】|\[f?\d+(?:\s*,\s*f?\d+)*\]|\([1-9]\d{0,1}\)))+[\s\u00A0]*([.,;!?]?)$/g, '$1');
+            cleaned = cleaned.replace(/([.,;!?])\s*(?:【[^】]*】|\[f?\d+(?:\s*,\s*f?\d+)*\]|\([1-9]\d{0,1}\))\s*$/g, '$1');
+            cleaned = cleaned.replace(/[\s\u00A0]+([.,;!?])/g, '$1').trimEnd();
+        }
+
+        return cleaned;
+    }).join('\n');
+}
+
 function stripInlineCitationMarkers(text) {
     if (!text || typeof text !== 'string') return '';
     let cleaned = text;
@@ -3842,14 +3899,18 @@ function stripInlineCitationMarkers(text) {
     cleaned = cleaned.replace(/\b(?:according\s+to|based\s+on)\s*\[\d+(?:\s*,\s*\d+)*\](?:\s*,?\s*\[\d+(?:\s*,\s*\d+)*\])*(?:,\s*)?/gi, '');
     cleaned = cleaned.replace(/\b(?:sources?|references?)\s*\[\d+(?:\s*,\s*\d+)*\](?:\s*,?\s*\[\d+(?:\s*,\s*\d+)*\])*/gi, '');
 
-    // 3. Remove standalone or comma-separated brackets: [1], [2], [1, 2], 【1】, (1)
+    // 3. Remove standalone or comma-separated brackets: [1], [2], [1, 2], 【1】, (1), 【f1】, [f1]
     cleaned = cleaned
-        .replace(/\s*【\d+(?:\s*,\s*\d+)*】/g, '')
+        .replace(/\s*【[^】]*】/g, '')
+        .replace(/\s*\[f\d+(?:\s*,\s*f?\d+)*\]/g, '')
         .replace(/\s*\[\d+(?:\s*,\s*\d+)*\](?=\s|[.,;:!?)]|$)/g, '')
         .replace(/\s+\(\d+(?:\s*,\s*\d+)*\)(?=\s|[.,;:!?]|$)/g, '');
 
     // 4. Clean up any remaining dangling bracket numbers
     cleaned = cleaned.replace(/\[\d+(?:\s*,\s*\d+)*\]/g, '');
+
+    // 5. Remove numbers/citations at the end of bullet points
+    cleaned = cleanBulletEndCitations(cleaned);
 
     // 5. Clean up any dangling prepositions left before punctuation:
     cleaned = cleaned.replace(/\b(?:as\s+)?(?:found|noted|stated|reported|seen|detailed|documented|cited)\s+(?:in|on|at|by|from)\s*([.,;:!?])/gi, '$1');
@@ -3873,6 +3934,7 @@ function cleanLiveAnswerText(text) {
     return stripInlineCitationMarkers(
         normalizeAssistantTextStyle(String(text || ''))
             .replace(/^\s*(?:\*\*)?Direct answer:(?:\*\*)?\s*/i, '')
+            .replace(/^\s*(?:\*\*)?Key (?:points|context & details):(?:\*\*)?\s*/gim, '')
             .replace(/\n\s*Confidence:\s*[^\n]*/gi, '')
             .replace(/\n\s*Verified sources checked:\s*[^\n]*/gi, '')
             .replace(/\n{3,}/g, '\n\n')
@@ -3907,11 +3969,7 @@ async function buildDirectLiveAnswer(question, items, signal) {
 User question: "${question}"
 
 Required format:
-Direct answer: <give a short summary first in 1-3 sentences; if the user asked who won/score/stat, say that immediately>
-Key points:
-- <point 1>
-- <point 2>
-- <point 3>
+Direct answer: <answer the question directly and comprehensively in natural, fluent paragraphs; use markdown headings for distinct thematic sections in longer answers and reserve bullet points only for genuine itemized lists or steps>
 Confidence: <High/Medium/Low based only on source agreement>
 
 Rules:
@@ -5266,6 +5324,15 @@ async function streamChatCompletion(payload, options = {}) {
             }
             return;
         }
+        if (event.event === 'entity') {
+            const id = ensureStreamMessage();
+            const row = findAssistantMessageRow(id);
+            const renderVisualFn = window.JarvisLiveResearch?.renderOrUpdateVisualEntityHeader || globalThis.JarvisLiveResearch?.renderOrUpdateVisualEntityHeader;
+            if (row && typeof renderVisualFn === 'function') {
+                renderVisualFn(row, event.data?.entity, event.data?.notableWorks || []);
+            }
+            return;
+        }
         if (event.event === 'status') {
             const nextState = event.data?.state || 'ANALYZING';
             const label = event.data?.label || (nextState === 'SEARCHING' ? 'SEARCHING' : 'Analyzing...');
@@ -5370,6 +5437,8 @@ async function streamChatCompletion(payload, options = {}) {
             updateStreamingAssistantMessage(id, doneResponse, {
                 userMessage,
                 streaming: false,
+                entity: donePayload.entity || null,
+                notableWorks: donePayload.notableWorks || [],
                 modelUsed: donePayload.modelUsed || streamMeta.modelUsed || streamMeta.model || '',
                 provider: donePayload.provider || streamMeta.provider || '',
                 failover: donePayload.failover || streamMeta.failover || false,
@@ -5899,10 +5968,17 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
                 routeDecision: requestOptions?.routeDecision || null,
                 timeoutMs: Number(requestOptions?.timeoutMs) > 0 ? Number(requestOptions.timeoutMs) : undefined
             })
-            : await window.JarvisApi.postJson((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, requestPayload, {
-                signal: controller.signal,
-                timeoutMs: Number(requestOptions?.timeoutMs) > 0 ? Number(requestOptions.timeoutMs) : 25000
-            });
+            : (window.JarvisApi?.postJson
+                ? await window.JarvisApi.postJson((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, requestPayload, {
+                    signal: controller.signal,
+                    timeoutMs: Number(requestOptions?.timeoutMs) > 0 ? Number(requestOptions.timeoutMs) : 25000
+                })
+                : await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(requestPayload),
+                    signal: controller.signal
+                }).then(r => r.json()));
         latencyTrace.apiEndedAt = performance.now();
         logLatencyTrace('chat_api_complete', {
             requestId: latencyTrace.requestId,
@@ -5950,7 +6026,11 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
                 stream: false
             });
             showThinkingIndicator('Finalizing');
-            const retryData = await window.JarvisApi.postJson((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, retryPayload, {
+            const safePost = window.JarvisApi?.postJson || (async (u, b, o) => {
+                const r = await fetch(u, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b), signal: o?.signal });
+                return r.json();
+            });
+            const retryData = await safePost((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, retryPayload, {
                 signal: controller.signal,
                 timeoutMs: 18000
             });
@@ -6075,7 +6155,16 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
         if (requestOptions?.stream === true && requestPayload && !isAbortError(error) && !isPermanentProviderFailure(error)) {
             try {
                 console.warn('[askGeminiAI] Stream failed, attempting direct non-streaming API fetch fallback for transient error:', error?.message || error);
-                const directRes = await window.JarvisApi.postJson(
+                const safePostJson = window.JarvisApi?.postJson || (async (url, body, opts) => {
+                    const res = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', ...(opts?.headers || {}) },
+                        body: JSON.stringify(body),
+                        signal: opts?.signal
+                    });
+                    return res.json();
+                });
+                const directRes = await safePostJson(
                     (window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq,
                     { ...requestPayload, stream: false },
                     {
@@ -9831,8 +9920,10 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             const text = String(rawText ?? '');
             if (!text.trim()) return '';
 
+            const sources = Array.isArray(options?.sources) ? options.sources : (Array.isArray(options?.meta?.sources) ? options.meta.sources : []);
+
             if (globalThis.JarvisMarkdownRenderer?.renderMarkdown) {
-                let rendered = globalThis.JarvisMarkdownRenderer.renderMarkdown(text, { linkClass });
+                let rendered = globalThis.JarvisMarkdownRenderer.renderMarkdown(text, { linkClass, sources, ...options });
                 // Skip heavy TreeWalker DOM enhancement during active streaming to prevent detached DOM heap thrashing
                 if (options?.streaming !== true && window.JarvisScienceFormat?.enhanceHtml) {
                     rendered = window.JarvisScienceFormat.enhanceHtml(rendered);
@@ -9915,10 +10006,25 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                     continue;
                 }
 
-                if (/^\s*[-*]\s+/.test(line)) {
+                if (/^\s*[-*•+]\s+/.test(line)) {
                     const items = [];
-                    while (i < lines.length && /^\s*[-*]\s+/.test(String(lines[i] || ''))) {
-                        items.push(String(lines[i]).replace(/^\s*[-*]\s+/, ''));
+                    while (i < lines.length && /^\s*[-*•+]\s+/.test(String(lines[i] || ''))) {
+                        let item = String(lines[i]).replace(/^\s*[-*•+]\s+/, '');
+                        item = item.replace(/^[\s\-*•+–—]+(?:\s+|$)/, '');
+                        if (typeof cleanBulletEndCitations === 'function') {
+                            item = cleanBulletEndCitations(item, true);
+                        }
+                        const trimmedItem = item.trim();
+                        const prevItem = items[items.length - 1];
+                        const prevEndsWithInitial = prevItem && (/\b[A-Za-z]\.$/.test(prevItem) || /\b[A-Za-z]\.\s+[A-Za-z]\.$/.test(prevItem));
+                        const isInitial = /^[A-Za-z]\.?$/.test(trimmedItem);
+                        const isShortWordOrName = /^[A-Z][a-z0-9]{1,15}\.?$/.test(trimmedItem);
+
+                        if (items.length > 0 && (isInitial || (prevEndsWithInitial && isShortWordOrName))) {
+                            items[items.length - 1] += ' ' + trimmedItem;
+                        } else if (trimmedItem) {
+                            items.push(trimmedItem);
+                        }
                         i += 1;
                     }
                     out.push(`<ul class="assistant-md-list">${items.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`);
@@ -9928,7 +10034,22 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 if (/^\s*\d+\.\s+/.test(line)) {
                     const items = [];
                     while (i < lines.length && /^\s*\d+\.\s+/.test(String(lines[i] || ''))) {
-                        items.push(String(lines[i]).replace(/^\s*\d+\.\s+/, ''));
+                        let item = String(lines[i]).replace(/^\s*\d+\.\s+/, '');
+                        item = item.replace(/^[\s\-*•+–—]+(?:\s+|$)/, '');
+                        if (typeof cleanBulletEndCitations === 'function') {
+                            item = cleanBulletEndCitations(item, true);
+                        }
+                        const trimmedItem = item.trim();
+                        const prevItem = items[items.length - 1];
+                        const prevEndsWithInitial = prevItem && (/\b[A-Za-z]\.$/.test(prevItem) || /\b[A-Za-z]\.\s+[A-Za-z]\.$/.test(prevItem));
+                        const isInitial = /^[A-Za-z]\.?$/.test(trimmedItem);
+                        const isShortWordOrName = /^[A-Z][a-z0-9]{1,15}\.?$/.test(trimmedItem);
+
+                        if (items.length > 0 && (isInitial || (prevEndsWithInitial && isShortWordOrName))) {
+                            items[items.length - 1] += ' ' + trimmedItem;
+                        } else if (trimmedItem) {
+                            items.push(trimmedItem);
+                        }
                         i += 1;
                     }
                     out.push(`<ol class="assistant-md-olist">${items.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ol>`);
@@ -9953,14 +10074,24 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                             <div class="assistant-table-toolbar">
                                 <span class="assistant-table-badge">Data Table</span>
                                 <div class="assistant-table-actions">
-                                    <button type="button" class="assistant-table-btn" onclick="window.downloadTableCsv?.(this)" title="Download as CSV (Excel compatible)">
-                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                                        <span>CSV</span>
-                                    </button>
-                                    <button type="button" class="assistant-table-btn" onclick="window.copyTableTsv?.(this)" title="Copy table for Excel or Sheets">
-                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                                        <span>Copy</span>
-                                    </button>
+                                    <div class="table-pencil-dropdown-wrapper">
+                                        <button type="button" class="table-pencil-trigger-btn" onclick="window.toggleTablePencilMenu?.(this)" title="Table options (Copy, Download)" aria-label="Table options">
+                                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                                <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path>
+                                                <path d="m15 5 4 4"></path>
+                                            </svg>
+                                        </button>
+                                        <div class="table-pencil-menu hidden">
+                                            <button type="button" class="table-pencil-menu-item" onclick="window.copyTableTsv?.(this); window.toggleTablePencilMenu?.(this, false)" title="Copy table for Excel or Sheets">
+                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                                                <span>Copy</span>
+                                            </button>
+                                            <button type="button" class="table-pencil-menu-item" onclick="window.downloadTableCsv?.(this); window.toggleTablePencilMenu?.(this, false)" title="Download as CSV (Excel compatible)">
+                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                                                <span>Download</span>
+                                            </button>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                             <div class="assistant-table-scroll-container" tabindex="0" role="region" aria-label="Scrollable table">
@@ -10023,12 +10154,73 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 }
                 return `<code class="assistant-md-inline-code">${inner}</code>`;
             });
+            const findSrcFn = globalThis.JarvisMarkdownRenderer?.findSourceById || function(srcs, id) {
+                if (!Array.isArray(srcs) || !srcs.length || id === null || id === undefined) return null;
+                const cleanId = String(id).trim().replace(/^[f#]/i, '');
+                const numId = Number(cleanId);
+                return srcs.find(s => String(s.id) === String(id) || String(s.id) === cleanId || s.id === numId)
+                    || (!isNaN(numId) && numId >= 1 && numId <= srcs.length ? srcs[numId - 1] : null);
+            };
+
+            const renderLogoFn = globalThis.JarvisMarkdownRenderer?.renderSourceLogoBadge || function(source, id) {
+                let domain = source?.domain;
+                if (!domain && source?.url) {
+                    try { domain = new URL(source.url).hostname.replace(/^www\./i, ''); } catch { domain = 'web'; }
+                }
+                domain = domain || (id ? `src-${id}` : 'web');
+                const title = escapeHtml(source?.title || domain || 'Source');
+                const url = escapeHtml(source?.url || '#');
+                const favicon = escapeHtml(source?.favicon || `/api/favicon?domain=${encodeURIComponent(domain)}`);
+                const fallbackSvg = globalThis.JarvisMarkdownRenderer?.getDomainMonogramSvg ? globalThis.JarvisMarkdownRenderer.getDomainMonogramSvg(domain) : `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="32" height="32" rx="8" fill="%230284c7"/><text x="50%" y="54%" font-family="sans-serif" font-size="16" font-weight="700" fill="%23fff" text-anchor="middle" dominant-baseline="central">${(domain[0]||'S').toUpperCase()}</text></svg>`;
+                return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="citation-source-logo" data-source-id="${id}" title="${title} (${domain})" onclick="window.JarvisLiveResearch?.highlightSource?.('${id}')"><img class="citation-logo-icon" src="${favicon}" alt="${domain}" loading="lazy" onerror="this.onerror=null;this.src='${fallbackSvg}';" /></a>`;
+            };
+
+            // Bold + Italic (*** or ___)
+            html = html.replace(/\*\*\*([^*]+)\*\*\*/g, '<strong><em>$1</em></strong>');
+            html = html.replace(/___([^_]+)___/g, '<strong><em>$1</em></strong>');
+
+            // Bold (** or __)
             html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-            html = html.replace(/\[(\d+)\]\((https?:\/\/[^)]+)\)/g, `<a href="$2" target="_blank" rel="noopener noreferrer" class="citation-badge" data-source-id="$1" title="Source [$1]"><sup>[$1]</sup></a>`);
-            html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, `<a href="$2" target="_blank" rel="noopener noreferrer" class="${linkClass}">$1</a>`);
-            html = html.replace(/(?<![\[\w`])\[(\d+(?:\s*,\s*\d+)*)\](?![\]\(])/g, (match, idsStr) => {
+            html = html.replace(/__([^_]+)__/g, '<strong>$1</strong>');
+
+            // Strikethrough (~~)
+            html = html.replace(/~~([^~]+)~~/g, '<del>$1</del>');
+
+            // Italics (*italic* and _italic_)
+            html = html.replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '<em>$1</em>');
+            html = html.replace(/(?<![\w\\])_(?![\s_])([^\n_]+?)(?<![\s_])_(?![\w])/g, '<em>$1</em>');
+            html = html.replace(/\[\^(\d+)\]\((https?:\/\/[^)]+)\)/g, (match, id, url) => {
+                const src = (typeof findSrcFn === 'function' ? findSrcFn(sources, id) : null) || { id, url };
+                return renderLogoFn(src, id);
+            });
+            html = html.replace(/\[\^(\d+)\]/g, (match, id) => {
+                const src = typeof findSrcFn === 'function' ? findSrcFn(sources, id) : null;
+                return renderLogoFn(src, id);
+            });
+            html = html.replace(/\[\[(\d+)\]\]\((https?:\/\/[^)]+)\)/g, (match, id, url) => {
+                const src = (typeof findSrcFn === 'function' ? findSrcFn(sources, id) : null) || { id, url };
+                return renderLogoFn(src, id);
+            });
+            html = html.replace(/\[(\d+)\]\((https?:\/\/[^)]+)\)/g, (match, id, url) => {
+                const src = (typeof findSrcFn === 'function' ? findSrcFn(sources, id) : null) || { id, url };
+                return renderLogoFn(src, id);
+            });
+            html = html.replace(/(?<![\[\w`])(?:\[|【)((?:f?\d+)(?:\s*,\s*f?\d+)*)(?:\]|】)(?![\]\(])/g, (match, idsStr) => {
                 const ids = idsStr.split(',').map(s => s.trim()).filter(Boolean);
-                return ids.map(id => `<button type="button" class="citation-badge" data-source-id="${id}" onclick="window.JarvisLiveResearch?.highlightSource('${id}')" title="Source [${id}]"><sup>[${id}]</sup></button>`).join('');
+                return ids.map(id => {
+                    const src = typeof findSrcFn === 'function' ? findSrcFn(sources, id) : null;
+                    return renderLogoFn(src, id);
+                }).join('');
+            });
+            html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, (match, linkText, url) => {
+                const trimmedText = String(linkText || '').trim();
+                const citeMatch = trimmedText.match(/^\[?(?:f?\d+)\]?$/);
+                if (citeMatch) {
+                    const id = trimmedText.replace(/[\[\]f#]/gi, '');
+                    const src = (typeof findSrcFn === 'function' ? findSrcFn(sources, id) : null) || { id, url };
+                    return renderLogoFn(src, id);
+                }
+                return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="${linkClass}">${linkText}</a>`;
             });
 
             html = html.replace(/__MATH_BLOCK_(\d+)__/g, (_, idx) => {
@@ -10799,28 +10991,125 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             }
         }
 
+        let activeTtsSpeechRun = null;
+        let ttsKeepAliveInterval = null;
+
+        function stopActiveTtsSpeech() {
+            if (ttsKeepAliveInterval) {
+                clearInterval(ttsKeepAliveInterval);
+                ttsKeepAliveInterval = null;
+            }
+            if (activeTtsSpeechRun) {
+                activeTtsSpeechRun.cancelled = true;
+                if (activeTtsSpeechRun.button && activeTtsSpeechRun.button.isConnected) {
+                    activeTtsSpeechRun.button.classList.remove('is-speaking');
+                    activeTtsSpeechRun.button.innerHTML = activeTtsSpeechRun.prevHtml || `<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/></svg><span>Speak</span>`;
+                }
+                activeTtsSpeechRun = null;
+            }
+            if (typeof window !== 'undefined' && window.speechSynthesis) {
+                try { window.speechSynthesis.cancel(); } catch (_) {}
+            }
+        }
+
+        function speakFullAssistantMessage(rawText, options = {}) {
+            if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+                if (typeof showTemporaryMessage === 'function') showTemporaryMessage('Text-to-speech is not supported in this browser.');
+                return;
+            }
+            stopActiveTtsSpeech();
+            const button = options.button || null;
+            const messageId = options.messageId || null;
+            const clean = typeof sanitizeTextForConverseSpeech === 'function'
+                ? sanitizeTextForConverseSpeech(rawText, true)
+                : String(rawText || '').replace(/```[\s\S]*?```/g, 'Code block omitted.').replace(/[#*_~`]/g, '').trim();
+            if (!clean) return;
+
+            const segments = typeof splitConverseSpeechSegments === 'function'
+                ? splitConverseSpeechSegments(clean, 0)
+                : [clean];
+            if (!segments.length) return;
+
+            const run = {
+                cancelled: false,
+                button,
+                messageId,
+                prevHtml: button ? button.innerHTML : ''
+            };
+            activeTtsSpeechRun = run;
+
+            if (button) {
+                button.classList.add('is-speaking');
+                button.innerHTML = `<svg class="w-3.5 h-3.5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"/></svg><span>Stop</span>`;
+            }
+
+            // Keepalive to prevent Chrome 15s engine pause/drop
+            if (ttsKeepAliveInterval) clearInterval(ttsKeepAliveInterval);
+            ttsKeepAliveInterval = setInterval(() => {
+                if (typeof window !== 'undefined' && window.speechSynthesis && window.speechSynthesis.speaking) {
+                    try {
+                        window.speechSynthesis.pause();
+                        window.speechSynthesis.resume();
+                    } catch (_) {}
+                } else if (!activeTtsSpeechRun) {
+                    clearInterval(ttsKeepAliveInterval);
+                    ttsKeepAliveInterval = null;
+                }
+            }, 5000);
+
+            let segIdx = 0;
+            const speakNext = () => {
+                if (!activeTtsSpeechRun || activeTtsSpeechRun !== run || run.cancelled) return;
+                if (segIdx >= segments.length) {
+                    stopActiveTtsSpeech();
+                    return;
+                }
+                const segText = segments[segIdx++];
+                const utterance = new SpeechSynthesisUtterance(segText);
+                const lang = typeof detectScriptLanguage === 'function' ? detectScriptLanguage(segText) : 'en-US';
+                utterance.lang = lang;
+                const voice = typeof getBestVoiceForLanguage === 'function' ? getBestVoiceForLanguage(lang) : null;
+                if (voice) utterance.voice = voice;
+                utterance.rate = 1.0;
+                utterance.pitch = 1.0;
+
+                let watchdog = setTimeout(() => {
+                    speakNext();
+                }, 14000);
+
+                utterance.onend = () => {
+                    clearTimeout(watchdog);
+                    speakNext();
+                };
+                utterance.onerror = () => {
+                    clearTimeout(watchdog);
+                    setTimeout(speakNext, 40);
+                };
+
+                try {
+                    window.speechSynthesis.speak(utterance);
+                } catch (_) {
+                    clearTimeout(watchdog);
+                    speakNext();
+                }
+            };
+            speakNext();
+        }
+
         function toggleTtsSpeak(messageId) {
             if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
                 showTemporaryMessage('Text-to-speech is not supported in this browser.');
                 return;
             }
-            if (window.speechSynthesis.speaking) {
-                window.speechSynthesis.cancel();
+            if (activeTtsSpeechRun || window.speechSynthesis.speaking) {
+                stopActiveTtsSpeech();
                 showTemporaryMessage('Speech stopped.');
                 return;
             }
             const meta = getAssistantMessageMeta(messageId);
             const text = stripSourcesFromAssistantText(meta?.text || '');
             if (!text) return;
-            const cleanSpokenText = text
-                .replace(/```[\s\S]*?```/g, 'Code block omitted.')
-                .replace(/`([^`]+)`/g, '$1')
-                .replace(/[#*_~>]/g, '')
-                .slice(0, 1200);
-            const utterance = new SpeechSynthesisUtterance(cleanSpokenText);
-            utterance.rate = 1.0;
-            utterance.pitch = 1.0;
-            window.speechSynthesis.speak(utterance);
+            speakFullAssistantMessage(text, { messageId });
             showTemporaryMessage('Reading response aloud...');
         }
 
@@ -11075,7 +11364,11 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             const controller = beginAbortableRequest();
             showThinkingIndicator('Improving answer...');
             try {
-                const data = await window.JarvisApi.postJson((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
+                const safePost = window.JarvisApi?.postJson || (async (u, b, o) => {
+                    const r = await fetch(u, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b), signal: o?.signal });
+                    return r.json();
+                });
+                const data = await safePost((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
                     message: processingPrompt,
                     context: [],
                     preferences: {
@@ -11577,7 +11870,11 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                     'Return only How checked and Sources used. Use only URLs from the retrieved source evidence. If no retrieved source evidence is available, write "Sources used: No retrieved sources were available."'
                 ].join('\n');
                 showThinkingIndicator('Verifying answer...');
-                const response = await window.JarvisApi.postJson((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
+                const safePost = window.JarvisApi?.postJson || (async (u, b, o) => {
+                    const r = await fetch(u, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b), signal: o?.signal });
+                    return r.json();
+                });
+                const response = await safePost((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
                     message: verificationPrompt,
                     context: [],
                     preferences: {
@@ -12223,7 +12520,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                     const isLiveSearchTurn = meta?.isLiveSearch === true || meta?.sourceType === 'verified' || meta?.liveResearch === true;
                     formattedText = allowEmptyAssistant
                         ? (isLiveSearchTurn ? '' : '<span class="streaming-placeholder">Thinking</span>')
-                        : renderAssistantMarkdown(readableText, linkClass);
+                        : renderAssistantMarkdown(readableText, linkClass, { sources: sourcePresentation.sources || meta?.sources || [], meta });
                 }
                 formattedText = sanitizeAssistantMarkup(formattedText);
 
@@ -12330,6 +12627,13 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                         </div> 
                     </div> 
                 `;
+
+                if (!isUser && meta?.entity) {
+                    const renderVisualFn = window.JarvisLiveResearch?.renderOrUpdateVisualEntityHeader || globalThis.JarvisLiveResearch?.renderOrUpdateVisualEntityHeader;
+                    if (typeof renderVisualFn === 'function') {
+                        renderVisualFn(messageDiv, meta.entity, meta.notableWorks || []);
+                    }
+                }
 
                 const replaceMessageId = String(
                     meta?.replaceMessageId ||
@@ -12541,8 +12845,13 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                                (Array.isArray(options?.meta?.sources) && options.meta.sources.length > 0);
             const rawAnswerNoImages = stripStreamedImageTags(rawAnswer);
             const isResearchTurn = hasSources || Boolean(options?.meta?.research || options?.meta?.provenance === 'web_grounded' || options?.meta?.liveResearch || options?.meta?.isLiveSearch);
-            const cleanTextForDisplay = isResearchTurn ? rawAnswerNoImages : stripInlineCitationMarkers(rawAnswerNoImages);
+            const rawAnswerCleaned = cleanBulletEndCitations(rawAnswerNoImages);
+            const cleanTextForDisplay = isResearchTurn ? rawAnswerCleaned : stripInlineCitationMarkers(rawAnswerCleaned);
             const readableText = formatAssistantTextForReadability(normalizeAssistantTextStyle(cleanTextForDisplay));
+            const effectiveSources = presentation.sources?.length ? presentation.sources : (options?.meta?.sources || options?.sources || []);
+            if (options && typeof options === 'object') {
+                options.sources = effectiveSources;
+            }
             const formatted = sanitizeAssistantMarkup(renderAssistantMarkdown(readableText, linkClass, options));
             textElement.classList.toggle('is-streaming', options?.streaming === true);
             textElement.innerHTML = formatted;
@@ -12579,6 +12888,14 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 if (imgTag && imgTag.prompt && imgTag.prompt.length >= 3) {
                     row.__imageActionTriggered = true;
                     window.handleImageGenerationRequest?.(imgTag.prompt);
+                }
+            }
+
+            // Render Dynamic Visual Entity Header & Notable Works if entity metadata is attached
+            if (meta?.entity) {
+                const renderVisualFn = window.JarvisLiveResearch?.renderOrUpdateVisualEntityHeader || globalThis.JarvisLiveResearch?.renderOrUpdateVisualEntityHeader;
+                if (typeof renderVisualFn === 'function') {
+                    renderVisualFn(row, meta.entity, meta.notableWorks || []);
                 }
             }
             
@@ -12998,8 +13315,8 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             window.speechSynthesis.onvoiceschanged = refreshAvailableVoices;
         }
 
-        function sanitizeTextForConverseSpeech(text) {
-            if (globalThis.JarvisConverseState?.sanitizeTextForConverseSpeech) {
+        function sanitizeTextForConverseSpeech(text, isFull = false) {
+            if (globalThis.JarvisConverseState?.sanitizeTextForConverseSpeech && !isFull) {
                 return globalThis.JarvisConverseState.sanitizeTextForConverseSpeech(text);
             }
             let result = String(text || '');
@@ -13050,22 +13367,29 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             result = result.replace(/≈/g, ' approximately ');
             result = result.replace(/(\b\d+)\.(\d+\b)/g, '$1 point $2');
 
-            // Stage 6: Conversational Condensation & Punctuation Cleanup
+            // Stage 6: Punctuation-aware sentence splitting & cleanup
             result = result.replace(/\s+/g, ' ').replace(/\s+([,.:;?!])/g, '$1').trim();
-            const sentences = result.match(/[^.!?]+[.!?]+/g) || [result];
-            if (sentences.length > 4) {
-                result = sentences.slice(0, 4).map(s => s.trim()).join(' ');
+            const sentences = typeof splitReadableSentences === 'function'
+                ? splitReadableSentences(result)
+                : (result.match(/[^.!?]+[.!?]+/g) || [result]);
+            if (isFull) {
+                return sentences.join(' ').trim();
             }
-            return result.slice(0, 600).trim();
+            if (sentences.length > 6) {
+                result = sentences.slice(0, 6).map(s => s.trim()).join(' ');
+            }
+            return result.slice(0, 1800).trim();
         }
 
-        function splitConverseSpeechSegments(text) {
-            if (globalThis.JarvisConverseState?.splitConverseSpeechSegments) {
+        function splitConverseSpeechSegments(text, maxSegments = 0) {
+            if (globalThis.JarvisConverseState?.splitConverseSpeechSegments && maxSegments > 0) {
                 return globalThis.JarvisConverseState.splitConverseSpeechSegments(text);
             }
             const source = String(text || '').replace(/\s+/g, ' ').trim();
             if (!source) return [];
-            const sentences = source.match(/[^.!?;:]+[.!?;:]?/g) || [source];
+            const sentences = typeof splitReadableSentences === 'function'
+                ? splitReadableSentences(source)
+                : (source.match(/[^.!?;:]+[.!?;:]?/g) || [source]);
             const segments = [];
             for (const sentence of sentences) {
                 const clean = sentence.trim();
@@ -13074,7 +13398,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                     segments.push(clean);
                     continue;
                 }
-                const clauses = clean.match(/[^,]+,?/g) || [clean];
+                const clauses = clean.match(/[^,;]+[,;]?/g) || [clean];
                 let buffer = '';
                 for (const clause of clauses) {
                     const next = [buffer, clause.trim()].filter(Boolean).join(' ');
@@ -13087,7 +13411,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 }
                 if (buffer.trim()) segments.push(buffer.trim());
             }
-            return segments.slice(0, 8);
+            return (maxSegments > 0) ? segments.slice(0, maxSegments) : segments;
         }
 
         function detectScriptLanguage(text) { return 'en-US'; }
@@ -14632,14 +14956,15 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                         ${sources.map((s, i) => {
                             const domain = escapeHtml(s.domain || getHost(s.url) || 'web');
                             const title = escapeHtml(s.title || domain);
-                            const favicon = escapeHtml(s.favicon || `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`);
+                            const favicon = escapeHtml(s.favicon || `/api/favicon?domain=${encodeURIComponent(domain)}`);
                             const url = escapeHtml(s.url || '#');
                             const dateLabel = s.date ? escapeHtml(s.date) : '';
                             const domainText = dateLabel ? `${domain} • ${dateLabel}` : domain;
                             const fullTitle = dateLabel ? `[${dateLabel}] ${title}` : title;
+                            const fallbackSvg = globalThis.JarvisMarkdownRenderer?.getDomainMonogramSvg ? globalThis.JarvisMarkdownRenderer.getDomainMonogramSvg(domain) : '';
                             return `
                                 <a href="${url}" target="_blank" rel="noopener noreferrer" class="source-card-pill" data-source-id="${Number.isInteger(s.id) ? s.id : i + 1}" title="${fullTitle}">
-                                    <img class="source-card-favicon" src="${favicon}" alt="" loading="lazy" onerror="this.style.display='none'" />
+                                    <img class="source-card-favicon" src="${favicon}" alt="" loading="lazy" onerror="this.onerror=null;this.src='${fallbackSvg}';" />
                                     <div class="source-card-info">
                                         <span class="source-card-domain">${domainText}</span>
                                         <span class="source-card-title">${title}</span>
@@ -14857,35 +15182,20 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
         }
 
         function toggleSpeakAssistantMessage(button, text) {
-            if (window.speechSynthesis?.speaking) {
-                window.speechSynthesis.cancel();
-                if (button) {
-                    button.classList.remove('is-speaking');
-                    button.innerHTML = `<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/></svg><span>Speak</span>`;
-                }
+            if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+                if (typeof showTemporaryMessage === 'function') showTemporaryMessage('Text-to-speech is not supported in this browser.');
                 return;
             }
-            const rawText = text || getAssistantMessageTextFromButton(button);
-            const clean = typeof sanitizeTextForConverseSpeech === 'function'
-                ? sanitizeTextForConverseSpeech(String(rawText || '').trim())
-                : String(rawText || '').trim();
-            if (!clean) return;
-            const utterance = new SpeechSynthesisUtterance(clean);
-            const lang = typeof detectScriptLanguage === 'function' ? detectScriptLanguage(clean) : 'en-US';
-            utterance.lang = lang;
-            const voice = typeof getBestVoiceForLanguage === 'function' ? getBestVoiceForLanguage(lang) : null;
-            if (voice) utterance.voice = voice;
-            utterance.onend = () => {
-                if (button) {
-                    button.classList.remove('is-speaking');
-                    button.innerHTML = `<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/></svg><span>Speak</span>`;
-                }
-            };
-            if (button) {
-                button.classList.add('is-speaking');
-                button.innerHTML = `<svg class="w-3.5 h-3.5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"/></svg><span>Stop</span>`;
+            if (activeTtsSpeechRun || window.speechSynthesis?.speaking) {
+                stopActiveTtsSpeech();
+                return;
             }
-            window.speechSynthesis.speak(utterance);
+            const row = button?.closest?.('[data-message-id]');
+            const msgId = row?.dataset?.messageId;
+            const meta = msgId ? getAssistantMessageMeta(msgId) : null;
+            const rawText = text || meta?.text || getAssistantMessageTextFromButton(button);
+            if (!rawText) return;
+            speakFullAssistantMessage(rawText, { button, messageId: msgId });
         }
 
         function triggerFollowUpChip(chipText) {
@@ -14901,6 +15211,8 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
         globalThis.copyAssistantMessageText = copyAssistantMessageText;
         globalThis.copyAssistantThoughtText = copyAssistantThoughtText;
         globalThis.toggleSpeakAssistantMessage = toggleSpeakAssistantMessage;
+        globalThis.speakFullAssistantMessage = speakFullAssistantMessage;
+        globalThis.stopActiveTtsSpeech = stopActiveTtsSpeech;
         globalThis.triggerFollowUpChip = triggerFollowUpChip;
         globalThis.generateContextualFollowUpChips = generateContextualFollowUpChips;
         globalThis.applyAssistantActionBarAndFollowups = applyAssistantActionBarAndFollowups;
@@ -14940,7 +15252,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             const mathAttrs = new Set(['class', 'style', 'mathvariant', 'stretchy', 'fence', 'separator', 'lspace', 'rspace', 'form', 'accent', 'xmlns', 'display', 'encoding']);
             const svgAttrs = new Set(['class', 'style', 'width', 'height', 'viewbox', 'viewBox', 'fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin', 'points', 'x', 'y', 'x1', 'y1', 'x2', 'y2', 'r', 'cx', 'cy', 'd', 'xmlns', 'aria-hidden', 'aria-label', 'role', 'href', 'xlink:href']);
             const allowedAttrs = {
-                A: new Set(['href', 'target', 'rel', 'class', 'style', 'title', 'id']),
+                A: new Set(['href', 'target', 'rel', 'class', 'style', 'title', 'id', 'onclick']),
                 BLOCKQUOTE: new Set(['class', 'style', 'id']),
                 BUTTON: new Set(['class', 'style', 'type', 'onclick', 'title', 'id', 'disabled', 'aria-label']),
                 CODE: new Set(['class', 'style', 'id']),
@@ -14950,7 +15262,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 H3: new Set(['class', 'style', 'id']),
                 H4: new Set(['class', 'style', 'id']),
                 IFRAME: new Set(['src', 'width', 'height', 'loading', 'allowfullscreen', 'class', 'style', 'referrerpolicy', 'frameborder', 'id']),
-                IMG: new Set(['src', 'alt', 'class', 'style', 'id', 'onclick', 'loading', 'width', 'height']),
+                IMG: new Set(['src', 'alt', 'class', 'style', 'id', 'onclick', 'onerror', 'loading', 'width', 'height']),
                 P: new Set(['class', 'style', 'id']),
                 PRE: new Set(['class', 'style', 'id']),
                 SPAN: new Set(['class', 'style', 'title', 'id']),
@@ -15038,7 +15350,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                         continue;
                     }
 
-                    if ((name === 'href' || name === 'src') && (/^(?:javascript|vbscript):/i.test(value) || (/^data:/i.test(value) && !/^data:image\/(?:png|jpeg|webp|gif|svg\+xml);base64,/i.test(value)))) {
+                    if ((name === 'href' || name === 'src') && (/^(?:javascript|vbscript):/i.test(value) || (/^data:/i.test(value) && !/^data:image\/(?:png|jpeg|webp|gif|svg\+xml)(?:;(?:base64|utf8))?,/i.test(value)))) {
                         node.removeAttribute(attr.name);
                         continue;
                     }
@@ -15858,7 +16170,11 @@ ${code}
         async function showDeploymentDiagnostics() {
             try {
                 showThinkingIndicator('Checking diagnostics');
-                const data = await window.JarvisApi.postJson((window.APP_CONFIG || APP_CONFIG).endpoints.diagnostics, {}, { timeoutMs: 12000 });
+                const safePost = window.JarvisApi?.postJson || (async (u, b, o) => {
+                    const r = await fetch(u, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b), signal: o?.signal });
+                    return r.json();
+                });
+                const data = await safePost((window.APP_CONFIG || APP_CONFIG).endpoints.diagnostics, {}, { timeoutMs: 12000 });
                 const status = data?.diagnostics || {};
                 const lines = [
                     'Deployment diagnostics',
@@ -16878,14 +17194,19 @@ async function fetchLiveSearchJson(query, options = {}) {
     const searchTimeout = Math.max(Number(options.timeoutMs) || defaultTimeout, 6000);
     const { signal, cleanup } = createSafeTimeoutSignal(searchTimeout, options.signal);
     try {
+        const safeContext = Array.isArray(options.context)
+            ? options.context.slice(-8).map(c => ({
+                role: c?.role === 'assistant' ? 'assistant' : 'user',
+                content: String(c?.content || c?.text || '').replace(/data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/g, '[image]').slice(0, 2500)
+            }))
+            : undefined;
         const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.search, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             signal,
             body: JSON.stringify({
                 query,
-                context: Array.isArray(options.context) ? options.context : undefined,
-                threadState: options.threadState || (typeof window !== 'undefined' && window.JarvisConversation?.getActiveLedger ? window.JarvisConversation.getActiveLedger() : undefined),
+                context: safeContext,
                 maxResults: options.maxResults || 8,
                 answer: Boolean(options.answer),
                 domain: options.domain || '',
@@ -23398,7 +23719,7 @@ async function handleUniversalEntityFactQuery(userText, liveIntent = null) {
 }
 
 
-function getActiveResearchContext(currentQuery = '', maxTurns = 6) {
+function getActiveResearchContext(currentQuery = '', maxTurns = 16) {
     const session = chatSessions.find(item => item.id === activeChatSessionId && !item.deleted);
     let messages = Array.isArray(session?.messages) ? session.messages : [];
     if (activeResponseRenderContext?.isRegeneration) {
@@ -23409,11 +23730,18 @@ function getActiveResearchContext(currentQuery = '', maxTurns = 6) {
     } else if (messages.at(-1)?.role === 'user' && messages.at(-1)?.text === currentQuery) {
         messages = messages.slice(0, -1);
     }
-    return messages.slice(-Math.max(1, maxTurns) * 2).map(item => ({
-        role: item.role === 'assistant' ? 'assistant' : 'user',
-        content: String(item.text || ''),
-        turnId: String(item.turnId || '')
-    })).filter(item => item.content.trim());
+    return messages.slice(-Math.max(1, maxTurns) * 2).map(item => {
+        let content = String(item.text || '').trim();
+        content = content.replace(/data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/g, '[attached image]');
+        if (content.length > 1500) {
+            content = content.slice(0, 1500) + '...';
+        }
+        return {
+            role: item.role === 'assistant' ? 'assistant' : 'user',
+            content,
+            turnId: String(item.turnId || '')
+        };
+    }).filter(item => item.content.trim());
 }
 
 function renderLiveResearchAnswerStatus(row, answerStatus) {
@@ -23600,7 +23928,17 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                     const label = document.querySelector('#chat-thinking-indicator .thinking-timer');
                     if (label) label.textContent = 'Checking the answer against retrieved evidence…';
                 },
-                onComplete: ({ content, sources, provenance, telemetry, answerStatus, verified }) => {
+                onEntityResolved: ({ entity, notableWorks }) => {
+                    if (!isCurrentResearch() || controller.isTerminal) return;
+                    const row = getRow();
+                    if (row) {
+                        row.style.display = '';
+                        if (window.JarvisLiveResearch?.renderOrUpdateVisualEntityHeader) {
+                            window.JarvisLiveResearch.renderOrUpdateVisualEntityHeader(row, entity, notableWorks || []);
+                        }
+                    }
+                },
+                onComplete: ({ content, sources, provenance, telemetry, answerStatus, verified, entity, notableWorks }) => {
                     if (!isCurrentResearch() || controller.searchAbortController.signal.aborted) { resolve(false); return; }
                     hideThinkingIndicator();
                     const row = getRow();
@@ -23624,12 +23962,17 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                         if (hasSources && window.JarvisLiveResearch?.renderOrUpdateSourcesCarousel) {
                             window.JarvisLiveResearch.renderOrUpdateSourcesCarousel(row, sources);
                         }
+                        if (entity && window.JarvisLiveResearch?.renderOrUpdateVisualEntityHeader) {
+                            window.JarvisLiveResearch.renderOrUpdateVisualEntityHeader(row, entity, notableWorks || []);
+                        }
                     }
 
                     updateStreamingAssistantMessage(assistantMessageId, content, {
                         turnId: controller.turnId,
                         streaming: false,
                         sources: sources || [],
+                        entity: entity || null,
+                        notableWorks: notableWorks || [],
                         sourceType: isVerified ? 'verified' : (hasSources ? 'retrieved' : 'no_sources'),
                         sourceLabel: hasSources ? `${sources.length} retrieved sources` : (answerStatus === 'clarification' ? 'Clarification needed' : 'No live evidence'),
                         answerStatus,
@@ -23787,8 +24130,8 @@ async function handleLiveRetrievalQuery(userText, options = {}) {
 
             const isAttribution = options?.entityAttribution || options?.mediaAttribution || isEntityAttributionQuery(query);
             const attributionFormatPrompt = isAttribution
-                ? `Direct answer: <accurately state the exact entity association, creator, origin, release/publication year, and primary figures>\nKey context & details:\n- Source work / parent entity context\n- Key creators / authors / contributors\n- Significance & background`
-                : `Direct answer: <answer the question in 1-3 sentences first; if the user asked who won/score/stat/leader, state that immediately>\nKey points:\n- <point 1>\n- <point 2>\n- <point 3>`;
+                ? `Direct answer: <accurately state the exact entity association, creator, origin, release/publication year, and primary figures in natural, cohesive paragraphs>`
+                : `Direct answer: <answer the question directly, comprehensively, and fluently in natural, well-structured paragraphs. Use Markdown headings (## or ###) to organize distinct sections in longer answers when appropriate. Reserve bullet points only for genuine itemized lists or steps.>`;
 
             const synthesisPrompt = `Answer the user's question directly, comprehensively, and factually using ONLY the verified web content below.
 
@@ -27629,29 +27972,32 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
                 </div>
             `;
 
-            const minLon = (lon - 0.008).toFixed(6);
-            const minLat = (lat - 0.005).toFixed(6);
-            const maxLon = (lon + 0.008).toFixed(6);
-            const maxLat = (lat + 0.005).toFixed(6);
-            const osmEmbedUrl = `https://www.openstreetmap.org/export/embed.html?bbox=${minLon}%2C${minLat}%2C${maxLon}%2C${maxLat}&layer=mapnik&marker=${lat.toFixed(6)}%2C${lon.toFixed(6)}`;
-
             const mapHtml = `
-                <div class="loc-map-container" style="margin-top:14px; border-radius:12px; overflow:hidden; border:1px solid rgba(255,255,255,0.08); background:radial-gradient(circle at 50% 50%, #1e293b 0%, #0f172a 100%); position:relative; height:220px;">
-                    <iframe
-                        src="${osmEmbedUrl}"
-                        width="100%"
-                        height="220"
-                        style="border:0; display:block; width:100%; height:100%;"
-                        loading="lazy"
-                        title="Interactive Location Map"
-                        allowfullscreen>
-                    </iframe>
+                <div class="loc-map-container" style="margin-top:14px; border-radius:12px; overflow:hidden; border:1px solid rgba(255,255,255,0.1); background:radial-gradient(circle at 50% 50%, #1e293b 0%, #0f172a 100%); position:relative; min-height:160px; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:20px; box-sizing:border-box;">
+                    <div style="width:48px; height:48px; border-radius:50%; background:rgba(56,189,248,0.18); border:2px solid #38bdf8; display:flex; align-items:center; justify-content:center; font-size:24px; margin-bottom:10px; box-shadow:0 0 20px rgba(56,189,248,0.35);">
+                        📍
+                    </div>
+                    <div style="font-size:13.5px; font-weight:700; color:#f8fafc; margin-bottom:4px; text-align:center; max-width:90%;">
+                        ${escapeHtml(exactAddress || locationTitle)}
+                    </div>
+                    <div style="font-size:12px; font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; color:#38bdf8; margin-bottom:12px;">
+                        ${lat.toFixed(6)}, ${lon.toFixed(6)}
+                    </div>
+                    <div style="display:flex; gap:10px; flex-wrap:wrap; justify-content:center;">
+                        <a href="${mapsUrl}" target="_blank" rel="noopener noreferrer" style="background:#2563eb; color:#ffffff; padding:7px 16px; border-radius:6px; font-size:12px; font-weight:700; text-decoration:none; display:inline-flex; align-items:center; gap:6px; box-shadow:0 2px 8px rgba(37,99,235,0.4);">
+                            🗺️ Open Live Pin in Google Maps
+                        </a>
+                        <a href="${directionsBaseUrl}${lat},${lon}" target="_blank" rel="noopener noreferrer" style="background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); color:#ffffff; padding:7px 14px; border-radius:6px; font-size:12px; font-weight:600; text-decoration:none; display:inline-flex; align-items:center; gap:6px;">
+                            🧭 Get Directions
+                        </a>
+                    </div>
                 </div>
                 <div class="loc-map-footer" style="display:flex; justify-content:space-between; align-items:center; margin-top:8px; font-size:12px; color:#94a3b8; flex-wrap:wrap; gap:8px;">
                     <span>${isApproximate ? 'Estimated Pin' : 'Exact Pin'}: <strong style="color:#e2e8f0;">${escapeHtml(exactAddress || locationTitle)}</strong></span>
                     <div style="display:flex; gap:12px; align-items:center;">
-                        <a href="${mapsUrl}" target="_blank" rel="noopener noreferrer" style="color:#38bdf8; text-decoration:none; font-weight:600; display:inline-flex; align-items:center; gap:4px; font-size:12px;">🗺️ Open in Google Maps</a>
-                        <a href="${directionsBaseUrl}${lat},${lon}" target="_blank" rel="noopener noreferrer" style="color:#38bdf8; text-decoration:none; font-weight:600; display:inline-flex; align-items:center; gap:4px; font-size:12px;">🧭 Get Directions</a>
+                        <a href="${mapsUrl}" target="_blank" rel="noopener noreferrer" style="color:#38bdf8; text-decoration:none; font-weight:600; display:inline-flex; align-items:center; gap:4px; font-size:12px;">Google Maps</a>
+                        <a href="https://maps.apple.com/?ll=${lat},${lon}" target="_blank" rel="noopener noreferrer" style="color:#38bdf8; text-decoration:none; font-weight:600; display:inline-flex; align-items:center; gap:4px; font-size:12px;">Apple Maps</a>
+                        <a href="https://www.openstreetmap.org/?mlat=${lat.toFixed(6)}&amp;mlon=${lon.toFixed(6)}#map=16/${lat.toFixed(6)}/${lon.toFixed(6)}" target="_blank" rel="noopener noreferrer" style="color:#38bdf8; text-decoration:none; font-weight:600; display:inline-flex; align-items:center; gap:4px; font-size:12px;">OpenStreetMap</a>
                     </div>
                 </div>
             `;
@@ -27857,14 +28203,57 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
                 };
 
                 const primaryContact = sosModule?.getPrimaryEmergencyContact?.() || null;
-                const cardHtml = sosModule?.buildEmergencyCardHtml?.(payload, primaryContact) || ('<div class="emergency-sos-card">' + payload.distressText + '</div>');
+                let targetContact = primaryContact;
+                if (!targetContact) {
+                    const phonePattern = /(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}|\b\d{10,12}\b/;
+                    let candidatePhone = '';
+                    const directMatch = String(originalText || '').match(phonePattern);
+                    if (directMatch) {
+                        candidatePhone = directMatch[0].replace(/[^\d+]/g, '');
+                    }
+                    if (!candidatePhone && Array.isArray(window.chatHistory)) {
+                        for (let idx = window.chatHistory.length - 1; idx >= 0; idx--) {
+                            const turn = window.chatHistory[idx];
+                            const textToScan = `${turn?.user || turn?.content || ''} ${turn?.ai || ''}`;
+                            const histMatch = textToScan.match(phonePattern);
+                            if (histMatch) {
+                                candidatePhone = histMatch[0].replace(/[^\d+]/g, '');
+                                if (candidatePhone.length >= 10) break;
+                            }
+                        }
+                    }
+                    if (!candidatePhone && typeof localStorage !== 'undefined') {
+                        candidatePhone = localStorage.getItem('jarvis_last_emergency_phone') || '';
+                    }
+                    if (candidatePhone && candidatePhone.length >= 10) {
+                        targetContact = { name: 'Emergency Recipient', phone: candidatePhone, isPrimary: true };
+                        try {
+                            if (typeof localStorage !== 'undefined') {
+                                localStorage.setItem('jarvis_last_emergency_phone', candidatePhone);
+                            }
+                        } catch (_) {}
+                    }
+                }
+
+                const cardHtml = sosModule?.buildEmergencyCardHtml?.(payload, targetContact) || ('<div class="emergency-sos-card">' + payload.distressText + '</div>');
 
                 addChatMessage(cardHtml, false, false);
                 saveToHistory(originalText || 'Emergency SOS', `🚨 Emergency SOS distress signal generated (${lat.toFixed(4)}, ${lon.toFixed(4)}).`);
 
+                // Immediately dispatch SMS with precision coordinates and telemetry
+                try {
+                    if (typeof sosModule?.dispatchImmediateEmergencySms === 'function') {
+                        sosModule.dispatchImmediateEmergencySms(payload, targetContact);
+                    } else if (typeof globalThis.dispatchImmediateEmergencySms === 'function') {
+                        globalThis.dispatchImmediateEmergencySms(payload, targetContact);
+                    }
+                } catch (dispatchErr) {
+                    console.warn('[Emergency SOS] Automatic SMS dispatch error:', dispatchErr);
+                }
+
                 try {
                     if (typeof speakModelResponse === 'function' && !document.hidden) {
-                        speakModelResponse('Satellite Emergency SOS activated. Distress dispatch ready.');
+                        speakModelResponse('Satellite Emergency SOS activated. Distress dispatch transmitted.');
                     }
                 } catch (_) {}
             } finally {
@@ -32127,6 +32516,31 @@ function openCodePreviewInNewTab(blockId) {
 }
 window.openCodePreviewInNewTab = openCodePreviewInNewTab;
 
+function toggleTablePencilMenu(triggerOrItem, forceState) {
+    const wrap = triggerOrItem?.closest?.('.table-pencil-dropdown-wrapper');
+    const menu = wrap?.querySelector?.('.table-pencil-menu');
+    if (!menu) return;
+    const shouldOpen = typeof forceState === 'boolean' ? forceState : menu.classList.contains('hidden');
+    document.querySelectorAll('.table-pencil-menu:not(.hidden)').forEach(m => {
+        if (m !== menu) m.classList.add('hidden');
+    });
+    if (shouldOpen) {
+        menu.classList.remove('hidden');
+    } else {
+        menu.classList.add('hidden');
+    }
+}
+window.toggleTablePencilMenu = toggleTablePencilMenu;
+
+if (typeof document !== 'undefined' && !window.__jarvisTablePencilGlobalListenerAdded) {
+    window.__jarvisTablePencilGlobalListenerAdded = true;
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.table-pencil-dropdown-wrapper')) {
+            document.querySelectorAll('.table-pencil-menu:not(.hidden)').forEach(m => m.classList.add('hidden'));
+        }
+    });
+}
+
 function downloadTableCsv(btn) {
     const wrap = btn?.closest?.('.assistant-md-table-wrap');
     const table = wrap?.querySelector?.('table');
@@ -32936,16 +33350,36 @@ function formatAssistantTextForReadability(rawText) {
     rawText = normalizeAssistantTextStyle(rawText);
     if (/<(iframe|div|img|table|svg|button|a|p|section|article)\b/i.test(rawText)) return rawText;
     rawText = normalizeItineraryTextForReadability(rawText);
-    if (/^\s*[-*]\s+/m.test(rawText) || /^\s*\d+\.\s+/m.test(rawText)) return rawText;
+
+    if (globalThis.JarvisMarkdownRenderer?.deBulletizePseudoListIfNeeded) {
+        rawText = globalThis.JarvisMarkdownRenderer.deBulletizePseudoListIfNeeded(rawText);
+    }
+
+    if (/^\s*[-*•+]\s+/m.test(rawText) || /^\s*\d+\.\s+/m.test(rawText)) return rawText;
 
     const proceduralText = autoBulletizeProcedureText(rawText);
     if (proceduralText !== rawText) return proceduralText;
 
+    // If text already has paragraph breaks or headings, preserve them intact
     if (rawText.includes('\n')) return rawText;
     if (rawText.length < 300) return rawText;
 
-    const sentences = splitReadableSentences(rawText).filter(s => /[.!?]$/.test(s));
-    if (sentences.length < 5) return rawText;
+    const rawSentences = splitReadableSentences(rawText).filter(s => /[.!?]$/.test(s));
+    if (rawSentences.length < 2) return rawText;
+
+    // Consolidate short fragments / stranded initials into full coherent sentences
+    const sentences = [];
+    for (const s of rawSentences) {
+        const cleanS = s.trim();
+        if (!cleanS) continue;
+        if (sentences.length > 0 && (cleanS.length < 25 || /^[A-Za-z]\.?$/.test(cleanS))) {
+            sentences[sentences.length - 1] += ' ' + cleanS;
+        } else {
+            sentences.push(cleanS);
+        }
+    }
+
+    if (sentences.length < 2) return rawText;
 
     let closingQuestion = '';
     const last = sentences[sentences.length - 1] || '';
@@ -32954,33 +33388,86 @@ function formatAssistantTextForReadability(rawText) {
         sentences.pop();
     }
 
-    if (sentences.length < 3) return rawText;
+    if (sentences.length < 2) return rawText;
 
-    const bullets = sentences.map(s => `- ${s}`).join('\n');
-    return closingQuestion ? `${bullets}\n\n${closingQuestion}` : bullets;
+    // Group sentences into natural, cohesive paragraphs (2-3 sentences each) instead of bullet points
+    const paragraphs = [];
+    let currentPara = [];
+    let currentLen = 0;
+
+    for (const s of sentences) {
+        currentPara.push(s);
+        currentLen += s.length;
+        if (currentPara.length >= 2 && (currentLen >= 200 || currentPara.length >= 3)) {
+            paragraphs.push(currentPara.join(' '));
+            currentPara = [];
+            currentLen = 0;
+        }
+    }
+    if (currentPara.length > 0) {
+        paragraphs.push(currentPara.join(' '));
+    }
+
+    const narrative = paragraphs.join('\n\n');
+    return closingQuestion ? `${narrative}\n\n${closingQuestion}` : narrative;
 }
 
 function splitReadableSentences(text) {
     const raw = String(text || '').replace(/\s+/g, ' ').trim();
     if (!raw) return [];
 
+    const MONTHS = new Set(['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'sept', 'oct', 'nov', 'dec']);
+    const ABBRS = new Set(['mr', 'mrs', 'ms', 'dr', 'prof', 'sr', 'jr', 'vs', 'etc', 'eg', 'ie', 'al', 'approx', 'dept', 'fig', 'no', 'vol', 'st', 'inc', 'corp', 'co', 'ltd', 'gen', 'rep', 'sen', ...MONTHS]);
     const sentences = [];
     let start = 0;
+
     for (let i = 0; i < raw.length; i += 1) {
         const char = raw[i];
         if (!/[.!?]/.test(char)) continue;
+
         const prev = raw[i - 1] || '';
         const next = raw[i + 1] || '';
+
+        // Numbers/decimals: e.g. 3.14 or v2.0
         if (char === '.' && /\d/.test(prev) && /\d/.test(next)) continue;
+
+        // Ellipsis: .. or ...
+        if (char === '.' && (prev === '.' || next === '.')) continue;
+
+        // Must be followed by whitespace or end of string
         if (next && !/\s/.test(next)) continue;
 
-        const sentence = raw.slice(start, i + 1).trim();
-        if (sentence) sentences.push(sentence);
+        // Check word ending at this punctuation
+        const sub = raw.slice(start, i + 1).trim();
+        const lastWordMatch = sub.match(/([a-zA-Z.]+)[.!?]$/);
+        if (lastWordMatch && char === '.') {
+            const word = lastWordMatch[1].replace(/\.$/, '');
+            // Multi-dot initialisms like U.S. or e.g. or single letters like J. or B.
+            if (/^[A-Za-z]$/.test(word) || /^[A-Za-z](\.[A-Za-z])+$/.test(lastWordMatch[1])) continue;
+            if (ABBRS.has(word.toLowerCase())) continue;
+        }
+
+        // Lookahead: cannot be a date remainder like '20, 1950' or '1st, 2024'
+        const remainder = raw.slice(i + 1).trim();
+        if (/^\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4}/.test(remainder)) continue;
+        // Don't split if current word is a single initial/abbreviation followed by an initial: e.g. "J." followed by "B." or "Dr." followed by "A."
+        if (lastWordMatch && (/^[A-Za-z]$/.test(lastWordMatch[1].replace(/\.$/, '')) || ABBRS.has(lastWordMatch[1].replace(/\.$/, '').toLowerCase())) && /^[A-Z]\.\s+/i.test(remainder)) continue;
+        // Lookahead: must be followed by an uppercase letter, quote, or end of string
+        if (remainder && !/^[A-Z\"“'‘(\[]/.test(remainder)) continue;
+
+        if (sub) sentences.push(sub);
         start = i + 1;
     }
 
     const tail = raw.slice(start).trim();
-    if (tail) sentences.push(tail);
+    if (tail) {
+        if (sentences.length > 0 && (/^[A-Za-z]\.?$/.test(tail) || tail.length < 15 || !/[.!?]$/.test(tail))) {
+            sentences[sentences.length - 1] += ' ' + tail;
+        } else {
+            sentences.push(tail);
+        }
+    }
+
     return sentences;
 }
 
@@ -33058,26 +33545,30 @@ function autoBulletizeProcedureText(rawText) {
     if (typeof rawText !== 'string') return rawText;
     const text = String(rawText || '').replace(/\r\n/g, '\n').trim();
     if (!text) return rawText;
-    if (/^\s*[-*]\s+/.test(text) || /^\s*\d+\.\s+/.test(text)) return rawText;
+    if (/^\s*[-*•+–—]\s+/m.test(text) || /^\s*\d+\.\s+/m.test(text)) return rawText;
 
     const lines = text.split('\n').map(line => line.trim()).filter(Boolean);
     if (lines.length < 4) return rawText;
 
     const stepHint = /\b(step by step|steps?|procedure|what you can do|what to do|do this|try this)\b/i.test(text);
+    if (!stepHint) return rawText;
+
     const stepLike = line =>
-        /^[A-Z][^:]{1,100}:\s+.+/.test(line) ||
-        /^(apply|take|keep|avoid|rest|monitor|call|seek|elevate|ice|stop|wash|clean|use|drink|move|check)\b/i.test(line);
+        /^(?:step\s*\d+:?\s*)?(apply|take|keep|avoid|rest|monitor|call|seek|elevate|ice|stop|wash|clean|use|drink|move|check)\b/i.test(line);
 
     const firstStepIdx = lines.findIndex(stepLike);
     const stepCount = lines.filter(stepLike).length;
-    if (firstStepIdx < 0 || (!stepHint && stepCount < 3)) return rawText;
+    if (firstStepIdx < 0 || stepCount < 2) return rawText;
 
     const introLines = lines.slice(0, firstStepIdx);
     const stepLines = lines.slice(firstStepIdx).filter(line => !/^sources?\s*:/i.test(line));
     if (stepLines.length < 2) return rawText;
 
     const intro = introLines.length ? `${introLines.join('\n\n')}\n\n` : '';
-    const bullets = stepLines.map(line => `- ${line}`).join('\n');
+    const bullets = stepLines.map(line => {
+        const cleanLine = line.replace(/^[\s\-*•+–—]+(?:\s+|$)/, '');
+        return `- ${cleanLine}`;
+    }).join('\n');
     return `${intro}${bullets}`.trim();
 }
 
