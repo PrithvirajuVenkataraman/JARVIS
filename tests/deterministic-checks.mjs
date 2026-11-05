@@ -57,7 +57,8 @@ import {
     extractCandidateEntity,
     isValidImageUrl,
     classifyEntityTypeFromDescription,
-    isSemanticCreativeWork
+    isSemanticCreativeWork,
+    computeTitleTokenOverlap
 } from '../api/_lib/visual-answer-engine.js';
 
 // Load science formatter
@@ -533,6 +534,17 @@ console.log('--- Section 12: Dynamic Visual Answer Engine & SSRF Security Contra
     assert.equal(extractCandidateEntity('10 * 50'), '', 'Math queries must not trigger entity visual searches');
     assert.equal(extractCandidateEntity('hello'), '', 'Greetings must not trigger entity visual searches');
 
+    // Strict Entity Gating: Causal, explanatory, medical, and multi-sentence questions must NOT extract entities
+    assert.equal(extractCandidateEntity('What is in the world man? Why are lot of youngsters are getting heart attacks?'), '', 'Multi-clause casual/medical query must be rejected');
+    assert.equal(extractCandidateEntity('Why are lot of youngsters getting heart attacks?'), '', 'Causal medical inquiry must be rejected');
+    assert.equal(extractCandidateEntity('What causes heart attacks in youth?'), '', 'Causal query must be rejected');
+    assert.equal(extractCandidateEntity('how do vaccines work?'), '', 'Procedural/mechanistic query must be rejected');
+
+    // Strict Token Overlap ratio verification
+    assert.equal(computeTitleTokenOverlap('Harris Jayaraj', 'Harris Jayaraj'), 1.0);
+    assert.equal(computeTitleTokenOverlap('Deva composer', 'Deva (composer)'), 1.0);
+    assert.equal(computeTitleTokenOverlap('youngsters heart attacks', 'All Creatures Great and Small'), 0, 'Irrelevant entity must have 0 overlap');
+
     // Secure image CDN domain validation and SSRF guards
     assert.equal(isValidImageUrl('https://upload.wikimedia.org/wikipedia/commons/thumb/a/a4/Deva.jpg/220px-Deva.jpg'), true);
     assert.equal(isValidImageUrl('https://thumb.wikimedia.org/image.png'), true);
@@ -619,7 +631,7 @@ console.log('--- Section 13: Response Formatting, Markdown Hierarchy & Paragraph
     const sampleBioText = 'Deva was born on Nov 20, 1950. He studied Indian classical harmonium under J. B. Krishna. His score was 3.14 on Next.js.';
     const sentences = splitReadableSentences(sampleBioText);
     assert.equal(sentences.length, 3, 'Must split into exactly 3 sentences');
-    assert.ok(sentences[0].includes('Nov 20, 1950'), 'Must preserve date without splitting at Nov');
+    assert.ok(sentences[0].includes('Nov 20, 1950'), 'Must preserve date without splitting at Nov'); 
     assert.ok(sentences[1].includes('J. B. Krishna'), 'Must preserve initials without splitting at J. or B.');
     assert.ok(sentences[2].includes('3.14 on Next.js'), 'Must preserve decimals and dot-syntax without splitting');
 
