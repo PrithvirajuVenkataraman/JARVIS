@@ -721,7 +721,7 @@ export function toggleTablePencilMenu(triggerOrItem, forceState) {
         menu.classList.remove('hidden');
     } else {
         menu.classList.add('hidden');
-    }
+    } 
 }
 
 if (typeof window !== 'undefined') {
