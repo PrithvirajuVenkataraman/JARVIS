@@ -11782,7 +11782,7 @@ table {
 .compliance-audit-action.badge-block {
     background: rgba(239, 68, 68, 0.2);
     color: #f87171;
-    border: 1px solid rgba(239, 68, 68, 0.4);
+    border: 1px solid rgba(239, 68, 68, 0.4); 
 }
 .compliance-audit-action.badge-mask {
     background: rgba(245, 158, 11, 0.2);
