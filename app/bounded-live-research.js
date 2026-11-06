@@ -1803,15 +1803,17 @@ Today's Date: ${currentDateStr}. Use this exact date as your reference point for
 RULES:
 1. COMPLETE COVERAGE: Identify and answer every distinct question, sub-question, and requested detail in the user prompt using the retrieved evidence. If the prompt contains multiple parts (such as status, affected entities, requirements, comparisons, or timelines), address each part thoroughly in a dedicated explanation or structured breakdown.
 2. SUBSTANTIVE DETAILS: Never return only headlines, source titles, or a list of links as an answer. Extract and explain substantive facts, operational impacts, context, and concrete details from the source excerpts.
-3. DISTINGUISH CONFIRMED FACTS VS. UNCERTAINTY: Clearly differentiate verified facts and confirmed actions from unconfirmed claims, ongoing status, or speculation. If different sources report conflicting claims, explain the divergence and cite each source. If evidence for any specific part of the user question is missing, inaccessible, or unverified in the excerpts, explicitly state what could not be verified rather than fabricating or omitting it.
-4. GROUNDED CITATIONS & NATURAL SYNTHESIS: Ground key statements and extracted facts thoroughly in the verified sources below. Present the answer in clean, natural prose without emitting bracket citations (like [1], [2]) or citation phrases (like 'found in [1]'). Verified sources are tracked and rendered separately in the interface.
-5. STRUCTURE: Provide a direct answer first, followed by clear explanations, requested lists, and impact analyses.
-6. CHRONOLOGICAL PRIORITY: Sources are ordered chronologically with the newest/most recent updates listed first ([1], [2], ...). For questions about current status, updates, or recent developments, prioritize the latest sources over older sources.
-7. ENTITY INTEGRITY & ZERO HALLUCINATION (CRITICAL):
+3. DISTINGUISH CONFIRMED FACTS VS. UNCERTAINTY: Clearly differentiate verified facts and confirmed actions from unconfirmed claims, ongoing status, or speculation. If different sources report conflicting claims, explain the divergence and cite each source.
+4. DIRECT NATURAL PROSE & NO META-COMMENTARY: Present answers directly, fluently, and naturally like ChatGPT or Claude. Never output meta-commentary about the search or verification process (do NOT say 'The answer integrates verified information from...', 'This response incorporates...', or 'while noting the missing...'). For missing details or partial timelines in non-medical queries, do not output audit disclaimers; simply provide the best available facts directly.
+5. MEDICAL QUESTIONS ONLY: For medical, physiological, or clinical inquiries, always include a brief, responsible disclaimer at the end: "Please consult a doctor or healthcare professional for a confirmed clinical diagnosis and personalized evaluation; this summary provides educational background." Non-medical queries must NOT contain disclaimers or verification announcements.
+6. GROUNDED CITATIONS & NATURAL SYNTHESIS: Ground key statements and extracted facts thoroughly in the verified sources below. Present the answer in clean, natural prose without emitting bracket citations (like [1], [2]) or citation phrases (like 'found in [1]'). Verified sources are tracked and rendered separately in the interface.
+7. STRUCTURE: Provide a direct answer first, followed by clear explanations, requested lists, and impact analyses.
+8. CHRONOLOGICAL PRIORITY: Sources are ordered chronologically with the newest/most recent updates listed first ([1], [2], ...). For questions about current status, updates, or recent developments, prioritize the latest sources over older sources.
+9. ENTITY INTEGRITY & ZERO HALLUCINATION (CRITICAL):
    - For proper nouns, suspect identities, person names, places, and organizations: report ONLY names and places explicitly stated in the retrieved sources below.
    - If a person's name, suspect identity, or specific location is unstated, unconfirmed, or has not been publicly released in the verified sources, explicitly state that authorities or reports have not released the name/location. NEVER guess, assume, or invent person names, places, or affiliations.
    - When answering follow-up questions, stay anchored to the specific event, location, and entities established in the conversation history. Do not conflate or substitute names or locations from unrelated search excerpts.
-8. COUNTED LIST EXTRACTION, ZERO SUBSTITUTION & ZERO PARAMETRIC INTRUSION:
+10. COUNTED LIST EXTRACTION, ZERO SUBSTITUTION & ZERO PARAMETRIC INTRUSION:
    - When extracting specific lists, counts, or entities, report EXACTLY what the retrieved sources state.
    - Enforce ZERO SUBSTITUTION: do not replace entities found in sources with alternative entities.
    - Enforce ZERO PARAMETRIC INTRUSION: rely strictly on the provided web evidence rather than model pre-training memory.
@@ -1866,7 +1868,12 @@ ${sourcesContext}`;
                             });
                         }
 
-                        const cleanStreamed = (this.streamedText || '').trim();
+                        let cleanStreamed = (this.streamedText || '').trim();
+                    cleanStreamed = cleanStreamed
+                        .replace(/(?:^|\n|\.\s+)(?:The\s+answer|This\s+(?:answer|response|summary))\s+integrates\s+verified\s+information.*?(?:\.|$)/gim, '')
+                        .replace(/(?:,\s*)?while\s+noting\s+the\s+missing\s+[^.!?\n]+[.!?]?/gi, '')
+                        .replace(/(?:^|\n)Still\s+unverified:\s*.*$/gim, '')
+                        .trim();
                         // Invariant: empty/trivial output protection — 10 chars minimum to distinguish real output from blank
                         if (cleanStreamed.length >= 10) {
                             synthesisSucceeded = true;
@@ -1886,7 +1893,12 @@ ${sourcesContext}`;
                 }
 
                 if (!this.isTerminal) {
-                    const cleanStreamed = (this.streamedText || '').trim();
+                    let cleanStreamed = (this.streamedText || '').trim();
+                    cleanStreamed = cleanStreamed
+                        .replace(/(?:^|\n|\.\s+)(?:The\s+answer|This\s+(?:answer|response|summary))\s+integrates\s+verified\s+information.*?(?:\.|$)/gim, '')
+                        .replace(/(?:,\s*)?while\s+noting\s+the\s+missing\s+[^.!?\n]+[.!?]?/gi, '')
+                        .replace(/(?:^|\n)Still\s+unverified:\s*.*$/gim, '')
+                        .trim();
                     if (synthesisSucceeded && cleanStreamed.length >= 10) {
                         completeExecution({
                             success: true,
