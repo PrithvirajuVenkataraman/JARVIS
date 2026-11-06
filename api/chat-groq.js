@@ -712,23 +712,57 @@ async function getInstantFactHelper() {
     }
 
     function buildCompactedContextBlock(context, options = {}) {
-        const retrievedTurns = Array.isArray(options.retrievedTurns) ? options.retrievedTurns : [];
-        const retrievedBlock = retrievedTurns.length > 0
-            ? `[Relevant Background Context from Earlier in this Conversation:\n${retrievedTurns.map(m => `${m?.role === 'user' ? 'User' : 'Assistant'}: ${String(m?.text || '')}`).join('\n')}]\n\n`
-            : '';
+        let retrievedTurns = Array.isArray(options.retrievedTurns) ? [...options.retrievedTurns] : [];
 
-        if (!Array.isArray(context) || !context.length) return retrievedBlock.trim();
-        const MAX_VERBATIM_TURNS = 8;
+        if (!Array.isArray(context) || !context.length) {
+            const retrievedBlock = retrievedTurns.length > 0
+                ? `[Relevant Background Context from Earlier in this Conversation:\n${retrievedTurns.map(m => `${m?.role === 'user' ? 'User' : 'Assistant'}: ${String(m?.text || '')}`).join('\n')}]\n\n`
+                : '';
+            return retrievedBlock.trim();
+        }
+
+        const MAX_VERBATIM_TURNS = 16;
         if (context.length <= MAX_VERBATIM_TURNS) {
             const verbatim = context
                 .map(m => `${m?.role === 'user' ? 'User' : 'Assistant'}: ${String(m?.text || '')}`)
                 .join('\n');
+            const retrievedBlock = retrievedTurns.length > 0
+                ? `[Relevant Background Context from Earlier in this Conversation:\n${retrievedTurns.map(m => `${m?.role === 'user' ? 'User' : 'Assistant'}: ${String(m?.text || '')}`).join('\n')}]\n\n`
+                : '';
             return `${retrievedBlock}${verbatim}`;
         }
 
         // Older turns: condense into structured rolling executive summary
         const olderTurns = context.slice(0, context.length - MAX_VERBATIM_TURNS);
         const recentTurns = context.slice(-MAX_VERBATIM_TURNS);
+
+        // Dynamic Semantic Recall: If user prompt refers to an earlier topic/entity, retrieve matching older turns
+        const queryText = String(options.query || options.message || '').trim();
+        if (queryText && retrievedTurns.length === 0 && olderTurns.length > 0) {
+            const queryTokens = queryText.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter(w => w.length >= 3);
+            if (queryTokens.length > 0) {
+                const candidates = [];
+                for (let i = 0; i < olderTurns.length; i++) {
+                    const t = olderTurns[i];
+                    const txt = String(t?.text || '').toLowerCase();
+                    let hitCount = 0;
+                    for (const tok of queryTokens) {
+                        if (txt.includes(tok)) hitCount++;
+                    }
+                    if (hitCount > 0) {
+                        candidates.push({ turn: t, score: hitCount / queryTokens.length });
+                    }
+                }
+                candidates.sort((a, b) => b.score - a.score);
+                if (candidates.length > 0 && candidates[0].score >= 0.25) {
+                    retrievedTurns.push(...candidates.slice(0, 2).map(c => c.turn));
+                }
+            }
+        }
+
+        const retrievedBlock = retrievedTurns.length > 0
+            ? `[Relevant Background Context from Earlier in this Conversation:\n${retrievedTurns.map(m => `${m?.role === 'user' ? 'User' : 'Assistant'}: ${String(m?.text || '')}`).join('\n')}]\n\n`
+            : '';
 
         const summary = options.rollingSummary || extractRollingExecutiveSummary(olderTurns);
         const summarySections = [];
@@ -747,7 +781,7 @@ async function getInstantFactHelper() {
 
         if (summarySections.length === 0) {
             const digestLines = [];
-            for (const turn of olderTurns.slice(-6)) {
+            for (const turn of olderTurns.slice(-8)) {
                 const role = turn?.role === 'user' ? 'User' : 'Assistant';
                 const clean = String(turn?.text || '').replace(/\s+/g, ' ').trim();
                 if (clean) {
@@ -769,7 +803,7 @@ async function getInstantFactHelper() {
             .join('\n');
 
         const combined = `${retrievedBlock}${digestBlock}${verbatimBlock}`;
-        return combined.length > 6000 ? combined.slice(-6000) : combined;
+        return combined.length > 16000 ? combined.slice(-16000) : combined;
     }
 
 /* ==========================================================================
@@ -970,16 +1004,17 @@ export default async function handler(req, res) {
             preferences.webMode = preferences.webMode || String(req.body?.webMode || '').trim().toLowerCase();
             preferences.isWebForced = Boolean(preferences.isWebForced || req.body?.isWebForced || req.body?.webMode === 'force' || preferences.webMode === 'force');
             const systemPrompt = buildServerSystemPrompt(preferences, intent);
-            const contextBlock = buildCompactedContextBlock(context, {
-                rollingSummary: req.body?.rollingSummary || null,
-                retrievedTurns: request.value.retrievedTurns || null
-            });
             const effectiveMessage = buildGroundedUserMessage(sanitizedMessage, intent, grounding, images);
             const isAttachmentGrounding = isAttachmentGroundingPayload(grounding, intent);
             const clientRoutingProbe = String(req.body?.routingMessage || req.body?.displayUserMessage || '').trim();
             const routingMessage = isAttachmentGrounding
                 ? String(grounding?.originalRequest || sanitizedMessage || 'Analyze the attached file(s).').trim()
                 : (clientRoutingProbe || effectiveMessage);
+            const contextBlock = buildCompactedContextBlock(context, {
+                rollingSummary: req.body?.rollingSummary || null,
+                retrievedTurns: request.value.retrievedTurns || null,
+                query: routingMessage || effectiveMessage
+            });
             const isInternalSummary = isInternalSummarizerPrompt(effectiveMessage, '');
             if (intent === 'verify_answer') {
                 return await handleVerifyAnswerRequest(res, {
@@ -5562,7 +5597,7 @@ export const __test = {
         if (mode === 'range') {
             if (maxWords > 0 && count > maxWords) return trimToWordCount(out, maxWords);
             return out;
-        } 
+        }
         if (mode === 'target') {
             if (maxWords > 0 && count > maxWords) return trimToWordCount(out, maxWords);
         }
