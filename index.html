@@ -75,7 +75,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous">
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
-    <link rel="stylesheet" href="styles.css?v=2.4.6">
+    <link rel="stylesheet" href="styles.css?v=2.4.7">
     <script src="science-format.js?v=2.0.1"></script>
     <script type="module" src="app/bootstrap.js?v=2.4.6"></script>
 </head>
@@ -5950,9 +5950,16 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
                     } catch (_) {}
                     return [];
                 })(),
-                selectedModel: ((Array.isArray(requestOptions?.images) && requestOptions.images.length > 0) || (Array.isArray(requestOptions?.grounding?.images) && requestOptions.grounding.images.length > 0)) && (window.APP_CONFIG || APP_CONFIG)?.models?.find(m => m.id === selectedModel)?.supportsMedia === false
-                    ? 'gemini-2.5-flash'
-                    : (requestOptions?.selectedModel || (selectedModel !== 'auto' ? selectedModel : undefined)),
+                selectedModel: (() => {
+                    const hasImages = (Array.isArray(requestOptions?.images) && requestOptions.images.length > 0) || (Array.isArray(requestOptions?.grounding?.images) && requestOptions.grounding.images.length > 0);
+                    const isUnsupportedMedia = hasImages && (window.APP_CONFIG || APP_CONFIG)?.models?.find(m => m.id === selectedModel)?.supportsMedia === false;
+                    const textLen = String(requestOptions?.grounding?.selectedText || requestOptions?.grounding?.sourceAnswer || '').length;
+                    const isHeavyDocument = textLen > 30000 && (selectedModel === 'auto' || !selectedModel);
+                    if (isUnsupportedMedia || isHeavyDocument) {
+                        return 'gemini-2.5-flash';
+                    }
+                    return requestOptions?.selectedModel || (selectedModel !== 'auto' ? selectedModel : undefined);
+                })(),
                 webMode: typeof getWebSearchMode === 'function' ? getWebSearchMode() : _composerWebMode,
                 isWebForced: (typeof getWebSearchMode === 'function' ? getWebSearchMode() : _composerWebMode) === 'force'
             },
@@ -24101,6 +24108,12 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
         return activeRow;
     };
 
+    // Initially keep provisional live research row hidden while searching to eliminate initial empty box flicker
+    const initialRow = getRow();
+    if (initialRow) {
+        initialRow.style.display = 'none';
+    }
+
     const isWebForced = Boolean(options?.isWebForced ?? (typeof getWebSearchMode === 'function' ? getWebSearchMode() === 'force' : _composerWebMode === 'force'));
     return new Promise((resolve) => {
         controller.execute({
@@ -24189,8 +24202,12 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                     // BUT preserve row visibility if an entity header is already mounted so it does not flicker or disappear!
                     const row = getRow();
                     if (row) {
-                        const hasMountedEntity = Boolean(row.querySelector('.chat-entity-visual-container') || controller.entity);
-                        if (!hasMountedEntity) {
+                        const hasMountedContent = Boolean(
+                            row.querySelector('.chat-entity-visual-container') ||
+                            controller.entity ||
+                            controller.streamedText
+                        );
+                        if (!hasMountedContent) {
                             row.style.display = 'none';
                         } else {
                             row.style.display = '';
@@ -24275,8 +24292,8 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                 getRow()?.remove();
                 hideThinkingIndicator();
             }
-            // Abort resolves controller.execute without invoking onComplete.
-            resolve(!result?.aborted && isCurrentResearch() && result?.success === true);
+            // If research concluded (even with partial/fallback synthesis) and was not aborted, it handled the turn
+            resolve(!result?.aborted && isCurrentResearch());
         }).catch((err) => {
             if (isCurrentResearch()) {
                 hideThinkingIndicator();
