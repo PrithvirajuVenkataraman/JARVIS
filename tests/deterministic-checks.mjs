@@ -55,6 +55,7 @@ import {
 } from '../api/_lib/research-evidence.js';
 import {
     extractCandidateEntity,
+    extractCandidateEntityAndDomain,
     isValidImageUrl,
     classifyEntityTypeFromDescription,
     isSemanticCreativeWork,
@@ -544,6 +545,17 @@ console.log('--- Section 12: Dynamic Visual Answer Engine & SSRF Security Contra
     assert.equal(computeTitleTokenOverlap('Harris Jayaraj', 'Harris Jayaraj'), 1.0);
     assert.equal(computeTitleTokenOverlap('Deva composer', 'Deva (composer)'), 1.0);
     assert.equal(computeTitleTokenOverlap('youngsters heart attacks', 'All Creatures Great and Small'), 0, 'Irrelevant entity must have 0 overlap');
+    assert.equal(computeTitleTokenOverlap('SCENE', 'Scene (2026 film)'), 1.0, 'Base title must have 1.0 similarity');
+    assert.ok(computeTitleTokenOverlap('SCENE', 'My Scene Goes Hollywood: The Movie') <= 0.40, 'Bloated irrelevant title must fail threshold');
+
+    // Domain awareness entity extraction
+    const sceneExt = extractCandidateEntityAndDomain('SCENE movie');
+    assert.equal(sceneExt.cleanSubject, 'SCENE');
+    assert.equal(sceneExt.domain, 'movie');
+
+    const harrisExt = extractCandidateEntityAndDomain('Harris Jayaraj music director');
+    assert.equal(harrisExt.cleanSubject, 'Harris Jayaraj');
+    assert.equal(harrisExt.domain, 'musician');
 
     // Secure image CDN domain validation and SSRF guards
     assert.equal(isValidImageUrl('https://upload.wikimedia.org/wikipedia/commons/thumb/a/a4/Deva.jpg/220px-Deva.jpg'), true);
