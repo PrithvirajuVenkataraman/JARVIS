@@ -38,8 +38,20 @@ export function resolveResearchAmbiguity(plan, query, context = []) {
     return plan;
 }
 
+export function stripRhetoricalInterjections(query = '') {
+    if (!query || typeof query !== 'string') return '';
+    let q = query.trim();
+    // Strip common rhetorical interjections and conversational openers
+    q = q.replace(/^(?:what(?:\s+is)?\s+(?:in\s+the\s+world|on\s+earth|the\s+hell|the\s+heck)(?:\s+man)?[?!,.]*\s*)/i, '');
+    q = q.replace(/^(?:(?:hey|hi|yo|look|listen|tell\s+me)(?:\s+man)?[?!,.]*\s*)/i, '');
+    q = q.replace(/^(?:why(?:\s+in\s+the\s+world|on\s+earth)[?!,.]*\s*)/i, '');
+    q = q.replace(/^[?!,.;:\s]+/, '').trim();
+    return q || query.trim();
+}
+
 export function deterministicResearchPlan(query, context = []) {
-    const q = clean(query);
+    const rawClean = clean(query);
+    const q = stripRhetoricalInterjections(rawClean);
     const userTurns = [];
     const conversationTurns = [];
     for (const t of context) {
@@ -128,7 +140,21 @@ export function deterministicResearchPlan(query, context = []) {
     const resolved = contextual && anchor ? `${anchor} — ${q}` : q;
     const facets = unique(resolved.split(/\?\s+|;\s+|\band also\b/i)).slice(0, 4);
     const isTopicLookup = !/^(?:who|what|when|where|why|how|which|compare|is|are|can|could|did|do|does|will|would|calculate)\b/i.test(resolved) && !/\b(?:compare|comparison|versus|vs\.?|difference(?:s)? between)\b/i.test(resolved) && resolved.split(/\s+/).length <= 5 && !/latest|recent|news|updates|today/i.test(resolved);
-    const queries = isTopicLookup ? unique([resolved, `${resolved} latest news updates`]).slice(0, 2) : [resolved];
+    let queries = [resolved];
+    if (isTopicLookup) {
+        if (/\b(?:movies?|films?|cinemas?)\b/i.test(resolved)) {
+            const cleanSubj = resolved.replace(/\b(?:movies?|films?|cinemas?)\b/gi, '').trim();
+            queries = unique([resolved, `${cleanSubj} film release cast plot synopsis`]).slice(0, 2);
+        } else if (/\b(?:songs?|albums?|soundtracks?|tracks?)\b/i.test(resolved)) {
+            const cleanSubj = resolved.replace(/\b(?:songs?|albums?|soundtracks?|tracks?)\b/gi, '').trim();
+            queries = unique([resolved, `${cleanSubj} song release artist lyrics`]).slice(0, 2);
+        } else if (/\b(?:books?|novels?)\b/i.test(resolved)) {
+            const cleanSubj = resolved.replace(/\b(?:books?|novels?)\b/gi, '').trim();
+            queries = unique([resolved, `${cleanSubj} book author synopsis overview`]).slice(0, 2);
+        } else {
+            queries = unique([resolved, `${resolved} latest news updates`]).slice(0, 2);
+        }
+    }
     return { query: resolved, originalQuery: q, queries, facets: facets.length ? facets : [resolved], researchIntent: isResearchableClaim(resolved) ? 'verify_claim' : 'answer_question', ambiguous: unresolved, clarification: unresolved ? 'Which event or subject are you referring to?' : '', interpretations: [] };
 }
 
