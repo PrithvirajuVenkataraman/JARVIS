@@ -631,7 +631,7 @@ console.log('--- Section 13: Response Formatting, Markdown Hierarchy & Paragraph
     const sampleBioText = 'Deva was born on Nov 20, 1950. He studied Indian classical harmonium under J. B. Krishna. His score was 3.14 on Next.js.';
     const sentences = splitReadableSentences(sampleBioText);
     assert.equal(sentences.length, 3, 'Must split into exactly 3 sentences');
-    assert.ok(sentences[0].includes('Nov 20, 1950'), 'Must preserve date without splitting at Nov'); 
+    assert.ok(sentences[0].includes('Nov 20, 1950'), 'Must preserve date without splitting at Nov');
     assert.ok(sentences[1].includes('J. B. Krishna'), 'Must preserve initials without splitting at J. or B.');
     assert.ok(sentences[2].includes('3.14 on Next.js'), 'Must preserve decimals and dot-syntax without splitting');
 
@@ -645,6 +645,13 @@ console.log('--- Section 13: Response Formatting, Markdown Hierarchy & Paragraph
     // Test 9: deBulletizePseudoListIfNeeded strictly preserves genuine procedural lists and key-value specs
     const genuineProcedure = `- Step 1: Clone the repository.\n- Step 2: Run npm install.\n- Step 3: Run npm test.`;
     assert.equal(deBulletizePseudoListIfNeeded(genuineProcedure), genuineProcedure, 'Must preserve genuine procedural step lists');
+
+    // Test 10: cleanAnswerText strips unwanted meta-commentary sentences
+    const metaAnswer = 'Harris Jayaraj is an Indian composer born in 1975. He has composed scores for numerous Tamil films.\n\nThe answer integrates verified information from the Times of India profile and the Wikipedia entry, while noting the missing detailed early-career timeline.';
+    const cleanedMeta = cleanAnswerText(metaAnswer);
+    assert.equal(cleanedMeta.includes('integrates verified information'), false, 'Must strip "The answer integrates verified information" sentence');
+    assert.equal(cleanedMeta.includes('while noting the missing'), false, 'Must strip "while noting the missing" clause');
+    assert.equal(cleanedMeta.includes('Harris Jayaraj is an Indian composer born in 1975.'), true, 'Must preserve actual substantive answer');
 
     const genuineSpecs = `- **Processor**: Apple M3 Max\n- **Memory**: 36GB Unified\n- **Storage**: 1TB NVMe SSD`;
     assert.equal(deBulletizePseudoListIfNeeded(genuineSpecs), genuineSpecs, 'Must preserve genuine key-value specifications');
