@@ -492,6 +492,74 @@ async function runBrowserTests() {
         assert.notEqual(vttResult?.valAfterStop, 'What is the capital of france What is the capital of france', 'Prompt must not be duplicated');
         console.log('[PASS] VTT prompt deduping verified: prompt appears exactly once');
 
+        // Test 11: Settings "Important Info & Architecture" Disclosure Subview & Footer Link
+        const evalImportantInfo = await sendCommand('Runtime.evaluate', {
+            expression: `(() => {
+                const footerBtn = document.querySelector('#footer-disclaimer .composer-disclaimer-btn');
+                const hasFooterBtn = Boolean(footerBtn);
+                const footerBtnText = footerBtn ? footerBtn.textContent.trim() : '';
+
+                // Click the footer link
+                if (footerBtn) {
+                    footerBtn.click();
+                }
+
+                const helpModal = document.getElementById('help-modal');
+                const isModalOpen = Boolean(helpModal);
+                const archView = document.getElementById('settings-view-architecture-info');
+                const isArchActive = archView && archView.classList.contains('active') && archView.style.display === 'flex';
+                const archText = archView ? archView.innerText || archView.textContent : '';
+
+                const hasNodeRuntime = archText.includes('22.x');
+                const hasColdStartInfo = archText.includes('Cold Start Prevention') && archText.includes('Disabled');
+                const hasServerlessTradeoff = archText.includes('Serverless Cold Starts');
+                const hasPrivacyAdvantage = archText.includes('100% Local-First Privacy');
+                const hasEnterpriseCompare = archText.includes('ChatGPT') || archText.includes('OpenAI');
+
+                // Return to main view
+                const backBtn = archView ? archView.querySelector('.settings-subview-back-btn') : null;
+                if (backBtn) {
+                    backBtn.click();
+                }
+                const mainView = document.getElementById('settings-view-main');
+                const isMainActive = mainView && mainView.classList.contains('active');
+
+                // Close modal
+                if (typeof window.closeHelpModal === 'function') {
+                    window.closeHelpModal();
+                }
+
+                return {
+                    hasFooterBtn,
+                    footerBtnText,
+                    isModalOpen,
+                    isArchActive,
+                    hasNodeRuntime,
+                    hasColdStartInfo,
+                    hasServerlessTradeoff,
+                    hasPrivacyAdvantage,
+                    hasEnterpriseCompare,
+                    isMainActive
+                };
+            })()`,
+            awaitPromise: true,
+            returnByValue: true
+        });
+
+        const infoResult = evalImportantInfo?.result?.result?.value || evalImportantInfo?.result?.value;
+        console.log('Important Info view verification:', infoResult);
+        assert.equal(infoResult?.hasFooterBtn, true, 'Footer disclaimer button must exist');
+        assert.equal(infoResult?.footerBtnText, 'Check important info.', 'Footer disclaimer button text must be "Check important info."');
+        assert.equal(infoResult?.isModalOpen, true, 'Clicking footer button must open Settings modal');
+        assert.equal(infoResult?.isArchActive, true, 'Settings modal must navigate directly to Important Info & Architecture subview');
+        assert.equal(infoResult?.hasNodeRuntime, true, 'Sub-view must disclose Node.js 22.x runtime');
+        assert.equal(infoResult?.hasColdStartInfo, true, 'Sub-view must disclose Cold Start Prevention Disabled');
+        assert.equal(infoResult?.hasServerlessTradeoff, true, 'Sub-view must explain Serverless Cold Starts vs dedicated enterprise GPU fleets');
+        assert.equal(infoResult?.hasPrivacyAdvantage, true, 'Sub-view must explain 100% Local-First Privacy and zero training retention');
+        assert.equal(infoResult?.hasEnterpriseCompare, true, 'Sub-view must compare tradeoffs vs OpenAI/ChatGPT/Anthropic');
+        assert.equal(infoResult?.isMainActive, true, 'Back button must return cleanly to main Settings view');
+        console.log('[PASS] Settings "Important Info & Architecture" disclosure verified end-to-end');
+
         // Test Vercel Serverless Function Count limit (must be <= 12 on Hobby plan)
         const fs = await import('node:fs');
         const path = await import('node:path');
