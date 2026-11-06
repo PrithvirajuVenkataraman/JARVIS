@@ -363,10 +363,13 @@ export async function runResearch(query, options = {}, dependencies = {}) {
             rounds = round + 1;
             status(round ? 'researching' : 'searching', round ? 'Searching for the missing names, values or details…' : 'Finding relevant sources…', { round: rounds });
             await mapLimited(pending, 2, gather);
-            await readPages();
+            if (options.deepResearch === true || options.answer !== false || sources.size < 2) {
+                await readPages();
+            }
             emit('sources', { sources: rankedSources(), coverage: validation.coverage });
             if (generations === 0 && options.answer !== false && await generate(false)) break;
             if (validation.answerStatus === 'complete') break;
+            if (options.answer === false && sources.size >= 2) break;
             if (options.answer === false && [...sources.values()].some(source => source.pageFetched)) break;
             pending = gapQueries();
             if (!pending.length) {
@@ -441,7 +444,7 @@ export async function cachedResearchSearch(query, options, search) {
     let work = inFlight.get(key);
     if (!work) {
         const scope = researchTimeoutSignal(options.timeoutMs || RESEARCH_LIMITS.PROVIDER_MS);
-        work = { scope, users: 0, promise: null }; 
+        work = { scope, users: 0, promise: null };
         work.promise = Promise.resolve().then(() => search(query, { ...options, signal: scope.signal })).then(results => {
             if (results?.length && !scope.signal.aborted) {
                 if (cache.size >= 200) cache.delete(cache.keys().next().value);
