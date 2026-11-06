@@ -75,9 +75,9 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous">
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
-    <link rel="stylesheet" href="styles.css?v=2.4.1">
+    <link rel="stylesheet" href="styles.css?v=2.4.6">
     <script src="science-format.js?v=2.0.1"></script>
-    <script type="module" src="app/bootstrap.js?v=2.4.1"></script>
+    <script type="module" src="app/bootstrap.js?v=2.4.6"></script>
 </head>
 <body class="dark min-h-screen bg-black text-white">
 
@@ -507,7 +507,7 @@
             <input type="file" id="composer-photo-library-input" class="hidden" accept="image/*,.heic,.heif,.heics,.heifs,.avif,.dng,.raw,.cr2,.cr3,.nef,.nrw,.arw,.raf,.rw2,.orf,.pef,.jp2,.j2k,.jpf,.jpx,.jpm,.pict,.pct,.psd,.jpeg,.jpg,.png,.webp,.gif,.bmp,.tiff,.tif" multiple>
             <input type="file" id="composer-photo-camera-input" class="hidden" accept="image/*,.heic,.heif,.dng,.jpeg,.jpg,.png" capture="environment">
             <input type="file" id="composer-file-input" class="hidden" accept="*/*" multiple>
-            <p id="footer-disclaimer" class="composer-disclaimer">AI can make mistakes. Check important info.</p>
+            <p id="footer-disclaimer" class="composer-disclaimer">AI can make mistakes. <button type="button" class="composer-disclaimer-btn" onclick="openImportantInfoModal()">Check important info.</button></p>
         </div>
     </div>
     <!-- Live camera preview removed (dedicated file attachment OCR pipeline active) -->
@@ -585,13 +585,13 @@ const APP_CONFIG = Object.freeze({
     }),
     models: Object.freeze([
         { id: 'auto', label: 'Auto (Best Available)', displayName: null, icon: '⚡', supportsMedia: true },
-        { id: 'gemini-3.7-flash', label: 'Gemini 3.7 Flash (Latest Vision & Coding)', displayName: 'Gemini 3.7 Flash', icon: '✦', supportsMedia: true },
-        { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro (Deep Reasoning & Vision)', displayName: 'Gemini 2.5 Pro', icon: '✦', supportsMedia: true },
-        { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (Fast Multimodal)', displayName: 'Gemini 2.5 Flash', icon: '✦', supportsMedia: true },
-        { id: 'openai/gpt-oss-120b', label: 'GPT OSS 120B (Groq Reasoning & Multilingual)', displayName: 'GPT-OSS 120B', icon: '⚡', supportsMedia: false },
-        { id: 'openai/gpt-oss-20b', label: 'GPT OSS 20B (Groq Fast & Direct)', displayName: 'GPT-OSS 20B', icon: '⚡', supportsMedia: false },
-        { id: 'qwen/qwen3.8-27b', label: 'Qwen 3.8 27B (Groq Vision & Reasoning)', displayName: 'Qwen 3.8 27B', icon: '⚡', supportsMedia: true },
-        { id: 'openai/safety-gpt-oss-20b', label: 'Safety GPT OSS 20B (Groq Content Moderation)', displayName: 'Safety GPT-OSS 20B', icon: '⚡', supportsMedia: false }
+        { id: 'openai/gpt-oss-120b', label: 'GPT OSS 120B (Reasoning & Multilingual)', displayName: 'GPT-OSS 120B', icon: '🧠', supportsMedia: false },
+        { id: 'openai/gpt-oss-20b', label: 'GPT OSS 20B (Fast & Direct)', displayName: 'GPT-OSS 20B', icon: '⚡', supportsMedia: false },
+        { id: 'qwen/qwen3.8-27b', label: 'Qwen 3.8 27B (Vision & Reasoning)', displayName: 'Qwen 3.8 27B', icon: '🔮', supportsMedia: true },
+        { id: 'openai/safety-gpt-oss-20b', label: 'Safety GPT OSS 20B (Content Moderation)', displayName: 'Safety GPT-OSS 20B', icon: '🛡️', supportsMedia: false },
+        { id: 'gemini-3.7-flash', label: 'Gemini 3.7 Flash (Resilient Fallback & Vision)', displayName: 'Gemini 3.7 Flash', icon: '✦', supportsMedia: true },
+        { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro (Resilient Fallback & Deep Reasoning)', displayName: 'Gemini 2.5 Pro', icon: '✦', supportsMedia: true },
+        { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (Resilient Fallback & Fast Multimodal)', displayName: 'Gemini 2.5 Flash', icon: '✦', supportsMedia: true }
     ]),
     timeouts: Object.freeze({
         diagnosticsMs: 8000,
@@ -5151,6 +5151,13 @@ function postProcessAssistantResponse(rawText, userMessage = '') {
         .replace(/\s*(?:happy to (?:help|assist|answer|clarify|elaborate)(?: (?:further|more|with anything else))?[.!]?)\s*$/i, '')
         .trim();
 
+    // Strip self-referential research meta-commentary sentences (e.g. "The answer integrates verified information from...", "...while noting the missing...")
+    text = text
+        .replace(/(?:^|\n|\.\s+)(?:The\s+answer|This\s+(?:answer|response|summary))\s+integrates\s+verified\s+information.*?(?:\.|$)/gim, '')
+        .replace(/(?:,\s*)?while\s+noting\s+the\s+missing\s+[^.!?\n]+[.!?]?/gi, '')
+        .replace(/(?:^|\n)Still\s+unverified:\s*.*$/gim, '')
+        .trim();
+
     // Keep tense accurate for historical "When did ... release?" questions.
     text = fixHistoricalReleaseWording(text, userMessage);
 
@@ -7310,14 +7317,14 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                                     </div>
                                     <div class="settings-row-right">
                                         <select id="model-selector" class="settings-select" onchange="setSelectedModel(this.value)" aria-labelledby="settings-model-label">
-                                            <option value="auto" ${currentSelectedModel === 'auto' ? 'selected' : ''}>Auto (Recommended)</option>
-                                            <option value="gemini-3.7-flash" ${currentSelectedModel === 'gemini-3.7-flash' ? 'selected' : ''}>Gemini 3.7 Flash (Latest Vision &amp; Coding)</option>
-                                            <option value="gemini-2.5-pro" ${currentSelectedModel === 'gemini-2.5-pro' ? 'selected' : ''}>Gemini 2.5 Pro (Deep Reasoning &amp; Vision)</option>
-                                            <option value="gemini-2.5-flash" ${currentSelectedModel === 'gemini-2.5-flash' ? 'selected' : ''}>Gemini 2.5 Flash (Fast Multimodal)</option>
-                                            <option value="openai/gpt-oss-120b" ${currentSelectedModel === 'openai/gpt-oss-120b' ? 'selected' : ''}>GPT OSS 120B (Groq Reasoning &amp; Multilingual)</option>
-                                            <option value="openai/gpt-oss-20b" ${currentSelectedModel === 'openai/gpt-oss-20b' ? 'selected' : ''}>GPT OSS 20B (Groq Fast &amp; Direct)</option>
-                                            <option value="qwen/qwen3.6-27b" ${currentSelectedModel === 'qwen/qwen3.6-27b' ? 'selected' : ''}>Qwen 3.6 27B (Groq Vision &amp; Reasoning)</option>
-                                            <option value="qwen/qwen3.8-27b" ${currentSelectedModel === 'qwen/qwen3.8-27b' ? 'selected' : ''}>Qwen 3.8 27B (Groq Vision &amp; Reasoning)</option>
+                                            <option value="auto" ${currentSelectedModel === 'auto' ? 'selected' : ''}>Auto (Best Available)</option>
+                                            <option value="openai/gpt-oss-120b" ${currentSelectedModel === 'openai/gpt-oss-120b' ? 'selected' : ''}>GPT OSS 120B (Reasoning &amp; Multilingual)</option>
+                                            <option value="openai/gpt-oss-20b" ${currentSelectedModel === 'openai/gpt-oss-20b' ? 'selected' : ''}>GPT OSS 20B (Fast &amp; Direct)</option>
+                                            <option value="qwen/qwen3.8-27b" ${currentSelectedModel === 'qwen/qwen3.8-27b' ? 'selected' : ''}>Qwen 3.8 27B (Vision &amp; Reasoning)</option>
+                                            <option value="openai/safety-gpt-oss-20b" ${currentSelectedModel === 'openai/safety-gpt-oss-20b' ? 'selected' : ''}>Safety GPT OSS 20B (Content Moderation)</option>
+                                            <option value="gemini-3.7-flash" ${currentSelectedModel === 'gemini-3.7-flash' ? 'selected' : ''}>Gemini 3.7 Flash (Fallback &amp; Vision)</option>
+                                            <option value="gemini-2.5-pro" ${currentSelectedModel === 'gemini-2.5-pro' ? 'selected' : ''}>Gemini 2.5 Pro (Fallback &amp; Deep Reasoning)</option>
+                                            <option value="gemini-2.5-flash" ${currentSelectedModel === 'gemini-2.5-flash' ? 'selected' : ''}>Gemini 2.5 Flash (Fallback &amp; Fast Multimodal)</option>
                                         </select>
                                     </div>
                                 </div>
@@ -7554,6 +7561,33 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                                         </button>
                                     </div>
                                 </div>
+                            </div>
+
+                            <!-- Section 4: ABOUT & SYSTEM ARCHITECTURE -->
+                            <div class="settings-section-label">ABOUT &amp; SYSTEM ARCHITECTURE</div>
+                            <div class="settings-group-card">
+                                <!-- Important Info & Tradeoffs Row -->
+                                <button type="button" class="settings-row settings-row-interactive" id="settings-row-architecture-info" onclick="switchSettingsView('architecture_info')" aria-label="Important Info &amp; Architecture">
+                                    <div class="settings-row-left">
+                                        <div class="settings-icon-badge settings-icon-cyan" aria-hidden="true">
+                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                <circle cx="12" cy="12" r="10"/>
+                                                <line x1="12" y1="16" x2="12" y2="12"/>
+                                                <line x1="12" y1="8" x2="12.01" y2="8"/>
+                                            </svg>
+                                        </div>
+                                        <div class="settings-row-text">
+                                            <h3 class="settings-row-title">Important Info &amp; System Tradeoffs</h3>
+                                            <p class="settings-row-desc">Serverless runtime, cold starts &amp; tradeoffs vs enterprise AI</p>
+                                        </div>
+                                    </div>
+                                    <div class="settings-row-right">
+                                        <span class="settings-row-status configured">Node 22 Serverless</span>
+                                        <svg class="settings-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                            <path d="M9 18l6-6-6-6"/>
+                                        </svg>
+                                    </div>
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -7842,6 +7876,177 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                             </div>
                         </div>
                     </div>
+
+                    <!-- Sub-View: Important Info & System Architecture -->
+                    <div id="settings-view-architecture-info" class="settings-view-panel settings-subview-panel" style="display:none;">
+                        <!-- Sub-view Header -->
+                        <div class="help-modal-header">
+                            <button type="button" onclick="switchSettingsView('main')" class="help-modal-back-btn settings-subview-back-btn" aria-label="Back to settings">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <path d="M19 12H5"></path>
+                                    <path d="M12 19l-7-7 7-7"></path>
+                                </svg>
+                                <span class="settings-back-label">Settings</span>
+                            </button>
+                            <div class="help-modal-title-block">
+                                <h2 class="settings-modal-heading">Important Info &amp; Architecture</h2>
+                            </div>
+                            <button type="button" onclick="closeHelpModal()" class="help-modal-ok-btn" aria-label="Close settings" style="background:#ffffff!important;color:#000000!important;-webkit-text-fill-color:#000000!important;font-weight:750!important;">
+                                Done
+                            </button>
+                        </div>
+
+                        <!-- Sub-view Body -->
+                        <div class="help-modal-body custom-scrollbar">
+                            <p class="settings-subview-desc">
+                                Transparent architectural disclosures: How JARVIS is hosted, key engineering differences, and tradeoffs compared to multi-billion-dollar enterprise platforms (OpenAI / ChatGPT, Anthropic / Claude).
+                            </p>
+
+                            <!-- Runtime Environment Banner -->
+                            <div class="p-3 rounded-xl bg-white/[0.04] border border-white/10 mb-4">
+                                <div class="flex items-center justify-between mb-2">
+                                    <div class="text-xs font-semibold text-neutral-200 flex items-center gap-2">
+                                        <span class="inline-block w-2 h-2 rounded-full bg-emerald-400"></span>
+                                        <span>Active Production Infrastructure</span>
+                                    </div>
+                                    <span class="compliance-badge personal">Serverless Vercel</span>
+                                </div>
+                                <div class="grid grid-cols-2 gap-2 text-[11px] text-neutral-400 mt-2">
+                                    <div class="p-2 rounded-lg bg-black/40 border border-white/5">
+                                        <div class="text-neutral-500 uppercase tracking-wider text-[9px] font-semibold">Node.js Runtime</div>
+                                        <div class="text-neutral-200 font-mono font-medium mt-0.5">22.x (LTS)</div>
+                                    </div>
+                                    <div class="p-2 rounded-lg bg-black/40 border border-white/5">
+                                        <div class="text-neutral-500 uppercase tracking-wider text-[9px] font-semibold">Cold Start Prevention</div>
+                                        <div class="text-neutral-200 font-mono font-medium mt-0.5">Disabled (On-Demand)</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="settings-section-label">SYSTEM TRADEOFFS VS. ENTERPRISE AI GIANTS</div>
+
+                            <!-- Card 1: Serverless Cold Starts -->
+                            <div class="settings-group-card mb-4" style="padding:14px;">
+                                <div class="flex items-start justify-between gap-3 mb-1">
+                                    <h4 class="text-xs font-semibold text-neutral-100 flex items-center gap-2">
+                                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                                        <span>1. Serverless Cold Starts vs. Dedicated GPU Fleets</span>
+                                    </h4>
+                                    <span class="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 font-medium">Latency Tradeoff</span>
+                                </div>
+                                <p class="text-[11px] text-neutral-300 leading-relaxed mt-1">
+                                    <strong>The Difference:</strong> Enterprise companies (OpenAI, Anthropic) maintain hundreds of thousands of constantly warm GPU clusters in dedicated datacenters 24/7. JARVIS runs on lightweight on-demand Vercel Serverless Functions with Cold Start Prevention disabled to keep the website free and lightweight.
+                                </p>
+                                <p class="text-[11px] text-neutral-400 leading-relaxed mt-1.5">
+                                    <strong>Drawback &amp; Impact:</strong> If the site is idle for more than a few minutes, the initial request or web search may take 1 to 3 seconds longer while the serverless container initializes. Subsequent turns run at instant streaming speeds.
+                                </p>
+                            </div>
+
+                            <!-- Card 2: Free Shared Tier vs Paid Subscription -->
+                            <div class="settings-group-card mb-4" style="padding:14px;">
+                                <div class="flex items-start justify-between gap-3 mb-1">
+                                    <h4 class="text-xs font-semibold text-neutral-100 flex items-center gap-2">
+                                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m16 10-4 4-2-2"/></svg>
+                                        <span>2. Free BYOK vs. $20/mo Enterprise Subscriptions</span>
+                                    </h4>
+                                    <span class="text-[10px] px-2 py-0.5 rounded-full bg-sky-500/10 text-sky-400 border border-sky-500/20 font-medium">Cost &amp; Quotas</span>
+                                </div>
+                                <p class="text-[11px] text-neutral-300 leading-relaxed mt-1">
+                                    <strong>The Difference:</strong> Commercial AI services charge $20 to $200 per month for reserved GPU capacity. JARVIS is 100% free, utilizing shared platform quotas on ultra-fast Groq LPUs and Google Gemini.
+                                </p>
+                                <p class="text-[11px] text-neutral-400 leading-relaxed mt-1.5">
+                                    <strong>Drawback &amp; Solution:</strong> During worldwide peak spikes, shared platform limits may occasionally queue requests. You can bypass this completely by bringing your own free personal API keys under <strong>API Keys (BYOK)</strong> in Settings for dedicated, unmetered throughput.
+                                </p>
+                            </div>
+
+                            <!-- Card 3: 100% Local-First Privacy -->
+                            <div class="settings-group-card mb-4" style="padding:14px;">
+                                <div class="flex items-start justify-between gap-3 mb-1">
+                                    <h4 class="text-xs font-semibold text-neutral-100 flex items-center gap-2">
+                                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                                        <span>3. 100% Local-First Privacy vs. Cloud Training Logs</span>
+                                    </h4>
+                                    <span class="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium">Privacy Advantage</span>
+                                </div>
+                                <p class="text-[11px] text-neutral-300 leading-relaxed mt-1">
+                                    <strong>The Difference:</strong> Enterprise AI platforms log all conversations and uploads to remote cloud databases and may retain user data to train future models. JARVIS is client-side first: conversations, attachments, vectors, and memory items reside strictly inside your browser (IndexedDB / localStorage).
+                                </p>
+                                <p class="text-[11px] text-neutral-400 leading-relaxed mt-1.5">
+                                    <strong>Drawback &amp; Tradeoff:</strong> Because we do not operate a remote user database, your chat history stays on this specific device and browser. Clearing browser site data will erase local history unless you export your chats first.
+                                </p>
+                            </div>
+
+                            <!-- Card 4: Real-Time Live Web Grounding -->
+                            <div class="settings-group-card mb-4" style="padding:14px;">
+                                <div class="flex items-start justify-between gap-3 mb-1">
+                                    <h4 class="text-xs font-semibold text-neutral-100 flex items-center gap-2">
+                                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#a855f7" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                                        <span>4. Live Multi-Source Grounding vs. Closed Crawled Caches</span>
+                                    </h4>
+                                    <span class="text-[10px] px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/20 font-medium">Search Latency</span>
+                                </div>
+                                <p class="text-[11px] text-neutral-300 leading-relaxed mt-1">
+                                    <strong>The Difference:</strong> Big tech search engines query proprietary internal index caches. JARVIS dynamically searches the live open web (DuckDuckGo, SearXNG, Wikipedia) and verifies citations and entity details in real time.
+                                </p>
+                                <p class="text-[11px] text-neutral-400 leading-relaxed mt-1.5">
+                                    <strong>Drawback:</strong> Multi-source live retrieval takes 2 to 4 seconds to retrieve and corroborate sources before synthesis begins, but guarantees real-time freshness without closed-ecosystem biases.
+                                </p>
+                            </div>
+
+                            <!-- Card 5: Multi-Model Orchestration -->
+                            <div class="settings-group-card mb-4" style="padding:14px;">
+                                <div class="flex items-start justify-between gap-3 mb-1">
+                                    <h4 class="text-xs font-semibold text-neutral-100 flex items-center gap-2">
+                                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#ec4899" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+                                        <span>5. Independent Multi-Model Orchestration vs. Single-Vendor Lock-in</span>
+                                    </h4>
+                                    <span class="text-[10px] px-2 py-0.5 rounded-full bg-pink-500/10 text-pink-400 border border-pink-500/20 font-medium">No Lock-In</span>
+                                </div>
+                                <p class="text-[11px] text-neutral-300 leading-relaxed mt-1">
+                                    <strong>The Difference:</strong> Instead of being locked into a single proprietary provider (e.g. only OpenAI or only Anthropic), JARVIS routes dynamically across specialized open-weight models on Groq with Gemini frontier models maintained as resilient fallbacks:
+                                </p>
+                                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-2.5 text-[10px]">
+                                    <div class="bg-neutral-900/90 border border-neutral-800/90 rounded-md p-2">
+                                        <div class="text-[9px] font-semibold uppercase tracking-wider text-neutral-400 mb-1">Reasoning &amp; Tools</div>
+                                        <div class="text-neutral-200 font-medium">GPT OSS 120B</div>
+                                        <div class="text-neutral-300">GPT OSS 20B</div>
+                                        <div class="text-purple-400 font-medium">Qwen 3.8 27B</div>
+                                    </div>
+                                    <div class="bg-neutral-900/90 border border-neutral-800/90 rounded-md p-2">
+                                        <div class="text-[9px] font-semibold uppercase tracking-wider text-neutral-400 mb-1">Text &amp; Multilingual</div>
+                                        <div class="text-neutral-200 font-medium">GPT OSS 120B</div>
+                                        <div class="text-neutral-300">GPT OSS 20B</div>
+                                        <div class="text-neutral-400">Whisper Large v3</div>
+                                    </div>
+                                    <div class="bg-neutral-900/90 border border-neutral-800/90 rounded-md p-2">
+                                        <div class="text-[9px] font-semibold uppercase tracking-wider text-neutral-400 mb-1">Vision &amp; Safety</div>
+                                        <div class="text-purple-400 font-medium">Qwen 3.8 27B</div>
+                                        <div class="text-emerald-400 font-medium mt-1">Safety GPT OSS 20B</div>
+                                    </div>
+                                    <div class="bg-neutral-900/90 border border-neutral-800/90 rounded-md p-2">
+                                        <div class="text-[9px] font-semibold uppercase tracking-wider text-neutral-400 mb-1">Speech &amp; Fallback</div>
+                                        <div class="text-neutral-300">Whisper v3 / Turbo</div>
+                                        <div class="text-neutral-300">Orpheus EN / AR</div>
+                                        <div class="text-blue-400 font-medium mt-1">Gemini 2.5 / 3.7 (Fallback)</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Card 6: Responsible Usage & Clinical Boundaries -->
+                            <div class="settings-group-card mb-2" style="padding:14px;">
+                                <div class="flex items-start justify-between gap-3 mb-1">
+                                    <h4 class="text-xs font-semibold text-neutral-100 flex items-center gap-2">
+                                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                                        <span>6. Responsible AI &amp; Professional Boundaries</span>
+                                    </h4>
+                                    <span class="text-[10px] px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-400 border border-rose-500/20 font-medium">Important Advisory</span>
+                                </div>
+                                <p class="text-[11px] text-neutral-300 leading-relaxed mt-1">
+                                    JARVIS provides comprehensive, grounded overviews for scientific and educational questions. However, AI cannot replace a licensed physician, attorney, or emergency operator. Medical inquiries always include an advisory notice to consult a doctor for clinical diagnosis. In emergencies, use the Emergency SOS button in Settings or call local authorities.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             `;
 
@@ -7871,6 +8076,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             const subViewCustom = document.getElementById('settings-view-custom-instructions');
             const subViewCompliance = document.getElementById('settings-view-compliance');
             const subViewByok = document.getElementById('settings-view-byok');
+            const subViewArchInfo = document.getElementById('settings-view-architecture-info');
             if (!mainView) return;
 
             if (viewName === 'custom_instructions') {
@@ -7883,6 +8089,10 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 if (subViewByok) {
                     subViewByok.style.display = 'none';
                     subViewByok.classList.remove('active');
+                }
+                if (subViewArchInfo) {
+                    subViewArchInfo.style.display = 'none';
+                    subViewArchInfo.classList.remove('active');
                 }
                 if (subViewCustom) {
                     subViewCustom.style.display = 'flex';
@@ -7907,6 +8117,10 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                     subViewByok.style.display = 'none';
                     subViewByok.classList.remove('active');
                 }
+                if (subViewArchInfo) {
+                    subViewArchInfo.style.display = 'none';
+                    subViewArchInfo.classList.remove('active');
+                }
                 if (subViewCompliance) {
                     subViewCompliance.style.display = 'flex';
                     subViewCompliance.classList.add('active');
@@ -7927,6 +8141,10 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                     subViewCompliance.style.display = 'none';
                     subViewCompliance.classList.remove('active');
                 }
+                if (subViewArchInfo) {
+                    subViewArchInfo.style.display = 'none';
+                    subViewArchInfo.classList.remove('active');
+                }
                 if (subViewByok) {
                     subViewByok.style.display = 'flex';
                     subViewByok.classList.add('active');
@@ -7934,6 +8152,27 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                         loadByokSettings();
                     }
                     const backBtn = subViewByok.querySelector('.settings-subview-back-btn');
+                    if (backBtn) backBtn.focus();
+                }
+            } else if (viewName === 'architecture_info') {
+                mainView.style.display = 'none';
+                mainView.classList.remove('active');
+                if (subViewCustom) {
+                    subViewCustom.style.display = 'none';
+                    subViewCustom.classList.remove('active');
+                }
+                if (subViewCompliance) {
+                    subViewCompliance.style.display = 'none';
+                    subViewCompliance.classList.remove('active');
+                }
+                if (subViewByok) {
+                    subViewByok.style.display = 'none';
+                    subViewByok.classList.remove('active');
+                }
+                if (subViewArchInfo) {
+                    subViewArchInfo.style.display = 'flex';
+                    subViewArchInfo.classList.add('active');
+                    const backBtn = subViewArchInfo.querySelector('.settings-subview-back-btn');
                     if (backBtn) backBtn.focus();
                 }
             } else {
@@ -7949,6 +8188,10 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                     subViewByok.style.display = 'none';
                     subViewByok.classList.remove('active');
                 }
+                if (subViewArchInfo) {
+                    subViewArchInfo.style.display = 'none';
+                    subViewArchInfo.classList.remove('active');
+                }
                 mainView.style.display = 'flex';
                 mainView.classList.add('active');
 
@@ -7956,10 +8199,20 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 if (typeof updateByokStatusBadge === 'function') {
                     updateByokStatusBadge();
                 }
-                const rowBtn = document.getElementById('settings-row-custom-instructions');
+                const rowBtn = document.getElementById('settings-row-architecture-info') || document.getElementById('settings-row-custom-instructions');
                 if (rowBtn) rowBtn.focus();
             }
         }
+
+        function openImportantInfoModal() {
+            if (!document.getElementById('help-modal')) {
+                if (typeof showHelpModal === 'function') {
+                    showHelpModal();
+                }
+            }
+            switchSettingsView('architecture_info');
+        }
+        window.openImportantInfoModal = openImportantInfoModal;
 
         async function renderComplianceSettingsView() {
             const badgeEl = document.getElementById('compliance-policy-badge');
@@ -23932,15 +24185,25 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                 onSourcesValidated: ({ sources, provenance }) => {
                     if (!isCurrentResearch() || controller.isTerminal) return;
                     // Keep SEARCHING indicator visible and active until first token arrives.
-                    // Keep the empty assistant row hidden so no empty blinking box is shown before synthesis.
+                    // Keep the empty assistant row hidden so no empty blinking box is shown before synthesis,
+                    // BUT preserve row visibility if an entity header is already mounted so it does not flicker or disappear!
                     const row = getRow();
                     if (row) {
-                        row.style.display = 'none';
+                        const hasMountedEntity = Boolean(row.querySelector('.chat-entity-visual-container') || controller.entity);
+                        if (!hasMountedEntity) {
+                            row.style.display = 'none';
+                        } else {
+                            row.style.display = '';
+                        }
                     }
                     showThinkingIndicator('SEARCHING');
                 },
                 onToken: ({ streamedText }) => {
                     if (!isCurrentResearch() || controller.isTerminal) return;
+                    const row = getRow();
+                    if (row && row.style.display === 'none') {
+                        row.style.display = '';
+                    }
                     // Tokens are provisional. Keep the previous answer visible until canonical completion.
                     const label = document.querySelector('#chat-thinking-indicator .thinking-timer');
                     if (label) label.textContent = 'Checking the answer against retrieved evidence…';
@@ -23948,7 +24211,7 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                 onEntityResolved: ({ entity, notableWorks }) => {
                     if (!isCurrentResearch() || controller.isTerminal) return;
                     const row = getRow();
-                    if (row) {
+                    if (row && entity) {
                         row.style.display = '';
                         if (window.JarvisLiveResearch?.renderOrUpdateVisualEntityHeader) {
                             window.JarvisLiveResearch.renderOrUpdateVisualEntityHeader(row, entity, notableWorks || []);
