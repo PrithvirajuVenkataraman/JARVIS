@@ -202,10 +202,22 @@ export async function ingestAllForMessage(attachments = [], userText = '') {
                         base64
                     };
                 }
+                // High-performance single-pass native vision:
+                // Multimodal LLM (Gemini 2.5 Flash / Groq Vision) receives the image base64 directly in a single pass.
+                // Bypasses 45s heavy OCR preprocessing and Tesseract fallback.
+                const result = {
+                    ok: Boolean(base64),
+                    text: '',
+                    method: 'single_pass_native_image',
+                    provider: 'native'
+                };
+                attachment.extractedText = '';
+                attachment.ocrMethod = 'single_pass_native_image';
+                return { attachment, isImg, imagePayload, result };
             }
             const result = await ingestAttachmentWithFallback(attachment);
             attachment.extractedText = String(result.text || '').trim();
-            attachment.ocrMethod = result.method || (isImg ? (result.text ? 'vision_ocr' : 'single_pass_native_image') : '');
+            attachment.ocrMethod = result.method || '';
             return { attachment, isImg, imagePayload, result };
         } finally {
             release();
@@ -561,7 +573,7 @@ async function ingestOnServer(attachment, localResult = {}) {
         base64,
         clientText,
         clientMethod: String(localResult?.method || '')
-    }, { timeoutMs: 45000 });
+    }, { timeoutMs: 8000 });
     return {
         ok: Boolean(data?.ok || data?.success) && hasUsefulExtractedText(data?.text),
         text: String(data?.text || ''),
@@ -584,7 +596,7 @@ async function ingestViaVision(attachment) {
             prompt: `Transcribe all readable text, tables, and details from this image (${attachment.name}) in clean Markdown format. Preserve layout, line breaks, bullet points, and render all tables with markdown syntax (| Col 1 | Col 2 |).`,
             mimeType,
             imageBase64: base64
-        }, { timeoutMs: 45000 });
+        }, { timeoutMs: 8000 });
         const details = data?.details && typeof data.details === 'object' ? data.details : {};
         const fullText = String(details?.fullText || '').trim();
         const snippets = Array.isArray(details?.textDetected)
