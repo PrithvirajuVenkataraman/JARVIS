@@ -704,7 +704,7 @@ export async function resolveEntityVisuals(query = '', options = {}) {
                 height: summary.thumbnail?.height
             } : null,
             pageUrl: summary.content_urls?.desktop?.page || `https://en.wikipedia.org/wiki/${encodeURIComponent(summary.title.replace(/\s+/g, '_'))}`
-        };
+        }; 
 
         // Step 3: Concurrently discover notable works if applicable
         let notableWorks = [];
