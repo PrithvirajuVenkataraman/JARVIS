@@ -55,7 +55,7 @@ const MAX_ATTACHMENTS = 12;
 const MAX_FILE_BYTES = 50 * 1024 * 1024;
 const MAX_EXTRACT_CHARS = 500000;
 const PDF_DIGITAL_PAGE_LIMIT = 100;
-const PDF_VISUAL_PAGE_LIMIT = 25;
+const PDF_VISUAL_PAGE_LIMIT = 100; // expanded to 100 pages for heavy scanned documents (batch-streamed)
 const TEXT_EXTENSIONS = /\.(txt|md|markdown|json|jsonl|csv|tsv|xml|html|htm|css|js|mjs|cjs|ts|tsx|jsx|py|java|cpp|c|h|cs|go|rs|rb|php|sh|yaml|yml|toml|ini|log|sql|rtf|eml|msg)$/i;
 const IMAGE_EXTENSIONS = /\.(jpe?g|pjpeg|png|gif|webp|bmp|dib|tiff?|heic|heif|heics|heifs|avif|avifs|dng|raw|cr[23]|nef|nrw|arw|srf|sr2|raf|rw2|orf|pef|jp2|j2k|jpf|jpx|jpm|pict?|pct|pic|psd|ico|cur|svgz?)$/i;
 const XLSX_EXTENSIONS = /\.(xlsx|xls|ods)$/i;
@@ -1185,11 +1185,19 @@ async function extractPdfViaVision(attachment) {
     const pageCount = Math.min(doc.numPages || 0, PDF_VISUAL_PAGE_LIMIT);
 
     const parts = [];
-    for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
-        notifyAttachmentProgress(attachment, `Reading page ${pageNumber} of ${pageCount}...`);
-        const pageText = await processPdfPageVision(attachment, pdfjs, doc, pageNumber, pageCount);
-        if (pageText) {
-            parts.push(pageText);
+    const BATCH_SIZE = 3;
+    for (let i = 1; i <= pageCount; i += BATCH_SIZE) {
+        const batchEnd = Math.min(i + BATCH_SIZE - 1, pageCount);
+        notifyAttachmentProgress(attachment, `Scanning pages ${i}–${batchEnd} of ${pageCount}...`);
+        const batchPromises = [];
+        for (let pageNumber = i; pageNumber <= batchEnd; pageNumber++) {
+            batchPromises.push(processPdfPageVision(attachment, pdfjs, doc, pageNumber, pageCount));
+        }
+        const results = await Promise.allSettled(batchPromises);
+        for (const res of results) {
+            if (res.status === 'fulfilled' && res.value) {
+                parts.push(res.value);
+            }
         }
     }
 
@@ -1221,6 +1229,9 @@ async function processPdfPageVision(attachment, pdfjs, doc, pageNumber, totalPag
         if (!context) return '';
         await page.render({ canvasContext: context, viewport }).promise;
         const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
+        // Explicitly clear canvas backbuffer to prevent memory accumulation across 100 pages
+        canvas.width = 0;
+        canvas.height = 0;
         const base64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
         if (!base64) return '';
 
