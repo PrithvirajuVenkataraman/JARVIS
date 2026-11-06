@@ -19,30 +19,32 @@ const ENTITY_CACHE_TTL_MS = 3600000; // 1 hour
 const entityVisualCache = new Map();
 
 /**
- * Normalizes query string to clean candidate entity terms.
- * Universal entity extraction: removes conversational filler, command verbs, and temporal buzzwords.
+ * Universal entity & domain extraction:
+ * Distinguishes the specific subject from any explicit domain / field constraints
+ * (e.g. "SCENE movie" -> subject: "SCENE", domain: "movie").
+ * Strips conversational filler, command verbs, and temporal buzzwords.
  */
-export function extractCandidateEntity(query = '') {
-    if (!query || typeof query !== 'string') return '';
+export function extractCandidateEntityAndDomain(query = '') {
+    if (!query || typeof query !== 'string') return { entity: '', domain: null };
     let q = query.trim();
 
     // Do not attempt entity resolution on explicit mathematical expressions or greetings
-    if (/^\s*(?:calculate|solve|what\s+is\s+)?[\d\s+\-*/^=().%x×÷]+[?]?\s*$/i.test(q)) return '';
-    if (/^\s*(?:hi|hello|hey|good\s+(?:morning|afternoon|evening)|how\s+are\s+you|who\s+are\s+you|thank\s+you|thanks)\b/i.test(q)) return '';
+    if (/^\s*(?:calculate|solve|what\s+is\s+)?[\d\s+\-*/^=().%x×÷]+[?]?\s*$/i.test(q)) return { entity: '', domain: null };
+    if (/^\s*(?:hi|hello|hey|good\s+(?:morning|afternoon|evening)|how\s+are\s+you|who\s+are\s+you|thank\s+you|thanks)\b/i.test(q)) return { entity: '', domain: null };
 
     // Strictly reject causal, explanatory, medical, health, or procedural questions
-    if (/\b(?:why|how\s+come|what\s+causes|causes\s+of|reasons?\s+(?:for|why)|mechanism\s+of|symptoms?\s+of|treatments?\s+for|cure\s+for|risk\s+factors?|side\s+effects?|how\s+to|how\s+do|how\s+can|should\s+i|can\s+i|is\s+it\s+safe|difference\s+between|pros\s+and\s+cons)\b/i.test(q)) return '';
+    if (/\b(?:why|how\s+come|what\s+causes|causes\s+of|reasons?\s+(?:for|why)|mechanism\s+of|symptoms?\s+of|treatments?\s+for|cure\s+for|risk\s+factors?|side\s+effects?|how\s+to|how\s+do|how\s+can|should\s+i|can\s+i|is\s+it\s+safe|difference\s+between|pros\s+and\s+cons)\b/i.test(q)) return { entity: '', domain: null };
 
     // Reject conversational/rhetorical interjections and idioms
-    if (/\b(?:what(?:\s+is)?\s+(?:in\s+the\s+world|on\s+earth|the\s+hell|the\s+heck))\b/i.test(q)) return '';
+    if (/\b(?:what(?:\s+is)?\s+(?:in\s+the\s+world|on\s+earth|the\s+hell|the\s+heck))\b/i.test(q)) return { entity: '', domain: null };
 
     // Reject compound multi-clause sentences or multi-question strings
-    if (/[?!;]\s+[a-z0-9]/i.test(q)) return '';
+    if (/[?!;]\s+[a-z0-9]/i.test(q)) return { entity: '', domain: null };
 
     // Reject queries asking about general medical conditions or biological processes
     if (/\b(?:heart\s+attacks?|cardiac\s+arrest|chest\s+pain|stroke|diabetes|blood\s+pressure|cholesterol|hypertension|infection|headache|fever)\b/i.test(q)) {
-        if (/\b(?:getting|having|prevent|cure|youngsters|people|adults|causes?|reasons?)\b/i.test(q)) {
-            return '';
+        if (/\b(?:getting|having|prevent|cure|youngsters|young\s+people|people|adults|causes?|reasons?)\b/i.test(q)) {
+            return { entity: '', domain: null };
         }
     }
 
@@ -57,17 +59,55 @@ export function extractCandidateEntity(query = '') {
     q = q.replace(/\s+(?:in\s+one\s+sentence|briefly|in\s+detail|with\s+sources|with\s+citations)$/i, '').trim();
 
     // If remaining string is pure math or numbers, reject
-    if (/^[\d\s+\-*/^=().%x×÷]+$/i.test(q)) return '';
+    if (/^[\d\s+\-*/^=().%x×÷]+$/i.test(q)) return { entity: '', domain: null };
+
+    // Domain specifier detection
+    const DOMAIN_PATTERNS = [
+        { regex: /\b(?:movies?|films?|cinemas?|blockbusters?|motion\s+pictures?)\b/i, domain: 'movie' },
+        { regex: /\b(?:tv\s+series|tv\s+shows?|television\s+series|sitcoms?|dramas?)\b/i, domain: 'tv_series' },
+        { regex: /\b(?:musicians?|music\s+directors?|composers?|singers?|songwriters?|bands?|orchestras?)\b/i, domain: 'musician' },
+        { regex: /\b(?:songs?|tracks?|singles?|soundtracks?|albums?)\b/i, domain: 'album' },
+        { regex: /\b(?:books?|novels?|authors?|writers?|poets?|literature)\b/i, domain: 'book' },
+        { regex: /\b(?:actors?|actresses?|stars?)\b/i, domain: 'actor' },
+        { regex: /\b(?:directors?|filmmakers?)\b/i, domain: 'director' },
+        { regex: /\b(?:compan(?:y|ies)|corporations?|enterprises?|brands?|startups?)\b/i, domain: 'company' },
+        { regex: /\b(?:landmarks?|monuments?|buildings?|stadiums?|temples?|churches?|mountains?)\b/i, domain: 'landmark' },
+        { regex: /\b(?:scientists?|physicists?|chemists?|biologists?|inventors?)\b/i, domain: 'scientist' }
+    ];
+
+    let detectedDomain = null;
+    let cleanSubject = q;
+    for (const dp of DOMAIN_PATTERNS) {
+        if (dp.regex.test(q)) {
+            detectedDomain = dp.domain;
+            // Clean domain token if it appears as an adjunct/suffix or prefix (e.g. "SCENE movie" -> "SCENE")
+            cleanSubject = q.replace(dp.regex, '').replace(/^(?:the|an?)\s+/i, '').replace(/\s+(?:the|an?)$/i, '').trim();
+            break;
+        }
+    }
 
     // Entity titles are concise proper names (typically 1-6 words)
     const words = q.split(/\s+/).filter(Boolean);
-    if (words.length > 6) return '';
+    if (words.length > 6) return { entity: '', domain: null };
 
     // Reject if remaining candidate contains conversational non-entity verbs or conjunctions
-    if (/\b(?:getting|having|affecting|living|dying|causing|suffering|because|although|whereas)\b/i.test(q)) return '';
+    if (/\b(?:getting|having|affecting|living|dying|causing|suffering|because|although|whereas)\b/i.test(q)) return { entity: '', domain: null };
 
-    if (q.length < 2 || q.length > 100) return '';
-    return q;
+    if (q.length < 2 || q.length > 100) return { entity: '', domain: null };
+
+    return {
+        entity: q,
+        cleanSubject: cleanSubject && cleanSubject.length >= 2 ? cleanSubject : q,
+        domain: detectedDomain
+    };
+}
+
+/**
+ * Normalizes query string to clean candidate entity terms.
+ * Universal entity extraction: removes conversational filler, command verbs, and temporal buzzwords.
+ */
+export function extractCandidateEntity(query = '') {
+    return extractCandidateEntityAndDomain(query).entity;
 }
 
 /**
@@ -439,30 +479,73 @@ export async function discoverNotableWorks(entityTitle, entityType, summaryData,
 }
 
 /**
- * Computes token overlap ratio between candidate query and encyclopedic title.
+ * Helper to clean and tokenize a string for entity similarity comparison.
+ */
+function cleanEntityTokens(s = '') {
+    return String(s || '')
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+        .split(/\s+/)
+        .filter(t => t.length > 0 && !/^(?:the|a|an|of|in|on|at|by|for|with|and|is|are|was|were)$/i.test(t));
+}
+
+/**
+ * Computes bidirectional token similarity between candidate query and encyclopedic title.
+ * Strips Wikipedia disambiguation tags (e.g. "(film)", "(2026 film)", "(composer)") to properly
+ * match base titles ("Scene" for "Scene (2026 film)", "Deva" for "Deva (composer)").
+ * Enforces strict bidirectional precision and recall, preventing loose substring matches (e.g. "My Scene Goes Hollywood" for "Scene").
  */
 export function computeTitleTokenOverlap(candidate, title) {
     if (!candidate || !title) return 0;
-    const clean = s => s.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter(t => t.length > 1 && !/^(?:the|a|an|of|in|on|at|by|for|with|and|is|are|was|were)$/i.test(t));
-    const candTokens = clean(candidate);
-    const titleTokens = clean(title);
-    if (!candTokens.length || !titleTokens.length) return 0;
-    const matchCount = candTokens.filter(ct => titleTokens.some(tt => tt === ct || tt.startsWith(ct) || ct.startsWith(tt))).length;
-    return matchCount / candTokens.length;
+
+    const baseTitle = title.replace(/\s*\([^)]*\)$/, '').trim();
+    const candTokens = cleanEntityTokens(candidate);
+    const baseTokens = cleanEntityTokens(baseTitle);
+    const fullTokens = cleanEntityTokens(title);
+
+    if (!candTokens.length || !fullTokens.length) return 0;
+
+    // Exact base title match: e.g. "Scene" vs "Scene (2026 film)" -> 1.0
+    if (candTokens.length === baseTokens.length && candTokens.every((ct, i) => ct === baseTokens[i])) {
+        return 1.0;
+    }
+
+    // Exact full title match: e.g. "Deva composer" vs "Deva (composer)" -> 1.0
+    if (candTokens.length === fullTokens.length && candTokens.every((ct, i) => ct === fullTokens[i])) {
+        return 1.0;
+    }
+
+    // Bidirectional overlap against base title first, falling back to full title
+    const targetTokens = baseTokens.length ? baseTokens : fullTokens;
+    const matchCount = candTokens.filter(ct => targetTokens.some(tt => tt === ct || (ct.length > 3 && (tt.startsWith(ct) || ct.startsWith(tt))))).length;
+    const revMatchCount = targetTokens.filter(tt => candTokens.some(ct => ct === tt || (ct.length > 3 && (tt.startsWith(ct) || ct.startsWith(tt))))).length;
+
+    const recall = matchCount / candTokens.length;
+    const precision = revMatchCount / targetTokens.length;
+
+    // Bloat penalty: if candidate is concise (1-2 words) but target title contains many extra words, penalize
+    if (candTokens.length <= 2 && targetTokens.length >= 4 && precision < 0.5) {
+        return 0.3;
+    }
+
+    if (recall === 1.0 && precision >= 0.8) return 1.0;
+    if (recall + precision === 0) return 0;
+    return Number(((2 * recall * precision) / (recall + precision)).toFixed(2));
 }
 
 /**
  * Universal Entity Visuals Resolver.
  * Given any factual query, resolves primary entity metadata, verified portrait/logo,
- * and associated notable works asynchronously.
+ * and associated notable works asynchronously with domain-aware strict verification.
  * 
- * Returns null if the query is not an entity lookup or if no valid entity was found.
+ * Returns null if the query is not an entity lookup, lacks strict confidence, or violates domain alignment.
  */
 export async function resolveEntityVisuals(query = '', options = {}) {
-    const candidate = extractCandidateEntity(query);
+    const { entity: rawCandidate, cleanSubject, domain: targetDomain } = extractCandidateEntityAndDomain(query);
+    const candidate = cleanSubject || rawCandidate;
     if (!candidate) return null;
 
-    const cacheKey = candidate.toLowerCase();
+    const cacheKey = `${candidate.toLowerCase()}__${targetDomain || 'any'}`;
     const cached = entityVisualCache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < ENTITY_CACHE_TTL_MS) {
         return cached.data;
@@ -475,57 +558,85 @@ export async function resolveEntityVisuals(query = '', options = {}) {
     }
 
     try {
-        // Step 1: Direct summary lookup on clean candidate
-        let summary = await fetchWikiSummary(candidate, controller.signal);
-        if (summary) {
-            const overlap = computeTitleTokenOverlap(candidate, summary.title);
-            if (overlap < 0.5) {
-                summary = null;
+        let summary = null;
+
+        // Step 1: Targeted direct lookup
+        // When a domain is explicitly requested (e.g. "movie", "book", "musician"), check targeted titles first
+        const directCandidates = [];
+        if (targetDomain === 'movie') {
+            directCandidates.push(`${candidate} (film)`, `${candidate} (movie)`);
+        } else if (targetDomain === 'musician') {
+            directCandidates.push(`${candidate} (musician)`, `${candidate} (composer)`);
+        } else if (targetDomain === 'tv_series') {
+            directCandidates.push(`${candidate} (TV series)`, `${candidate} (series)`);
+        } else if (targetDomain === 'book') {
+            directCandidates.push(`${candidate} (novel)`, `${candidate} (book)`);
+        }
+        directCandidates.push(candidate);
+        if (rawCandidate && rawCandidate !== candidate) {
+            directCandidates.push(rawCandidate);
+        }
+
+        for (const titleTry of directCandidates) {
+            const s = await fetchWikiSummary(titleTry, controller.signal);
+            if (s && s.extract && s.type !== 'disambiguation') {
+                const sim = computeTitleTokenOverlap(candidate, s.title);
+                if (sim >= 0.75) {
+                    const cType = classifyEntityTypeFromDescription(s.description, s.title);
+                    const domainOk = !targetDomain || cType === targetDomain ||
+                        (targetDomain === 'movie' && (cType === 'movie' || /\b(?:film|movie|feature)\b/i.test(s.description || ''))) ||
+                        (targetDomain === 'book' && (cType === 'book' || cType === 'author')) ||
+                        (targetDomain === 'musician' && (cType === 'musician' || cType === 'album'));
+                    if (domainOk) {
+                        summary = s;
+                        break;
+                    }
+                }
             }
         }
 
-        // Step 2: If direct lookup failed, gave disambiguation, or lacked a thumbnail image, search Wikipedia candidates
+        // Step 2: Search Wikipedia candidates if direct lookup didn't yield an exact match
         if (!summary || summary.type === 'disambiguation' || !summary.extract || !summary.thumbnail?.source) {
-            const contextSearchQuery = options.textContext
-                ? `${candidate} ${options.textContext.slice(0, 80)}`
-                : candidate;
-            const candidates = await searchWikipediaCandidates(contextSearchQuery, controller.signal, 5);
+            const searchTerms = targetDomain
+                ? `${candidate} ${targetDomain === 'movie' ? 'film' : targetDomain}`
+                : (options.textContext ? `${candidate} ${options.textContext.slice(0, 60)}` : candidate);
+            const candidates = await searchWikipediaCandidates(searchTerms, controller.signal, 6);
 
             let bestHit = null;
             let bestScore = -1;
-            const contextTokens = (options.textContext || '').toLowerCase().split(/\W+/).filter(t => t.length > 2);
-            const candLower = candidate.toLowerCase();
 
             for (const hit of candidates) {
                 const s = await fetchWikiSummary(hit.title, controller.signal);
                 if (!s || s.type === 'disambiguation' || !s.extract) continue;
 
-                // Strict Entity Gating: Must have at least 60% token overlap with target candidate
-                const overlap = computeTitleTokenOverlap(candidate, s.title);
-                if (overlap < 0.6) continue;
+                // Strict Entity Gating: Must have at least 0.75 bidirectional token similarity
+                const sim = computeTitleTokenOverlap(candidate, s.title);
+                if (sim < 0.75) continue;
 
-                let score = Math.round(overlap * 20); // 12-20 pts based on title overlap
-                if (s.thumbnail?.source) score += 5; // thumbnail is a bonus, never a substitute for match
-                const titleLower = (s.title || '').toLowerCase();
-                const descLower = (s.description || '').toLowerCase();
-                const extractLower = (s.extract || '').toLowerCase();
-                const combined = descLower + ' ' + extractLower;
-
-                // Title similarity to target candidate entity
-                if (titleLower === candLower || titleLower.startsWith(`${candLower} (`)) {
-                    score += 10;
-                } else if (titleLower.includes(candLower)) {
-                    score += 5;
+                const cType = classifyEntityTypeFromDescription(s.description, s.title);
+                // STRICT DOMAIN ENFORCEMENT: If domain specified, candidate MUST match that domain!
+                if (targetDomain) {
+                    const domainMatches = (targetDomain === 'movie' && (cType === 'movie' || /\b(?:film|movie|feature)\b/i.test(s.description || '')))
+                        || (targetDomain === 'tv_series' && (cType === 'tv_series' || /\b(?:tv|television|series)\b/i.test(s.description || '')))
+                        || (targetDomain === 'musician' && (cType === 'musician' || cType === 'album' || /\b(?:composer|singer|musician|band)\b/i.test(s.description || '')))
+                        || (targetDomain === 'book' && (cType === 'book' || cType === 'author' || /\b(?:novel|book|writer|author)\b/i.test(s.description || '')))
+                        || (targetDomain === 'actor' && cType === 'actor')
+                        || (targetDomain === 'director' && cType === 'director')
+                        || (targetDomain === 'company' && cType === 'company')
+                        || (targetDomain === 'landmark' && cType === 'landmark')
+                        || (targetDomain === 'scientist' && cType === 'scientist');
+                    if (!domainMatches) continue;
                 }
 
-                for (const tok of contextTokens) {
-                    if (combined.includes(tok)) score += 2;
-                }
+                let score = Math.round(sim * 30);
+                if (s.thumbnail?.source) score += 10;
+                const titleClean = s.title.replace(/\s*\([^)]*\)$/, '').trim().toLowerCase();
+                if (titleClean === candidate.toLowerCase()) score += 15;
 
                 if (score > bestScore) {
                     bestScore = score;
                     bestHit = s;
-                    if (s.thumbnail?.source && bestScore >= 25) break;
+                    if (s.thumbnail?.source && bestScore >= 45) break;
                 }
             }
 
@@ -540,14 +651,32 @@ export async function resolveEntityVisuals(query = '', options = {}) {
             return null;
         }
 
-        // Final verification: Title must maintain >= 60% token overlap with candidate query
+        // Final verification: Title must maintain >= 0.75 bidirectional token similarity with candidate query
         const finalOverlap = computeTitleTokenOverlap(candidate, summary.title);
-        if (finalOverlap < 0.6) {
+        if (finalOverlap < 0.75) {
             entityVisualCache.set(cacheKey, { data: null, timestamp: Date.now() });
             return null;
         }
 
         const entityType = classifyEntityTypeFromDescription(summary.description, summary.title);
+
+        // Strict domain verification on the final entity
+        if (targetDomain) {
+            const domainMatches = (targetDomain === 'movie' && (entityType === 'movie' || /\b(?:film|movie|feature)\b/i.test(summary.description || '')))
+                || (targetDomain === 'tv_series' && (entityType === 'tv_series' || /\b(?:tv|television|series)\b/i.test(summary.description || '')))
+                || (targetDomain === 'musician' && (entityType === 'musician' || entityType === 'album' || /\b(?:composer|singer|musician|band)\b/i.test(summary.description || '')))
+                || (targetDomain === 'book' && (entityType === 'book' || entityType === 'author' || /\b(?:novel|book|writer|author)\b/i.test(summary.description || '')))
+                || (targetDomain === 'actor' && entityType === 'actor')
+                || (targetDomain === 'director' && entityType === 'director')
+                || (targetDomain === 'company' && entityType === 'company')
+                || (targetDomain === 'landmark' && entityType === 'landmark')
+                || (targetDomain === 'scientist' && entityType === 'scientist');
+            if (!domainMatches) {
+                entityVisualCache.set(cacheKey, { data: null, timestamp: Date.now() });
+                return null;
+            }
+        }
+
         // Only verified entity categories qualify for visual entity hero cards
         const ALLOWED_HERO_TYPES = new Set([
             'musician', 'actor', 'director', 'author', 'scientist', 'company',
