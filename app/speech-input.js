@@ -1464,7 +1464,7 @@ export function installSpeechInputUI(options = {}) {
     globalThis.addEventListener?.('jarvis:assistant-processing', event => {
         const state = controller.getState?.() || {};
         if (!event.detail?.active) {
-            controller.setProcessing(false);
+            controller.setProcessing(false); 
         } else if (state.listening || state.converseEnabled) {
             controller.setProcessing(true);
         }
