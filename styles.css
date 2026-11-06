@@ -1420,8 +1420,28 @@ option {
     pointer-events: none;
 }
 
-.composer-disclaimer a {
+.composer-disclaimer a,
+.composer-disclaimer button,
+.composer-disclaimer-btn {
     pointer-events: auto;
+    background: transparent;
+    border: none;
+    padding: 0;
+    margin: 0;
+    font: inherit;
+    color: inherit;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    cursor: pointer;
+    transition: color 0.15s ease;
+}
+
+.composer-disclaimer a:hover,
+.composer-disclaimer button:hover,
+.composer-disclaimer-btn:hover,
+.composer-disclaimer-btn:focus-visible {
+    color: #ffffff !important;
+    outline: none;
 }
 
 #input-bar-container .max-w-5xl,
