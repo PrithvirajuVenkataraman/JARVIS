@@ -441,7 +441,7 @@ export async function cachedResearchSearch(query, options, search) {
     let work = inFlight.get(key);
     if (!work) {
         const scope = researchTimeoutSignal(options.timeoutMs || RESEARCH_LIMITS.PROVIDER_MS);
-        work = { scope, users: 0, promise: null };
+        work = { scope, users: 0, promise: null }; 
         work.promise = Promise.resolve().then(() => search(query, { ...options, signal: scope.signal })).then(results => {
             if (results?.length && !scope.signal.aborted) {
                 if (cache.size >= 200) cache.delete(cache.keys().next().value);
