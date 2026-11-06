@@ -108,12 +108,15 @@ export function cleanSpeechFillers(text = '') {
     s = s.replace(/\b(?:i mean)\b/gi, '');
 
     s = s.replace(/^(?:like|basically|literally|actually)[,\s]+/gi, '');
-    s = s.replace(/[,\s]+(?:like|basically|literally|actually)[,\s]+/gi, ' ');
-    s = s.replace(/[,\s]+(?:like|basically|literally|actually)$/gi, '');
+    // 'like' is only a filler if not preceded by pronouns/verbs (I, you, we, etc.) and not followed by objects (that, this, it, etc.)
+    s = s.replace(/(?<!\b(?:i|you|we|they|he|she|it|who|would|could|should|do|does|did|dont|don't|looks?|sounds?|feels?|is|was|are|were|something|anything|nothing|more|just)\s+)\b(?:like)\b(?!\s+(?:that|this|these|those|it|to|a|an|the|me|you|us|them|him|her))/gi, '');
+    s = s.replace(/[,\s]+(?:basically|literally|actually)[,\s]+/gi, ' ');
+    s = s.replace(/[,\s]+(?:basically|literally|actually)$/gi, '');
 
-    // 3. Remove speech stutter / immediate duplicate words (e.g. "the the", "I I", "to to")
-    s = s.replace(/\b([a-zA-Z]+)\s+\1\b/gi, '$1');
-    s = s.replace(/\b([a-zA-Z]+)\s+\1\b/gi, '$1');
+    // 3. Remove speech stutter / immediate duplicate words & phrases (e.g. "the the", "I like that i like that")
+    for (let pass = 0; pass < 2; pass++) {
+        s = s.replace(/\b([a-zA-Z0-9'’]+(?:\s+[a-zA-Z0-9'’]+){0,6})[,\s]+\1\b/gi, '$1');
+    }
     s = s.replace(/^[ \t,;:—\-]+/, '');
 
     // 4. Auto-correct common speech-to-text contractions, pronouns & slips
@@ -585,11 +588,31 @@ export function createSpeechInputController(options = {}) {
                 if (currentFinal) {
                     const cleanChunk = cleanSpeechFillers(currentFinal);
                     if (cleanChunk) {
-                        accumulatedTranscript = (accumulatedTranscript ? (accumulatedTranscript + ' ' + cleanChunk) : cleanChunk).replace(/^[ \t]+|[ \t]+$/g, '');
+                        if (!accumulatedTranscript) {
+                            accumulatedTranscript = cleanChunk;
+                        } else {
+                            const accLower = accumulatedTranscript.toLowerCase().trim();
+                            const chunkLower = cleanChunk.toLowerCase().trim();
+                            if (!accLower.endsWith(chunkLower)) {
+                                const sep = cleanChunk.startsWith('\n') ? '' : ' ';
+                                accumulatedTranscript = `${accumulatedTranscript.replace(/[ \t]+$/, '')}${sep}${cleanChunk}`.replace(/^[ \t]+|[ \t]+$/g, '');
+                            }
+                        }
                     }
                 }
 
-                const liveCandidate = (accumulatedTranscript ? (accumulatedTranscript + ' ' + currentInterim) : currentInterim).replace(/^[ \t]+|[ \t]+$/g, '');
+                let liveCandidate = accumulatedTranscript;
+                if (currentInterim) {
+                    const interimTrimmed = currentInterim.trim();
+                    const accLower = accumulatedTranscript.toLowerCase().trim();
+                    const interimLower = interimTrimmed.toLowerCase();
+                    if (!accumulatedTranscript) {
+                        liveCandidate = interimTrimmed;
+                    } else if (!accLower.endsWith(interimLower) && !interimLower.startsWith(accLower)) {
+                        const sep = interimTrimmed.startsWith('\n') ? '' : ' ';
+                        liveCandidate = `${accumulatedTranscript.replace(/[ \t]+$/, '')}${sep}${interimTrimmed}`;
+                    }
+                }
                 lastLiveCandidate = liveCandidate;
                 const cleanedInterim = cleanSpeechFillers(liveCandidate);
 
@@ -1305,10 +1328,8 @@ export function installSpeechInputUI(options = {}) {
         onState(state) {
             if (!state.listening) {
                 if (input && state.mode === 'idle') {
-                    const fullCandidate = sessionPrefix
-                        ? `${sessionPrefix}${sessionSpokenText ? ' ' + sessionSpokenText : ''}`
-                        : (sessionSpokenText || input.value);
-                    const cleaned = cleanSpeechFillers(fullCandidate);
+                    const textToClean = input.value || (sessionPrefix ? `${sessionPrefix}${sessionSpokenText ? ' ' + sessionSpokenText : ''}` : sessionSpokenText);
+                    const cleaned = cleanSpeechFillers(textToClean);
                     input.value = cleaned ? cleaned.trim() : (sessionPrefix || '');
                     sessionPrefix = input.value;
                     sessionSpokenText = '';
@@ -1398,10 +1419,7 @@ export function installSpeechInputUI(options = {}) {
             // Second press: user stops dictation (ChatGPT style)
             const res = await controller.toggleDictation();
             if (input) {
-                const fullCandidate = sessionPrefix
-                    ? `${sessionPrefix}${sessionSpokenText ? ' ' + sessionSpokenText : ''}`
-                    : (sessionSpokenText || input.value);
-                const cleaned = cleanSpeechFillers(fullCandidate);
+                const cleaned = cleanSpeechFillers(input.value);
                 input.value = cleaned ? cleaned.trim() : (sessionPrefix || '');
                 sessionPrefix = input.value;
                 sessionSpokenText = '';
