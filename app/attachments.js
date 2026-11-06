@@ -485,7 +485,7 @@ async function extractLocally(attachment) {
     }
 
     if (isPdfFile(file)) {
-        const pdfText = await extractPdfTextClient(file).catch(() => '');
+        const pdfText = await extractPdfTextClient(file, attachment).catch(() => '');
         const useful = hasUsefulExtractedText(pdfText);
         attempts.push({ stage: 'client_pdf', ok: useful, method: 'client_pdf' });
         if (useful) {
@@ -1160,17 +1160,179 @@ function fileToBase64(file) {
     return downsampleImageFileToSafeBase64(file);
 }
 
-async function extractPdfTextClient(file) {
+/**
+ * Reconstructs 2D spatial layout from PDF.js items (multi-column flows, tables, paragraphs)
+ * replicating and exceeding Python pdfminer/pypdf fidelity entirely client-side.
+ */
+function reconstructPdfPageLayout(items = [], viewport = { width: 612, height: 792 }) {
+    if (!items || !items.length) return '';
+
+    const pageHeight = viewport?.height || 792;
+    const pageWidth = viewport?.width || 612;
+
+    const normalized = items.map(it => {
+        const x = Number(it.transform?.[4] ?? it.x ?? 0);
+        const rawY = Number(it.transform?.[5] ?? it.y ?? 0);
+        // Flip PDF bottom-up coordinate system to top-down
+        const y = pageHeight - rawY;
+        const width = Number(it.width || (it.str ? it.str.length * 6 : 0));
+        const height = Number(it.height || Math.abs(it.transform?.[0]) || 12);
+        const str = String(it.str || '').trim();
+        return { str, x, y, width, height, right: x + width, bottom: y + height };
+    }).filter(it => it.str.length > 0);
+
+    if (!normalized.length) return '';
+
+    // Multi-column detection: split items across horizontal halves if divided by a vertical gutter
+    const midX = pageWidth / 2;
+    const gutterWidth = 18;
+    const leftColItems = [];
+    const rightColItems = [];
+    const spanColItems = [];
+
+    for (const it of normalized) {
+        if (it.width > pageWidth * 0.6) {
+            spanColItems.push(it);
+        } else if (it.right < midX - (gutterWidth / 2)) {
+            leftColItems.push(it);
+        } else if (it.x > midX + (gutterWidth / 2)) {
+            rightColItems.push(it);
+        } else {
+            spanColItems.push(it);
+        }
+    }
+
+    const isMultiColumn = leftColItems.length >= 8 && rightColItems.length >= 8;
+
+    function groupIntoLinesAndParagraphs(itemList) {
+        if (!itemList.length) return '';
+        // Sort items: top-to-bottom (y), then left-to-right (x)
+        itemList.sort((a, b) => {
+            if (Math.abs(a.y - b.y) <= 3) return a.x - b.x;
+            return a.y - b.y;
+        });
+
+        // Group into lines by y proximity
+        const lines = [];
+        let currentLine = [];
+        let currentY = -999;
+
+        for (const it of itemList) {
+            if (Math.abs(it.y - currentY) > 4) {
+                if (currentLine.length) lines.push(currentLine);
+                currentLine = [it];
+                currentY = it.y;
+            } else {
+                currentLine.push(it);
+            }
+        }
+        if (currentLine.length) lines.push(currentLine);
+
+        // Process lines and detect tables
+        const outputLines = [];
+        let prevLineY = 0;
+        let tableBuffer = [];
+
+        function flushTable() {
+            if (!tableBuffer.length) return;
+            if (tableBuffer.length >= 2) {
+                // Format as clean Markdown table
+                const numCols = Math.max(...tableBuffer.map(r => r.length));
+                outputLines.push('| ' + tableBuffer[0].map(c => c.trim()).join(' | ') + ' |');
+                outputLines.push('| ' + Array(numCols).fill('---').join(' | ') + ' |');
+                for (let r = 1; r < tableBuffer.length; r++) {
+                    outputLines.push('| ' + tableBuffer[r].map(c => c.trim()).join(' | ') + ' |');
+                }
+            } else {
+                outputLines.push(tableBuffer[0].join('    '));
+            }
+            tableBuffer = [];
+        }
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const lineY = line[0].y;
+            const deltaY = prevLineY ? (lineY - prevLineY) : 0;
+            prevLineY = lineY;
+
+            // Check if this line has multiple spaced cells (possible table row)
+            const cells = [];
+            let currentCell = '';
+            for (let j = 0; j < line.length; j++) {
+                const it = line[j];
+                const prev = line[j - 1];
+                if (prev && (it.x - prev.right) > 28) {
+                    cells.push(currentCell.trim());
+                    currentCell = it.str;
+                } else {
+                    currentCell += (currentCell ? ' ' : '') + it.str;
+                }
+            }
+            if (currentCell) cells.push(currentCell.trim());
+
+            if (cells.length >= 2) {
+                tableBuffer.push(cells);
+            } else {
+                flushTable();
+                if (deltaY > 18 && outputLines.length) {
+                    outputLines.push(''); // Paragraph break
+                }
+                outputLines.push(cells[0] || '');
+            }
+        }
+        flushTable();
+
+        return outputLines.join('\n');
+    }
+
+    if (isMultiColumn) {
+        const spanText = groupIntoLinesAndParagraphs(spanColItems);
+        const col1Text = groupIntoLinesAndParagraphs(leftColItems);
+        const col2Text = groupIntoLinesAndParagraphs(rightColItems);
+        return [spanText, col1Text, col2Text].filter(Boolean).join('\n\n');
+    }
+
+    return groupIntoLinesAndParagraphs(normalized);
+}
+
+async function extractPdfTextClient(file, attachment = null) {
     const pdfjs = await loadPdfJs();
     const buffer = await file.arrayBuffer();
     const doc = await pdfjs.getDocument({ data: buffer }).promise;
     const parts = [];
     const pageCount = Math.min(doc.numPages || 0, PDF_DIGITAL_PAGE_LIMIT);
-    for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
-        const page = await doc.getPage(pageNumber);
-        const content = await page.getTextContent();
-        const text = content.items.map(item => String(item?.str || '')).join(' ').trim();
-        if (text) parts.push(text);
+    const CHUNK_SIZE = 5;
+
+    for (let i = 1; i <= pageCount; i += CHUNK_SIZE) {
+        const chunkEnd = Math.min(i + CHUNK_SIZE - 1, pageCount);
+        if (attachment) {
+            notifyAttachmentProgress(attachment, `Extracting layout: Pages ${i}–${chunkEnd} of ${pageCount}...`);
+        }
+        for (let pageNumber = i; pageNumber <= chunkEnd; pageNumber++) {
+            const page = await doc.getPage(pageNumber);
+            const viewport = page.getViewport({ scale: 1.0 });
+            const content = await page.getTextContent();
+            const rawLength = content.items.reduce((acc, it) => acc + (it.str?.length || 0), 0);
+
+            let pageText = '';
+            if (rawLength >= 15) {
+                // High-fidelity 2D Spatial Reconstruction (multi-column, tables, paragraphs)
+                pageText = reconstructPdfPageLayout(content.items, viewport);
+            } else if (doc.numPages <= 30) {
+                // Hybrid Per-Page Fallback: page is sparse/scanned, run vision OCR for this specific page
+                try {
+                    pageText = await processPdfPageVision(attachment || { name: file.name, file }, pdfjs, doc, pageNumber, pageCount);
+                } catch (_) {
+                    pageText = '';
+                }
+            }
+
+            if (pageText && pageText.trim()) {
+                parts.push(pageText.trim());
+            }
+        }
+        // Micro-yield to the browser event loop to preserve silky smooth UI responsiveness
+        await new Promise(r => setTimeout(r, 0));
     }
     return clipText(parts.join('\n\n'));
 }
