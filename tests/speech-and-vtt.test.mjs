@@ -655,9 +655,12 @@ assert.equal(completePhraseRes.recommendedTimeoutMs, 1200);
     assert.equal(cleanSpeechFillers('what sort of database is best'), 'What sort of database is best');
     assert.equal(cleanSpeechFillers('which kind of algorithm should i choose question mark'), 'Which kind of algorithm should I choose?');
 
-    // E. Speech Stutter & Duplicate Word Suppression
+    // E. Speech Stutter & Duplicate Word & Phrase Suppression
     assert.equal(cleanSpeechFillers('the the quick brown fox to to go to to the store'), 'The quick brown fox to go to the store');
     assert.equal(cleanSpeechFillers('I I think we we should start'), 'I think we should start');
+    assert.equal(cleanSpeechFillers('I like that i like that'), 'I like that');
+    assert.equal(cleanSpeechFillers('what is this what is this'), 'What is this');
+    assert.equal(cleanSpeechFillers('I want to know, I want to know'), 'I want to know');
 
     // F. Spoken Punctuation & Formatting Commands
     assert.equal(cleanSpeechFillers('hello comma this is an API test period new line how does AI work question mark'), 'Hello, this is an API test.\nHow does AI work?');
