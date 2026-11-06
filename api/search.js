@@ -798,7 +798,9 @@ export default async function handler(req, res) {
                     selectedModel: req.body?.selectedModel,
                     timeoutMs: Math.min(Number(req.body?.timeoutMs) || RESEARCH_LIMITS.TOTAL_MS, RESEARCH_LIMITS.TOTAL_MS),
                     customGeminiKey: customGemini,
-                    customGroqKey: customGroq
+                    customGroqKey: customGroq,
+                    deepResearch: req.body?.deepResearch === true,
+                    skipAutoDeepCrawl: req.body?.skipAutoDeepCrawl === true || req.body?.deepResearch !== true
                 }),
                 resolveEntityVisuals(query).catch(() => null)
             ]);
