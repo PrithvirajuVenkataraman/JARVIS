@@ -453,7 +453,7 @@ export async function cachedResearchSearch(query, options, search) {
             return results || [];
         }).finally(() => { scope.dispose(); if (inFlight.get(key) === work) inFlight.delete(key); });
         inFlight.set(key, work);
-    }
+    } 
     work.users++;
     let abort;
     try {
