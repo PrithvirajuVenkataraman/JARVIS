@@ -9457,21 +9457,19 @@ body:not(.dark) .assistant-followup-chip:hover {
     padding-bottom: 2px;
 }
 
-/* Notebook Final Answer Callout */
+/* Notebook Final Answer Callout (Zero Enclosed Box Invariant) */
 .math-notebook-answer,
 .katex .mord.framebox,
 .katex .boxed {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 3px 10px;
-    margin: 3px 5px;
-    border: 1.5px solid rgba(56, 189, 248, 0.6) !important;
-    border-radius: 6px;
-    background: rgba(56, 189, 248, 0.07) !important;
-    box-shadow: 0 0 10px rgba(56, 189, 248, 0.1);
+    display: inline;
+    padding: 0 4px;
+    margin: 0 2px;
+    border: none !important;
+    background: transparent !important;
+    box-shadow: none !important;
     font-family: inherit;
-    color: #7dd3fc !important;
+    font-weight: 700;
+    color: #38bdf8 !important;
     font-style: normal;
 }
 
