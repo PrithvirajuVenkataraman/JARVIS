@@ -194,8 +194,9 @@ export function buildEmergencyCardHtml(payload = {}, contact = null) {
     const battery = payload.batteryLevel !== null && payload.batteryLevel !== undefined ? Number(payload.batteryLevel) : null;
     const textToSend = payload.locationMapsText || payload.cleanText || payload.distressText || '';
 
-    const contactName = contact?.name || 'Emergency Contacts';
+    const contactName = contact?.name || 'Emergency Contact';
     const contactPhone = contact?.phone || '';
+    const googleMapsUrl = payload.googleMapsUrl || ('https://maps.google.com/?q=' + lat + ',' + lon);
 
     const smsUrl = buildSmsUrl(contactPhone, textToSend);
     const waUrl = buildWhatsAppUrl(contactPhone, textToSend);
@@ -208,11 +209,11 @@ export function buildEmergencyCardHtml(payload = {}, contact = null) {
     const osmEmbedUrl = 'https://www.openstreetmap.org/export/embed.html?bbox=' + minLon + '%2C' + minLat + '%2C' + maxLon + '%2C' + maxLat + '&layer=mapnik&marker=' + lat.toFixed(6) + '%2C' + lon.toFixed(6);
 
     return `
-        <div class="emergency-sos-card" style="margin-top:8px; padding:18px; background:linear-gradient(135deg, rgba(220,38,38,0.2) 0%, rgba(15,23,42,0.85) 100%); border:2px solid #ef4444; border-radius:16px; color:#f8fafc; font-family:inherit; box-shadow:0 0 30px rgba(239,68,68,0.25);">
-            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
+        <div class="emergency-sos-card" style="margin-top:8px; padding:14px 16px; background:linear-gradient(135deg, rgba(220,38,38,0.18) 0%, rgba(15,23,42,0.92) 100%); border:1.5px solid #ef4444; border-radius:14px; color:#f8fafc; font-family:inherit; box-shadow:0 4px 20px rgba(239,68,68,0.2);">
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; flex-wrap:wrap; gap:8px;">
                 <div style="display:flex; align-items:center; gap:8px;">
-                    <span style="display:inline-block; width:12px; height:12px; border-radius:50%; background:#ef4444; animation:pulse 1.2s infinite ease-in-out;"></span>
-                    <h3 style="margin:0; font-size:16px; font-weight:800; color:#fca5a5; letter-spacing:0.02em; text-transform:uppercase;">🚨 Satellite Emergency SOS Active</h3>
+                    <span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:#ef4444; animation:pulse 1.2s infinite ease-in-out;"></span>
+                    <h3 style="margin:0; font-size:14px; font-weight:800; color:#fca5a5; letter-spacing:0.02em; text-transform:uppercase;">🚨 Satellite Emergency SOS Active</h3>
                 </div>
                 <div style="display:flex; gap:6px;">
                     ${accuracy > 0 ? `<span style="background:rgba(239,68,68,0.2); border:1px solid rgba(239,68,68,0.4); padding:2px 8px; border-radius:999px; font-size:11px; font-weight:600; color:#fca5a5;">±${Math.round(accuracy)}m GPS</span>` : ''}
@@ -220,60 +221,35 @@ export function buildEmergencyCardHtml(payload = {}, contact = null) {
                 </div>
             </div>
 
-            <div style="background:rgba(0,0,0,0.45); border:1px solid rgba(239,68,68,0.3); border-radius:10px; padding:12px; margin-bottom:14px; font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; font-size:12.5px; line-height:1.6; color:#f1f5f9; white-space:pre-wrap;">${escapeSosHtml(textToSend)}${contactPhone ? `\nRecipient: ${escapeSosHtml(contactName)} (${escapeSosHtml(contactPhone)})` : ''}</div>
-
-            <div class="emergency-sos-dispatch-banner" style="display:flex; align-items:center; justify-content:space-between; gap:8px; background:rgba(56,189,248,0.15); border:1px solid rgba(56,189,248,0.35); border-radius:8px; padding:8px 12px; margin-bottom:12px; font-size:12px; color:#7dd3fc; line-height:1.4;">
-                <div style="display:flex; align-items:center; gap:8px;">
-                    <span style="font-size:16px;">📍</span>
-                    <span><strong>Location &amp; Maps Link Ready:</strong> Formatted for instant dispatch${contactPhone ? ` to <strong>${escapeSosHtml(contactName)} (${escapeSosHtml(contactPhone)})</strong>` : ''}. Tap <strong>Send SMS</strong> or <strong>WhatsApp</strong> below.</span>
-                </div>
+            <div class="emergency-sos-dispatch-banner" style="display:flex; align-items:center; gap:8px; background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.3); border-radius:8px; padding:8px 12px; margin-bottom:10px; font-size:12px; color:#7dd3fc; line-height:1.4;">
+                <span style="font-size:15px; flex-shrink:0;">📍</span>
+                <span><strong>Location &amp; Maps Link Ready:</strong> Formatted for instant dispatch${contactPhone ? ` to <strong>${escapeSosHtml(contactName)} (${escapeSosHtml(contactPhone)})</strong>` : ''}. Telemetry transmitted via SMS.</span>
             </div>
 
-            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:8px; margin-bottom:14px;">
-                <a href="${smsUrl}" target="_blank" rel="noopener noreferrer" style="background:#dc2626; color:#ffffff; padding:10px 12px; border-radius:8px; text-decoration:none; font-weight:700; font-size:13px; display:flex; align-items:center; justify-content:center; gap:6px; box-shadow:0 2px 10px rgba(220,38,38,0.4);">
+            <div style="display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:6px; margin-bottom:12px; font-size:12px; color:#cbd5e1;">
+                <div>📍 <strong>${escapeSosHtml(address)}</strong> <span style="font-family:monospace; color:#38bdf8;">(${lat.toFixed(6)}, ${lon.toFixed(6)})</span></div>
+                <a href="${googleMapsUrl}" target="_blank" rel="noopener noreferrer" style="color:#60a5fa; text-decoration:none; font-weight:600; display:inline-flex; align-items:center; gap:4px;">🗺️ Google Maps Pin &rarr;</a>
+            </div>
+
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(120px, 1fr)); gap:8px;">
+                <a href="${smsUrl}" target="_blank" rel="noopener noreferrer" style="background:#dc2626; color:#ffffff; padding:9px 12px; border-radius:8px; text-decoration:none; font-weight:700; font-size:12.5px; display:flex; align-items:center; justify-content:center; gap:6px; box-shadow:0 2px 8px rgba(220,38,38,0.35);">
                     <span>📱</span>
                     <span>Send SMS</span>
                 </a>
-                <a href="${waUrl}" target="_blank" rel="noopener noreferrer" style="background:#16a34a; color:#ffffff; padding:10px 12px; border-radius:8px; text-decoration:none; font-weight:700; font-size:13px; display:flex; align-items:center; justify-content:center; gap:6px; box-shadow:0 2px 10px rgba(220,38,38,0.4);">
+                <a href="${waUrl}" target="_blank" rel="noopener noreferrer" style="background:#16a34a; color:#ffffff; padding:9px 12px; border-radius:8px; text-decoration:none; font-weight:700; font-size:12.5px; display:flex; align-items:center; justify-content:center; gap:6px; box-shadow:0 2px 8px rgba(22,163,74,0.35);">
                     <span>💬</span>
                     <span>WhatsApp</span>
                 </a>
-                <a href="${telUrl}" style="background:#2563eb; color:#ffffff; padding:10px 12px; border-radius:8px; text-decoration:none; font-weight:700; font-size:13px; display:flex; align-items:center; justify-content:center; gap:6px; box-shadow:0 2px 10px rgba(37,99,235,0.4);">
+                <a href="${telUrl}" style="background:#2563eb; color:#ffffff; padding:9px 12px; border-radius:8px; text-decoration:none; font-weight:700; font-size:12.5px; display:flex; align-items:center; justify-content:center; gap:6px; box-shadow:0 2px 8px rgba(37,99,235,0.35);">
                     <span>📞</span>
                     <span>Call SOS</span>
                 </a>
-                <button type="button" class="emergency-share-btn" data-share-text="${encodeURIComponent(textToSend)}" onclick="globalThis.shareEmergencySos?.(decodeURIComponent(this.getAttribute('data-share-text')||''))" style="background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); color:#ffffff; padding:10px 12px; border-radius:8px; font-weight:600; font-size:13px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px;">
+                <button type="button" class="emergency-share-btn" data-share-text="${encodeURIComponent(textToSend)}" onclick="globalThis.shareEmergencySos?.(decodeURIComponent(this.getAttribute('data-share-text')||''))" style="background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); color:#ffffff; padding:9px 12px; border-radius:8px; font-weight:600; font-size:12.5px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px;">
                     <span>📤</span>
                     <span>Share Location</span>
                 </button>
             </div>
-
-            <div style="border-radius:10px; overflow:hidden; border:1px solid rgba(239,68,68,0.3); margin-top:8px; background:#0f172a; position:relative; min-height:150px;">
-                <div style="padding:16px; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; background:radial-gradient(circle at center, rgba(239,68,68,0.15) 0%, rgba(15,23,42,0.9) 70%);">
-                    <div style="width:44px; height:44px; border-radius:50%; background:rgba(239,68,68,0.2); border:2px solid #ef4444; display:flex; align-items:center; justify-content:center; font-size:22px; margin-bottom:8px; animation:pulse 1.5s infinite ease-in-out;">
-                        📍
-                    </div>
-                    <div style="font-size:13px; font-weight:700; color:#f8fafc; margin-bottom:4px; max-width:90%;">
-                        ${escapeSosHtml(address)}
-                    </div>
-                    <div style="font-size:12px; font-family:monospace; color:#38bdf8; margin-bottom:12px;">
-                        ${lat.toFixed(6)}, ${lon.toFixed(6)}
-                    </div>
-                    <a href="${payload.googleMapsUrl || ('https://maps.google.com/?q=' + lat + ',' + lon)}" target="_blank" rel="noopener noreferrer" style="background:#2563eb; color:#ffffff; padding:7px 16px; border-radius:6px; font-size:12px; font-weight:700; text-decoration:none; display:inline-flex; align-items:center; gap:6px; box-shadow:0 2px 8px rgba(37,99,235,0.4);">
-                        🗺️ Open Live Pin in Google Maps
-                    </a>
-                </div>
-                <!-- Interactive embed telemetry: iframe fallback ${osmEmbedUrl} -->
-            </div>
-
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px; font-size:12px; color:#94a3b8; flex-wrap:wrap; gap:8px;">
-                <span>Navigation Links:</span>
-                <div style="display:flex; gap:12px;">
-                    <a href="${payload.googleMapsUrl || ('https://maps.google.com/?q=' + lat + ',' + lon)}" target="_blank" rel="noopener noreferrer" style="color:#38bdf8; text-decoration:none; font-weight:600;">Google Maps</a>
-                    <a href="${payload.appleMapsUrl || ('https://maps.apple.com/?ll=' + lat + ',' + lon)}" target="_blank" rel="noopener noreferrer" style="color:#38bdf8; text-decoration:none; font-weight:600;">Apple Maps</a>
-                    <a href="https://www.openstreetmap.org/?mlat=${lat.toFixed(6)}&amp;mlon=${lon.toFixed(6)}#map=16/${lat.toFixed(6)}/${lon.toFixed(6)}" target="_blank" rel="noopener noreferrer" style="color:#38bdf8; text-decoration:none; font-weight:600;">OpenStreetMap</a>
-                </div>
-            </div>
+            <!-- Interactive embed telemetry: iframe fallback ${osmEmbedUrl} -->
         </div>
     `;
 }
@@ -283,7 +259,7 @@ export function dispatchImmediateEmergencySms(payload = {}, contact = null) {
     const text = payload.locationMapsText || payload.cleanText || payload.distressText || '';
     const smsUrl = buildSmsUrl(contactPhone, text);
 
-    // 1. Immediately copy telemetry & coordinates to clipboard for instant pasting on laptop/desktop
+    // 1. Immediately copy telemetry & coordinates to clipboard for instant pasting
     try {
         if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
             navigator.clipboard.writeText(text).catch(() => {});
@@ -307,34 +283,27 @@ export function dispatchImmediateEmergencySms(payload = {}, contact = null) {
             const banner = typeof document !== 'undefined' ? document.querySelector('.emergency-sos-dispatch-banner') : null;
             if (banner) {
                 if (result?.success) {
-                    banner.innerHTML = `<div style="display:flex; align-items:center; gap:8px;"><span style="font-size:16px;">✅</span><span><strong>SMS Delivered:</strong> Coordinates &amp; Maps link sent to <strong>${escapeSosHtml(contactPhone)}</strong> via carrier gateway.</span></div>`;
-                    banner.style.background = 'rgba(34,197,94,0.2)';
-                    banner.style.borderColor = 'rgba(34,197,94,0.5)';
+                    banner.innerHTML = `<span style="font-size:15px; flex-shrink:0;">✅</span><span><strong>SMS Delivered:</strong> Coordinates &amp; Maps link sent to <strong>${escapeSosHtml(contactPhone)}</strong> via carrier gateway.</span>`;
+                    banner.style.background = 'rgba(34,197,94,0.18)';
+                    banner.style.borderColor = 'rgba(34,197,94,0.45)';
                     banner.style.color = '#86efac';
-                } else {
-                    banner.innerHTML = `<div style="display:flex; align-items:center; gap:8px;"><span style="font-size:16px;">📋</span><span><strong>Location &amp; Maps link copied:</strong> Click <strong>Send SMS</strong> or <strong>WhatsApp</strong> below to send directly${contactPhone ? ` to <strong>${escapeSosHtml(contactPhone)}</strong>` : ''}.</span></div>`;
-                    banner.style.background = 'rgba(234,179,8,0.15)';
-                    banner.style.borderColor = 'rgba(234,179,8,0.4)';
-                    banner.style.color = '#fde047';
                 }
             }
         }).catch(() => {});
     }
 
-    // 3. Open native SMS URL on mobile devices
+    // 3. Automatically launch native SMS client on all platforms
     try {
         if (typeof window !== 'undefined' && typeof document !== 'undefined') {
-            const isMobile = /Android|iPhone|iPad|iPod|webOS/i.test(navigator.userAgent || '');
-            if (isMobile) {
-                const dispatchLink = document.createElement('a');
-                dispatchLink.href = smsUrl;
-                dispatchLink.style.display = 'none';
-                document.body.appendChild(dispatchLink);
-                dispatchLink.click();
-                setTimeout(() => {
-                    try { dispatchLink.remove(); } catch (_) {}
-                }, 1000);
-            }
+            const dispatchLink = document.createElement('a');
+            dispatchLink.href = smsUrl;
+            dispatchLink.rel = 'noopener noreferrer';
+            dispatchLink.style.display = 'none';
+            document.body.appendChild(dispatchLink);
+            dispatchLink.click();
+            setTimeout(() => {
+                try { dispatchLink.remove(); } catch (_) {}
+            }, 1000);
         }
     } catch (_) {}
 
