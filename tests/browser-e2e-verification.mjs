@@ -560,6 +560,59 @@ async function runBrowserTests() {
         assert.equal(infoResult?.isMainActive, true, 'Back button must return cleanly to main Settings view');
         console.log('[PASS] Settings "Important Info & Architecture" disclosure verified end-to-end');
 
+        // Test 12: Real Browser Math Problem Rendering (KaTeX, Steps, Display Delimiters, Zero <br> Artifacts)
+        const evalMathRender = await sendCommand('Runtime.evaluate', {
+            expression: `(() => {
+                const sampleMathMd = 'Here is the step-by-step solution:\\n\\nStep 1: Solve quadratic formula\\n$$\\nx = \\\\frac{-b \\\\pm \\\\sqrt{b^2 - 4ac}}{2a}\\n$$\\n\\nStep 2: Calculate discriminant for roots\\n$$\\\\Delta = (-5)^2 - 4(1)(6) = 1$$\\n\\nStep 3: Final roots\\n$$\\\\boxed{x = 2, 3}$$';
+
+                const testContainer = document.createElement('div');
+                testContainer.id = 'browser-math-test-container';
+                testContainer.innerHTML = window.JarvisMarkdownRenderer.renderMarkdown(sampleMathMd);
+                document.body.appendChild(testContainer);
+
+                const hasKatex = typeof window.katex !== 'undefined';
+                const hasKatexHtml = Boolean(testContainer.querySelector('.katex-html'));
+                const displayBlocks = testContainer.querySelectorAll('.math-display-block');
+                const stepLabels = testContainer.querySelectorAll('.math-step-label');
+                const rawHtml = testContainer.innerHTML;
+
+                // Critical Invariants:
+                // 1. Zero <br> tags leaked into KaTeX TeX annotations or math formulas
+                const mathAnnotationTexts = Array.from(testContainer.querySelectorAll('annotation')).map(a => a.textContent || '');
+                const hasBrInAnnotation = mathAnnotationTexts.some(t => t.includes('<br>') || t.includes('&lt;br&gt;'));
+                // 2. Zero invalid <p><div> DOM nesting
+                const hasDivInsideP = rawHtml.includes('<p class="assistant-md-p"><div class="math-display-block">');
+                // 3. Step labels properly matched
+                const stepsCount = stepLabels.length;
+
+                testContainer.remove();
+
+                return {
+                    hasKatex,
+                    hasKatexHtml,
+                    displayBlockCount: displayBlocks.length,
+                    stepsCount,
+                    hasBrInAnnotation,
+                    hasDivInsideP
+                };
+            })()`,
+            returnByValue: true
+        });
+
+        const mathResult = evalMathRender?.result?.result?.value || evalMathRender?.result?.value;
+        console.log('Real browser math problem verification:', mathResult);
+        assert.equal(mathResult?.hasKatex, true, 'KaTeX must be loaded in browser environment');
+        assert.equal(mathResult?.hasKatexHtml, true, 'KaTeX HTML elements must be rendered');
+        assert.equal(mathResult?.displayBlockCount, 3, 'Must render 3 display math blocks');
+        assert.equal(mathResult?.stepsCount, 3, 'Must detect all 3 step labels');
+        assert.equal(mathResult?.hasBrInAnnotation, false, 'Must have ZERO <br> artifacts leaked into math annotations');
+        assert.equal(mathResult?.hasDivInsideP, false, 'Must have ZERO invalid <p><div> DOM nestings');
+        console.log('[PASS] Real browser math problems verified: KaTeX display rendering, steps, and zero <br> artifacts');
+        assert.equal(mathResult?.stepsCount, 3, 'Must detect all 3 step labels');
+        assert.equal(mathResult?.hasBrInAnnotation, false, 'Must have ZERO <br> artifacts leaked into math annotations');
+        assert.equal(mathResult?.hasDivInsideP, false, 'Must have ZERO invalid <p><div> DOM nestings');
+        console.log('[PASS] Real browser math problems verified: KaTeX display rendering, steps, and zero <br> artifacts');
+
         // Test Vercel Serverless Function Count limit (must be <= 12 on Hobby plan)
         const fs = await import('node:fs');
         const path = await import('node:path');
