@@ -2432,7 +2432,6 @@ console.log('\n--- Section 3: Dynamic HTML Card with Approximate Badge ---');
 console.log('\n================================================================');
 console.log('=== All Location Intent & Fallback Tests PASSED (100%) ===');
 console.log('================================================================\n');
-process.exit(0);
 
 });
 
