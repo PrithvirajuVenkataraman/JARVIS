@@ -1141,7 +1141,9 @@ export default async function handler(req, res) {
                 lengthPolicy.instruction,
                 intent
             );
-            const hasStructuredContext = Array.isArray(request.value.structuredMessages) && request.value.structuredMessages.length > 0;
+            const hasAssistantInStructured = Array.isArray(request.value.structuredMessages) && request.value.structuredMessages.some(m => m.role === 'assistant');
+            const hasAssistantInContext = Array.isArray(context) && context.some(m => m.role === 'assistant');
+            const hasStructuredContext = Array.isArray(request.value.structuredMessages) && request.value.structuredMessages.length > 0 && (hasAssistantInStructured || !hasAssistantInContext);
             const firstStructured = hasStructuredContext
                 ? request.value.structuredMessages
                 : composeStructuredChatMessages({
@@ -1747,7 +1749,9 @@ export default async function handler(req, res) {
             const prompt = liveRag.ragText
                 ? composeFinalPrompt(systemPrompt, liveRag.ragText, contextBlock, effectiveMessage, lengthPolicy?.instruction || '', intent, selectedModel, selectedModel)
                 : composeStreamingPrompt(systemPrompt, contextBlock, effectiveMessage, lengthPolicy?.instruction || '', intent, selectedModel, selectedModel);
-            const hasStructuredContext = Array.isArray(structuredMessages) && structuredMessages.length > 0;
+            const hasAssistantInStructured = Array.isArray(structuredMessages) && structuredMessages.some(m => m.role === 'assistant');
+            const hasAssistantInContext = Array.isArray(context) && context.some(m => m.role === 'assistant');
+            const hasStructuredContext = Array.isArray(structuredMessages) && structuredMessages.length > 0 && (hasAssistantInStructured || !hasAssistantInContext);
             const structuredChat = hasStructuredContext
                 ? structuredMessages
                 : composeStructuredChatMessages({
@@ -4922,13 +4926,11 @@ Capabilities:
 - Weather, Reminders, Shopping lists, Memory
 - AI Image Generation: Emit :::image[detailed visual prompt]::: when requested. NEVER emit for non-visual prompts.
 
-Style & Language Rules:
+Style & Conversational Tone:
+- Tone & Depth: Speak in an authentic, conversational voice like a thoughtful peer. For deep, analytical, or exploratory questions, converse naturally: explore nuances, weigh trade-offs, and engage directly with the user's thoughts and context.
 - Languages: Kannada (ಕನ್ನಡ), Tamil (தமிழ்), Telugu (తెలుగు), Malayalam (മലയാളം), Hindi (हिन्दी), English, phonetic forms (Kanglish, Tanglish). Match naturally.
-- Start directly with the answer. Avoid greeting preambles. NO META-TALK RULE: Never start with commentary about search snippets. State the direct answer immediately.
-- Conversational Closure: Conclude with at most one contextual follow-up when useful; for short facts, answer directly. NEVER end with generic robotic phrases like "Would you like to know more?", "Is there anything else I can help with?", or "Hope that helps!".
-- Adaptive Depth: Brief for simple facts; structured overviews (background, achievements, notable works) for broad entities.
-- Formatting: Default to natural paragraphs with Markdown headings (## or ###). Use bullet lists only when semantically appropriate (steps, specs, comparisons).
-- Continuity: Seamlessly continue discussions on follow-ups ("explain more", "why", "it"). Follow word-count constraints strictly. Avoid em/en dashes.
+- Direct Substance: Start directly with the answer. Avoid greeting preambles. NO META-TALK RULE: Never start with commentary about search snippets or verification processes. State the direct answer immediately.
+- Closure & Continuity: Conclude with at most one contextual follow-up when useful; never use generic robotic phrases ("Hope that helps!", "Would you like to know more?"). Seamlessly maintain full context across conversational follow-ups ("with these info what do you think", "explain more"). Avoid em/en dashes.
 
 ZERO-HALLUCINATION & EPISTEMIC GROUNDING (CRITICAL):
 - Never invent people, dates, prices, statistics, quotes, URLs, citations, code APIs, model versions, or event outcomes. If uncertain, state "I am not sure" rather than guessing.
@@ -4970,7 +4972,7 @@ DEEP REASONING & RECURSIVE VERIFICATION DIRECTIVE:
 
 MATHEMATICAL & QUANTITATIVE REASONING (applies to all math problems, whether from images or text):
 - Define every variable and its unit before substituting a value. State theorem or formula before applying.
-- Show each algebraic/arithmetic step on its own line; verify by substituting back into original equation.
+- Show each algebraic or arithmetic step on its own line; verify it by substituting back into the original equation.
 - Analytical geometry: place figures in a coordinate frame $(0,0)$ and solve algebraically.
 - Format: use $$...$$ for display equations and $...$ for inline math.
 - If ambiguous or missing information, state the ambiguity explicitly rather than inventing a value. Include units and clearly label the final answer.
@@ -5597,7 +5599,7 @@ export const __test = {
         if (mode === 'range') {
             if (maxWords > 0 && count > maxWords) return trimToWordCount(out, maxWords);
             return out;
-        } 
+        }
         if (mode === 'target') {
             if (maxWords > 0 && count > maxWords) return trimToWordCount(out, maxWords);
         }
