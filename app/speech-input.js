@@ -489,6 +489,10 @@ export function createSpeechInputController(options = {}) {
     let processingTimer = null;
     let restartTimer = null;
     let adaptiveTurnTimer = null;
+    let dictationSilenceTimer = null;
+    let dictationInactivityTimer = null;
+    const dictationSilenceMs = options.dictationSilenceTimeoutMs || 3000;
+    const dictationInactivityMs = options.dictationInactivityTimeoutMs || 8000;
     let accumulatedTranscript = '';
     let lastLiveCandidate = '';
     let lastEmittedFinal = '';
@@ -624,6 +628,16 @@ export function createSpeechInputController(options = {}) {
                     clearTimeout(adaptiveTurnTimer);
                     adaptiveTurnTimer = null;
                 }
+                if (!converseEnabled && mode === 'dictation') {
+                    if (dictationInactivityTimer) {
+                        clearTimeout(dictationInactivityTimer);
+                        dictationInactivityTimer = null;
+                    }
+                    if (dictationSilenceTimer) {
+                        clearTimeout(dictationSilenceTimer);
+                        dictationSilenceTimer = null;
+                    }
+                }
 
                 const evalResult = evaluateTurnCompleteness(liveCandidate, {
                     completeTimeoutMs: options.completeTimeoutMs || (converseEnabled ? 450 : 800),
@@ -642,7 +656,24 @@ export function createSpeechInputController(options = {}) {
                             interrupt: false
                         });
                     }
+                    // Auto-stop on silence: after user finishes speaking, if no new speech arrives within
+                    // dictationSilenceMs (default 3000ms), auto-close recognition so microphone doesn't stay
+                    // active in background listening to ambient room audio.
+                    dictationSilenceTimer = setTimeout(() => {
+                        if (mode === 'dictation' && !explicitlyStopped) {
+                            stop();
+                        }
+                    }, dictationSilenceMs);
                     return;
+                }
+
+                if (!converseEnabled && mode === 'dictation') {
+                    // Interim silence fallback: if user paused mid-sentence and stopped speaking
+                    dictationSilenceTimer = setTimeout(() => {
+                        if (mode === 'dictation' && !explicitlyStopped) {
+                            stop();
+                        }
+                    }, dictationSilenceMs + 2000);
                 }
 
                 if (converseEnabled) {
@@ -774,6 +805,20 @@ export function createSpeechInputController(options = {}) {
         mode = 'dictation';
         converseEnabled = false;
 
+        if (dictationSilenceTimer) {
+            clearTimeout(dictationSilenceTimer);
+            dictationSilenceTimer = null;
+        }
+        if (dictationInactivityTimer) {
+            clearTimeout(dictationInactivityTimer);
+            dictationInactivityTimer = null;
+        }
+        dictationInactivityTimer = setTimeout(() => {
+            if (mode === 'dictation' && !explicitlyStopped && !accumulatedTranscript && !lastLiveCandidate) {
+                stop();
+            }
+        }, dictationInactivityMs);
+
         if (Recognition) {
             fallbackMode = false;
             startBrowserRecognition();
@@ -834,6 +879,14 @@ export function createSpeechInputController(options = {}) {
         if (adaptiveTurnTimer) {
             clearTimeout(adaptiveTurnTimer);
             adaptiveTurnTimer = null;
+        }
+        if (dictationSilenceTimer) {
+            clearTimeout(dictationSilenceTimer);
+            dictationSilenceTimer = null;
+        }
+        if (dictationInactivityTimer) {
+            clearTimeout(dictationInactivityTimer);
+            dictationInactivityTimer = null;
         }
         accumulatedTranscript = '';
         if (processingTimer) {
@@ -912,6 +965,14 @@ export function createSpeechInputController(options = {}) {
         if (adaptiveTurnTimer) {
             clearTimeout(adaptiveTurnTimer);
             adaptiveTurnTimer = null;
+        }
+        if (dictationSilenceTimer) {
+            clearTimeout(dictationSilenceTimer);
+            dictationSilenceTimer = null;
+        }
+        if (dictationInactivityTimer) {
+            clearTimeout(dictationInactivityTimer);
+            dictationInactivityTimer = null;
         }
         if (mode === 'dictation' && (accumulatedTranscript || lastLiveCandidate)) {
             const pendingText = cleanSpeechFillers(accumulatedTranscript || lastLiveCandidate);
