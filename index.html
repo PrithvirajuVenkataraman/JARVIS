@@ -77,7 +77,7 @@
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
     <link rel="stylesheet" href="styles.css?v=2.4.8">
     <script src="science-format.js?v=2.0.1"></script>
-    <script type="module" src="app/bootstrap.js?v=2.4.6"></script>
+    <script type="module" src="app/bootstrap.js?v=2.4.9"></script>
 </head>
 <body class="dark min-h-screen bg-black text-white">
 
@@ -5922,12 +5922,26 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
         const effectiveTier = isDeepReasoningActive ? 'deep' : (requestOptions?.tier || (typeof getPreferredModelTier === 'function' ? getPreferredModelTier() : undefined));
         const shouldForceReasoning = isDeepReasoningActive || requestOptions?.forceReasoning || effectiveTier === 'deep';
 
+        // Ensure structuredMessages always includes assistant dialogue turns when context is available
+        let structuredMessagesToSend = multiTierContext?.structuredMessages || undefined;
+        const hasAssistantInStructured = Array.isArray(structuredMessagesToSend) && structuredMessagesToSend.some(m => m.role === 'assistant');
+        if (!hasAssistantInStructured && engineContext.some(t => t.role === 'assistant')) {
+            structuredMessagesToSend = [
+                { role: 'system', content: systemDirectives },
+                ...engineContext.filter(t => t && t.role !== 'system').map(t => ({
+                    role: t.role === 'assistant' ? 'assistant' : 'user',
+                    content: String(t.text || '').trim()
+                })),
+                { role: 'user', content: normalizedUserMessage }
+            ];
+        }
+
         requestPayload = {
             message: effectiveMessage,
             context: engineContext,
             retrievedTurns: multiTierContext?.retrievedTurns || [],
             rollingSummary: multiTierContext?.summaryText || '',
-            structuredMessages: multiTierContext?.structuredMessages || undefined,
+            structuredMessages: structuredMessagesToSend,
             preferences: {
                 userName,
                 responseLength: responseMode,
@@ -7934,12 +7948,12 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
 
                             <!-- Card 1: Serverless Cold Starts -->
                             <div class="settings-group-card mb-4" style="padding:14px;">
-                                <div class="flex items-start justify-between gap-3 mb-1">
-                                    <h4 class="text-xs font-semibold text-neutral-100 flex items-center gap-2">
+                                <div class="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+                                    <h4 class="text-xs font-semibold text-neutral-100 flex items-center gap-2 min-w-0 flex-1">
                                         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
                                         <span>1. Serverless Cold Starts vs. Dedicated GPU Fleets</span>
                                     </h4>
-                                    <span class="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 font-medium">Latency Tradeoff</span>
+                                    <span class="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 font-medium shrink-0">Latency Tradeoff</span>
                                 </div>
                                 <p class="text-[11px] text-neutral-300 leading-relaxed mt-1">
                                     <strong>The Difference:</strong> Enterprise companies (OpenAI, Anthropic) maintain hundreds of thousands of constantly warm GPU clusters in dedicated datacenters 24/7. JARVIS runs on lightweight on-demand Vercel Serverless Functions with Cold Start Prevention disabled to keep the website free and lightweight.
@@ -7951,12 +7965,12 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
 
                             <!-- Card 2: Free Shared Tier vs Paid Subscription -->
                             <div class="settings-group-card mb-4" style="padding:14px;">
-                                <div class="flex items-start justify-between gap-3 mb-1">
-                                    <h4 class="text-xs font-semibold text-neutral-100 flex items-center gap-2">
+                                <div class="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+                                    <h4 class="text-xs font-semibold text-neutral-100 flex items-center gap-2 min-w-0 flex-1">
                                         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m16 10-4 4-2-2"/></svg>
                                         <span>2. Free BYOK vs. $20/mo Enterprise Subscriptions</span>
                                     </h4>
-                                    <span class="text-[10px] px-2 py-0.5 rounded-full bg-sky-500/10 text-sky-400 border border-sky-500/20 font-medium">Cost &amp; Quotas</span>
+                                    <span class="text-[10px] px-2 py-0.5 rounded-full bg-sky-500/10 text-sky-400 border border-sky-500/20 font-medium shrink-0">Cost &amp; Quotas</span>
                                 </div>
                                 <p class="text-[11px] text-neutral-300 leading-relaxed mt-1">
                                     <strong>The Difference:</strong> Commercial AI services charge $20 to $200 per month for reserved GPU capacity. JARVIS is 100% free, utilizing shared platform quotas on ultra-fast Groq LPUs and Google Gemini.
@@ -7968,12 +7982,12 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
 
                             <!-- Card 3: 100% Local-First Privacy -->
                             <div class="settings-group-card mb-4" style="padding:14px;">
-                                <div class="flex items-start justify-between gap-3 mb-1">
-                                    <h4 class="text-xs font-semibold text-neutral-100 flex items-center gap-2">
+                                <div class="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+                                    <h4 class="text-xs font-semibold text-neutral-100 flex items-center gap-2 min-w-0 flex-1">
                                         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
                                         <span>3. 100% Local-First Privacy vs. Cloud Training Logs</span>
                                     </h4>
-                                    <span class="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium">Privacy Advantage</span>
+                                    <span class="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium shrink-0">Privacy Advantage</span>
                                 </div>
                                 <p class="text-[11px] text-neutral-300 leading-relaxed mt-1">
                                     <strong>The Difference:</strong> Enterprise AI platforms log all conversations and uploads to remote cloud databases and may retain user data to train future models. JARVIS is client-side first: conversations, attachments, vectors, and memory items reside strictly inside your browser (IndexedDB / localStorage).
@@ -7985,12 +7999,12 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
 
                             <!-- Card 4: Real-Time Live Web Grounding -->
                             <div class="settings-group-card mb-4" style="padding:14px;">
-                                <div class="flex items-start justify-between gap-3 mb-1">
-                                    <h4 class="text-xs font-semibold text-neutral-100 flex items-center gap-2">
+                                <div class="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+                                    <h4 class="text-xs font-semibold text-neutral-100 flex items-center gap-2 min-w-0 flex-1">
                                         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#a855f7" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
                                         <span>4. Live Multi-Source Grounding vs. Closed Crawled Caches</span>
                                     </h4>
-                                    <span class="text-[10px] px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/20 font-medium">Search Latency</span>
+                                    <span class="text-[10px] px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/20 font-medium shrink-0">Search Latency</span>
                                 </div>
                                 <p class="text-[11px] text-neutral-300 leading-relaxed mt-1">
                                     <strong>The Difference:</strong> Big tech search engines query proprietary internal index caches. JARVIS dynamically searches the live open web (DuckDuckGo, SearXNG, Wikipedia) and verifies citations and entity details in real time.
@@ -8002,17 +8016,17 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
 
                             <!-- Card 5: Multi-Model Orchestration -->
                             <div class="settings-group-card mb-4" style="padding:14px;">
-                                <div class="flex items-start justify-between gap-3 mb-1">
-                                    <h4 class="text-xs font-semibold text-neutral-100 flex items-center gap-2">
+                                <div class="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+                                    <h4 class="text-xs font-semibold text-neutral-100 flex items-center gap-2 min-w-0 flex-1">
                                         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#ec4899" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
                                         <span>5. Independent Multi-Model Orchestration vs. Single-Vendor Lock-in</span>
                                     </h4>
-                                    <span class="text-[10px] px-2 py-0.5 rounded-full bg-pink-500/10 text-pink-400 border border-pink-500/20 font-medium">No Lock-In</span>
+                                    <span class="text-[10px] px-2 py-0.5 rounded-full bg-pink-500/10 text-pink-400 border border-pink-500/20 font-medium shrink-0">No Lock-In</span>
                                 </div>
                                 <p class="text-[11px] text-neutral-300 leading-relaxed mt-1">
                                     <strong>The Difference:</strong> Instead of being locked into a single proprietary provider (e.g. only OpenAI or only Anthropic), JARVIS routes dynamically across specialized open-weight models on Groq with Gemini frontier models maintained as resilient fallbacks:
                                 </p>
-                                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-2.5 text-[10px]">
+                                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 mt-2.5 text-[10px]">
                                     <div class="bg-neutral-900/90 border border-neutral-800/90 rounded-md p-2">
                                         <div class="text-[9px] font-semibold uppercase tracking-wider text-neutral-400 mb-1">Reasoning &amp; Tools</div>
                                         <div class="text-neutral-200 font-medium">GPT OSS 120B</div>
@@ -8041,12 +8055,12 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
 
                             <!-- Card 6: Responsible Usage & Clinical Boundaries -->
                             <div class="settings-group-card mb-2" style="padding:14px;">
-                                <div class="flex items-start justify-between gap-3 mb-1">
-                                    <h4 class="text-xs font-semibold text-neutral-100 flex items-center gap-2">
+                                <div class="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+                                    <h4 class="text-xs font-semibold text-neutral-100 flex items-center gap-2 min-w-0 flex-1">
                                         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
                                         <span>6. Responsible AI &amp; Professional Boundaries</span>
                                     </h4>
-                                    <span class="text-[10px] px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-400 border border-rose-500/20 font-medium">Important Advisory</span>
+                                    <span class="text-[10px] px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-400 border border-rose-500/20 font-medium shrink-0">Important Advisory</span>
                                 </div>
                                 <p class="text-[11px] text-neutral-300 leading-relaxed mt-1">
                                     JARVIS provides comprehensive, grounded overviews for scientific and educational questions. However, AI cannot replace a licensed physician, attorney, or emergency operator. Medical inquiries always include an advisory notice to consult a doctor for clinical diagnosis. In emergencies, use the Emergency SOS button in Settings or call local authorities.
@@ -12250,7 +12264,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 if (/^\/(?:image|img|draw|art)\s*$/i.test(input.value.trim())) {
                     input.value = '';
                 }
-                input.placeholder = 'Describe the image you want to create...';
+                input.placeholder = 'Describe the image...';
                 input.focus();
                 autoResizeComposerTextarea?.();
                 toggleSendButton?.();
@@ -12312,7 +12326,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 tray.classList.add('hidden');
             }
             const input = document.getElementById('text-input');
-            if (input && (input.placeholder === 'Ask a question about this text...' || input.placeholder === 'Describe the image you want to create...')) {
+            if (input && (input.placeholder === 'Ask a question about this text...' || input.placeholder === 'Describe the image...')) {
                 input.placeholder = 'Ask Jarvis...';
             }
         }
@@ -13119,7 +13133,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             const isResearchTurn = hasSources || Boolean(options?.meta?.research || options?.meta?.provenance === 'web_grounded' || options?.meta?.liveResearch || options?.meta?.isLiveSearch);
             const rawAnswerCleaned = cleanBulletEndCitations(rawAnswerNoImages);
             const cleanTextForDisplay = isResearchTurn ? rawAnswerCleaned : stripInlineCitationMarkers(rawAnswerCleaned);
-            const readableText = formatAssistantTextForReadability(normalizeAssistantTextStyle(cleanTextForDisplay));
+            const readableText = formatAssistantTextForReadability(normalizeAssistantTextStyle(cleanTextForDisplay), options);
             const effectiveSources = presentation.sources?.length ? presentation.sources : (options?.meta?.sources || options?.sources || []);
             if (options && typeof options === 'object') {
                 options.sources = effectiveSources;
@@ -13300,26 +13314,39 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 : '';
             const textToRender = cleanAnswer || (isMinimalThinking ? strippedMinimal : (isThinkingStream || thoughtText ? '' : text));
             const isStreaming = meta?.streaming === true;
+            const now = performance.now();
             if (isStreaming) {
                 row.__pendingStreamText = textToRender;
                 row.__pendingStreamMeta = meta;
+                const elapsedSinceLast = now - (row.__lastStreamRenderAt || 0);
+                const MIN_STREAM_INTERVAL_MS = 65; // ~15 FPS max throttle for DOM re-parsing on long text
                 if (!row.__streamRafId) {
-                    const rafFn = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : (cb => setTimeout(cb, 30));
-                    row.__streamRafId = rafFn(() => {
-                        row.__streamRafId = null;
-                        renderAssistantTextIntoElement(textElement, row.__pendingStreamText, { streaming: true, meta: row.__pendingStreamMeta });
-                    });
+                    const delay = Math.max(0, MIN_STREAM_INTERVAL_MS - elapsedSinceLast);
+                    row.__streamRafId = setTimeout(() => {
+                        const rafFn = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : (cb => setTimeout(cb, 20));
+                        rafFn(() => {
+                            row.__streamRafId = null;
+                            row.__lastStreamRenderAt = performance.now();
+                            try {
+                                renderAssistantTextIntoElement(textElement, row.__pendingStreamText, { streaming: true, meta: row.__pendingStreamMeta, messageId });
+                            } catch (err) {
+                                console.warn('Streaming render error (recovered):', err);
+                            }
+                        });
+                    }, delay);
                 }
             } else {
                 if (row.__streamRafId) {
-                    if (typeof cancelAnimationFrame === 'function') {
-                        cancelAnimationFrame(row.__streamRafId);
-                    } else {
-                        clearTimeout(row.__streamRafId);
-                    }
+                    clearTimeout(row.__streamRafId);
                     row.__streamRafId = null;
                 }
-                renderAssistantTextIntoElement(textElement, textToRender, { streaming: false, meta });
+                row.__lastStreamRenderAt = performance.now();
+                try {
+                    renderAssistantTextIntoElement(textElement, textToRender, { streaming: false, meta, messageId });
+                } catch (err) {
+                    console.warn('Final render error (fallback to safe text):', err);
+                    if (textElement) textElement.textContent = textToRender;
+                }
             }
 
             try {
@@ -28291,24 +28318,37 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
             `;
 
             return `
-                <div class="location-suite-card" style="margin-top:10px; padding:16px; background:rgba(17,24,39,0.75); backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px); border:1px solid rgba(255,255,255,0.08); border-radius:16px; color:#f8fafc; font-family:inherit; width:100%; max-width:680px; box-sizing:border-box; box-shadow:0 4px 20px -2px rgba(0,0,0,0.35);">
-                    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
-                        <div style="display:flex; align-items:center; gap:8px;">
-                            <span style="font-size:18px;">🧭</span>
-                            <h3 style="margin:0; font-size:15px; font-weight:700; color:#f8fafc; letter-spacing:-0.01em;">Current Location Telemetry</h3>
-                        </div>
-                        ${isApproximate ? `
+                <div class="location-suite-card location-suite-content" style="margin-top:6px; color:#f8fafc; font-family:inherit; width:100%; max-width:680px; background:transparent; border:none; padding:0; box-shadow:none;">
+                    ${isApproximate ? `
+                        <div style="margin-bottom:8px;">
                             <span style="font-size:11px; font-weight:600; background:rgba(234,179,8,0.15); color:#facc15; border:1px solid rgba(234,179,8,0.3); border-radius:999px; padding:2px 10px;">Approximate Network Location</span>
-                        ` : ''}
-                    </div>
-                    <p style="margin:0 0 12px; font-size:13.5px; line-height:1.55; color:#cbd5e1;">${aiSummary}</p>
-                    <div class="loc-meta-table-wrap" style="background:rgba(15,23,42,0.45); border-radius:12px; border:1px solid rgba(255,255,255,0.07); overflow:hidden;">
+                        </div>
+                    ` : ''}
+                    <p style="margin:0 0 12px; font-size:14px; line-height:1.6; color:#e2e8f0;">${aiSummary}</p>
+                    <div class="loc-meta-table-wrap" style="border-radius:10px; overflow:hidden; margin-bottom:12px; border:1px solid rgba(255,255,255,0.07);">
                         <table class="loc-meta-table" style="width:100%; border-collapse:collapse;">
                             <tbody>${areaRows}</tbody>
                         </table>
                     </div>
                     ${showAmenities ? amenitiesGridHtml : ''}
-                    ${mapHtml}
+                    <div style="margin-top:10px; display:flex; gap:14px; align-items:center; flex-wrap:wrap; font-size:12.5px;">
+                        <a href="${mapsUrl}" target="_blank" rel="noopener noreferrer" style="color:#38bdf8; text-decoration:none; font-weight:600; display:inline-flex; align-items:center; gap:5px;">
+                            <span>🗺️ Open in Google Maps</span>
+                            <span style="font-size:10px;">↗</span>
+                        </a>
+                        <a href="${directionsBaseUrl}${lat},${lon}" target="_blank" rel="noopener noreferrer" style="color:#94a3b8; text-decoration:none; font-weight:500; display:inline-flex; align-items:center; gap:5px;">
+                            <span>🧭 Get Directions</span>
+                        </a>
+                        <a href="https://maps.apple.com/?ll=${lat},${lon}" target="_blank" rel="noopener noreferrer" style="color:#94a3b8; text-decoration:none; font-weight:500; display:inline-flex; align-items:center; gap:5px;">
+                            <span>Apple Maps</span>
+                        </a>
+                        <a href="https://www.openstreetmap.org/?mlat=${lat.toFixed(6)}&amp;mlon=${lon.toFixed(6)}#map=16/${lat.toFixed(6)}/${lon.toFixed(6)}" target="_blank" rel="noopener noreferrer" style="color:#94a3b8; text-decoration:none; font-weight:500; display:inline-flex; align-items:center; gap:5px;">
+                            <span>OpenStreetMap</span>
+                        </a>
+                    </div>
+                    <div class="loc-map-footer" style="display:flex; justify-content:space-between; align-items:center; margin-top:8px; font-size:12px; color:#94a3b8; flex-wrap:wrap; gap:8px;">
+                        <span>${isApproximate ? 'Estimated Pin:' : 'Exact Pin:'} <strong style="color:#e2e8f0;">${escapeHtml(exactAddress || locationTitle)}</strong></span>
+                    </div>
                 </div>
             `;
         }
@@ -32409,13 +32449,11 @@ if (typeof window !== 'undefined') {
             return;
         }
 
-        // Voice dictation toggle: Space (when not typing in text field) or Ctrl+Space (anywhere)
-        const isTextInput = e.target && (
-            e.target.tagName === 'INPUT' ||
-            e.target.tagName === 'TEXTAREA' ||
-            e.target.isContentEditable
-        );
-        if ((e.key === ' ' || e.code === 'Space') && (!isTextInput || (cmdOrCtrl && !e.altKey && !e.shiftKey))) {
+        // Voice dictation toggle: Ctrl+Space / Cmd+Space (anywhere) or Ctrl+Alt+V
+        // NOTE: Bare Space is strictly preserved for natural typing and page scrolling; never triggers mic!
+        const isVoiceShortcut = (cmdOrCtrl && (e.key === ' ' || e.code === 'Space') && !e.altKey && !e.shiftKey) ||
+            (cmdOrCtrl && e.altKey && (e.key === 'v' || e.key === 'V'));
+        if (isVoiceShortcut) {
             e.preventDefault();
             if (typeof toggleVoiceToText === 'function') {
                 toggleVoiceToText();
@@ -33633,9 +33671,10 @@ function hideThinkingIndicator() {
     }, 200);
 }
 
-function formatAssistantTextForReadability(rawText) {
+function formatAssistantTextForReadability(rawText, options = {}) {
     if (typeof rawText !== 'string') return rawText;
     rawText = normalizeAssistantTextStyle(rawText);
+    if (options?.streaming === true) return rawText;
     if (/<(iframe|div|img|table|svg|button|a|p|section|article)\b/i.test(rawText)) return rawText;
     rawText = normalizeItineraryTextForReadability(rawText);
 
