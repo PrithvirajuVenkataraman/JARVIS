@@ -369,16 +369,38 @@ export function renderMarkdown(rawText = '', options = {}) {
     const codeBlocks = [];
     const mathBlocks = [];
 
+    // 1a. Code blocks (including fenced math/latex code blocks)
     text = text.replace(/```([a-zA-Z0-9_\-+]*)\n?([\s\S]*?)```/g, (_, lang, code) => {
         const rawCode = code.replace(/\n$/, '');
         if (isMathCodeBlock(lang, rawCode)) {
             const mathIdx = mathBlocks.length;
             mathBlocks.push(rawCode.trim());
-            return `__MATH_BLOCK_${mathIdx}__`;
+            return `\n\n@@JARVIS_MATH_BLOCK_${mathIdx}@@\n\n`;
         }
         const idx = codeBlocks.length;
         codeBlocks.push({ lang: (lang || '').trim(), code: rawCode });
-        return `__CODE_BLOCK_${idx}__`;
+        return `\n\n@@JARVIS_CODE_BLOCK_${idx}@@\n\n`;
+    });
+
+    // 1b. Display math: $$ ... $$
+    text = text.replace(/(?<!\\)\$\$([\s\S]+?)(?<!\\)\$\$/g, (_, math) => {
+        const mathIdx = mathBlocks.length;
+        mathBlocks.push(math.trim());
+        return `\n\n@@JARVIS_MATH_BLOCK_${mathIdx}@@\n\n`;
+    });
+
+    // 1c. Display math: \[ ... \]
+    text = text.replace(/\\\[([\s\S]+?)\\\]/g, (_, math) => {
+        const mathIdx = mathBlocks.length;
+        mathBlocks.push(math.trim());
+        return `\n\n@@JARVIS_MATH_BLOCK_${mathIdx}@@\n\n`;
+    });
+
+    // 1d. Standalone LaTeX environments (aligned, align, gather, split, cases, matrix, bmatrix, pmatrix, vmatrix)
+    text = text.replace(/\\begin\s*\{([a-zA-Z*]+)\}([\s\S]*?)\\end\s*\{\1\}/g, (match) => {
+        const mathIdx = mathBlocks.length;
+        mathBlocks.push(match.trim());
+        return `\n\n@@JARVIS_MATH_BLOCK_${mathIdx}@@\n\n`;
     });
 
     // Step 2: Line-by-line block parsing (headers, lists, tables, blockquotes, paragraphs)
@@ -392,13 +414,13 @@ export function renderMarkdown(rawText = '', options = {}) {
         line = line.replace(/^[\s\-*•+–—]+\s*(#{1,6}\s+)/, '$1');
         const trim = line.trim();
 
-        if (trim.startsWith('__CODE_BLOCK_') && trim.endsWith('__')) {
+        if (trim.startsWith('@@JARVIS_CODE_BLOCK_') && trim.endsWith('@@')) {
             out.push(trim);
             i += 1;
             continue;
         }
 
-        if (trim.startsWith('__MATH_BLOCK_') && trim.endsWith('__')) {
+        if (trim.startsWith('@@JARVIS_MATH_BLOCK_') && trim.endsWith('@@')) {
             out.push(trim);
             i += 1;
             continue;
@@ -528,15 +550,14 @@ export function renderMarkdown(rawText = '', options = {}) {
                 !/^\s*>/.test(String(lines[i] || '')) &&
                 !/^(#{1,4})\s+/.test(String(lines[i] || '')) &&
                 !/^\s*\|.+\|\s*$/.test(String(lines[i] || '')) &&
-                !(String(lines[i] || '').trim().startsWith('__CODE_BLOCK_') && String(lines[i] || '').trim().endsWith('__')) &&
-                !(String(lines[i] || '').trim().startsWith('__MATH_BLOCK_') && String(lines[i] || '').trim().endsWith('__'))
+                !(String(lines[i] || '').trim().startsWith('@@JARVIS_CODE_BLOCK_') && String(lines[i] || '').trim().endsWith('@@')) &&
+                !(String(lines[i] || '').trim().startsWith('@@JARVIS_MATH_BLOCK_') && String(lines[i] || '').trim().endsWith('@@'))
             ) {
                 para.push(String(lines[i]));
                 i += 1;
             }
             let pContent = escapeHtml(para.join('\n')).replace(/\n/g, '<br>');
-            pContent = pContent.replace(/^<strong>(Step\s*\d+[^<]*)<\/strong>/i, '<span class="math-step-label">$1</span>');
-            pContent = pContent.replace(/^(Step\s*\d+:[^\n<]*)/im, '<span class="math-step-label">$1</span>');
+            pContent = pContent.replace(/(^|<br>)(?:<strong>)?(Step\s*\d+[\s:.\-][^<]*?)(?:<\/strong>)?(?=<br>|$)/gim, '$1<span class="math-step-label">$2</span>');
             out.push(`<p class="assistant-md-p">${pContent}</p>`);
             continue;
         }
@@ -623,14 +644,16 @@ export function renderMarkdown(rawText = '', options = {}) {
     });
 
     // Step 3: Re-inject display math blocks with clean notebook styling (NO code container / copy buttons)
-    html = html.replace(/__MATH_BLOCK_(\d+)__/g, (_, idx) => {
+    html = html.replace(/@@JARVIS_MATH_BLOCK_(\d+)@@/g, (_, idx) => {
         const mathCode = mathBlocks[Number(idx)];
         if (!mathCode) return '';
         return `<div class="math-display-block"><span class="math-display-inner">${formatLatexExpression(mathCode, true)}</span></div>`;
     });
+    html = html.replace(/(?:<br\s*\/?>\s*)+(<div class="math-display-block">)/g, '$1');
+    html = html.replace(/(<\/div>)\s*(?:<br\s*\/?>\s*)+/g, '$1');
 
     // Step 4: Re-inject code blocks with syntax highlighting & action buttons
-    html = html.replace(/__CODE_BLOCK_(\d+)__/g, (_, idx) => {
+    html = html.replace(/@@JARVIS_CODE_BLOCK_(\d+)@@/g, (_, idx) => {
         const block = codeBlocks[Number(idx)];
         if (!block) return '';
         const blockId = options?.messageId ? `${options.messageId}_code_${idx}` : `code_block_${idx}`;
