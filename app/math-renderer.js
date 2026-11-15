@@ -9,11 +9,15 @@ function escapeHtml(text) {
 
 function unescapeHtmlInMath(text) {
     return String(text || '')
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<sup>(.*?)<\/sup>/gi, '^{$1}')
+        .replace(/<sub>(.*?)<\/sub>/gi, '_{$1}')
         .replace(/&amp;/g, '&')
         .replace(/&lt;/g, '<')
         .replace(/&gt;/g, '>')
         .replace(/&quot;/g, '"')
-        .replace(/&#39;/g, "'");
+        .replace(/&#39;/g, "'")
+        .replace(/&nbsp;/g, ' ');
 }
 
 function extractBalancedBraces(str, startIndex) {
@@ -69,17 +73,27 @@ function replaceBalancedCommand(str, cmdName, replacer) {
 function replaceFractions(str) {
     let result = '';
     let i = 0;
-    const prefix = '\\frac';
+    const prefixes = ['\\frac', '\\dfrac', '\\tfrac'];
 
     while (i < str.length) {
-        const nextIdx = str.indexOf(prefix, i);
-        if (nextIdx === -1) {
+        let foundIdx = -1;
+        let matchedPrefix = '';
+
+        for (const p of prefixes) {
+            const idx = str.indexOf(p, i);
+            if (idx !== -1 && (foundIdx === -1 || idx < foundIdx)) {
+                foundIdx = idx;
+                matchedPrefix = p;
+            }
+        }
+
+        if (foundIdx === -1) {
             result += str.slice(i);
             break;
         }
 
-        result += str.slice(i, nextIdx);
-        let cursor = nextIdx + prefix.length;
+        result += str.slice(i, foundIdx);
+        let cursor = foundIdx + matchedPrefix.length;
         while (cursor < str.length && /\s/.test(str[cursor])) cursor++;
 
         if (cursor < str.length && str[cursor] === '{') {
@@ -98,8 +112,8 @@ function replaceFractions(str) {
             }
         }
 
-        result += prefix;
-        i = nextIdx + prefix.length;
+        result += matchedPrefix;
+        i = foundIdx + matchedPrefix.length;
     }
 
     return result;
@@ -109,21 +123,31 @@ export function formatLatexExpression(expr = '', isDisplay = false) {
     let raw = String(expr || '').trim();
     if (!raw) return '';
 
-    // Step 0: Unescape any HTML entities from earlier pipeline escaping so LaTeX parsers don't choke on &amp;
-    const katexInput = unescapeHtmlInMath(raw);
+    // Step 0: Unescape any HTML entities and strip unwanted tags from earlier pipeline steps
+    let katexInput = unescapeHtmlInMath(raw).trim();
+
+    // KaTeX normalization:
+    // Convert top-level \begin{align} / \begin{align*} to \begin{aligned}
+    katexInput = katexInput
+        .replace(/\\begin\s*\{align\*?\}/g, '\\begin{aligned}')
+        .replace(/\\end\s*\{align\*?\}/g, '\\end{aligned}')
+        .replace(/\\begin\s*\{gather\*?\}/g, '\\begin{gathered}')
+        .replace(/\\end\s*\{gather\*?\}/g, '\\end{gathered}')
+        .replace(/\\begin\s*\{split\}/g, '\\begin{aligned}')
+        .replace(/\\end\s*\{split\}/g, '\\end{aligned}');
+
+    // Clean up unbalanced or dangling alignment tags that would make KaTeX fail
+    if (katexInput.includes('\\end{aligned}') && !katexInput.includes('\\begin{aligned}')) {
+        katexInput = katexInput.replace(/\\end\{aligned\}/g, '');
+    }
+    if (katexInput.includes('\\begin{aligned}') && !katexInput.includes('\\end{aligned}')) {
+        katexInput = katexInput.replace(/\\begin\{aligned\}/g, '');
+    }
 
     const katex = globalThis.katex || (typeof window !== 'undefined' ? window.katex : null);
     if (katex && typeof katex.renderToString === 'function') {
         try {
-            let sanitized = katexInput;
-            // Clean up unbalanced or dangling alignment tags that would make KaTeX fail
-            if (sanitized.includes('\\end{aligned}') && !sanitized.includes('\\begin{aligned}')) {
-                sanitized = sanitized.replace(/\\end\{aligned\}/g, '');
-            }
-            if (sanitized.includes('\\begin{aligned}') && !sanitized.includes('\\end{aligned}')) {
-                sanitized = sanitized.replace(/\\begin\{aligned\}/g, '');
-            }
-            const rendered = katex.renderToString(sanitized, {
+            const rendered = katex.renderToString(katexInput, {
                 displayMode: Boolean(isDisplay),
                 throwOnError: false
             });
@@ -136,8 +160,8 @@ export function formatLatexExpression(expr = '', isDisplay = false) {
     // Fallback Pure-HTML Notebook Math Engine:
     raw = unescapeHtmlInMath(raw);
 
-    // Multiline alignment environment
-    raw = raw.replace(/\\begin\s*\{(?:aligned|align|split|gather)\}([\s\S]*?)\\end\s*\{(?:aligned|align|split|gather)\}/g, (_, body) => {
+    // Multiline alignment environment: aligned, align, split, gather
+    raw = raw.replace(/\\begin\s*\{(?:aligned|align\*?|split|gather\*?)\}([\s\S]*?)\\end\s*\{(?:aligned|align\*?|split|gather\*?)\}/g, (_, body) => {
         const rows = body.split(/\\\\|\\newline/g);
         const renderedRows = rows.map(row => {
             const trimmedRow = row.trim();
@@ -150,16 +174,43 @@ export function formatLatexExpression(expr = '', isDisplay = false) {
         return `<div class="math-aligned-block">${renderedRows.join('')}</div>`;
     });
 
-    // Clean up any remaining dangling / orphaned alignment tags
-    raw = raw.replace(/\\(?:begin|end)\s*\{(?:aligned|align|split|gather|cases|matrix|bmatrix|pmatrix)\}/g, '');
+    // Matrices: matrix, pmatrix, bmatrix, vmatrix, cases
+    raw = raw.replace(/\\begin\s*\{(pmatrix|bmatrix|vmatrix|matrix|cases)\}([\s\S]*?)\\end\s*\{\1\}/g, (_, type, body) => {
+        const rows = body.split(/\\\\|\\newline/g);
+        const renderedRows = rows.map(row => {
+            const trimmedRow = row.trim();
+            if (!trimmedRow) return '';
+            const cells = trimmedRow.split('&').map(cell => {
+                return `<span class="math-align-cell">${formatLatexExpression(cell.trim(), false)}</span>`;
+            });
+            return `<div class="math-align-row">${cells.join('')}</div>`;
+        }).filter(Boolean);
 
-    // Boxed final answer (Notebook Highlight)
+        let openDelim = '';
+        let closeDelim = '';
+        if (type === 'pmatrix') { openDelim = '<span class="math-delim">(</span>'; closeDelim = '<span class="math-delim">)</span>'; }
+        else if (type === 'bmatrix') { openDelim = '<span class="math-delim">[</span>'; closeDelim = '<span class="math-delim">]</span>'; }
+        else if (type === 'vmatrix') { openDelim = '<span class="math-delim">|</span>'; closeDelim = '<span class="math-delim">|</span>'; }
+        else if (type === 'cases') { openDelim = '<span class="math-delim">{</span>'; closeDelim = ''; }
+
+        return `<span class="math-matrix-wrap">${openDelim}<div class="math-aligned-block">${renderedRows.join('')}</div>${closeDelim}</span>`;
+    });
+
+    // Clean up any remaining dangling / orphaned alignment tags
+    raw = raw.replace(/\\(?:begin|end)\s*\{(?:aligned|align\*?|split|gather\*?|cases|matrix|bmatrix|pmatrix|vmatrix)\}/g, '');
+
+    // Boxed final answer (Notebook Highlight without enclosing box borders)
     raw = replaceBalancedCommand(raw, 'boxed', inner => {
         return `<span class="math-notebook-answer">${formatLatexExpression(inner, false)}</span>`;
     });
 
     // Fractions
     raw = replaceFractions(raw);
+
+    // Binomial coefficients: \binom{n}{k}
+    raw = replaceBalancedCommand(raw, 'binom', nStr => {
+        return `(${formatLatexExpression(nStr, false)})`;
+    });
 
     // Square roots
     raw = replaceBalancedCommand(raw, 'sqrt', inner => {
@@ -173,9 +224,46 @@ export function formatLatexExpression(expr = '', isDisplay = false) {
         });
     }
 
-    // Mathematical operators & relations
+    // Calculus and Advanced Mathematical Operators
+    raw = raw.replace(/\\iiint\b/g, '&int;&int;&int;');
+    raw = raw.replace(/\\iint\b/g, '&int;&int;');
+    raw = raw.replace(/\\oint\b/g, '&#8750;');
+    raw = raw.replace(/\\int\b/g, '&int;');
+    raw = raw.replace(/\\sum\b/g, '&sum;');
+    raw = raw.replace(/\\coprod\b/g, '&#8720;');
+    raw = raw.replace(/\\prod\b/g, '&prod;');
+    raw = raw.replace(/\\lim\b/g, '<span class="math-op-lim">lim</span>');
+    raw = raw.replace(/\\partial\b/g, '&part;');
+    raw = raw.replace(/\\nabla\b/g, '&nabla;');
+
+    // Arrows and Implications
+    raw = raw.replace(/\\(?:rightarrow|to)\b/g, '&rarr;');
+    raw = raw.replace(/\\leftarrow\b/g, '&larr;');
+    raw = raw.replace(/\\Leftarrow\b/g, '&lArr;');
+    raw = raw.replace(/\\(?:Rightarrow|implies)\b/g, '&rArr;');
+    raw = raw.replace(/\\(?:leftrightarrow|iff)\b/g, '&hArr;');
+
+    // Set Theory and Logic
+    raw = raw.replace(/\\forall\b/g, '&forall;');
+    raw = raw.replace(/\\exists\b/g, '&exist;');
+    raw = raw.replace(/\\nexists\b/g, '&#8708;');
+    raw = raw.replace(/\\in\b/g, '&isin;');
+    raw = raw.replace(/\\notin\b/g, '&notin;');
+    raw = raw.replace(/\\subseteq\b/g, '&sube;');
+    raw = raw.replace(/\\subset\b/g, '&sub;');
+    raw = raw.replace(/\\supseteq\b/g, '&supe;');
+    raw = raw.replace(/\\supset\b/g, '&sup;');
+    raw = raw.replace(/\\cup\b/g, '&cup;');
+    raw = raw.replace(/\\cap\b/g, '&cap;');
+    raw = raw.replace(/\\setminus\b/g, '&#8726;');
+    raw = raw.replace(/\\(?:land|wedge)\b/g, '&and;');
+    raw = raw.replace(/\\(?:lor|vee)\b/g, '&or;');
+    raw = raw.replace(/\\neg\b/g, '&not;');
+
+    // Standard Operators & Relations
     raw = raw.replace(/\\approx\b/g, '&asymp;');
     raw = raw.replace(/\\times\b/g, '&times;');
+    raw = raw.replace(/\\div\b/g, '&divide;');
     raw = raw.replace(/\\cdot\b/g, '&sdot;');
     raw = raw.replace(/\\pm\b/g, '&plusmn;');
     raw = raw.replace(/\\mp\b/g, '&#8723;');
@@ -186,9 +274,16 @@ export function formatLatexExpression(expr = '', isDisplay = false) {
     raw = raw.replace(/\\sim\b/g, '&sim;');
     raw = raw.replace(/\\propto\b/g, '&prop;');
     raw = raw.replace(/\\infty\b/g, '&infin;');
-    raw = raw.replace(/\\circ\b/g, '&deg;');
+    raw = raw.replace(/\\(?:circ|degree)\b/g, '&deg;');
 
-    // Greek letters
+    // Common Functions
+    const mathFuncs = ['arcsin', 'arccos', 'arctan', 'sin', 'cos', 'tan', 'sec', 'csc', 'cot', 'ln', 'log', 'exp', 'det', 'max', 'min'];
+    for (const fn of mathFuncs) {
+        const fnRegex = new RegExp(`\\\\${fn}\\b`, 'g');
+        raw = raw.replace(fnRegex, `<span class="math-func">${fn}</span>`);
+    }
+
+    // Greek letters (lowercase)
     raw = raw.replace(/\\alpha\b/g, '&alpha;');
     raw = raw.replace(/\\beta\b/g, '&beta;');
     raw = raw.replace(/\\gamma\b/g, '&gamma;');
@@ -212,11 +307,16 @@ export function formatLatexExpression(expr = '', isDisplay = false) {
     raw = raw.replace(/\\chi\b/g, '&chi;');
     raw = raw.replace(/\\psi\b/g, '&psi;');
     raw = raw.replace(/\\omega\b/g, '&omega;');
+
+    // Greek letters (uppercase)
     raw = raw.replace(/\\Gamma\b/g, '&Gamma;');
     raw = raw.replace(/\\Delta\b/g, '&Delta;');
     raw = raw.replace(/\\Theta\b/g, '&Theta;');
     raw = raw.replace(/\\Lambda\b/g, '&Lambda;');
+    raw = raw.replace(/\\Xi\b/g, '&Xi;');
+    raw = raw.replace(/\\Pi\b/g, '&Pi;');
     raw = raw.replace(/\\Sigma\b/g, '&Sigma;');
+    raw = raw.replace(/\\Upsilon\b/g, '&Upsilon;');
     raw = raw.replace(/\\Phi\b/g, '&Phi;');
     raw = raw.replace(/\\Psi\b/g, '&Psi;');
     raw = raw.replace(/\\Omega\b/g, '&Omega;');
@@ -256,24 +356,40 @@ export function formatInlineMathPowers(text = '') {
 
 export function renderMathInText(text = '') {
     let raw = String(text || '');
+    if (!raw) return '';
+
+    // Protect currency tokens so amounts like $50, $12.99, $1,000, $5k, $100M, $10/month are never treated as math delimiters
+    const currencyTokens = [];
+    raw = raw.replace(/(?<!\w)\$(\d+(?:,\d{3})*(?:\.\d+)?(?:\s*(?:k|m|b|trillion|million|billion|usd|dollars?|cents?|per|\/))?)(?!\w)/gi, (m) => {
+        const idx = currencyTokens.length;
+        currencyTokens.push(m);
+        return `__CURRENCY_HOLD_${idx}__`;
+    });
 
     // Display math: $$ ... $$ and \[ ... \]
-    raw = raw.replace(/\$\$([\s\S]+?)\$\$/g, (_, math) => {
+    raw = raw.replace(/(?<!\\)\$\$([\s\S]+?)(?<!\\)\$\$/g, (_, math) => {
         return `<div class="math-display-block"><span class="math-display-inner">${formatLatexExpression(math, true)}</span></div>`;
     });
     raw = raw.replace(/\\\[([\s\S]+?)\\\]/g, (_, math) => {
         return `<div class="math-display-block"><span class="math-display-inner">${formatLatexExpression(math, true)}</span></div>`;
     });
 
-    // Inline math: $ ... $ and \( ... \)
-    raw = raw.replace(/(?<!\\)\$(?!\s)([^\$\n]+?)(?<!\s)\$(?!\d)/g, (_, math) => {
-        return `<span class="math-inline">${formatLatexExpression(math, false)}</span>`;
-    });
+    // Inline math: \( ... \)
     raw = raw.replace(/\\\(([\s\S]+?)\\\)/g, (_, math) => {
         return `<span class="math-inline">${formatLatexExpression(math, false)}</span>`;
     });
 
+    // Inline math: $ ... $
+    raw = raw.replace(/(?<!\\)\$(?!\$)([^\$\n]+?)(?<!\\)\$/g, (_, math) => {
+        const trimmed = math.trim();
+        if (!trimmed) return '$';
+        return `<span class="math-inline">${formatLatexExpression(trimmed, false)}</span>`;
+    });
+
     raw = formatInlineMathPowers(raw);
+
+    // Restore protected currency tokens
+    raw = raw.replace(/__CURRENCY_HOLD_(\d+)__/g, (_, idx) => currencyTokens[Number(idx)] || '$');
 
     return raw;
 }
