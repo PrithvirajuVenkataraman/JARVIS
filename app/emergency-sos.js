@@ -81,6 +81,28 @@ export function deleteEmergencyContact(id) {
     return contacts;
 }
 
+export function setPrimaryEmergencyContact(id) {
+    const contacts = getEmergencyContacts();
+    let found = false;
+    contacts.forEach(c => {
+        if (c.id === id) {
+            c.isPrimary = true;
+            found = true;
+        } else {
+            c.isPrimary = false;
+        }
+    });
+    if (found) {
+        memoryContacts = contacts;
+        try {
+            if (typeof localStorage !== 'undefined') {
+                localStorage.setItem(EMERGENCY_STORAGE_KEY, JSON.stringify(contacts));
+            }
+        } catch (_) {}
+    }
+    return contacts;
+}
+
 export function getPrimaryEmergencyContact() {
     const contacts = getEmergencyContacts();
     return contacts.find(c => c.isPrimary) || contacts[0] || null;
