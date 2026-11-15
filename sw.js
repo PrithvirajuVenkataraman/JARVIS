@@ -3,18 +3,19 @@
  * @description Service Worker for JARVIS PWA & Offline Shell Caching
  */
 
-const CACHE_NAME = 'jarvis-cache-v33';
+const CACHE_NAME = 'jarvis-cache-v34';
 const STATIC_ASSETS = [
     '/',
-    '/index.html',
-    '/styles.css',
-    '/app/bootstrap.js?v=2.4.2',
-    '/app/bounded-live-research.js?v=2.4.2',
-    '/app/markdown-renderer.js?v=2.4.2',
-    '/app/search/research-stream.mjs',
-    '/app/search/research-contract.mjs',
-    '/404.html',
-    '/manifest.json'
+    'index.html',
+    'styles.css',
+    'app/bootstrap.js?v=2.4.2',
+    'app/bounded-live-research.js?v=2.4.2',
+    'app/markdown-renderer.js?v=2.4.2',
+    'app/math-renderer.js?v=2.4.2',
+    'app/search/research-stream.mjs',
+    'app/search/research-contract.mjs',
+    '404.html',
+    'manifest.json'
 ];
 
 self.addEventListener('install', (event) => {
@@ -46,6 +47,26 @@ self.addEventListener('fetch', (event) => {
 
     // API calls, streaming SSE, and POST requests must NEVER use cache
     if (request.method !== 'GET' || url.pathname.startsWith('/api/')) {
+        return;
+    }
+
+    // KaTeX CDN Assets: Cache-First for instant offline availability
+    if (url.hostname === 'cdn.jsdelivr.net' && url.pathname.includes('katex')) {
+        event.respondWith(
+            caches.open(CACHE_NAME).then(async (cache) => {
+                const cached = await cache.match(request);
+                if (cached) return cached;
+                try {
+                    const res = await fetch(request);
+                    if (res && res.status === 200) {
+                        cache.put(request, res.clone());
+                    }
+                    return res;
+                } catch (_) {
+                    return cached;
+                }
+            })
+        );
         return;
     }
 
