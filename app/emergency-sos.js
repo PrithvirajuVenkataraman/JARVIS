@@ -231,25 +231,13 @@ export function buildEmergencyCardHtml(payload = {}, contact = null) {
                 <a href="${googleMapsUrl}" target="_blank" rel="noopener noreferrer" style="color:#60a5fa; text-decoration:none; font-weight:600; display:inline-flex; align-items:center; gap:4px;">🗺️ Google Maps Pin &rarr;</a>
             </div>
 
-            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(120px, 1fr)); gap:8px;">
-                <a href="${smsUrl}" target="_blank" rel="noopener noreferrer" style="background:#dc2626; color:#ffffff; padding:9px 12px; border-radius:8px; text-decoration:none; font-weight:700; font-size:12.5px; display:flex; align-items:center; justify-content:center; gap:6px; box-shadow:0 2px 8px rgba(220,38,38,0.35);">
-                    <span>📱</span>
-                    <span>Send SMS</span>
+            <div style="margin-top:6px;">
+                <a href="${smsUrl}" class="sos-primary-sms-btn" style="background:linear-gradient(135deg, #ef4444 0%, #dc2626 100%); color:#ffffff; padding:12px 18px; border-radius:10px; text-decoration:none; font-weight:800; font-size:14px; display:flex; align-items:center; justify-content:center; gap:8px; box-shadow:0 4px 14px rgba(220,38,38,0.4); border:1px solid rgba(254,202,202,0.35); text-align:center;">
+                    <span style="font-size:16px;">📱</span>
+                    <span>Send SMS${contactPhone ? ` to ${escapeSosHtml(contactPhone)}` : ''}</span>
                 </a>
-                <a href="${waUrl}" target="_blank" rel="noopener noreferrer" style="background:#16a34a; color:#ffffff; padding:9px 12px; border-radius:8px; text-decoration:none; font-weight:700; font-size:12.5px; display:flex; align-items:center; justify-content:center; gap:6px; box-shadow:0 2px 8px rgba(22,163,74,0.35);">
-                    <span>💬</span>
-                    <span>WhatsApp</span>
-                </a>
-                <a href="${telUrl}" style="background:#2563eb; color:#ffffff; padding:9px 12px; border-radius:8px; text-decoration:none; font-weight:700; font-size:12.5px; display:flex; align-items:center; justify-content:center; gap:6px; box-shadow:0 2px 8px rgba(37,99,235,0.35);">
-                    <span>📞</span>
-                    <span>Call SOS</span>
-                </a>
-                <button type="button" class="emergency-share-btn" data-share-text="${encodeURIComponent(textToSend)}" onclick="globalThis.shareEmergencySos?.(decodeURIComponent(this.getAttribute('data-share-text')||''))" style="background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); color:#ffffff; padding:9px 12px; border-radius:8px; font-weight:600; font-size:12.5px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px;">
-                    <span>📤</span>
-                    <span>Share Location</span>
-                </button>
             </div>
-            <!-- Interactive embed telemetry: iframe fallback ${osmEmbedUrl} -->
+            <!-- Fallback channels: WhatsApp, Call SOS, Share Location, iframe ${osmEmbedUrl} -->
         </div>
     `;
 }
@@ -292,9 +280,14 @@ export function dispatchImmediateEmergencySms(payload = {}, contact = null) {
         }).catch(() => {});
     }
 
-    // 3. Automatically launch native SMS client on all platforms
+    // 3. Immediately launch native SMS client on all platforms
     try {
-        if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+        if (typeof window !== 'undefined') {
+            window.location.href = smsUrl;
+        }
+    } catch (_) {}
+    try {
+        if (typeof document !== 'undefined') {
             const dispatchLink = document.createElement('a');
             dispatchLink.href = smsUrl;
             dispatchLink.rel = 'noopener noreferrer';
