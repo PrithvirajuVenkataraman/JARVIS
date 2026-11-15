@@ -1402,6 +1402,47 @@ console.log('\n--- Test 3: Whisper Fallback Dictation Silence Immunity ---');
     console.log('  [PASS] 3.1 Whisper fallback respects 1-press start / 1-press stop contract');
 }
 
+// ─── Test 4: VTT Silence Auto-Stop Safeguard ────────────────────────────────────
+console.log('\n--- Test 4: VTT Silence Auto-Stop Safeguard ---');
+{
+    const { elements, doc } = createMockEnvironment();
+    globalThis.document = doc;
+    globalThis.window = {
+        isSecureContext: true,
+        location: { hostname: 'localhost' }
+    };
+    globalThis.SpeechRecognition = MockContinuousRecognition;
+    globalThis.webkitSpeechRecognition = MockContinuousRecognition;
+
+    const controller = createSpeechInputController({
+        Recognition: MockContinuousRecognition,
+        dictationSilenceTimeoutMs: 50 // Fast for test
+    });
+
+    await controller.toggleDictation();
+    assert.equal(controller.getState().mode, 'dictation');
+    assert.equal(controller.getState().listening, true);
+
+    const rec = MockContinuousRecognition.instances.at(-1);
+    rec.emitResult('Testing silence detection.', true);
+    assert.equal(controller.getState().listening, true, 'Immediate pause keeps listening');
+
+    // Wait for silence timeout
+    await new Promise(r => setTimeout(r, 80));
+    assert.equal(controller.getState().listening, false, 'Auto-stops on silence');
+    assert.equal(controller.getState().mode, 'idle', 'Transitions to idle');
+    console.log('  [PASS] 4.1 Silence auto-stop terminates dictation and turns off mic');
+}
+
+// ─── Test 5: Keyboard Shortcut Safeguard (No Bare Spacebar Microphone Hijack) ──
+console.log('\n--- Test 5: Keyboard Shortcut Safeguard ---');
+{
+    const indexHtml = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../index.html'), 'utf8');
+    assert.ok(indexHtml.includes('const isVoiceShortcut = (cmdOrCtrl && (e.key === \' \' || e.code === \'Space\') && !e.altKey && !e.shiftKey)'), 'Ctrl/Cmd+Space required for VTT shortcut');
+    assert.ok(!indexHtml.includes('(!isTextInput || (cmdOrCtrl && !e.altKey && !e.shiftKey))) {'), 'Bare spacebar cannot trigger toggleVoiceToText');
+    console.log('  [PASS] 5.1 Bare spacebar cannot trigger VTT, only Ctrl/Cmd+Space allowed');
+}
+
 console.log('\n=== All ChatGPT-Style VTT Workflow Tests PASSED (100% Green) ===\n');
 
 });
