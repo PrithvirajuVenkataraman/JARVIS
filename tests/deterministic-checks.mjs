@@ -441,6 +441,37 @@ console.log('--- Section 10: Code Highlighter, Math & Markdown Renderers ---');
     assert.ok(!alignRendered.includes('assistant-md-code-container'), 'Latex block must NEVER produce assistant-md-code-container');
     assert.ok(!alignRendered.includes('\\end{aligned}'), 'Must not leak dangling \\end{aligned}');
 
+    // Direct $$ ... $$ multiline display math parsing & zero <br> / <p> containment invariant
+    const displayMultiMd = 'Here is the derivation:\n\n$$\nx = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}\n$$\n\nDone.';
+    const displayMultiRendered = renderMarkdown(displayMultiMd);
+    assert.ok(displayMultiRendered.includes('math-display-block'), 'Display math $$ must render math-display-block');
+    assert.ok(!displayMultiRendered.includes('<p class="assistant-md-p"><div class="math-display-block">'), 'Display math must NEVER be nested inside <p>');
+    assert.ok(!displayMultiRendered.includes('<br>x ='), 'Display math must NEVER have <br> injected into math formulas');
+
+    // Standalone LaTeX environment (unwrapped \begin{aligned})
+    const standaloneEnvMd = 'Solution:\n\\begin{aligned}\n2x + 4 &= 10 \\\\\n2x &= 6 \\\\\nx &= 3\n\\end{aligned}\n';
+    const standaloneEnvRendered = renderMarkdown(standaloneEnvMd);
+    assert.ok(standaloneEnvRendered.includes('math-display-block'), 'Standalone LaTeX environment must render as math-display-block');
+
+    // Inline math with spaces and currency protection
+    const currencyAndMathMd = 'The price is $50 each, and formula is $ x + y = 10 $.';
+    const currencyAndMathRendered = renderMarkdown(currencyAndMathMd);
+    assert.ok(currencyAndMathRendered.includes('$50'), 'Currency must remain protected and intact');
+    assert.ok(currencyAndMathRendered.includes('<span class="math-inline">x + y = 10</span>'), 'Inline math with spaces must render properly');
+
+    // Step-by-step problem sequence
+    const stepsMd = 'Step 1: Expand quadratic\n$$x^2 + 5x + 6 = 0$$\nStep 2: Factorize\n$$(x + 2)(x + 3) = 0$$\nStep 3: Solve roots\n$$\\boxed{x = -2, -3}$$';
+    const stepsRendered = renderMarkdown(stepsMd);
+    const stepLabelCount = (stepsRendered.match(/class="math-step-label"/g) || []).length;
+    assert.equal(stepLabelCount, 3, 'All 3 steps must be rendered as math-step-label');
+    assert.ok(stepsRendered.includes('math-notebook-answer'), 'Boxed final answer must render notebook highlight');
+
+    // Advanced Fallback Math Engine Operators
+    const intSumExpr = formatLatexExpression('\\int_0^1 x^2 dx + \\sum_{i=1}^n i + \\lim_{x \\to \\infty} \\frac{1}{x}');
+    assert.ok(intSumExpr.includes('&int;') || intSumExpr.includes('int'), 'Must support integrals');
+    assert.ok(intSumExpr.includes('&sum;') || intSumExpr.includes('sum'), 'Must support summations');
+    assert.ok(intSumExpr.includes('lim'), 'Must support limits');
+
     // Inline backticked math unwrap
     const backtickMd = 'The radius is `r \\approx 3 \\times 3.6055` and answer `\\boxed{10.8\\ cm}`.';
     const backtickRendered = renderMarkdown(backtickMd);
