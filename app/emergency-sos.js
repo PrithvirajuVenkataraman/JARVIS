@@ -221,14 +221,17 @@ export function buildEmergencyCardHtml(payload = {}, contact = null) {
                 </div>
             </div>
 
-            <div class="emergency-sos-dispatch-banner" style="display:flex; align-items:center; gap:8px; background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.3); border-radius:8px; padding:8px 12px; margin-bottom:10px; font-size:12px; color:#7dd3fc; line-height:1.4;">
-                <span style="font-size:15px; flex-shrink:0;">📍</span>
-                <span><strong>Location &amp; Maps Link Ready:</strong> Formatted for instant dispatch${contactPhone ? ` to <strong>${escapeSosHtml(contactName)} (${escapeSosHtml(contactPhone)})</strong>` : ''}. Telemetry transmitted via SMS.</span>
+            <div class="emergency-sos-dispatch-banner" style="display:none;">
+                <span>Location &amp; Maps Link Ready: Formatted for instant dispatch${contactPhone ? ` to ${escapeSosHtml(contactName)} (${escapeSosHtml(contactPhone)})` : ''}. Telemetry transmitted via SMS.</span>
             </div>
 
-            <div style="display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:6px; margin-bottom:12px; font-size:12px; color:#cbd5e1;">
-                <div>📍 <strong>${escapeSosHtml(address)}</strong> <span style="font-family:monospace; color:#38bdf8;">(${lat.toFixed(6)}, ${lon.toFixed(6)})</span></div>
-                <a href="${googleMapsUrl}" target="_blank" rel="noopener noreferrer" style="color:#60a5fa; text-decoration:none; font-weight:600; display:inline-flex; align-items:center; gap:4px;">🗺️ Google Maps Pin &rarr;</a>
+            <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin:10px 0 12px; font-size:13px; color:#cbd5e1;">
+                <div style="display:flex; align-items:center; gap:6px;">
+                    <span>📍</span>
+                    <span style="font-weight:600;">${escapeSosHtml(address)}</span>
+                    <span style="font-family:monospace; color:#38bdf8; font-size:11.5px;">(${lat.toFixed(6)}, ${lon.toFixed(6)})</span>
+                </div>
+                <a href="${googleMapsUrl}" target="_blank" rel="noopener noreferrer" style="color:#60a5fa; text-decoration:none; font-weight:600; font-size:12.5px; display:inline-flex; align-items:center; gap:4px;">🗺️ Google Maps Pin &rarr;</a>
             </div>
 
             <div style="margin-top:6px;">
@@ -247,7 +250,27 @@ export function dispatchImmediateEmergencySms(payload = {}, contact = null) {
     const text = payload.locationMapsText || payload.cleanText || payload.distressText || '';
     const smsUrl = buildSmsUrl(contactPhone, text);
 
-    // 1. Immediately copy telemetry & coordinates to clipboard for instant pasting
+    // 1. Immediately launch native SMS client synchronously within user gesture
+    try {
+        if (typeof window !== 'undefined') {
+            window.location.href = smsUrl;
+        }
+    } catch (_) {}
+    try {
+        if (typeof document !== 'undefined') {
+            const dispatchLink = document.createElement('a');
+            dispatchLink.href = smsUrl;
+            dispatchLink.rel = 'noopener noreferrer';
+            dispatchLink.style.display = 'none';
+            document.body.appendChild(dispatchLink);
+            dispatchLink.click();
+            setTimeout(() => {
+                try { dispatchLink.remove(); } catch (_) {}
+            }, 1000);
+        }
+    } catch (_) {}
+
+    // 2. Immediately copy telemetry & coordinates to clipboard for instant pasting
     try {
         if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
             navigator.clipboard.writeText(text).catch(() => {});
