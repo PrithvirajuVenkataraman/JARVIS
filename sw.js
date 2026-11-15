@@ -3,7 +3,7 @@
  * @description Service Worker for JARVIS PWA & Offline Shell Caching
  */
 
-const CACHE_NAME = 'jarvis-cache-v32';
+const CACHE_NAME = 'jarvis-cache-v33';
 const STATIC_ASSETS = [
     '/',
     '/index.html',
@@ -85,7 +85,7 @@ self.addEventListener('fetch', (event) => {
         );
         return;
     }
- 
+
     // Cache-First for static assets (images, icons, fonts)
     event.respondWith(
         caches.match(request).then((cachedResponse) => {
