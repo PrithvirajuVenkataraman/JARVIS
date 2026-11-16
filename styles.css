@@ -7031,6 +7031,9 @@ body:not(.dark) .sos-btn-close:hover {
     .emergency-sos-card {
         padding: 10px 12px !important;
         font-size: 13px !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+        overflow-x: hidden !important;
     }
     .sos-top-toast-banner {
         top: 10px !important;
@@ -7041,6 +7044,30 @@ body:not(.dark) .sos-btn-close:hover {
     .sos-sent-display {
         padding: 10px 12px !important;
         font-size: 13px !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+    }
+    .sos-modal-card {
+        width: calc(100vw - 20px) !important;
+        max-width: 100% !important;
+        padding: 1.1rem 0.9rem !important;
+        margin: 0 auto !important;
+        box-sizing: border-box !important;
+    }
+    .sos-contact-card {
+        flex-direction: column !important;
+        align-items: stretch !important;
+        gap: 0.6rem !important;
+        box-sizing: border-box !important;
+    }
+    .sos-contact-actions {
+        width: 100% !important;
+        justify-content: flex-end !important;
+        gap: 0.5rem !important;
+    }
+    .sos-btn-quick-sms {
+        flex: 1 !important;
+        justify-content: center !important;
     }
 }
 
