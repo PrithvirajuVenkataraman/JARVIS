@@ -219,13 +219,13 @@ export function buildEmergencyCardHtml(payload = {}, contact = null) {
     const osmEmbedUrl = 'https://www.openstreetmap.org/export/embed.html?bbox=' + minLon + '%2C' + minLat + '%2C' + maxLon + '%2C' + maxLat + '&layer=mapnik&marker=' + lat.toFixed(6) + '%2C' + lon.toFixed(6);
 
     return `
-        <div class="emergency-sos-card" style="margin-top:8px; padding:14px 16px; background:linear-gradient(135deg, rgba(220,38,38,0.18) 0%, rgba(15,23,42,0.92) 100%); border:1.5px solid #ef4444; border-radius:14px; color:#f8fafc; font-family:inherit; box-shadow:0 4px 20px rgba(239,68,68,0.2);">
-            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; flex-wrap:wrap; gap:8px;">
+        <div class="emergency-sos-card" style="margin-top:8px; padding:12px 14px; background:linear-gradient(135deg, rgba(220,38,38,0.18) 0%, rgba(15,23,42,0.92) 100%); border:1.5px solid #ef4444; border-radius:14px; color:#f8fafc; font-family:inherit; box-shadow:0 4px 20px rgba(239,68,68,0.2); max-width:100%; box-sizing:border-box; overflow:hidden;">
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; flex-wrap:wrap; gap:6px;">
                 <div style="display:flex; align-items:center; gap:8px;">
-                    <span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:#ef4444; animation:pulse 1.2s infinite ease-in-out;"></span>
-                    <h3 style="margin:0; font-size:14px; font-weight:800; color:#fca5a5; letter-spacing:0.02em; text-transform:uppercase;">🚨 Satellite Emergency SOS Active</h3>
+                    <span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:#ef4444; animation:pulse 1.2s infinite ease-in-out; flex-shrink:0;"></span>
+                    <h3 style="margin:0; font-size:13.5px; font-weight:800; color:#fca5a5; letter-spacing:0.02em; text-transform:uppercase;">🚨 Satellite Emergency SOS Active</h3>
                 </div>
-                <div style="display:flex; gap:6px;">
+                <div style="display:flex; gap:6px; flex-wrap:wrap;">
                     ${accuracy > 0 ? `<span style="background:rgba(239,68,68,0.2); border:1px solid rgba(239,68,68,0.4); padding:2px 8px; border-radius:999px; font-size:11px; font-weight:600; color:#fca5a5;">±${Math.round(accuracy)}m GPS</span>` : ''}
                     ${battery !== null ? `<span style="background:rgba(56,189,248,0.15); border:1px solid rgba(56,189,248,0.3); padding:2px 8px; border-radius:999px; font-size:11px; font-weight:600; color:#38bdf8;">🔋 ${Math.round(battery)}%</span>` : ''}
                 </div>
@@ -235,18 +235,22 @@ export function buildEmergencyCardHtml(payload = {}, contact = null) {
                 <span>Location &amp; Maps Link Ready: Formatted for instant dispatch${contactPhone ? ` to ${escapeSosHtml(contactName)} (${escapeSosHtml(contactPhone)})` : ''}. Telemetry transmitted via SMS.</span>
             </div>
 
-            <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin:10px 0 12px; font-size:13px; color:#cbd5e1;">
-                <div style="display:flex; align-items:center; gap:6px;">
-                    <span>📍</span>
-                    <span style="font-weight:600;">${escapeSosHtml(address)}</span>
-                    <span style="font-family:monospace; color:#38bdf8; font-size:11.5px;">(${lat.toFixed(6)}, ${lon.toFixed(6)})</span>
+            <div style="margin:8px 0 10px; font-size:12.5px; color:#cbd5e1; word-break:break-word;">
+                <div style="display:flex; align-items:flex-start; gap:6px; margin-bottom:4px;">
+                    <span style="flex-shrink:0;">📍</span>
+                    <div>
+                        <span style="font-weight:600;">${escapeSosHtml(address)}</span>
+                        <span style="font-family:monospace; color:#38bdf8; font-size:11.5px; display:inline-block; margin-left:4px;">(${lat.toFixed(6)}, ${lon.toFixed(6)})</span>
+                    </div>
                 </div>
-                <a href="${googleMapsUrl}" target="_blank" rel="noopener noreferrer" style="color:#60a5fa; text-decoration:none; font-weight:600; font-size:12.5px; display:inline-flex; align-items:center; gap:4px;">🗺️ Google Maps Pin &rarr;</a>
+                <div style="margin-top:4px;">
+                    <a href="${googleMapsUrl}" target="_blank" rel="noopener noreferrer" style="color:#60a5fa; text-decoration:none; font-weight:600; font-size:12px; display:inline-flex; align-items:center; gap:4px;">🗺️ Google Maps Pin &rarr;</a>
+                </div>
             </div>
 
-            <div style="margin-top:6px;">
-                <a href="${smsUrl}" class="sos-primary-sms-btn" style="background:linear-gradient(135deg, #ef4444 0%, #dc2626 100%); color:#ffffff; padding:12px 18px; border-radius:10px; text-decoration:none; font-weight:800; font-size:14px; display:flex; align-items:center; justify-content:center; gap:8px; box-shadow:0 4px 14px rgba(220,38,38,0.4); border:1px solid rgba(254,202,202,0.35); text-align:center;">
-                    <span style="font-size:16px;">📱</span>
+            <div style="margin-top:8px;">
+                <a href="${smsUrl}" class="sos-primary-sms-btn" style="background:linear-gradient(135deg, #ef4444 0%, #dc2626 100%); color:#ffffff; padding:11px 16px; border-radius:10px; text-decoration:none; font-weight:800; font-size:13.5px; display:flex; align-items:center; justify-content:center; gap:8px; box-shadow:0 4px 14px rgba(220,38,38,0.4); border:1px solid rgba(254,202,202,0.35); text-align:center; width:100%; box-sizing:border-box;">
+                    <span style="font-size:15px;">📱</span>
                     <span>Send SMS${contactPhone ? ` to ${escapeSosHtml(contactPhone)}` : ''}</span>
                 </a>
             </div>
