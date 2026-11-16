@@ -320,7 +320,7 @@ export function dispatchImmediateEmergencySms(payload = {}, contact = null) {
             setTimeout(() => {
                 try { dispatchLink.remove(); } catch (_) {}
             }, 1000);
-        }
+        } 
     } catch (_) {}
 
     return smsUrl;
