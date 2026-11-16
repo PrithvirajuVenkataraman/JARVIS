@@ -6960,6 +6960,47 @@ body:not(.dark) .sos-btn-close:hover {
     padding-top: 2px;
 }
 
+@keyframes fadeInDown {
+    from {
+        opacity: 0;
+        transform: translate(-50%, -12px);
+    }
+    to {
+        opacity: 1;
+        transform: translate(-50%, 0);
+    }
+}
+
+.sos-top-toast-banner {
+    position: fixed;
+    top: 18px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 99999;
+    background: linear-gradient(135deg, #b91c1c 0%, #7f1d1d 100%);
+    color: #ffffff;
+    padding: 10px 18px;
+    border-radius: 12px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(254, 202, 202, 0.3);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 700;
+    font-size: 13.5px;
+    max-width: 92vw;
+    animation: fadeInDown 0.25s ease-out;
+}
+
+.sos-sent-display {
+    margin: 8px 0;
+    padding: 12px 16px;
+    background: linear-gradient(135deg, rgba(220, 38, 38, 0.2) 0%, rgba(15, 23, 42, 0.92) 100%);
+    border: 1.5px solid #ef4444;
+    border-radius: 12px;
+    color: #f8fafc;
+    box-shadow: 0 4px 16px rgba(239, 68, 68, 0.25);
+}
+
 body:not(.dark) .sos-security-note {
     color: #64748b;
 }
