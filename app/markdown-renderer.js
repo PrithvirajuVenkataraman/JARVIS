@@ -139,10 +139,12 @@ export function deBulletizePseudoListIfNeeded(text) {
     // Only inspect if 3 or more bullet items exist
     if (bulletItems.length < 3) return text;
 
-    // Reject conversion if genuine procedure, step, or recipe list
-    const hasProceduralKeywords = bulletItems.some(item =>
-        /^(?:step\s*\d+|install\b|run\b|curl\b|git\b|npm\b|pip\b|sudo\b|open\b|click\b|select\b|mix\b|bake\b|boil\b|whisk\b)/i.test(item)
-    );
+    // Reject conversion if genuine procedure, step, or recipe list (math derivations are de-bulletized)
+    const hasProceduralKeywords = bulletItems.some(item => {
+        const isMathStep = /(?:\$|\\|@@JARVIS_MATH_BLOCK_|\\frac|\\sqrt|=|\\times|\+|-|\/)/.test(item);
+        if (isMathStep) return false;
+        return /^(?:install\b|run\b|curl\b|git\b|npm\b|pip\b|sudo\b|open\b|click\b|select\b|mix\b|bake\b|boil\b|whisk\b)/i.test(item);
+    });
     if (hasProceduralKeywords) return text;
 
     // Reject conversion if key-value attribute list (e.g. "- **RAM**: 16GB" or "- Chip: M3")
@@ -402,6 +404,17 @@ export function renderMarkdown(rawText = '', options = {}) {
         mathBlocks.push(match.trim());
         return `\n\n@@JARVIS_MATH_BLOCK_${mathIdx}@@\n\n`;
     });
+
+    // 1e. For mathematical problems and derivations, bulletins are not required.
+    // Strip bullet markers wrapping math display equations, math steps, or math narrative lines.
+    if (mathBlocks.length > 0 || /(?:\$|\\frac|\\sqrt|\\int|\\sum|\\approx|\\boxed)/.test(text)) {
+        text = text.replace(/^[\s\-*•+–—]+\s*(@@JARVIS_MATH_BLOCK_\d+@@)/gm, '$1');
+        text = text.replace(/^[\s\-*•+–—]+\s*(Step\s*\d+[\s:.\-])/gmi, '$1');
+        text = text.replace(/^[\s\-*•+–—]+\s*(Substitute\b|Applying\b|Therefore\b|Hence\b|Thus\b|Solving\b|Simplifying\b|Expanding\b|Factoring\b|Divide\b|Multiply\b|Add\b|Subtract\b|Differentiating\b|Integrating\b|We get\b|This gives\b|The (?:final )?(?:answer|result|solution|value|root) is\b)/gmi, '$1');
+        if (mathBlocks.length >= 2 || (mathBlocks.length >= 1 && /Step\s*\d+/i.test(text))) {
+            text = text.replace(/^[\s\-*•+–—]+\s+/gm, '');
+        }
+    }
 
     // Step 2: Line-by-line block parsing (headers, lists, tables, blockquotes, paragraphs)
     const lines = text.split('\n');
