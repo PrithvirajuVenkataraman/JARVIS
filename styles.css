@@ -6999,6 +6999,49 @@ body:not(.dark) .sos-btn-close:hover {
     border-radius: 12px;
     color: #f8fafc;
     box-shadow: 0 4px 16px rgba(239, 68, 68, 0.25);
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+    word-break: break-word !important;
+}
+
+.emergency-sos-card {
+    max-width: 100% !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+    word-break: break-word !important;
+}
+
+.emergency-sos-card * {
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+}
+
+.emergency-sos-card .sos-primary-sms-btn {
+    width: 100% !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    text-align: center !important;
+    box-sizing: border-box !important;
+}
+
+@media (max-width: 640px) {
+    .emergency-sos-card {
+        padding: 10px 12px !important;
+        font-size: 13px !important;
+    }
+    .sos-top-toast-banner {
+        top: 10px !important;
+        padding: 8px 14px !important;
+        font-size: 12.5px !important;
+        max-width: 96vw !important;
+    }
+    .sos-sent-display {
+        padding: 10px 12px !important;
+        font-size: 13px !important;
+    }
 }
 
 body:not(.dark) .sos-security-note {
