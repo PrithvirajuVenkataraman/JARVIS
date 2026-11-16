@@ -1741,7 +1741,7 @@ export default async function handler(req, res) {
             writeSse(res, 'status', { state: 'SEARCHING', label: 'Searching...' });
             liveRag = await buildLiveRagContext(effectiveMessage, req, context);
             timing.searchMs = Date.now() - searchStartedAt;
-            writeSse(res, 'status', { state: 'ANALYZING', label: 'Analyzing...' });
+            writeSse(res, 'status', { state: 'THINKING', label: 'Thinking...' });
         }
 
         let streamedText = '';
