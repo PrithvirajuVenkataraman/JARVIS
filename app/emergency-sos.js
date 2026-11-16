@@ -13,7 +13,17 @@ let memoryContacts = [];
 export function isEmergencySosIntentText(text = '') {
     const t = String(text || '').toLowerCase().trim();
     if (!t) return false;
-    return /\b(emergency|distress|sos|satellite\s+sos|call\s+(?:police|ambulance|help)|need\s+(?:immediate\s+)?help|in\s+danger|send\s+help|emergency\s+contact)\b/i.test(t);
+    if (/\b(emergency|distress|sos|satellite\s+sos|call\s+(?:police|ambulance|help)|need\s+(?:immediate\s+)?help|in\s+danger|send\s+help|emergency\s+contact)\b/i.test(t)) {
+        return true;
+    }
+    if (/\b(send\s+sms|send\s+sos|sms\b|send\s+distress)\b/i.test(t)) {
+        return true;
+    }
+    const hasPhone = /(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}|\b\d{7,15}\b/.test(t);
+    if (hasPhone && /\b(sms|message|text|alert|contact|notify|send)\b/i.test(t)) {
+        return true;
+    }
+    return false;
 }
 
 export function getEmergencyContacts() {
@@ -320,7 +330,7 @@ export function dispatchImmediateEmergencySms(payload = {}, contact = null) {
             setTimeout(() => {
                 try { dispatchLink.remove(); } catch (_) {}
             }, 1000);
-        } 
+        }
     } catch (_) {}
 
     return smsUrl;
