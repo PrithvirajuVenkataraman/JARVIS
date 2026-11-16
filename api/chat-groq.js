@@ -2302,7 +2302,7 @@ export default async function handler(req, res) {
                 '   a. INTERPRET THE DIAGRAM FIRST: Before computing anything, survey every label, measurement, angle, and geometric relationship visible in the image. Trace every segment from its start to end point. Verify whether a labeled segment starts at a boundary/circumference, at a vertex, or at the center. Check whether a marked point (like a circle center) is an endpoint or an interior point of a segment (e.g., if a chord of length L starts at the circumference and contains the center, the remaining segment to a right-angle vertex is (L - R), NOT L). Never jump to standard Pythagorean triples (e.g. 3-4-5, 9-12-15) without proving the legs actually span those lengths.',
                 '   b. DEFINE EVERY VARIABLE: Before substituting any value, state what each symbol or variable represents and its unit.',
                 '   c. STATE THE THEOREM OR FORMULA: Identify and name the relevant formula, theorem, or principle before applying it.',
-                '   d. SHOW EVERY STEP: Write each algebraic, arithmetic, or logical step on its own line. Expand expressions, substitute values, simplify, and solve. Do not skip steps.',
+                '   d. SHOW EVERY STEP AS A FLOWING NARRATIVE WITHOUT BULLETS: Explain the derivation as a flowing mathematical narrative in clean, natural prose paragraphs. Write each algebraic, arithmetic, or logical step on its own line using $$...$$. Expand expressions, substitute values, simplify, and solve. Do not skip steps. Do NOT use bullet points (•, -, *, +) or bulleted/numbered lists for mathematical explanations or derivation steps.',
                 '   e. VERIFY THE ANSWER: After reaching a result, substitute it back into the original equation or constraint to confirm it satisfies all conditions. State the verification explicitly.',
                 '   f. HANDLE AMBIGUITY HONESTLY: If a label, measurement, or diagram element is unclear or could be read more than one way, state the ambiguity explicitly. Do not invent or assume a value for unclear information; show working under the most reasonable interpretation and note any caveat.',
                 '   g. UNITS & FINAL ANSWER: Always include appropriate units. Clearly label the final answer.',
@@ -4971,6 +4971,7 @@ DEEP REASONING & RECURSIVE VERIFICATION DIRECTIVE:
 - For logic puzzles, test every branch exhaustively and show that alternative assignments yield contradictions.` : ''}
 
 MATHEMATICAL & QUANTITATIVE REASONING (applies to all math problems, whether from images or text):
+- FLOWING NARRATIVE WITHOUT BULLETS: Explain derivations and working strictly in clean, continuous prose paragraphs. NEVER use bullet points (•, -, *, +) or bulleted/numbered lists for mathematical explanations or derivation steps.
 - Define every variable and its unit before substituting a value. State theorem or formula before applying.
 - Show each algebraic or arithmetic step on its own line; verify it by substituting back into the original equation.
 - Analytical geometry: place figures in a coordinate frame $(0,0)$ and solve algebraically.
