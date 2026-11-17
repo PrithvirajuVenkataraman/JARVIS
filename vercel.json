@@ -26,10 +26,6 @@
       "destination": "/api/diagnostics?__route=feedback"
     },
     {
-      "source": "/api/send-sms",
-      "destination": "/api/diagnostics?__route=send-sms"
-    },
-    {
       "source": "/api/favicon",
       "destination": "/api/diagnostics?__route=favicon"
     },
@@ -48,7 +44,7 @@
     {
       "source": "/api/extract-url",
       "destination": "/api/diagnostics?__route=extract-url"
-    }, 
+    },
     {
       "source": "/api/current-facts",
       "destination": "/api/diagnostics?__route=current-facts"
