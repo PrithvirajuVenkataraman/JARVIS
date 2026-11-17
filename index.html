@@ -75,9 +75,9 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous">
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
-    <link rel="stylesheet" href="styles.css?v=2.5.2">
+    <link rel="stylesheet" href="styles.css?v=2.5.3">
     <script src="science-format.js?v=2.0.1"></script>
-    <script type="module" src="app/bootstrap.js?v=2.5.2"></script>
+    <script type="module" src="app/bootstrap.js?v=2.5.3"></script>
 </head>
 <body class="dark min-h-screen bg-black text-white">
 
@@ -407,18 +407,6 @@
                                             <polyline points="21 15 16 10 5 21"></polyline>
                                         </svg>
                                         <span>Generate Image</span>
-                                    </span>
-                                </button>
-                                <button
-                                    type="button"
-                                    class="composer-action-item"
-                                    onclick="closeComposerActionsMenu(); openEmergencyContactModal();"
-                                    role="menuitem"
-                                    title="Configure Emergency SOS and trusted contacts"
-                                    aria-label="Emergency SOS">
-                                    <span class="composer-web-search-item-left">
-                                        <span style="font-size:14px; line-height:1;">🚨</span>
-                                        <span>Emergency SOS</span>
                                     </span>
                                 </button>
                             </div>
@@ -808,25 +796,6 @@ function isPersonalHealthStatement(text) {
     const firstPerson = /\b(i|i'm|i am|my|me)\b/.test(t);
     if (!firstPerson) return false;
     return /\b(hurt|injur|injured|pain|ache|swelling|swollen|bleed|bleeding|burn|burned|burnt|cut|sprain|fracture|fever|cough|cold|vomit|nausea|dizzy|headache|toe|ankle|knee|back pain|stomach pain|chest pain|sick)\b/.test(t);
-}
-
-function isEmergencySosIntentText(text) {
-    if (window.JarvisEmergencySOS?.isEmergencySosIntentText) {
-        return window.JarvisEmergencySOS.isEmergencySosIntentText(text);
-    }
-    const t = String(text || '').toLowerCase().trim();
-    if (!t) return false;
-    if (/\b(emergency|distress|sos|satellite\s+sos|call\s+(?:police|ambulance|help)|need\s+(?:immediate\s+)?help|in\s+danger|send\s+help|emergency\s+contact)\b/i.test(t)) {
-        return true;
-    }
-    if (/\b(send\s+sms|send\s+sos|sms\b|send\s+distress)\b/i.test(t)) {
-        return true;
-    }
-    const hasPhone = /(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}|\b\d{7,15}\b/.test(t);
-    if (hasPhone && /\b(sms|message|text|alert|contact|notify|send)\b/i.test(t)) {
-        return true;
-    }
-    return false;
 }
 
 function isCurrentLocationIntentText(text) {
@@ -7605,28 +7574,6 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                             <!-- Section 3: SAFETY & DATA -->
                             <div class="settings-section-label">SAFETY &amp; DATA</div>
                             <div class="settings-group-card">
-                                <!-- Emergency SOS Row -->
-                                <div class="settings-row">
-                                    <div class="settings-row-left">
-                                        <div class="settings-icon-badge settings-icon-rose" aria-hidden="true">
-                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-                                                <line x1="12" y1="9" x2="12" y2="13"/>
-                                                <line x1="12" y1="17" x2="12.01" y2="17"/>
-                                            </svg>
-                                        </div>
-                                        <div class="settings-row-text">
-                                            <h3 class="settings-row-title">Emergency SOS</h3>
-                                            <p class="settings-row-desc">Configure distress contacts and emergency dispatch</p>
-                                        </div>
-                                    </div>
-                                    <div class="settings-row-right">
-                                        <button type="button" class="settings-action-btn" onclick="closeHelpModal(); openEmergencyContactModal();">
-                                            <span>Configure &rarr;</span>
-                                        </button>
-                                    </div>
-                                </div>
-
                                 <!-- Compliance & Observability Row -->
                                 <button type="button" class="settings-row settings-row-interactive" id="settings-row-compliance" onclick="switchSettingsView('compliance')" aria-label="Compliance & Observability">
                                     <div class="settings-row-left">
@@ -8155,7 +8102,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                                     <span class="text-[10px] px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-400 border border-rose-500/20 font-medium shrink-0">Important Advisory</span>
                                 </div>
                                 <p class="text-[11px] text-neutral-300 leading-relaxed mt-1">
-                                    JARVIS provides comprehensive, grounded overviews for scientific and educational questions. However, AI cannot replace a licensed physician, attorney, or emergency operator. Medical inquiries always include an advisory notice to consult a doctor for clinical diagnosis. In emergencies, use the Emergency SOS button in Settings or call local authorities.
+                                    JARVIS provides comprehensive, grounded overviews for scientific and educational questions. However, AI cannot replace a licensed physician, attorney, or emergency operator. Medical inquiries always include an advisory notice to consult a doctor for clinical diagnosis. In emergencies, please contact local emergency services directly.
                                 </p>
                             </div>
                         </div>
@@ -8801,7 +8748,6 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
 
         const slashCommandChoices = Object.freeze([
             { id: 'image', label: 'Image', hint: 'Generate an AI image locally', template: '/image ' },
-            { id: 'sos', label: 'Emergency SOS', hint: 'Distress dispatch & contacts', template: 'emergency' },
             { id: 'translate', label: 'Translate', hint: 'Translate a phrase', template: 'translate "..." to Tamil', select: [11, 14] },
             { id: 'verify', label: 'Verify', hint: 'Check a claim or answer', template: 'verify this: ' },
             { id: 'summarize', label: 'Summarize', hint: 'Summarize pasted text', template: 'summarize this: ' },
@@ -8880,10 +8826,6 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             closeSlashCommandPicker();
             if (choice.id === 'image') {
                 activateComposerImageMode({ aspectRatio: '1:1' });
-                return;
-            }
-            if (choice.id === 'sos') {
-                openEmergencyContactModal();
                 return;
             }
             const input = document.getElementById('text-input');
@@ -10581,7 +10523,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                 const title = escapeHtml(source?.title || domain || 'Source');
                 const url = escapeHtml(source?.url || '#');
                 const favicon = escapeHtml(source?.favicon || `/api/favicon?domain=${encodeURIComponent(domain)}`);
-                const fallbackSvg = globalThis.JarvisMarkdownRenderer?.getDomainMonogramSvg ? globalThis.JarvisMarkdownRenderer.getDomainMonogramSvg(domain) : `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="32" height="32" rx="8" fill="%230284c7"/><text x="50%" y="54%" font-family="sans-serif" font-size="16" font-weight="700" fill="%23fff" text-anchor="middle" dominant-baseline="central">${(domain[0]||'S').toUpperCase()}</text></svg>`;
+                const fallbackSvg = globalThis.JarvisMarkdownRenderer?.getDomainMonogramSvg ? globalThis.JarvisMarkdownRenderer.getDomainMonogramSvg(domain) : `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="32" height="32" rx="16" fill="%230284c7"/><text x="50%" y="54%" font-family="sans-serif" font-size="16" font-weight="700" fill="%23fff" text-anchor="middle" dominant-baseline="central">${(domain[0]||'S').toUpperCase()}</text></svg>`;
                 return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="citation-source-logo" data-source-id="${id}" title="${title} (${domain})" onclick="window.JarvisLiveResearch?.highlightSource?.('${id}')"><img class="citation-logo-icon" src="${favicon}" alt="${domain}" loading="lazy" onerror="this.onerror=null;this.src='${fallbackSvg}';" /></a>`;
             };
 
@@ -16904,73 +16846,6 @@ async function sendTextInput(submission = {}) {
                     return;
                 }
 
-                // Instant Emergency SOS & Phone Number Fast-Path (Zero LLM Processing)
-                if (hasText && !pendingAttachments.length) {
-                    const rawInput = String(text || '').trim();
-                    const cleanDigits = rawInput.replace(/[^\d]/g, '');
-                    const phoneMatch = rawInput.match(/(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}|\b\d{7,15}\b/);
-                    const hasPhoneNumber = Boolean(phoneMatch);
-                    const isPurePhoneNumber = hasPhoneNumber && cleanDigits.length >= 7 && cleanDigits.length <= 15 && (/^\+?[\d\s\-().]{7,18}$/.test(rawInput) || !/[a-zA-Z]{5,}/.test(rawInput));
-                    const isSosTrigger = isEmergencySosIntentText(rawInput) || /^\/(?:sos|emergency)\b/i.test(rawInput) || (hasPhoneNumber && /\b(sos|sms|send|help|call|emergency|contact|alert|distress)\b/i.test(rawInput));
-
-                    if (isPurePhoneNumber || isSosTrigger) {
-                        hideThinkingIndicator();
-                        window.JarvisInteractionState?.transition?.('IDLE');
-                        const oldIndicator = document.getElementById('chat-thinking-indicator');
-                        if (oldIndicator) oldIndicator.remove();
-                        const blinker = document.getElementById('chat-synthesizing-blinker');
-                        if (blinker) blinker.remove();
-
-                        const extractedPhone = isPurePhoneNumber ? rawInput.replace(/[^\d+]/g, '') : (phoneMatch ? phoneMatch[0].replace(/[^\d+]/g, '') : '');
-                        const targetPhone = extractedPhone || localStorage.getItem('jarvis_last_emergency_phone') || '';
-
-                        // Immediate synchronous SMS invocation within user gesture
-                        if (targetPhone) {
-                            const lat = window.userLocation?.latitude || 0;
-                            const lon = window.userLocation?.longitude || 0;
-                            const mapsUrl = (lat && lon) ? `https://maps.google.com/?q=${lat},${lon}` : '';
-                            const distress = `EMERGENCY SOS: Help needed!${lat && lon ? ` Location: ${lat}, ${lon} (${mapsUrl})` : ''}`;
-                            const directSms = `sms:${targetPhone.replace(/[^\d+]/g, '')}?body=${encodeURIComponent(distress)}`;
-                            try { window.location.href = directSms; } catch (_) {}
-                            try {
-                                const dispatchLink = document.createElement('a');
-                                dispatchLink.href = directSms;
-                                dispatchLink.rel = 'noopener noreferrer';
-                                dispatchLink.style.display = 'none';
-                                document.body.appendChild(dispatchLink);
-                                dispatchLink.click();
-                                setTimeout(() => { try { dispatchLink.remove(); } catch (_) {} }, 1000);
-                            } catch (_) {}
-                        }
-
-                        if (extractedPhone && extractedPhone.length >= 7) {
-                            try {
-                                const sosModule = window.JarvisEmergencySOS || globalThis.JarvisEmergencySOS;
-                                if (typeof sosModule?.saveEmergencyContact === 'function') {
-                                    sosModule.saveEmergencyContact({
-                                        name: 'Emergency Contact',
-                                        phone: extractedPhone,
-                                        isPrimary: true
-                                    });
-                                }
-                                localStorage.setItem('jarvis_last_emergency_phone', extractedPhone);
-                            } catch (_) {}
-                        }
-
-                        if (input) {
-                            input.value = '';
-                            delete input.dataset.inputSource;
-                            input.style.height = '';
-                            autoResizeComposerTextarea();
-                        }
-                        globalThis.resetSpeechInputCommittedText?.();
-                        toggleSendButton();
-
-                        addChatMessage(rawInput, true);
-                        await handleEmergencySosRequest(rawInput);
-                        return;
-                    }
-                }
                 if (window.JarvisUnifiedMemory?.FEATURE_UNIFIED_MEMORY) {
                     processUnifiedMemoryTurn(text, inputSource === 'voice' || inputSource === 'vtt');
                 } else if (text && typeof JarvisSelfImprovingMemory !== 'undefined' && (typeof isPersonalizationEnabled !== 'function' || isPersonalizationEnabled())) {
@@ -25544,17 +25419,6 @@ function isWakeGreetingText(text) {
         }
 
         async function processCommand(text) {
-            const rawCommandText = String(text || '').trim();
-            if (isEmergencySosIntentText(rawCommandText)) {
-                hideThinkingIndicator();
-                window.JarvisInteractionState?.transition?.('IDLE');
-                const oldIndicator = document.getElementById('chat-thinking-indicator');
-                if (oldIndicator) oldIndicator.remove();
-                const blinker = document.getElementById('chat-synthesizing-blinker');
-                if (blinker) blinker.remove();
-                await handleEmergencySosRequest(rawCommandText);
-                return;
-            }
             if (String(activeResponseRenderContext?.source || '').toLowerCase() === 'converse') {
                 setConverseUiState('submitting', 'command_received');
             }
@@ -28794,365 +28658,6 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
             });
         }
 
-        function showSosTopToast(name = 'Emergency Contact', phone = '', coords = {}) {
-            const existing = document.getElementById('sos-top-toast');
-            if (existing) existing.remove();
-
-            const toast = document.createElement('div');
-            toast.id = 'sos-top-toast';
-            toast.className = 'sos-top-toast-banner';
-
-            const safeName = escapeHtml(name || 'Emergency Contact');
-            const safePhone = escapeHtml(phone || '');
-            const mapsLink = coords?.googleMapsUrl ? `<a href="${coords.googleMapsUrl}" target="_blank" rel="noopener noreferrer" style="color:#fecaca; text-decoration:underline; font-size:12px; margin-left:6px;">📍 View Location</a>` : '';
-
-            toast.innerHTML = `
-                <span style="font-size:16px;">🚨</span>
-                <span>SOS sent to ${safeName}${safePhone ? ` (${safePhone})` : ''}</span>
-                ${mapsLink}
-                <button type="button" onclick="this.parentElement.remove()" style="background:none; border:none; color:#ffffff; font-size:16px; cursor:pointer; margin-left:8px; opacity:0.85; line-height:1;" aria-label="Dismiss">&times;</button>
-            `;
-
-            document.body.appendChild(toast);
-            setTimeout(() => {
-                if (toast.parentElement) {
-                    toast.style.opacity = '0';
-                    toast.style.transition = 'opacity 0.4s ease';
-                    setTimeout(() => toast.remove(), 400);
-                }
-            }, 7000);
-        }
-
-        async function handleEmergencySosSelect(contactName = 'Emergency Contact', contactPhone = '', originalText = '') {
-            hideThinkingIndicator();
-            window.JarvisInteractionState?.transition?.('IDLE');
-            const oldIndicator = document.getElementById('chat-thinking-indicator');
-            if (oldIndicator) oldIndicator.remove();
-            const blinker = document.getElementById('chat-synthesizing-blinker');
-            if (blinker) blinker.remove();
-
-            closeEmergencyContactModal();
-
-            let cleanPhone = String(contactPhone || '').trim();
-            let cleanName = String(contactName || 'Emergency Contact').trim();
-
-            if (!cleanPhone) {
-                const sosModule = window.JarvisEmergencySOS || globalThis.JarvisEmergencySOS;
-                const primary = sosModule?.getPrimaryEmergencyContact?.();
-                if (primary?.phone) {
-                    cleanPhone = primary.phone;
-                    if (cleanName === 'Emergency Contact' && primary.name) {
-                        cleanName = primary.name;
-                    }
-                } else {
-                    cleanPhone = localStorage.getItem('jarvis_last_emergency_phone') || '';
-                }
-            }
-
-            if (!cleanPhone) {
-                openEmergencyContactModal();
-                return;
-            }
-
-            // 1. SYNCHRONOUSLY trigger native SMS within active user gesture (IMMEDIATELY before any async await)
-            const digits = cleanPhone.replace(/[^\d+]/g, '');
-            let lat = window.userLocation?.latitude || 0;
-            let lon = window.userLocation?.longitude || 0;
-            let accuracy = window.userLocation?.accuracy || 0;
-
-            const initialMapsUrl = (lat && lon) ? `https://maps.google.com/?q=${lat},${lon}` : '';
-            const initialDistress = `EMERGENCY SOS: Help needed!${lat && lon ? ` Location: ${lat.toFixed(6)}, ${lon.toFixed(6)} (${initialMapsUrl})` : ''}`;
-            const directSms = `sms:${digits}?body=${encodeURIComponent(initialDistress)}`;
-
-            try {
-                window.location.href = directSms;
-            } catch (_) {}
-            try {
-                const hiddenLink = document.createElement('a');
-                hiddenLink.href = directSms;
-                hiddenLink.rel = 'noopener noreferrer';
-                hiddenLink.style.display = 'none';
-                document.body.appendChild(hiddenLink);
-                hiddenLink.click();
-                setTimeout(() => { try { hiddenLink.remove(); } catch (_) {} }, 1000);
-            } catch (_) {}
-
-            // Save contact locally for fast future 1-tap dispatch
-            try {
-                localStorage.setItem('jarvis_last_emergency_phone', cleanPhone);
-                const sosModule = window.JarvisEmergencySOS || globalThis.JarvisEmergencySOS;
-                sosModule?.saveEmergencyContact?.({ name: cleanName, phone: cleanPhone, isPrimary: true });
-            } catch (_) {}
-
-            // Fetch high-accuracy live coordinates if not already available
-            if (!lat || !lon) {
-                try {
-                    if (typeof getCurrentPositionAsync === 'function') {
-                        const pos = await getCurrentPositionAsync({
-                            enableHighAccuracy: true,
-                            timeout: 1500,
-                            maximumAge: 60000
-                        });
-                        lat = pos.coords.latitude;
-                        lon = pos.coords.longitude;
-                        accuracy = pos.coords.accuracy || 0;
-                    } else if (navigator.geolocation) {
-                        const pos = await new Promise((resolve, reject) => {
-                            navigator.geolocation.getCurrentPosition(resolve, reject, {
-                                enableHighAccuracy: true,
-                                timeout: 1500,
-                                maximumAge: 60000
-                            });
-                        });
-                        lat = pos.coords.latitude;
-                        lon = pos.coords.longitude;
-                        accuracy = pos.coords.accuracy || 0;
-                    }
-                } catch (_) {}
-            }
-
-            const mapsUrl = (lat && lon) ? `https://maps.google.com/?q=${lat},${lon}` : '';
-            const locText = (lat && lon) ? `${lat.toFixed(6)}, ${lon.toFixed(6)}` : 'Live Coordinates';
-            const distressText = `EMERGENCY SOS: Help needed! Location: ${locText}${mapsUrl ? ` (${mapsUrl})` : ''}`;
-
-            // Re-trigger with coordinates if location was freshly acquired
-            if (lat && lon && !initialMapsUrl) {
-                const updatedSms = `sms:${digits}?body=${encodeURIComponent(distressText)}`;
-                try { window.location.href = updatedSms; } catch (_) {}
-            }
-
-            // 2. Asynchronously dispatch via backend SMS gateway / webhook
-            fetch('/api/send-sms', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    phone: cleanPhone,
-                    name: cleanName,
-                    message: distressText,
-                    locationMapsText: distressText,
-                    coordinates: { latitude: lat, longitude: lon, accuracy },
-                    googleMapsUrl: mapsUrl
-                })
-            }).catch(err => console.warn('[Emergency SOS] Backend SMS dispatch:', err));
-
-            // 3. Display compact top toast banner: "🚨 SOS sent to [Name] ([Phone])"
-            showSosTopToast(cleanName, cleanPhone, { latitude: lat, longitude: lon, googleMapsUrl: mapsUrl });
-
-            // 4. Display in UI: "🚨 SOS sent to [Name] ([Phone])"
-            const sentHtml = `
-                <div class="sos-sent-display">
-                    <div style="display:flex; align-items:center; gap:8px; font-weight:700; font-size:14.5px; color:#fca5a5;">
-                        <span style="font-size:18px;">🚨</span>
-                        <span>SOS sent to ${escapeHtml(cleanName)}${cleanPhone ? ` (${escapeHtml(cleanPhone)})` : ''}</span>
-                    </div>
-                    ${lat && lon ? `
-                    <div style="margin-top:6px; font-size:12.5px; color:#cbd5e1; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:6px;">
-                        <span>📍 Live Location: ${lat.toFixed(6)}, ${lon.toFixed(6)}</span>
-                        <a href="${mapsUrl}" target="_blank" rel="noopener noreferrer" style="color:#60a5fa; text-decoration:none; font-weight:600;">🗺️ Google Maps &rarr;</a>
-                    </div>` : ''}
-                </div>
-            `;
-            addChatMessage(sentHtml, false, false);
-            saveToHistory(originalText || 'Emergency SOS', `🚨 SOS sent to ${cleanName} (${cleanPhone}).`);
-
-            try {
-                if (typeof speakModelResponse === 'function' && !document.hidden) {
-                    speakModelResponse(`SOS sent to ${cleanName}`);
-                }
-            } catch (_) {}
-        }
-
-        async function handleEmergencySosRequest(originalText = '') {
-            hideThinkingIndicator();
-            window.JarvisInteractionState?.transition?.('IDLE');
-            const oldIndicator = document.getElementById('chat-thinking-indicator');
-            if (oldIndicator) oldIndicator.remove();
-            const blinker = document.getElementById('chat-synthesizing-blinker');
-            if (blinker) blinker.remove();
-
-            const phonePattern = /(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}|\b\d{7,15}\b/;
-            let candidatePhone = '';
-            let candidateName = 'Emergency Contact';
-
-            const directMatch = String(originalText || '').match(phonePattern);
-            if (directMatch) {
-                candidatePhone = directMatch[0].replace(/[^\d+]/g, '');
-            }
-
-            const nameMatch = String(originalText || '').match(/(?:to|for)\s+([A-Za-z]+)/i);
-            if (nameMatch && nameMatch[1]) {
-                candidateName = nameMatch[1];
-            }
-
-            if (!candidatePhone) {
-                const sosModule = window.JarvisEmergencySOS || globalThis.JarvisEmergencySOS;
-                const primary = sosModule?.getPrimaryEmergencyContact?.();
-                if (primary?.phone) {
-                    candidatePhone = primary.phone;
-                    candidateName = primary.name || 'Emergency Contact';
-                } else {
-                    candidatePhone = localStorage.getItem('jarvis_last_emergency_phone') || '';
-                }
-            }
-
-            if (!candidatePhone) {
-                openEmergencyContactModal();
-                return;
-            }
-
-            await handleEmergencySosSelect(candidateName, candidatePhone, originalText);
-        }
-
-        function handleSosModalKeydown(event) {
-            if (event.key === 'Escape') {
-                closeEmergencyContactModal();
-            }
-        }
-
-        function openEmergencyContactModal() {
-            const modal = document.getElementById('sos-contact-modal');
-            if (modal) {
-                modal.style.display = 'flex';
-                renderEmergencyContactsList();
-                document.addEventListener('keydown', handleSosModalKeydown);
-            }
-        }
-
-        function closeEmergencyContactModal() {
-            const modal = document.getElementById('sos-contact-modal');
-            if (modal) {
-                modal.style.display = 'none';
-                document.removeEventListener('keydown', handleSosModalKeydown);
-            }
-        }
-
-        function renderEmergencyContactsList() {
-            const container = document.getElementById('sos-contacts-list-container');
-            const triggerText = document.getElementById('sos-trigger-btn-text');
-            if (!container) return;
-            const sosModule = window.JarvisEmergencySOS || globalThis.JarvisEmergencySOS;
-            const contacts = sosModule?.getEmergencyContacts?.() || [];
-
-            if (triggerText) {
-                triggerText.textContent = '🚨 Send SOS';
-            }
-
-            if (!contacts.length) {
-                container.innerHTML = `
-                    <div style="font-size:13px; color:#94a3b8; padding:6px 0;">No emergency contacts added yet. Add someone trusted below.</div>
-                `;
-                return;
-            }
-
-            container.innerHTML = contacts.map(c => {
-                const initial = escapeHtml((c.name || 'E').charAt(0).toUpperCase());
-                return `
-                    <div class="sos-contact-card sos-contact-item ${c.isPrimary ? 'is-primary' : ''}">
-                        <div class="sos-contact-avatar" aria-hidden="true">${initial}</div>
-                        <div class="sos-contact-body">
-                            <div class="sos-contact-top-row">
-                                <span class="sos-contact-name">${escapeHtml(c.name)}</span>
-                                ${c.isPrimary ? '<span class="sos-badge-primary">★ PRIMARY</span>' : ''}
-                            </div>
-                            <div class="sos-contact-bottom-row">
-                                <span class="sos-contact-phone">${escapeHtml(c.phone)}</span>
-                            </div>
-                        </div>
-                        <div class="sos-contact-actions" style="display:flex; align-items:center; gap:6px;">
-                            <button type="button" class="sos-btn-quick-sms" onclick="handleEmergencySosSelect('${escapeHtml(c.name)}', '${escapeHtml(c.phone)}')" style="background:linear-gradient(135deg, #ef4444 0%, #dc2626 100%); color:#ffffff; border:none; padding:7px 14px; border-radius:8px; font-weight:700; font-size:12.5px; cursor:pointer; display:inline-flex; align-items:center; gap:4px; box-shadow:0 2px 6px rgba(220,38,38,0.35);" title="Send SOS to ${escapeHtml(c.name)}">
-                                <span>🚨</span>
-                                <span>Send SOS</span>
-                            </button>
-                            <button type="button" class="sos-contact-delete-btn" onclick="handleDeleteEmergencyContact('${c.id}')" title="Delete Contact" aria-label="Delete contact">
-                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
-                            </button>
-                        </div>
-                    </div>
-                `;
-            }).join('');
-        }
-
-        function handleSetPrimaryEmergencyContact(id) {
-            const sosModule = window.JarvisEmergencySOS || globalThis.JarvisEmergencySOS;
-            if (sosModule?.setPrimaryEmergencyContact) {
-                sosModule.setPrimaryEmergencyContact(id);
-            }
-            renderEmergencyContactsList();
-        }
-
-        function selectSosRelationship(val) {
-            const input = document.getElementById('sos-input-relation');
-            if (input) {
-                input.value = val;
-                input.focus();
-            }
-        }
-
-        function showSosFeedback(msg) {
-            const el = document.getElementById('sos-form-feedback');
-            if (!el) return;
-            el.innerHTML = `<span>✓</span> <span>${escapeHtml(msg)}</span>`;
-            el.style.display = 'flex';
-            setTimeout(() => {
-                if (el) el.style.display = 'none';
-            }, 3000);
-        }
-
-        function handleSaveEmergencyContactForm(e) {
-            if (e && typeof e.preventDefault === 'function') e.preventDefault();
-            triggerImmediateSatelliteSos();
-        }
-
-        function handleDeleteEmergencyContact(id) {
-            const sosModule = window.JarvisEmergencySOS || globalThis.JarvisEmergencySOS;
-            if (sosModule?.deleteEmergencyContact) {
-                sosModule.deleteEmergencyContact(id);
-            }
-            renderEmergencyContactsList();
-        }
-
-        function triggerImmediateSatelliteSos() {
-            hideThinkingIndicator();
-            window.JarvisInteractionState?.transition?.('IDLE');
-            const oldIndicator = document.getElementById('chat-thinking-indicator');
-            if (oldIndicator) oldIndicator.remove();
-            const blinker = document.getElementById('chat-synthesizing-blinker');
-            if (blinker) blinker.remove();
-
-            const phoneInput = document.getElementById('sos-input-phone');
-            const nameInput = document.getElementById('sos-input-name');
-            const phone = phoneInput?.value?.trim() || '';
-            const name = nameInput?.value?.trim() || 'Emergency Contact';
-
-            if (!phone) {
-                if (phoneInput) phoneInput.focus();
-                return;
-            }
-
-            if (phoneInput) phoneInput.value = '';
-            if (nameInput) nameInput.value = '';
-
-            closeEmergencyContactModal();
-            handleEmergencySosSelect(name, phone);
-        }
-
-        window.isEmergencySosIntentText = isEmergencySosIntentText;
-        window.openEmergencyContactModal = openEmergencyContactModal;
-        window.closeEmergencyContactModal = closeEmergencyContactModal;
-        window.renderEmergencyContactsList = renderEmergencyContactsList;
-        window.handleSetPrimaryEmergencyContact = handleSetPrimaryEmergencyContact;
-        window.selectSosRelationship = selectSosRelationship;
-        window.handleSaveEmergencyContactForm = handleSaveEmergencyContactForm;
-        window.handleDeleteEmergencyContact = handleDeleteEmergencyContact;
-        window.triggerImmediateSatelliteSos = triggerImmediateSatelliteSos;
-        window.handleEmergencySosRequest = handleEmergencySosRequest;
-        window.handleEmergencySosSelect = handleEmergencySosSelect;
-        window.showSosTopToast = showSosTopToast;
-        window.handleSaveEmergencyContactForm = handleSaveEmergencyContactForm;
-        window.handleDeleteEmergencyContact = handleDeleteEmergencyContact;
-        window.triggerImmediateSatelliteSos = triggerImmediateSatelliteSos;
-        window.handleEmergencySosRequest = handleEmergencySosRequest;
-
         function isLikelyPersonalName(value) {
             const raw = String(value || '').trim();
             if (!raw) return false;
@@ -32283,10 +31788,6 @@ function openSidebarQuickAction(action) {
         showMemoryManager();
         return;
     }
-    if (action === 'sos') {
-        openEmergencyContactModal();
-        return;
-    }
     showHelpModal();
     if (action === 'system') {
         setTimeout(() => document.getElementById('custom-system-prompt-input')?.focus(), 0);
@@ -32312,7 +31813,7 @@ function initSidebarOutsideClickClose() {
         if (toggle && toggle.contains(e.target)) return;
 
         // Ignore clicks within modals, popups, menus, or lightboxes
-        if (e.target.closest('#help-modal, #sos-contact-modal, #image-lightbox-overlay, .modal-overlay, #settings-modal, #chat-session-menu, #chat-delete-dialog-backdrop, #confirm-action-dialog-backdrop')) {
+        if (e.target.closest('#help-modal, #image-lightbox-overlay, .modal-overlay, #settings-modal, #chat-session-menu, #chat-delete-dialog-backdrop, #confirm-action-dialog-backdrop')) {
             return;
         }
 
@@ -35359,68 +34860,6 @@ if (window.visualViewport) {
 setVH();
 initDynamicComposerHeightObserver();
 </script>
-
-    <!-- Emergency SOS Contact Management Modal -->
-    <div id="sos-contact-modal" class="sos-modal-overlay" style="display:none;" onclick="if (event.target === this) closeEmergencyContactModal()">
-        <div class="sos-modal-card" role="dialog" aria-modal="true" aria-labelledby="sos-modal-title">
-            <div class="sos-modal-header">
-                <div class="sos-modal-title-wrap">
-                    <div class="sos-title-badge">
-                        <span class="sos-title-pulse"></span>
-                        <span>🚨</span>
-                    </div>
-                    <div>
-                        <h3 id="sos-modal-title" class="sos-modal-title">Emergency SOS</h3>
-                        <div class="sos-modal-subtitle">Instant Location Alert &amp; Distress Dispatch</div>
-                    </div>
-                </div>
-                <button type="button" class="sos-modal-close-btn" onclick="closeEmergencyContactModal()" aria-label="Close emergency contacts modal">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                </button>
-            </div>
-
-            <!-- Saved Emergency Contacts List (Option to select existing) -->
-            <div id="sos-contacts-list-section" style="margin-bottom:12px;">
-                <div style="font-size:12px; font-weight:700; color:#94a3b8; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:8px;">Select Emergency Contact:</div>
-                <div id="sos-contacts-list-container" class="sos-contacts-list"></div>
-            </div>
-
-            <!-- Enter Name & Phone Form -->
-            <form id="sos-add-contact-form" class="sos-form" onsubmit="handleSaveEmergencyContactForm(event)">
-                <div style="font-size:12px; font-weight:700; color:#94a3b8; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:8px;">Or Enter Contact:</div>
-                <div class="sos-form-group">
-                    <label class="sos-form-label" for="sos-input-name">
-                        <span class="sos-label-icon">👤</span>
-                        <span>Contact Name</span>
-                        <span class="sos-required">*</span>
-                    </label>
-                    <input type="text" id="sos-input-name" class="sos-form-input" placeholder="e.g. Mom, Partner, Doctor" required autocomplete="name">
-                </div>
-
-                <div class="sos-form-group">
-                    <label class="sos-form-label" for="sos-input-phone">
-                        <span class="sos-label-icon">📞</span>
-                        <span>Phone Number</span>
-                        <span class="sos-required">*</span>
-                    </label>
-                    <input type="tel" id="sos-input-phone" class="sos-form-input" placeholder="e.g. +91 9876543210 or 911" required autocomplete="tel">
-                </div>
-
-                <div id="sos-form-feedback" class="sos-form-feedback" style="display:none;" role="status"></div>
-
-                <button type="submit" id="sos-btn-trigger" class="sos-btn-trigger" style="width:100%; margin-top:6px;">
-                    <span class="sos-pulse-dot" aria-hidden="true"></span>
-                    <span id="sos-trigger-btn-text">🚨 Send SOS</span>
-                </button>
-            </form>
-
-            <div class="sos-modal-footer" style="justify-content:flex-end; margin-top:10px;">
-                <button type="button" class="sos-btn-close" onclick="closeEmergencyContactModal()">
-                    Close
-                </button>
-            </div>
-        </div>
-    </div>
 
 </body>
 </html>
