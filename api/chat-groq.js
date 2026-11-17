@@ -1079,6 +1079,8 @@ export default async function handler(req, res) {
                     selectedModel: preferences?.selectedModel || null,
                     sources: Array.isArray(req.body?.sources) ? req.body.sources : (Array.isArray(grounding?.sources) ? grounding.sources : null),
                     ragText: typeof req.body?.ragText === 'string' ? req.body.ragText : null,
+                    isContinuation: Boolean(request.value.isContinuation),
+                    continuationPreviousText: request.value.continuationPreviousText || '',
                     customGroqKey,
                     customGeminiKey
                 });
@@ -1663,6 +1665,8 @@ export default async function handler(req, res) {
             routeDecision,
             lengthPolicy,
             selectedModel,
+            isContinuation = false,
+            continuationPreviousText = '',
             customGroqKey = '',
             customGeminiKey = ''
         } = options;
@@ -1766,6 +1770,17 @@ export default async function handler(req, res) {
                     model: selectedModel,
                     userSelectedModel: selectedModel
                 });
+            if (isContinuation && continuationPreviousText) {
+                const resumeGuidance = 'CONTINUATION DIRECTIVE: Seamlessly resume and continue generating your response from exactly where you left off. Do not repeat previous sentences or restart. Pick up immediately with the next word or line:';
+                if (Array.isArray(structuredChat)) {
+                    structuredChat.push({ role: 'assistant', content: continuationPreviousText });
+                    structuredChat.push({ role: 'user', content: resumeGuidance });
+                }
+            }
+            let effectivePrompt = prompt;
+            if (isContinuation && continuationPreviousText) {
+                effectivePrompt += `\n\n[Previous Partial Output:\n${continuationPreviousText.slice(-3000)}\n\nCONTINUATION DIRECTIVE: Seamlessly resume generating from exactly where you left off above. Do not repeat previous sentences or restart. Output the next part directly:]`;
+            }
             const modelStartedAt = Date.now();
             let firstTokenReceivedAt = null;
             const streamImages = Array.isArray(images)
@@ -1778,7 +1793,7 @@ export default async function handler(req, res) {
 
             let mathGuard = isMathOrReasoningQuery ? new StreamingSpeculativeGuard() : null;
 
-            const streamResult = await streamModelWithFallback(prompt, lengthPolicy, delta => {
+            const streamResult = await streamModelWithFallback(effectivePrompt, lengthPolicy, delta => {
                 if (!delta) return;
                 if (!firstTokenReceivedAt) {
                     firstTokenReceivedAt = Date.now();
@@ -1931,6 +1946,9 @@ export default async function handler(req, res) {
                 selfCritique: streamCritiqueMetadata || undefined,
                 entity: visualData?.entity || null,
                 notableWorks: visualData?.notableWorks || [],
+                finishReason: streamResult?.finishReason || 'stop',
+                truncated: Boolean(streamResult?.truncated),
+                isContinuation: isContinuation,
                 sources: (Array.isArray(liveRag.sources) && liveRag.sources.length > 0)
                     ? liveRag.sources
                     : (Array.isArray(streamResult.sources) && streamResult.sources.length > 0 ? streamResult.sources : undefined),
@@ -2788,7 +2806,7 @@ export default async function handler(req, res) {
         const reasoningAllowance = isFastSimple ? 0 : REASONING_TOKEN_ALLOWANCE;
         const targetMaxTokens = isFastSimple
             ? Math.min(512, clampInt(lengthPolicy?.maxTokens, 512, 64, 1024))
-            : Math.max(8000, clampInt(lengthPolicy?.maxTokens, 8000, 256, 16000));
+            : Math.max(16000, clampInt(lengthPolicy?.maxTokens, 32768, 256, 65536));
         const maxTokens = targetMaxTokens + reasoningAllowance;
         const hasImages = Array.isArray(images) && images.length > 0;
 
@@ -2955,11 +2973,11 @@ export default async function handler(req, res) {
             const isReasoning = isExplicitReasoningIntent(options?.intent, prompt) || isUserChosenR1;
             const shouldSuppressReasoning = !isReasoning || options?.minimalThinking === true ||
                 ['fast_simple', 'casual_chat', 'chat_title', 'internal_summary', 'fast_explainer', 'pop_culture_reference', 'chat'].includes(String(options?.intent || ''));
-            const modelMaxTokens = supportsGroqReasoningFormat(model) ? 8192 : 8192;
+            const modelMaxTokens = 16384;
             const groqPayload = {
                 model,
                 temperature,
-                max_tokens: Math.min(maxTokens || 8192, modelMaxTokens),
+                max_tokens: Math.min(maxTokens || 16384, modelMaxTokens),
                 stream: true,
                 messages
             };
@@ -3052,13 +3070,19 @@ export default async function handler(req, res) {
                 }
             }
             // If the model hit a length cutoff on an incomplete header/section or truncated short, do not treat as success
-            const isIncompleteHeaderOrList = /(?:^|\n)\s*(?:\d+\.|\*|-|#{1,4})\s+[^\n]{0,60}$/.test(cleanContent) && finishReason === 'length';
             const isTruncatedShort = finishReason === 'length' && cleanContent.length < 200;
             const isUnclosedMarkdownFragment = /^[*#_`"']{1,4}[^*#_`"'\n]+$/.test(cleanContent) && cleanContent.length < 60;
             const isToolCallJson = isRawToolCallJson(cleanContent);
-            if (cleanContent.length > 0 && !isIncompleteHeaderOrList && !isTruncatedShort && !isUnclosedMarkdownFragment && !isToolCallJson) {
+            if (cleanContent.length > 0 && !isTruncatedShort && !isUnclosedMarkdownFragment && !isToolCallJson) {
                 recordKeySuccess(apiKey);
-                return { ok: true, provider: 'groq', modelUsed: model, text };
+                return {
+                    ok: true,
+                    provider: 'groq',
+                    modelUsed: model,
+                    text,
+                    finishReason: finishReason || 'stop',
+                    truncated: finishReason === 'length'
+                };
             }
             // If the model solely emitted reasoning thoughts or truncated mid-header, cascade to next model
             recordKeyFailure(apiKey, false);
@@ -3132,7 +3156,7 @@ export default async function handler(req, res) {
                 temperature,
                 topK: 40,
                 topP: 0.95,
-                maxOutputTokens: maxTokens
+                maxOutputTokens: Math.min(Math.max(maxTokens || 32768, 32768), 65536)
             };
             if (shouldSuppressReasoning && supportsGeminiThinking(model)) {
                 generationConfig.thinkingConfig = { thinkingBudget: 0 };
@@ -3163,6 +3187,7 @@ export default async function handler(req, res) {
             let text = '';
             let inReasoning = false;
             let groundingSources = [];
+            let finishReason = null;
             await readSseStream(response.body, payload => {
                 if (initialTimer) {
                     clearTimeout(initialTimer);
@@ -3171,6 +3196,9 @@ export default async function handler(req, res) {
                 resetIdleTimer();
 
                 const candidate = payload?.candidates?.[0];
+                if (candidate?.finishReason) {
+                    finishReason = candidate.finishReason;
+                }
                 if (candidate?.groundingMetadata?.groundingChunks) {
                     const chunks = candidate.groundingMetadata.groundingChunks;
                     if (Array.isArray(chunks)) {
@@ -3246,6 +3274,8 @@ export default async function handler(req, res) {
                     provider: 'gemini',
                     modelUsed: model,
                     text,
+                    finishReason: finishReason || 'STOP',
+                    truncated: finishReason === 'MAX_TOKENS',
                     sources: groundingSources.length > 0 ? groundingSources : undefined
                 }
                 : { ok: false };
@@ -5010,9 +5040,13 @@ Answer directly.`;
         if ((intent.startsWith('selection_') || intent === 'verify_answer') && !grounding) {
             return { ok: false, error: 'Grounded requests require valid grounding data.' };
         }
+        const isContinuation = Boolean(body?.isContinuation);
+        const continuationPreviousText = typeof body?.continuationPreviousText === 'string'
+            ? body.continuationPreviousText.slice(-64000)
+            : '';
         return {
             ok: true,
-            value: { message, context, retrievedTurns, rollingSummary, structuredMessages, preferences, intent, grounding, images }
+            value: { message, context, retrievedTurns, rollingSummary, structuredMessages, preferences, intent, grounding, images, isContinuation, continuationPreviousText }
         };
     }
 
@@ -5347,7 +5381,7 @@ Answer directly.`;
         if (isRecipeGenerationRequest(message)) {
             return {
                 instruction: 'User asked for a recipe. Provide the complete recipe with all required sections and finish every step cleanly. Keep it concise but do not truncate the final cooking/resting step.',
-                maxTokens: 10000,
+                maxTokens: 16000,
                 temperature,
                 wordSpec: null
             };
@@ -5355,7 +5389,7 @@ Answer directly.`;
         if (isLongTravelPlanningRequest(message)) {
             return {
                 instruction: 'User asked for a substantial travel plan. Provide the full itinerary without truncating: use clear day-by-day sections, practical timing, transit, food guidance, and concise bullets for each stop.',
-                maxTokens: 14000,
+                maxTokens: 32768,
                 temperature,
                 wordSpec: null
             };
@@ -5363,7 +5397,7 @@ Answer directly.`;
         if (detail === 'detailed') {
             return {
                 instruction: 'User asked for detail. Provide a structured, in-depth explanation with enough depth to fully answer.',
-                maxTokens: 12000,
+                maxTokens: 32768,
                 temperature,
                 wordSpec: null
             };
@@ -5378,7 +5412,7 @@ Answer directly.`;
         }
         return {
             instruction: 'Provide a complete, well-structured answer with enough depth to fully satisfy the question. Finish all sections, lists, and steps cleanly - do not stop mid-thought or mid-list.',
-            maxTokens: 12000,
+            maxTokens: 32768,
             temperature,
             wordSpec: null
         };
