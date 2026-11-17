@@ -224,7 +224,7 @@ export function getDomainMonogramSvg(domain = '') {
         hash |= 0;
     }
     const hue = Math.abs(hash) % 360;
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="hsl(${hue}, 60%, 38%)"/><text x="50%" y="54%" font-family="system-ui, -apple-system, sans-serif" font-size="18" font-weight="700" fill="#ffffff" dominant-baseline="central" text-anchor="middle">${letter}</text></svg>`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><rect width="32" height="32" rx="16" fill="hsl(${hue}, 60%, 38%)"/><text x="50%" y="54%" font-family="system-ui, -apple-system, sans-serif" font-size="18" font-weight="700" fill="#ffffff" dominant-baseline="central" text-anchor="middle">${letter}</text></svg>`;
     return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
