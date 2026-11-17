@@ -608,10 +608,87 @@ async function runBrowserTests() {
         assert.equal(mathResult?.hasBrInAnnotation, false, 'Must have ZERO <br> artifacts leaked into math annotations');
         assert.equal(mathResult?.hasDivInsideP, false, 'Must have ZERO invalid <p><div> DOM nestings');
         console.log('[PASS] Real browser math problems verified: KaTeX display rendering, steps, and zero <br> artifacts');
-        assert.equal(mathResult?.stepsCount, 3, 'Must detect all 3 step labels');
-        assert.equal(mathResult?.hasBrInAnnotation, false, 'Must have ZERO <br> artifacts leaked into math annotations');
-        assert.equal(mathResult?.hasDivInsideP, false, 'Must have ZERO invalid <p><div> DOM nestings');
-        console.log('[PASS] Real browser math problems verified: KaTeX display rendering, steps, and zero <br> artifacts');
+
+        // Test 13: Perplexity-Style Research Sources Bar & Citation Synchronization
+        const evalResearchBar = await sendCommand('Runtime.evaluate', {
+            expression: `(() => {
+                const testMsgId = 'test-msg-' + Date.now();
+                const chatContainer = document.getElementById('chat-messages') || document.body;
+                const row = document.createElement('div');
+                row.className = 'chat-row chat-message-row assistant';
+                row.setAttribute('data-message-id', testMsgId);
+                row.innerHTML = \`
+                    <div class="chat-bubble-assistant">
+                        <div class="assistant-message-text">
+                            Evidence verified in the clinical literature
+                            <a href="javascript:void(0)" class="citation-source-logo" data-source-id="1" title="Nature (nature.com)">
+                                <img class="citation-logo-icon" src="/api/favicon?domain=nature.com" alt="nature.com" />
+                            </a>.
+                        </div>
+                    </div>
+                \`;
+                chatContainer.appendChild(row);
+
+                // Step 1: Render shimmer skeleton while searching
+                window.renderResearchSourcesBar(testMsgId, [], true);
+                const barAfterSearch = row.querySelector('.research-dossier-bar');
+                const shimmers = row.querySelectorAll('.research-source-card-shimmer');
+                const shimmerCount = shimmers.length;
+
+                // Step 2: Render completed sources carousel (10 sources to test 8 visible + 2 overflow)
+                const mockSources = Array.from({ length: 10 }, (_, i) => ({
+                    id: i + 1,
+                    title: 'Research Paper ' + (i + 1),
+                    url: 'https://nature.com/articles/s41586-026-0' + (i + 1),
+                    domain: 'nature.com'
+                }));
+                window.renderResearchSourcesBar(testMsgId, mockSources, false);
+
+                const sourceCards = row.querySelectorAll('.research-source-card:not(.research-source-overflow-btn)');
+                const hiddenOverflowCards = row.querySelectorAll('.research-source-card.is-overflow-hidden');
+                const overflowBtn = row.querySelector('.research-source-overflow-btn');
+                const firstCardIndex = row.querySelector('.research-source-card[data-source-id="1"] .research-source-card-index')?.textContent?.trim();
+
+                // Step 3: Test overflow button click unhiding cards
+                if (overflowBtn) {
+                    overflowBtn.click();
+                }
+                const hiddenAfterClick = row.querySelectorAll('.research-source-card.is-overflow-hidden').length;
+
+                // Step 4: Click citation badge to test synchronized highlight
+                const citationBadge = row.querySelector('.citation-source-logo[data-source-id="1"]');
+                if (citationBadge) {
+                    citationBadge.click();
+                }
+                const firstCardHighlighted = row.querySelector('.research-source-card[data-source-id="1"]')?.classList.contains('is-highlighted');
+
+                row.remove();
+
+                return {
+                    hasBar: Boolean(barAfterSearch),
+                    shimmerCount,
+                    totalSourceCards: sourceCards.length,
+                    initialOverflowHidden: hiddenOverflowCards.length,
+                    hasOverflowBtn: Boolean(overflowBtn),
+                    firstCardIndex,
+                    hiddenAfterClick,
+                    firstCardHighlighted: Boolean(firstCardHighlighted)
+                };
+            })()`,
+            returnByValue: true
+        });
+
+        const researchResult = evalResearchBar?.result?.result?.value || evalResearchBar?.result?.value;
+        console.log('Perplexity-style research bar verification:', researchResult);
+        assert.equal(researchResult?.hasBar, true, 'Research dossier bar must be created in assistant bubble');
+        assert.equal(researchResult?.shimmerCount, 4, 'Must show 4 animated shimmer cards while searching');
+        assert.equal(researchResult?.totalSourceCards, 10, 'Must render all 10 source cards');
+        assert.equal(researchResult?.initialOverflowHidden, 2, 'Must hide 2 overflow cards initially (max 8 visible)');
+        assert.equal(researchResult?.hasOverflowBtn, true, 'Must display +2 more overflow button');
+        assert.equal(researchResult?.firstCardIndex, '1', 'First card index badge must display "1"');
+        assert.equal(researchResult?.hiddenAfterClick, 0, 'Clicking overflow button must unhide all overflow cards');
+        assert.equal(researchResult?.firstCardHighlighted, true, 'Clicking in-text citation badge must add is-highlighted to matching source card');
+        console.log('[PASS] Perplexity-style research sources carousel, shimmers, overflow expansion, and synchronized citation highlighting verified');
 
         // Test Vercel Serverless Function Count limit (must be <= 12 on Hobby plan)
         const fs = await import('node:fs');
