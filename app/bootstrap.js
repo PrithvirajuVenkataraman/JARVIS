@@ -20,11 +20,11 @@ import * as JarvisAgentWorkflows from './agent-workflows.js?v=2.4.1';
 import JarvisDataVerification from './data-tracking-verification.js?v=2.4.1';
 import * as JarvisToolDispatcher from './tool-dispatcher.js?v=2.4.1';
 import { highlightCode, normalizeLang } from './code-highlighter.js?v=2.4.1';
-import { renderMathInText, formatLatexExpression } from './math-renderer.js?v=2.4.1';
-import * as JarvisMarkdownRenderer from './markdown-renderer.js?v=2.4.1';
+import { renderMathInText, formatLatexExpression } from './math-renderer.js?v=2.4.3';
+import * as JarvisMarkdownRenderer from './markdown-renderer.js?v=2.4.4';
 import * as JarvisAgentOrchestrator from './agent-orchestrator.js?v=2.4.1';
 import * as JarvisLocationSuite from './location-suite.js?v=2.4.1';
-import * as JarvisEmergencySOS from './emergency-sos.js?v=2.4.1';
+
 import * as JarvisImageConfig from './image-generation-config.js?v=2.4.1';
 import * as JarvisImageStorage from './image-storage.js?v=2.4.1';
 import * as JarvisImageGenerator from './image-generator.js?v=2.4.1';
@@ -70,7 +70,7 @@ globalThis.JarvisMathRenderer = Object.freeze({ renderMathInText, formatLatexExp
 globalThis.JarvisMarkdownRenderer = Object.freeze({ ...JarvisMarkdownRenderer });
 globalThis.JarvisAgentOrchestrator = Object.freeze({ ...JarvisAgentOrchestrator });
 globalThis.JarvisLocationSuite = Object.freeze({ ...JarvisLocationSuite });
-globalThis.JarvisEmergencySOS = Object.freeze({ ...JarvisEmergencySOS });
+
 globalThis.JarvisImageConfig = Object.freeze({ ...JarvisImageConfig });
 globalThis.JarvisImageStorage = Object.freeze({ ...JarvisImageStorage });
 globalThis.JarvisImageGenerator = Object.freeze({ ...JarvisImageGenerator });
