@@ -386,6 +386,12 @@ export function renderMathInText(text = '') {
         return `<span class="math-inline">${formatLatexExpression(trimmed, false)}</span>`;
     });
 
+    // Intercept bare un-delimited LaTeX \text{...} or {\text{...}} blocks
+    raw = raw.replace(/\{?\\text\{([^}]+)\}\}?/g, (_, inner) => {
+        return `<span class="math-text">${escapeHtml(inner)}</span>`;
+    });
+    raw = raw.replace(/([a-zA-Z]\([a-zA-Z0-9_,+-]+\))_\{?\\?text\{([^}]+)\}\}?/g, '$1<sub>$2</sub>');
+
     raw = formatInlineMathPowers(raw);
 
     // Restore protected currency tokens
