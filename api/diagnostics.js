@@ -2,7 +2,6 @@ import { applyApiSecurity, getSealedSecretsPublicKey } from './_lib/security.js'
 import { getCostControls } from './_lib/cost-controls.js';
 import { isTelemetryExporterConfigured } from './_lib/telemetry-exporter.js';
 import handleFeedback from './_lib/feedback-handler.js';
-import sendSmsHandler from './_lib/send-sms.js';
 import faviconHandler from './_lib/favicon.js';
 import extractUrlHandler from './_lib/crawl4ai-client.js';
 import currentFactsHandler from './_lib/current-facts.js';
@@ -67,9 +66,6 @@ export default async function handler(req, res) {
     const reqPath = resolveRequestPath(req);
     const routeParam = String(req?.query?.__route || '').trim().toLowerCase();
 
-    if (routeParam === 'send-sms' || reqPath === '/api/send-sms' || matchedPath === '/api/send-sms' || req.url?.includes('send-sms')) {
-        return sendSmsHandler(req, res);
-    }
     if (routeParam === 'favicon' || reqPath === '/api/favicon' || matchedPath === '/api/favicon' || reqPath === '/favicons' || reqPath === '/favicon' || req.url?.includes('favicon')) {
         return faviconHandler(req, res);
     }
