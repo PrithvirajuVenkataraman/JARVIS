@@ -14,9 +14,9 @@ export function getCostControls() {
     return {
         qualityCriticEnabled: readBool('JARVIS_QUALITY_CRITIC_ENABLED', true),
         streamQualityReviewEnabled: readBool('JARVIS_STREAM_QUALITY_REVIEW', false),
-        defaultMaxTokens: clampInt(process.env.JARVIS_DEFAULT_MAX_TOKENS, 12000, 256, 16000),
+        defaultMaxTokens: clampInt(process.env.JARVIS_DEFAULT_MAX_TOKENS, 32768, 256, 65536),
         fastMaxTokens: clampInt(process.env.JARVIS_FAST_MAX_TOKENS, 8000, 256, 16000),
-        streamMaxTokens: clampInt(process.env.JARVIS_STREAM_MAX_TOKENS, 12000, 256, 16000)
+        streamMaxTokens: clampInt(process.env.JARVIS_STREAM_MAX_TOKENS, 32768, 256, 65536)
     };
 }
 
@@ -25,7 +25,7 @@ export function applyCostCapToLengthPolicy(lengthPolicy = {}, options = {}) {
     const intent = String(options.intent || '');
     const isFast = ['fast_simple', 'fast_explainer', 'casual_chat', 'chat_title'].includes(intent);
     const cap = isFast ? controls.fastMaxTokens : (options.stream ? controls.streamMaxTokens : controls.defaultMaxTokens);
-    const maxTokens = clampInt(lengthPolicy?.maxTokens, cap, 256, 16000);
+    const maxTokens = clampInt(lengthPolicy?.maxTokens, cap, 256, 65536);
     return {
         ...lengthPolicy,
         maxTokens: Math.min(maxTokens, cap)
