@@ -3,7 +3,7 @@
  * @description Service Worker for JARVIS PWA & Offline Shell Caching
  */
 
-const CACHE_NAME = 'jarvis-cache-v40';
+const CACHE_NAME = 'jarvis-cache-v41';
 const STATIC_ASSETS = [
     '/',
     'index.html',
