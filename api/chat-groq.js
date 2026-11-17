@@ -1740,11 +1740,15 @@ export default async function handler(req, res) {
                 sources: options.sources,
                 ragText: options.ragText || options.sources.map((s, idx) => `[${s.id || idx + 1}] ${s.title || ''}: ${s.fullArticleText || s.extract || s.snippet || s.text || s.description || ''} (${s.url || ''})`).join('\n\n')
             };
+            writeSse(res, 'sources', { sources: liveRag.sources });
         } else if (requiresLiveRetrievalBeforeStream) {
             const searchStartedAt = Date.now();
             writeSse(res, 'status', { state: 'SEARCHING', label: 'Searching...' });
             liveRag = await buildLiveRagContext(effectiveMessage, req, context);
             timing.searchMs = Date.now() - searchStartedAt;
+            if (Array.isArray(liveRag.sources) && liveRag.sources.length > 0) {
+                writeSse(res, 'sources', { sources: liveRag.sources });
+            }
             writeSse(res, 'status', { state: 'THINKING', label: 'Thinking...' });
         }
 
