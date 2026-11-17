@@ -159,7 +159,13 @@ export function deBulletizePseudoListIfNeeded(text) {
         return clean.length >= 65 && /[.!?]$/.test(clean);
     });
 
-    const isPseudoList = (longSentenceBullets.length / bulletItems.length) >= 0.75;
+    // Detect mathematical derivations disguised as bullet points (must have equals or explicit math formulas)
+    const mathBullets = bulletItems.filter(item =>
+        /(?:\$|\\frac|\\sqrt|\\times|\\approx|\\pm|\\cdot|\\text\{|[=≠≤≥]|d\([A-Za-z0-9_]+\)\s*[=+\-])/i.test(item)
+    );
+    const isMathDerivationList = bulletItems.length >= 2 && (mathBullets.length / bulletItems.length) >= 0.5;
+
+    const isPseudoList = isMathDerivationList || ((longSentenceBullets.length / bulletItems.length) >= 0.75);
     if (!isPseudoList) return text;
 
     // De-bulletize: Convert pseudo-bullets into flowing prose grouped in natural paragraphs
@@ -169,7 +175,7 @@ export function deBulletizePseudoListIfNeeded(text) {
         return cleanBulletEndCitations(clean, true).trim();
     }).filter(Boolean);
 
-    // Group into paragraphs of 2-3 sentences each
+    // Group into paragraphs: math steps each get their own line/paragraph; prose groups 2-3 sentences
     const paragraphs = [];
     let current = [];
     let currentLen = 0;
@@ -177,7 +183,7 @@ export function deBulletizePseudoListIfNeeded(text) {
     for (const sent of proseSentences) {
         current.push(sent);
         currentLen += sent.length;
-        if (current.length >= 2 && (currentLen >= 200 || current.length >= 3)) {
+        if (isMathDerivationList || (current.length >= 2 && (currentLen >= 200 || current.length >= 3))) {
             paragraphs.push(current.join(' '));
             current = [];
             currentLen = 0;
