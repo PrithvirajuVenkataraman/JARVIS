@@ -117,39 +117,42 @@ export function verifyAndRepairMathClaims(text = '') {
     };
 }
 
-export function validateAndRepairCodeAndMath(text = '') {
+export function validateAndRepairCodeAndMath(text = '', options = {}) {
     let result = String(text || '');
     if (!result.trim()) return { text: result, modified: false, issues: [] };
 
     const issues = [];
+    const isStreamingChunk = options?.isStreamingChunk === true;
 
-    // 1. Unclosed Markdown Code Blocks (odd number of ```)
-    const codeBlockMatches = result.match(/```/g);
-    if (codeBlockMatches && codeBlockMatches.length % 2 !== 0) {
-        result += '\n```';
-        issues.push('unclosed_code_fence_repaired');
-    }
+    if (!isStreamingChunk) {
+        // 1. Unclosed Markdown Code Blocks (odd number of ```)
+        const codeBlockMatches = result.match(/```/g);
+        if (codeBlockMatches && codeBlockMatches.length % 2 !== 0) {
+            result += '\n```';
+            issues.push('unclosed_code_fence_repaired');
+        }
 
-    // 2. Unclosed Display Math ($$...$$ or \[...\])
-    const displayMathMatches = result.match(/\$\$/g);
-    if (displayMathMatches && displayMathMatches.length % 2 !== 0) {
-        result += '\n$$';
-        issues.push('unclosed_display_math_repaired');
-    }
+        // 2. Unclosed Display Math ($$...$$ or \[...\])
+        const displayMathMatches = result.match(/\$\$/g);
+        if (displayMathMatches && displayMathMatches.length % 2 !== 0) {
+            result += '\n$$';
+            issues.push('unclosed_display_math_repaired');
+        }
 
-    // 3. Unclosed Inline LaTeX Brackets \( and \[
-    const openParenMath = (result.match(/\\\(/g) || []).length;
-    const closeParenMath = (result.match(/\\\)/g) || []).length;
-    if (openParenMath > closeParenMath) {
-        result += '\\)'.repeat(openParenMath - closeParenMath);
-        issues.push('unclosed_latex_inline_math_repaired');
-    }
+        // 3. Unclosed Inline LaTeX Brackets \( and \[
+        const openParenMath = (result.match(/\\\(/g) || []).length;
+        const closeParenMath = (result.match(/\\\)/g) || []).length;
+        if (openParenMath > closeParenMath) {
+            result += '\\)'.repeat(openParenMath - closeParenMath);
+            issues.push('unclosed_latex_inline_math_repaired');
+        }
 
-    const openBracketMath = (result.match(/\\\[/g) || []).length;
-    const closeBracketMath = (result.match(/\\\]/g) || []).length;
-    if (openBracketMath > closeBracketMath) {
-        result += '\n\\]'.repeat(openBracketMath - closeBracketMath);
-        issues.push('unclosed_latex_display_math_repaired');
+        const openBracketMath = (result.match(/\\\[/g) || []).length;
+        const closeBracketMath = (result.match(/\\\]/g) || []).length;
+        if (openBracketMath > closeBracketMath) {
+            result += '\n\\]'.repeat(openBracketMath - closeBracketMath);
+            issues.push('unclosed_latex_display_math_repaired');
+        }
     }
 
     // 4. Broken JSON trailing commas in JSON code blocks
@@ -193,13 +196,20 @@ export class StreamingSpeculativeGuard {
         this.buffer += str;
         this.fullAccumulated += str;
 
-        // Split buffer along safe sentence/paragraph delimiters or math line endings
-        const delimiterMatch = this.buffer.match(/^(.*?(?:[.!?]\s+|\n\n|```[\w]*\n|\n|\$\$))([\s\S]*)$/);
+        // Ensure we do not split while inside an unclosed code block or display math block
+        const codeFences = (this.buffer.match(/```/g) || []).length;
+        const displayMath = (this.buffer.match(/\$\$/g) || []).length;
+        if (codeFences % 2 !== 0 || displayMath % 2 !== 0) {
+            return '';
+        }
+
+        // Split buffer along safe sentence/paragraph delimiters
+        const delimiterMatch = this.buffer.match(/^(.*?(?:[.!?]\s+|\n\n))([\s\S]*)$/);
         if (delimiterMatch && delimiterMatch[1]) {
             const sentenceToVerify = delimiterMatch[1];
             const remaining = delimiterMatch[2] || '';
 
-            const repaired = validateAndRepairCodeAndMath(sentenceToVerify);
+            const repaired = validateAndRepairCodeAndMath(sentenceToVerify, { isStreamingChunk: true });
             this.buffer = remaining;
             const output = repaired.text;
             if (this.onVerifiedChunk) this.onVerifiedChunk(output);
