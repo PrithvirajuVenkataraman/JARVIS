@@ -313,6 +313,7 @@ async function getInstantFactHelper() {
         'qwen-2.5-coder-32b',
         'gemma2-9b-it',
         'deepseek-r1-distill-qwen-32b',
+        'gemini-4-hydrogen',
         'gemini-3.8-flash',
         'gemini-3.7-flash',
         'gemini-2.5-pro',
@@ -619,16 +620,17 @@ async function getInstantFactHelper() {
 
         let geminiList = [];
         if (tier === 'deep') {
-            geminiList = [mappedGemini, configured, 'gemini-3.8-flash', 'gemini-2.5-pro', 'gemini-3.7-flash', 'gemini-2.5-flash'];
+            geminiList = [mappedGemini, configured, 'gemini-4-hydrogen', 'gemini-3.8-flash', 'gemini-2.5-pro', 'gemini-3.7-flash', 'gemini-2.5-flash'];
         } else if (preferSpeed || tier === 'instant') {
-            geminiList = [mappedGemini, configured, 'gemini-2.5-flash-lite', 'gemini-3.8-flash', 'gemini-2.5-flash', 'gemini-3.7-flash', 'gemini-2.5-pro'];
+            geminiList = [mappedGemini, configured, 'gemini-2.5-flash-lite', 'gemini-4-hydrogen', 'gemini-2.5-flash', 'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-2.5-pro'];
         } else {
-            geminiList = [mappedGemini, configured, 'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-2.5-flash-lite'];
+            geminiList = [mappedGemini, configured, 'gemini-4-hydrogen', 'gemini-2.5-flash', 'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-2.5-pro', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-2.5-flash-lite'];
         }
         return [...new Set(geminiList.filter(Boolean))];
     }
 
     const KNOWN_GEMINI_VISION_MODELS = new Set([
+        'gemini-4-hydrogen',
         'gemini-3.8-flash',
         'gemini-3.7-flash',
         'gemini-2.5-pro',
@@ -647,6 +649,7 @@ async function getInstantFactHelper() {
             : (String(userSelectedModel || '').startsWith('gemini-') ? String(userSelectedModel) : '');
         const visionModels = visionLane === 'math_diagram'
             ? [
+                'gemini-4-hydrogen',
                 'gemini-3.8-flash',
                 'gemini-2.5-pro',
                 'gemini-3.7-flash',
@@ -656,9 +659,10 @@ async function getInstantFactHelper() {
                 'gemini-2.5-flash-lite'
             ]
             : [
+                'gemini-4-hydrogen',
+                'gemini-2.5-flash',
                 'gemini-3.8-flash',
                 'gemini-3.7-flash',
-                'gemini-2.5-flash',
                 'gemini-2.0-flash',
                 'gemini-2.5-pro',
                 'gemini-1.5-flash',
@@ -1612,7 +1616,7 @@ export default async function handler(req, res) {
 
     function supportsGeminiThinking(modelName = '') {
         const m = String(modelName || '').toLowerCase();
-        return m.includes('thinking') || m.includes('2.5-pro') || m.includes('3.7') || m.includes('3.8');
+        return m.includes('thinking') || m.includes('2.5-pro') || m.includes('3.7') || m.includes('3.8') || m.includes('4-hydrogen') || m.includes('gemini-4');
     }
 
     function isExplicitReasoningIntent(intent = '', message = '') {
@@ -2720,7 +2724,7 @@ export default async function handler(req, res) {
             const geminiApiKey = String(options?.customGeminiKey || '').trim() || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
             if (!geminiApiKey) return null;
             const geminiConfiguredModel = String(process.env.GEMINI_MODEL || '').trim();
-            const visionLane = hasImages ? (options?.visionLane || classifyVisionLane(prompt, true)) : 'none';
+            const visionLane = hasImages ? (options?.visionLane || classifyVisionLane(finalPrompt, true)) : 'none';
             const rawGeminiCandidates = hasImages
                 ? getPreferredGeminiVisionCandidates(geminiConfiguredModel, userSelectedModel, { visionLane })
                 : getPreferredGeminiCandidates(geminiConfiguredModel, userSelectedModel, { preferSpeed: speedPreferred, tier: routingTier });
@@ -2961,7 +2965,7 @@ export default async function handler(req, res) {
             const geminiApiKey = String(options?.customGeminiKey || '').trim() || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
             if (!geminiApiKey) return null;
             const geminiConfiguredModel = String(process.env.GEMINI_MODEL || '').trim();
-            const visionLane = hasImages ? (options?.visionLane || classifyVisionLane(prompt, true)) : 'none';
+            const visionLane = hasImages ? (options?.visionLane || classifyVisionLane(finalPrompt, true)) : 'none';
             const rawGeminiCandidates = hasImages
                 ? getPreferredGeminiVisionCandidates(geminiConfiguredModel, userSelectedModel, { visionLane })
                 : getPreferredGeminiCandidates(geminiConfiguredModel, userSelectedModel, { preferSpeed: speedPreferred, tier: routingTier });
