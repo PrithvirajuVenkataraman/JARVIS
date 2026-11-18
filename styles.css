@@ -4162,30 +4162,12 @@ body:not(.dark) .thinking-inline-text {
     color: #1e293b;
 }
 
-.streaming-placeholder::after {
-    content: '';
-    display: inline-block;
-    width: 7px;
-    height: 1.05em;
-    margin-left: 3px;
-    transform: translateY(2px);
-    border-right: 2px solid currentColor;
-    animation: jarvis-stream-caret 0.85s steps(2, start) infinite;
-}
-
-.assistant-message-text.is-streaming::after {
-    content: '';
-    display: inline-block;
-    width: 7px;
-    height: 1.05em;
-    margin-left: 3px;
-    transform: translateY(2px);
-    border-right: 2px solid currentColor;
-    animation: jarvis-stream-caret 0.85s steps(2, start) infinite;
-}
-
+.streaming-placeholder::after,
+.assistant-message-text.is-streaming::after,
 .thinking-inline-text.is-streaming::after {
+    content: none !important;
     display: none !important;
+    animation: none !important;
 }
 
 .professional-thinking-dots {
