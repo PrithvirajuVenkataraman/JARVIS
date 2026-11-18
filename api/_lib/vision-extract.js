@@ -3,9 +3,9 @@ const GEMINI_API_VERSIONS = ['v1beta', 'v1'];
 const GEMINI_MODEL_FALLBACKS = [
     'gemini-3.8-flash',
     'gemini-3.7-flash',
-    'gemini-2.5-pro',
     'gemini-2.5-flash',
     'gemini-2.0-flash',
+    'gemini-2.5-pro',
     'gemini-2.0-flash-lite',
     'gemini-1.5-flash',
     'gemini-flash-latest'
@@ -14,6 +14,30 @@ const GROQ_VISION_MODEL_FALLBACKS = [
     'qwen/qwen3.8-27b',
     'qwen-3.8-27b'
 ];
+
+const EXTRACT_UNAVAILABLE_MODEL_TTL_MS = 10 * 60 * 1000;
+const EXTRACT_UNAVAILABLE_MODELS = new Map();
+
+function filterAvailableExtractModels(prefix, list) {
+    const unique = [...new Set(list.filter(Boolean))];
+    const now = Date.now();
+    const available = unique.filter(m => {
+        const exp = EXTRACT_UNAVAILABLE_MODELS.get(`${prefix}:${m}`);
+        if (!exp) return true;
+        if (now > exp) {
+            EXTRACT_UNAVAILABLE_MODELS.delete(`${prefix}:${m}`);
+            return true;
+        }
+        return false;
+    });
+    return available.length > 0 ? available : unique;
+}
+
+function markExtractModelUnavailable(prefix, model, status) {
+    if (status === 404 || status === 410) {
+        EXTRACT_UNAVAILABLE_MODELS.set(`${prefix}:${model}`, Date.now() + EXTRACT_UNAVAILABLE_MODEL_TTL_MS);
+    }
+}
 
 // Normalize any image mime type to one accepted by Gemini/Groq (jpeg/png/webp/gif)
 function normalizeMimeForProvider(mimeType, base64 = '') {
@@ -109,7 +133,7 @@ async function callVisionText({ providers, systemPrompt, mimeType, imageBase64 }
 }
 
 async function callGroqVisionText({ apiKey, configuredModel, systemPrompt, mimeType, imageBase64 }) {
-    const candidates = [String(configuredModel || '').trim(), ...GROQ_VISION_MODEL_FALLBACKS].filter(Boolean);
+    const candidates = filterAvailableExtractModels('groq', [String(configuredModel || '').trim(), ...GROQ_VISION_MODEL_FALLBACKS]);
     const dataUrl = `data:${mimeType || 'image/jpeg'};base64,${imageBase64}`;
     for (const model of candidates) {
         try {
@@ -132,6 +156,10 @@ async function callGroqVisionText({ apiKey, configuredModel, systemPrompt, mimeT
                     }]
                 })
             });
+            if (response.status === 404 || response.status === 410) {
+                markExtractModelUnavailable('groq', model, response.status);
+                continue;
+            }
             if (!response.ok) continue;
             const data = await response.json();
             const text = extractGroqText(data);
@@ -142,11 +170,19 @@ async function callGroqVisionText({ apiKey, configuredModel, systemPrompt, mimeT
 }
 
 async function callGeminiVision({ apiKey, configuredModel = '', systemPrompt, mimeType, imageBase64 }) {
-    const modelFallbacks = [String(configuredModel || '').trim(), ...GEMINI_MODEL_FALLBACKS].filter(Boolean);
+    const modelFallbacks = filterAvailableExtractModels('gemini', [String(configuredModel || '').trim(), ...GEMINI_MODEL_FALLBACKS]);
     for (const apiVersion of GEMINI_API_VERSIONS) {
         for (const model of modelFallbacks) {
+            if (apiVersion === 'v1' && /^gemini-(?:3\.|2\.5)/i.test(model)) continue;
             try {
-                const response = await fetchWithTimeout(
+                const genConfig = {
+                    temperature: 0.1,
+                    maxOutputTokens: 8192
+                };
+                if (apiVersion === 'v1beta') {
+                    genConfig.mediaResolution = 'MEDIA_RESOLUTION_HIGH';
+                }
+                const makeReq = (gc) => fetchWithTimeout(
                     `https://generativelanguage.googleapis.com/${apiVersion}/models/${model}:generateContent?key=${apiKey}`,
                     {
                         method: 'POST',
@@ -158,13 +194,20 @@ async function callGeminiVision({ apiKey, configuredModel = '', systemPrompt, mi
                                     { inlineData: { mimeType, data: imageBase64 } }
                                 ]
                             }],
-                            generationConfig: {
-                                temperature: 0.1,
-                                maxOutputTokens: 8192
-                            }
+                            generationConfig: gc
                         })
                     }
                 );
+                let response = await makeReq(genConfig);
+                if (response.status === 400 && genConfig.mediaResolution) {
+                    const fallbackGc = { ...genConfig };
+                    delete fallbackGc.mediaResolution;
+                    response = await makeReq(fallbackGc);
+                }
+                if (response.status === 404 || response.status === 410) {
+                    markExtractModelUnavailable('gemini', model, response.status);
+                    continue;
+                }
                 if (!response.ok) continue;
                 const data = await response.json();
                 const text = extractGeminiText(data);
