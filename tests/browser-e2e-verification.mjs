@@ -787,6 +787,82 @@ async function runBrowserTests() {
         assert.equal(fbResult?.concisenessSuperseded, true, 'Conflicting depth_and_rigor rule must cleanly supersede conciseness');
         console.log('[PASS] Thumbs up/down, closed-loop self-improving memory, conflict superseding & semantic weather routing verified');
 
+        // Test 15: Premium Typography, Code Blocks (Wrap/Collapse/Copy Icon), Sticky Header & Floating Top-Center Toast
+        const evalUiPolish = await sendCommand('Runtime.evaluate', {
+            expression: `(() => {
+                const header = document.getElementById('app-header');
+                const headerPosition = header ? getComputedStyle(header).position : '';
+
+                // Floating top-center toast must NOT append inside #chat-container
+                const chatCountBeforeToast = document.getElementById('chat-container')?.children.length || 0;
+                showTemporaryMessage('Toast polish check');
+                const chatCountAfterToast = document.getElementById('chat-container')?.children.length || 0;
+                const toastRegion = document.getElementById('jarvis-toast-region');
+                const toastPosition = toastRegion ? getComputedStyle(toastRegion).position : '';
+                const hasToastPill = Boolean(toastRegion?.querySelector('.jarvis-toast-pill'));
+                toastRegion?.remove();
+
+                // Developer-grade code block (32 lines -> auto-collapsed + Wrap + Copy icon)
+                const longCode = Array.from({ length: 32 }, (_, i) => 'const line_' + (i + 1) + ' = "value_' + (i + 1) + '";').join('\\n');
+                const md = '# Main Title\\n\\n## Section Heading\\n\\n> Key architectural note\\n\\n\`\`\`javascript\\n' + longCode + '\\n\`\`\`';
+                const box = document.createElement('div');
+                box.className = 'assistant-message-text';
+                box.innerHTML = window.JarvisMarkdownRenderer.renderMarkdown(md);
+                document.body.appendChild(box);
+
+                const h2Size = parseFloat(getComputedStyle(box.querySelector('h2')).fontSize);
+                const h3Size = parseFloat(getComputedStyle(box.querySelector('h3')).fontSize);
+                const bqBorderLeft = parseFloat(getComputedStyle(box.querySelector('blockquote')).borderLeftWidth);
+
+                const codeContainer = box.querySelector('.assistant-md-code-container');
+                const codeLinesText = box.querySelector('.assistant-md-code-lines')?.textContent?.trim() || '';
+                const hasCopyIconSpan = Boolean(box.querySelector('.code-copy-icon svg'));
+                const startsCollapsed = Boolean(codeContainer?.classList.contains('is-collapsed'));
+                const pre = box.querySelector('.assistant-md-code-block');
+                const initialWhiteSpace = pre ? getComputedStyle(pre).whiteSpace : '';
+
+                // Click Wrap & Expand
+                box.querySelector('.code-wrap-btn')?.click();
+                const wrappedAfterClick = Boolean(pre?.classList.contains('is-wrapped'));
+                box.querySelector('.code-collapse-btn')?.click();
+                const collapsedAfterExpand = Boolean(codeContainer?.classList.contains('is-collapsed'));
+
+                box.remove();
+
+                return {
+                    headerPosition,
+                    toastLeftChatClean: chatCountBeforeToast === chatCountAfterToast,
+                    toastPosition,
+                    hasToastPill,
+                    h1GreaterThanH2: h2Size > h3Size,
+                    bqHasLeftAccent: bqBorderLeft >= 2.5,
+                    codeLinesText,
+                    hasCopyIconSpan,
+                    startsCollapsed,
+                    initialWhiteSpace,
+                    wrappedAfterClick,
+                    collapsedAfterExpand
+                };
+            })()`,
+            returnByValue: true
+        });
+
+        const uiPolish = evalUiPolish?.result?.result?.value || evalUiPolish?.result?.value;
+        console.log('Premium UI polish verification:', uiPolish);
+        assert.equal(uiPolish?.headerPosition, 'sticky', 'Top header must be truly sticky');
+        assert.equal(uiPolish?.toastLeftChatClean, true, 'Floating toast must not inject into #chat-container');
+        assert.equal(uiPolish?.toastPosition, 'fixed', 'Floating toast region must use fixed top-center positioning');
+        assert.equal(uiPolish?.hasToastPill, true, 'Floating toast pill must render');
+        assert.equal(uiPolish?.h1GreaterThanH2, true, 'H1 heading must be visibly larger than H2');
+        assert.equal(uiPolish?.bqHasLeftAccent, true, 'Blockquote must have cyan left accent border');
+        assert.equal(uiPolish?.codeLinesText, '32 lines', 'Code block header must display accurate line count');
+        assert.equal(uiPolish?.hasCopyIconSpan, true, 'Code block copy button must wrap SVG in .code-copy-icon for animated checkmark');
+        assert.equal(uiPolish?.startsCollapsed, true, 'Long code blocks (>28 lines) must start collapsed when not streaming');
+        assert.equal(uiPolish?.initialWhiteSpace, 'pre', 'Code blocks must preserve horizontal scroll by default');
+        assert.equal(uiPolish?.wrappedAfterClick, true, 'Clicking Wrap toggle must enable word wrap');
+        assert.equal(uiPolish?.collapsedAfterExpand, false, 'Clicking Expand must reveal full code block');
+        console.log('[PASS] Premium typography, developer code blocks, sticky header, and top-center floating toast verified');
+
         // Test Vercel Serverless Function Count limit (must be <= 12 on Hobby plan)
         const fs = await import('node:fs');
         const path = await import('node:path');
