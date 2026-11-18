@@ -701,8 +701,23 @@ export function renderMarkdown(rawText = '', options = {}) {
             </button>`;
         }
 
+        const lineCount = String(block.code || '').split('\n').length;
+        const isCollapsible = lineCount > 28;
+        const startCollapsed = isCollapsible && options?.streaming !== true;
+
+        const wrapBtnHtml = `<button type="button" class="code-header-btn code-wrap-btn" onclick="window.toggleCodeBlockWrap?.(this, '${blockId}')" title="Toggle word wrap" aria-pressed="false">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"></line><path d="M3 12h15a3 3 0 1 1 0 6h-4"></path><polyline points="16 16 14 18 16 20"></polyline><line x1="3" y1="18" x2="10" y2="18"></line></svg>
+            <span>Wrap</span>
+        </button>`;
+
+        const collapseBtnHtml = isCollapsible
+            ? `<button type="button" class="code-header-btn code-collapse-btn" onclick="window.toggleCodeBlockCollapse?.(this, '${blockId}')" title="${startCollapsed ? 'Expand full code' : 'Collapse code'}" aria-expanded="${startCollapsed ? 'false' : 'true'}">
+                <span>${startCollapsed ? 'Expand' : 'Collapse'}</span>
+            </button>`
+            : '';
+
         const copyBtnHtml = `<button type="button" class="code-header-btn" onclick="copyCodeBlock(this, '${blockId}')" title="Copy code">
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+            <span class="code-copy-icon"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></span>
             <span>Copy</span>
         </button>`;
 
@@ -733,16 +748,28 @@ export function renderMarkdown(rawText = '', options = {}) {
                 </div>`;
         }
 
+        const expandOverlayHtml = isCollapsible
+            ? `<div class="code-expand-fade" aria-hidden="${startCollapsed ? 'false' : 'true'}"><button type="button" class="code-expand-overlay-btn" onclick="window.toggleCodeBlockCollapse?.(this, '${blockId}')">Show all ${lineCount} lines</button></div>`
+            : '';
+
         return `
-            <div class="assistant-md-code-container" id="container_${blockId}">
+            <div class="assistant-md-code-container${startCollapsed ? ' is-collapsed' : ''}" id="container_${blockId}" data-line-count="${lineCount}">
                 <div class="assistant-md-code-header">
-                    <span class="assistant-md-code-lang">${langLabel}</span>
+                    <div class="assistant-md-code-meta">
+                        <span class="assistant-md-code-lang">${langLabel}</span>
+                        <span class="assistant-md-code-lines">${lineCount} ${lineCount === 1 ? 'line' : 'lines'}</span>
+                    </div>
                     <div class="assistant-md-code-actions">
                         ${runBtnHtml}
+                        ${wrapBtnHtml}
+                        ${collapseBtnHtml}
                         ${copyBtnHtml}
                     </div>
                 </div>
-                <pre class="assistant-md-code-block"><code class="lang-${escapeHtml(block.lang || 'text')}">${highlighted}</code></pre>
+                <div class="assistant-md-code-body">
+                    <pre class="assistant-md-code-block"><code class="lang-${escapeHtml(block.lang || 'text')}">${highlighted}</code></pre>
+                    ${expandOverlayHtml}
+                </div>
                 ${previewHtml}
                 <div class="assistant-code-output" id="output_${blockId}" style="display:none;"></div>
             </div>
