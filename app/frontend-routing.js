@@ -977,8 +977,10 @@ export function classifyLiveVsNormal(text, context = {}) {
     // Financial & Cryptocurrency Markets (capability-driven, no hardcoded company names)
     const isLiveMarket = /\b(?:stock|share|shares|crypto|cryptocurrency|bitcoin|btc|ethereum|eth|solana|gold|silver|crude\s+oil|forex|fx)\s+(?:price|prices|quotes?|value|rate|rates|all-time\s+high|ath|market\s*cap|trading\s+volume)\b|\b(?:market\s*cap|market\s+valuation|stock\s+price|share\s+price|quarterly\s+earnings|earnings\s+report)\s+of\s+[a-zA-Z0-9_.-]+\b|\b(?:price|quote|exchange\s+rate|market\s+valuation)\s+of\s+(?:[a-zA-Z0-9_.-]+\s+)?(?:stock|shares?|equity|crypto|cryptocurrency|coin|token|assets?|gold|silver|bitcoin|btc|eth|ethereum)\b|\b[a-zA-Z0-9_.-]+\s+(?:stock\s+price|market\s*cap)\b|\b(?:exchange\s+rate|currency\s+exchange|conversion\s+rate|market\s+valuation|quarterly\s+earnings|earnings\s+report)\b/i.test(raw);
 
-    // Weather & Real-time environmental
-    const isLiveWeather = /\b(?:weather|forecast|temperature|humidity|uv\s+index|rain\s+chances?|air\s+quality|aqi)\s+(?:in|for|at|today|now|tomorrow|this\s+week|right\s+now)\b|\b(?:is\s+it\s+raining|will\s+it\s+rain|weather\s+today|weather\s+forecast)\b/i.test(raw);
+    // Weather & Real-time environmental (exclude non-weather forecasts like astrology/financial/sales)
+    const isNonWeatherForecast = /\b(?:astrolog\w*|horoscope|zodiac|tarot|relationship|career|financial|economic|economy|market|stock|crypto|revenue|sales|earnings|election|demand|growth|sagittarius|aries|taurus|gemini|cancer|leo|virgo|libra|scorpio|capricorn|aquarius|pisces)\b/i.test(raw);
+    const hasExplicitWeatherTerm = /\b(?:weather|temperature|humidity|uv\s+index|rain|raining|snow|air\s+quality|aqi)\b/i.test(raw);
+    const isLiveWeather = (!isNonWeatherForecast || hasExplicitWeatherTerm) && /\b(?:weather|forecast|temperature|humidity|uv\s+index|rain\s+chances?|air\s+quality|aqi)\s+(?:in|for|at|today|now|tomorrow|this\s+week|right\s+now)\b|\b(?:is\s+it\s+raining|will\s+it\s+rain|weather\s+today|weather\s+forecast)\b/i.test(raw);
 
     // Live Sports, Scores, Schedules & Standings
     const isLiveSports = /\b(?:live\s+(?:[a-z]+\s+){0,2}scores?|match\s+scores?|cricket\s+scores?|football\s+scores?|nba\s+scores?|game\s+scores?|ipl\s+scores?|current\s+scores?|who\s+won\s+yesterday|who\s+is\s+winning|match\s+status|premier\s+league\s+standings|points\s+table|who\s+won\s+(?:the\s+)?(?:latest|last|recent)\s+(?:super\s+bowl|fifa|world\s+cup|match|tournament|game))\b/i.test(raw);
