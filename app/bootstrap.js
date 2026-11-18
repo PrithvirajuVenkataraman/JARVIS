@@ -31,7 +31,7 @@ import * as JarvisImageGenerator from './image-generator.js?v=2.4.1';
 import { selfImprovingMemory } from './self-improving-memory.js?v=2.4.2';
 import * as JarvisLiveResearch from './bounded-live-research.js?v=2.4.1';
 import * as JarvisQueryNormalizer from './query-normalizer.js?v=2.4.1';
-import * as JarvisUnifiedMemory from './unified-memory.js?v=2.4.1';
+import * as JarvisUnifiedMemory from './unified-memory.js?v=2.4.2';
 import * as JarvisDocumentExporter from './document-exporter.js?v=2.4.1';
 import * as JarvisDlpGateway from './dlp-gateway.js?v=2.4.1';
 import * as JarvisDlpEngine from './dlp-engine.js?v=2.4.1';
@@ -84,7 +84,7 @@ globalThis.JarvisDocumentExporter = JarvisDocumentExporter;
 globalThis.JarvisDlp = Object.freeze({ ...JarvisDlpGateway, ...JarvisDlpEngine });
 globalThis.JarvisConversationSearch = Object.freeze({ ...JarvisConversationSearch });
 try {
-    JarvisUnifiedMemory.unifiedMemoryStore?.runIdempotentMigration();
+    JarvisUnifiedMemory.unifiedMemoryStore?.init();
 } catch (_) {}
 selfImprovingMemory.init().catch(() => {});
 
