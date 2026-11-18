@@ -36,6 +36,7 @@ import * as JarvisDocumentExporter from './document-exporter.js?v=2.4.1';
 import * as JarvisDlpGateway from './dlp-gateway.js?v=2.4.1';
 import * as JarvisDlpEngine from './dlp-engine.js?v=2.4.1';
 import * as JarvisConversationSearch from './conversation-search.js?v=2.4.1';
+import * as JarvisWorkspaceDurability from './workspace-durability.js?v=2.4.1';
 
 import { createInteractionStateMachine, InteractionState } from './interaction-state.js?v=2.4.1';
 
@@ -83,6 +84,10 @@ globalThis.JarvisUnifiedMemory = JarvisUnifiedMemory;
 globalThis.JarvisDocumentExporter = JarvisDocumentExporter;
 globalThis.JarvisDlp = Object.freeze({ ...JarvisDlpGateway, ...JarvisDlpEngine });
 globalThis.JarvisConversationSearch = Object.freeze({ ...JarvisConversationSearch });
+globalThis.JarvisWorkspaceDurability = Object.freeze({ ...JarvisWorkspaceDurability });
+try {
+    JarvisWorkspaceDurability.workspaceTabSync?.start();
+} catch (_) {}
 try {
     JarvisUnifiedMemory.unifiedMemoryStore?.init();
 } catch (_) {}
