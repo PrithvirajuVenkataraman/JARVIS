@@ -973,6 +973,109 @@ async function runBrowserTests() {
         assert.equal(raceRes?.blinkerNodes, 0, 'Synthesizing blinker must be removed on completion');
         console.log('[PASS] Fast-stream RAF race fixed and lingering vertical caret blinkers eliminated');
 
+        // Test 18: Local-First IndexedDB Durability, Multi-Tab LWW Merge, AES-256-GCM Backup & Settings Sub-View
+        const evalDurability = await sendCommand('Runtime.evaluate', {
+            expression: `(async () => {
+                const dur = window.JarvisWorkspaceDurability;
+                if (!dur) return { missing: true };
+
+                // 18A: IndexedDB stores full untruncated messages (>12,000 chars)
+                const longText = 'DURABLE_PAYLOAD_' + 'X'.repeat(12000) + '_END';
+                const bigSession = {
+                    id: 'sess_idb_big_1',
+                    title: 'Long Architecture Spec',
+                    messages: [
+                        { role: 'user', text: 'Write spec', timestamp: '2026-11-18T10:00:00.000Z' },
+                        { role: 'assistant', text: longText, timestamp: '2026-11-18T10:00:01.000Z' }
+                    ],
+                    createdAt: '2026-11-18T10:00:00.000Z',
+                    updatedAt: '2026-11-18T10:00:01.000Z',
+                    deleted: false
+                };
+                await dur.workspaceDb.clearAllSessions();
+                await dur.workspaceDb.saveSessions([bigSession], []);
+                const reloaded = await dur.workspaceDb.loadAllSessions();
+                const restoredLen = reloaded.find(s => s.id === 'sess_idb_big_1')?.messages?.[1]?.text?.length || 0;
+
+                // 18B: LWW merge + tombstones + active-stream protection
+                const localSessions = [
+                    { id: 's1', title: 'Old Title', messages: [{ role: 'user', text: 'Hi' }], updatedAt: '2026-11-18T10:00:00.000Z' },
+                    { id: 's_stream', title: 'Streaming Chat', messages: [{ role: 'user', text: 'Q' }, { role: 'assistant', text: 'Live partial' }], updatedAt: '2026-11-18T10:00:00.000Z' }
+                ];
+                const incomingSessions = [
+                    { id: 's1', title: 'Newer Title', messages: [{ role: 'user', text: 'Hi' }, { role: 'assistant', text: 'Updated' }], updatedAt: '2026-11-18T10:05:00.000Z' },
+                    { id: 's_deleted', title: 'Ghost', messages: [{ role: 'user', text: 'Ghost' }], updatedAt: '2026-11-18T10:09:00.000Z' },
+                    { id: 's_stream', title: 'Streaming Chat', messages: [{ role: 'user', text: 'Q' }], updatedAt: '2026-11-18T10:09:00.000Z' }
+                ];
+                const merged = dur.mergeChatSessionsLww(localSessions, incomingSessions, ['s_deleted'], { activeStreamingSessionId: 's_stream' });
+                const s1Merged = merged.find(s => s.id === 's1');
+                const ghostResurrected = merged.some(s => s.id === 's_deleted');
+                const streamProtected = merged.find(s => s.id === 's_stream')?.messages?.[1]?.text === 'Live partial';
+
+                // 18C: AES-256-GCM Encrypted Backup & Restore (BYOK strictly excluded)
+                const archiveStr = await dur.createWorkspaceBackup({
+                    sessions: [bigSession],
+                    memories: [{ id: 'm1', text: 'Lives in Chennai', category: 'location', enabled: true }],
+                    learnedRules: [{ id: 'r1', directive: 'Be concise', category: 'conciseness', enabled: true }],
+                    customSystemPrompt: 'Staff engineer tone',
+                    settings: { themeMode: 'dark', groq_api_key: 'gsk_SHOULD_NEVER_EXPORT', jarvis_byok_gemini_sealed: 'SECRET_BLOB' }
+                }, { encrypt: true, passphrase: 'TestPass#2026' });
+
+                const envelope = JSON.parse(archiveStr);
+                const plaintextLeaked = archiveStr.includes('DURABLE_PAYLOAD_') || archiveStr.includes('gsk_SHOULD_NEVER_EXPORT');
+                const wrongPassRes = await dur.parseWorkspaceBackup(archiveStr, 'WrongPass');
+                const rightPassRes = await dur.parseWorkspaceBackup(archiveStr, 'TestPass#2026');
+                const byokExcluded = !rightPassRes?.payload?.settings?.groq_api_key && !rightPassRes?.payload?.settings?.jarvis_byok_gemini_sealed;
+
+                // 18D: Settings -> Workspace Backup & Storage Health Sub-View UI
+                if (!document.getElementById('help-modal')) showHelpModal();
+                const rowBtn = document.getElementById('settings-row-workspace-durability');
+                rowBtn?.click();
+                await new Promise(r => setTimeout(r, 80));
+                const subView = document.getElementById('settings-view-workspace-durability');
+                const subViewActive = Boolean(subView?.classList?.contains('active'));
+                const encryptDefaultOn = Boolean(document.getElementById('backup-encrypt-toggle')?.checked);
+                const tabsBadgeText = document.getElementById('durability-active-tabs-badge')?.textContent?.trim() || '';
+                const healthStatsText = document.getElementById('durability-health-stats')?.textContent?.trim() || '';
+                closeHelpModal();
+                await dur.workspaceDb.clearAllSessions();
+
+                return {
+                    restoredLen,
+                    lwwNewerWon: s1Merged?.title === 'Newer Title' && s1Merged?.messages?.length === 2,
+                    ghostResurrected,
+                    streamProtected,
+                    isEncrypted: envelope.encrypted === true && envelope.cipher === 'AES-256-GCM' && envelope.kdf === 'PBKDF2-SHA256',
+                    plaintextLeaked,
+                    wrongPassRejected: wrongPassRes?.ok === false && wrongPassRes?.code === 'decrypt_failed',
+                    rightPassOk: rightPassRes?.ok === true && rightPassRes?.summary?.sessionCount === 1 && rightPassRes?.summary?.memoryCount === 1,
+                    byokExcluded,
+                    subViewActive,
+                    encryptDefaultOn,
+                    tabsBadgeText,
+                    hasHealthStats: healthStatsText.includes('IndexedDB Durable Chats')
+                };
+            })()`,
+            awaitPromise: true,
+            returnByValue: true
+        });
+        const durRes = evalDurability?.result?.result?.value || evalDurability?.result?.value;
+        console.log('Workspace durability, multi-tab sync & encrypted backup verification:', durRes);
+        assert.ok(durRes?.restoredLen > 12000, 'IndexedDB must persist full untruncated messages (>12,000 chars)');
+        assert.equal(durRes?.lwwNewerWon, true, 'LWW merge must pick newer session timestamp');
+        assert.equal(durRes?.ghostResurrected, false, 'Delete tombstones must prevent stale sessions from resurrecting');
+        assert.equal(durRes?.streamProtected, true, 'Multi-tab merge must protect an active streaming session');
+        assert.equal(durRes?.isEncrypted, true, 'Workspace backup must encrypt with PBKDF2-SHA256 + AES-256-GCM');
+        assert.equal(durRes?.plaintextLeaked, false, 'Encrypted backup must leak zero plaintext chats or secrets');
+        assert.equal(durRes?.wrongPassRejected, true, 'Incorrect passphrase must be rejected by AES-GCM auth tag');
+        assert.equal(durRes?.rightPassOk, true, 'Correct passphrase must decrypt full workspace snapshot');
+        assert.equal(durRes?.byokExcluded, true, 'BYOK API keys must strictly be excluded from workspace backups');
+        assert.equal(durRes?.subViewActive, true, 'Settings Workspace Backup & Storage Health sub-view must open cleanly');
+        assert.equal(durRes?.encryptDefaultOn, true, 'Backup encryption must default to ON');
+        assert.ok(durRes?.tabsBadgeText?.includes('Active Tab'), 'Active tabs badge must display live BroadcastChannel presence');
+        assert.equal(durRes?.hasHealthStats, true, 'Storage Health view must display live IndexedDB metrics');
+        console.log('[PASS] Dual-Tier IndexedDB durability, LWW multi-tab sync, AES-256-GCM backup/restore & Settings sub-view verified');
+
         // Test Vercel Serverless Function Count limit (must be <= 12 on Hobby plan)
         const fs = await import('node:fs');
         const path = await import('node:path');
