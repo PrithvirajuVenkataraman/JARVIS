@@ -863,6 +863,85 @@ async function runBrowserTests() {
         assert.equal(uiPolish?.collapsedAfterExpand, false, 'Clicking Expand must reveal full code block');
         console.log('[PASS] Premium typography, developer code blocks, sticky header, and top-center floating toast verified');
 
+        // Test 16: Single Thumbs Bar (No Duplicate Legacy Feedback Pill) + End-to-End Personalized Experience Verification
+        const evalPersonalizationAndFeedback = await sendCommand('Runtime.evaluate', {
+            expression: `(() => {
+                // 16A: Verify addFeedbackButtons does NOT append duplicate legacy .feedback-container
+                addFeedbackButtons('test query', 'test answer', 'msg_single_thumb_check');
+                const legacyFeedbackCount = document.querySelectorAll('.feedback-container').length;
+
+                // 16B: Verify Personalized Experience end-to-end (init, extract, persist, conflict update, prompt build, toggle pause)
+                const um = window.JarvisUnifiedMemory;
+                const store = um.unifiedMemoryStore;
+                store.clear();
+                setPersonalizationEnabled(true);
+                um.setMemoryActive(true);
+
+                // Auto-learn from natural conversation
+                processUnifiedMemoryTurn('My name is Aarav and I live in Chennai. I code in TypeScript.');
+                const learnedCount = store.getEnabled().length;
+
+                // Simulate full page reload by resetting in-memory array and calling init()
+                store.memories = [];
+                store.isInitialized = false;
+                store.init();
+                const persistedCountAfterReload = store.getEnabled().length;
+
+                // Conflict update: moved city replaces previous location cleanly
+                processUnifiedMemoryTurn('I recently moved to Bangalore.');
+                const locationsAfterMove = store.getEnabled().filter(m => m.category === 'location').map(m => m.text);
+
+                // Prompt injection must include relevant memories
+                const normalPrompt = um.buildRelevantMemoryPrompt('Help me write a TypeScript function', store.getEnabled());
+                const metaPrompt = um.buildRelevantMemoryPrompt('What do you know about me?', store.getEnabled());
+
+                // Pause Personalized Experience -> must block new learning while preserving existing memories
+                handlePersonalizationToggleChange({ checked: false, setAttribute() {} });
+                const isPausedInPage = !isPersonalizationEnabled();
+                const isPausedInModule = !um.isMemoryActive();
+                processUnifiedMemoryTurn('I live in London and I am vegan.');
+                const locationsWhilePaused = store.getEnabled().filter(m => m.category === 'location').map(m => m.text);
+                const countWhilePaused = store.getEnabled().length;
+
+                // Restore clean state
+                handlePersonalizationToggleChange({ checked: true, setAttribute() {} });
+                store.clear();
+                document.getElementById('jarvis-toast-region')?.remove();
+
+                return {
+                    legacyFeedbackCount,
+                    hasExtractMemories: typeof um.extractMemories === 'function',
+                    hasBuildRelevantMemoryPrompt: typeof um.buildRelevantMemoryPrompt === 'function',
+                    learnedCount,
+                    persistedCountAfterReload,
+                    locationsAfterMove,
+                    normalPromptHasProfile: normalPrompt.includes('Aarav') && normalPrompt.includes('Bangalore') && normalPrompt.includes('TypeScript'),
+                    metaPromptHasProfile: metaPrompt.includes('Aarav') && metaPrompt.includes('Bangalore'),
+                    isPausedInPage,
+                    isPausedInModule,
+                    locationsWhilePaused,
+                    countWhilePaused
+                };
+            })()`,
+            returnByValue: true
+        });
+
+        const persRes = evalPersonalizationAndFeedback?.result?.result?.value || evalPersonalizationAndFeedback?.result?.value;
+        console.log('Single thumbs & Personalized Experience verification:', persRes);
+        assert.equal(persRes?.legacyFeedbackCount, 0, 'Duplicate legacy .feedback-container must not render');
+        assert.equal(persRes?.hasExtractMemories, true, 'JarvisUnifiedMemory.extractMemories must be exported');
+        assert.equal(persRes?.hasBuildRelevantMemoryPrompt, true, 'JarvisUnifiedMemory.buildRelevantMemoryPrompt must be exported');
+        assert.ok(persRes?.learnedCount >= 3, 'Natural conversation turn must auto-extract name, location, and coding language');
+        assert.equal(persRes?.persistedCountAfterReload, persRes?.learnedCount, 'Saved memories must persist across reload via store.init()');
+        assert.deepEqual(persRes?.locationsAfterMove, ['Lives in Bangalore'], 'Moving cities must supersede old location cleanly');
+        assert.equal(persRes?.normalPromptHasProfile, true, 'buildRelevantMemoryPrompt must inject relevant profile & tech memories');
+        assert.equal(persRes?.metaPromptHasProfile, true, 'Meta-query prompt must list all saved memories');
+        assert.equal(persRes?.isPausedInPage, true, 'Toggle OFF must pause isPersonalizationEnabled()');
+        assert.equal(persRes?.isPausedInModule, true, 'Toggle OFF must pause JarvisUnifiedMemory.isMemoryActive()');
+        assert.deepEqual(persRes?.locationsWhilePaused, ['Lives in Bangalore'], 'Paused personalization must NOT overwrite or learn new facts');
+        assert.equal(persRes?.countWhilePaused, persRes?.persistedCountAfterReload, 'Paused personalization must preserve existing memories without adding new ones');
+        console.log('[PASS] Single thumbs bar & full Personalized Experience lifecycle verified end-to-end');
+
         // Test Vercel Serverless Function Count limit (must be <= 12 on Hobby plan)
         const fs = await import('node:fs');
         const path = await import('node:path');
