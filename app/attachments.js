@@ -643,12 +643,25 @@ async function ingestViaVision(attachment) {
 async function resolveAttachmentBase64(attachment, options = {}) {
     const existing = String(attachment?.base64 || '').trim();
     if (existing) return existing;
+    if (attachment?.preEncodedPromise) {
+        try {
+            const preEncoded = String(await attachment.preEncodedPromise || '').trim();
+            if (preEncoded) {
+                attachment.base64 = preEncoded;
+                return preEncoded;
+            }
+        } catch (_) {}
+    }
     const file = attachment?.file;
     if (!file) {
         if (options.allowEmpty) return '';
         throw new Error(`Missing file data for ${attachment?.name || 'attachment'}. Please reattach the file and try again.`);
     }
-    const encoded = String(await fileToBase64(file) || '').trim();
+    const isImg = isImageAttachment(attachment);
+    const encoded = String((isImg ? await compressImageFileToBase64(file).catch(() => fileToBase64(file)) : await fileToBase64(file)) || '').trim();
+    if (encoded) {
+        attachment.base64 = encoded;
+    }
     if (!encoded && !options.allowEmpty) {
         throw new Error(`Could not encode ${attachment?.name || file.name || 'attachment'}. Please reattach the file and try again.`);
     }
@@ -686,25 +699,37 @@ async function createPendingAttachment(file) {
         const ext = file.type ? (file.type.split('/')[1]?.replace('jpeg', 'jpg') || 'png') : 'png';
         fileName = `pasted-media-${Date.now()}.${ext}`;
     }
-    let base64 = '';
-    let storedMimeType = isImage ? (file.type || 'image/jpeg') : (file.type || guessMimeFromName(fileName));
-    if (isImage) {
-        base64 = await compressImageFileToBase64(file).catch(() => fileToBase64(file));
-        // Derive MIME type strictly from the final encoded data, not the original filename
-        storedMimeType = normalizeImageMime(file.type || 'image/jpeg', fileName, base64);
-    } else {
-        base64 = await fileToBase64(file);
-    }
-    const previewUrl = isImage ? URL.createObjectURL(file) : '';
-    return {
+    const storedMimeType = isImage ? (file.type || 'image/jpeg') : (file.type || guessMimeFromName(fileName));
+    const previewUrl = isImage && typeof URL?.createObjectURL === 'function' ? URL.createObjectURL(file) : '';
+    const attachment = {
         id: `att_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         name: fileName,
         mimeType: storedMimeType,
         size: file.size || 0,
         file,
-        base64,
-        previewUrl
+        base64: '',
+        previewUrl,
+        preEncodedPromise: null
     };
+
+    if (isImage) {
+        // Eager non-blocking pre-encoding: starts immediately while the user types so Send has 0ms encode wait.
+        attachment.preEncodedPromise = compressImageFileToBase64(file)
+            .catch(() => fileToBase64(file))
+            .then((encoded) => {
+                const clean = String(encoded || '').trim();
+                if (clean) {
+                    attachment.base64 = clean;
+                    attachment.mimeType = normalizeImageMime(file.type || 'image/jpeg', fileName, clean);
+                }
+                return clean;
+            })
+            .catch(() => '');
+    } else {
+        attachment.base64 = await fileToBase64(file);
+    }
+
+    return attachment;
 }
 
 /**
@@ -780,10 +805,18 @@ function applyExifOrientationTransform(ctx, orientation, width, height) {
     }
 }
 
-async function compressImageFileToBase64(file, maxDimension = 1536, quality = 0.82) {
+const LOSSLESS_PASSTHROUGH_MAX_BYTES = 400 * 1024;
+const LOSSLESS_PASSTHROUGH_MIMES = new Set(['image/png', 'image/webp']);
+
+async function compressImageFileToBase64(file, maxDimension = 1600, quality = 0.88) {
     if (typeof document === 'undefined') {
         return fileToBase64(file);
     }
+
+    const rawMime = String(file?.type || '').trim().toLowerCase();
+    const isLosslessCandidate = LOSSLESS_PASSTHROUGH_MIMES.has(rawMime) &&
+        Number(file?.size || 0) > 0 &&
+        Number(file?.size || 0) <= LOSSLESS_PASSTHROUGH_MAX_BYTES;
 
     // Read EXIF orientation FIRST (before any decode) for phone camera photos
     const exifOrientation = await readExifOrientation(file).catch(() => 1);
@@ -797,8 +830,15 @@ async function compressImageFileToBase64(file, maxDimension = 1536, quality = 0.
             // imageOrientation: 'none' forces raw pixel data without browser auto-rotation
             // so our manual EXIF transform is always authoritative
             const bitmap = await createImageBitmap(file, { imageOrientation: 'none' }).catch(() => createImageBitmap(file));
-            let srcWidth = bitmap.width;
-            let srcHeight = bitmap.height;
+            const srcWidth = bitmap.width;
+            const srcHeight = bitmap.height;
+
+            // Preserve small crisp PNG/WebP images losslessly (prevents JPEG chroma bleed on flags, emblems & OCR text)
+            if (isLosslessCandidate && exifOrientation === 1 && srcWidth <= maxDimension && srcHeight <= maxDimension) {
+                bitmap.close?.();
+                const direct = await fileToBase64(file);
+                if (direct && direct.length > 50) return direct;
+            }
 
             // Apply dimension scaling BEFORE rotation for proper aspect ratio
             let drawWidth = srcWidth;
@@ -824,6 +864,8 @@ async function compressImageFileToBase64(file, maxDimension = 1536, quality = 0.
             canvas.height = canvasHeight;
             // Re-apply because applyExifOrientationTransform mutates ctx but we need correct canvas size set first
             const ctx2 = canvas.getContext('2d');
+            ctx2.imageSmoothingEnabled = true;
+            ctx2.imageSmoothingQuality = 'high';
             applyExifOrientationTransform(ctx2, exifOrientation, drawWidth, drawHeight);
             ctx2.drawImage(bitmap, 0, 0, drawWidth, drawHeight);
             bitmap.close?.();
@@ -846,8 +888,13 @@ async function compressImageFileToBase64(file, maxDimension = 1536, quality = 0.
         const img = new Image();
         img.onload = () => {
             try {
-                let srcWidth = img.naturalWidth || img.width;
-                let srcHeight = img.naturalHeight || img.height;
+                const srcWidth = img.naturalWidth || img.width;
+                const srcHeight = img.naturalHeight || img.height;
+                if (isLosslessCandidate && exifOrientation === 1 && srcWidth <= maxDimension && srcHeight <= maxDimension) {
+                    URL.revokeObjectURL(objectUrl);
+                    fileToBase64(file).then(resolve).catch(reject);
+                    return;
+                }
                 let drawWidth = srcWidth;
                 let drawHeight = srcHeight;
                 if (srcWidth > maxDimension || srcHeight > maxDimension) {
@@ -868,6 +915,8 @@ async function compressImageFileToBase64(file, maxDimension = 1536, quality = 0.
                 canvas.width = canvasWidth;
                 canvas.height = canvasHeight;
                 const ctx2 = canvas.getContext('2d');
+                ctx2.imageSmoothingEnabled = true;
+                ctx2.imageSmoothingQuality = 'high';
                 applyExifOrientationTransform(ctx2, exifOrientation, drawWidth, drawHeight);
                 ctx2.drawImage(img, 0, 0, drawWidth, drawHeight);
                 const dataUrl = canvas.toDataURL('image/jpeg', quality);
