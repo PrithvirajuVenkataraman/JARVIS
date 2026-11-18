@@ -4787,6 +4787,7 @@ async function callGeminiJson(prompt, options = {}) {
         const configuredModel = String(process.env.GEMINI_SEARCH_MODEL || process.env.GEMINI_MODEL || '').trim();
         const candidateModels = Array.from(new Set([
             configuredModel,
+            'gemini-4-hydrogen',
             'gemini-2.5-flash',
             'gemini-flash-latest',
             'gemini-2.5-flash-lite',
@@ -4957,6 +4958,7 @@ export async function searchGeminiGrounding(query, options = {}) {
     const configuredModel = String(process.env.GEMINI_SEARCH_MODEL || process.env.GEMINI_MODEL || '').trim();
     const candidateModels = Array.from(new Set([
         configuredModel,
+        'gemini-4-hydrogen',
         'gemini-2.5-flash',
         'gemini-flash-latest',
         'gemini-2.5-flash-lite',
@@ -7034,7 +7036,7 @@ export const __test = {
     parseGeminiGroundingResponse,
     isTechnicalDocumentationQuery,
     scoreSearchResult,
-    distillSearchQuery, 
+    distillSearchQuery,
     extractComparisonEntities,
     decomposeMultiPartQuery,
     cleanSubQueryClause,
