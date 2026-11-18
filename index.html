@@ -77,7 +77,7 @@
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
     <link rel="stylesheet" href="styles.css?v=2.5.3">
     <script src="science-format.js?v=2.0.1"></script>
-    <script type="module" src="app/bootstrap.js?v=2.5.4"></script>
+    <script type="module" src="app/bootstrap.js?v=2.5.5"></script>
 </head>
 <body class="dark min-h-screen bg-black text-white">
 
@@ -589,6 +589,7 @@ const APP_CONFIG = Object.freeze({
         { id: 'openai/gpt-oss-20b', label: 'GPT OSS 20B (Fast & Direct)', displayName: 'GPT-OSS 20B', icon: '⚡', supportsMedia: false },
         { id: 'qwen/qwen3.8-27b', label: 'Qwen 3.8 27B (Vision & Reasoning)', displayName: 'Qwen 3.8 27B', icon: '🔮', supportsMedia: true },
         { id: 'openai/safety-gpt-oss-20b', label: 'Safety GPT OSS 20B (Content Moderation)', displayName: 'Safety GPT-OSS 20B', icon: '🛡️', supportsMedia: false },
+        { id: 'gemini-4-hydrogen', label: 'Gemini 4 Hydrogen (Flagship Fallback, Thinking & Vision)', displayName: 'Gemini 4 Hydrogen', icon: '✦', supportsMedia: true },
         { id: 'gemini-3.7-flash', label: 'Gemini 3.7 Flash (Resilient Fallback & Vision)', displayName: 'Gemini 3.7 Flash', icon: '✦', supportsMedia: true },
         { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro (Resilient Fallback & Deep Reasoning)', displayName: 'Gemini 2.5 Pro', icon: '✦', supportsMedia: true },
         { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (Resilient Fallback & Fast Multimodal)', displayName: 'Gemini 2.5 Flash', icon: '✦', supportsMedia: true }
@@ -777,6 +778,12 @@ function getUserIntent(text) {
 function isWeatherIntentText(text) {
     const t = (text || '').toLowerCase().trim();
     if (!t) return false;
+    // Avoid astrology/horoscope/financial/business forecast false positives (e.g., "astrology forecast for Sagittarius").
+    const hasExplicitWeatherWord = /\b(weather|climate|temperature|humidity|humid|rain|raining|drizzle|snow|snowing|wind|windy|sunny|cloudy|overcast|storm|thunder|chilly|freezing|umbrella|aqi|air quality)\b/.test(t);
+    const isNonWeatherForecast = /\b(astrolog\w*|horoscope|zodiac|tarot|numerolog\w*|relationship|love\s+life|marriage|career|financial|economic|economy|market|stock|crypto|bitcoin|revenue|sales|earnings|profit|gdp|inflation|election|demand|growth|sagittarius|aries|taurus|gemini|cancer|leo|virgo|libra|scorpio|capricorn|aquarius|pisces)\b/.test(t);
+    if (isNonWeatherForecast && !hasExplicitWeatherWord) {
+        return false;
+    }
     // Avoid health/small-talk false positives like "I have a cold" / "I'm hot under the collar".
     if (/\b(i(?:'| a)?m|i have|i got|feeling|feel)\b/.test(t) && /\b(cold|fever|cough|sick|chills)\b/.test(t) && !/\b(weather|forecast|outside|temperature)\b/.test(t)) {
         return false;
@@ -7404,6 +7411,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                                             <option value="openai/gpt-oss-20b" ${currentSelectedModel === 'openai/gpt-oss-20b' ? 'selected' : ''}>GPT OSS 20B (Fast &amp; Direct)</option>
                                             <option value="qwen/qwen3.8-27b" ${currentSelectedModel === 'qwen/qwen3.8-27b' ? 'selected' : ''}>Qwen 3.8 27B (Vision &amp; Reasoning)</option>
                                             <option value="openai/safety-gpt-oss-20b" ${currentSelectedModel === 'openai/safety-gpt-oss-20b' ? 'selected' : ''}>Safety GPT OSS 20B (Content Moderation)</option>
+                                            <option value="gemini-4-hydrogen" ${currentSelectedModel === 'gemini-4-hydrogen' ? 'selected' : ''}>Gemini 4 Hydrogen (Flagship Fallback, Thinking &amp; Vision)</option>
                                             <option value="gemini-3.7-flash" ${currentSelectedModel === 'gemini-3.7-flash' ? 'selected' : ''}>Gemini 3.7 Flash (Fallback &amp; Vision)</option>
                                             <option value="gemini-2.5-pro" ${currentSelectedModel === 'gemini-2.5-pro' ? 'selected' : ''}>Gemini 2.5 Pro (Fallback &amp; Deep Reasoning)</option>
                                             <option value="gemini-2.5-flash" ${currentSelectedModel === 'gemini-2.5-flash' ? 'selected' : ''}>Gemini 2.5 Flash (Fallback &amp; Fast Multimodal)</option>
@@ -25419,6 +25427,7 @@ function isWakeGreetingText(text) {
         }
 
         async function processCommand(text) {
+            const rawCommandText = String(text || '').trim();
             if (String(activeResponseRenderContext?.source || '').toLowerCase() === 'converse') {
                 setConverseUiState('submitting', 'command_received');
             }
