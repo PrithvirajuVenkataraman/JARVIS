@@ -21,7 +21,7 @@ import JarvisDataVerification from './data-tracking-verification.js?v=2.4.1';
 import * as JarvisToolDispatcher from './tool-dispatcher.js?v=2.4.1';
 import { highlightCode, normalizeLang } from './code-highlighter.js?v=2.4.1';
 import { renderMathInText, formatLatexExpression } from './math-renderer.js?v=2.4.3';
-import * as JarvisMarkdownRenderer from './markdown-renderer.js?v=2.4.4';
+import * as JarvisMarkdownRenderer from './markdown-renderer.js?v=2.4.5';
 import * as JarvisAgentOrchestrator from './agent-orchestrator.js?v=2.4.1';
 import * as JarvisLocationSuite from './location-suite.js?v=2.4.3';
 
