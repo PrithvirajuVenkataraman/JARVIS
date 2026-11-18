@@ -1,9 +1,10 @@
 const PROVIDER_TIMEOUT_MS = 20_000;
 const GEMINI_API_VERSIONS = ['v1beta', 'v1'];
 const GEMINI_MODEL_FALLBACKS = [
+    'gemini-4-hydrogen',
+    'gemini-2.5-flash',
     'gemini-3.8-flash',
     'gemini-3.7-flash',
-    'gemini-2.5-flash',
     'gemini-2.0-flash',
     'gemini-2.5-pro',
     'gemini-2.0-flash-lite',
@@ -173,7 +174,7 @@ async function callGeminiVision({ apiKey, configuredModel = '', systemPrompt, mi
     const modelFallbacks = filterAvailableExtractModels('gemini', [String(configuredModel || '').trim(), ...GEMINI_MODEL_FALLBACKS]);
     for (const apiVersion of GEMINI_API_VERSIONS) {
         for (const model of modelFallbacks) {
-            if (apiVersion === 'v1' && /^gemini-(?:3\.|2\.5)/i.test(model)) continue;
+            if (apiVersion === 'v1' && /^gemini-(?:4|3\.|2\.5)/i.test(model)) continue;
             try {
                 const genConfig = {
                     temperature: 0.1,
@@ -181,6 +182,9 @@ async function callGeminiVision({ apiKey, configuredModel = '', systemPrompt, mi
                 };
                 if (apiVersion === 'v1beta') {
                     genConfig.mediaResolution = 'MEDIA_RESOLUTION_HIGH';
+                    if (/gemini-(?:4|3\.|2\.5-(?:flash|pro))/i.test(model) && !/flash-lite/i.test(model)) {
+                        genConfig.thinkingConfig = { thinkingBudget: 0 };
+                    }
                 }
                 const makeReq = (gc) => fetchWithTimeout(
                     `https://generativelanguage.googleapis.com/${apiVersion}/models/${model}:generateContent?key=${apiKey}`,
@@ -199,9 +203,10 @@ async function callGeminiVision({ apiKey, configuredModel = '', systemPrompt, mi
                     }
                 );
                 let response = await makeReq(genConfig);
-                if (response.status === 400 && genConfig.mediaResolution) {
+                if (response.status === 400 && (genConfig.mediaResolution || genConfig.thinkingConfig)) {
                     const fallbackGc = { ...genConfig };
                     delete fallbackGc.mediaResolution;
+                    delete fallbackGc.thinkingConfig;
                     response = await makeReq(fallbackGc);
                 }
                 if (response.status === 404 || response.status === 410) {
