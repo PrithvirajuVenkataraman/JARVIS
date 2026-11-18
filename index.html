@@ -75,7 +75,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous">
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
-    <link rel="stylesheet" href="styles.css?v=2.5.5">
+    <link rel="stylesheet" href="styles.css?v=2.5.6">
     <script src="science-format.js?v=2.0.1"></script>
     <script type="module" src="app/bootstrap.js?v=2.5.8"></script>
 </head>
@@ -13557,26 +13557,49 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             const isStreaming = meta?.streaming === true;
             const now = performance.now();
             if (isStreaming) {
+                row.__streamFinalized = false;
                 row.__pendingStreamText = textToRender;
                 row.__pendingStreamMeta = meta;
                 const elapsedSinceLast = now - (row.__lastStreamRenderAt || 0);
                 const MIN_STREAM_INTERVAL_MS = 65; // ~15 FPS max throttle for DOM re-parsing on long text
-                if (!row.__streamRafId) {
+                if (!row.__streamTimerId && !row.__streamAnimFrameId) {
+                    const renderSeq = (row.__streamRenderSeq || 0) + 1;
+                    row.__streamRenderSeq = renderSeq;
                     const delay = Math.max(0, MIN_STREAM_INTERVAL_MS - elapsedSinceLast);
-                    row.__streamRafId = setTimeout(() => {
-                        const rafFn = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : (cb => setTimeout(cb, 20));
-                        rafFn(() => {
-                            row.__streamRafId = null;
+                    row.__streamTimerId = setTimeout(() => {
+                        row.__streamTimerId = null;
+                        if (row.__streamFinalized || row.__streamRenderSeq !== renderSeq) return;
+                        const runRender = () => {
+                            row.__streamAnimFrameId = null;
+                            if (row.__streamFinalized || row.__streamRenderSeq !== renderSeq) return;
                             row.__lastStreamRenderAt = performance.now();
                             try {
                                 renderAssistantTextIntoElement(textElement, row.__pendingStreamText, { streaming: true, meta: row.__pendingStreamMeta, messageId });
                             } catch (err) {
                                 console.warn('Streaming render error (recovered):', err);
                             }
-                        });
+                        };
+                        if (typeof requestAnimationFrame === 'function') {
+                            row.__streamAnimFrameId = requestAnimationFrame(runRender);
+                        } else {
+                            row.__streamTimerId = setTimeout(() => {
+                                row.__streamTimerId = null;
+                                runRender();
+                            }, 20);
+                        }
                     }, delay);
                 }
             } else {
+                row.__streamFinalized = true;
+                row.__streamRenderSeq = (row.__streamRenderSeq || 0) + 1;
+                if (row.__streamTimerId) {
+                    clearTimeout(row.__streamTimerId);
+                    row.__streamTimerId = null;
+                }
+                if (row.__streamAnimFrameId && typeof cancelAnimationFrame === 'function') {
+                    cancelAnimationFrame(row.__streamAnimFrameId);
+                    row.__streamAnimFrameId = null;
+                }
                 if (row.__streamRafId) {
                     clearTimeout(row.__streamRafId);
                     row.__streamRafId = null;
@@ -13587,6 +13610,9 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 } catch (err) {
                     console.warn('Final render error (fallback to safe text):', err);
                     if (textElement) textElement.textContent = textToRender;
+                }
+                if (textElement) {
+                    textElement.classList.remove('is-streaming');
                 }
             }
 
