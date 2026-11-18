@@ -75,9 +75,9 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous">
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
-    <link rel="stylesheet" href="styles.css?v=2.5.6">
+    <link rel="stylesheet" href="styles.css?v=2.5.7">
     <script src="science-format.js?v=2.0.1"></script>
-    <script type="module" src="app/bootstrap.js?v=2.5.9"></script>
+    <script type="module" src="app/bootstrap.js?v=2.6.0"></script>
 </head>
 <body class="dark min-h-screen bg-black text-white">
 
@@ -5884,7 +5884,11 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
             (typeof globalThis !== 'undefined' && globalThis.JarvisSelfImprovingMemory) || null);
         const effectiveCustomPrompt = [customSystemPrompt, requestOptions?.customSystemPrompt].filter(Boolean).join('\n\n');
         const baseSystemPrompt = (baseMem && typeof baseMem.injectIntoSystemPrompt === 'function')
-            ? baseMem.injectIntoSystemPrompt(effectiveCustomPrompt, normalizedUserMessage)
+            ? baseMem.injectIntoSystemPrompt(effectiveCustomPrompt, normalizedUserMessage, {
+                turnId: latencyTrace.requestId,
+                modelUsed: selectedModel || 'auto',
+                intent: requestOptions?.intent || 'chat'
+            })
             : effectiveCustomPrompt;
         const formattedMemoryBlock = relevantSavedMemoryContext
             ? (relevantSavedMemoryContext.startsWith('[') ? relevantSavedMemoryContext : `[Saved User Memory & Profile:\n${relevantSavedMemoryContext}]`)
@@ -11955,6 +11959,13 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             if (!meta?.text) return;
             copyToClipboard(meta.text);
             closeAssistantActionMenus();
+            if (typeof isPersonalizationEnabled !== 'function' || isPersonalizationEnabled()) {
+                window.JarvisSelfImprovingMemory?.recordImplicitSignal?.('copy', {
+                    turnId: meta?.turnId || messageId,
+                    query: meta?.priorUserPrompt || '',
+                    modelUsed: meta?.modelUsed || ''
+                }).catch?.(() => {});
+            }
             showTemporaryMessage('Copied to clipboard!');
             if (button) {
                 const prevHtml = button.innerHTML;
@@ -12306,6 +12317,13 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
 
         async function regenerateAssistantMessage(messageId) {
             const meta = getAssistantMessageMeta(messageId);
+            if (typeof isPersonalizationEnabled !== 'function' || isPersonalizationEnabled()) {
+                window.JarvisSelfImprovingMemory?.recordImplicitSignal?.('regenerate', {
+                    turnId: meta?.turnId || messageId,
+                    query: meta?.priorUserPrompt || '',
+                    modelUsed: meta?.modelUsed || ''
+                }).catch?.(() => {});
+            }
             let turn = getConversationTurn(meta?.turnId);
             let rawPrompt = String(turn?.rawPrompt || '').trim();
             let processingPrompt = String(turn?.processingPrompt || rawPrompt).trim();
@@ -16283,9 +16301,9 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             const allowedAttrs = {
                 A: new Set(['href', 'target', 'rel', 'class', 'style', 'title', 'id', 'onclick']),
                 BLOCKQUOTE: new Set(['class', 'style', 'id']),
-                BUTTON: new Set(['class', 'style', 'type', 'onclick', 'title', 'id', 'disabled', 'aria-label']),
+                BUTTON: new Set(['class', 'style', 'type', 'onclick', 'title', 'id', 'disabled', 'aria-label', 'aria-pressed', 'aria-expanded', 'data-visual-action', 'data-step-idx']),
                 CODE: new Set(['class', 'style', 'id']),
-                DIV: new Set(['class', 'style', 'id']),
+                DIV: new Set(['class', 'style', 'id', 'data-line-count', 'data-visual-id', 'data-visual-type', 'data-visual-spec', 'data-visual-stage']),
                 H1: new Set(['class', 'style', 'id']),
                 H2: new Set(['class', 'style', 'id']),
                 H3: new Set(['class', 'style', 'id']),
@@ -29851,6 +29869,24 @@ function exportUnifiedMemoriesJson() {
 }
 window.exportUnifiedMemoriesJson = exportUnifiedMemoriesJson;
 
+async function runManualMemoryConsolidation() {
+    const sim = window.JarvisSelfImprovingMemory;
+    if (!sim?.runConsolidationCycle) return;
+    const res = await sim.runConsolidationCycle('manual');
+    renderMemoryManagerList();
+    showTemporaryMessage(`Consolidated rules (${res.mergedCount} merged, ${res.decayedCount} decayed, ${res.remainingRules} active).`);
+}
+
+async function runManualMemoryRollback() {
+    const sim = window.JarvisSelfImprovingMemory;
+    if (!sim?.rollbackPolicySnapshot) return;
+    const res = await sim.rollbackPolicySnapshot();
+    renderMemoryManagerList();
+    showTemporaryMessage(res?.rolledBack ? `Rolled back to previous snapshot (${res.restoredRules} rules restored).` : 'No previous policy snapshot available.');
+}
+window.runManualMemoryConsolidation = runManualMemoryConsolidation;
+window.runManualMemoryRollback = runManualMemoryRollback;
+
 function renderMemoryManagerList() {
     const list = document.getElementById('memory-manager-list');
     if (!list) return;
@@ -29900,7 +29936,13 @@ function renderMemoryManagerList() {
             .filter(r => !query || r.directive.toLowerCase().includes(query) || (r.category && r.category.toLowerCase().includes(query)));
         const stats = typeof memEngine?.getStats === 'function' ? memEngine.getStats() : null;
         const statsBanner = stats && (stats.positiveCount > 0 || stats.negativeCount > 0 || stats.activeRules > 0)
-            ? `<div class="memory-manager-item" style="margin-bottom:8px;opacity:0.9;font-size:12px;"><strong>Self-Improving Loop:</strong> ${stats.activeRules} active rule${stats.activeRules === 1 ? '' : 's'} (${stats.globalRules || 0} global, ${stats.topicRules || 0} topic) · 👍 ${stats.positiveCount || 0} · 👎 ${stats.negativeCount || 0}${stats.satisfactionRate !== null && stats.satisfactionRate !== undefined ? ` (${stats.satisfactionRate}% helpful)` : ''}</div>`
+            ? `<div class="memory-manager-item" style="margin-bottom:8px;opacity:0.95;font-size:12px;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;">
+                <div><strong>Recursive Self-Improving Loop:</strong> ${stats.activeRules} active rule${stats.activeRules === 1 ? '' : 's'} (${stats.globalRules || 0} global, ${stats.topicRules || 0} topic) &middot; Failure Guardrails: ${stats.failureLedgerCount || 0} &middot; 👍 ${stats.positiveCount || 0} &middot; 👎 ${stats.negativeCount || 0}${stats.satisfactionRate !== null && stats.satisfactionRate !== undefined ? ` (${stats.satisfactionRate}% helpful)` : ''}</div>
+                <div style="display:flex;gap:6px;">
+                    <button type="button" class="settings-chip-btn" onclick="runManualMemoryConsolidation()" style="font-size:11px;padding:3px 8px;">Consolidate</button>
+                    ${stats.snapshotCount > 0 ? '<button type="button" class="settings-chip-btn" onclick="runManualMemoryRollback()" style="font-size:11px;padding:3px 8px;">Rollback</button>' : ''}
+                </div>
+            </div>`
             : '';
 
         if (!rules.length) {
