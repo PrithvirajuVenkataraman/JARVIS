@@ -3036,6 +3036,7 @@ assert.equal(chatTest.supportsGeminiThinking('gemini-2.0-flash'), false, '2.0 fl
 assert.equal(chatTest.supportsGeminiThinking('gemini-2.5-pro'), true, '2.5-pro must be flagged as thinking model');
 assert.equal(chatTest.supportsGeminiThinking('gemini-3.7-flash'), true, '3.7-flash must be flagged as thinking model');
 assert.equal(chatTest.supportsGeminiThinking('gemini-3.8-flash'), true, '3.8-flash must be flagged as thinking model');
+assert.equal(chatTest.supportsGeminiThinking('gemini-4-hydrogen'), true, 'gemini-4-hydrogen must be flagged as thinking model');
 assert.equal(chatTest.supportsGeminiThinking('gemini-2.5-flash-thinking'), true, 'flash-thinking must be flagged as thinking model');
 console.log('  [PASS] 2.2 Gemini thinking config guards against unsupported models and invalid snake_case');
 
