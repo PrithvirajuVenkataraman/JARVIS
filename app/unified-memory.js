@@ -206,6 +206,7 @@ export class UnifiedMemoryStore {
             id: candidate.id && typeof candidate.id === 'string' ? candidate.id : generateUUID(),
             text,
             category: normalizeCategory(candidate.category, text),
+            slotKey: candidate.slotKey || candidate.slot || null,
             createdAt: candidate.createdAt || now,
             updatedAt: now,
             source: ['auto', 'explicit', 'manual'].includes(candidate.source) ? candidate.source : 'auto',
@@ -227,6 +228,9 @@ export class UnifiedMemoryStore {
             target.text = cleanText;
         }
         if (typeof patch.category === 'string') target.category = normalizeCategory(patch.category, target.text);
+        if (typeof patch.slotKey === 'string' || typeof patch.slot === 'string') {
+            target.slotKey = patch.slotKey || patch.slot;
+        }
         if (typeof patch.enabled === 'boolean') target.enabled = patch.enabled;
         if (typeof patch.sensitive === 'boolean') target.sensitive = patch.sensitive;
         target.updatedAt = new Date().toISOString();
@@ -403,42 +407,51 @@ export function extract(utterance = '') {
     if (shouldIgnoreForExtraction(raw)) return [];
     const candidates = [];
 
+    const nameMatch = raw.match(/\b(?:my\s+name\s+is|call\s+me|you\s+can\s+call\s+me)\s+([a-zA-Z][a-zA-Z\s'-]{1,35}?)(?:[.,;!?\n]|$)/i);
+    if (nameMatch && !hasNegation(raw.slice(0, nameMatch.index + 15))) {
+        const cleanName = sanitizeCapturedGroup(nameMatch[1]);
+        if (cleanName && !/\b(?:sir|ma'am|boss|dude|bro|friend|assistant|jarvis)\b/i.test(cleanName)) {
+            candidates.push({ text: `Name: ${_capitalizeWords(cleanName)}`, category: 'identity', slot: 'name', slotKey: 'name', sensitive: false, confidence: 0.96 });
+        }
+    }
+
     const locationMatch = raw.match(/\b(?:i\s+(?:currently\s+)?live\s+in|i'm\s+based\s+in|i\s+am\s+based\s+in|i\s+(?:recently\s+)?moved\s+to|i\s+am\s+living\s+in|i'm\s+living\s+in)\s+([^.!?,\n]+)/i);
     if (locationMatch && !hasNegation(raw.slice(0, locationMatch.index + 15))) {
         const place = sanitizeCapturedGroup(locationMatch[1]);
         if (place && !/\b(?:here|there|home|a\s+house|an\s+apartment)\b/i.test(place)) {
-            candidates.push({ text: `Lives in ${_capitalizeWords(place)}`, category: 'location', slot: 'location', sensitive: false, confidence: 0.95 });
+            candidates.push({ text: `Lives in ${_capitalizeWords(place)}`, category: 'location', slot: 'location', slotKey: 'location', sensitive: false, confidence: 0.95 });
         }
     }
 
     const professionMatch = raw.match(/\b(?:i\s+work\s+as\s+(?:an?|the)?|my\s+job\s+is\s+(?:an?|the)?|my\s+profession\s+is\s+(?:an?|the)?)\s+([^.!?,\n]+)/i);
     if (professionMatch && !hasNegation(raw.slice(0, professionMatch.index + 15))) {
         const job = sanitizeCapturedGroup(professionMatch[1]);
-        if (job) candidates.push({ text: `Works as a ${_capitalizeWords(job)}`, category: 'occupation', slot: 'occupation', sensitive: false, confidence: 0.95 });
+        if (job) candidates.push({ text: `Works as a ${_capitalizeWords(job)}`, category: 'occupation', slot: 'occupation', slotKey: 'occupation', sensitive: false, confidence: 0.95 });
     } else {
         const iAmMatch = raw.match(/\b(?:i\s+am|i'm)\s+(?:an?)\s+([a-zA-Z\s-]+?)(?:[.,;!?\n]|$)/i);
         if (iAmMatch && !hasNegation(raw.slice(0, iAmMatch.index + 10))) {
             const rawJob = sanitizeCapturedGroup(iAmMatch[1]);
             if (rawJob && !NON_OCCUPATION_WORDS.has(rawJob.split(/\s+/)[0].toLowerCase())) {
-                candidates.push({ text: `Works as a ${_capitalizeWords(rawJob)}`, category: 'occupation', slot: 'occupation', sensitive: false, confidence: 0.85 });
+                candidates.push({ text: `Works as a ${_capitalizeWords(rawJob)}`, category: 'occupation', slot: 'occupation', slotKey: 'occupation', sensitive: false, confidence: 0.85 });
             }
         }
     }
 
     if (/\b(?:i\s+am|i'm)\s+(?:a\s+)?(?:vegetarian|pescatarian)\b/i.test(raw) && !hasNegation(raw)) {
-        candidates.push({ text: 'Diet: Vegetarian', category: 'diet_health', slot: 'diet', sensitive: true, confidence: 0.95 });
+        candidates.push({ text: 'Diet: Vegetarian', category: 'diet_health', slot: 'diet', slotKey: 'diet', sensitive: true, confidence: 0.95 });
     } else if (/\b(?:i\s+am|i'm)\s+(?:a\s+)?vegan\b/i.test(raw) && !hasNegation(raw)) {
-        candidates.push({ text: 'Diet: Vegan', category: 'diet_health', slot: 'diet', sensitive: true, confidence: 0.95 });
+        candidates.push({ text: 'Diet: Vegan', category: 'diet_health', slot: 'diet', slotKey: 'diet', sensitive: true, confidence: 0.95 });
     }
 
     const allergyMatch = raw.match(/\b(?:i\s+am|i'm|i\s+have\s+an?)\s+allergic\s+to\s+([^.!?,\n]+)/i);
     if (allergyMatch && !hasNegation(raw.slice(0, allergyMatch.index + 15))) {
         const allergen = sanitizeCapturedGroup(allergyMatch[1]);
-        if (allergen) candidates.push({ text: `Allergic to ${allergen.toLowerCase()}`, category: 'diet_health', slot: `allergy_${allergen.toLowerCase().replace(/\s+/g, '_')}`, sensitive: true, confidence: 0.95 });
+        const allergySlot = allergen ? `allergy_${allergen.toLowerCase().replace(/\s+/g, '_')}` : '';
+        if (allergen) candidates.push({ text: `Allergic to ${allergen.toLowerCase()}`, category: 'diet_health', slot: allergySlot, slotKey: allergySlot, sensitive: true, confidence: 0.95 });
     }
 
     if (/\b(?:i\s+am|i'm)\s+(?:strictly\s+)?gluten[-\s]?free\b/i.test(raw) && !hasNegation(raw)) {
-        candidates.push({ text: 'Diet: Gluten-free', category: 'diet_health', slot: 'diet_gluten', sensitive: true, confidence: 0.95 });
+        candidates.push({ text: 'Diet: Gluten-free', category: 'diet_health', slot: 'diet_gluten', slotKey: 'diet_gluten', sensitive: true, confidence: 0.95 });
     }
 
     const petNamedMatch = raw.match(/\b(?:i\s+have\s+an?|my)\s+([a-zA-Z]+)(?:'s\s+name\s+is|\s+named|\s+called)\s+([a-zA-Z]+)\b/i);
@@ -446,40 +459,44 @@ export function extract(utterance = '') {
         const petType = petNamedMatch[1].toLowerCase().trim();
         const petName = _capitalizeWords(petNamedMatch[2].trim());
         if (['dog', 'cat', 'puppy', 'kitten', 'parrot', 'hamster', 'rabbit', 'horse', 'golden retriever', 'labrador', 'pet'].includes(petType)) {
-            candidates.push({ text: `Has a ${petType} named ${petName}`, category: 'pet_family', slot: `pet_${petType}`, sensitive: false, confidence: 0.95 });
+            candidates.push({ text: `Has a ${petType} named ${petName}`, category: 'pet_family', slot: `pet_${petType}`, slotKey: `pet_${petType}`, sensitive: false, confidence: 0.95 });
         }
     }
 
     const codeInMatch = raw.match(/\b(?:i\s+code\s+in|i\s+(?:mostly\s+)?develop\s+in|i\s+write\s+code\s+in|i\s+program\s+in)\s+([a-zA-Z0-9#+._\s]+?)(?:[.,;!?\n]|$)/i);
     if (codeInMatch && !hasNegation(raw.slice(0, codeInMatch.index + 15))) {
         const lang = sanitizeCapturedGroup(codeInMatch[1]);
-        if (lang) candidates.push({ text: `Codes in ${lang}`, category: 'tech', slot: 'primary_language', sensitive: false, confidence: 0.95 });
+        if (lang) candidates.push({ text: `Codes in ${lang}`, category: 'tech', slot: 'primary_language', slotKey: 'primary_language', sensitive: false, confidence: 0.95 });
     }
 
     const myStackMatch = raw.match(/\bmy\s+stack\s+is\s+([^.!?\n]+)/i);
     if (myStackMatch && !hasNegation(raw.slice(0, myStackMatch.index + 15))) {
         const stack = sanitizeCapturedGroup(myStackMatch[1]);
-        if (stack) candidates.push({ text: `Tech stack: ${stack}`, category: 'tech', slot: 'tech_stack', sensitive: false, confidence: 0.92 });
+        if (stack) candidates.push({ text: `Tech stack: ${stack}`, category: 'tech', slot: 'tech_stack', slotKey: 'tech_stack', sensitive: false, confidence: 0.92 });
     }
 
     if (/\b(?:be\s+(?:more\s+)?concise|keep\s+(?:your\s+)?answers?\s+(?:very\s+)?brief|no\s+fluff|give\s+direct\s+answers?)\b/i.test(raw)) {
-        candidates.push({ text: 'Preference: Direct and concise answers with no fluff', category: 'preference', slot: 'conciseness', sensitive: false, confidence: 0.95 });
+        candidates.push({ text: 'Preference: Direct and concise answers with no fluff', category: 'preference', slot: 'conciseness', slotKey: 'conciseness', sensitive: false, confidence: 0.95 });
     }
 
     const negativeConstraintMatch = raw.match(/\b(?:don'?t|do\s+not|never|avoid|stop)\s+(?:use|using|include|including|give|giving|write|writing)\s+([^.!?\n]{3,80})/i);
     if (negativeConstraintMatch) {
         const subject = sanitizeCapturedGroup(negativeConstraintMatch[1]);
-        if (subject) candidates.push({ text: `Constraint: Avoid ${subject}`, category: 'constraint', slot: `avoid_${subject.toLowerCase().replace(/\s+/g, '_').slice(0, 30)}`, sensitive: false, confidence: 0.90 });
+        const avoidSlot = subject ? `avoid_${subject.toLowerCase().replace(/\s+/g, '_').slice(0, 30)}` : '';
+        if (subject) candidates.push({ text: `Constraint: Avoid ${subject}`, category: 'constraint', slot: avoidSlot, slotKey: avoidSlot, sensitive: false, confidence: 0.90 });
     }
 
     const alwaysFormatMatch = raw.match(/\b(?:always|from\s+now\s+on\s*,?\s*always|prefer)\s+(?:format\s+(?:in|as)|respond\s+in|answer\s+in)\s+([^.!?\n]{3,80})/i);
     if (alwaysFormatMatch && !hasNegation(raw.slice(0, alwaysFormatMatch.index + 10))) {
         const style = sanitizeCapturedGroup(alwaysFormatMatch[1]);
-        if (style) candidates.push({ text: `Preference: Always format as ${style}`, category: 'preference', slot: `format_${style.toLowerCase().replace(/\s+/g, '_').slice(0, 30)}`, sensitive: false, confidence: 0.90 });
+        const fmtSlot = style ? `format_${style.toLowerCase().replace(/\s+/g, '_').slice(0, 30)}` : '';
+        if (style) candidates.push({ text: `Preference: Always format as ${style}`, category: 'preference', slot: fmtSlot, slotKey: fmtSlot, sensitive: false, confidence: 0.90 });
     }
 
     return candidates;
 }
+
+export const extractMemories = extract;
 
 export function resolveConflictsAndDedup(candidates = [], existingMemories = []) {
     const toAdd = [], toUpdate = [], toSupersede = [];
@@ -607,7 +624,7 @@ export function selectRelevantMemories(currentTurnText = '', enabledMemories = [
     });
     scored.sort((a, b) => b.score - a.score);
     for (const { item, score } of scored) {
-        if (score > 0 || ['identity', 'location'].includes(item.category)) {
+        if (score > 0 || ['identity', 'location', 'occupation'].includes(item.category)) {
             const itemLen = item.text.length + 10;
             if (charCount + itemLen <= maxCharsBudget) { selected.push(item); charCount += itemLen; }
         }
@@ -643,4 +660,13 @@ export function buildMetaQueryMemoryPrompt(allMemories = []) {
         ']',
         'Instruction: The user asked what you know/remember about them. Answer conversationally, cleanly, and accurately using ONLY the facts listed above. Do not hallucinate or invent any personal details not present in this list.'
     ].join('\n');
+}
+
+export function buildRelevantMemoryPrompt(currentTurnText = '', enabledMemories = [], maxCharsBudget = 3200) {
+    if (!Array.isArray(enabledMemories) || !enabledMemories.length) return '';
+    if (isMetaMemoryQuery(currentTurnText)) {
+        return buildMetaQueryMemoryPrompt(enabledMemories);
+    }
+    const relevant = selectRelevantMemories(currentTurnText, enabledMemories, maxCharsBudget);
+    return buildNormalTurnMemoryPrompt(relevant);
 }
