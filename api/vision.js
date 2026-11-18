@@ -263,9 +263,10 @@ async function fetchWithTimeout(url, init = {}) {
 
 const GEMINI_API_VERSIONS = ['v1beta', 'v1'];
 const GEMINI_MODEL_FALLBACKS = [
+    'gemini-4-hydrogen',
+    'gemini-2.5-flash',
     'gemini-3.8-flash',
     'gemini-3.7-flash',
-    'gemini-2.5-flash',
     'gemini-2.0-flash',
     'gemini-2.5-pro',
     'gemini-2.5-flash-lite',
@@ -419,7 +420,7 @@ async function callGeminiVision({ apiKey, configuredModel = '', systemPrompt, mi
 
     for (const apiVersion of GEMINI_API_VERSIONS) {
         for (const model of modelFallbacks) {
-            if (apiVersion === 'v1' && /^gemini-(?:3\.|2\.5)/i.test(model)) continue;
+            if (apiVersion === 'v1' && /^gemini-(?:4|3\.|2\.5)/i.test(model)) continue;
             try {
                 const baseGenConfig = {
                     temperature: 0.12,
@@ -428,6 +429,9 @@ async function callGeminiVision({ apiKey, configuredModel = '', systemPrompt, mi
                 };
                 if (apiVersion === 'v1beta') {
                     baseGenConfig.mediaResolution = 'MEDIA_RESOLUTION_HIGH';
+                    if (/gemini-(?:4|3\.|2\.5-(?:flash|pro))/i.test(model) && !/flash-lite/i.test(model)) {
+                        baseGenConfig.thinkingConfig = { thinkingBudget: 512 };
+                    }
                 }
                 const makeReq = (genConfig) => fetchWithTimeout(
                     `https://generativelanguage.googleapis.com/${apiVersion}/models/${model}:generateContent?key=${apiKey}`,
@@ -453,9 +457,10 @@ async function callGeminiVision({ apiKey, configuredModel = '', systemPrompt, mi
                     }
                 );
                 let response = await makeReq(baseGenConfig);
-                if (response.status === 400 && baseGenConfig.mediaResolution) {
+                if (response.status === 400 && (baseGenConfig.mediaResolution || baseGenConfig.thinkingConfig)) {
                     const fallbackGenConfig = { ...baseGenConfig };
                     delete fallbackGenConfig.mediaResolution;
+                    delete fallbackGenConfig.thinkingConfig;
                     response = await makeReq(fallbackGenConfig);
                 }
 
