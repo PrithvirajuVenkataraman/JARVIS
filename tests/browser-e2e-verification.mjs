@@ -681,6 +681,112 @@ async function runBrowserTests() {
         assert.equal(researchResult?.firstCardHighlighted, true, 'Clicking in-text citation badge must add is-highlighted to matching source card');
         console.log('[PASS] Perplexity-style research sources carousel, shimmers, overflow expansion, and synchronized citation highlighting verified');
 
+        // Test 14: Thumbs Up/Down Feedback Loop, Closed-Loop Self-Improving Memory & Semantic Weather Routing
+        const evalFeedbackAndRouting = await sendCommand('Runtime.evaluate', {
+            expression: `(async () => {
+                // 1. Semantic Weather Routing (Zero Negative Blocklist Whack-a-Mole)
+                const weatherFn = window.JarvisFrontendRouting?.isMeteorologicalWeatherIntent;
+                const astroWeather = weatherFn('Give me a brief 2027 relationship astrology forecast for Sagittarius');
+                const salesWeather = weatherFn('Q3 sales forecast for EMEA');
+                const boxOfficeWeather = weatherFn('box office forecast for Avatar');
+                const tokyoWeather = weatherFn('weather forecast for Tokyo');
+                const rainWeather = weatherFn('will it rain today');
+                const aqiWeather = weatherFn('AQI in Delhi');
+
+                // 2. Thumbs Up / Thumbs Down + Closed-Loop Self-Improving Memory
+                await window.JarvisSelfImprovingMemory.clear();
+                const msgId = 'fb-test-' + Date.now();
+                const host = document.createElement('div');
+                host.innerHTML = buildAssistantActionsHtml(msgId, true, { label: 'Gemini 4 Hydrogen' });
+                document.body.appendChild(host);
+
+                const btnUp = host.querySelector('[data-assistant-action="feedback_up"]');
+                const btnDown = host.querySelector('[data-assistant-action="feedback_down"]');
+
+                // Click Thumbs Up
+                btnUp.click();
+                await new Promise(r => setTimeout(r, 80));
+                const upActive = btnUp.classList.contains('is-feedback-up') && btnUp.getAttribute('aria-pressed') === 'true';
+                const statsAfterUp = window.JarvisSelfImprovingMemory.getStats();
+
+                // Click Thumbs Down to open viewport-clamped popover
+                btnDown.click();
+                await new Promise(r => setTimeout(r, 80));
+                const popover = document.getElementById('assistant-feedback-popover-' + msgId);
+                const popoverVisible = Boolean(popover && !popover.classList.contains('hidden'));
+                const popoverPos = popover ? getComputedStyle(popover).position : '';
+                const hasRegenBtn = Boolean(popover?.querySelector('.feedback-regen-btn'));
+
+                // Select Inaccurate + Too Long tags and submit
+                const chips = Array.from(popover.querySelectorAll('.feedback-tag-chip'));
+                chips.find(c => c.textContent.trim() === 'Inaccurate')?.click();
+                chips.find(c => c.textContent.trim() === 'Too Long')?.click();
+                const commentBox = document.getElementById('feedback-comment-' + msgId);
+                if (commentBox) commentBox.value = 'Keep math explanations concise without fluff';
+                await window.submitAssistantNegativeFeedback(msgId, false);
+
+                const popoverClosedAfterSubmit = Boolean(popover?.classList.contains('hidden'));
+                const downActive = btnDown.classList.contains('is-feedback-down') && !btnUp.classList.contains('is-feedback-up');
+                const statsAfterDown = window.JarvisSelfImprovingMemory.getStats();
+
+                // Verify global rules inject even on an unrelated query (Two-Tier Injection)
+                const injectedPrompt = window.JarvisSelfImprovingMemory.injectIntoSystemPrompt('BASE_PROMPT', 'Solve x^2 - 5x + 6 = 0');
+                const injectedHasLearned = injectedPrompt.includes('USER LEARNED PREFERENCES');
+
+                // Verify conflict superseding (Incomplete/depth_and_rigor supersedes conciseness)
+                await window.JarvisSelfImprovingMemory.distillNegativeFeedback('Incomplete answer', 'test', 'resp', { tags: ['Incomplete'] });
+                const categoriesAfterConflict = window.JarvisSelfImprovingMemory.getAll().map(r => r.category);
+                const concisenessSuperseded = !categoriesAfterConflict.includes('conciseness') && categoriesAfterConflict.includes('depth_and_rigor');
+
+                popover?.remove();
+                host.remove();
+                await window.JarvisSelfImprovingMemory.clear();
+
+                return {
+                    astroWeather,
+                    salesWeather,
+                    boxOfficeWeather,
+                    tokyoWeather,
+                    rainWeather,
+                    aqiWeather,
+                    upActive,
+                    positiveCount: statsAfterUp.positiveCount,
+                    popoverVisible,
+                    popoverPos,
+                    hasRegenBtn,
+                    popoverClosedAfterSubmit,
+                    downActive,
+                    negativeCount: statsAfterDown.negativeCount,
+                    activeRulesAfterDown: statsAfterDown.activeRules,
+                    injectedHasLearned,
+                    concisenessSuperseded
+                };
+            })()`,
+            awaitPromise: true,
+            returnByValue: true
+        });
+
+        const fbResult = evalFeedbackAndRouting?.result?.result?.value || evalFeedbackAndRouting?.result?.value;
+        console.log('Feedback loop & semantic routing verification:', fbResult);
+        assert.equal(fbResult?.astroWeather, false, 'Astrology forecast must NOT route to weather');
+        assert.equal(fbResult?.salesWeather, false, 'Sales forecast must NOT route to weather');
+        assert.equal(fbResult?.boxOfficeWeather, false, 'Box office forecast must NOT route to weather');
+        assert.equal(fbResult?.tokyoWeather, true, 'Weather forecast for Tokyo must route to weather');
+        assert.equal(fbResult?.rainWeather, true, 'Will it rain today must route to weather');
+        assert.equal(fbResult?.aqiWeather, true, 'AQI in Delhi must route to weather');
+        assert.equal(fbResult?.upActive, true, 'Thumbs up must visibly activate with emerald state');
+        assert.equal(fbResult?.positiveCount, 1, 'Thumbs up must record positive reinforcement');
+        assert.equal(fbResult?.popoverVisible, true, 'Thumbs down must open feedback popover');
+        assert.equal(fbResult?.popoverPos, 'fixed', 'Feedback popover must use viewport-safe fixed positioning');
+        assert.equal(fbResult?.hasRegenBtn, true, 'Feedback popover must include Fix & Regenerate action');
+        assert.equal(fbResult?.popoverClosedAfterSubmit, true, 'Submitting negative feedback must close popover cleanly without errors');
+        assert.equal(fbResult?.downActive, true, 'Thumbs down must activate rose state and deactivate thumbs up');
+        assert.equal(fbResult?.negativeCount, 1, 'Thumbs down must record negative count');
+        assert.ok(fbResult?.activeRulesAfterDown >= 2, 'Thumbs down tags must distill actionable rules');
+        assert.equal(fbResult?.injectedHasLearned, true, 'Global learned rules must inject even on unrelated queries');
+        assert.equal(fbResult?.concisenessSuperseded, true, 'Conflicting depth_and_rigor rule must cleanly supersede conciseness');
+        console.log('[PASS] Thumbs up/down, closed-loop self-improving memory, conflict superseding & semantic weather routing verified');
+
         // Test Vercel Serverless Function Count limit (must be <= 12 on Hobby plan)
         const fs = await import('node:fs');
         const path = await import('node:path');
