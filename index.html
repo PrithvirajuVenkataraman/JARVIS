@@ -75,9 +75,9 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous">
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
-    <link rel="stylesheet" href="styles.css?v=2.5.3">
+    <link rel="stylesheet" href="styles.css?v=2.5.4">
     <script src="science-format.js?v=2.0.1"></script>
-    <script type="module" src="app/bootstrap.js?v=2.5.5"></script>
+    <script type="module" src="app/bootstrap.js?v=2.5.6"></script>
 </head>
 <body class="dark min-h-screen bg-black text-white">
 
@@ -776,25 +776,20 @@ function getUserIntent(text) {
 }
 
 function isWeatherIntentText(text) {
+    if (typeof window.JarvisFrontendRouting?.isMeteorologicalWeatherIntent === 'function') {
+        return window.JarvisFrontendRouting.isMeteorologicalWeatherIntent(text);
+    }
     const t = (text || '').toLowerCase().trim();
     if (!t) return false;
-    // Avoid astrology/horoscope/financial/business forecast false positives (e.g., "astrology forecast for Sagittarius").
-    const hasExplicitWeatherWord = /\b(weather|climate|temperature|humidity|humid|rain|raining|drizzle|snow|snowing|wind|windy|sunny|cloudy|overcast|storm|thunder|chilly|freezing|umbrella|aqi|air quality)\b/.test(t);
-    const isNonWeatherForecast = /\b(astrolog\w*|horoscope|zodiac|tarot|numerolog\w*|relationship|love\s+life|marriage|career|financial|economic|economy|market|stock|crypto|bitcoin|revenue|sales|earnings|profit|gdp|inflation|election|demand|growth|sagittarius|aries|taurus|gemini|cancer|leo|virgo|libra|scorpio|capricorn|aquarius|pisces)\b/.test(t);
-    if (isNonWeatherForecast && !hasExplicitWeatherWord) {
+    const hasExplicitWeatherWord = /\b(weather|climate|temperature|humidity|humid|rain|raining|drizzle|snow|snowing|wind|windy|sunny|cloudy|overcast|storm|thunder|chilly|freezing|umbrella|aqi|air quality|uv index|weather forecast)\b/.test(t);
+    if (/\b(i(?:'| a)?m|i have|i got|feeling|feel)\b/.test(t) && /\b(cold|fever|cough|sick|chills)\b/.test(t) && !hasExplicitWeatherWord && !/\boutside\b/.test(t)) {
         return false;
     }
-    // Avoid health/small-talk false positives like "I have a cold" / "I'm hot under the collar".
-    if (/\b(i(?:'| a)?m|i have|i got|feeling|feel)\b/.test(t) && /\b(cold|fever|cough|sick|chills)\b/.test(t) && !/\b(weather|forecast|outside|temperature)\b/.test(t)) {
-        return false;
-    }
-    return /\b(weather|climate|temperature|forecast|humidity|humid|rain|raining|drizzle|snow|snowing|wind|windy|sunny|cloudy|overcast|storm|thunder|chilly|freezing|umbrella|jacket|aqi|air quality)\b/.test(t) ||
-        /\b(how(?:'?s|\s+is|\s+can|\s+could|\s+would|\s+might)?\s+(?:the\s+)?(?:weather|climate|temperature|forecast)\b)/.test(t) ||
-        /\b(what(?:'?s|\s+is|\s+will|\s+would)\s+(?:the\s+)?(?:weather|climate|temperature|forecast)\b)/.test(t) ||
+    return hasExplicitWeatherWord ||
         /\b(will\s+it\s+(?:rain|snow|be\s+(?:hot|cold|humid|sunny|cloudy|windy))|is\s+it\s+(?:raining|snowing|hot|cold|windy|sunny|cloudy|humid)\b)/.test(t) ||
         /\b(how(?:'?s|\s+is)\s+it\s+(?:outside|out(?:side)?|where\s+i\s+am)|what(?:'?s|\s+is)\s+it\s+like\s+(?:outside|where\s+i\s+am))\b/.test(t) ||
         (/\b(?:outside|here|around me|near me|my current location|current location|my location|where i am|my area|my place)\b/.test(t) &&
-            /\b(?:forecast|temperature|rain|snow|hot|cold|wind|sunny|cloudy|humid|weather|climate)\b/.test(t));
+            /\b(?:temperature|rain|snow|hot|cold|wind|sunny|cloudy|humid|weather|climate)\b/.test(t));
 }
 
 function isPersonalHealthStatement(text) {
@@ -11067,9 +11062,36 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             return;
         }
 
+        function getSavedFeedbackRating(messageId) {
+            try {
+                const map = JSON.parse(localStorage.getItem('jarvis_message_feedback_ratings') || '{}');
+                return Number(map[String(messageId || '')] || 0);
+            } catch (_) {
+                return 0;
+            }
+        }
+
+        function persistFeedbackRating(messageId, rating) {
+            try {
+                const id = String(messageId || '').trim();
+                if (!id) return;
+                const map = JSON.parse(localStorage.getItem('jarvis_message_feedback_ratings') || '{}');
+                if (!rating) delete map[id];
+                else map[id] = rating;
+                const keys = Object.keys(map);
+                if (keys.length > 200) {
+                    for (const k of keys.slice(0, keys.length - 200)) delete map[k];
+                }
+                localStorage.setItem('jarvis_message_feedback_ratings', JSON.stringify(map));
+            } catch (_) {}
+        }
+
         function buildAssistantActionsHtml(messageId, canRegenerate, modelInfo = null) {
             const safeId = escapeHtml(messageId);
             const regenAttr = canRegenerate ? '' : 'disabled aria-disabled="true"';
+            const savedRating = getSavedFeedbackRating(messageId);
+            const upClass = savedRating === 1 ? ' is-active is-feedback-up' : '';
+            const downClass = savedRating === -1 ? ' is-active is-feedback-down' : '';
             const badgeHtml = modelInfo && modelInfo.label
                 ? `<span class="assistant-model-badge ${modelInfo.isFailover ? 'is-failover' : ''}" title="${escapeHtml(modelInfo.label)}">${escapeHtml(modelInfo.label)}</span>`
                 : '';
@@ -11081,9 +11103,9 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                     <button type="button" class="assistant-action-icon" data-assistant-action="tts_speak" onclick="return handleAssistantActionInline(event, '${safeId}', 'tts_speak')" title="Read aloud" aria-label="Read aloud">${getActionIconSvg('speaker')}</button>
                     <button type="button" class="assistant-action-icon" data-assistant-action="share" onclick="return handleAssistantActionInline(event, '${safeId}', 'share')" title="Share" aria-label="Share">${getActionIconSvg('share')}</button>
                     <button type="button" class="assistant-action-icon" data-assistant-action="regenerate" onclick="return handleAssistantActionInline(event, '${safeId}', 'regenerate')" title="Regenerate" aria-label="Regenerate" ${regenAttr}>${getActionIconSvg('retry')}</button>
-                    <button type="button" class="assistant-action-icon" data-assistant-action="feedback_up" onclick="return handleAssistantActionInline(event, '${safeId}', 'feedback_up')" title="Helpful" aria-label="Helpful">${getActionIconSvg('thumb_up')}</button>
-                    <button type="button" class="assistant-action-icon" data-assistant-action="feedback_down" onclick="return handleAssistantActionInline(event, '${safeId}', 'feedback_down')" title="Not helpful" aria-label="Not helpful">${getActionIconSvg('thumb_down')}</button>
-                    <div id="assistant-feedback-popover-${safeId}" class="assistant-feedback-popover hidden" data-message-id="${safeId}">
+                    <button type="button" class="assistant-action-icon${upClass}" data-assistant-action="feedback_up" onclick="return handleAssistantActionInline(event, '${safeId}', 'feedback_up')" title="Helpful" aria-label="Helpful" aria-pressed="${savedRating === 1 ? 'true' : 'false'}">${getActionIconSvg('thumb_up')}</button>
+                    <button type="button" class="assistant-action-icon${downClass}" data-assistant-action="feedback_down" onclick="return handleAssistantActionInline(event, '${safeId}', 'feedback_down')" title="Not helpful" aria-label="Not helpful" aria-pressed="${savedRating === -1 ? 'true' : 'false'}">${getActionIconSvg('thumb_down')}</button>
+                    <div id="assistant-feedback-popover-${safeId}" class="assistant-feedback-popover hidden" data-message-id="${safeId}" role="dialog" aria-label="Answer feedback">
                         <div class="feedback-popover-header">
                             <span class="feedback-popover-title">Why wasn't this helpful?</span>
                             <button type="button" class="feedback-popover-close-btn" onclick="closeFeedbackPopover('${safeId}')" aria-label="Close feedback">&times;</button>
@@ -11091,14 +11113,17 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                         <div class="feedback-tags-grid">
                             <button type="button" class="feedback-tag-chip" onclick="toggleFeedbackTag(this, 'Inaccurate')">Inaccurate</button>
                             <button type="button" class="feedback-tag-chip" onclick="toggleFeedbackTag(this, 'Formatting')">Formatting</button>
+                            <button type="button" class="feedback-tag-chip" onclick="toggleFeedbackTag(this, 'Too Long')">Too Long</button>
                             <button type="button" class="feedback-tag-chip" onclick="toggleFeedbackTag(this, 'Incomplete')">Incomplete</button>
                             <button type="button" class="feedback-tag-chip" onclick="toggleFeedbackTag(this, 'Tone')">Tone</button>
+                            <button type="button" class="feedback-tag-chip" onclick="toggleFeedbackTag(this, 'Wrong Tool')">Wrong Tool</button>
                             <button type="button" class="feedback-tag-chip" onclick="toggleFeedbackTag(this, 'Other')">Other</button>
                         </div>
-                        <textarea id="feedback-comment-${safeId}" class="feedback-comment-input" maxlength="200" placeholder="Optional details (max 200 chars)..."></textarea>
+                        <textarea id="feedback-comment-${safeId}" class="feedback-comment-input" maxlength="200" placeholder="Optional details to help JARVIS improve (max 200 chars)..."></textarea>
                         <div class="feedback-popover-actions">
                             <button type="button" class="feedback-cancel-btn" onclick="closeFeedbackPopover('${safeId}')">Cancel</button>
-                            <button type="button" class="feedback-submit-btn" onclick="submitAssistantNegativeFeedback('${safeId}')">Submit</button>
+                            <button type="button" class="feedback-submit-btn" onclick="submitAssistantNegativeFeedback('${safeId}', false)">Submit</button>
+                            ${canRegenerate ? `<button type="button" class="feedback-regen-btn" onclick="submitAssistantNegativeFeedback('${safeId}', true)">Fix &amp; Regenerate</button>` : ''}
                         </div>
                     </div>
                     <div class="assistant-action-menu-wrap">
@@ -11142,8 +11167,8 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             transform_shorter: messageId => transformAssistantAnswer(messageId, 'shorter'),
             transform_examples: messageId => transformAssistantAnswer(messageId, 'examples'),
             transform_steps: messageId => transformAssistantAnswer(messageId, 'steps'),
-            feedback_up: messageId => handleAssistantPositiveFeedback(messageId),
-            feedback_down: messageId => handleAssistantNegativeFeedbackClick(messageId)
+            feedback_up: (messageId, button) => handleAssistantPositiveFeedback(messageId, button),
+            feedback_down: (messageId, button) => handleAssistantNegativeFeedbackClick(messageId, button)
         };
 
         function handleAssistantActionInline(event, messageId, action) {
@@ -11156,23 +11181,52 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             return false;
         }
 
-        function handleAssistantPositiveFeedback(messageId) {
+        function handleAssistantPositiveFeedback(messageId, button = null) {
             const row = document.querySelector(`.assistant-action-row[data-message-id="${messageId}"]`);
-            const btnUp = row?.querySelector('[data-assistant-action="feedback_up"]');
+            const btnUp = button || row?.querySelector('[data-assistant-action="feedback_up"]');
             const btnDown = row?.querySelector('[data-assistant-action="feedback_down"]');
-            if (btnUp) btnUp.classList.add('is-active', 'text-emerald-400');
-            if (btnDown) btnDown.classList.remove('is-active', 'text-rose-400');
+            const wasActive = Boolean(btnUp?.classList?.contains('is-feedback-up'));
+
+            if (wasActive) {
+                btnUp?.classList.remove('is-active', 'is-feedback-up', 'text-emerald-400');
+                btnUp?.setAttribute('aria-pressed', 'false');
+                persistFeedbackRating(messageId, 0);
+                if (typeof showTemporaryMessage === 'function') showTemporaryMessage('Rating cleared.');
+                return;
+            }
+
+            if (btnUp) {
+                btnUp.classList.add('is-active', 'is-feedback-up', 'text-emerald-400');
+                btnUp.setAttribute('aria-pressed', 'true');
+            }
+            if (btnDown) {
+                btnDown.classList.remove('is-active', 'is-feedback-down', 'text-rose-400');
+                btnDown.setAttribute('aria-pressed', 'false');
+            }
+            persistFeedbackRating(messageId, 1);
             closeFeedbackPopover(messageId);
 
-            const meta = getAssistantMessageMeta(messageId) || {};
+            const meta = (typeof getAssistantMessageMeta === 'function' ? getAssistantMessageMeta(messageId) : null) || {};
             const turnId = meta.turnId || messageId;
+            const query = meta.userMessage || meta.prompt || '';
+            const response = meta.rawText || meta.text || '';
+            const modelUsed = meta.modelUsed || '';
+
             if (window.JarvisObservability?.recordFeedbackAudit) {
                 window.JarvisObservability.recordFeedbackAudit({
                     messageId,
                     turnId,
+                    rating: 'up',
                     score: 1,
-                    tags: []
+                    tags: [],
+                    hasComment: false
                 });
+            }
+
+            const memEngine = (typeof globalThis !== 'undefined' && globalThis.JarvisSelfImprovingMemory) ||
+                (typeof JarvisSelfImprovingMemory !== 'undefined' ? JarvisSelfImprovingMemory : null);
+            if (memEngine?.recordPositiveFeedback && (typeof isPersonalizationEnabled !== 'function' || isPersonalizationEnabled())) {
+                Promise.resolve(memEngine.recordPositiveFeedback({ messageId, turnId, query, response, modelUsed })).catch(() => {});
             }
 
             fetch('/api/feedback', {
@@ -11184,15 +11238,50 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             window.dispatchEvent(new CustomEvent('jarvis:feedback-recorded', {
                 detail: { messageId, turnId, score: 1, tags: [] }
             }));
+
+            if (typeof showTemporaryMessage === 'function') {
+                showTemporaryMessage('Thanks! Marked as helpful.');
+            }
         }
 
-        function handleAssistantNegativeFeedbackClick(messageId) {
+        function positionFeedbackPopover(popover, anchorBtn) {
+            if (!popover || !anchorBtn) return;
+            if (popover.parentElement !== document.body) {
+                document.body.appendChild(popover);
+            }
+            popover.classList.remove('hidden');
+            const btnRect = anchorBtn.getBoundingClientRect();
+            const popRect = popover.getBoundingClientRect();
+            const margin = 8;
+            let left = btnRect.left - (popRect.width / 2) + (btnRect.width / 2);
+            left = Math.max(margin, Math.min(left, window.innerWidth - popRect.width - margin));
+            let top = btnRect.top - popRect.height - 8;
+            if (top < margin) {
+                top = Math.min(window.innerHeight - popRect.height - margin, btnRect.bottom + 8);
+            }
+            popover.style.left = `${Math.round(left)}px`;
+            popover.style.top = `${Math.round(Math.max(margin, top))}px`;
+        }
+
+        function closeAllFeedbackPopovers() {
+            document.querySelectorAll('.assistant-feedback-popover').forEach(p => {
+                p.classList.add('hidden');
+            });
+        }
+
+        function handleAssistantNegativeFeedbackClick(messageId, button = null) {
             const popover = document.getElementById(`assistant-feedback-popover-${messageId}`);
             if (!popover) return;
             const isHidden = popover.classList.contains('hidden');
-            document.querySelectorAll('.assistant-feedback-popover').forEach(p => p.classList.add('hidden'));
+            closeAllFeedbackPopovers();
             if (isHidden) {
-                popover.classList.remove('hidden');
+                const row = document.querySelector(`.assistant-action-row[data-message-id="${messageId}"]`);
+                const anchor = button || row?.querySelector('[data-assistant-action="feedback_down"]');
+                if (anchor) {
+                    positionFeedbackPopover(popover, anchor);
+                } else {
+                    popover.classList.remove('hidden');
+                }
                 popover.querySelector('textarea')?.focus();
             }
         }
@@ -11207,12 +11296,12 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             btn.classList.toggle('is-selected');
         }
 
-        function submitAssistantNegativeFeedback(messageId) {
+        async function submitAssistantNegativeFeedback(messageId, shouldRegenerate = false) {
             const popover = document.getElementById(`assistant-feedback-popover-${messageId}`);
             if (!popover) return;
             const selectedTags = Array.from(popover.querySelectorAll('.feedback-tag-chip.is-selected')).map(el => el.textContent.trim());
             const commentEl = document.getElementById(`feedback-comment-${messageId}`);
-            let commentText = String(commentEl?.value || '').trim().slice(0, 200);
+            const commentText = String(commentEl?.value || '').trim().slice(0, 200);
 
             let sanitizedComment = commentText;
             if (window.JarvisDlp?.dlpGateway && commentText) {
@@ -11223,17 +11312,29 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             const row = document.querySelector(`.assistant-action-row[data-message-id="${messageId}"]`);
             const btnUp = row?.querySelector('[data-assistant-action="feedback_up"]');
             const btnDown = row?.querySelector('[data-assistant-action="feedback_down"]');
-            if (btnDown) btnDown.classList.add('is-active', 'text-rose-400');
-            if (btnUp) btnUp.classList.remove('is-active', 'text-emerald-400');
+            if (btnDown) {
+                btnDown.classList.add('is-active', 'is-feedback-down', 'text-rose-400');
+                btnDown.setAttribute('aria-pressed', 'true');
+            }
+            if (btnUp) {
+                btnUp.classList.remove('is-active', 'is-feedback-up', 'text-emerald-400');
+                btnUp.setAttribute('aria-pressed', 'false');
+            }
+            persistFeedbackRating(messageId, -1);
 
-            const meta = getAssistantMessageMeta(messageId) || {};
+            const meta = (typeof getAssistantMessageMeta === 'function' ? getAssistantMessageMeta(messageId) : null) || {};
             const turnId = meta.turnId || messageId;
+            const query = meta.userMessage || meta.prompt || '';
+            const response = meta.rawText || meta.text || '';
+
             if (window.JarvisObservability?.recordFeedbackAudit) {
                 window.JarvisObservability.recordFeedbackAudit({
                     messageId,
                     turnId,
+                    rating: 'down',
                     score: -1,
                     tags: selectedTags,
+                    hasComment: Boolean(sanitizedComment),
                     comment: sanitizedComment
                 });
             }
@@ -11253,17 +11354,57 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 detail: { messageId, turnId, score: -1, tags: selectedTags, comment: sanitizedComment }
             }));
 
-            if (selectedTags.includes('Inaccurate') || selectedTags.includes('Tone')) {
-                if (typeof JarvisSelfImprovingMemory !== 'undefined' && (typeof isPersonalizationEnabled !== 'function' || isPersonalizationEnabled())) {
-                    const directive = selectedTags.includes('Inaccurate')
-                        ? 'Be strictly factual, double check claims, and verify before asserting.'
-                        : 'Maintain an objective, neutral, professional tone without unnecessary repetition.';
-                    JarvisSelfImprovingMemory.learnExplicitRule?.(directive, 'feedback').catch(() => {});
-                }
+            // Feed ALL structured tags + user comments into the closed-loop Self-Improving Memory Engine
+            const memEngine = (typeof globalThis !== 'undefined' && globalThis.JarvisSelfImprovingMemory) ||
+                (typeof JarvisSelfImprovingMemory !== 'undefined' ? JarvisSelfImprovingMemory : null);
+            let learnedRule = null;
+            if (memEngine && (typeof isPersonalizationEnabled !== 'function' || isPersonalizationEnabled())) {
+                try {
+                    const reasonSummary = [selectedTags.join(', '), sanitizedComment].filter(Boolean).join(': ');
+                    if (typeof memEngine.distillNegativeFeedback === 'function') {
+                        learnedRule = await memEngine.distillNegativeFeedback(reasonSummary, query, response, {
+                            tags: selectedTags,
+                            comment: sanitizedComment
+                        });
+                    } else if (typeof memEngine.learnExplicitRule === 'function' && reasonSummary) {
+                        learnedRule = await memEngine.learnExplicitRule(`Address user feedback: ${reasonSummary}`, 'feedback');
+                    }
+                } catch (_) {}
             }
 
+            // Reset popover inputs and close cleanly
+            popover.querySelectorAll('.feedback-tag-chip.is-selected').forEach(el => el.classList.remove('is-selected'));
+            if (commentEl) commentEl.value = '';
             closeFeedbackPopover(messageId);
+
+            if (typeof showTemporaryMessage === 'function') {
+                showTemporaryMessage(learnedRule
+                    ? 'Feedback saved — JARVIS adapted for future replies.'
+                    : 'Feedback recorded. Thank you!');
+            }
+
+            if (shouldRegenerate && typeof regenerateAssistantMessage === 'function') {
+                void regenerateAssistantMessage(messageId);
+            }
         }
+
+        if (!window.__jarvisFeedbackPopoverListenersBound) {
+            window.__jarvisFeedbackPopoverListenersBound = true;
+            document.addEventListener('pointerdown', (e) => {
+                if (e.target?.closest?.('.assistant-feedback-popover, [data-assistant-action="feedback_down"]')) return;
+                closeAllFeedbackPopovers();
+            }, true);
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') closeAllFeedbackPopovers();
+            });
+        }
+
+        window.handleAssistantActionInline = handleAssistantActionInline;
+        window.handleAssistantPositiveFeedback = handleAssistantPositiveFeedback;
+        window.handleAssistantNegativeFeedbackClick = handleAssistantNegativeFeedbackClick;
+        window.closeFeedbackPopover = closeFeedbackPopover;
+        window.toggleFeedbackTag = toggleFeedbackTag;
+        window.submitAssistantNegativeFeedback = submitAssistantNegativeFeedback;
 
         function handleAssistantActionClick(event) {
             const button = event.target?.closest?.('[data-assistant-action]');
@@ -16856,11 +16997,12 @@ async function sendTextInput(submission = {}) {
 
                 if (window.JarvisUnifiedMemory?.FEATURE_UNIFIED_MEMORY) {
                     processUnifiedMemoryTurn(text, inputSource === 'voice' || inputSource === 'vtt');
-                } else if (text && typeof JarvisSelfImprovingMemory !== 'undefined' && (typeof isPersonalizationEnabled !== 'function' || isPersonalizationEnabled())) {
+                }
+                if (text && typeof JarvisSelfImprovingMemory !== 'undefined' && (typeof isPersonalizationEnabled !== 'function' || isPersonalizationEnabled())) {
                     const lastAssistantTurn = Array.isArray(conversationHistory) && conversationHistory.length
                         ? (conversationHistory[conversationHistory.length - 1]?.ai || '')
                         : '';
-                    JarvisSelfImprovingMemory.processUserMessage(text, lastAssistantTurn).catch(() => {});
+                    Promise.resolve(JarvisSelfImprovingMemory.processUserMessage(text, lastAssistantTurn)).catch(() => {});
                 }
                 const preserveTranscript = submission?.preserveTranscript === true;
                 const selectionGrounding = pendingSelectionGrounding
@@ -29357,19 +29499,29 @@ function renderMemoryManagerList() {
     }
 
     if (currentMemoryManagerTab === 'learned') {
-        const rules = (typeof JarvisSelfImprovingMemory !== 'undefined' ? JarvisSelfImprovingMemory.getAll() : [])
+        const memEngine = (typeof globalThis !== 'undefined' && globalThis.JarvisSelfImprovingMemory) ||
+            (typeof JarvisSelfImprovingMemory !== 'undefined' ? JarvisSelfImprovingMemory : null);
+        const rules = (memEngine?.getAll ? memEngine.getAll() : [])
             .filter(r => !query || r.directive.toLowerCase().includes(query) || (r.category && r.category.toLowerCase().includes(query)));
+        const stats = typeof memEngine?.getStats === 'function' ? memEngine.getStats() : null;
+        const statsBanner = stats && (stats.positiveCount > 0 || stats.negativeCount > 0 || stats.activeRules > 0)
+            ? `<div class="memory-manager-item" style="margin-bottom:8px;opacity:0.9;font-size:12px;"><strong>Self-Improving Loop:</strong> ${stats.activeRules} active rule${stats.activeRules === 1 ? '' : 's'} (${stats.globalRules || 0} global, ${stats.topicRules || 0} topic) · 👍 ${stats.positiveCount || 0} · 👎 ${stats.negativeCount || 0}${stats.satisfactionRate !== null && stats.satisfactionRate !== undefined ? ` (${stats.satisfactionRate}% helpful)` : ''}</div>`
+            : '';
 
         if (!rules.length) {
-            list.innerHTML = '<div class="memory-manager-empty">No learned adaptations yet. The engine automatically learns from your corrections and feedback during conversation.</div>';
+            list.innerHTML = `${statsBanner}<div class="memory-manager-empty">No learned adaptations yet. Use 👍/👎 feedback or tell JARVIS how you prefer answers, and it adapts automatically.</div>`;
             return;
         }
 
-        list.innerHTML = rules.map(rule => `
+        list.innerHTML = statsBanner + rules.map(rule => {
+            const confPct = Math.round(Number(rule.confidence || 0.75) * 100);
+            const scopeLabel = (rule.scope || 'global') === 'global' ? 'Global' : 'Topic';
+            return `
             <article class="memory-manager-item ${rule.enabled !== false ? 'is-pinned' : ''}">
                 <div class="memory-manager-item-main">
                     <div class="memory-manager-item-title">
                         <strong>${escapeHtml(rule.directive)}</strong>
+                        <span class="learned-rule-badge">${escapeHtml(scopeLabel)} · ${confPct}%</span>
                         <span class="learned-rule-badge">${escapeHtml(rule.category || 'adaptation')}</span>
                         <span>${rule.enabled !== false ? 'Active' : 'Disabled'}</span>
                     </div>
@@ -29380,7 +29532,8 @@ function renderMemoryManagerList() {
                     <button type="button" onclick="deleteLearnedRule('${escapeJsString(rule.id)}')">Delete</button>
                 </div>
             </article>
-        `).join('');
+        `;
+        }).join('');
         return;
     }
 
@@ -29897,6 +30050,32 @@ const JarvisSelfImprovingMemory = {
         await this.save();
     },
     
+    async learnExplicitRule(directive = '', source = 'feedback', options = {}) {
+        if (typeof globalThis !== 'undefined' && globalThis.JarvisSelfImprovingMemory && globalThis.JarvisSelfImprovingMemory !== this && typeof globalThis.JarvisSelfImprovingMemory.learnExplicitRule === 'function') {
+            return globalThis.JarvisSelfImprovingMemory.learnExplicitRule(directive, source, options);
+        }
+        const clean = String(directive || '').trim();
+        if (!clean) return null;
+        const item = { id: 'pref_' + Date.now().toString(36), category: options.category || 'feedback', directive: clean, source, enabled: true, detectedAt: Date.now() };
+        this.preferences.push(item);
+        await this.save();
+        return item;
+    },
+
+    async recordPositiveFeedback(payload = {}) {
+        if (typeof globalThis !== 'undefined' && globalThis.JarvisSelfImprovingMemory && globalThis.JarvisSelfImprovingMemory !== this && typeof globalThis.JarvisSelfImprovingMemory.recordPositiveFeedback === 'function') {
+            return globalThis.JarvisSelfImprovingMemory.recordPositiveFeedback(payload);
+        }
+        return { ok: true, reinforced: 0 };
+    },
+
+    getStats() {
+        if (typeof globalThis !== 'undefined' && globalThis.JarvisSelfImprovingMemory && globalThis.JarvisSelfImprovingMemory !== this && typeof globalThis.JarvisSelfImprovingMemory.getStats === 'function') {
+            return globalThis.JarvisSelfImprovingMemory.getStats();
+        }
+        return { totalRules: this.preferences.length, activeRules: this.preferences.filter(p => p.enabled !== false).length };
+    },
+
     injectIntoSystemPrompt(baseSystemPrompt = '', activeQuery = '') {
         if (typeof globalThis !== 'undefined' && globalThis.JarvisSelfImprovingMemory && globalThis.JarvisSelfImprovingMemory !== this && typeof globalThis.JarvisSelfImprovingMemory.injectIntoSystemPrompt === 'function') {
             return globalThis.JarvisSelfImprovingMemory.injectIntoSystemPrompt(baseSystemPrompt, activeQuery);
