@@ -942,6 +942,37 @@ async function runBrowserTests() {
         assert.equal(persRes?.countWhilePaused, persRes?.persistedCountAfterReload, 'Paused personalization must preserve existing memories without adding new ones');
         console.log('[PASS] Single thumbs bar & full Personalized Experience lifecycle verified end-to-end');
 
+        // Test 17: Fast-Stream RAF Race & Zero Lingering Vertical Blinker Caret
+        const evalStreamBlinkerRace = await sendCommand('Runtime.evaluate', {
+            expression: `(async () => {
+                const msgId = createStreamingAssistantMessage({ userMessage: 'Hey' });
+                // Simulate fast Groq token chunk followed immediately by done before next animation frame
+                updateStreamingAssistantMessage(msgId, 'How can I', { userMessage: 'Hey', streaming: true });
+                await new Promise(r => setTimeout(r, 5));
+                updateStreamingAssistantMessage(msgId, 'How can I help you today?', { userMessage: 'Hey', streaming: false });
+                await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+                await new Promise(r => setTimeout(r, 80));
+
+                const row = findAssistantMessageRow(msgId);
+                const textEl = row?.querySelector('.assistant-message-text');
+                const stillHasStreamingClass = Boolean(textEl?.classList?.contains('is-streaming'));
+                const renderedText = (textEl?.textContent || '').trim();
+                const afterContent = textEl ? getComputedStyle(textEl, '::after').content : '';
+                const blinkerNodes = document.querySelectorAll('#chat-synthesizing-blinker, .synthesizing-blinker').length;
+                row?.remove();
+                return { stillHasStreamingClass, renderedText, afterContent, blinkerNodes };
+            })()`,
+            awaitPromise: true,
+            returnByValue: true
+        });
+        const raceRes = evalStreamBlinkerRace?.result?.result?.value || evalStreamBlinkerRace?.result?.value;
+        console.log('Fast-stream RAF race & blinker elimination verification:', raceRes);
+        assert.equal(raceRes?.stillHasStreamingClass, false, 'Finalized message must NEVER retain .is-streaming after pending RAF frames');
+        assert.equal(raceRes?.renderedText, 'How can I help you today?', 'Pending streaming RAF must NEVER overwrite finalized reply');
+        assert.equal(raceRes?.afterContent, 'none', 'Assistant message must NOT render a blinking ::after vertical caret');
+        assert.equal(raceRes?.blinkerNodes, 0, 'Synthesizing blinker must be removed on completion');
+        console.log('[PASS] Fast-stream RAF race fixed and lingering vertical caret blinkers eliminated');
+
         // Test Vercel Serverless Function Count limit (must be <= 12 on Hobby plan)
         const fs = await import('node:fs');
         const path = await import('node:path');
