@@ -137,7 +137,11 @@ export default async function handler(req, res) {
             return sendVisionError(res, 503, 'vision_provider_unavailable', 'Image recognition requires a Gemini (GEMINI_API_KEY) or Groq Vision (GROQ_API_KEY) API key configured in the environment.');
         }
 
-        const isMathOrProblemQuery = !prompt || String(prompt).trim() === '?' || /\b(?:solve|calculate|find|compute|radius|diameter|area|equation|answer|geometry|triangle|circle|math|\?)\b/i.test(String(prompt));
+        const trimmedPrompt = String(prompt || '').trim();
+        const isMathOrProblemQuery = Boolean(trimmedPrompt) && (
+            /\b(?:solve|calculate|compute|radius|diameter|area|perimeter|volume|equation|quadratic|integral|derivative|geometry|triangle|circle|hypotenuse|algebra|math|proof|simplify|factor)\b/i.test(trimmedPrompt) ||
+            /\bfind\s+(?:the\s+)?(?:value|x|y|z|area|length|radius|angle|perimeter|volume|root|solution|distance|slope)\b/i.test(trimmedPrompt)
+        );
         const activeTask = (task === 'general_vision' && isMathOrProblemQuery) ? 'math_ocr_solve' : task;
 
         if (activeTask === 'math_ocr_solve') { 
@@ -261,9 +265,9 @@ const GEMINI_API_VERSIONS = ['v1beta', 'v1'];
 const GEMINI_MODEL_FALLBACKS = [
     'gemini-3.8-flash',
     'gemini-3.7-flash',
-    'gemini-2.5-pro',
     'gemini-2.5-flash',
     'gemini-2.0-flash',
+    'gemini-2.5-pro',
     'gemini-2.5-flash-lite',
     'gemini-flash-latest'
 ];
@@ -277,6 +281,31 @@ const GROQ_TEXT_MODEL_FALLBACKS = [
     'qwen/qwen3.8-27b',
     'qwen-3.8-27b'
 ];
+
+const VISION_UNAVAILABLE_MODEL_TTL_MS = 10 * 60 * 1000;
+const VISION_UNAVAILABLE_MODELS = new Map();
+
+function isVisionModelUnavailable(key) {
+    const expiresAt = VISION_UNAVAILABLE_MODELS.get(key);
+    if (!expiresAt) return false;
+    if (Date.now() > expiresAt) {
+        VISION_UNAVAILABLE_MODELS.delete(key);
+        return false;
+    }
+    return true;
+}
+
+function markVisionModelUnavailable(key, status) {
+    if (status === 404 || status === 410) {
+        VISION_UNAVAILABLE_MODELS.set(key, Date.now() + VISION_UNAVAILABLE_MODEL_TTL_MS);
+    }
+}
+
+function filterVisionCandidates(prefix, candidates) {
+    const unique = [...new Set(candidates.filter(Boolean))];
+    const available = unique.filter(m => !isVisionModelUnavailable(`${prefix}:${m}`));
+    return available.length > 0 ? available : unique;
+}
 
 function getVisionProviders(req = null) {
     const rawGroq = String(
@@ -339,10 +368,10 @@ async function callVisionText({ providers, systemPrompt, mimeType, imageBase64 }
 }
 
 async function callGroqVisionText({ apiKey, configuredModel, systemPrompt, mimeType, imageBase64 }) {
-    const candidates = [
+    const candidates = filterVisionCandidates('groq-vision', [
         String(configuredModel || '').trim(),
         ...GROQ_VISION_MODEL_FALLBACKS
-    ].filter(Boolean);
+    ]);
     const dataUrl = `data:${mimeType || 'image/jpeg'};base64,${imageBase64}`;
 
     for (const model of candidates) {
@@ -355,7 +384,7 @@ async function callGroqVisionText({ apiKey, configuredModel, systemPrompt, mimeT
                 },
                 body: JSON.stringify({
                     model,
-                    temperature: 0.15,
+                    temperature: 0.12,
                     max_tokens: 3000,
                     messages: [
                         {
@@ -368,6 +397,10 @@ async function callGroqVisionText({ apiKey, configuredModel, systemPrompt, mimeT
                     ]
                 })
             });
+            if (response.status === 404 || response.status === 410) {
+                markVisionModelUnavailable(`groq-vision:${model}`, response.status);
+                continue;
+            }
             if (!response.ok) continue;
             const data = await response.json();
             const text = extractGroqText(data);
@@ -379,15 +412,24 @@ async function callGroqVisionText({ apiKey, configuredModel, systemPrompt, mimeT
 
 async function callGeminiVision({ apiKey, configuredModel = '', systemPrompt, mimeType, imageBase64 }) {
     let lastError = null;
-    const modelFallbacks = [
+    const modelFallbacks = filterVisionCandidates('gemini-vision', [
         String(configuredModel || '').trim(),
         ...GEMINI_MODEL_FALLBACKS
-    ].filter(Boolean);
+    ]);
 
     for (const apiVersion of GEMINI_API_VERSIONS) {
         for (const model of modelFallbacks) {
+            if (apiVersion === 'v1' && /^gemini-(?:3\.|2\.5)/i.test(model)) continue;
             try {
-                const response = await fetchWithTimeout(
+                const baseGenConfig = {
+                    temperature: 0.12,
+                    topP: 0.9,
+                    maxOutputTokens: 1800
+                };
+                if (apiVersion === 'v1beta') {
+                    baseGenConfig.mediaResolution = 'MEDIA_RESOLUTION_HIGH';
+                }
+                const makeReq = (genConfig) => fetchWithTimeout(
                     `https://generativelanguage.googleapis.com/${apiVersion}/models/${model}:generateContent?key=${apiKey}`,
                     {
                         method: 'POST',
@@ -406,16 +448,21 @@ async function callGeminiVision({ apiKey, configuredModel = '', systemPrompt, mi
                                     ]
                                 }
                             ],
-                            generationConfig: {
-                                temperature: 0.2,
-                                topP: 0.9,
-                                maxOutputTokens: 1500
-                            }
+                            generationConfig: genConfig
                         })
                     }
                 );
+                let response = await makeReq(baseGenConfig);
+                if (response.status === 400 && baseGenConfig.mediaResolution) {
+                    const fallbackGenConfig = { ...baseGenConfig };
+                    delete fallbackGenConfig.mediaResolution;
+                    response = await makeReq(fallbackGenConfig);
+                }
 
                 if (!response.ok) {
+                    if (response.status === 404 || response.status === 410) {
+                        markVisionModelUnavailable(`gemini-vision:${model}`, response.status);
+                    }
                     let errorDetail = '';
                     try {
                         const raw = await response.text();
@@ -1029,6 +1076,7 @@ function buildVisionPrompt(userPrompt, task) {
         '     * In geometric diagrams, trace segment endpoints carefully: if a segment passes through a circle center, determine which portion is the radius R and which is (L - R); do not assume numbers are triangle legs without checking their actual endpoints.',
         '     * If the user prompt is "?", "solve", or empty, execute the solution to the embedded question or problem directly.',
         '- UNCERTAINTY & ZERO-HALLUCINATION RULE: If uncertain about any identity, object, model, brand, or visual detail, state uncertainty clearly rather than guessing. Never invent, assume, or fabricate unseen devices, screens, backgrounds, or contexts.',
+        '- FLAGS, EMBLEMS, LOGOS & FINE-GRAINED OBJECT VERIFICATION: Before naming any flag, crest, logo, badge, symbol, or look-alike object, verify exact pixel geometry first: (1) division/layout (horizontal vs. vertical stripes, canton, cross, hoist triangle), (2) exact ordered color sequence top-to-bottom or left/hoist-to-right/fly (never swap left/right), (3) exact shades, star/crescent/emblem count and placement, and approximate aspect ratio. Cross-check known visual twins (e.g., Chad vs. Romania, Indonesia vs. Monaco vs. Poland, Ireland vs. Côte d\'Ivoire, Mali vs. Guinea, Luxembourg vs. Netherlands, Slovenia vs. Slovakia vs. Russia, Australia vs. New Zealand). If two look-alikes are genuinely indistinguishable in the image, state the primary match in "answer" and note the look-alike caveat in "uncertainty" and "distinctiveFeatures".',
         '- PERSONS & PORTRAIT RULE: When a person, portrait, or group of people appears in the image, identify public figures when clearly recognizable from prominent visual features. For unknown or non-public individuals, provide a clear, respectful description of:',
         '     * How the person or people look (apparent age range, expression, hair color/style, facial features).',
         '     * What they are wearing (clothing type, colors, patterns, accessories like glasses, watch, hat, jewelry).',
