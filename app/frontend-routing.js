@@ -248,6 +248,107 @@ export function vectorCosineSimilarity(a, b) {
     return dot;
 }
 
+// =========================================================================
+// Semantic Domain Intent Competition (Zero Negative Regex Blocklists)
+// =========================================================================
+const DOMAIN_INTENT_PROTOTYPES = Object.freeze([
+    {
+        id: 'weather_meteorology',
+        text: 'weather temperature rain raining rainfall snow snowing humidity humid wind windy sunny cloudy overcast storm thunder thunderstorm drizzle chilly freezing umbrella aqi air quality uv index celsius fahrenheit degrees climate weather forecast atmospheric conditions precipitation outside'
+    },
+    {
+        id: 'creative_astrology',
+        text: 'astrology horoscope zodiac relationship love marriage compatibility tarot numerology birth chart planetary transit fortune reading creative writing story poem fiction'
+    },
+    {
+        id: 'finance_business',
+        text: 'stock share crypto bitcoin ethereum market cap revenue sales quarterly earnings profit gdp inflation economy financial investment economic outlook budget demand growth valuation price'
+    },
+    {
+        id: 'sports_live',
+        text: 'live score match cricket football soccer nba ipl premier league standings points table tournament winner world cup super bowl fixture schedule game stats'
+    },
+    {
+        id: 'general_knowledge',
+        text: 'explain define history science mathematics code programming tutorial biography geography election population traffic box office technology research'
+    }
+]);
+
+const DOMAIN_INTENT_BM25 = new BM25Index({ k1: 1.2, b: 0.75, minDocCountForRatio: 10 });
+const COMPILED_DOMAIN_PROTOTYPES = DOMAIN_INTENT_PROTOTYPES.map((proto) => {
+    DOMAIN_INTENT_BM25.addDocument(proto.id, proto.text, proto);
+    return {
+        id: proto.id,
+        vector: textToEmbeddingVector(proto.text, 512)
+    };
+});
+
+export function classifyDomainIntent(query = '') {
+    const raw = String(query || '').trim();
+    if (!raw) {
+        return { domain: 'general_knowledge', scores: {}, margin: 0 };
+    }
+    const queryVec = textToEmbeddingVector(raw, 512);
+    const bm25Hits = DOMAIN_INTENT_BM25.search(raw, { topK: DOMAIN_INTENT_PROTOTYPES.length });
+    const bm25Map = new Map(bm25Hits.map(hit => [hit.doc.id, Math.min(1.0, hit.score / 4.5)]));
+
+    const scores = {};
+    const ranked = COMPILED_DOMAIN_PROTOTYPES.map((proto) => {
+        const semSim = vectorCosineSimilarity(queryVec, proto.vector);
+        const bm25 = bm25Map.get(proto.id) || 0;
+        const combined = semSim * 0.55 + bm25 * 0.45;
+        scores[proto.id] = Number(combined.toFixed(4));
+        return { id: proto.id, score: combined };
+    }).sort((a, b) => b.score - a.score);
+
+    const top = ranked[0] || { id: 'general_knowledge', score: 0 };
+    const second = ranked[1] || { id: 'general_knowledge', score: 0 };
+    return {
+        domain: top.id,
+        scores,
+        margin: Number((top.score - second.score).toFixed(4))
+    };
+}
+
+export function isMeteorologicalWeatherIntent(query = '') {
+    const raw = String(query || '').trim();
+    const t = raw.toLowerCase();
+    if (!t) return false;
+
+    // Exclude personal illness phrases ("I have a cold", "feeling chilled") without atmospheric context
+    const hasPersonalIllness = /\b(?:i(?:'| a)?m|i have|i got|feeling|feel)\b/.test(t) &&
+        /\b(?:cold|fever|cough|sick|chills)\b/.test(t);
+    const hasDirectWeatherCue = /\b(?:weather|temperature|humidity|humid|uv\s+index|rain\s+chances?|air\s+quality|aqi|precipitation|°[cf]|weather\s+forecast|5-day\s+forecast|7-day\s+forecast|10-day\s+forecast|hourly\s+forecast)\b/.test(t);
+    if (hasPersonalIllness && !hasDirectWeatherCue && !/\boutside\b/.test(t)) {
+        return false;
+    }
+
+    // Conceptual science/educational questions ("How does an ocean current affect global climate?") are NOT live weather lookups
+    const isConceptualScienceAsk = /\b(?:how\s+does|how\s+do|why\s+does|why\s+do|what\s+causes|explain\s+(?:the\s+)?|define\s+|global\s+climate|climate\s+change|water\s+cycle)\b/.test(t);
+    if (isConceptualScienceAsk && !/\b(?:today|now|tomorrow|tonight|outside|right\s+now|weather\s+in|weather\s+for|weather\s+at)\b/.test(t)) {
+        return false;
+    }
+
+    // 1. Positive live meteorological signal (explicit weather/atmospheric lookup)
+    if (/\b(?:weather|temperature|humidity|uv\s+index|rain\s+chances?|air\s+quality|aqi)\s+(?:in|for|at|today|now|tomorrow|tonight|this\s+week|right\s+now|outside|here)\b/.test(t) ||
+        /\b(?:weather\s+today|weather\s+now|weather\s+forecast|5-day\s+forecast|7-day\s+forecast|10-day\s+forecast|hourly\s+forecast|weekly\s+weather|current\s+weather|local\s+weather)\b/.test(t) ||
+        /\b(?:what(?:'?s|\s+is)|how(?:'?s|\s+is))\s+(?:the\s+)?(?:weather|temperature|humidity|aqi|air\s+quality)\b/.test(t) ||
+        /\b(?:will\s+it\s+(?:rain|snow|be\s+(?:hot|cold|humid|sunny|cloudy|windy))|is\s+it\s+(?:raining|snowing|hot|cold|windy|sunny|cloudy|humid)\b)/.test(t) ||
+        /\b(?:how(?:'?s|\s+is)\s+it\s+(?:outside|out(?:side)?|where\s+i\s+am)|what(?:'?s|\s+is)\s+it\s+like\s+(?:outside|where\s+i\s+am))\b/.test(t) ||
+        (/\b(?:outside|here|around\s+me|near\s+me|my\s+current\s+location|current\s+location|my\s+location|where\s+i\s+am)\b/.test(t) &&
+            /\b(?:hot|cold|warm|cool|rain|snow|wind|sunny|cloudy|humid|temperature|weather)\b/.test(t))) {
+        return true;
+    }
+
+    // 2. Ambiguous weather-adjacent cue ("forecast", "conditions") -> require semantic domain competition win
+    if (/\b(?:forecast|conditions?)\b/.test(t)) {
+        const classification = classifyDomainIntent(raw);
+        return classification.domain === 'weather_meteorology' && classification.margin >= 0.06;
+    }
+
+    return false;
+}
+
 export function normalizeCasualConversationText(text) {
     return String(text || '')
         .toLowerCase()
@@ -977,10 +1078,8 @@ export function classifyLiveVsNormal(text, context = {}) {
     // Financial & Cryptocurrency Markets (capability-driven, no hardcoded company names)
     const isLiveMarket = /\b(?:stock|share|shares|crypto|cryptocurrency|bitcoin|btc|ethereum|eth|solana|gold|silver|crude\s+oil|forex|fx)\s+(?:price|prices|quotes?|value|rate|rates|all-time\s+high|ath|market\s*cap|trading\s+volume)\b|\b(?:market\s*cap|market\s+valuation|stock\s+price|share\s+price|quarterly\s+earnings|earnings\s+report)\s+of\s+[a-zA-Z0-9_.-]+\b|\b(?:price|quote|exchange\s+rate|market\s+valuation)\s+of\s+(?:[a-zA-Z0-9_.-]+\s+)?(?:stock|shares?|equity|crypto|cryptocurrency|coin|token|assets?|gold|silver|bitcoin|btc|eth|ethereum)\b|\b[a-zA-Z0-9_.-]+\s+(?:stock\s+price|market\s*cap)\b|\b(?:exchange\s+rate|currency\s+exchange|conversion\s+rate|market\s+valuation|quarterly\s+earnings|earnings\s+report)\b/i.test(raw);
 
-    // Weather & Real-time environmental (exclude non-weather forecasts like astrology/financial/sales)
-    const isNonWeatherForecast = /\b(?:astrolog\w*|horoscope|zodiac|tarot|relationship|career|financial|economic|economy|market|stock|crypto|revenue|sales|earnings|election|demand|growth|sagittarius|aries|taurus|gemini|cancer|leo|virgo|libra|scorpio|capricorn|aquarius|pisces)\b/i.test(raw);
-    const hasExplicitWeatherTerm = /\b(?:weather|temperature|humidity|uv\s+index|rain|raining|snow|air\s+quality|aqi)\b/i.test(raw);
-    const isLiveWeather = (!isNonWeatherForecast || hasExplicitWeatherTerm) && /\b(?:weather|forecast|temperature|humidity|uv\s+index|rain\s+chances?|air\s+quality|aqi)\s+(?:in|for|at|today|now|tomorrow|this\s+week|right\s+now)\b|\b(?:is\s+it\s+raining|will\s+it\s+rain|weather\s+today|weather\s+forecast)\b/i.test(raw);
+    // Weather & Real-time environmental (positive meteorological signals + semantic domain competition)
+    const isLiveWeather = isMeteorologicalWeatherIntent(raw);
 
     // Live Sports, Scores, Schedules & Standings
     const isLiveSports = /\b(?:live\s+(?:[a-z]+\s+){0,2}scores?|match\s+scores?|cricket\s+scores?|football\s+scores?|nba\s+scores?|game\s+scores?|ipl\s+scores?|current\s+scores?|who\s+won\s+yesterday|who\s+is\s+winning|match\s+status|premier\s+league\s+standings|points\s+table|who\s+won\s+(?:the\s+)?(?:latest|last|recent)\s+(?:super\s+bowl|fifa|world\s+cup|match|tournament|game))\b/i.test(raw);
