@@ -6,7 +6,7 @@ globalThis.JarvisApi = Object.freeze({ ApiError, postJson });
 import { createApplicationState } from './state.js?v=2.4.1';
 import { createSafeStorage } from './storage.js?v=2.4.1';
 import { installSpeechInputUI } from './speech-input.js?v=2.4.1';
-import * as JarvisFrontendRouting from './frontend-routing.js?v=2.4.1';
+import * as JarvisFrontendRouting from './frontend-routing.js?v=2.4.2';
 import * as JarvisFailurePolicy from './failure-policy.js?v=2.4.1';
 import * as JarvisPlaceGrounding from './place-grounding.js?v=2.4.1';
 import * as JarvisObservability from './observability.js?v=2.4.1';
@@ -23,7 +23,7 @@ import { highlightCode, normalizeLang } from './code-highlighter.js?v=2.4.1';
 import { renderMathInText, formatLatexExpression } from './math-renderer.js?v=2.4.3';
 import * as JarvisMarkdownRenderer from './markdown-renderer.js?v=2.4.4';
 import * as JarvisAgentOrchestrator from './agent-orchestrator.js?v=2.4.1';
-import * as JarvisLocationSuite from './location-suite.js?v=2.4.1';
+import * as JarvisLocationSuite from './location-suite.js?v=2.4.2';
 
 import * as JarvisImageConfig from './image-generation-config.js?v=2.4.1';
 import * as JarvisImageStorage from './image-storage.js?v=2.4.1';
