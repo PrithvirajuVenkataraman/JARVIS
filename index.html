@@ -77,7 +77,7 @@
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
     <link rel="stylesheet" href="styles.css?v=2.5.6">
     <script src="science-format.js?v=2.0.1"></script>
-    <script type="module" src="app/bootstrap.js?v=2.5.8"></script>
+    <script type="module" src="app/bootstrap.js?v=2.5.9"></script>
 </head>
 <body class="dark min-h-screen bg-black text-white">
 
@@ -2658,6 +2658,7 @@ function processUnifiedMemoryTurn(text, isVoiceTurn = false) {
 
     if (anyChanged) {
         showMemoryUpdatedToast({ message: 'Memory updated', canUndo: true, isVoiceTurn });
+        window.JarvisWorkspaceDurability?.workspaceTabSync?.broadcast?.('memories_updated', { ts: Date.now() });
         if (typeof renderMemoryManagerList === 'function') {
             renderMemoryManagerList();
         }
@@ -7574,6 +7575,29 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                                     </div>
                                 </button>
 
+                                <!-- Workspace Backup & Storage Health Row -->
+                                <button type="button" class="settings-row settings-row-interactive" id="settings-row-workspace-durability" onclick="switchSettingsView('workspace_durability')" aria-label="Workspace Backup & Storage Health">
+                                    <div class="settings-row-left">
+                                        <div class="settings-icon-badge settings-icon-emerald" aria-hidden="true">
+                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                <ellipse cx="12" cy="5" rx="9" ry="3"/>
+                                                <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
+                                                <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+                                            </svg>
+                                        </div>
+                                        <div class="settings-row-text">
+                                            <h3 class="settings-row-title">Workspace Backup &amp; Storage Health</h3>
+                                            <p class="settings-row-desc">IndexedDB durability, multi-tab sync &amp; AES-256 encrypted backup</p>
+                                        </div>
+                                    </div>
+                                    <div class="settings-row-right">
+                                        <span id="workspace-durability-status-pill" class="settings-row-status configured">IndexedDB</span>
+                                        <svg class="settings-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                            <path d="M9 18l6-6-6-6"/>
+                                        </svg>
+                                    </div>
+                                </button>
+
                                 <!-- Local Storage & Privacy Row -->
                                 <div class="settings-row">
                                     <div class="settings-row-left">
@@ -8086,6 +8110,86 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
                             </div>
                         </div>
                     </div>
+
+                    <!-- Sub-View 5: Workspace Backup & Storage Health -->
+                    <div id="settings-view-workspace-durability" class="settings-view-panel" style="display:none;">
+                        <div class="help-modal-header">
+                            <button type="button" onclick="switchSettingsView('main')" class="help-modal-back-btn settings-subview-back-btn" aria-label="Back to Settings">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <path d="M19 12H5"></path>
+                                    <path d="M12 19l-7-7 7-7"></path>
+                                </svg>
+                            </button>
+                            <div class="help-modal-title-block">
+                                <h2 class="settings-modal-heading">Backup &amp; Storage Health</h2>
+                            </div>
+                            <button type="button" onclick="switchSettingsView('main')" class="help-modal-ok-btn" aria-label="Done" style="background:#ffffff!important;color:#000000!important;-webkit-text-fill-color:#000000!important;font-weight:750!important;">
+                                Done
+                            </button>
+                        </div>
+                        <div class="help-modal-body custom-scrollbar">
+                            <div class="settings-section-label">STORAGE HEALTH &amp; MULTI-TAB SYNC</div>
+                            <div class="settings-group-card mb-3" style="padding:14px;">
+                                <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+                                    <span class="text-xs font-semibold text-neutral-100">Dual-Tier IndexedDB Engine</span>
+                                    <div class="flex items-center gap-2">
+                                        <span id="durability-active-tabs-badge" class="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 font-medium">1 Active Tab</span>
+                                        <span id="durability-persist-badge" class="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 font-medium">Best-Effort</span>
+                                    </div>
+                                </div>
+                                <div class="w-full h-2 rounded-full bg-white/10 overflow-hidden mb-2">
+                                    <div id="durability-quota-bar" class="h-full rounded-full transition-all duration-300" style="width:2%;background:linear-gradient(90deg,#06b6d4,#10b981);"></div>
+                                </div>
+                                <div id="durability-health-stats" class="text-[11px] text-neutral-300 leading-relaxed mb-3">
+                                    Checking browser storage health...
+                                </div>
+                                <div class="flex flex-wrap items-center gap-2">
+                                    <button type="button" id="btn-request-persistent-storage" class="settings-chip-btn" onclick="requestWorkspacePersistentStorage()">Protect Storage</button>
+                                    <button type="button" class="settings-chip-btn" onclick="renderWorkspaceDurabilityView()">Refresh Metrics</button>
+                                </div>
+                            </div>
+
+                            <div class="settings-section-label">PORTABLE ENCRYPTED BACKUP</div>
+                            <div class="settings-group-card mb-3" style="padding:14px;">
+                                <p class="text-[11px] text-neutral-300 leading-relaxed mb-2.5">
+                                    Export all durable chats, unified memories, self-improving rules, and custom instructions into a portable archive. BYOK API keys are strictly excluded for security.
+                                </p>
+                                <label class="flex items-center gap-2 text-xs text-neutral-200 mb-2 cursor-pointer">
+                                    <input type="checkbox" id="backup-encrypt-toggle" checked onchange="toggleBackupPassphraseField()" class="rounded border-white/20">
+                                    <span>Encrypt with AES-256-GCM (PBKDF2-SHA256)</span>
+                                </label>
+                                <div id="backup-passphrase-row" class="mb-3">
+                                    <input type="password" id="backup-export-passphrase" class="w-full px-3 py-2 rounded-lg text-xs bg-white/5 border border-white/15 text-white placeholder-neutral-400" placeholder="Enter backup passphrase (min 4 chars)..." autocomplete="new-password">
+                                </div>
+                                <button type="button" id="btn-download-workspace-backup" class="settings-chip-btn" onclick="downloadEncryptedWorkspaceBackup()">
+                                    <span>Download Workspace Backup</span>
+                                </button>
+                            </div>
+
+                            <div class="settings-section-label">RESTORE WORKSPACE</div>
+                            <div class="settings-group-card mb-2" style="padding:14px;">
+                                <p class="text-[11px] text-neutral-300 leading-relaxed mb-2.5">
+                                    Import a <code>.jarvis.json</code> archive from another device. Choose Merge to combine via Last-Write-Wins or Replace to overwrite local workspace data.
+                                </p>
+                                <input type="file" id="backup-restore-file" accept=".json,application/json" class="w-full text-xs text-neutral-300 mb-2.5">
+                                <input type="password" id="backup-restore-passphrase" class="w-full px-3 py-2 rounded-lg text-xs bg-white/5 border border-white/15 text-white placeholder-neutral-400 mb-2.5" placeholder="Backup passphrase (required if encrypted)..." autocomplete="current-password">
+                                <div class="flex items-center gap-4 text-xs text-neutral-200 mb-3">
+                                    <label class="flex items-center gap-1.5 cursor-pointer">
+                                        <input type="radio" name="backup-restore-mode" value="merge" checked>
+                                        <span>Merge (Keep Existing)</span>
+                                    </label>
+                                    <label class="flex items-center gap-1.5 cursor-pointer">
+                                        <input type="radio" name="backup-restore-mode" value="replace">
+                                        <span>Replace All</span>
+                                    </label>
+                                </div>
+                                <button type="button" id="btn-restore-workspace-backup" class="settings-chip-btn" onclick="restoreWorkspaceBackupFromFile()">
+                                    <span>Restore Workspace</span>
+                                </button>
+                                <div id="backup-restore-status" class="text-[11px] text-neutral-300 mt-2"></div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             `;
 
@@ -8116,23 +8220,22 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             const subViewCompliance = document.getElementById('settings-view-compliance');
             const subViewByok = document.getElementById('settings-view-byok');
             const subViewArchInfo = document.getElementById('settings-view-architecture-info');
+            const subViewDurability = document.getElementById('settings-view-workspace-durability');
             if (!mainView) return;
+            const allSubViews = [subViewCustom, subViewCompliance, subViewByok, subViewArchInfo, subViewDurability];
+            const hideAllSubViews = () => {
+                allSubViews.forEach(v => {
+                    if (v) {
+                        v.style.display = 'none';
+                        v.classList.remove('active');
+                    }
+                });
+            };
 
             if (viewName === 'custom_instructions') {
                 mainView.style.display = 'none';
                 mainView.classList.remove('active');
-                if (subViewCompliance) {
-                    subViewCompliance.style.display = 'none';
-                    subViewCompliance.classList.remove('active');
-                }
-                if (subViewByok) {
-                    subViewByok.style.display = 'none';
-                    subViewByok.classList.remove('active');
-                }
-                if (subViewArchInfo) {
-                    subViewArchInfo.style.display = 'none';
-                    subViewArchInfo.classList.remove('active');
-                }
+                hideAllSubViews();
                 if (subViewCustom) {
                     subViewCustom.style.display = 'flex';
                     subViewCustom.classList.add('active');
@@ -8148,18 +8251,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             } else if (viewName === 'compliance') {
                 mainView.style.display = 'none';
                 mainView.classList.remove('active');
-                if (subViewCustom) {
-                    subViewCustom.style.display = 'none';
-                    subViewCustom.classList.remove('active');
-                }
-                if (subViewByok) {
-                    subViewByok.style.display = 'none';
-                    subViewByok.classList.remove('active');
-                }
-                if (subViewArchInfo) {
-                    subViewArchInfo.style.display = 'none';
-                    subViewArchInfo.classList.remove('active');
-                }
+                hideAllSubViews();
                 if (subViewCompliance) {
                     subViewCompliance.style.display = 'flex';
                     subViewCompliance.classList.add('active');
@@ -8172,18 +8264,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             } else if (viewName === 'byok') {
                 mainView.style.display = 'none';
                 mainView.classList.remove('active');
-                if (subViewCustom) {
-                    subViewCustom.style.display = 'none';
-                    subViewCustom.classList.remove('active');
-                }
-                if (subViewCompliance) {
-                    subViewCompliance.style.display = 'none';
-                    subViewCompliance.classList.remove('active');
-                }
-                if (subViewArchInfo) {
-                    subViewArchInfo.style.display = 'none';
-                    subViewArchInfo.classList.remove('active');
-                }
+                hideAllSubViews();
                 if (subViewByok) {
                     subViewByok.style.display = 'flex';
                     subViewByok.classList.add('active');
@@ -8196,41 +8277,28 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             } else if (viewName === 'architecture_info') {
                 mainView.style.display = 'none';
                 mainView.classList.remove('active');
-                if (subViewCustom) {
-                    subViewCustom.style.display = 'none';
-                    subViewCustom.classList.remove('active');
-                }
-                if (subViewCompliance) {
-                    subViewCompliance.style.display = 'none';
-                    subViewCompliance.classList.remove('active');
-                }
-                if (subViewByok) {
-                    subViewByok.style.display = 'none';
-                    subViewByok.classList.remove('active');
-                }
+                hideAllSubViews();
                 if (subViewArchInfo) {
                     subViewArchInfo.style.display = 'flex';
                     subViewArchInfo.classList.add('active');
                     const backBtn = subViewArchInfo.querySelector('.settings-subview-back-btn');
                     if (backBtn) backBtn.focus();
                 }
+            } else if (viewName === 'workspace_durability') {
+                mainView.style.display = 'none';
+                mainView.classList.remove('active');
+                hideAllSubViews();
+                if (subViewDurability) {
+                    subViewDurability.style.display = 'flex';
+                    subViewDurability.classList.add('active');
+                    if (typeof renderWorkspaceDurabilityView === 'function') {
+                        renderWorkspaceDurabilityView();
+                    }
+                    const backBtn = subViewDurability.querySelector('.settings-subview-back-btn');
+                    if (backBtn) backBtn.focus();
+                }
             } else {
-                if (subViewCustom) {
-                    subViewCustom.style.display = 'none';
-                    subViewCustom.classList.remove('active');
-                }
-                if (subViewCompliance) {
-                    subViewCompliance.style.display = 'none';
-                    subViewCompliance.classList.remove('active');
-                }
-                if (subViewByok) {
-                    subViewByok.style.display = 'none';
-                    subViewByok.classList.remove('active');
-                }
-                if (subViewArchInfo) {
-                    subViewArchInfo.style.display = 'none';
-                    subViewArchInfo.classList.remove('active');
-                }
+                hideAllSubViews();
                 mainView.style.display = 'flex';
                 mainView.classList.add('active');
 
@@ -8252,6 +8320,260 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             switchSettingsView('architecture_info');
         }
         window.openImportantInfoModal = openImportantInfoModal;
+
+        function formatStorageBytes(bytes) {
+            const n = Number(bytes) || 0;
+            if (n < 1024) return `${n} B`;
+            if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+            if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(2)} MB`;
+            return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+        }
+
+        function toggleBackupPassphraseField() {
+            const toggle = document.getElementById('backup-encrypt-toggle');
+            const row = document.getElementById('backup-passphrase-row');
+            if (row) row.style.display = toggle?.checked !== false ? '' : 'none';
+        }
+
+        async function renderWorkspaceDurabilityView() {
+            const dur = window.JarvisWorkspaceDurability;
+            const statsEl = document.getElementById('durability-health-stats');
+            const barEl = document.getElementById('durability-quota-bar');
+            const tabsEl = document.getElementById('durability-active-tabs-badge');
+            const persistEl = document.getElementById('durability-persist-badge');
+            const persistBtn = document.getElementById('btn-request-persistent-storage');
+            if (!dur) {
+                if (statsEl) statsEl.textContent = 'Durability engine loading...';
+                return;
+            }
+
+            const activeTabs = dur.workspaceTabSync?.getActiveTabCount?.() || 1;
+            if (tabsEl) {
+                tabsEl.textContent = `${activeTabs} Active ${activeTabs === 1 ? 'Tab' : 'Tabs'}`;
+            }
+
+            const health = await dur.workspaceDb.getStorageHealth();
+            if (barEl) {
+                const widthPct = Math.max(2, Math.min(100, health.estimateSupported ? health.percentUsed : health.localStoragePercent));
+                barEl.style.width = `${widthPct}%`;
+            }
+            if (persistEl) {
+                persistEl.textContent = health.persisted ? 'Persistent (Protected)' : 'Best-Effort';
+                persistEl.className = health.persisted
+                    ? 'text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-medium'
+                    : 'text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 font-medium';
+            }
+            if (persistBtn) {
+                persistBtn.style.display = health.persisted ? 'none' : '';
+            }
+            if (statsEl) {
+                const memCount = window.JarvisUnifiedMemory?.unifiedMemoryStore?.getAll?.().length || 0;
+                const ruleCount = window.JarvisSelfImprovingMemory?.getAllPreferences?.().length || 0;
+                const quotaLine = health.estimateSupported
+                    ? `Origin Storage: <strong>${formatStorageBytes(health.usageBytes)}</strong> / ${formatStorageBytes(health.quotaBytes)} (${health.percentUsed}%)`
+                    : `Local Hot-Cache: <strong>${formatStorageBytes(health.localStorageBytes)}</strong> / 5.00 MB (${health.localStoragePercent}%)`;
+                statsEl.innerHTML = [
+                    `<div>${quotaLine}</div>`,
+                    `<div>IndexedDB Durable Chats: <strong>${Math.max(health.durableSessionCount, getVisibleChatSessions().length)}</strong> &middot; Hot-Cache Keys: <strong>${health.localStorageKeys}</strong> &middot; Memories: <strong>${memCount}</strong> &middot; Learned Rules: <strong>${ruleCount}</strong></div>`
+                ].join('');
+            }
+        }
+
+        async function requestWorkspacePersistentStorage() {
+            const dur = window.JarvisWorkspaceDurability;
+            if (!dur?.workspaceDb?.requestPersistentStorage) return;
+            const granted = await dur.workspaceDb.requestPersistentStorage();
+            await renderWorkspaceDurabilityView();
+            if (typeof showTemporaryMessage === 'function') {
+                showTemporaryMessage(granted
+                    ? 'Persistent storage granted — browser will protect your JARVIS data.'
+                    : 'Browser kept best-effort persistence (install as PWA or bookmark to upgrade).');
+            }
+        }
+
+        async function collectWorkspaceBackupPayload() {
+            const dur = window.JarvisWorkspaceDurability;
+            let durableSessions = [];
+            try {
+                durableSessions = dur?.workspaceDb ? await dur.workspaceDb.loadAllSessions() : [];
+            } catch (_) {}
+            const deletedIds = Array.from(getDeletedChatSessionIds());
+            const mergedSessions = dur?.mergeChatSessionsLww
+                ? dur.mergeChatSessionsLww(getVisibleChatSessions(), durableSessions, deletedIds)
+                : getVisibleChatSessions();
+            const uStore = window.JarvisUnifiedMemory?.unifiedMemoryStore;
+            if (uStore && !uStore.isInitialized && typeof uStore.init === 'function') uStore.init();
+            const memories = uStore ? uStore.getAll() : [];
+            const learnedRules = window.JarvisSelfImprovingMemory?.getAllPreferences?.() || [];
+            const promptVal = (typeof customSystemPrompt === 'string' ? customSystemPrompt : (window.customSystemPrompt || '')).slice(0, 1200);
+            return {
+                sessions: mergedSessions,
+                memories,
+                learnedRules,
+                customSystemPrompt: promptVal,
+                settings: {
+                    personalizedExperience: typeof isPersonalizationEnabled === 'function' ? isPersonalizationEnabled() : true,
+                    themeMode: localStorage.getItem('jarvis_theme_mode') || (darkMode ? 'dark' : 'light'),
+                    selectedModel: typeof getSelectedModel === 'function' ? getSelectedModel() : 'auto',
+                    responseFormat: typeof responseFormat === 'string' ? responseFormat : 'paragraph',
+                    responseStyle: typeof responseStyle === 'string' ? responseStyle : 'balanced',
+                    piiMasking: localStorage.getItem('jarvis_pii_masking') !== 'false'
+                }
+            };
+        }
+
+        async function downloadEncryptedWorkspaceBackup() {
+            const dur = window.JarvisWorkspaceDurability;
+            if (!dur?.createWorkspaceBackup) return;
+            const encryptChecked = document.getElementById('backup-encrypt-toggle')?.checked !== false;
+            const passphrase = String(document.getElementById('backup-export-passphrase')?.value || '').trim();
+            if (encryptChecked && passphrase.length < 4) {
+                showTemporaryMessage('Enter a passphrase of at least 4 characters (or uncheck encryption).');
+                document.getElementById('backup-export-passphrase')?.focus();
+                return;
+            }
+            try {
+                const data = await collectWorkspaceBackupPayload();
+                const archiveJson = await dur.createWorkspaceBackup(data, {
+                    encrypt: encryptChecked,
+                    passphrase: encryptChecked ? passphrase : ''
+                });
+                const blob = new Blob([archiveJson], { type: 'application/json;charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                const stamp = new Date().toISOString().slice(0, 10);
+                a.href = url;
+                a.download = encryptChecked ? `jarvis-workspace-${stamp}.encrypted.jarvis.json` : `jarvis-workspace-${stamp}.jarvis.json`;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
+                showTemporaryMessage(encryptChecked
+                    ? `Encrypted backup downloaded (${data.sessions.length} chats, ${data.memories.length} memories).`
+                    : `Workspace backup downloaded (${data.sessions.length} chats, ${data.memories.length} memories).`);
+            } catch (err) {
+                showTemporaryMessage(err?.message || 'Failed to create workspace backup.');
+            }
+        }
+
+        async function applyRestoredWorkspacePayload(payload, mode = 'merge') {
+            const dur = window.JarvisWorkspaceDurability;
+            const isReplace = mode === 'replace';
+            const deletedIds = isReplace ? [] : Array.from(getDeletedChatSessionIds());
+
+            // 1. Sessions (IndexedDB + Hot-Cache + In-Memory)
+            const importedSessions = (Array.isArray(payload.sessions) ? payload.sessions : [])
+                .map(normalizeChatSession)
+                .filter(Boolean);
+            if (isReplace) {
+                try {
+                    localStorage.removeItem(CHAT_DELETED_SESSION_IDS_KEY);
+                    localStorage.removeItem(CHAT_DELETED_SESSION_TITLES_KEY);
+                } catch (_) {}
+                chatSessions = importedSessions;
+                if (dur?.workspaceDb?.replaceAllSessions) {
+                    await dur.workspaceDb.replaceAllSessions(chatSessions);
+                }
+            } else {
+                chatSessions = dur?.mergeChatSessionsLww
+                    ? dur.mergeChatSessionsLww(chatSessions, importedSessions, deletedIds)
+                    : chatSessions.concat(importedSessions);
+                if (dur?.workspaceDb?.saveSessions) {
+                    await dur.workspaceDb.saveSessions(chatSessions, deletedIds);
+                }
+            }
+            saveChatSessions({ skipBroadcast: true });
+            if (typeof renderChatHistorySidebar === 'function') renderChatHistorySidebar();
+
+            // 2. Unified Memories
+            const uStore = window.JarvisUnifiedMemory?.unifiedMemoryStore;
+            if (uStore) {
+                if (!uStore.isInitialized && typeof uStore.init === 'function') uStore.init();
+                const incomingMems = Array.isArray(payload.memories) ? payload.memories : [];
+                if (isReplace) {
+                    uStore.memories = incomingMems.slice(0, 200);
+                } else if (dur?.mergeRecordsLww) {
+                    uStore.memories = dur.mergeRecordsLww(uStore.getAll(), incomingMems, 'text').slice(0, 200);
+                }
+                uStore.save();
+                if (typeof renderMemoryManagerList === 'function') renderMemoryManagerList();
+            }
+
+            // 3. Self-Improving Learned Rules
+            const sim = window.JarvisSelfImprovingMemory;
+            if (sim && Array.isArray(payload.learnedRules)) {
+                const existingRules = typeof sim.getAllPreferences === 'function' ? sim.getAllPreferences() : [];
+                const nextRules = isReplace
+                    ? payload.learnedRules
+                    : (dur?.mergeRecordsLww ? dur.mergeRecordsLww(existingRules, payload.learnedRules, 'directive') : existingRules.concat(payload.learnedRules));
+                try {
+                    const storageKey = sim.STORAGE_KEY || 'jarvis_self_improving_memory_v1';
+                    const existingRaw = JSON.parse(localStorage.getItem(storageKey) || '{}');
+                    localStorage.setItem(storageKey, JSON.stringify({
+                        ...existingRaw,
+                        preferences: nextRules,
+                        updatedAt: Date.now()
+                    }));
+                    if (typeof sim.init === 'function') await sim.init();
+                } catch (_) {}
+            }
+
+            // 4. Custom Instructions & Safe Settings (never touches BYOK keys)
+            if (typeof payload.customSystemPrompt === 'string' && (isReplace || payload.customSystemPrompt.trim())) {
+                if (typeof setCustomSystemPrompt === 'function') {
+                    setCustomSystemPrompt(payload.customSystemPrompt, false);
+                }
+            }
+            const s = payload.settings || {};
+            if (typeof s.personalizedExperience === 'boolean') {
+                setPersonalizationEnabled(s.personalizedExperience);
+                window.JarvisUnifiedMemory?.setMemoryActive?.(s.personalizedExperience);
+            }
+            if (typeof s.selectedModel === 'string' && typeof setSelectedModel === 'function') {
+                setSelectedModel(s.selectedModel);
+            }
+
+            dur?.workspaceTabSync?.broadcast?.('workspace_restored', { mode, ts: Date.now() });
+            if (typeof refreshPrivacyDataSummary === 'function') refreshPrivacyDataSummary();
+            await renderWorkspaceDurabilityView();
+        }
+
+        async function restoreWorkspaceBackupFromFile() {
+            const dur = window.JarvisWorkspaceDurability;
+            const fileInput = document.getElementById('backup-restore-file');
+            const statusEl = document.getElementById('backup-restore-status');
+            const passphrase = String(document.getElementById('backup-restore-passphrase')?.value || '').trim();
+            const mode = document.querySelector('input[name="backup-restore-mode"]:checked')?.value || 'merge';
+            const file = fileInput?.files?.[0];
+            if (!file) {
+                if (statusEl) statusEl.textContent = 'Select a .jarvis.json backup file first.';
+                return;
+            }
+            try {
+                const rawText = await file.text();
+                const parsed = await dur.parseWorkspaceBackup(rawText, passphrase);
+                if (!parsed.ok) {
+                    if (statusEl) statusEl.textContent = parsed.error || 'Failed to parse backup.';
+                    showTemporaryMessage(parsed.error || 'Could not restore backup.');
+                    return;
+                }
+                await applyRestoredWorkspacePayload(parsed.payload, mode);
+                const msg = `Restored (${mode}): ${parsed.summary.sessionCount} chats, ${parsed.summary.memoryCount} memories, ${parsed.summary.ruleCount} learned rules.`;
+                if (statusEl) statusEl.textContent = msg;
+                showTemporaryMessage(msg);
+            } catch (err) {
+                const msg = err?.message || 'Backup restore failed.';
+                if (statusEl) statusEl.textContent = msg;
+                showTemporaryMessage(msg);
+            }
+        }
+
+        window.renderWorkspaceDurabilityView = renderWorkspaceDurabilityView;
+        window.requestWorkspacePersistentStorage = requestWorkspacePersistentStorage;
+        window.toggleBackupPassphraseField = toggleBackupPassphraseField;
+        window.downloadEncryptedWorkspaceBackup = downloadEncryptedWorkspaceBackup;
+        window.applyRestoredWorkspacePayload = applyRestoredWorkspacePayload;
+        window.restoreWorkspaceBackupFromFile = restoreWorkspaceBackupFromFile;
 
         async function renderComplianceSettingsView() {
             const badgeEl = document.getElementById('compliance-policy-badge');
@@ -8654,6 +8976,10 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             if (checkbox) checkbox.setAttribute('aria-checked', isChecked ? 'true' : 'false');
             setPersonalizationEnabled(isChecked);
             window.JarvisUnifiedMemory?.setMemoryActive?.(isChecked);
+            window.JarvisWorkspaceDurability?.workspaceTabSync?.broadcast?.('settings_updated', {
+                key: 'jarvis_personalized_experience',
+                value: isChecked
+            });
             if (typeof renderMemoryManagerList === 'function') {
                 renderMemoryManagerList();
             }
@@ -25449,10 +25775,15 @@ function promptClearAllDataConfirmation() {
                 conversationHistory = [];
                 conversationContext = [];
                 memoryStore = {};
+                chatSessions = [];
+                window.JarvisUnifiedMemory?.unifiedMemoryStore?.clear?.();
+                window.JarvisWorkspaceDurability?.workspaceDb?.clearAllSessions?.().catch?.(() => {});
+                window.JarvisWorkspaceDurability?.workspaceTabSync?.broadcast?.('workspace_cleared', { ts: Date.now() });
                 window.JarvisConversation?.reset?.();
                 window.JarvisState?.resetConversationState?.();
                 const chatContainer = document.getElementById('chat-container');
                 if (chatContainer) chatContainer.innerHTML = '';
+                if (typeof renderChatHistorySidebar === 'function') renderChatHistorySidebar();
                 refreshPrivacyDataSummary();
                 showTemporaryMessage('All local app data deleted.');
             } catch (_) {
@@ -30610,6 +30941,118 @@ function rememberDeletedChatSession(session) {
         const next = Array.from(new Set(deletedIds.concat(id))).slice(-200);
         localStorage.setItem(CHAT_DELETED_SESSION_IDS_KEY, JSON.stringify(next));
     } catch (_) {}
+    window.JarvisWorkspaceDurability?.workspaceDb?.deleteSession?.(id).catch?.(() => {});
+    window.JarvisWorkspaceDurability?.workspaceTabSync?.broadcast?.('session_deleted', { sessionId: id });
+}
+
+async function hydrateDurableSessionsFromIndexedDb() {
+    const dur = window.JarvisWorkspaceDurability;
+    if (!dur?.workspaceDb?.loadAllSessions) return;
+    try {
+        const idbSessions = await dur.workspaceDb.loadAllSessions();
+        const deletedIds = Array.from(getDeletedChatSessionIds());
+        const normalizedIdb = (Array.isArray(idbSessions) ? idbSessions : [])
+            .map(normalizeChatSession)
+            .filter(s => s && !isDeletedChatSession(s) && chatSessionHasUserMessage(s));
+        if (!normalizedIdb.length) {
+            // Seed IndexedDB from existing localStorage sessions on first run
+            const currentDurable = getVisibleChatSessions();
+            if (currentDurable.length) {
+                await dur.workspaceDb.saveSessions(currentDurable, deletedIds);
+            }
+            return;
+        }
+        const activeStreamingId = isChatStreamingActive() ? activeChatSessionId : '';
+        const merged = dur.mergeChatSessionsLww(chatSessions, normalizedIdb, deletedIds, {
+            activeStreamingSessionId: activeStreamingId
+        });
+        const nonUserDrafts = chatSessions.filter(s => s && !isDeletedChatSession(s) && !chatSessionHasUserMessage(s));
+        chatSessions = merged.concat(nonUserDrafts);
+        if (typeof renderChatHistorySidebar === 'function') {
+            renderChatHistorySidebar();
+        }
+        // Keep IndexedDB up to date with any newer local sessions
+        await dur.workspaceDb.saveSessions(merged, deletedIds);
+    } catch (_) {}
+}
+
+function isChatStreamingActive() {
+    try {
+        return Boolean(
+            document.querySelector('.assistant-message-text.is-streaming') ||
+            window.JarvisInteractionState?.getState?.() === 'STREAMING'
+        );
+    } catch (_) {
+        return false;
+    }
+}
+
+function initWorkspaceMultiTabSync() {
+    if (globalThis.__jarvisWorkspaceSyncBound) return;
+    const dur = window.JarvisWorkspaceDurability;
+    if (!dur?.workspaceTabSync?.onSync) return;
+    globalThis.__jarvisWorkspaceSyncBound = true;
+    dur.workspaceTabSync.start();
+
+    dur.workspaceTabSync.onSync(async (msg) => {
+        if (!msg || !msg.type) return;
+        if (msg.type === 'peers_changed') {
+            const tabsEl = document.getElementById('durability-active-tabs-badge');
+            if (tabsEl) {
+                const count = msg.activeTabs || dur.workspaceTabSync.getActiveTabCount();
+                tabsEl.textContent = `${count} Active ${count === 1 ? 'Tab' : 'Tabs'}`;
+            }
+            return;
+        }
+        if (msg.type === 'sessions_updated' || msg.type === 'session_deleted' || msg.type === 'workspace_restored') {
+            if (msg.type === 'session_deleted' && msg.payload?.sessionId) {
+                const delId = String(msg.payload.sessionId);
+                chatSessions = chatSessions.filter(s => s && s.id !== delId);
+            }
+            await hydrateDurableSessionsFromIndexedDb();
+            if (msg.type === 'workspace_restored') {
+                window.JarvisUnifiedMemory?.unifiedMemoryStore?.load?.();
+                window.JarvisSelfImprovingMemory?.init?.().catch?.(() => {});
+                if (typeof renderMemoryManagerList === 'function') renderMemoryManagerList();
+            }
+            return;
+        }
+        if (msg.type === 'memories_updated') {
+            window.JarvisUnifiedMemory?.unifiedMemoryStore?.load?.();
+            if (typeof renderMemoryManagerList === 'function') renderMemoryManagerList();
+            return;
+        }
+        if (msg.type === 'rules_updated') {
+            window.JarvisSelfImprovingMemory?.init?.().catch?.(() => {});
+            if (typeof renderMemoryManagerList === 'function') renderMemoryManagerList();
+            return;
+        }
+        if (msg.type === 'settings_updated') {
+            const toggle = document.getElementById('settings-personalization-toggle');
+            if (toggle && typeof isPersonalizationEnabled === 'function') {
+                const active = isPersonalizationEnabled();
+                toggle.checked = active;
+                toggle.setAttribute('aria-checked', active ? 'true' : 'false');
+            }
+            if (typeof updateCustomInstructionsStatus === 'function') updateCustomInstructionsStatus();
+            if (typeof initModelSelector === 'function') initModelSelector();
+            return;
+        }
+        if (msg.type === 'workspace_cleared') {
+            chatSessions = [];
+            window.JarvisUnifiedMemory?.unifiedMemoryStore?.load?.();
+            if (typeof renderChatHistorySidebar === 'function') renderChatHistorySidebar();
+            if (typeof refreshPrivacyDataSummary === 'function') refreshPrivacyDataSummary();
+        }
+    });
+}
+window.hydrateDurableSessionsFromIndexedDb = hydrateDurableSessionsFromIndexedDb;
+window.initWorkspaceMultiTabSync = initWorkspaceMultiTabSync;
+if (typeof window !== 'undefined') {
+    window.addEventListener('jarvis:modules-ready', () => {
+        initWorkspaceMultiTabSync();
+        hydrateDurableSessionsFromIndexedDb();
+    }, { once: true });
 }
 
 function loadChatSessions() {
@@ -30635,19 +31078,40 @@ function loadChatSessions() {
         chatSessions = [];
     }
     migrateLegacyHistoryToChatSession();
+    initWorkspaceMultiTabSync();
+    hydrateDurableSessionsFromIndexedDb();
 }
 
-function saveChatSessions() {
+function saveChatSessions(options = {}) {
     try {
-        const sessions = chatSessions
-            .filter(session => session && !isDeletedChatSession(session) && chatSessionHasUserMessage(session))
-            .slice(-80);
-        const payload = sessions.map(compactChatSessionForStorage);
-        if (!writeChatSessionsWithQuotaRecovery(payload)) return;
-        // Keep full in-memory sessions; only the persisted payload is compacted.
-        chatSessions = sessions.concat(
+        const allValidSessions = chatSessions
+            .filter(session => session && !isDeletedChatSession(session) && chatSessionHasUserMessage(session));
+        const durableMax = window.JarvisWorkspaceDurability?.MAX_DURABLE_SESSIONS || 500;
+        const durableSessions = allValidSessions.slice(-durableMax);
+        const deletedIds = Array.from(getDeletedChatSessionIds());
+
+        // Tier 1 (Primary Durable): Write full untruncated sessions asynchronously to IndexedDB
+        if (window.JarvisWorkspaceDurability?.workspaceDb?.saveSessions) {
+            window.JarvisWorkspaceDurability.workspaceDb.saveSessions(durableSessions, deletedIds).catch(() => {});
+        }
+
+        // Tier 2 (Hot Cache): Write recent compacted sessions to localStorage for 0ms instant boot
+        const hotLimit = window.JarvisWorkspaceDurability?.HOT_CACHE_MAX_SESSIONS || 15;
+        const hotSessions = durableSessions.slice(-Math.max(hotLimit, Math.min(80, durableSessions.length)));
+        const payload = hotSessions.map(compactChatSessionForStorage);
+        writeChatSessionsWithQuotaRecovery(payload);
+
+        // Keep full untruncated in-memory sessions; only the localStorage hot-cache is compacted.
+        chatSessions = durableSessions.concat(
             chatSessions.filter(session => session && !isDeletedChatSession(session) && !chatSessionHasUserMessage(session))
         );
+
+        if (options?.skipBroadcast !== true) {
+            window.JarvisWorkspaceDurability?.workspaceTabSync?.broadcast?.('sessions_updated', {
+                count: durableSessions.length,
+                ts: Date.now()
+            });
+        }
     } catch (_) {}
 }
 
