@@ -179,9 +179,8 @@ export function isCurrentLocationIntent(text) {
         return false;
     }
 
-    // 3. Guard against explicit weather inquiries for a remote/named city: "weather in Tokyo"
-    if (/\b(?:weather|temperature|humidity)\s+(?:in|at|for|around)\s+[a-z]+/i.test(t) ||
-        (/\bforecast\s+(?:in|at|for|around)\s+[a-z]+/i.test(t) && !/\b(?:astrolog\w*|horoscope|zodiac|relationship|financial|economic|market|stock|sales|revenue|election)\b/i.test(t))) {
+    // 3. Guard against explicit meteorological inquiries for a remote/named city: "weather in Tokyo"
+    if (/\b(?:weather|temperature|humidity|rain|snow|aqi|air\s+quality|weather\s+forecast)\s+(?:in|at|for|around)\s+[a-z]+/i.test(t)) {
         return false;
     }
 
