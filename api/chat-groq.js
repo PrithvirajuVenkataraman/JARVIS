@@ -403,10 +403,36 @@ async function getInstantFactHelper() {
         return hasOptions || (hasMcqPhrases && /\b[A-Da-d]\b/.test(raw));
     }
 
+    const UNAVAILABLE_MODEL_TTL_MS = 10 * 60 * 1000;
+    const UNAVAILABLE_MODEL_CACHE = new Map();
+
+    function isModelTemporarilyUnavailable(provider, model) {
+        const key = `${provider}:${String(model || '').trim().toLowerCase()}`;
+        const expiresAt = UNAVAILABLE_MODEL_CACHE.get(key);
+        if (!expiresAt) return false;
+        if (Date.now() > expiresAt) {
+            UNAVAILABLE_MODEL_CACHE.delete(key);
+            return false;
+        }
+        return true;
+    }
+
+    function markModelTemporarilyUnavailable(provider, model, status = 404) {
+        if (status !== 404 && status !== 410) return;
+        const key = `${provider}:${String(model || '').trim().toLowerCase()}`;
+        UNAVAILABLE_MODEL_CACHE.set(key, Date.now() + UNAVAILABLE_MODEL_TTL_MS);
+    }
+
+    function filterAvailableModelCandidates(provider, candidates = []) {
+        const list = Array.isArray(candidates) ? candidates.filter(Boolean) : [];
+        const available = list.filter(m => !isModelTemporarilyUnavailable(provider, m));
+        return available.length > 0 ? available : list;
+    }
+
     function isMathematicalOrQuantitativeQuery(text = '', options = {}) {
         const raw = String(text || '').trim();
         const lower = raw.toLowerCase();
-        if (!raw && !options?.hasImages) return false;
+        if (!raw) return false;
 
         const mathKeywords = /\b(?:radius|diameter|circumference|circle|chord|tangent|secant|triangle|hypotenuse|perpendicular|pythagorean|geometry|geometric|algebra|algebraic|equation|system\s+of\s+equations|quadratic|polynomial|calculus|derivative|integral|integrate|matrix|determinant|eigenvalue|trigonometry|sine|cosine|logarithm|solve\s+for\s+[a-zA-Z]|prove\s+that|proof|derivation|derive|formula)\b/i;
         if (mathKeywords.test(lower)) return true;
@@ -415,11 +441,38 @@ async function getInstantFactHelper() {
         const hasSolveIntent = /\b(?:solve|calculate|compute|find|determine|evaluate|simplify)\b/i.test(lower);
         if (hasMathSymbols && (hasSolveIntent || raw.length > 8)) return true;
 
-        if (options?.hasImages && (/\b(?:solve|find|calculate|radius|length|area|perimeter|equation|value|x|angle)\b/i.test(lower) || !raw)) {
+        if (options?.hasImages && (
+            /\b(?:solve|calculate|compute|equation|radius|diameter|perimeter|hypotenuse|angle|area|volume|quadratic|integral|derivative|algebra|geometry|math|proof|simplify|factor)\b/i.test(lower) ||
+            /\bfind\s+(?:the\s+)?(?:value|x|y|z|area|length|radius|angle|perimeter|volume|root|solution|distance|slope|height|width|sum|product)\b/i.test(lower)
+        )) {
             return true;
         }
 
         return false;
+    }
+
+    function classifyVisionLane(text = '', hasImages = false) {
+        if (!hasImages) return 'none';
+        const raw = String(text || '').trim();
+        const lower = raw.toLowerCase();
+
+        if (isMathematicalOrQuantitativeQuery(raw, { hasImages: true })) {
+            return 'math_diagram';
+        }
+
+        const isPureOcrOrTextTask = /\b(?:ocr|transcribe|extract\s+(?:all\s+)?text|read\s+(?:the\s+)?(?:text|document|receipt|invoice|page|bill|handwriting|table)|convert\s+to\s+(?:table|markdown|csv|json)|summarize\s+(?:this\s+)?(?:document|page|receipt|invoice|screenshot)|translate\s+(?:this|the\s+text))\b/i.test(lower);
+        if (isPureOcrOrTextTask) {
+            return 'fast_ocr_scene';
+        }
+
+        const isFineGrainedId = !raw ||
+            /\b(?:flag|flags|country|nation|emblem|crest|coat\s+of\s+arms|heraldry|logo|brand|badge|insignia|symbol|seal|coin|stamp|banknote|currency|road\s+sign|traffic\s+sign|landmark|monument|species|bird|plant|flower|insect|snake|spider|mushroom|breed|dog|cat|car|vehicle|aircraft|ship|watch|uniform|medal|jersey|kit)\b/i.test(lower) ||
+            /\b(?:what\s+(?:is|are|kind\s+of|type\s+of|country|nation|brand|model|flag|logo|symbol)|which\s+(?:country|nation|flag|state|city|brand|model|car|bird|plant)|whose\s+flag|identify|recognize|name\s+this)\b/i.test(lower);
+        if (isFineGrainedId) {
+            return 'fine_grained_id';
+        }
+
+        return 'fast_ocr_scene';
     }
 
     function classifyQueryComplexity(rawQuery = '', options = {}) {
@@ -428,19 +481,24 @@ async function getInstantFactHelper() {
             return { tier: 'deep', preferSpeed: false, reason: 'explicit_deep_tier_request' };
         }
 
-        // Image attachments require a vision-capable model with sufficient capacity.
-        // Never downgrade to the instant tier when images are present.
+        // Image attachments use Adaptive 3-Lane Vision Routing:
+        // 1) math_diagram -> deep tier (8192 thinking)
+        // 2) fine_grained_id (flags/logos/emblems/objects) -> standard Flash-first + compact visual verification thinking (1024)
+        // 3) fast_ocr_scene (OCR/documents/general scene) -> standard Flash-first + high media resolution + 0 thinking
         const hasImages = options?.hasImages === true || intent === 'selection_custom';
+        const visionLane = classifyVisionLane(rawQuery, hasImages);
         const isMathProblem = isMathematicalOrQuantitativeQuery(rawQuery, { hasImages });
 
         if (hasImages) {
-            // Auto-promote any image containing math, geometry, or calculation to deep tier
-            if (isMathProblem ||
+            if (visionLane === 'math_diagram' ||
                 scoreChatIntent(String(rawQuery || ''), 'explicit_math_logic_proof') >= 0.28 ||
                 scoreChatIntent(String(rawQuery || ''), 'deep_engineering_reasoning') >= 0.28) {
-                return { tier: 'deep', preferSpeed: false, reason: 'image_math_deep_reasoning' };
+                return { tier: 'deep', preferSpeed: false, visionLane: 'math_diagram', reason: 'image_math_deep_reasoning' };
             }
-            return { tier: 'standard', preferSpeed: false, reason: 'image_attachment_standard_floor' };
+            if (visionLane === 'fine_grained_id') {
+                return { tier: 'standard', preferSpeed: false, visionLane: 'fine_grained_id', reason: 'image_fine_grained_visual_verification' };
+            }
+            return { tier: 'standard', preferSpeed: true, visionLane: 'fast_ocr_scene', reason: 'image_fast_ocr_or_scene' };
         }
 
         const query = String(rawQuery || '').trim();
@@ -580,22 +638,32 @@ async function getInstantFactHelper() {
         'gemini-2.5-flash-lite'
     ]);
 
-    function getPreferredGeminiVisionCandidates(configuredModel = '', userSelectedModel = null) {
+    function getPreferredGeminiVisionCandidates(configuredModel = '', userSelectedModel = null, { visionLane = 'fast_ocr_scene' } = {}) {
         const configured = KNOWN_GEMINI_VISION_MODELS.has(String(configuredModel || '').trim())
             ? String(configuredModel || '').trim()
             : '';
         const userSelected = KNOWN_GEMINI_VISION_MODELS.has(String(userSelectedModel || '').trim())
             ? String(userSelectedModel || '').trim()
             : (String(userSelectedModel || '').startsWith('gemini-') ? String(userSelectedModel) : '');
-        const visionModels = [
-            'gemini-3.8-flash',
-            'gemini-3.7-flash',
-            'gemini-2.5-pro',
-            'gemini-2.5-flash',
-            'gemini-2.0-flash',
-            'gemini-1.5-flash',
-            'gemini-2.5-flash-lite'
-        ];
+        const visionModels = visionLane === 'math_diagram'
+            ? [
+                'gemini-3.8-flash',
+                'gemini-2.5-pro',
+                'gemini-3.7-flash',
+                'gemini-2.5-flash',
+                'gemini-2.0-flash',
+                'gemini-1.5-flash',
+                'gemini-2.5-flash-lite'
+            ]
+            : [
+                'gemini-3.8-flash',
+                'gemini-3.7-flash',
+                'gemini-2.5-flash',
+                'gemini-2.0-flash',
+                'gemini-2.5-pro',
+                'gemini-1.5-flash',
+                'gemini-2.5-flash-lite'
+            ];
         return [...new Set([userSelected, configured, ...visionModels].filter(Boolean))];
     }
 
@@ -2319,6 +2387,10 @@ export default async function handler(req, res) {
                 '   - Photograph: describe visible scene and prominent subjects.',
                 '3. CONTEXT-AWARE OCR INTEGRATION: Read all visible text, numbers, labels, diagrams, and measurements in the image. Do not require the user to explicitly say "OCR" or "extract text". Incorporate visible text and layout into your reasoning.',
                 '4. VISIBLE EVIDENCE & ZERO HALLUCINATION: Answer strictly from what is visible in the image pixels. Do not invent text, numbers, or labels that are not visible. If details are cropped or illegible, state what is unclear rather than guessing.',
+                '4b. FINE-GRAINED VISUAL VERIFICATION (FLAGS, EMBLEMS, LOGOS, BADGES, SYMBOLS & LOOK-ALIKE OBJECTS):',
+                '   - ALWAYS inspect exact pixel geometry BEFORE naming: (a) layout/divisions (horizontal vs. vertical bands, hoist triangle, canton, cross, saltire), (b) exact color order strictly top-to-bottom or left/hoist-to-right/fly (never reverse left and right), (c) exact shade (navy vs. sky blue, crimson vs. orange), emblem/crest/star/crescent count and placement, and approximate aspect ratio.',
+                '   - Explicitly cross-check visually similar twins before answering (e.g., Chad vs. Romania, Indonesia vs. Monaco vs. Poland, Ireland vs. Côte d\'Ivoire, Mali vs. Guinea, Luxembourg vs. Netherlands, Slovenia vs. Slovakia vs. Russia, Australia vs. New Zealand).',
+                '   - HONEST DISAMBIGUATION: If lighting, angle, crop, or aspect ratio makes two look-alike flags or emblems genuinely indistinguishable from the pixels alone, state the primary match AND explicitly note the visually identical look-alike caveat instead of guessing blindly.',
                 '5. DIRECT VISUAL ACCESS: You have direct access to the image pixels in this request. Never claim you cannot view, see, open, or access the attachment.',
                 '6. MATHEMATICAL & QUANTITATIVE REASONING (apply whenever the image contains math, geometry, physics, statistics, or any quantitative problem):',
                 '   a. INTERPRET THE DIAGRAM FIRST: Before computing anything, survey every label, measurement, angle, and geometric relationship visible in the image. Trace every segment from its start to end point. Verify whether a labeled segment starts at a boundary/circumference, at a vertex, or at the center. Check whether a marked point (like a circle center) is an endpoint or an interior point of a segment (e.g., if a chord of length L starts at the circumference and contains the center, the remaining segment to a right-angle vertex is (L - R), NOT L). Never jump to standard Pythagorean triples (e.g. 3-4-5, 9-12-15) without proving the legs actually span those lengths.',
@@ -2648,9 +2720,11 @@ export default async function handler(req, res) {
             const geminiApiKey = String(options?.customGeminiKey || '').trim() || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
             if (!geminiApiKey) return null;
             const geminiConfiguredModel = String(process.env.GEMINI_MODEL || '').trim();
-            const geminiCandidates = hasImages
-                ? getPreferredGeminiVisionCandidates(geminiConfiguredModel, userSelectedModel)
+            const visionLane = hasImages ? (options?.visionLane || classifyVisionLane(prompt, true)) : 'none';
+            const rawGeminiCandidates = hasImages
+                ? getPreferredGeminiVisionCandidates(geminiConfiguredModel, userSelectedModel, { visionLane })
                 : getPreferredGeminiCandidates(geminiConfiguredModel, userSelectedModel, { preferSpeed: speedPreferred, tier: routingTier });
+            const geminiCandidates = filterAvailableModelCandidates('gemini', rawGeminiCandidates);
             for (const model of geminiCandidates) {
                 const parts = [{ text: finalPrompt }];
                 if (hasImages) {
@@ -2676,17 +2750,32 @@ export default async function handler(req, res) {
                     }
                 }
                 const isMathTarget = isMathematicalOrQuantitativeQuery(prompt, { hasImages: Boolean(images?.length) });
-                const shouldSuppressGeminiReasoning = !isMathTarget && (
+                const isFineGrainedVision = hasImages && visionLane === 'fine_grained_id';
+                const shouldSuppressGeminiReasoning = !isMathTarget && !isFineGrainedVision && (
+                    hasImages ||
                     options?.minimalThinking === true ||
                     options?.preferSpeed === true ||
                     options?.tier === 'instant' ||
                     ['fast_simple', 'casual_chat', 'chat_title', 'internal_summary', 'fast_explainer'].includes(String(options?.intent || ''))
                 );
-                const geminiGenConfig = { temperature: temp, topK: 40, topP: 0.95, maxOutputTokens: maxTokens };
+                const effectiveVisionTemp = hasImages
+                    ? (isMathTarget ? 0.1 : (isFineGrainedVision ? 0.12 : 0.15))
+                    : temp;
+                const geminiGenConfig = {
+                    temperature: effectiveVisionTemp,
+                    topK: 40,
+                    topP: hasImages ? 0.9 : 0.95,
+                    maxOutputTokens: maxTokens
+                };
+                if (hasImages) {
+                    geminiGenConfig.mediaResolution = 'MEDIA_RESOLUTION_HIGH';
+                }
                 if (shouldSuppressGeminiReasoning && supportsGeminiThinking(model)) {
                     geminiGenConfig.thinkingConfig = { thinkingBudget: 0 };
                 } else if (isMathTarget && supportsGeminiThinking(model)) {
                     geminiGenConfig.thinkingConfig = { thinkingBudget: 8192 };
+                } else if (isFineGrainedVision && supportsGeminiThinking(model)) {
+                    geminiGenConfig.thinkingConfig = { thinkingBudget: 1024 };
                 }
                 const geminiBody = {
                     contents,
@@ -2696,18 +2785,28 @@ export default async function handler(req, res) {
                     geminiBody.system_instruction = systemInstruction;
                 }
                 try {
-                    const response = await fetchWithTimeoutRetry(
+                    const doGeminiRequest = (bodyObj) => fetchWithTimeoutRetry(
                         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`,
                         {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(geminiBody)
+                            body: JSON.stringify(bodyObj)
                         },
                         {
                             timeoutMs: clampInt(lengthPolicy?.timeoutMs, MODEL_FETCH_TIMEOUT_MS, 1000, MODEL_FETCH_TIMEOUT_MS),
                             retries: Number.isFinite(Number(lengthPolicy?.retries)) ? Number(lengthPolicy.retries) : FETCH_RETRIES
                         }
                     );
+                    let response = await doGeminiRequest(geminiBody);
+                    if (response.status === 400 && geminiGenConfig.mediaResolution) {
+                        const fallbackGenConfig = { ...geminiGenConfig };
+                        delete fallbackGenConfig.mediaResolution;
+                        response = await doGeminiRequest({ ...geminiBody, generationConfig: fallbackGenConfig });
+                    }
+                    if (response.status === 404 || response.status === 410) {
+                        markModelTemporarilyUnavailable('gemini', model, response.status);
+                        continue;
+                    }
                     if (response.ok) {
                         const geminiData = await response.json();
                         const geminiParts = Array.isArray(geminiData?.candidates?.[0]?.content?.parts)
@@ -2862,9 +2961,11 @@ export default async function handler(req, res) {
             const geminiApiKey = String(options?.customGeminiKey || '').trim() || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
             if (!geminiApiKey) return null;
             const geminiConfiguredModel = String(process.env.GEMINI_MODEL || '').trim();
-            const geminiCandidates = hasImages
-                ? getPreferredGeminiVisionCandidates(geminiConfiguredModel, userSelectedModel)
+            const visionLane = hasImages ? (options?.visionLane || classifyVisionLane(prompt, true)) : 'none';
+            const rawGeminiCandidates = hasImages
+                ? getPreferredGeminiVisionCandidates(geminiConfiguredModel, userSelectedModel, { visionLane })
                 : getPreferredGeminiCandidates(geminiConfiguredModel, userSelectedModel, { preferSpeed: speedPreferred, tier: routingTier });
+            const geminiCandidates = filterAvailableModelCandidates('gemini', rawGeminiCandidates);
             for (const model of geminiCandidates) {
                 let currentModelDeltasEmitted = false;
                 const perModelDelta = (delta) => {
@@ -2880,7 +2981,7 @@ export default async function handler(req, res) {
                     maxTokens,
                     timeoutMs: clampInt(lengthPolicy?.timeoutMs, STREAM_MODEL_FETCH_TIMEOUT_MS, 1000, STREAM_MODEL_FETCH_TIMEOUT_MS),
                     onDelta: perModelDelta,
-                    options
+                    options: hasImages ? { ...options, visionLane } : options
                 });
                 if (result.ok) return result;
                 if (currentModelDeltasEmitted && typeof options?.onReset === 'function') {
@@ -3147,25 +3248,37 @@ export default async function handler(req, res) {
                     contents = formatted;
                 }
             }
+            const hasStreamImages = Array.isArray(images) && images.length > 0;
+            const visionLane = hasStreamImages ? (options?.visionLane || classifyVisionLane(prompt, true)) : 'none';
             const isUserChosenR1 = String(options?.userSelectedModel || '').toLowerCase().includes('r1');
-            const isMathStream = isMathematicalOrQuantitativeQuery(prompt, { hasImages: Boolean(images?.length) });
-            const isReasoning = isMathStream || isExplicitReasoningIntent(options?.intent, prompt) || isUserChosenR1;
-            const shouldSuppressReasoning = !isReasoning || (!isMathStream && (
+            const isMathStream = isMathematicalOrQuantitativeQuery(prompt, { hasImages: hasStreamImages });
+            const isFineGrainedVision = hasStreamImages && visionLane === 'fine_grained_id';
+            const isReasoning = isMathStream || isFineGrainedVision || isExplicitReasoningIntent(options?.intent, prompt) || isUserChosenR1;
+            const shouldSuppressReasoning = !isReasoning || (!isMathStream && !isFineGrainedVision && (
+                hasStreamImages ||
                 options?.minimalThinking === true ||
                 options?.preferSpeed === true ||
                 options?.tier === 'instant' ||
                 ['fast_simple', 'casual_chat', 'chat_title', 'internal_summary', 'fast_explainer', 'pop_culture_reference', 'chat'].includes(String(options?.intent || ''))
             ));
+            const effectiveTemp = hasStreamImages
+                ? (isMathStream ? 0.1 : (isFineGrainedVision ? 0.12 : 0.15))
+                : temperature;
             const generationConfig = {
-                temperature,
+                temperature: effectiveTemp,
                 topK: 40,
-                topP: 0.95,
+                topP: hasStreamImages ? 0.9 : 0.95,
                 maxOutputTokens: Math.min(Math.max(maxTokens || 32768, 32768), 65536)
             };
+            if (hasStreamImages) {
+                generationConfig.mediaResolution = 'MEDIA_RESOLUTION_HIGH';
+            }
             if (shouldSuppressReasoning && supportsGeminiThinking(model)) {
                 generationConfig.thinkingConfig = { thinkingBudget: 0 };
             } else if (isMathStream && supportsGeminiThinking(model)) {
                 generationConfig.thinkingConfig = { thinkingBudget: 8192 };
+            } else if (isFineGrainedVision && supportsGeminiThinking(model)) {
+                generationConfig.thinkingConfig = { thinkingBudget: 1024 };
             }
             const reqBody = {
                 contents,
@@ -3178,15 +3291,25 @@ export default async function handler(req, res) {
             if (isExplicitSearchQuery && !options?.minimalThinking && !generationConfig.thinkingConfig?.thinkingBudget) {
                 reqBody.tools = [{ googleSearch: {} }];
             }
-            const response = await fetch(
+            const doStreamFetch = (bodyObj) => fetch(
                 `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${apiKey}`,
                 {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     signal: controller.signal,
-                    body: JSON.stringify(reqBody)
+                    body: JSON.stringify(bodyObj)
                 }
             );
+            let response = await doStreamFetch(reqBody);
+            if (response.status === 400 && generationConfig.mediaResolution) {
+                const fallbackGenConfig = { ...generationConfig };
+                delete fallbackGenConfig.mediaResolution;
+                response = await doStreamFetch({ ...reqBody, generationConfig: fallbackGenConfig });
+            }
+            if (response.status === 404 || response.status === 410) {
+                markModelTemporarilyUnavailable('gemini', model, response.status);
+                return { ok: false };
+            }
             if (!response.ok || !response.body) return { ok: false };
             let text = '';
             let inReasoning = false;
@@ -5488,6 +5611,10 @@ export const __test = {
         streamModelWithFallback,
         runModelWithFallback,
         classifyQueryComplexity,
+        classifyVisionLane,
+        isMathematicalOrQuantitativeQuery,
+        filterAvailableModelCandidates,
+        markModelTemporarilyUnavailable,
         getPreferredGroqCandidates,
         getPreferredGroqVisionCandidates,
         getPreferredGeminiCandidates,
