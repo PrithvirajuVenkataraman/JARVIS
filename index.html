@@ -77,7 +77,7 @@
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
     <link rel="stylesheet" href="styles.css?v=2.5.5">
     <script src="science-format.js?v=2.0.1"></script>
-    <script type="module" src="app/bootstrap.js?v=2.5.7"></script>
+    <script type="module" src="app/bootstrap.js?v=2.5.8"></script>
 </head>
 <body class="dark min-h-screen bg-black text-white">
 
@@ -2579,21 +2579,29 @@ window.showMemoryUpdatedToast = showMemoryUpdatedToast;
 function processUnifiedMemoryTurn(text, isVoiceTurn = false) {
     const unifiedMem = window.JarvisUnifiedMemory;
     if (!unifiedMem || !unifiedMem.FEATURE_UNIFIED_MEMORY) return;
+    if (typeof isPersonalizationEnabled === 'function' && !isPersonalizationEnabled()) return;
     if (typeof unifiedMem.isMemoryActive === 'function' && !unifiedMem.isMemoryActive()) return;
 
     const raw = String(text || '').trim();
     if (!raw) return;
 
-    const candidates = typeof unifiedMem.extractMemories === 'function' ? unifiedMem.extractMemories(raw) : [];
+    const extractor = typeof unifiedMem.extractMemories === 'function'
+        ? unifiedMem.extractMemories
+        : (typeof unifiedMem.extract === 'function' ? unifiedMem.extract : null);
+    const candidates = extractor ? extractor(raw) : [];
     if (!candidates || !candidates.length) return;
 
     const store = unifiedMem.unifiedMemoryStore;
     if (!store) return;
+    if (!store.isInitialized && typeof store.init === 'function') {
+        store.init();
+    }
 
     let anyChanged = false;
     const existing = store.getAll();
 
     for (const cand of candidates) {
+        const candSlotKey = cand.slotKey || cand.slot || null;
         // 1. Check exact or near-duplicate (token Jaccard >= 0.8)
         const dupItem = existing.find(e => {
             if (e.text.toLowerCase() === cand.text.toLowerCase()) return true;
@@ -2605,16 +2613,30 @@ function processUnifiedMemoryTurn(text, isVoiceTurn = false) {
             continue;
         }
 
-        // 2. Conflict resolution: same category and slotKey with different value
-        const conflictItem = cand.slotKey
-            ? existing.find(e => e.category === cand.category && e.slotKey === cand.slotKey && e.text.toLowerCase() !== cand.text.toLowerCase())
+        // 2. Conflict resolution: same category and slotKey (or matching single-value slot prefix)
+        const conflictItem = candSlotKey
+            ? existing.find(e => {
+                if (e.text.toLowerCase() === cand.text.toLowerCase()) return false;
+                const existingSlot = e.slotKey || e.slot || null;
+                if (existingSlot && e.category === cand.category && existingSlot === candSlotKey) return true;
+                if (e.category === cand.category) {
+                    const lower = e.text.toLowerCase();
+                    if (candSlotKey === 'name' && lower.startsWith('name:')) return true;
+                    if (candSlotKey === 'location' && lower.startsWith('lives in')) return true;
+                    if (candSlotKey === 'occupation' && lower.startsWith('works as')) return true;
+                    if (candSlotKey === 'diet' && lower.startsWith('diet:')) return true;
+                    if (candSlotKey === 'primary_language' && lower.startsWith('codes in')) return true;
+                    if (candSlotKey === 'tech_stack' && lower.startsWith('tech stack:')) return true;
+                }
+                return false;
+            })
             : null;
 
         if (conflictItem) {
             store.update(conflictItem.id, {
                 text: cand.text,
                 category: cand.category,
-                slotKey: cand.slotKey,
+                slotKey: candSlotKey,
                 sensitive: cand.sensitive
             });
             anyChanged = true;
@@ -2625,7 +2647,7 @@ function processUnifiedMemoryTurn(text, isVoiceTurn = false) {
         const addRes = store.add({
             text: cand.text,
             category: cand.category,
-            slotKey: cand.slotKey,
+            slotKey: candSlotKey,
             source: 'auto',
             sensitive: cand.sensitive
         });
@@ -2816,66 +2838,15 @@ function handleNegativeFeedback(buttonElement, reason = '') {
     }, 2500);
 }
 
-// Add feedback buttons after AI response
+// Record latest query-response pair for feedback context.
+// Note: Inline thumbs up/down already live in `.assistant-action-row` on every assistant message
+// (with persistent emerald/rose state, 7-tag popover, comments, and Fix & Regenerate), so we no
+// longer append a duplicate legacy `.feedback-container` pill beneath the message.
 function addFeedbackButtons(query, response, assistantMessageId = '') {
-    // Store for feedback reference
     lastQueryResponse = { query, response };
-
     const chatContainer = document.getElementById('chat-container');
-    const feedbackDiv = document.createElement('div');
-    feedbackDiv.className = 'flex justify-start my-2 fade-in feedback-container';
-    feedbackDiv.dataset.query = encodeURIComponent(String(query || ''));
-    feedbackDiv.dataset.response = encodeURIComponent(String(response || ''));
-    feedbackDiv.dataset.assistantMessageId = String(assistantMessageId || '');
-
-    const bgClass = darkMode ? 'bg-gray-800' : 'bg-gray-100';
-    const textClass = darkMode ? 'text-gray-400' : 'text-gray-600';
-
-    feedbackDiv.innerHTML = `
-        <div class="flex items-center gap-2 ${bgClass} rounded-full px-3 py-1.5 ml-2">
-            <span class="text-xs ${textClass}">Was this helpful?</span>
-            <button onclick="handlePositiveFeedback(this)"
-                    class="p-1.5 rounded-full hover:bg-green-100 dark:hover:bg-green-900/40 transition-all group"
-                    title="Yes, helpful!">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-gray-400 group-hover:text-green-500 transition-colors">
-                    <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path>
-                </svg>
-            </button>
-            <button onclick="handleNegativeFeedback(this)"
-                    class="p-1.5 rounded-full hover:bg-red-100 dark:hover:bg-red-900/40 transition-all group"
-                    title="Not quite right">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-gray-400 group-hover:text-red-500 transition-colors">
-                    <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"></path>
-                </svg>
-            </button>
-        </div>
-    `;
-
-    const targetId = String(assistantMessageId || '').trim();
-    const targetMessage = targetId
-        ? Array.from(chatContainer.querySelectorAll('.chat-row[data-message-id]'))
-            .find(row => row.dataset.messageId === targetId)
-        : null;
-    if (targetMessage) {
-        chatContainer.querySelectorAll('.feedback-container').forEach(existing => {
-            if (existing.dataset.assistantMessageId === targetId) existing.remove();
-        });
-        targetMessage.insertAdjacentElement('afterend', feedbackDiv);
-    } else if (
-        targetId &&
-        activeResponseRenderContext?.isRegeneration &&
-        activeResponseRenderContext?.replacementCandidate?.messageId === targetId
-    ) {
-        activeResponseRenderContext.pendingFeedback = feedbackDiv;
-    } else {
-        chatContainer.appendChild(feedbackDiv);
-    }
-    if (!autoScrollLocked) {
-        maybeAutoScroll(chatContainer, true);
-        requestAnimationFrame(() => {
-            const chatMain = document.getElementById('chat-main');
-            if (chatMain) chatMain.scrollTop = chatMain.scrollHeight;
-        });
+    if (chatContainer) {
+        chatContainer.querySelectorAll('.feedback-container').forEach(existing => existing.remove());
     }
 }
 
@@ -5910,9 +5881,10 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
         const selectedModel = getSelectedModel();
         const baseMem = personalizationActive && ((typeof JarvisSelfImprovingMemory !== 'undefined' && JarvisSelfImprovingMemory) ||
             (typeof globalThis !== 'undefined' && globalThis.JarvisSelfImprovingMemory) || null);
+        const effectiveCustomPrompt = [customSystemPrompt, requestOptions?.customSystemPrompt].filter(Boolean).join('\n\n');
         const baseSystemPrompt = (baseMem && typeof baseMem.injectIntoSystemPrompt === 'function')
-            ? baseMem.injectIntoSystemPrompt(customSystemPrompt, normalizedUserMessage)
-            : customSystemPrompt;
+            ? baseMem.injectIntoSystemPrompt(effectiveCustomPrompt, normalizedUserMessage)
+            : effectiveCustomPrompt;
         const formattedMemoryBlock = relevantSavedMemoryContext
             ? (relevantSavedMemoryContext.startsWith('[') ? relevantSavedMemoryContext : `[Saved User Memory & Profile:\n${relevantSavedMemoryContext}]`)
             : '';
@@ -8681,8 +8653,12 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             const isChecked = Boolean(checkbox && checkbox.checked);
             if (checkbox) checkbox.setAttribute('aria-checked', isChecked ? 'true' : 'false');
             setPersonalizationEnabled(isChecked);
+            window.JarvisUnifiedMemory?.setMemoryActive?.(isChecked);
+            if (typeof renderMemoryManagerList === 'function') {
+                renderMemoryManagerList();
+            }
             if (typeof showTemporaryMessage === 'function') {
-                showTemporaryMessage(isChecked ? 'Personalized experience enabled.' : 'Personalized experience disabled.');
+                showTemporaryMessage(isChecked ? 'Personalized experience enabled.' : 'Personalized experience paused.');
             }
         }
 
@@ -11229,7 +11205,28 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
 
             const memEngine = (typeof globalThis !== 'undefined' && globalThis.JarvisSelfImprovingMemory) ||
                 (typeof JarvisSelfImprovingMemory !== 'undefined' ? JarvisSelfImprovingMemory : null);
-            if (memEngine?.recordPositiveFeedback && (typeof isPersonalizationEnabled !== 'function' || isPersonalizationEnabled())) {
+            const canPersonalize = typeof isPersonalizationEnabled !== 'function' || isPersonalizationEnabled();
+            if (canPersonalize) {
+                try {
+                    const prefs = loadLearnedPreferences();
+                    if (query) {
+                        const topics = extractTopics(query);
+                        prefs.positivePatterns = Array.isArray(prefs.positivePatterns) ? prefs.positivePatterns : [];
+                        prefs.positivePatterns.push({
+                            query: String(query).substring(0, 100),
+                            topics,
+                            timestamp: new Date().toISOString()
+                        });
+                        if (prefs.positivePatterns.length > 50) prefs.positivePatterns = prefs.positivePatterns.slice(-50);
+                        prefs.preferredTopics = prefs.preferredTopics || {};
+                        topics.forEach(t => { prefs.preferredTopics[t] = (prefs.preferredTopics[t] || 0) + 1; });
+                    }
+                    prefs.feedbackCount = prefs.feedbackCount || { positive: 0, negative: 0 };
+                    prefs.feedbackCount.positive = Number(prefs.feedbackCount.positive || 0) + 1;
+                    saveLearnedPreferences(prefs);
+                } catch (_) {}
+            }
+            if (memEngine?.recordPositiveFeedback && canPersonalize) {
                 Promise.resolve(memEngine.recordPositiveFeedback({ messageId, turnId, query, response, modelUsed })).catch(() => {});
             }
 
@@ -11361,8 +11358,17 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             // Feed ALL structured tags + user comments into the closed-loop Self-Improving Memory Engine
             const memEngine = (typeof globalThis !== 'undefined' && globalThis.JarvisSelfImprovingMemory) ||
                 (typeof JarvisSelfImprovingMemory !== 'undefined' ? JarvisSelfImprovingMemory : null);
+            const canPersonalize = typeof isPersonalizationEnabled !== 'function' || isPersonalizationEnabled();
             let learnedRule = null;
-            if (memEngine && (typeof isPersonalizationEnabled !== 'function' || isPersonalizationEnabled())) {
+            if (canPersonalize) {
+                try {
+                    const prefs = loadLearnedPreferences();
+                    prefs.feedbackCount = prefs.feedbackCount || { positive: 0, negative: 0 };
+                    prefs.feedbackCount.negative = Number(prefs.feedbackCount.negative || 0) + 1;
+                    saveLearnedPreferences(prefs);
+                } catch (_) {}
+            }
+            if (memEngine && canPersonalize) {
                 try {
                     const reasonSummary = [selectedTags.join(', '), sanitizedComment].filter(Boolean).join(': ');
                     if (typeof memEngine.distillNegativeFeedback === 'function') {
@@ -11647,6 +11653,10 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
         }
 
         async function saveAssistantMessageToMemory(messageId) {
+            if (typeof isPersonalizationEnabled === 'function' && !isPersonalizationEnabled()) {
+                showTemporaryMessage('Personalized experience is paused in Settings. Turn it on to save memories.');
+                return;
+            }
             const meta = getAssistantMessageMeta(messageId);
             const rawText = stripSourcesFromAssistantText(meta?.text || '');
             const suggested = rawText
@@ -11671,6 +11681,12 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             const key = buildMemoryKeyFromText(cleanValue);
             memoryStore[key] = createExplicitMemoryRecord(key, cleanValue, 'saved from message', 'note');
             saveUserData();
+            if (window.JarvisUnifiedMemory?.unifiedMemoryStore) {
+                const store = window.JarvisUnifiedMemory.unifiedMemoryStore;
+                if (!store.isInitialized && typeof store.init === 'function') store.init();
+                store.add({ text: cleanValue, category: 'preference', source: 'explicit' });
+                if (typeof renderMemoryManagerList === 'function') renderMemoryManagerList();
+            }
             refreshPrivacyDataSummary();
             showTemporaryMessage('Saved to memory.');
         }
@@ -25726,8 +25742,17 @@ function isWakeGreetingText(text) {
                         }
                         return;
                     }
-                    const enabledMems = window.JarvisUnifiedMemory.unifiedMemoryStore.getEnabled();
-                    if (!enabledMems.length) {
+                    const store = window.JarvisUnifiedMemory.unifiedMemoryStore;
+                    if (store && !store.isInitialized && typeof store.init === 'function') store.init();
+                    const enabledMems = store ? store.getEnabled() : [];
+                    const learnedRules = (typeof JarvisSelfImprovingMemory !== 'undefined' && typeof JarvisSelfImprovingMemory.getAllPreferences === 'function')
+                        ? JarvisSelfImprovingMemory.getAllPreferences().filter(r => r && r.enabled !== false && r.directive)
+                        : [];
+                    const combinedMems = [
+                        ...enabledMems,
+                        ...learnedRules.map(r => ({ text: `Learned preference: ${r.directive}`, category: r.category || 'preference' }))
+                    ];
+                    if (!combinedMems.length) {
                         const reply = "I don't have any memories saved about you yet. As we chat, I'll remember relevant details you share if Personalized Experience is enabled.";
                         addChatMessage(reply, false);
                         saveToHistory(text, reply);
@@ -25740,7 +25765,7 @@ function isWakeGreetingText(text) {
                         }
                         return;
                     }
-                    const prompt = window.JarvisUnifiedMemory.buildMetaQueryMemoryPrompt(enabledMems);
+                    const prompt = window.JarvisUnifiedMemory.buildMetaQueryMemoryPrompt(combinedMems);
                     const result = await askGeminiAI(text, {
                         customSystemPrompt: prompt,
                         intent: 'chat'
@@ -28898,6 +28923,15 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
                 normalizeMemoryStoreRecords();
                 memoryStore[key] = createExplicitMemoryRecord(key, noteRequest.value, text, noteRequest.type || '');
                 saveUserData();
+                if (window.JarvisUnifiedMemory?.unifiedMemoryStore && (typeof isPersonalizationEnabled !== 'function' || isPersonalizationEnabled())) {
+                    const uStore = window.JarvisUnifiedMemory.unifiedMemoryStore;
+                    if (!uStore.isInitialized && typeof uStore.init === 'function') uStore.init();
+                    const existingExact = uStore.getAll().find(m => m.text.toLowerCase() === noteRequest.value.toLowerCase());
+                    if (!existingExact) {
+                        uStore.add({ text: noteRequest.value, category: noteRequest.type || 'preference', source: 'explicit' });
+                    }
+                    if (typeof renderMemoryManagerList === 'function') renderMemoryManagerList();
+                }
 
                 await deliverApiReply('memory_saved', {
                     thing: key,
