@@ -849,6 +849,10 @@ console.log('--- Testing JARVIS Image Understanding & Multimodal Pipeline ---');
 
 const {
     buildGroundedUserMessage,
+    classifyVisionLane,
+    isMathematicalOrQuantitativeQuery,
+    filterAvailableModelCandidates,
+    markModelTemporarilyUnavailable,
     getPreferredGeminiVisionCandidates,
     getPreferredGroqVisionCandidates,
     normalizeImageMimeType,
@@ -1003,7 +1007,36 @@ console.log('5. Verifying preferred vision model candidates selection...');
     assert.ok(Array.isArray(groqVision) && groqVision.length > 0);
     assert.ok(groqVision.every(m => !m.toLowerCase().includes('llama')), 'Must never contain Llama models');
     assert.ok(groqVision.some(m => m.includes('qwen')), 'Must contain Qwen multimodal vision models');
-    console.log('  [PASS] 5.1 Vision-capable candidate routing verified for Gemini and Groq.');
+
+    // Adaptive 3-Lane Vision Routing: flags/blank prompts must NOT misroute into slow deep math
+    assert.equal(classifyVisionLane('find what flag this is', true), 'fine_grained_id', 'Flag query with "find" must route to fine_grained_id');
+    assert.equal(classifyVisionLane('', true), 'fine_grained_id', 'Blank image caption must route to fine_grained_id, not math_diagram');
+    assert.equal(classifyVisionLane('extract all text from this receipt', true), 'fast_ocr_scene', 'Receipt OCR must route to fast_ocr_scene');
+    assert.equal(classifyVisionLane('solve for radius x in this circle', true), 'math_diagram', 'Geometry problem must route to math_diagram');
+    assert.equal(isMathematicalOrQuantitativeQuery('find what flag this is', { hasImages: true }), false, 'Flag query must not trigger math mode');
+
+    // Flash-first ordering for non-math vs Pro-first for math
+    const fastOcrModels = getPreferredGeminiVisionCandidates('', null, { visionLane: 'fast_ocr_scene' });
+    assert.ok(fastOcrModels.indexOf('gemini-2.5-flash') < fastOcrModels.indexOf('gemini-2.5-pro'), 'Flash must precede Pro for non-math OCR/scene');
+    const mathVisionModels = getPreferredGeminiVisionCandidates('', null, { visionLane: 'math_diagram' });
+    assert.ok(mathVisionModels.indexOf('gemini-2.5-pro') < mathVisionModels.indexOf('gemini-2.5-flash'), 'Pro must precede Flash for math_diagram');
+
+    // 404/Unavailable Model Circuit Breaker (0ms skip after miss, safe bypass if all marked)
+    markModelTemporarilyUnavailable('gemini', 'gemini-nonexistent-test', 404);
+    const filtered = filterAvailableModelCandidates('gemini', ['gemini-nonexistent-test', 'gemini-2.5-flash']);
+    assert.deepEqual(filtered, ['gemini-2.5-flash'], '404 model must be skipped immediately by circuit breaker');
+    const allUnavailableFallback = filterAvailableModelCandidates('gemini', ['gemini-nonexistent-test']);
+    assert.deepEqual(allUnavailableFallback, ['gemini-nonexistent-test'], 'Must safely bypass circuit breaker if every candidate is cached unavailable');
+
+    // Structured Flag/Object Verification Prompt Check
+    const flagGrounded = buildGroundedUserMessage({
+        message: 'What flag is this?',
+        images: [{ name: 'flag.png', mimeType: 'image/png', base64: 'iVBORw0KGgoAAAANSUhEUg==' }]
+    });
+    assert.ok(flagGrounded.includes('FINE-GRAINED VISUAL VERIFICATION'), 'Image prompt must include structured visual-feature verification');
+    assert.ok(flagGrounded.includes('HONEST DISAMBIGUATION'), 'Image prompt must include look-alike disambiguation rule');
+
+    console.log('  [PASS] 5.1 Vision-capable candidate routing, 3-lane classifier, 404 circuit breaker, and flag verification verified.');
 }
 
 // =========================================================================
