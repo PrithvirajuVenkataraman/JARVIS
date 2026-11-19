@@ -252,7 +252,7 @@ The test suite in `tests/chatgpt-personalization-e2e.test.mjs` validates the mem
 * `Undo & Synchronization`: Tests atomic rollback of memory additions and tab synchronization.
 
 ---
-
+ 
 ## 11. Continual Recursive Self-Improvement Engine (`app/self-improving-memory.js`)
 
 Alongside factual user memory (`jarvis_unified_memories_v1`), JARVIS runs a **Continual Recursive Self-Improvement (CRSI)** loop over behavioral rules (`jarvis_learned_preferences` + `jarvis_crsi_recursive_state_v1`):
