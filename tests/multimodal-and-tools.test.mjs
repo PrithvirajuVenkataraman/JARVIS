@@ -53,7 +53,7 @@ import {
     formatHistoryAsMarkdown,
     formatHistoryAsCsv
 } from '../app/document-exporter.js';
-import { renderMarkdown } from '../app/markdown-renderer.js';
+import { renderMarkdown, autoWrapBareLatexMath } from '../app/markdown-renderer.js';
 import visionHandler from '../api/vision.js';
 import verifyHandler, { assessAlignment } from '../api/_lib/verify.js';
 import {
@@ -3965,6 +3965,31 @@ assert.ok(htmlOutput.includes('href="https://example.gov/doc2"'));
 assert.ok(htmlOutput.includes('<sup>[1]</sup>'));
 assert.ok(htmlOutput.includes('<sup>[2]</sup>'));
 console.log('  [PASS] 5.1 Footnote citation tags [^1](url) rendered as interactive badges');
+
+// Section 6: Bare LaTeX Auto-Wrapping & Math Robustness Invariants
+console.log('\n--- Section 6: Bare LaTeX Auto-Wrapping & Math Robustness ---');
+
+const rawMathProblem = [
+    'The integral of $\\sqrt{\\tan x}$ is:',
+    '\\int \\sqrt{\\tan x} dx',
+    '',
+    'Let t = \\sqrt{\\tan x} \\Rightarrow \\tan x = t^2 ,',
+    '',
+    'so',
+    '',
+    '\\sec^{2}x dx = 2t dt \\Longrightarrow dx=\\frac{2t dt}{1+\\tan^2 x} = \\frac{2t dt}{1+t^4} = 2 \\int \\frac{t^2}{1+t^4} dt.'
+].join('\n');
+
+const wrappedMath = autoWrapBareLatexMath(rawMathProblem);
+assert.ok(wrappedMath.includes('$$\n\\int \\sqrt{\\tan x} dx\n$$'), 'Must wrap standalone bare integral in display delimiters');
+assert.ok(wrappedMath.includes('$t = \\sqrt{\\tan x} \\Rightarrow \\tan x = t^2'), 'Must wrap inline math clause in delimiters');
+assert.ok(wrappedMath.includes('$$\n\\sec^{2}x dx = 2t dt \\Longrightarrow'), 'Must wrap complex multi-step equation in display delimiters');
+
+const renderedMathHtml = renderMarkdown(rawMathProblem);
+assert.ok(renderedMathHtml.includes('math-display-block'), 'Must render display math block for bare equations');
+assert.ok(renderedMathHtml.includes('math-inline'), 'Must render inline math for variable introduction');
+assert.ok(!renderedMathHtml.includes('<p class="assistant-md-p">\\int \\sqrt{\\tan x} dx</p>'), 'Must never leak bare LaTeX equation as un-rendered plain-text paragraph');
+console.log('  [PASS] 6.1 Bare LaTeX equations and inline clauses automatically wrapped and rendered in KaTeX');
 
 console.log('\n================================================================');
 console.log('=== All Enterprise Production RAG & Triad Tests PASSED ===');
