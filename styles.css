@@ -12268,7 +12268,7 @@ body:not(.dark) .jarvis-visual-caption {
 }
 
 body:not(.dark) .jarvis-visual-step-card {
-    background: rgba(15, 23, 42, 0.04);
+    background: rgba(15, 23, 42, 0.04); 
 }
 
 .jarvis-visual-step-title {
