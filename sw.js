@@ -3,11 +3,11 @@
  * @description Service Worker for JARVIS PWA & Offline Shell Caching
  */
 
-const CACHE_NAME = 'jarvis-cache-v51';
+const CACHE_NAME = 'jarvis-cache-v52';
 const STATIC_ASSETS = [
     '/',
     'index.html',
-    'styles.css?v=2.5.7',
+    'styles.css?v=2.5.8',
     'app/bootstrap.js?v=2.6.0',
     'app/workspace-durability.js?v=2.4.1',
     'app/interactive-illustrations.js?v=2.4.1',
@@ -115,7 +115,7 @@ self.addEventListener('fetch', (event) => {
             if (cachedResponse) {
                 return cachedResponse;
             }
-            return fetch(request).then((networkResponse) => { 
+            return fetch(request).then((networkResponse) => {
                 if (!networkResponse || networkResponse.status !== 200 || networkResponse.type !== 'basic') {
                     return networkResponse;
                 }
