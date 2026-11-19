@@ -6004,7 +6004,10 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
                     return [];
                 })(),
                 selectedModel: (() => {
-                    const hasImages = (Array.isArray(requestOptions?.images) && requestOptions.images.length > 0) || (Array.isArray(requestOptions?.grounding?.images) && requestOptions.grounding.images.length > 0);
+                    const sessionImages = window.JarvisAttachments?.getActiveSessionImages?.() || [];
+                    const hasImages = (Array.isArray(requestOptions?.images) && requestOptions.images.length > 0) ||
+                        (Array.isArray(requestOptions?.grounding?.images) && requestOptions.grounding.images.length > 0) ||
+                        (sessionImages.length > 0);
                     const isUnsupportedMedia = hasImages && (window.APP_CONFIG || APP_CONFIG)?.models?.find(m => m.id === selectedModel)?.supportsMedia === false;
                     const textLen = String(requestOptions?.grounding?.selectedText || requestOptions?.grounding?.sourceAnswer || '').length;
                     const isHeavyDocument = textLen > 30000 && (selectedModel === 'auto' || !selectedModel);
@@ -6028,9 +6031,21 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
                 }
                 : (requestOptions?.grounding || null),
             minimalThinking: shouldForceReasoning ? false : (isFastSimpleRequest ? true : requestOptions?.minimalThinking),
-            images: Array.isArray(requestOptions?.images)
-                ? requestOptions.images
-                : (Array.isArray(requestOptions?.grounding?.images) ? requestOptions.grounding.images : undefined),
+            images: (() => {
+                const direct = (Array.isArray(requestOptions?.images) && requestOptions.images.length > 0)
+                    ? requestOptions.images
+                    : (Array.isArray(requestOptions?.grounding?.images) && requestOptions.grounding.images.length > 0 ? requestOptions.grounding.images : undefined);
+                if (direct && Array.isArray(direct)) {
+                    for (const img of direct) {
+                        if (img && typeof window.JarvisAttachments?.recordActiveSessionImage === 'function') {
+                            window.JarvisAttachments.recordActiveSessionImage(img);
+                        }
+                    }
+                    return direct;
+                }
+                const activeSession = window.JarvisAttachments?.getActiveSessionImages?.();
+                return (Array.isArray(activeSession) && activeSession.length > 0) ? activeSession : undefined;
+            })(),
             routingMessage: String(requestOptions?.routingMessage || requestOptions?.displayUserMessage || '').trim() || undefined,
             displayUserMessage: String(requestOptions?.displayUserMessage || '').trim() || undefined
         };
@@ -14964,6 +14979,9 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             if (lastMultimodalGrounding?.kind === 'vision') {
                 lastMultimodalGrounding = null;
             }
+            try {
+                window.JarvisAttachments?.clearActiveSessionImages?.();
+            } catch (_) {}
         }
 
         function compactVisionContextValue(value, limit = 220) {
