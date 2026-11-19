@@ -361,6 +361,48 @@ export function balanceDelimitersForStreaming(rawText = '') {
     return text;
 }
 
+/**
+ * Auto-wraps bare un-delimited LaTeX display equations and math clauses so they render
+ * cleanly through KaTeX rather than leaking raw backslashes and symbols into the UI.
+ * @param {string} rawText
+ * @returns {string} Text with properly delimited math blocks
+ */
+export function autoWrapBareLatexMath(rawText = '') {
+    if (!rawText || typeof rawText !== 'string') return rawText;
+
+    const parts = rawText.split(/(```[\s\S]*?```|\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\])/g);
+    for (let p = 0; p < parts.length; p++) {
+        // Skip fenced code blocks or already delimited display math
+        if (p % 2 === 1) continue;
+
+        let part = parts[p];
+        const lines = part.split('\n');
+        for (let l = 0; l < lines.length; l++) {
+            let line = lines[l].trim();
+            if (!line) continue;
+            if (line.startsWith('#') || line.startsWith('>') || line.startsWith('|') || line.startsWith(':::')) continue;
+
+            const hasMathCommand = /\\(?:int|iint|iiint|oint|sum|prod|frac|dfrac|tfrac|sqrt|sec|csc|cot|sin|cos|tan|lim|partial|nabla|log|ln|exp|pmatrix|bmatrix|vmatrix|aligned|cases)\b/.test(line);
+            const hasMathRel = /[=≈≠≤≥<>]|\\(?:Longrightarrow|Rightarrow|rightarrow|to|iff|approx|equiv)\b/.test(line);
+            const isMostlyMath = !/^(?:Let|If|Since|Where|Because|Note|Here|Then|Thus|Hence|Therefore|Substituting|Substitute|We have|Step\s*\d+)\b/i.test(line);
+
+            // 1. Standalone equation line without $$ delimiters: e.g. "\sec^{2}x dx = 2t dt \Longrightarrow dx=\frac{2t dt}{1+\tan^2 x} ..."
+            if (hasMathCommand && (hasMathRel || /^\\(?:int|sum|frac|sqrt|lim)\b/.test(line)) && isMostlyMath) {
+                lines[l] = `$$\n${line}\n$$`;
+            } else if (/^(?:Let|Where|Since|If|When|So|Thus|Hence)\s+([^,.:;\n]+(?:=|\\(?:Longrightarrow|Rightarrow|to|in))[^\n,.:;]+)/i.test(line)) {
+                // 2. Inline math inside introductory clause: e.g. "Let t = \sqrt{\tan x} \Rightarrow \tan x = t^2,"
+                lines[l] = line.replace(/^(Let|Where|Since|If|When|So|Thus|Hence)\s+([^,.:;\n]+(?:=|\\(?:Longrightarrow|Rightarrow|to|in))[^\n,.:;]+)/i, (_, intro, mathClause) => {
+                    if (mathClause.includes('$')) return `${intro} ${mathClause}`;
+                    return `${intro} $${mathClause.trim()}$`;
+                });
+            }
+        }
+        parts[p] = lines.join('\n');
+    }
+
+    return parts.join('');
+}
+
 export function renderMarkdown(rawText = '', options = {}) {
     if (typeof rawText !== 'string') return '';
     let text = rawText.trim();
@@ -368,6 +410,9 @@ export function renderMarkdown(rawText = '', options = {}) {
 
     // Automatically balance unclosed code fences and math blocks during streaming
     text = balanceDelimitersForStreaming(text);
+
+    // Auto-wrap bare un-delimited LaTeX display equations and math clauses for KaTeX
+    text = autoWrapBareLatexMath(text);
 
     // Convert pseudo-lists (explanatory prose in bullets) into natural paragraphs if not streaming
     if (options?.streaming !== true) {
