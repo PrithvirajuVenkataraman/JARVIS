@@ -34,7 +34,7 @@
                 "maxDuration": 60
             }
         },
-        "rewrites": [
+        "rewrites": [ 
             {
                 "source": "/api/feedback",
                 "destination": "/api/diagnostics?__route=feedback"
