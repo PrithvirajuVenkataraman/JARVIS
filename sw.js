@@ -3,12 +3,13 @@
  * @description Service Worker for JARVIS PWA & Offline Shell Caching
  */
 
-const CACHE_NAME = 'jarvis-cache-v53';
+const CACHE_NAME = 'jarvis-cache-v55';
 const STATIC_ASSETS = [
     '/',
     'index.html',
-    'styles.css?v=2.5.9',
+    'styles.css?v=2.6.0',
     'katex-local.css',
+    'katex.min.js',
     'katex-fonts/KaTeX_Main-Regular.woff2',
     'katex-fonts/KaTeX_Main-Bold.woff2',
     'katex-fonts/KaTeX_Main-Italic.woff2',
@@ -25,12 +26,12 @@ const STATIC_ASSETS = [
     'katex-fonts/KaTeX_SansSerif-Italic.woff2',
     'katex-fonts/KaTeX_Script-Regular.woff2',
     'katex-fonts/KaTeX_Typewriter-Regular.woff2',
-    'app/bootstrap.js?v=2.6.0',
+    'app/bootstrap.js?v=2.6.1',
     'app/workspace-durability.js?v=2.4.1',
     'app/interactive-illustrations.js?v=2.4.1',
     'app/bounded-live-research.js?v=2.4.2',
-    'app/markdown-renderer.js?v=2.4.6',
-    'app/math-renderer.js?v=2.4.3',
+    'app/markdown-renderer.js?v=2.4.7',
+    'app/math-renderer.js?v=2.4.4',
     'app/search/research-stream.mjs',
     'app/search/research-contract.mjs',
     '404.html',
