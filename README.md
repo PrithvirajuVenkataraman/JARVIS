@@ -31,6 +31,7 @@ Static frontend + Node/Vercel API routes. No frontend build step.
 - `api/_lib/embeddings.js` - Embedding and reranking helpers for semantic retrieval.
 - `api/_lib/query-target-cleanup.js` - Query subject cleanup and metadata extraction helpers.
 - `api/_lib/security.js` - Shared API security headers, CORS, body limits, and rate limiting.
+- `api/_lib/safety-guard.js` - Unified 4-stage content safety guardrails shared across Normal LLM Chat, Live Web Search, Vision, and Image Generation tags.
 - `api/_lib/vision-extract.js` - Lightweight image OCR helper used by attachment ingestion.
 - `api/_lib/free-live/classifier.js` - Free live-search intent classifier.
 - `api/_lib/free-live/providers.js` - Free/public live-source provider integrations.
@@ -62,6 +63,9 @@ Static frontend + Node/Vercel API routes. No frontend build step.
 - `app/speech-input.js` - Browser speech recognition and voice input orchestration.
 - `app/state.js` - Shared client state container and reset helpers.
 - `app/storage.js` - Browser storage helpers for persisted app data.
+- `app/workspace-durability.js` - Dual-tier IndexedDB durable session storage, BroadcastChannel multi-tab LWW sync, and PBKDF2 + AES-256-GCM encrypted portable backup/restore.
+- `app/interactive-illustrations.js` - XSS-safe 60fps in-answer interactive & animated illustration engine (`flow`, `orbit`, `wave`, `sort`, `bars`, `projectile`, `steps`).
+- `app/self-improving-memory.js` - Continual recursive self-improvement memory engine (credit assignment, implicit signals, failure ledger, sleep consolidation, policy snapshots & auto-rollback).
 - `tests/api-contracts.test.mjs` - API contract and behavior tests for server routes.
 - `tests/check-inline-script.mjs` - Syntax check for the inline script embedded in `index.html`.
 - `tests/context-engine.test.mjs` - Unit tests for local context resolution behavior.
