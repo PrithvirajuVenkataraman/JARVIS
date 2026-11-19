@@ -144,6 +144,9 @@ export function formatLatexExpression(expr = '', isDisplay = false) {
         katexInput = katexInput.replace(/\\begin\{aligned\}/g, '');
     }
 
+    // Clean up \boxed{...} to inner expression for KaTeX to eliminate broken box outlines and enforce horizontal flow
+    katexInput = replaceBalancedCommand(katexInput, 'boxed', inner => inner);
+
     const katex = globalThis.katex || (typeof window !== 'undefined' ? window.katex : null);
     if (katex && typeof katex.renderToString === 'function') {
         try {
@@ -237,11 +240,11 @@ export function formatLatexExpression(expr = '', isDisplay = false) {
     raw = raw.replace(/\\nabla\b/g, '&nabla;');
 
     // Arrows and Implications
-    raw = raw.replace(/\\(?:rightarrow|to)\b/g, '&rarr;');
-    raw = raw.replace(/\\leftarrow\b/g, '&larr;');
-    raw = raw.replace(/\\Leftarrow\b/g, '&lArr;');
-    raw = raw.replace(/\\(?:Rightarrow|implies)\b/g, '&rArr;');
-    raw = raw.replace(/\\(?:leftrightarrow|iff)\b/g, '&hArr;');
+    raw = raw.replace(/\\(?:rightarrow|longrightarrow|to)\b/g, '&rarr;');
+    raw = raw.replace(/\\(?:leftarrow|longleftarrow)\b/g, '&larr;');
+    raw = raw.replace(/\\(?:Leftarrow|Longleftarrow)\b/g, '&lArr;');
+    raw = raw.replace(/\\(?:Rightarrow|Longrightarrow|implies)\b/g, '&rArr;');
+    raw = raw.replace(/\\(?:leftrightarrow|longleftrightarrow|iff)\b/g, '&hArr;');
 
     // Set Theory and Logic
     raw = raw.replace(/\\forall\b/g, '&forall;');
