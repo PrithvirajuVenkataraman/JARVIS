@@ -3,11 +3,28 @@
  * @description Service Worker for JARVIS PWA & Offline Shell Caching
  */
 
-const CACHE_NAME = 'jarvis-cache-v52';
+const CACHE_NAME = 'jarvis-cache-v53';
 const STATIC_ASSETS = [
     '/',
     'index.html',
-    'styles.css?v=2.5.8',
+    'styles.css?v=2.5.9',
+    'katex-local.css',
+    'katex-fonts/KaTeX_Main-Regular.woff2',
+    'katex-fonts/KaTeX_Main-Bold.woff2',
+    'katex-fonts/KaTeX_Main-Italic.woff2',
+    'katex-fonts/KaTeX_Main-BoldItalic.woff2',
+    'katex-fonts/KaTeX_Math-Italic.woff2',
+    'katex-fonts/KaTeX_Math-BoldItalic.woff2',
+    'katex-fonts/KaTeX_Size1-Regular.woff2',
+    'katex-fonts/KaTeX_Size2-Regular.woff2',
+    'katex-fonts/KaTeX_Size3-Regular.woff2',
+    'katex-fonts/KaTeX_Size4-Regular.woff2',
+    'katex-fonts/KaTeX_AMS-Regular.woff2',
+    'katex-fonts/KaTeX_SansSerif-Regular.woff2',
+    'katex-fonts/KaTeX_SansSerif-Bold.woff2',
+    'katex-fonts/KaTeX_SansSerif-Italic.woff2',
+    'katex-fonts/KaTeX_Script-Regular.woff2',
+    'katex-fonts/KaTeX_Typewriter-Regular.woff2',
     'app/bootstrap.js?v=2.6.0',
     'app/workspace-durability.js?v=2.4.1',
     'app/interactive-illustrations.js?v=2.4.1',
@@ -53,7 +70,7 @@ self.addEventListener('fetch', (event) => {
     }
 
     // KaTeX CDN Assets: Cache-First for instant offline availability
-    if (url.hostname === 'cdn.jsdelivr.net' && url.pathname.includes('katex')) {
+    if ((url.hostname === 'cdn.jsdelivr.net' || url.hostname === 'cdnjs.cloudflare.com') && url.pathname.includes('katex')) {
         event.respondWith(
             caches.open(CACHE_NAME).then(async (cache) => {
                 const cached = await cache.match(request);
