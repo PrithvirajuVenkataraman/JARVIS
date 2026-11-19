@@ -1209,7 +1209,7 @@ async function runBrowserTests() {
         const path = await import('node:path');
         const apiDir = path.resolve(process.cwd(), 'api');
         const apiFiles = fs.readdirSync(apiDir).filter(f => f.endsWith('.js') && !f.startsWith('_'));
-        console.log(`Vercel function count: ${apiFiles.length} functions (${apiFiles.join(', ')})`);
+        console.log(`Vercel function count: ${apiFiles.length} functions (${apiFiles.join(', ')})`); 
         assert.ok(apiFiles.length <= 12, `Vercel Hobby plan allows max 12 functions, found ${apiFiles.length}`);
         console.log('[PASS] Vercel function count is within Hobby plan limit (<= 12)');
 
