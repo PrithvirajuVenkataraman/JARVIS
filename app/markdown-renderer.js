@@ -370,7 +370,12 @@ export function balanceDelimitersForStreaming(rawText = '') {
 export function autoWrapBareLatexMath(rawText = '') {
     if (!rawText || typeof rawText !== 'string') return rawText;
 
-    const parts = rawText.split(/(```[\s\S]*?```|\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\])/g);
+    // Upfront normalization: convert \(...\) and \[...\] delimiters into standard $ and $$ blocks
+    let normalized = rawText
+        .replace(/\\\(([\s\S]+?)\\\)/g, (_, m) => `$${m.trim()}$`)
+        .replace(/\\\[([\s\S]+?)\\\]/g, (_, m) => `$$\n${m.trim()}\n$$`);
+
+    const parts = normalized.split(/(```[\s\S]*?```|\$\$[\s\S]*?\$\$)/g);
     for (let p = 0; p < parts.length; p++) {
         // Skip fenced code blocks or already delimited display math
         if (p % 2 === 1) continue;
@@ -382,19 +387,28 @@ export function autoWrapBareLatexMath(rawText = '') {
             if (!line) continue;
             if (line.startsWith('#') || line.startsWith('>') || line.startsWith('|') || line.startsWith(':::')) continue;
 
-            const hasMathCommand = /\\(?:int|iint|iiint|oint|sum|prod|frac|dfrac|tfrac|sqrt|sec|csc|cot|sin|cos|tan|lim|partial|nabla|log|ln|exp|pmatrix|bmatrix|vmatrix|aligned|cases)\b/.test(line);
+            const hasMathCommand = /\\(?:int|iint|iiint|oint|sum|prod|frac|dfrac|tfrac|sqrt|boxed|sec|csc|cot|sin|cos|tan|lim|partial|nabla|log|ln|exp|pmatrix|bmatrix|vmatrix|aligned|cases)\b/.test(line);
             const hasMathRel = /[=≈≠≤≥<>]|\\(?:Longrightarrow|Rightarrow|rightarrow|to|iff|approx|equiv)\b/.test(line);
-            const isMostlyMath = !/^(?:Let|If|Since|Where|Because|Note|Here|Then|Thus|Hence|Therefore|Substituting|Substitute|We have|Step\s*\d+)\b/i.test(line);
+            const isMostlyMath = !/^(?:Let|If|Since|Where|Because|Recall\s+that|Notice\s+that|Note|Here|Then|Thus|Hence|Therefore|Substituting|Substitute|We have|Step\s*\d+)\b/i.test(line);
 
-            // 1. Standalone equation line without $$ delimiters: e.g. "\sec^{2}x dx = 2t dt \Longrightarrow dx=\frac{2t dt}{1+\tan^2 x} ..."
-            if (hasMathCommand && (hasMathRel || /^\\(?:int|sum|frac|sqrt|lim)\b/.test(line)) && isMostlyMath) {
+            // 1. Standalone equation line without $$ delimiters: e.g. "\sec^{2}x dx = 2t dt \Longrightarrow dx=\frac{2t dt}{1+\tan^2 x} ..." or "\boxed{\int \tan x dx = ...}"
+            if (hasMathCommand && (hasMathRel || /^\\(?:int|sum|frac|sqrt|lim|boxed)\b/.test(line)) && isMostlyMath) {
                 lines[l] = `$$\n${line}\n$$`;
-            } else if (/^(?:Let|Where|Since|If|When|So|Thus|Hence)\s+([^,.:;\n]+(?:=|\\(?:Longrightarrow|Rightarrow|to|in))[^\n,.:;]+)/i.test(line)) {
-                // 2. Inline math inside introductory clause: e.g. "Let t = \sqrt{\tan x} \Rightarrow \tan x = t^2,"
-                lines[l] = line.replace(/^(Let|Where|Since|If|When|So|Thus|Hence)\s+([^,.:;\n]+(?:=|\\(?:Longrightarrow|Rightarrow|to|in))[^\n,.:;]+)/i, (_, intro, mathClause) => {
-                    if (mathClause.includes('$')) return `${intro} ${mathClause}`;
-                    return `${intro} $${mathClause.trim()}$`;
-                });
+            } else {
+                // 2. Inline math inside introductory clause: e.g. "Because tan x = \frac{\sin x}{\cos x}, set" or "Let t = \sqrt{\tan x} \Rightarrow \tan x = t^2,"
+                const introRegex = /^(Let|Where|Since|If|When|So|Thus|Hence|Because|Recall\s+that|Notice\s+that|Using(?:\s+the\s+identity)?|Given|We\s+have|With|Set|Substituting|Substitute)\s+([^,.:;\n]+(?:=|\\(?:Longrightarrow|Rightarrow|to|in))[^\n,.:;]*)/i;
+                if (introRegex.test(line)) {
+                    line = line.replace(introRegex, (_, intro, mathClause) => {
+                        if (mathClause.includes('$')) return `${intro} ${mathClause}`;
+                        return `${intro} $${mathClause.trim()}$`;
+                    });
+                }
+                // 3. Wrap any bare un-delimited \frac{...}{...} or \boxed{...} in prose lines into inline math
+                if (!line.includes('$')) {
+                    line = line.replace(/\\frac\{[^{}]+\}\{[^{}]+\}/g, m => `$${m}$`);
+                    line = line.replace(/\\boxed\{[^{}]+\}/g, m => `$${m}$`);
+                }
+                lines[l] = line;
             }
         }
         parts[p] = lines.join('\n');
@@ -645,8 +659,9 @@ export function renderMarkdown(rawText = '', options = {}) {
         const isCoordinate = /^\([a-zA-Z0-9_+-]+,\s*[a-zA-Z0-9_+-]+\)$/.test(trimmed);
         const isSubSuper = /^[a-zA-Z]\s*[\^_]\{?[\w\d+-]+\}?$/.test(trimmed);
         const isArithmetic = /^(?:[\d\w_]+\s*[\+\-\*\/\^]\s*)+[\d\w_]+$/.test(trimmed) && /[+\-*/^]/.test(trimmed) && !/[a-zA-Z]{5,}/.test(trimmed);
+        const isDifferentialOrCalculus = /\b(?:d[x-z]|d[u-w]|dt)\b/.test(trimmed) && /\b(?:x|y|z|u|v|w|t|tan|sin|cos|sec|cot|csc|ln|log|\d+)\b/.test(trimmed);
 
-        const isMath = isExplicitMath || isEquationOrRelation || isCoordinate || isSubSuper || isArithmetic;
+        const isMath = isExplicitMath || isEquationOrRelation || isCoordinate || isSubSuper || isArithmetic || isDifferentialOrCalculus;
 
         if (isMath) {
             const cleanExpr = trimmed.replace(/^\$|\$$/g, '');
