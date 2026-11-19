@@ -9117,6 +9117,133 @@ body:not(.dark) .assistant-followup-chip:hover {
 /* ==========================================================================
    LaTeX Math Formula Styles (Notebook Aesthetic)
    ========================================================================== */
+/* Core KaTeX Layout Fallback Styles (Prevents vertical stacking when external CDN is delayed or blocked) */
+.katex {
+    font: normal 1.15em/1.2 "KaTeX_Main", "Cambria Math", "Latin Modern Math", "Times New Roman", serif;
+    text-indent: 0;
+    text-rendering: auto;
+    border-color: currentColor;
+    display: inline-block;
+    line-height: 1.2;
+    white-space: nowrap;
+}
+
+.katex * {
+    -ms-high-contrast-adjust: none !important;
+}
+
+.katex .katex-mathml {
+    clip: rect(1px, 1px, 1px, 1px);
+    border: 0;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    padding: 0;
+    position: absolute;
+    width: 1px;
+}
+
+.katex .katex-html {
+    display: inline-block;
+}
+
+.katex .base {
+    position: relative;
+    display: inline-block;
+    white-space: nowrap;
+    width: min-content;
+}
+
+.katex .strut {
+    display: inline-block;
+}
+
+.katex .mord, .katex .mbin, .katex .mrel, .katex .mopen, .katex .mclose, .katex .mpunct, .katex .minner, .katex .mop {
+    display: inline-block;
+    position: relative;
+}
+
+.katex .mbin { margin-left: 0.22222222em; margin-right: 0.22222222em; }
+.katex .mrel { margin-left: 0.27777778em; margin-right: 0.27777778em; }
+
+.katex .vlist-t {
+    display: inline-table;
+    table-layout: fixed;
+    border-collapse: collapse;
+}
+
+.katex .vlist-r {
+    display: table-row;
+}
+
+.katex .vlist {
+    display: table-cell;
+    vertical-align: bottom;
+    position: relative;
+}
+
+.katex .vlist > span {
+    display: block;
+    height: 0;
+    position: relative;
+}
+
+.katex .vlist > span > span {
+    display: inline-block;
+}
+
+.katex .vlist > span > .pstrut {
+    overflow: hidden;
+    width: 0;
+}
+
+.katex .vlist-t2 {
+    margin-right: -2px;
+}
+
+.katex .vlist-s {
+    display: table-cell;
+    vertical-align: bottom;
+    font-size: 1px;
+    width: 2px;
+    min-width: 2px;
+}
+
+.katex .frac-line {
+    display: block;
+    border-bottom-style: solid;
+    border-bottom-width: 0.04em;
+    width: 100%;
+}
+
+.katex .sqrt {
+    display: inline-block;
+    position: relative;
+}
+
+.katex .sqrt > .root {
+    margin-left: 0.27777778em;
+    margin-right: -0.55555556em;
+}
+
+.katex .sqrt > .vlist-t {
+    display: inline-table;
+}
+
+.katex svg {
+    display: block;
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    fill: currentColor;
+    stroke: currentColor;
+}
+
+.katex .svg-align {
+    display: inline-block;
+    vertical-align: middle;
+}
+
 .math-inline {
     font-family: "KaTeX_Math", "Cambria Math", "Latin Modern Math", "TeX Gyre Termes Math", "Times New Roman", Times, serif;
     font-style: italic;
@@ -12268,7 +12395,7 @@ body:not(.dark) .jarvis-visual-caption {
 }
 
 body:not(.dark) .jarvis-visual-step-card {
-    background: rgba(15, 23, 42, 0.04); 
+    background: rgba(15, 23, 42, 0.04);
 }
 
 .jarvis-visual-step-title {
