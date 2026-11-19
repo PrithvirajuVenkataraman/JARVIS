@@ -689,13 +689,22 @@ async function runFastMathOcrSolvePipeline({ providers, mimeType, imageBase64, u
     }
 
     const lines = [];
-    if (problemText) lines.push(`Problem: ${problemText}`);
-    if (steps.length) {
-        lines.push('Solution:');
-        steps.forEach((step, idx) => lines.push(`${idx + 1}. ${step}`));
+    if (problemText && finalAnswer) {
+        lines.push(`The solution for $${problemText}$ is:`);
+        lines.push(`$$${finalAnswer}$$`);
+        lines.push('---');
     }
-    lines.push(`Final answer: ${finalAnswer}`);
-    if (verification.length) lines.push(`Verification: ${verification.join(' | ')}`);
+    lines.push('### Step-by-Step Solution');
+    if (steps.length) {
+        steps.forEach((step, idx) => {
+            const stepStr = String(step || '').trim();
+            lines.push(`**${idx + 1}. Step ${idx + 1}**\n\n${stepStr}`);
+        });
+    }
+    lines.push(`**Final Answer:**\n\n$$${finalAnswer}$$`);
+    if (verification.length) {
+        lines.push(`**Verification:** ${verification.join(' | ')}`);
+    }
 
     return {
         response: lines.join('\n\n'),
