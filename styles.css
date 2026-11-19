@@ -9279,6 +9279,7 @@ body:not(.dark) .assistant-followup-chip:hover {
     letter-spacing: 0.4px;
     display: inline-block;
     max-width: 100%;
+    white-space: nowrap !important;
 }
 
 /* Notebook Step Labels (Whiteboard / Teacher Margin Style) */
@@ -9297,6 +9298,10 @@ body:not(.dark) .assistant-followup-chip:hover {
 /* Notebook Final Answer Callout (Zero Enclosed Box Invariant) */
 .math-notebook-answer,
 .katex .mord.framebox,
+.katex .framebox,
+.katex .fbox,
+.katex .mord.fbox,
+.katex .boxpad,
 .katex .boxed {
     display: inline;
     padding: 0 4px;
@@ -9308,6 +9313,13 @@ body:not(.dark) .assistant-followup-chip:hover {
     font-weight: 700;
     color: #38bdf8 !important;
     font-style: normal;
+    white-space: nowrap !important;
+}
+
+.katex .stretchy.fbox {
+    display: none !important;
+    border: none !important;
+    outline: none !important;
 }
 
 /* Multiline equation alignments */
@@ -9339,11 +9351,19 @@ body:not(.dark) .assistant-followup-chip:hover {
     text-align: center;
     padding: 0 4px;
     font-size: 0.9em;
+    white-space: nowrap !important;
 }
 
 .math-num {
     border-bottom: 1.5px solid currentColor;
     padding-bottom: 1px;
+    white-space: nowrap !important;
+}
+
+.math-den {
+    padding-top: 1px;
+    white-space: nowrap !important;
+}
 }
 
 .math-den {
