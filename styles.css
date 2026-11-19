@@ -9148,10 +9148,10 @@ body:not(.dark) .assistant-followup-chip:hover {
 }
 
 .katex .base {
-    position: relative;
-    display: inline-block;
-    white-space: nowrap;
-    width: min-content;
+    position: relative !important;
+    display: inline-block !important;
+    white-space: nowrap !important;
+    width: min-content !important;
 }
 
 .katex .strut {
@@ -9166,39 +9166,44 @@ body:not(.dark) .assistant-followup-chip:hover {
 .katex .mbin { margin-left: 0.22222222em; margin-right: 0.22222222em; }
 .katex .mrel { margin-left: 0.27777778em; margin-right: 0.27777778em; }
 
+/* ━━━ KaTeX Layout Hardening (v2.5.9) ━━━
+   These rules are CRITICAL for horizontal math rendering.
+   Without height:0 on .vlist>span, every math token stacks vertically.
+   Applied with !important to guard against partial CDN CSS load conflicts. */
 .katex .vlist-t {
-    display: inline-table;
-    table-layout: fixed;
-    border-collapse: collapse;
+    display: inline-table !important;
+    table-layout: fixed !important;
+    border-collapse: collapse !important;
 }
 
 .katex .vlist-r {
-    display: table-row;
+    display: table-row !important;
 }
 
 .katex .vlist {
-    display: table-cell;
-    vertical-align: bottom;
-    position: relative;
+    display: table-cell !important;
+    vertical-align: bottom !important;
+    position: relative !important;
 }
 
+/* THE KEY RULE: height:0 keeps vlist items stacked horizontally, not vertically */
 .katex .vlist > span {
-    display: block;
-    height: 0;
-    position: relative;
+    display: block !important;
+    height: 0 !important;
+    position: relative !important;
 }
 
 .katex .vlist > span > span {
-    display: inline-block;
+    display: inline-block !important;
 }
 
 .katex .vlist > span > .pstrut {
-    overflow: hidden;
-    width: 0;
+    overflow: hidden !important;
+    width: 0 !important;
 }
 
 .katex .vlist-t2 {
-    margin-right: -2px;
+    margin-right: -2px !important;
 }
 
 .katex .vlist-s {
