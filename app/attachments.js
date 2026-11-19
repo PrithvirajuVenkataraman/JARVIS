@@ -117,6 +117,44 @@ function scoreAttachmentIntent(query, categoryId) {
 
 const pendingAttachments = [];
 
+// Sliding Window Multimodal Memory for multi-turn visual dialogue continuity (ChatGPT/Gemini style)
+const activeSessionImages = [];
+const MAX_ACTIVE_SESSION_IMAGES = 3;
+const MAX_TOTAL_IMAGE_PAYLOAD_BYTES = 4 * 1024 * 1024; // 4MB safe boundary for Vercel Hobby serverless
+
+export function getActiveSessionImages() {
+    return activeSessionImages.map(img => ({ ...img }));
+}
+
+export function recordActiveSessionImage(imagePayload) {
+    if (!imagePayload || typeof imagePayload !== 'object') return;
+    const base64 = String(imagePayload.base64 || imagePayload.data || '').trim();
+    if (!base64 || base64.length < 50) return;
+    const item = {
+        name: String(imagePayload.name || 'image.png').trim(),
+        mimeType: String(imagePayload.mimeType || 'image/jpeg').trim(),
+        base64,
+        timestamp: Date.now()
+    };
+    const existingIdx = activeSessionImages.findIndex(img => img.name === item.name || img.base64.slice(0, 80) === item.base64.slice(0, 80));
+    if (existingIdx >= 0) {
+        activeSessionImages.splice(existingIdx, 1);
+    }
+    activeSessionImages.push(item);
+    while (activeSessionImages.length > MAX_ACTIVE_SESSION_IMAGES) {
+        activeSessionImages.shift();
+    }
+    let totalSize = activeSessionImages.reduce((sum, img) => sum + img.base64.length, 0);
+    while (activeSessionImages.length > 1 && totalSize > MAX_TOTAL_IMAGE_PAYLOAD_BYTES) {
+        activeSessionImages.shift();
+        totalSize = activeSessionImages.reduce((sum, img) => sum + img.base64.length, 0);
+    }
+}
+
+export function clearActiveSessionImages() {
+    activeSessionImages.splice(0, activeSessionImages.length);
+}
+
 let pdfLoaderPromise = null;
 let jsZipLoaderPromise = null;
 let sheetJsLoaderPromise = null;
@@ -238,6 +276,7 @@ export async function ingestAllForMessage(attachments = [], userText = '') {
         if (imagePayload) {
             anyReadable = true;
             imagePayloads.push(imagePayload);
+            recordActiveSessionImage(imagePayload);
         }
 
         methods.push({
