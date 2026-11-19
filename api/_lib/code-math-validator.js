@@ -200,6 +200,17 @@ export class StreamingSpeculativeGuard {
         const codeFences = (this.buffer.match(/```/g) || []).length;
         const displayMath = (this.buffer.match(/\$\$/g) || []).length;
         if (codeFences % 2 !== 0 || displayMath % 2 !== 0) {
+            // High-throughput streaming protection: If buffer inside unclosed block exceeds 200 chars,
+            // stream out up to the latest newline to prevent SSE socket starvation and idle timeouts.
+            if (this.buffer.length > 200) {
+                const lastNl = this.buffer.lastIndexOf('\n');
+                if (lastNl > 40) {
+                    const toEmit = this.buffer.slice(0, lastNl + 1);
+                    this.buffer = this.buffer.slice(lastNl + 1);
+                    if (this.onVerifiedChunk) this.onVerifiedChunk(toEmit);
+                    return toEmit;
+                }
+            }
             return '';
         }
 
@@ -214,6 +225,19 @@ export class StreamingSpeculativeGuard {
             const output = repaired.text;
             if (this.onVerifiedChunk) this.onVerifiedChunk(output);
             return output;
+        }
+
+        // Bound maximum buffer to prevent starvation on long non-punctuated lines (e.g. math derivations, list items)
+        if (this.buffer.length > 180) {
+            const lastNl = this.buffer.lastIndexOf('\n');
+            if (lastNl > 30) {
+                const slice = this.buffer.slice(0, lastNl + 1);
+                this.buffer = this.buffer.slice(lastNl + 1);
+                const repaired = validateAndRepairCodeAndMath(slice, { isStreamingChunk: true });
+                const output = repaired.text;
+                if (this.onVerifiedChunk) this.onVerifiedChunk(output);
+                return output;
+            }
         }
 
         return '';
