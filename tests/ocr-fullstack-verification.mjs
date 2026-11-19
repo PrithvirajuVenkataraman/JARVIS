@@ -94,7 +94,37 @@ async function run() {
     assert.ok(mathGrounded.includes('$$...$$'), 'Must specify display equation delimiters');
     assert.ok(mathGrounded.includes('$...$'), 'Must specify inline equation delimiters');
     assert.ok(mathGrounded.includes('MATHEMATICAL & QUANTITATIVE REASONING'), 'Must include structured mathematical reasoning');
+    assert.ok(mathGrounded.includes('### Step-by-Step Solution'), 'Must require Step-by-Step Solution header');
+    assert.ok(mathGrounded.includes('NUMBERED CONCEPTUAL PHASES'), 'Must require numbered conceptual phases');
+    assert.ok(mathGrounded.includes('BACK-SUBSTITUTION & CONSTANT OF INTEGRATION'), 'Must require back-substitution and integration constant');
     console.log('  [PASS] Modality 3: Math OCR routing, KaTeX rules, and step-by-step solving verified.');
+    passed++;
+
+    // -------------------------------------------------------------
+    // Modality 3b: Multi-Turn Sliding Window Multimodal Memory
+    // -------------------------------------------------------------
+    console.log('--- Modality 3b: Multi-Turn Sliding Window Multimodal Memory ---');
+    const { recordActiveSessionImage, getActiveSessionImages, clearActiveSessionImages } = await import('../app/attachments.js');
+    clearActiveSessionImages();
+    assert.equal(getActiveSessionImages().length, 0, 'Initial session images must be empty');
+
+    // Turn 1: user uploads math diagram
+    recordActiveSessionImage({
+        name: 'integral_problem.png',
+        mimeType: 'image/png',
+        base64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
+    });
+    assert.equal(getActiveSessionImages().length, 1, 'Should retain uploaded image in session memory');
+    assert.equal(getActiveSessionImages()[0].name, 'integral_problem.png');
+
+    // Turn 2: user asks follow-up ("Now evaluate it from 0 to pi/4") without re-uploading
+    const sessionImagesTurn2 = getActiveSessionImages();
+    assert.ok(sessionImagesTurn2.length > 0, 'Follow-up query must have access to retained session image');
+
+    // New chat clears session images
+    clearActiveSessionImages();
+    assert.equal(getActiveSessionImages().length, 0, 'Starting a new chat must clear active session images');
+    console.log('  [PASS] Modality 3b: Multi-turn sliding window multimodal memory verified.');
     passed++;
 
     // -------------------------------------------------------------
