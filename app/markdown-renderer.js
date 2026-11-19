@@ -387,12 +387,27 @@ export function autoWrapBareLatexMath(rawText = '') {
             if (!line) continue;
             if (line.startsWith('#') || line.startsWith('>') || line.startsWith('|') || line.startsWith(':::')) continue;
 
+            // If line already contains $ or ` delimiters, it is already delimited — NEVER wrap into $$ or modify
+            if (line.includes('$') || line.includes('`')) {
+                lines[l] = line;
+                continue;
+            }
+
             const hasMathCommand = /\\(?:int|iint|iiint|oint|sum|prod|frac|dfrac|tfrac|sqrt|boxed|sec|csc|cot|sin|cos|tan|lim|partial|nabla|log|ln|exp|pmatrix|bmatrix|vmatrix|aligned|cases)\b/.test(line);
             const hasMathRel = /[=≈≠≤≥<>]|\\(?:Longrightarrow|Rightarrow|rightarrow|to|iff|approx|equiv)\b/.test(line);
-            const isMostlyMath = !/^(?:Let|If|Since|Where|Because|Recall\s+that|Notice\s+that|Note|Here|Then|Thus|Hence|Therefore|Substituting|Substitute|We have|Step\s*\d+)\b/i.test(line);
 
-            // 1. Standalone equation line without $$ delimiters: e.g. "\sec^{2}x dx = 2t dt \Longrightarrow dx=\frac{2t dt}{1+\tan^2 x} ..." or "\boxed{\int \tan x dx = ...}"
-            if (hasMathCommand && (hasMathRel || /^\\(?:int|sum|frac|sqrt|lim|boxed)\b/.test(line)) && isMostlyMath) {
+            const isProseStart = /^(?:Let|If|Since|Where|Because|Recall|Notice|Note|Here|Then|Thus|Hence|Therefore|Substituting|Substitute|We|You|The|This|Express|Find|Compute|Calculate|Determine|Simplify|Consider|Now|Set|Given|With|Check|Assume|Define|Step\s*\d+)\b/i.test(line);
+
+            // Count English prose words of 3+ letters outside of LaTeX commands and standard math functions
+            const proseWords = line.replace(/\\(?:[a-zA-Z]+)/g, '').match(/\b[a-zA-Z]{3,}\b/g) || [];
+            const mathWordSet = new Set(['sin', 'cos', 'tan', 'sec', 'csc', 'cot', 'log', 'ln', 'lim', 'exp', 'det', 'max', 'min', 'and', 'for', 'mod']);
+            const nonMathWords = proseWords.filter(w => !mathWordSet.has(w.toLowerCase()));
+            const hasProseWords = nonMathWords.length >= 2;
+
+            const isDisplayMathCandidate = !isProseStart && !hasProseWords && (hasMathCommand && hasMathRel || /^\\(?:int|sum|frac|sqrt|lim|boxed)\b/.test(line));
+
+            // 1. Pure standalone equation line without $$ delimiters: e.g. "\sec^{2}x dx = 2t dt \Longrightarrow dx=\frac{2t dt}{1+\tan^2 x} ..." or "\boxed{\int \tan x dx = ...}"
+            if (isDisplayMathCandidate) {
                 lines[l] = `$$\n${line}\n$$`;
             } else {
                 // 2. Inline math inside introductory clause: e.g. "Because tan x = \frac{\sin x}{\cos x}, set" or "Let t = \sqrt{\tan x} \Rightarrow \tan x = t^2,"
