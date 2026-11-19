@@ -7,19 +7,19 @@ This document provides a comprehensive technical overview of the system design, 
 ## 1. High-Level System Architecture
 
 ```mermaid
-graph TD
+flowchart TD
     Client["Client Web UI (Vanilla JS, Web Audio, Responsive CSS)"]
     
-    subgraph Frontend["Frontend Subsystems"]
+    subgraph Frontend ["Frontend Subsystems"]
         ChatComposer["Chat Composer & Attachment Ingestion (Circular Send Button)"]
         VTTController["Enterprise Voice-to-Text (VTT & Dictation)"]
-        EmergencySosSubsystem["Emergency SOS & Satellite Distress Subsystem"]
+        DurabilitySubsystem["Workspace Durability & Dual-Tier IndexedDB"]
         OfflineWatchdog["Network Resilience Watchdog"]
         AudioHaptics["Web Audio Chimes Engine"]
         VectorEngine["512-Dim Dense Vector Embedding & Semantic Search"]
     end
 
-    subgraph Backend["Backend Edge Server (Vercel Serverless / Node.js)"]
+    subgraph Backend ["Backend Edge Server (Vercel Serverless / Node.js)"]
         SecurityShield["Security Shield (Origin/Referer & Delimiter Guard)"]
         ContextCompactor["Context Window Token Compactor"]
         IntentRouter["Autonomous Model Router & Fallback Cascade"]
@@ -28,7 +28,7 @@ graph TD
         LiveClassifier["Dense Vector Live Intent Classifier"]
     end
 
-    subgraph Models["Model & Provider Pool"]
+    subgraph Models ["Model & Provider Pool"]
         GroqPool["Groq LPU Pool (Multi-Key Round-Robin: GPT OSS 120B/20B, Qwen 3.8 27B)"]
         GeminiPool["Google Gemini Pool (Gemini 3.7 Flash, 2.5 Pro, 2.5 Flash)"]
         DeterministicFacts["Deterministic Instant Fact Layer"]
@@ -36,7 +36,7 @@ graph TD
 
     Client --> ChatComposer
     Client --> VTTController
-    Client --> EmergencySosSubsystem
+    Client --> DurabilitySubsystem
     ChatComposer --> SecurityShield
     VTTController --> SecurityShield
     SecurityShield --> ContextCompactor
@@ -60,7 +60,7 @@ flowchart TD
     DocStream["Incoming Turns, Documents & Memories"] --> Embedding["512-Dim Vector Projection (textToEmbeddingVector)"]
     Embedding --> IVFIndex["PartitionedIVFIndex (app/storage.js)"]
     
-    subgraph IVFStructure["Partitioned Inverted File (IVF) Index Structure"]
+    subgraph IVFStructure ["Partitioned Inverted File (IVF) Index Structure"]
         CentroidPool["Centroid Pool (C1, C2, ..., Ck)"]
         Bucket1["Cluster 1: Technical & Code"]
         Bucket2["Cluster 2: Knowledge & Entities"]
@@ -248,8 +248,8 @@ For long conversations (50+ turns), JARVIS maintains full conversational coheren
 flowchart LR
     A["Raw Chat History (Turns 1 to N)"] --> B{"Turn Count > 10?"}
     B -->|"No"| C["Verbatim Context (All Turns)"]
-    B -->|"Yes"| D["Older Turns (1 to N-10) &rarr; Condensed (Conversation Digest)"]
-    B -->|"Yes"| E["Recent Turns (N-9 to N) &rarr; Verbatim Stream Block"]
+    B -->|"Yes"| D["Older Turns (1 to N-10) → Condensed (Conversation Digest)"]
+    B -->|"Yes"| E["Recent Turns (N-9 to N) → Verbatim Stream Block"]
     D --> F["Compacted Context Payload"]
     E --> F
 ```
@@ -354,7 +354,7 @@ For complex multi-stage objectives (e.g. comparing technological frameworks, res
 flowchart TD
     UserGoal["User Goal: 'Research vector DB benchmarks & build a Node.js prototype'"] --> Planner["Agent 1: Planner (Decomposes DAG & Dependency Graph)"]
     
-    subgraph ConcurrentWave["Concurrent Execution Wave (Promise.allSettled)"]
+    subgraph ConcurrentWave ["Concurrent Execution Wave (Promise.allSettled)"]
         Researcher["Agent 2: Researcher (Web RAG & Domain Grounding)"]
         Coder["Agent 3: Coder (Architecture & Syntax Generation)"]
     end
@@ -464,4 +464,37 @@ To leverage the full free-tier capabilities of modern LLM APIs (specifically Goo
 - **Extended Analyzing Watchdog**: State machine applies a **120-second watchdog** for `ANALYZING` (`ANALYZING_WATCHDOG_MS = 120000`), preventing premature timeout resets during heavy multi-page OCR or document extraction.
 - **Progress-Driven Heartbeat (`touch()`)**: State machine subscribes to `jarvis-attachment-progress` and `jarvis:progress` events, renewing the watchdog timer each time a page is processed or progress is reported.
 - **Semantic State Transitions**: When messages include attachments, `sendTextInput` transitions directly to `ANALYZING`, followed by `SEARCHING` (if live verification is needed), `THINKING` (while waiting for the LLM), and `GENERATING` (during streaming).
+
+---
+
+## 19. Local-First Workspace Durability, Multi-Tab Sync & Encrypted Backup (`app/workspace-durability.js`)
+
+To stay 100% zero-cost on Vercel Hobby (**7/12 serverless functions**) while eliminating the 5MB `localStorage` truncation ceiling:
+- **Dual-Tier Write-Through IndexedDB (`WorkspaceIndexedDB`)**:
+  - Primary durable store persists up to **500 full, untruncated chat sessions** inside `jarvis_database_v1` (`sessions` object store).
+  - Lightweight `localStorage` hot-cache retains recent compacted sessions for 0ms synchronous boot.
+  - Exposes real browser storage quota (`navigator.storage.estimate()`) and persistent storage upgrade (`navigator.storage.persist()`) inside **Settings → Workspace Backup & Storage Health**.
+- **BroadcastChannel Multi-Tab LWW Sync (`WorkspaceTabSync` + `mergeChatSessionsLww`)**:
+  - Synchronizes chats, delete tombstones, unified memories, learned rules, and settings live across open tabs via `BroadcastChannel('jarvis_workspace_sync_v1')` (with `storage` event fallback).
+  - Resolves conflicts per-session via Last-Write-Wins (`updatedAt`) with tombstone dominance and active-stream protection so ongoing streaming responses are never interrupted.
+- **Portable Encrypted Workspace Backup (`createWorkspaceBackup` / `parseWorkspaceBackup`)**:
+  - Encrypts chats, memories, self-improving rules, custom instructions, and safe preferences client-side using **WebCrypto PBKDF2-SHA256 (310,000 iterations) + AES-256-GCM** (default ON).
+  - Strictly excludes BYOK API keys and supports **Merge (LWW)** or **Replace All** on restore.
+
+---
+
+## 20. In-Answer Interactive & Animated Illustrations (`app/interactive-illustrations.js`)
+
+When explaining processes, algorithms, physics, orbital mechanics, or multi-step concepts, JARVIS can render live **60fps interactive illustrations** inline inside chat responses via fenced ```` ```visual ```` JSON specs:
+- **Zero-Eval XSS-Safe Protocol**: Strictly validates allowlisted primitive types (`flow`, `orbit`, `wave`, `sort`, `bars`, `projectile`, `steps`) through `parseVisualSpec()` and sanitizes all labels/colors before mounting.
+- **60fps Retina Canvas & Interactive Controls**: Supports **Play / Pause**, **Replay**, **Speed (`0.5x / 1x / 2x`)**, and interactive step scrubbers.
+- **Battery & Accessibility Safe**: Automatically pauses off-screen animations via `IntersectionObserver`, cleans up `requestAnimationFrame` loops on DOM removal, and respects `prefers-reduced-motion`.
+
+---
+
+## 21. Unified Content Safety Guardrails & Continual Recursive Self-Improvement
+
+- **Unified Guardrails (`api/_lib/safety-guard.js`)**: Shared 4-stage guardrail across Normal LLM Chat (`api/chat-groq.js`), Live Web Search (`api/search.js` + `api/_lib/research-engine.js`), Vision (`api/vision.js`), and `:::image[...]` tags. Open-by-default on legitimate educational, clinical/medical, historical, legal, and creative topics; strictly blocks Adult/NSFW/CSAM, cruelty/gore/abuse, hate speech, harassment/doxxing, severe illegal harm, and prompt injections, with compassionate crisis helpline redirection for self-harm. See [`docs/compliance.md`](./docs/compliance.md).
+- **Continual Recursive Self-Improvement (`app/self-improving-memory.js`)**: Extends closed-loop preference learning with turn-scoped Bayesian credit assignment (`alpha`/`beta` utility scoring & auto-demotion), implicit behavioral signal mining (Copy, Export, Save, Regenerate), a semantic **Personal Failure Ledger**, periodic **Sleep/Consolidation** rule compression & 14-day temporal decay, **Versioned Policy Snapshots + Auto-Rollback**, immutable safety invariants, and UCB1 per-intent model bandit telemetry. See [`docs/memory.md`](./docs/memory.md).
+
 
