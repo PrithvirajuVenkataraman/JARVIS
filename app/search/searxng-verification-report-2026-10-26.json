@@ -1,0 +1,127 @@
+{
+  "auditDate": "2026-10-26",
+  "totalAudited": 10,
+  "passedCount": 0,
+  "results": [
+    {
+      "url": "https://search.sapti.me/search",
+      "verifiedAt": "2026-10-27T00:00:00Z",
+      "medianLatencyMs": 420,
+      "region": "EU-West",
+      "operator": "Sapti Network",
+      "notes": "High availability, JSON API enabled, cloud IP friendly",
+      "verificationStatus": "FAIL",
+      "probeLatencyMs": 639,
+      "probeError": "HTTP 429 Rate Limited",
+      "probeDate": "2026-10-26T18:46:47.427Z"
+    },
+    {
+      "url": "https://etsi.me/search",
+      "verifiedAt": "2026-10-27T00:00:00Z",
+      "medianLatencyMs": 480,
+      "region": "EU-Central",
+      "operator": "ETSI Hosting",
+      "notes": "Fast general search, reliable TLS termination",
+      "verificationStatus": "FAIL",
+      "probeLatencyMs": 3003,
+      "probeError": "Timeout",
+      "probeDate": "2026-10-26T18:46:50.433Z"
+    },
+    {
+      "url": "https://baresearch.org/search",
+      "verifiedAt": "2026-10-27T00:00:00Z",
+      "medianLatencyMs": 510,
+      "region": "NA-East",
+      "operator": "BareSearch Foundation",
+      "notes": "North American instance, low packet loss",
+      "verificationStatus": "FAIL",
+      "probeLatencyMs": 824,
+      "probeError": "Invalid JSON response",
+      "probeDate": "2026-10-26T18:46:51.261Z"
+    },
+    {
+      "url": "https://priv.au/search",
+      "verifiedAt": "2026-10-27T00:00:00Z",
+      "medianLatencyMs": 590,
+      "region": "OC-Australia",
+      "operator": "PrivAU Privacy Org",
+      "notes": "Asia-Pacific coverage, open JSON format",
+      "verificationStatus": "FAIL",
+      "probeLatencyMs": 175,
+      "probeError": "HTTP 429 Rate Limited",
+      "probeDate": "2026-10-26T18:46:51.436Z"
+    },
+    {
+      "url": "https://searx.be/search",
+      "verifiedAt": "2026-10-27T00:00:00Z",
+      "medianLatencyMs": 530,
+      "region": "EU-West",
+      "operator": "Searx.be",
+      "notes": "Established European privacy community instance",
+      "verificationStatus": "FAIL",
+      "probeLatencyMs": 776,
+      "probeError": "Invalid JSON response",
+      "probeDate": "2026-10-26T18:46:52.213Z"
+    },
+    {
+      "url": "https://searx.tiekoetter.com/search",
+      "verifiedAt": "2026-10-27T00:00:00Z",
+      "medianLatencyMs": 560,
+      "region": "EU-Central",
+      "operator": "Tiekoetter IT",
+      "notes": "German node, high bandwidth",
+      "verificationStatus": "FAIL",
+      "probeLatencyMs": 661,
+      "probeError": "HTTP 429 Rate Limited",
+      "probeDate": "2026-10-26T18:46:52.874Z"
+    },
+    {
+      "url": "https://search.disroot.org/search",
+      "verifiedAt": "2026-10-27T00:00:00Z",
+      "medianLatencyMs": 620,
+      "region": "EU-West",
+      "operator": "Disroot Foundation",
+      "notes": "Non-profit community service, high uptime",
+      "verificationStatus": "FAIL",
+      "probeLatencyMs": 617,
+      "probeError": "Invalid JSON response",
+      "probeDate": "2026-10-26T18:46:53.491Z"
+    },
+    {
+      "url": "https://paulgo.io/search",
+      "verifiedAt": "2026-10-27T00:00:00Z",
+      "medianLatencyMs": 640,
+      "region": "NA-Central",
+      "operator": "PaulGo Network",
+      "notes": "Solid fallback, rate-limits gracefully",
+      "verificationStatus": "FAIL",
+      "probeLatencyMs": 720,
+      "probeError": "HTTP 429 Rate Limited",
+      "probeDate": "2026-10-26T18:46:54.212Z"
+    },
+    {
+      "url": "https://search.ononoki.org/search",
+      "verifiedAt": "2026-10-27T00:00:00Z",
+      "medianLatencyMs": 580,
+      "region": "EU-North",
+      "operator": "Ononoki Privacy",
+      "notes": "Nordic cluster, strong peering",
+      "verificationStatus": "FAIL",
+      "probeLatencyMs": 35,
+      "probeError": "fetch failed",
+      "probeDate": "2026-10-26T18:46:54.247Z"
+    },
+    {
+      "url": "https://searx.work/search",
+      "verifiedAt": "2026-10-27T00:00:00Z",
+      "medianLatencyMs": 610,
+      "region": "EU-Central",
+      "operator": "SearxWork",
+      "notes": "Secondary EU fallback",
+      "verificationStatus": "FAIL",
+      "probeLatencyMs": 545,
+      "probeError": "fetch failed",
+      "probeDate": "2026-10-26T18:46:54.792Z"
+    }
+  ]
+}
