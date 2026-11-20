@@ -382,7 +382,7 @@ export function renderMathInText(text = '') {
         return `<span class="math-inline">${formatLatexExpression(math, false)}</span>`;
     });
 
-    // Inline math: $ ... $ 
+    // Inline math: $ ... $
     raw = raw.replace(/(?<!\\)\$(?!\$)([^\$\n]+?)(?<!\\)\$/g, (_, math) => {
         const trimmed = math.trim();
         if (!trimmed) return '$';
