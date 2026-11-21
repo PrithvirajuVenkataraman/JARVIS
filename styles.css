@@ -9151,16 +9151,10 @@ body:not(.dark) .assistant-followup-chip:hover {
     position: relative !important;
     display: inline-block !important;
     white-space: nowrap !important;
-    width: min-content !important;
 }
 
 .katex .strut {
     display: inline-block;
-}
-
-.katex .mord, .katex .mbin, .katex .mrel, .katex .mopen, .katex .mclose, .katex .mpunct, .katex .minner, .katex .mop {
-    display: inline-block;
-    position: relative;
 }
 
 .katex .mbin { margin-left: 0.22222222em; margin-right: 0.22222222em; }
