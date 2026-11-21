@@ -73,12 +73,11 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <!-- KaTeX CSS & JS: CDN primary with local fallback for zero-configuration, font-complete rendering -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" onerror="this.onerror=null;this.href='katex-local.css';">
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous" onerror="this.onerror=null;const s=document.createElement('script');s.src='katex.min.js';document.head.appendChild(s);"></script>
-    <link rel="stylesheet" href="styles.css?v=2.6.4">
+    <!-- KaTeX JS: Local bundle first for instant zero-latency loading with CDN fallback -->
+    <script src="katex.min.js" onerror="this.onerror=null;const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js';document.head.appendChild(s);"></script>
+    <link rel="stylesheet" href="styles.css?v=2.6.5">
     <script src="science-format.js?v=2.0.1"></script>
-    <script type="module" src="app/bootstrap.js?v=2.6.5"></script>
+    <script type="module" src="app/bootstrap.js?v=2.6.6"></script>
 </head>
 <body class="dark min-h-screen bg-black text-white">
 
