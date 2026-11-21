@@ -12439,7 +12439,7 @@ body:not(.dark) .jarvis-visual-step-card {
 }
 
 .jarvis-visual-step-title {
-    font-size: 14px;
+    font-size: 14px; 
     font-weight: 650;
     color: #f8fafc;
     margin-bottom: 4px;
