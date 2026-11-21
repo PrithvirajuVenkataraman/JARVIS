@@ -684,6 +684,29 @@ async function getInstantFactHelper() {
         return raw;
     }
 
+    function getMaxOutputTokensForGemini(model = '', requested = 65536) {
+        const raw = String(model || '').toLowerCase();
+        if (raw.includes('1.5')) {
+            return Math.min(Number(requested) || 8192, 8192);
+        }
+        // Gemini 2.0 / 2.5 Flash & Pro support up to 65,536 output tokens in free quota
+        return Math.min(Math.max(Number(requested) || 65536, 16384), 65536);
+    }
+
+    function getMaxOutputTokensForGroq(model = '', requested = 32768) {
+        const raw = String(model || '').toLowerCase();
+        if (raw.includes('70b') || raw.includes('llama-3.3')) {
+            return Math.min(Number(requested) || 32768, 32768);
+        }
+        if (raw.includes('32b') || raw.includes('27b') || raw.includes('qwen')) {
+            return Math.min(Number(requested) || 16384, 16384);
+        }
+        if (raw.includes('8b') || raw.includes('gpt-oss-120b') || raw.includes('gpt-oss-20b')) {
+            return Math.min(Number(requested) || 8192, 8192);
+        }
+        return Math.min(Number(requested) || 16384, 16384);
+    }
+
     const SQL_QUERY_GENERATION_SCHEMA = {
         type: 'json_schema',
         json_schema: {
@@ -2681,7 +2704,7 @@ export default async function handler(req, res) {
         const reasoningAllowance = isFastSimple ? 0 : REASONING_TOKEN_ALLOWANCE;
         const targetMaxTokens = isFastSimple
             ? Math.min(512, clampInt(lengthPolicy?.maxTokens, 512, 64, 1024))
-            : clampInt(lengthPolicy?.maxTokens, 8000, 256, 16000);
+            : clampInt(lengthPolicy?.maxTokens, 65536, 256, 65536);
         const maxTokens = targetMaxTokens + reasoningAllowance;
         const hasImages = Array.isArray(images) && images.length > 0;
 
@@ -2714,7 +2737,7 @@ export default async function handler(req, res) {
                     const requestBody = {
                         model,
                         temperature: temp,
-                        max_tokens: maxTokens,
+                        max_tokens: getMaxOutputTokensForGroq(model, maxTokens),
                         messages
                     };
                     if (isSqlQueryGenerationRequest(finalPrompt)) {
@@ -2817,7 +2840,7 @@ export default async function handler(req, res) {
                     temperature: effectiveVisionTemp,
                     topK: 40,
                     topP: hasImages ? 0.9 : 0.95,
-                    maxOutputTokens: maxTokens
+                    maxOutputTokens: getMaxOutputTokensForGemini(model, maxTokens)
                 };
                 if (hasImages) {
                     geminiGenConfig.mediaResolution = 'MEDIA_RESOLUTION_HIGH';
@@ -3135,11 +3158,10 @@ export default async function handler(req, res) {
             const isReasoning = isExplicitReasoningIntent(options?.intent, prompt) || isUserChosenR1;
             const shouldSuppressReasoning = !isReasoning || options?.minimalThinking === true ||
                 ['fast_simple', 'casual_chat', 'chat_title', 'internal_summary', 'fast_explainer', 'pop_culture_reference', 'chat'].includes(String(options?.intent || ''));
-            const modelMaxTokens = 16384;
             const groqPayload = {
                 model,
                 temperature,
-                max_tokens: Math.min(maxTokens || 16384, modelMaxTokens),
+                max_tokens: getMaxOutputTokensForGroq(model, maxTokens),
                 stream: true,
                 messages
             };
@@ -3325,7 +3347,7 @@ export default async function handler(req, res) {
                 temperature: effectiveTemp,
                 topK: 40,
                 topP: hasStreamImages ? 0.9 : 0.95,
-                maxOutputTokens: Math.min(Math.max(maxTokens || 32768, 32768), 65536)
+                maxOutputTokens: getMaxOutputTokensForGemini(model, maxTokens)
             };
             if (hasStreamImages) {
                 generationConfig.mediaResolution = 'MEDIA_RESOLUTION_HIGH';
