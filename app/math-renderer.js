@@ -279,6 +279,9 @@ export function formatLatexExpression(expr = '', isDisplay = false) {
     raw = raw.replace(/\\infty\b/g, '&infin;');
     raw = raw.replace(/\\(?:circ|degree)\b/g, '&deg;');
 
+    // Common Functions with powers (e.g. \sec^2 x, \tan^2 x, \cos^2 x)
+    raw = raw.replace(/\\(arcsin|arccos|arctan|sin|cos|tan|sec|csc|cot|ln|log)\^\{?([a-zA-Z0-9_+-]+)\}?/g, '<span class="math-func">$1</span><sup>$2</sup>');
+
     // Common Functions
     const mathFuncs = ['arcsin', 'arccos', 'arctan', 'sin', 'cos', 'tan', 'sec', 'csc', 'cot', 'ln', 'log', 'exp', 'det', 'max', 'min'];
     for (const fn of mathFuncs) {
