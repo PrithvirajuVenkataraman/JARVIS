@@ -485,7 +485,7 @@ To stay 100% zero-cost on Vercel Hobby (**7/12 serverless functions**) while eli
 
 ## 20. In-Answer Interactive & Animated Illustrations (`app/interactive-illustrations.js`)
 
-When explaining processes, algorithms, physics, orbital mechanics, or multi-step concepts, JARVIS can render live **60fps interactive illustrations** inline inside chat responses via fenced ```` ```visual ```` JSON specs: 
+When explaining processes, algorithms, physics, orbital mechanics, or multi-step concepts, JARVIS can render live **60fps interactive illustrations** inline inside chat responses via fenced ```` ```visual ```` JSON specs:
 - **Zero-Eval XSS-Safe Protocol**: Strictly validates allowlisted primitive types (`flow`, `orbit`, `wave`, `sort`, `bars`, `projectile`, `steps`) through `parseVisualSpec()` and sanitizes all labels/colors before mounting.
 - **60fps Retina Canvas & Interactive Controls**: Supports **Play / Pause**, **Replay**, **Speed (`0.5x / 1x / 2x`)**, and interactive step scrubbers.
 - **Battery & Accessibility Safe**: Automatically pauses off-screen animations via `IntersectionObserver`, cleans up `requestAnimationFrame` loops on DOM removal, and respects `prefers-reduced-motion`.
