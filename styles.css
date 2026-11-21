@@ -2361,10 +2361,7 @@ body.dark .composer-action-item:hover {
 }
 
 .assistant-message-text,
-.assistant-message-text p,
-.assistant-message-text li,
-.assistant-message-text span,
-.assistant-message-text a {
+.assistant-message-text :is(p, li, span, a):not(:where(.math-inline, .math-display-block, .math-inline *, .math-display-block *, .katex, .katex *)) {
     font-family: var(--app-font-family) !important;
     white-space: normal !important;
     word-break: normal !important;
@@ -9127,8 +9124,7 @@ body:not(.dark) .assistant-followup-chip:hover {
     font-style: italic;
     padding: 0 2px;
     color: #93c5fd;
-    display: inline-flex;
-    align-items: baseline;
+    display: inline-block;
     letter-spacing: 0.3px;
     white-space: nowrap !important;
 }
@@ -9158,11 +9154,11 @@ body:not(.dark) .assistant-followup-chip:hover {
 }
 
 .math-display-block {
-    display: flex;
-    justify-content: center;
-    align-items: center;
+    display: block;
+    min-width: 0;
+    max-width: 100%;
     margin: 1.15rem 0;
-    padding: 0.5rem 1rem;
+    padding: 0.5rem 0;
     overflow-x: auto;
     overflow-y: hidden;
     background: transparent;
@@ -9177,8 +9173,21 @@ body:not(.dark) .assistant-followup-chip:hover {
     color: #e2e8f0;
     letter-spacing: 0.4px;
     display: inline-block;
-    max-width: 100%;
+    width: max-content;
+    min-width: 100%;
     white-space: nowrap !important;
+}
+
+/* KaTeX measures its own fonts and spacing. Keep chat typography out of its tree. */
+.math-inline .katex,
+.math-display-inner .katex {
+    letter-spacing: normal;
+    overflow-wrap: normal;
+    word-break: normal;
+}
+
+.math-display-inner > .katex-display {
+    margin: 0;
 }
 
 /* Notebook Step Labels (Whiteboard / Teacher Margin Style) */
