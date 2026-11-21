@@ -9364,11 +9364,6 @@ body:not(.dark) .assistant-followup-chip:hover {
     padding-top: 1px;
     white-space: nowrap !important;
 }
-}
-
-.math-den {
-    padding-top: 1px;
-}
 
 .math-sqrt {
     display: inline-flex;
@@ -12421,7 +12416,7 @@ body:not(.dark) .jarvis-visual-caption {
 
 body:not(.dark) .jarvis-visual-step-card {
     background: rgba(15, 23, 42, 0.04);
-} 
+}
 
 .jarvis-visual-step-title {
     font-size: 14px;
