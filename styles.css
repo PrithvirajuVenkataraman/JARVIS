@@ -9254,8 +9254,34 @@ body:not(.dark) .assistant-followup-chip:hover {
     font-style: italic;
     padding: 0 2px;
     color: #93c5fd;
-    display: inline;
+    display: inline-flex;
+    align-items: baseline;
     letter-spacing: 0.3px;
+    white-space: nowrap !important;
+}
+
+.math-inline sup,
+.math-display-inner sup,
+.math-fraction sup,
+.math-num sup,
+.math-den sup {
+    font-size: 0.72em;
+    vertical-align: super;
+    line-height: 0;
+    margin-left: 1px;
+    white-space: nowrap !important;
+}
+
+.math-inline sub,
+.math-display-inner sub,
+.math-fraction sub,
+.math-num sub,
+.math-den sub {
+    font-size: 0.72em;
+    vertical-align: sub;
+    line-height: 0;
+    margin-left: 1px;
+    white-space: nowrap !important;
 }
 
 .math-display-block {
