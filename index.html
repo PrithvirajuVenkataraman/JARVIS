@@ -75,9 +75,9 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <!-- KaTeX JS: Local bundle first for instant zero-latency loading with CDN fallback -->
     <script src="katex.min.js" onerror="this.onerror=null;const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js';document.head.appendChild(s);"></script>
-    <link rel="stylesheet" href="styles.css?v=2.6.5">
+    <link rel="stylesheet" href="styles.css?v=2.6.7">
     <script src="science-format.js?v=2.0.1"></script>
-    <script type="module" src="app/bootstrap.js?v=2.6.6"></script>
+    <script type="module" src="app/bootstrap.js?v=2.6.7"></script>
 </head>
 <body class="dark min-h-screen bg-black text-white">
 
@@ -16310,7 +16310,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 'SVG', 'PATH', 'LINE', 'POLYGON', 'POLYLINE', 'RECT', 'CIRCLE', 'USE', 'G', 'DEFS', 'SYMBOL', 'LINEARGRADIENT', 'RADIALGRADIENT', 'STOP', 'CLIPPATH', 'MASK'
             ]);
             const mathAttrs = new Set(['class', 'style', 'mathvariant', 'stretchy', 'fence', 'separator', 'lspace', 'rspace', 'form', 'accent', 'xmlns', 'display', 'encoding']);
-            const svgAttrs = new Set(['class', 'style', 'width', 'height', 'viewbox', 'viewBox', 'fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin', 'points', 'x', 'y', 'x1', 'y1', 'x2', 'y2', 'r', 'cx', 'cy', 'd', 'xmlns', 'aria-hidden', 'aria-label', 'role', 'href', 'xlink:href']);
+            const svgAttrs = new Set(['class', 'style', 'width', 'height', 'viewbox', 'viewBox', 'preserveaspectratio', 'fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin', 'points', 'x', 'y', 'x1', 'y1', 'x2', 'y2', 'r', 'cx', 'cy', 'd', 'xmlns', 'aria-hidden', 'aria-label', 'role', 'href', 'xlink:href']);
             const allowedAttrs = {
                 A: new Set(['href', 'target', 'rel', 'class', 'style', 'title', 'id', 'onclick']),
                 BLOCKQUOTE: new Set(['class', 'style', 'id']),
