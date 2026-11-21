@@ -2177,9 +2177,25 @@ function addVisibleInputHistory(text) {
     }
 }
 
-function retryLastRequest(explicitMessage) { 
+function retryLastRequest(explicitMessage, targetMessageId) { 
     document.getElementById('response-recovery-card')?.remove();
     document.querySelectorAll('.stream-interrupted-banner').forEach(el => el.remove());
+
+    let targetId = (typeof targetMessageId === 'string' && targetMessageId.trim()) ? targetMessageId.trim() : '';
+    if (!targetId) {
+        const lastInterruptedRow = Array.from(document.querySelectorAll('.chat-row[data-role="assistant"]'))
+            .reverse()
+            .find(r => r.querySelector('.stream-interrupted-banner') || r.querySelector('.response-recovery-btn'));
+        if (lastInterruptedRow?.dataset?.messageId) {
+            targetId = lastInterruptedRow.dataset.messageId;
+        }
+    }
+
+    if (targetId && typeof regenerateAssistantMessage === 'function') {
+        void regenerateAssistantMessage(targetId);
+        return;
+    }
+
     // 1. Resolve the prompt to retry, prioritizing explicitMessage with comprehensive fallbacks
     let last = (typeof explicitMessage === 'string' && explicitMessage.trim()) ? explicitMessage.trim() : getLastVisibleUserMessage();
     if (!last && Array.isArray(conversationHistory) && conversationHistory.length) {
@@ -12313,26 +12329,9 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
 
         function commitRegenerationCandidate(renderContext) {
             const candidate = renderContext?.replacementCandidate;
-            if (!candidate?.replaceTarget?.isConnected) return false;
-            if (candidate.requiresEvidenceValidation && !candidate.researchValidated) return false;
-            document.querySelectorAll('.feedback-container').forEach(feedback => {
-                if (feedback.dataset.assistantMessageId === candidate.replaceMessageId) feedback.remove();
-            });
-            const oldFeedback = candidate.replaceTarget.nextElementSibling;
-            if (
-                oldFeedback?.classList?.contains('feedback-container') &&
-                (!oldFeedback.dataset.assistantMessageId || oldFeedback.dataset.assistantMessageId === candidate.replaceMessageId)
-            ) {
-                oldFeedback.remove();
-            }
-            candidate.replaceTarget.replaceWith(candidate.messageDiv);
-            assistantMessageMeta.delete(candidate.replaceMessageId);
-            if (candidate.oldTurn) {
-                candidate.oldTurn.assistantMessageIds = Array.from(new Set(
-                    candidate.oldTurn.assistantMessageIds.map(id => id === candidate.replaceMessageId ? candidate.messageId : id)
-                ));
-            }
-            if (renderContext.pendingFeedback) {
+            if (!candidate) return true;
+            if (candidate.messageDiv && !candidate.messageDiv.isConnected) return false;
+            if (renderContext.pendingFeedback && candidate.messageDiv) {
                 renderContext.pendingFeedback.dataset.assistantMessageId = candidate.messageId;
                 candidate.messageDiv.insertAdjacentElement('afterend', renderContext.pendingFeedback);
             }
@@ -12446,14 +12445,11 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                     ? turn.contextSnapshot.map(item => ({ ...item }))
                     : previousContext;
                 await processCommand(processingPrompt);
-                if (!commitRegenerationCandidate(activeResponseRenderContext)) {
-                    discardRegenerationCandidate(activeResponseRenderContext);
-                    showTemporaryMessage('I could not regenerate that answer. The original response was kept.');
-                }
+                commitRegenerationCandidate(activeResponseRenderContext);
             } catch (error) {
                 console.error('regenerate failed:', error);
                 discardRegenerationCandidate(activeResponseRenderContext);
-                showTemporaryMessage('I could not regenerate that answer. The original response was kept.');
+                showTemporaryMessage('I could not regenerate that answer.');
             } finally {
                 conversationContext = previousContext;
                 conversationHistory = previousHistory;
@@ -13538,26 +13534,35 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                     : null;
                 const existingThinking = !isUser ? document.getElementById('chat-thinking-indicator') : null;
                 const liveSpeechRow = isUser ? document.getElementById('live-speech-transcription-row') : null;
-                if (replaceTarget && activeResponseRenderContext?.isRegeneration) {
+                if (replaceTarget) {
                     const oldMeta = getAssistantMessageMeta(replaceMessageId);
                     const oldTurn = getConversationTurn(oldMeta?.turnId);
-                    if (activeResponseRenderContext.replacementCandidate) {
-                        assistantMessageMeta.delete(messageId);
-                        const turn = getConversationTurn(messageTurnId);
-                        if (turn) turn.assistantMessageIds = turn.assistantMessageIds.filter(id => id !== messageId);
-                        return activeResponseRenderContext.replacementCandidate.messageId;
+                    document.querySelectorAll('.feedback-container').forEach(feedback => {
+                        if (feedback.dataset.assistantMessageId === replaceMessageId) feedback.remove();
+                    });
+                    const oldFeedback = replaceTarget.nextElementSibling;
+                    if (oldFeedback?.classList?.contains('feedback-container')) {
+                        oldFeedback.remove();
                     }
-                    activeResponseRenderContext.replacementCandidate = {
-                        replaceMessageId,
-                        replaceTarget,
-                        messageId,
-                        messageDiv,
-                        turnId: messageTurnId,
-                        oldMeta,
-                        oldTurn
-                    };
-                } else if (replaceTarget) {
                     replaceTarget.replaceWith(messageDiv);
+                    assistantMessageMeta.delete(replaceMessageId);
+                    if (oldTurn) {
+                        oldTurn.assistantMessageIds = Array.from(new Set(
+                            (oldTurn.assistantMessageIds || []).map(id => id === replaceMessageId ? messageId : id)
+                        ));
+                    }
+                    if (activeResponseRenderContext) {
+                        activeResponseRenderContext.replacementConsumed = true;
+                        activeResponseRenderContext.replacementCandidate = {
+                            replaceMessageId,
+                            replaceTarget: messageDiv,
+                            messageId,
+                            messageDiv,
+                            turnId: messageTurnId,
+                            oldMeta,
+                            oldTurn
+                        };
+                    }
                 } else if (existingThinking && existingThinking.parentNode === chatContainer) {
                     if (allowEmptyAssistant) {
                         chatContainer.insertBefore(messageDiv, existingThinking);
@@ -14175,7 +14180,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                     </svg>
                     Generation was interrupted
                 </span>
-                <button type="button" class="px-2.5 py-1 text-xs font-semibold rounded-md bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 transition-colors cursor-pointer" onclick="retryLastRequest('${safeUserMsg}')">
+                <button type="button" class="px-2.5 py-1 text-xs font-semibold rounded-md bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 transition-colors cursor-pointer" onclick="retryLastRequest('${safeUserMsg}', '${assistantMessageId}')">
                     Retry
                 </button>
             `;
