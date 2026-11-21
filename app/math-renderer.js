@@ -360,36 +360,52 @@ export function formatInlineMathPowers(text = '') {
     return raw;
 }
 
-export function renderMathInText(text = '') {
+// Shared with streaming delimiter balancing so prices never create phantom equations.
+export function replaceCurrencyAmounts(text = '', replacer = () => '') {
+    const raw = String(text || '');
+    return raw.replace(/(?<![\\\w])\$(\d+(?:,\d{3})*(?:\.\d+)?(?:\s*(?:k|m|b|trillion|million|billion|usd|dollars?|cents?|per|\/))?)(?!\w)/gi, (amount, number, offset) => {
+        const rest = raw.slice(offset + amount.length);
+        if (/^\s*(?:\$|[+\-*/^_=<>]|\\[a-zA-Z])/.test(rest)) return amount;
+        return replacer(amount);
+    });
+}
+
+export function renderMathInText(text = '', options = {}) {
     let raw = String(text || '');
     if (!raw) return '';
 
-    // Protect currency tokens so amounts like $50, $12.99, $1,000, $5k, $100M, $10/month are never treated as math delimiters
-    const currencyTokens = [];
-    raw = raw.replace(/(?<!\w)\$(\d+(?:,\d{3})*(?:\.\d+)?(?:\s*(?:k|m|b|trillion|million|billion|usd|dollars?|cents?|per|\/))?)(?!\w)/gi, (m) => {
-        const idx = currencyTokens.length;
-        currencyTokens.push(m);
-        return `__CURRENCY_HOLD_${idx}__`;
-    });
+    // Keep generated HTML opaque to the remaining TeX and Markdown substitutions.
+    // In particular, powers and underscores inside MathML annotations are source text.
+    const renderedMath = [];
+    const holdMath = (markup) => {
+        const index = renderedMath.push(markup) - 1;
+        return `@@JARVIS_RENDERED_MATH_${index}@@`;
+    };
 
-    // Display math: $$ ... $$ and \[ ... \]
+    // Extract explicit math before protecting currency, including escaped dollars in \text.
     raw = raw.replace(/(?<!\\)\$\$([\s\S]+?)(?<!\\)\$\$/g, (_, math) => {
-        return `<div class="math-display-block"><span class="math-display-inner">${formatLatexExpression(math, true)}</span></div>`;
+        return holdMath(`<div class="math-display-block"><span class="math-display-inner">${formatLatexExpression(math, true)}</span></div>`);
     });
     raw = raw.replace(/\\\[([\s\S]+?)\\\]/g, (_, math) => {
-        return `<div class="math-display-block"><span class="math-display-inner">${formatLatexExpression(math, true)}</span></div>`;
+        return holdMath(`<div class="math-display-block"><span class="math-display-inner">${formatLatexExpression(math, true)}</span></div>`);
+    });
+    raw = raw.replace(/\\\(([\s\S]+?)\\\)/g, (_, math) => {
+        return holdMath(`<span class="math-inline">${formatLatexExpression(math, false)}</span>`);
     });
 
-    // Inline math: \( ... \)
-    raw = raw.replace(/\\\(([\s\S]+?)\\\)/g, (_, math) => {
-        return `<span class="math-inline">${formatLatexExpression(math, false)}</span>`;
+    // Protect currency tokens so amounts like $50, $12.99, $1,000, $5k, $100M, $10/month are never treated as math delimiters
+    const currencyTokens = [];
+    raw = replaceCurrencyAmounts(raw, (m) => {
+        const idx = currencyTokens.length;
+        currencyTokens.push(m);
+        return `@@JARVIS_CURRENCY_${idx}@@`;
     });
 
     // Inline math: $ ... $
-    raw = raw.replace(/(?<!\\)\$(?!\$)([^\$\n]+?)(?<!\\)\$/g, (_, math) => {
+    raw = raw.replace(/(?<!\\)\$(?!\$)((?:\\[^\n]|[^$\\\n])+?)(?<!\\)\$/g, (_, math) => {
         const trimmed = math.trim();
         if (!trimmed) return '$';
-        return `<span class="math-inline">${formatLatexExpression(trimmed, false)}</span>`;
+        return holdMath(`<span class="math-inline">${formatLatexExpression(trimmed, false)}</span>`);
     });
 
     // Intercept bare un-delimited LaTeX \text{...} or {\text{...}} blocks
@@ -401,7 +417,12 @@ export function renderMathInText(text = '') {
     raw = formatInlineMathPowers(raw);
 
     // Restore protected currency tokens
-    raw = raw.replace(/__CURRENCY_HOLD_(\d+)__/g, (_, idx) => currencyTokens[Number(idx)] || '$');
+    raw = raw.replace(/@@JARVIS_CURRENCY_(\d+)@@/g, (_, idx) => currencyTokens[Number(idx)] || '$');
+
+    raw = raw.replace(/@@JARVIS_RENDERED_MATH_(\d+)@@/g, (_, idx) => {
+        const markup = renderedMath[Number(idx)] || '';
+        return typeof options.storeMath === 'function' ? options.storeMath(markup) : markup;
+    });
 
     return raw;
 }
