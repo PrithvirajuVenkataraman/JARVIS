@@ -12,6 +12,8 @@
         "test:context": "node --test tests/context-and-routing.test.mjs",
         "test:speech": "node --test tests/speech-and-vtt.test.mjs",
         "test:ui": "node --test tests/ui-and-workspace.test.mjs",
+        "test:math": "node --test tests/math-rendering.test.mjs",
+        "test:math:browser": "node tests/browser-math-rendering.mjs",
         "test:compliance": "node --test tests/compliance-and-security.test.mjs",
         "test:multimodal": "node --test tests/multimodal-and-tools.test.mjs",
         "test:api": "node --test tests/api-and-resilience.test.mjs",
@@ -20,7 +22,7 @@
         "test:hygiene": "node tests/hygiene-scanner.test.mjs && node tools/hardcoded-content-scanner.mjs",
         "test:canary": "node tests/canary-live-search.mjs && node tests/canary-research-acceptance.mjs",
         "test": "npm run check",
-        "check": "npm run lint && npm run test:inline && npm run test:deterministic && npm run test:context && npm run test:speech && npm run test:ui && npm run test:compliance && npm run test:multimodal && npm run test:api && npm run test:live-search && npm run test:hygiene"
+        "check": "npm run lint && npm run test:inline && npm run test:deterministic && npm run test:context && npm run test:speech && npm run test:ui && npm run test:math && npm run test:compliance && npm run test:multimodal && npm run test:api && npm run test:live-search && npm run test:hygiene"
     },
     "dependencies": {
         "@vercel/blob": "^2.4.1"
@@ -34,7 +36,7 @@
                 "maxDuration": 60
             }
         },
-        "rewrites": [ 
+        "rewrites": [
             {
                 "source": "/api/feedback",
                 "destination": "/api/diagnostics?__route=feedback"
