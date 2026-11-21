@@ -358,6 +358,27 @@ export function balanceDelimitersForStreaming(rawText = '') {
         text += '\\)'.repeat(openInline - closeInline);
     }
 
+    // 5. Balance unclosed inline math $
+    const inlineDollars = (text.match(/(?<!\\)\$(?!\$)/g) || []).length;
+    if (inlineDollars % 2 === 1) {
+        text += '$';
+    }
+
+    // 6. Balance dangling LaTeX commands (e.g. truncated mid-token like \frac{1 or \sqrt{x)
+    if (/\\(?:frac|dfrac|tfrac)\s*\{[^{}]*\}\s*$/.test(text)) {
+        text += '{}';
+    } else if (/\\(?:frac|dfrac|tfrac)\s*\{[^{}]*$/.test(text)) {
+        text += '}{}';
+    } else if (/\\(?:frac|dfrac|tfrac)\s*$/.test(text)) {
+        text += '{}{}';
+    }
+    if (/\\sqrt\s*\{[^{}]*$/.test(text)) {
+        text += '}';
+    }
+    if (/\\boxed\s*\{[^{}]*$/.test(text)) {
+        text += '}';
+    }
+
     return text;
 }
 
