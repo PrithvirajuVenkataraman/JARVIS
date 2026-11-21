@@ -73,10 +73,14 @@ Static frontend + Node/Vercel API routes. No frontend build step.
 - `tests/emergency-sos.test.mjs` - Unit tests for emergency contacts CRUD, distress telemetry, and dispatch URL formatting.
 - `tests/hygiene-scanner.test.mjs` - Tests for hardcoded-content hygiene scanning.
 - `tests/image-generator.test.mjs` - Unit tests for image generation routing, config, storage, and tool dispatching.
+- `tests/math-rendering.test.mjs` - Regression tests using the bundled KaTeX engine, Markdown formatting, and streaming delimiters.
+- `tests/browser-math-rendering.mjs` - Isolated Chrome checks for sanitized desktop/mobile equation layout and local math fonts.
 - `tests/speech-input.test.mjs` - Unit tests for speech input behavior.
 - `tools/hardcoded-content-allowlist.mjs` - Allowlist for intentional hardcoded content scanner matches.
 - `tools/hardcoded-content-scanner.mjs` - Scanner for unwanted hardcoded user-facing content.
 - `tools/local-dev-server.mjs` - Local static/API development server.
+
+Run `npm run test:math` for math regressions (also included in `npm run check`). Run `npm run test:math:browser` for browser layout checks; set `CHROME_PATH` if Chrome/Chromium is not at a detected default location. Add `-- --screenshots` to save previews under `scratch/math-rendering/`.
 
 ## Exact Features
 
