@@ -125,7 +125,7 @@ self.addEventListener('fetch', (event) => {
                 })
         );
         return;
-    }
+    } 
 
     // Cache-First for static assets (images, icons, fonts)
     event.respondWith(
