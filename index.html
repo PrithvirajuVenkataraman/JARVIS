@@ -76,9 +76,9 @@
     <!-- KaTeX CSS & JS: CDN primary with local fallback for zero-configuration, font-complete rendering -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" onerror="this.onerror=null;this.href='katex-local.css';">
     <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous" onerror="this.onerror=null;const s=document.createElement('script');s.src='katex.min.js';document.head.appendChild(s);"></script>
-    <link rel="stylesheet" href="styles.css?v=2.6.3">
+    <link rel="stylesheet" href="styles.css?v=2.6.4">
     <script src="science-format.js?v=2.0.1"></script>
-    <script type="module" src="app/bootstrap.js?v=2.6.4"></script>
+    <script type="module" src="app/bootstrap.js?v=2.6.5"></script>
 </head>
 <body class="dark min-h-screen bg-black text-white">
 
@@ -2298,14 +2298,13 @@ function showFailureFallbackCard(userMessage, options = {}) {
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;');
-    const actions = Array.isArray(failure?.userActions) ? failure.userActions : ['retry', 'web_search'];
+    const actions = (Array.isArray(failure?.userActions) ? failure.userActions : ['web_search']).filter(a => a !== 'retry');
     const card = document.createElement('div');
     card.className = 'flex justify-start fade-in';
     card.innerHTML = `
         <div id="response-recovery-card" class="response-recovery-card" role="status">
             <p>${safeMessage}</p>
             <div class="response-recovery-actions">
-                ${actions.includes('retry') ? '<button type="button" onclick="retryLastRequest()" class="response-recovery-btn">Retry</button>' : ''}
                 ${actions.includes('maps') ? `<a href="${mapsUrl}" target="_blank" rel="noopener noreferrer" class="response-recovery-btn secondary">Open Maps</a>` : ''}
                 ${actions.includes('web_search') ? `<a href="${searchUrl}" target="_blank" rel="noopener noreferrer" class="response-recovery-btn secondary">Search web</a>` : ''}
             </div>
@@ -14165,29 +14164,8 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
         }
 
         function showStreamInterruptedNotice(assistantMessageId, userMessage) {
-            const row = findAssistantMessageRow(assistantMessageId);
-            if (!row) return;
-            const container = row.querySelector('.chat-bubble-assistant') || row;
-            if (!container || container.querySelector('.stream-interrupted-banner')) return;
-            const banner = document.createElement('div');
-            banner.className = 'stream-interrupted-banner flex items-center justify-between gap-3 mt-3 pt-2 text-xs border-t border-amber-500/25 text-amber-600 dark:text-amber-400';
-            const safeUserMsg = String(userMessage || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
-            banner.innerHTML = `
-                <span class="flex items-center gap-1.5 font-medium">
-                    <svg class="w-3.5 h-3.5 flex-shrink-0 text-amber-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <circle cx="12" cy="12" r="10"></circle>
-                        <line x1="12" y1="8" x2="12" y2="12"></line>
-                        <line x1="12" y1="16" x2="12.01" y2="16"></line>
-                    </svg>
-                    Generation was interrupted
-                </span>
-                <button type="button" class="px-2.5 py-1 text-xs font-semibold rounded-md bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 transition-colors cursor-pointer" onclick="retryLastRequest('${safeUserMsg}', '${assistantMessageId}')">
-                    Retry
-                </button>
-            `;
-            container.appendChild(banner);
-            const chatContainer = document.getElementById('chat-container');
-            if (chatContainer) maybeAutoScroll(chatContainer);
+            // Retry button explicitly removed per user directive.
+            // Message actions toolbar retains the clean in-place 🔄 Regenerate button.
         }
         window.showStreamInterruptedNotice = showStreamInterruptedNotice;
 
