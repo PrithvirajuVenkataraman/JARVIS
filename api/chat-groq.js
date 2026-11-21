@@ -672,6 +672,18 @@ async function getInstantFactHelper() {
         return [...new Set([userSelected, configured, ...visionModels].filter(Boolean))];
     }
 
+    function resolveGeminiApiModel(model = '') {
+        const raw = String(model || '').trim();
+        const lower = raw.toLowerCase();
+        if (lower === 'gemini-4-hydrogen' || lower === 'gemini-3.8-flash' || lower === 'gemini-3.7-flash') {
+            return 'gemini-2.5-flash';
+        }
+        if (lower === 'gemini-4-pro') {
+            return 'gemini-2.5-pro';
+        }
+        return raw;
+    }
+
     const SQL_QUERY_GENERATION_SCHEMA = {
         type: 'json_schema',
         json_schema: {
@@ -2825,8 +2837,9 @@ export default async function handler(req, res) {
                     geminiBody.system_instruction = systemInstruction;
                 }
                 try {
+                    const apiModel = resolveGeminiApiModel(model);
                     const doGeminiRequest = (bodyObj) => fetchWithTimeoutRetry(
-                        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`,
+                        `https://generativelanguage.googleapis.com/v1beta/models/${apiModel}:generateContent?key=${geminiApiKey}`,
                         {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
@@ -2877,7 +2890,9 @@ export default async function handler(req, res) {
             return null;
         };
 
-        const prioritizeGemini = Boolean(userSelectedModel && String(userSelectedModel).toLowerCase().startsWith('gemini-')) || hasImages;
+        const isExplicitGroq = Boolean(userSelectedModel && !String(userSelectedModel).toLowerCase().startsWith('gemini-') && userSelectedModel !== 'auto');
+        const hasGeminiKey = Boolean(String(options?.customGeminiKey || '').trim() || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
+        const prioritizeGemini = hasImages || (hasGeminiKey && !isExplicitGroq);
         const providerFns = prioritizeGemini ? [tryRunGemini, tryRunGroq] : [tryRunGroq, tryRunGemini];
 
         let attemptIndex = 0;
@@ -3031,7 +3046,9 @@ export default async function handler(req, res) {
             return null;
         };
 
-        const prioritizeGemini = Boolean(userSelectedModel && String(userSelectedModel).toLowerCase().startsWith('gemini-')) || hasImages;
+        const isExplicitGroqStream = Boolean(userSelectedModel && !String(userSelectedModel).toLowerCase().startsWith('gemini-') && userSelectedModel !== 'auto');
+        const hasGeminiKeyStream = Boolean(String(options?.customGeminiKey || '').trim() || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
+        const prioritizeGemini = hasImages || (hasGeminiKeyStream && !isExplicitGroqStream);
         const streamFns = prioritizeGemini ? [tryStreamGemini, tryStreamGroq] : [tryStreamGroq, tryStreamGemini];
 
         for (const fn of streamFns) {
@@ -3331,8 +3348,9 @@ export default async function handler(req, res) {
             if (isExplicitSearchQuery && !options?.minimalThinking && !generationConfig.thinkingConfig?.thinkingBudget) {
                 reqBody.tools = [{ googleSearch: {} }];
             }
+            const apiModel = resolveGeminiApiModel(model);
             const doStreamFetch = (bodyObj) => fetch(
-                `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${apiKey}`,
+                `https://generativelanguage.googleapis.com/v1beta/models/${apiModel}:streamGenerateContent?alt=sse&key=${apiKey}`,
                 {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -5130,7 +5148,14 @@ Answer directly.`;
             learnedDirectives.length > 0 ? `LEARNED USER PREFERENCES & HEURISTICS (ADAPTIVE MEMORY):\n${learnedDirectives.map(d => `- ${d}`).join('\n')}` : '',
             isWebForced ? `DEEP-SYNTHESIS REASONING ENGINE PROTOCOL (MANUAL LIVE WEB SEARCH ACTIVE):\nAct as a deep-synthesis reasoning engine. Answer the user's input by performing comprehensive cross-referencing, multi-hop lookups, and logical deduction:\n1. DECONSTRUCT THE INPUT: Never rely on a single source or a single surface-level match. Break the query down into its core parameters, underlying logic, and distinct sub-components. Address each part thoroughly.\n2. PIVOT ON INCOMPLETE DATA: If your initial search or knowledge retrieval yields an incomplete framework—such as referencing a count, a category, an error code, a doctrine, or a structural concept without providing the specific contents, names, or values—do not halt execution. Treat those surface findings as new search parameters and clues. Pivot immediately across all evidence layers to extract the missing data points. Never invent or recall unmentioned entities from parametric memory.\n3. DEDUCTIVE SYNTHESIS: Connect independent datasets logically across the evidence. If Dataset A defines a structural rule, system architecture, or conditional logic, and Dataset B contains the live variables or current entities that fit into that logic, synthesize them to deliver the final, specific solution. However, NEVER use deductive synthesis to substitute, swap out, or override concrete entities, people, or items explicitly named in the source excerpts with external unmentioned entities, and NEVER recall or introduce external trivia from memory.\n4. EPISTEMIC RESOLUTION: Never conclude that an answer is "unavailable" or "unverifiable" simply because a single summary source or initial data layer lacks the complete picture. Drill down to primary documentation, distinct data layers, or adjacent verified frameworks to fully resolve the query.` : '',
             intent === 'deep_reasoning' ? `DEEP REASONING & RECURSIVE VERIFICATION DIRECTIVE:\n- Execute rigorous step-by-step deduction.\n- Before reaching conclusions, explicitly verify: (1) all premises and constraint conditions, (2) deductive consistency without inverted assumptions, (3) elimination of false cases with explicit disproofs.\n- For logic puzzles, test every branch exhaustively and show that alternative assignments yield contradictions.` : '',
-            `MATHEMATICAL & QUANTITATIVE REASONING (EXACT PEDAGOGICAL STRUCTURE - applies to all math, calculus, algebra & geometry):\n- RESULT UP FRONT: When evaluating or solving an explicit integral, equation, derivative, or theorem, state the problem and executive result directly up front (e.g. "The integral of $\\sqrt{\\tan x}$ is:" followed by the full display formula in $$...$$ and a clean horizontal divider \`---\`).\n- SECTION HEADER: Provide a prominent "### Step-by-Step Solution" header.\n- NUMBERED CONCEPTUAL PHASES: Structure the derivation into bold, numbered stages describing the mathematical operation (e.g., "**1. Substitution**", "**2. Algebraic Manipulation**", "**3. Completing the Square in the Denominators**", "**4. Integrating Each Part**", "**5. Back-Substitution**").\n- NATURAL EXPLANATORY PROSE & DISPLAY FORMULAS: Introduce every algebraic step with a natural explanatory prose sentence, followed by centered $$...$$ display math on its own line; verify it by substituting back into the original equation. Never skip intermediate steps. When an integral or expression splits into multiple parts, use clear sub-bullets (e.g., "- First Integral: ...", "- Second Integral: ...").\n- BACK-SUBSTITUTION & CONSTANT OF INTEGRATION: Show the intermediate combination with substitution variables first, then back-substitute to original variables with constant $+ C$ (or units).\n- LaTeX Delimiters (MANDATORY): Always enclose every formula, variable, and equation in $...$ for inline math or $$...$$ on its own line for display math. Never leave raw LaTeX commands un-delimited.\n- Define every variable and its unit before substituting a value. State theorem or formula before applying.\n- Analytical geometry: place figures in a coordinate frame $(0,0)$ and solve algebraically.\n- If ambiguous or missing information, state the ambiguity explicitly rather than inventing a value. Include units and clearly label the final answer.`
+            `MATHEMATICAL & QUANTITATIVE REASONING (EXACT PEDAGOGICAL STRUCTURE - applies to all math, calculus, algebra & geometry):
+- CLEAN HIERARCHICAL PRESENTATION: Begin directly with a clear title header (e.g. "### Complete Mathematical Solution: $\\int \\sqrt{\\tan x} \\, dx$"). Never output premature or incomplete final formulas before showing the derivation.
+- SEQUENTIAL STEP HEADERS: Structure every derivation into clean, numbered step headers: "#### **Step 1: [Operation Name]**", "#### **Step 2: [Operation Name]**", etc., separated by clean horizontal dividers (\`---\`).
+- STEP COMPOSITION: Every step MUST begin with a concise, explanatory sentence, followed by centered display math in $$...$$ on its own line. Never skip intermediate algebra.
+- COMPONENT DECOMPOSITION: When an integral or expression splits into multiple parts, explicitly define and label them (e.g., "Let this be $I_1 + I_2$", followed by "#### **Step 4: Evaluate $I_1 = \\int ...$**" and "#### **Step 5: Evaluate $I_2 = \\int ...$**").
+- SYSTEMATIC BACK-SUBSTITUTION: Explicitly state the intermediate result with auxiliary substitution variables (e.g., in terms of $t$), then substitute back to the original variables ($x$) with the constant of integration $+ C$ (or units).
+- FINAL ANSWER: End with the complete, fully simplified final expression in display math $$...$$.
+- LaTeX DISCIPLINE: Always enclose every formula, symbol, and variable in $...$ for inline math or $$...$$ on its own line for display math. Always use complete curly braces \`{...}\` for fractions (e.g. \`\\frac{2t}{1 + t^4}\`, never \`\\frac{t2}{t4+1\`) and radicals (\`\\sqrt{2\\tan x}\`). Use standard function names (\\sin, \\cos, \\tan, \\sec, \\ln, \\arctan). Never leave raw LaTeX commands un-delimited.`
         ];
 
         return sections.filter(Boolean).join('\n\n');
