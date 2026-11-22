@@ -85,6 +85,8 @@ The answer UI does not display private model reasoning or fabricated thinking na
 
 Saved chats support search, rename, pin, deletion, and backup/restore. Deletions are retained as durable tombstones. Storage failures produce a visible notification; a browser refusing persistence cannot be treated as a successful save.
 
+Refreshing or reopening starts on a fresh chat rather than automatically displaying the previous answer. Previous conversations remain in the sidebar and can be opened explicitly. Unsent composer drafts and their empty-session mode are preserved.
+
 ## Configuration
 
 Set server variables in Vercel or `.env.local`:

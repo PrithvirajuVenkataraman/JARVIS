@@ -217,13 +217,39 @@ test('composer is neutral, has no empty badge, and fits a shortened mobile viewp
 test('document references survive reopening and stay inside their conversation', async ({ page }) => {
     await page.locator('#text-input').fill('Study the document I will attach.'); await page.locator('#text-input').press('Enter');
     await expect(page.locator('#request-status')).toHaveText('Response finished.');
+    const sessionId = await page.evaluate(() => window.getActiveChatSession().id);
     await page.evaluate(() => window.JarvisRecall.selectDocumentFile(new File(['The agreement specifies a 47-day cancellation notice.'], 'agreement.txt', { type: 'text/plain' }), 'agreement', 'What is the cancellation notice?'));
     await page.reload(); await page.waitForFunction(() => window.__jarvisModernReady);
+    await expect(page.locator('.chat-row')).toHaveCount(0);
+    await page.evaluate(id => window.restoreChatSession(id), sessionId);
     const same = await page.evaluate(() => window.JarvisRecall.buildContext(window.JarvisConversation, { message: 'What deadline did that agreement set?' }));
     expect(same.summaryText).toContain('47-day');
     await page.evaluate(() => window.startNewChatSession({ keepVisible: true }));
     const another = await page.evaluate(() => window.JarvisRecall.buildContext(window.JarvisConversation, { message: 'What deadline did that agreement set?' }));
     expect(another.summaryText || '').not.toContain('47-day');
+});
+
+test('refresh and reopening start fresh while saved conversations remain available', async ({ page, context }) => {
+    const question = 'Explain the difference between a stack and a queue.';
+    await page.locator('#text-input').fill(question); await page.locator('#text-input').press('Enter');
+    await expect(page.locator('#request-status')).toHaveText('Response finished.');
+    const sessionId = await page.evaluate(() => { window.JarvisPersistence.flush(); return window.getActiveChatSession().id; });
+    await expect.poll(() => page.evaluate(async id => (await window.JarvisWorkspaceDurability.workspaceDb.loadAllSessions()).some(session => session.id === id), sessionId)).toBe(true);
+    await page.reload(); await page.waitForFunction(() => window.__jarvisModernReady);
+    await page.evaluate(() => window.hydrateDurableSessionsFromIndexedDb());
+    const legacy = await page.evaluate(() => window.loadHistory());
+    expect(legacy.some(turn => turn.user === question)).toBe(true);
+    await expect(page.locator('.chat-row')).toHaveCount(0);
+    await expect(page.locator('#chat-empty-state')).toBeVisible();
+    expect(await page.evaluate(() => window.JarvisConversation.getState().turns.length)).toBe(0);
+    const reopened = await context.newPage();
+    await reopened.goto('/'); await reopened.waitForFunction(() => window.__jarvisModernReady);
+    await reopened.evaluate(() => window.hydrateDurableSessionsFromIndexedDb());
+    await expect(reopened.locator('.chat-row')).toHaveCount(0);
+    await reopened.evaluate(id => window.restoreChatSession(id), sessionId);
+    await expect(reopened.locator('.chat-row[data-role=user]')).toContainText(question);
+    await expect(reopened.locator('.assistant-message-text .katex').first()).toBeVisible();
+    await reopened.close();
 });
 
 test('JavaScript runs without access to the app storage or network', async ({ page }) => {

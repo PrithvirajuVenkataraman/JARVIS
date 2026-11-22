@@ -48,6 +48,7 @@ test('web search has one saved state for its inline label, menu, and animated ou
     const angle = await page.locator('.composer-web-outline').evaluate(element => getComputedStyle(element).getPropertyValue('--web-outline-angle'));
     await expect.poll(() => page.locator('.composer-web-outline').evaluate(element => getComputedStyle(element).getPropertyValue('--web-outline-angle'))).not.toBe(angle);
     await page.reload(); await page.waitForFunction(() => window.__jarvisModernReady); await expect(active).toBeVisible();
+    await expect(page.locator('#text-input')).toHaveValue('Keep this draft');
     await page.emulateMedia({ reducedMotion: 'reduce' });
     expect(await page.locator('.composer-web-outline').evaluate(element => getComputedStyle(element).animationName)).toBe('none');
     await active.click(); await expect(shell).not.toHaveClass(/has-web-search/); await expect(active).toBeHidden();

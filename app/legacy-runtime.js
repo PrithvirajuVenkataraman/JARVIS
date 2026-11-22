@@ -28254,10 +28254,10 @@ function chatSessionHasUserMessage(session) {
     );
 }
 
-function hydrateSessionMessagesFromHistory(session) {
+function hydrateSessionMessagesFromHistory(session, legacyHistory = []) {
     if (!session || !Array.isArray(session.messages)) return false;
     let modified = false;
-    const allHistory = [];
+    const allHistory = Array.isArray(legacyHistory) ? [...legacyHistory] : [];
     if (Array.isArray(conversationHistory)) allHistory.push(...conversationHistory);
     try {
         const keys = typeof getLegacyHistoryStorageKeys === 'function' ? getLegacyHistoryStorageKeys() : ['unify_history_default'];
@@ -28891,28 +28891,22 @@ function persistActiveSessionSnapshot(turnId = '') {
 }
 
 function initializeActiveChatSessionForStartup() {
-    const snapshot = window.JarvisSessionRecovery?.restoreActiveSessionSnapshot?.();
-    const savedSessionId = String(snapshot?.chatId || '').trim();
-    if (savedSessionId) {
-        const savedSession = chatSessions.find(item => item.id === savedSessionId && !item.deleted);
-        if (savedSession && chatSessionHasUserMessage(savedSession)) {
-            activeChatSessionId = savedSession.id;
-            restoreChatSession(savedSession.id);
-            return savedSession;
-        }
-    }
+    // A full page load starts fresh. Saved conversations are opened explicitly
+    // from the sidebar; only an empty session with an unsent draft is resumed.
     const draft = loadActiveEmptyChatDraft();
-    if (draft) {
+    if (draft && !chatSessions.some(session => session.id === draft.id && chatSessionHasUserMessage(session))) {
         activeChatSessionId = draft.id;
         chatSessions.push(draft);
         conversationHistory = [];
         conversationContext = [];
         chatHistory = [];
+        persistActiveSessionSnapshot();
         setWebSearchMode(draft.webSearchMode, { persist: false });
         renderChatSidebarList();
         return draft;
     }
-    return startNewChatSession();
+    forgetActiveEmptyChatDraft();
+    return startNewChatSession({ forceNew: true });
 }
 
 function getActiveChatSession() {
@@ -31201,7 +31195,7 @@ function saveToHistory(userMessage, aiResponse, options = {}) {
 }
 
 async function loadHistory() {
-    if (!persistMemoryToDevice) return;
+    if (!persistMemoryToDevice) return [];
     const historyKey = getHistoryStorageKey();
     let saved = null;
     try {
@@ -31215,24 +31209,12 @@ async function loadHistory() {
     if (saved) {
         try {
             const parsed = typeof saved === 'string' ? JSON.parse(saved) : saved;
-            if (Array.isArray(parsed) && parsed.length) {
-                conversationHistory = parsed;
-                conversationContext = conversationHistory.flatMap(item => [
-                    item.user ? { role: 'user', text: item.user, turnId: item.turnId || '' } : null,
-                    item.ai ? { role: 'assistant', text: item.ai, turnId: item.turnId || '' } : null
-                ]).filter(Boolean);
-                if (window.JarvisConversation) {
-                    const session = {
-                        messages: conversationHistory.flatMap(item => [
-                            item.user ? { role: 'user', text: item.user, turnId: item.turnId || '' } : null,
-                            item.ai ? { role: 'assistant', text: item.ai, turnId: item.turnId || '' } : null
-                        ]).filter(Boolean)
-                    };
-                    restoreConversationEngineForSession(session);
-                }
-            }
+            // Historical records can repair archived chats, but loading them
+            // must never replace the active conversation or its context.
+            if (Array.isArray(parsed)) return parsed;
         } catch (_) {}
     }
+    return [];
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -32462,11 +32444,12 @@ if (!document.getElementById('chat-empty-state')) {
 }
 
 if (typeof loadHistory === 'function') {
-    loadHistory().then(() => {
+    const startupDraftSessionId = activeChatSessionId;
+    loadHistory().then(legacyHistory => {
         let repaired = false;
         if (Array.isArray(chatSessions)) {
             chatSessions.forEach(session => {
-                if (session && hydrateSessionMessagesFromHistory(session)) {
+                if (session && session.id !== startupDraftSessionId && hydrateSessionMessagesFromHistory(session, legacyHistory)) {
                     repaired = true;
                 }
             });
