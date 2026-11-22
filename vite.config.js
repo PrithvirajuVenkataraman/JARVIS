@@ -1,0 +1,52 @@
+import { defineConfig } from 'vite';
+import { minify } from 'terser';
+import { readFile, readdir, writeFile, copyFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { join } from 'node:path';
+
+export default defineConfig({
+    publicDir: false,
+    server: { hmr: false },
+    build: { target: 'es2022', manifest: true, cssCodeSplit: true },
+    plugins: [{
+        name: 'jarvis-production-shell',
+        async generateBundle(_options, bundle) {
+            for (const entry of Object.values(bundle)) {
+                if (entry.type === 'asset' && /(?:legacy|settings|vision)-runtime.*\.js$/.test(entry.fileName)) {
+                    entry.source = (await minify(String(entry.source), { compress: true, mangle: { toplevel: false }, format: { comments: false } })).code;
+                }
+            }
+        },
+        async closeBundle() {
+            for (const name of ['katex.min.js', 'science-format.js', 'manifest.json', '404.html', 'robots.txt', 'sitemap.xml']) {
+                await copyFile(name, join('dist', name));
+            }
+            const files = [];
+            async function walk(directory) {
+                for (const item of await readdir(directory, { withFileTypes: true })) {
+                    if (item.name.startsWith('.')) continue;
+                    const path = join(directory, item.name);
+                    if (item.isDirectory()) await walk(path);
+                    else if (item.name !== 'sw.js') files.push('/' + path.replaceAll('\\', '/').slice(5));
+                }
+            }
+            await walk('dist');
+            const buildId = createHash('sha256');
+            for (const file of files.sort()) buildId.update(file).update(await readFile(join('dist', file.slice(1))));
+            const version = buildId.digest('hex').slice(0, 16);
+            const manifest = JSON.parse(await readFile('dist/.vite/manifest.json', 'utf8'));
+            const core = new Set(['/index.html', '/katex.min.js', '/science-format.js', '/manifest.json', '/404.html']);
+            const visit = key => {
+                const entry = manifest[key]; if (!entry) return;
+                core.add('/' + entry.file);
+                for (const file of [...(entry.css || []), ...(entry.assets || [])]) if (!/(?:settings|vision)-runtime|image-generator-worker/.test(file)) core.add('/' + file);
+                for (const dependency of entry.imports || []) visit(dependency);
+            };
+            visit('index.html');
+            const template = await readFile('sw.js', 'utf8');
+            const worker = template.replace(/const CACHE_NAME = .*?;/, `const CACHE_NAME = 'jarvis-cache-${version}';`)
+                .replace(/const STATIC_ASSETS = \[[\s\S]*?\];/, `const STATIC_ASSETS = ${JSON.stringify([...core])};`);
+            await writeFile('dist/sw.js', worker);
+        }
+    }]
+});
