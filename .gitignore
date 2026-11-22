@@ -3,15 +3,29 @@ node_modules/
 
 # Local Environment Variables & Secrets
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
 
 # Build, Temp & Scratch Artifacts
 scratch/
 dist/
 build/
+generated-tailwind.css
 .vercel/
 .agents/
+.codex/
+.claude/
+.aws/
+.cache/
+coverage/
+playwright-report/
+test-results/
+*.tsbuildinfo
+app/search/searxng-verification-report-*.json
 
 # System & Editor Logs
 *.log
