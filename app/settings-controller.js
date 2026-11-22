@@ -31,18 +31,22 @@ export function mount(modal) {
     editor = modal.querySelector('#custom-system-prompt-input'); saved = valueOf(editor);
     editor?.addEventListener('input', () => status(valueOf(editor) === saved ? 'No unsaved changes.' : 'Unsaved changes. Select Done to apply.'));
     modal.querySelector('.settings-presets-container')?.addEventListener('click', () => status('Unsaved changes. Select Done to apply.'));
-    const body = modal.querySelector('#settings-view-main .help-modal-body');
-    const group = document.createElement('div'); group.className = 'settings-group-card';
-    group.innerHTML = `<div class="settings-row"><div class="settings-row-text"><label for="local-recall-enabled" class="settings-row-title">Enhanced local recall</label><p class="settings-row-desc">Optional English recall on this device. Downloads 23 MB of model weights plus the WASM runtime. Chat works without it.</p><p id="local-recall-status" class="settings-row-desc" role="status"></p></div><label class="recall-toggle-hit"><input id="local-recall-enabled" type="checkbox" aria-label="Enable enhanced local recall"></label></div><div class="settings-row"><button type="button" id="recall-clear-cache" class="settings-action-btn">Clear recall cache</button><button type="button" id="settings-permissions" class="settings-action-btn">Manage permissions</button></div>`;
-    body?.append(group);
+    const group = document.createElement('div'); group.className = 'settings-group-card'; group.id = 'settings-local-recall-group';
+    group.innerHTML = `<div class="settings-row"><div class="settings-row-text"><label for="local-recall-enabled" class="settings-row-title">Enhanced local recall</label><p class="settings-row-desc">Improve recall of earlier messages on this device.</p><p class="settings-row-desc">English · 23 MB model download plus runtime. Optional.</p><p id="local-recall-status" class="settings-row-desc" role="status"></p></div><div class="settings-row-right"><label class="settings-switch"><input id="local-recall-enabled" class="settings-switch-input" type="checkbox" role="switch" aria-label="Enable enhanced local recall"><span class="settings-switch-slider" aria-hidden="true"></span></label></div></div><div class="settings-row recall-cache-actions"><button type="button" id="recall-clear-cache" class="settings-action-btn">Clear recall cache</button></div>`;
+    modal.querySelector('#settings-personalization-toggle')?.closest('.settings-group-card')?.after(group);
+    const permissions = document.createElement('div'); permissions.className = 'settings-row settings-permissions-row';
+    permissions.innerHTML = '<div class="settings-row-text"><span class="settings-row-title">Device permissions</span><p class="settings-row-desc">Manage microphone, camera, and location access.</p></div><button type="button" id="settings-permissions" class="settings-action-btn">Manage permissions</button>';
+    modal.querySelector('#settings-row-compliance')?.closest('.settings-group-card')?.append(permissions);
     const checkbox = group.querySelector('#local-recall-enabled'); checkbox.checked = recall.isEnabled();
     const update = () => {
         const target = group.querySelector('#local-recall-status');
         target.textContent = ({ off: 'Off', loading: 'Downloading or loading the local model…', ready: 'Ready on this device', unavailable: 'Local model unavailable. Lightweight recall remains available.' })[recall.getStatus()] || 'Not loaded yet';
     };
-    checkbox.onchange = () => { void recall.setEnabled(checkbox.checked); update(); };
-    group.querySelector('#recall-clear-cache').onclick = async () => { await recall.clearDerived(); checkbox.checked = false; update(); };
-    group.querySelector('#settings-permissions').onclick = () => { if (allowNavigation(() => { window.closeHelpModal(); void window.JarvisPermissions.show(); })) { window.closeHelpModal(); void window.JarvisPermissions.show(); } };
+    checkbox.setAttribute('aria-checked', String(checkbox.checked));
+    checkbox.onkeydown = event => { if (event.key === 'Enter') { event.preventDefault(); checkbox.click(); } };
+    checkbox.onchange = () => { checkbox.setAttribute('aria-checked', String(checkbox.checked)); void recall.setEnabled(checkbox.checked); update(); };
+    group.querySelector('#recall-clear-cache').onclick = async () => { await recall.clearDerived(); checkbox.checked = false; checkbox.setAttribute('aria-checked', 'false'); update(); };
+    permissions.querySelector('#settings-permissions').onclick = () => { if (allowNavigation(() => { window.closeHelpModal(); void window.JarvisPermissions.show(); })) { window.closeHelpModal(); void window.JarvisPermissions.show(); } };
     const listener = () => { if (!group.isConnected) { window.removeEventListener('jarvis:recall-status', listener); return; } update(); };
     window.addEventListener('jarvis:recall-status', listener); update();
 }

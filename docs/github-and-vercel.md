@@ -75,3 +75,9 @@ An `EUSAGE` error saying a lockfile is required means the deployment root has no
 Check GitHub's deployed branch, not just the files on your computer. A local file marked `??` by `git status` has not been added to Git. Also verify that Vercel's Root Directory is the directory containing both package files and `vite.config.js`. After committing/uploading the complete source, deploy that new commit.
 
 The Node engine warning in Vercel's logs is separate from a missing-lockfile error: the package engine selects Node 22.x. Set Node 22.x in project settings too. A deployment is not verified until its build actually succeeds.
+
+## When vision reports missing credentials
+
+Check `/api/diagnostics` on the actual deployment (`https://jarvisjr.vercel.app/api/diagnostics` for the current production site). `model.groqConfigured`, `model.geminiConfigured`, and `vision.configured` indicate configuration presence; they do not validate credentials or provider quotas. The former chat fallback incorrectly reported missing keys after upstream failures even when both keys were configured. The corrected version reports the failure category and preserves an attempt for the second configured provider. Deploy the matching API changes as well as the frontend.
+
+A previous failed reply stays in saved chat history after refreshing. Once the corrected commit is deployed, retry the image in a new turn; refreshing alone does not regenerate that reply. No provider key should be copied into the browser, GitHub, or support messages.

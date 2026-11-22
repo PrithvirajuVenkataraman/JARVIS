@@ -16,9 +16,11 @@ import * as JarvisSettings from './settings-controller.js';
 import * as JarvisRecall from './context-retrieval.js';
 import * as JarvisAnswerChecks from './answer-checks.js';
 import { installRequestPreferences } from './request-preferences.js';
+import * as JarvisSlashCommands from './slash-command-controller.js';
+import * as JarvisComposerTools from './composer-tools-controller.js';
 import './core-ux.css';
 
-Object.assign(window, { JarvisStreamRenderer, JarvisPersistence, JarvisPerformance, JarvisCodeRunner, JarvisCapabilities, JarvisPermissions, JarvisLocation, JarvisPaste, JarvisSettings, JarvisRecall, JarvisAnswerChecks });
+Object.assign(window, { JarvisStreamRenderer, JarvisPersistence, JarvisPerformance, JarvisCodeRunner, JarvisCapabilities, JarvisPermissions, JarvisLocation, JarvisPaste, JarvisSettings, JarvisRecall, JarvisAnswerChecks, JarvisSlashCommands, JarvisComposerTools });
 const scripts = new Map();
 function loadClassic(url) {
     if (!scripts.has(url)) scripts.set(url, new Promise((resolve, reject) => {
@@ -44,6 +46,8 @@ JarvisPersistence.installPersistenceLifecycle();
 JarvisPerformance.installPerformanceObservers();
 installDialogController();
 installComposerAccessibility();
+JarvisComposerTools.install();
+JarvisSlashCommands.install();
 JarvisCapabilities.installCapabilityVisibility();
 installRequestPreferences();
 JarvisPermissions.install();

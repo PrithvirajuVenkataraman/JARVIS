@@ -13,6 +13,17 @@ import { evaluateArithmetic, verifyArithmeticClaims } from '../api/_lib/arithmet
 import { verifyAndRepairMathClaims } from '../api/_lib/code-math-validator.js';
 import { createAnswerFilter, publicAnswer } from '../api/_lib/answer-visibility.js';
 import { normalizeUserInstructions, userPreferenceDirective } from '../api/_lib/answer-preferences.js';
+import { filterCommands } from '../app/slash-command-controller.js';
+
+test('slash names filter locally with capability isolation and deterministic ranking', () => {
+    assert.deepEqual(filterCommands('SuM').map(row => row.id), ['summarize']);
+    assert.deepEqual(filterCommands('pro').map(row => row.id), ['professional']);
+    assert.deepEqual(filterCommands('mar').map(row => row.id), ['summarize']);
+    assert.deepEqual(filterCommands('unavailable'), []);
+    assert.deepEqual(filterCommands('image'), []);
+    assert.deepEqual(filterCommands('image', true).map(row => row.id), ['image']);
+    assert.equal(filterCommands('').length, 5);
+});
 
 test('permission setup reports partial grants, skips blocked devices, and releases every temporary track', async () => {
     const requested = [], changes = []; let stops = 0;

@@ -237,15 +237,15 @@
                         </svg>
                     </div>
                     <h2 class="empty-state-headline">What can I help with today?</h2>
-                    <p class="empty-state-sub">Multimodal intelligence with live web search, deep reasoning, and document OCR.</p>
+                    <p class="empty-state-sub">Ask a question, write something, or explore an idea.</p>
                     <div class="empty-state-capabilities" aria-label="Key capabilities" role="toolbar">
                         <button type="button" class="empty-state-pill" data-capability="live_search" onclick="handleCapabilityPillClick('live_search')" title="Activate live web search mode">
                             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-                            <span>Live Web Search</span>
+                            <span>Web search</span>
                         </button>
                         <button type="button" class="empty-state-pill" data-capability="document_ocr" onclick="handleCapabilityPillClick('document_ocr')" title="Attach document or PDF for OCR">
                             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-                            <span>Document OCR</span>
+                            <span>Documents</span>
                         </button>
                     </div>
                 </div>
@@ -325,42 +325,31 @@
                         </button>
                         <div id="composer-actions-menu" class="composer-actions-menu hidden" role="menu" aria-label="Composer actions">
                             <div class="composer-action-group" data-composer-group="root">
-                                <button type="button" class="composer-action-item" data-composer-nav="photos" role="menuitem">Photos</button>
-                                <button type="button" class="composer-action-item" data-composer-nav="files" role="menuitem">Files</button>
+                                <button type="button" class="composer-action-item" data-composer-action="file-browse" role="menuitem">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m8 12 6-6a3 3 0 0 1 4 4l-8 8a5 5 0 0 1-7-7l9-9"/></svg>
+                                    <span class="composer-menu-label">Add photos &amp; files</span><small>Upload from your device</small>
+                                </button>
+                                <button id="composer-image-btn" type="button" class="composer-action-item" data-capability="image_generation" onclick="triggerImageGenerationPrompt()" role="menuitem" title="Create an image with the configured provider">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.5"/><path d="m3 17 6-6 5 5 3-3 4 4"/></svg>
+                                    <span class="composer-menu-label">Create image</span><small>Describe an image</small>
+                                </button>
                                 <button
                                     id="web-search-toggle-btn"
                                     type="button"
                                     class="composer-action-item composer-web-search-menuitem"
                                     onclick="cycleWebSearchMode()"
                                     data-web-mode="off"
-                                    role="menuitem"
+                                    role="menuitemcheckbox"
+                                    aria-checked="false"
                                     title="Live Web Search (OFF — click to turn on)"
                                     aria-label="Live Web Search OFF">
-                                    <span class="composer-web-search-item-left">
-                                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
                                             <circle cx="12" cy="12" r="10"></circle>
                                             <line x1="2" y1="12" x2="22" y2="12"></line>
                                             <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1 4-10z"></path>
                                         </svg>
-                                        <span>Web Search</span>
-                                    </span>
-                                    <span class="web-search-mode-badge web-search-mode-label">OFF</span>
-                                </button>
-                                <button
-                                    type="button"
-                                    class="composer-action-item"
-                                    onclick="triggerImageGenerationPrompt()"
-                                    role="menuitem"
-                                    title="Generate image locally or via prompt"
-                                    aria-label="Generate Image">
-                                    <span class="composer-web-search-item-left">
-                                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                                            <circle cx="8.5" cy="8.5" r="1.5"></circle>
-                                            <polyline points="21 15 16 10 5 21"></polyline>
-                                        </svg>
-                                        <span>Generate Image</span>
-                                    </span>
+                                        <span class="composer-menu-label">Web search</span><small>Find current information</small>
+                                    <span class="web-search-mode-label sr-only">OFF</span>
                                 </button>
                             </div>
                             <div class="composer-action-group hidden" data-composer-group="photos">
@@ -375,13 +364,15 @@
                         </div>
                     </div>
                 </div>
+                <div id="composer-entry" class="composer-entry" role="combobox" aria-label="Message commands" aria-haspopup="listbox" aria-expanded="false">
                 <textarea
                     id="text-input"
                     rows="1"
                     placeholder="Ask Jarvis..."
                     class="composer-input"
                     onkeydown="handleComposerKeydown(event)"
-                    oninput="handleComposerInput()"></textarea>
+                    oninput="handleComposerInput()" aria-label="Message JARVIS"></textarea>
+                </div>
                 <div id="vtt-waveform-container" class="composer-voice-visualizer hidden" aria-hidden="true">
                     <div class="composer-voice-waveform" id="composer-voice-waveform">
                         <span class="voice-wave-bar" style="--bar-index:0; --bar-scale:0.12"></span>

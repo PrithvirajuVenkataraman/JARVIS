@@ -75,6 +75,10 @@ Enhanced local recall is optional per device. It uses the pinned quantized `Xeno
 
 Custom Instructions apply when Done is selected. Other dismissal paths warn about unsaved edits. Saved instructions are reply preferences, while current explicit requests, security controls, and evidence requirements retain precedence.
 
+Type `/` to filter available commands. Arrow keys choose a result; Enter inserts its editable prompt starter without sending. Web search has one per-chat on/off setting, an inline composer control, and a blue animated outline while enabled. Reduced-motion preferences use a static outline. Other core menus and settings use neutral colors. Browser zoom gestures remain available.
+
+Vision distinguishes missing deployment credentials from provider authentication, quota, timeout, and temporary failures. When both providers are configured, generation reserves an attempt for each provider within the two-attempt request budget. Explicit vision model environment settings are honored; model names are not silently mapped to older models. Hosted provider credentials and model access still need to be valid.
+
 “Where am I?” uses the device position and one reverse-geocoding lookup, returning a place name and coordinates. It does not fetch weather, air quality, or an IP-based estimate. Precise positioning can be unavailable even after browser permission is granted.
 
 The answer UI does not display private model reasoning or fabricated thinking narratives. Optional verification metadata covers supported arithmetic equalities only; it does not certify an entire proof. Failed checks preserve the original claim rather than silently changing its numbers.

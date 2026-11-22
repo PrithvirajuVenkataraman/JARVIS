@@ -1,3 +1,4 @@
+import { formatBytes } from './file-format.js';
 import * as BM25Module from './bm25.js?v=2.0.5';
 
 const BM25Index = BM25Module.BM25Index;
@@ -1786,12 +1787,7 @@ function clipText(text) {
     return value.length > MAX_EXTRACT_CHARS ? `${value.slice(0, MAX_EXTRACT_CHARS)}\n\n[Partial extraction: first ${MAX_EXTRACT_CHARS} of ${value.length} characters. The original file is retained; do not claim the entire source was read.]` : value;
 }
 
-export function formatBytes(bytes) {
-    const size = Number(bytes) || 0;
-    if (size < 1024) return `${size} B`;
-    if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-    return `${(size / (1024 * 1024)).toFixed(1)} MB`;
-}
+export { formatBytes } from './file-format.js';
 
 export function renderAttachmentTray(container, attachments, onRemove, options = {}) {
     if (!container) return;

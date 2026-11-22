@@ -1877,8 +1877,9 @@ const mockRes = {
 
 await chatHandler(mockReq, mockRes);
 assert.ok(capturedResponse);
-assert.equal(capturedResponse.success, true);
-assert.ok(capturedResponse.response.includes('Image recognition requires a Gemini'));
+assert.equal(capturedResponse.success, false);
+assert.equal(capturedResponse.error.code, 'missing_credentials');
+assert.match(capturedResponse.response, /not configured for this deployment/);
 
 if (prevGroq) process.env.GROQ_API_KEY = prevGroq;
 if (prevGemini) process.env.GEMINI_API_KEY = prevGemini;

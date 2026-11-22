@@ -2,4 +2,4 @@ User-agent: *
 Allow: /
 Disallow: /api/
 
-Sitemap: https://unify-assistant.vercel.app/sitemap.xml
+Sitemap: https://jarvisjr.vercel.app/sitemap.xml

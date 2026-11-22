@@ -12,6 +12,62 @@ import { WorkspaceIndexedDB } from '../app/workspace-durability.js';
 import { schedule, flush, writeHotCache } from '../app/persistence-controller.js';
 import { buildDiagnosticsStatus } from '../api/diagnostics.js';
 import { __test as chat } from '../api/chat-groq.js';
+import { visionFailurePayload } from '../api/_lib/model-failure.js';
+import { lazyModule } from '../app/lazy-features.js';
+import { formatBytes } from '../app/file-format.js';
+
+test('restored attachment sizes remain synchronous before lazy document parsers load', () => {
+    const attachments = lazyModule(() => { throw new Error('Formatting must not import document parsers'); }, { formatBytes });
+    assert.equal(attachments.formatBytes(23347), '22.8 KB');
+    assert.equal(typeof attachments.formatBytes(100), 'string');
+});
+
+test('vision distinguishes configured provider failures from missing credentials and reserves the fallback attempt', async () => {
+    const original = globalThis.fetch;
+    const models = ['GEMINI_VISION_MODEL', 'GROQ_VISION_MODEL', 'GEMINI_MODEL', 'GROQ_MODEL'];
+    const saved = Object.fromEntries(models.map(name => [name, process.env[name]]));
+    const images = [{ mimeType: 'image/png', base64: 'eA==' }];
+    const options = { customGroqKey: 'synthetic-groq', customGeminiKey: 'synthetic-gemini' };
+    try {
+        process.env.GEMINI_VISION_MODEL = 'gemini-4-hydrogen'; process.env.GROQ_VISION_MODEL = 'qwen/qwen3.8-27b';
+        const calls = [];
+        globalThis.fetch = async (url, init) => {
+            calls.push(String(url)); const body = JSON.parse(init.body);
+            if (String(url).includes('googleapis.com')) {
+                assert.match(String(url), /models\/gemini-4-hydrogen:/);
+                assert.equal(body.generationConfig.thinkingConfig.thinkingLevel, 'HIGH');
+                assert.equal(body.generationConfig.topK, undefined);
+                return new Response('{}', { status: 503 });
+            }
+            assert.equal(body.model, 'qwen/qwen3.8-27b');
+            assert.equal(body.messages.at(-1).content[1].type, 'image_url');
+            return Response.json({ choices: [{ message: { content: 'The image contains an integral.' } }] });
+        };
+        const recovered = await chat.runModelWithFallback('Evaluate this integral from the image.', {}, null, images, options);
+        assert.equal(recovered.ok, true); assert.equal(recovered.provider, 'groq'); assert.equal(calls.length, 2);
+        calls.length = 0;
+        globalThis.fetch = async url => { calls.push(String(url)); return new Response('{}', { status: String(url).includes('googleapis.com') ? 429 : 503 }); };
+        for (const streaming of [false, true]) {
+            calls.length = 0;
+            const result = streaming ? await chat.streamModelWithFallback('Read the image.', {}, () => {}, null, images, options) : await chat.runModelWithFallback('Read the image.', {}, null, images, options);
+            assert.equal(result.ok, false); assert.equal(result.payload.code, 'vision_rate_limited');
+            assert.equal(calls.length, 2); assert.ok(calls[0].includes('googleapis.com')); assert.ok(calls[1].includes('groq.com'));
+            assert.doesNotMatch(result.payload.response, /configure.*key|requires.*key/i);
+        }
+        globalThis.fetch = async (url, init) => {
+            assert.match(String(url), /gemini-4-hydrogen/);
+            assert.ok(JSON.parse(init.body).contents[0].parts.some(part => part.inlineData));
+            return Response.json({ candidates: [{ content: { parts: [{ text: 'The integral can be simplified by substitution.' }] } }] });
+        };
+        const gemini = await chat.runModelWithFallback('Evaluate this integral.', {}, null, images, options);
+        assert.equal(gemini.ok, true); assert.equal(gemini.provider, 'gemini');
+        assert.equal(visionFailurePayload(false).code, 'missing_credentials');
+        assert.equal(visionFailurePayload(true, [{ status: 401 }, { status: 403 }]).code, 'vision_authentication_failed');
+    } finally {
+        globalThis.fetch = original;
+        for (const name of models) { if (saved[name] === undefined) delete process.env[name]; else process.env[name] = saved[name]; }
+    }
+});
 
 test('JSON requests preserve headers and reject canceled, timed out, and malformed responses', async () => {
     const original = globalThis.fetch;

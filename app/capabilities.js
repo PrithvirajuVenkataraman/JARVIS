@@ -8,6 +8,7 @@ const selectors = {
 };
 
 export function isAvailable(name) { return capabilities?.[name]?.available === true; }
+export function hasLoaded() { return capabilities !== null; }
 
 export function applyCapabilities(value) {
     if (!value || typeof value !== 'object') return;
@@ -25,6 +26,7 @@ export function applyCapabilities(value) {
     }
     if (!isAvailable('search') && (previous?.search?.available || document.getElementById('web-search-toggle-btn')?.dataset.webMode === 'force')) window.setWebSearchMode?.('off', { persist: false });
     if (!isAvailable('images') && previous?.images?.available) window.deactivateComposerImageMode?.();
+    if (JSON.stringify(previous) !== JSON.stringify(value)) window.dispatchEvent(new Event('jarvis:capabilities'));
 }
 
 export async function refreshCapabilities() {

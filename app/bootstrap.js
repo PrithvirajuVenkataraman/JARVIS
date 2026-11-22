@@ -1,3 +1,4 @@
+import { formatBytes } from './file-format.js';
 import { lazyModule } from './lazy-features.js';
 import * as JarvisMarkupSecurity from './markup-security.js';
 globalThis.JarvisMarkupSecurity = JarvisMarkupSecurity;
@@ -20,6 +21,7 @@ import * as JarvisSourceTransparency from './source-transparency.js?v=2.4.1';
 import * as JarvisContextCopilotUi from './context-copilot-ui.js?v=2.4.1';
 import * as JarvisMemoryQuality from './memory-quality.js?v=2.4.1';
 const JarvisAttachments = lazyModule(() => import('./attachments.js'), {
+    formatBytes,
     getPendingAttachments: () => [], hasPendingAttachments: () => false, clearPendingAttachments: () => {},
     getActiveSessionImages: () => [], clearActiveSessionImages: () => {}, takePendingForSend: () => [],
     buildChatAttachmentMeta: () => [], renderAttachmentTray: () => {}, setAttachmentTrayReading: () => {}

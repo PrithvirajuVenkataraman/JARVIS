@@ -110,6 +110,7 @@ export function shouldShowFailureFallbackCard(failureOrReason, userText, context
 }
 
 export function buildUserFacingErrorMessage(failureOrReason, context = {}) {
+    if (/^vision_/.test(String(failureOrReason?.code || '')) && failureOrReason?.message) return String(failureOrReason.message);
     const failure = classifyFailure(failureOrReason, context);
     switch (failure.code) {
         case 'network_timeout':

@@ -264,8 +264,8 @@ function showHelpModal() {
                                             </svg>
                                         </div>
                                         <div class="settings-row-text">
-                                            <h3 class="settings-row-title">Compliance &amp; Observability</h3>
-                                            <p class="settings-row-desc">DLP policies, PII masking &amp; local diagnostics log</p>
+                                            <h3 class="settings-row-title">Sensitive information &amp; activity</h3>
+                                            <p class="settings-row-desc">Protect sensitive information and review local activity.</p>
                                         </div>
                                     </div>
                                     <div class="settings-row-right">
@@ -287,8 +287,8 @@ function showHelpModal() {
                                             </svg>
                                         </div>
                                         <div class="settings-row-text">
-                                            <h3 class="settings-row-title">Workspace Backup &amp; Storage Health</h3>
-                                            <p class="settings-row-desc">IndexedDB durability, multi-tab sync &amp; AES-256 encrypted backup</p>
+                                            <h3 class="settings-row-title">Backup &amp; storage</h3>
+                                            <p class="settings-row-desc">Back up or restore your chats.</p>
                                         </div>
                                     </div>
                                     <div class="settings-row-right">
@@ -308,7 +308,7 @@ function showHelpModal() {
                                             </svg>
                                         </div>
                                         <div class="settings-row-text">
-                                            <h3 class="settings-row-title">Local Storage & Privacy</h3>
+                                            <h3 class="settings-row-title">Privacy &amp; data</h3>
                                             <p class="settings-row-desc">Stored locally on this device</p>
                                             <div id="privacy-data-summary" class="settings-privacy-summary">
                                                 ${typeof buildPrivacyDataSummaryHtml === 'function' ? buildPrivacyDataSummaryHtml() : ''}
@@ -328,7 +328,7 @@ function showHelpModal() {
                             </div>
 
                             <!-- Section 4: ABOUT & SYSTEM ARCHITECTURE -->
-                            <div class="settings-section-label">ABOUT &amp; SYSTEM ARCHITECTURE</div>
+                            <div class="settings-section-label">ABOUT</div>
                             <div class="settings-group-card">
                                 <!-- Important Info & Tradeoffs Row -->
                                 <button type="button" class="settings-row settings-row-interactive" id="settings-row-architecture-info" onclick="switchSettingsView('architecture_info')" aria-label="Important Info &amp; Architecture">
@@ -341,12 +341,12 @@ function showHelpModal() {
                                             </svg>
                                         </div>
                                         <div class="settings-row-text">
-                                            <h3 class="settings-row-title">Important Info &amp; System Tradeoffs</h3>
-                                            <p class="settings-row-desc">Serverless runtime, cold starts &amp; tradeoffs vs enterprise AI</p>
+                                            <h3 class="settings-row-title">About JARVIS</h3>
+                                            <p class="settings-row-desc">Version and service information.</p>
                                         </div>
                                     </div>
                                     <div class="settings-row-right">
-                                        <span class="settings-row-status configured">Node 22 Serverless</span>
+
                                         <svg class="settings-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                             <path d="M9 18l6-6-6-6"/>
                                         </svg>

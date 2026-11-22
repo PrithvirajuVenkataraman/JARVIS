@@ -6181,61 +6181,6 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             high: { confidence: 0.85, minWords: 2 }
         };
 
-        function initZoomLock() {
-            if (window.__jarvisZoomLockBound) return;
-            window.__jarvisZoomLockBound = true;
-
-            // Viewport static in head
-
-            // Prevent browser zoom gestures, Ctrl/Cmd + wheel zoom, and keyboard zoom shortcuts.
-            document.addEventListener('gesturestart', (event) => event.preventDefault(), { passive: false });
-            document.addEventListener('gesturechange', (event) => event.preventDefault(), { passive: false });
-            document.addEventListener('gestureend', (event) => event.preventDefault(), { passive: false });
-            document.addEventListener('wheel', (event) => {
-                if (event.ctrlKey || event.metaKey) event.preventDefault();
-            }, { passive: false });
-            window.addEventListener('keydown', (event) => {
-                if ((event.ctrlKey || event.metaKey) && ['+', '-', '=', '_', '0'].includes(event.key)) {
-                    event.preventDefault();
-                }
-            }, { passive: false });
-
-            // Block multi-touch pinch start and movement.
-            const preventMultiTouchZoom = (event) => {
-                if (event.touches && event.touches.length > 1) {
-                    event.preventDefault();
-                }
-            };
-            document.addEventListener('touchstart', preventMultiTouchZoom, { passive: false });
-            document.addEventListener('touchmove', preventMultiTouchZoom, { passive: false });
-
-            // Block double-tap zoom on iOS Safari.
-            let lastTouchEndAt = 0;
-            document.addEventListener('touchend', (event) => {
-                const now = Date.now();
-                if (now - lastTouchEndAt <= 320) {
-                    event.preventDefault();
-                }
-                lastTouchEndAt = now;
-            }, { passive: false });
-
-            // Re-assert viewport lock while focusing fields and normalize tiny font sizes on touch devices.
-            const isTouchDevice = window.matchMedia('(hover: none) and (pointer: coarse)').matches || navigator.maxTouchPoints > 0;
-            if (isTouchDevice) {
-                document.addEventListener('focusin', (event) => {
-                    const target = event.target;
-                    if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) {
-                        // Viewport static in head
-                        const computedSize = parseFloat(window.getComputedStyle(target).fontSize || '0');
-                        if (Number.isFinite(computedSize) && computedSize > 0 && computedSize < 16) {
-                            target.style.fontSize = '16px';
-                        }
-                    }
-                }, true);
-            }
-        }
-        initZoomLock();
-
         async function checkAppPermissionsState() {
             const states = {
                 geolocation: 'prompt',
@@ -6293,7 +6238,6 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
         }
 
         window.onload = async () => { 
-            initZoomLock();  
             void initStartupPermissions();
             loadMemoryPersistencePreference();  
             loadUserData();  
@@ -6492,7 +6436,8 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
   if (!tray) { tray = document.createElement('div'); tray.id = 'composer-mode-chips'; tray.className = 'composer-mode-chips'; const bar = document.getElementById('input-bar-inner'); bar?.before(tray); }
   tray.replaceChildren();
   const web = typeof getWebSearchMode === 'function' && getWebSearchMode() === 'force';
-  const label = web ? 'Web search' : _activeCapabilityPill === 'document_ocr' ? 'Document mode' : '';
+  const label = !web && _activeCapabilityPill === 'document_ocr' ? 'Document mode' : '';
+  window.JarvisComposerTools?.syncSearchState();
   if (label) { const button = document.createElement('button'); button.type = 'button'; button.className = 'composer-mode-chip'; button.textContent = label + ' ×'; button.setAttribute('aria-label', 'Turn off ' + label); button.addEventListener('click', handleComposerModeBadgeClick); tray.append(button); }
  }
 
@@ -7496,161 +7441,8 @@ function showHelpModal(...args) { return globalThis.JarvisLazy.loadClassic('sett
             });
         }
 
-        const slashCommandChoices = Object.freeze([
-            { id: 'image', label: 'Image', hint: 'Generate an image with the configured backend', template: '/image ' },
-            { id: 'translate', label: 'Translate', hint: 'Translate a phrase', template: 'translate "..." to Tamil', select: [11, 14] },
-            { id: 'verify', label: 'Verify', hint: 'Check a claim or answer', template: 'verify this: ' },
-            { id: 'summarize', label: 'Summarize', hint: 'Summarize pasted text', template: 'summarize this: ' },
-            { id: 'professional', label: 'Professional', hint: 'Polish wording', template: 'make this professional: ' },
-            { id: 'study', label: 'Study', hint: 'Teach or quiz a topic', template: 'teach me this topic: ' }
-        ]);
-        let slashCommandPickerIndex = 0;
-
-        function availableSlashCommandChoices() { return slashCommandChoices.filter(choice => choice.id !== 'image' || globalThis.JarvisCapabilities?.isAvailable('images')); }
-
-        function getSlashCommandPicker() {
-            return document.getElementById('slash-command-picker');
-        }
-
-        function closeSlashCommandPicker() {
-            getSlashCommandPicker()?.remove();
-        }
-
-        function renderSlashCommandPickerItems() {
-            const picker = getSlashCommandPicker();
-            const list = picker?.querySelector('.slash-command-list');
-            if (!list) return;
-            list.innerHTML = availableSlashCommandChoices().map((choice, index) => {
-                const active = index === slashCommandPickerIndex;
-                return `
-                    <button type="button" class="slash-command-item${active ? ' is-active' : ''}" data-slash-command="${escapeHtml(choice.id)}" role="option" aria-selected="${active ? 'true' : 'false'}">
-                        <span>${escapeHtml(choice.label)}</span>
-                        <small>${escapeHtml(choice.hint)}</small>
-                    </button>
-                `;
-            }).join('');
-        }
-
-        function positionSlashCommandPicker(picker) {
-            const input = document.getElementById('text-input');
-            const anchor = document.getElementById('input-bar-inner') || input;
-            if (!picker || !anchor) return;
-            const rect = anchor.getBoundingClientRect();
-            const margin = 10;
-            const width = Math.min(360, Math.max(260, rect.width));
-            picker.style.width = `${Math.round(width)}px`;
-            picker.style.left = `${Math.round(Math.max(margin, Math.min(rect.left, window.innerWidth - width - margin)))}px`;
-            picker.style.bottom = `${Math.round(Math.max(margin, window.innerHeight - rect.top + 8))}px`;
-        }
-
-        function openSlashCommandPicker() {
-            closeSlashCommandPicker();
-            slashCommandPickerIndex = 0;
-            const picker = document.createElement('div');
-            picker.id = 'slash-command-picker';
-            picker.className = 'slash-command-picker';
-            picker.setAttribute('role', 'listbox');
-            picker.setAttribute('aria-label', 'Slash command choices');
-            picker.innerHTML = `
-                <div class="slash-command-title">Choose a command</div>
-                <div class="slash-command-list"></div>
-            `;
-            picker.addEventListener('mousedown', event => {
-                event.preventDefault();
-                const item = event.target?.closest?.('[data-slash-command]');
-                if (item) selectSlashCommand(item.dataset.slashCommand);
-            });
-            document.body.appendChild(picker);
-            renderSlashCommandPickerItems();
-            positionSlashCommandPicker(picker);
-        }
-
-        function moveSlashCommandPicker(delta) {
-            if (!getSlashCommandPicker()) return;
-            const count = availableSlashCommandChoices().length;
-            slashCommandPickerIndex = (slashCommandPickerIndex + delta + count) % count;
-            renderSlashCommandPickerItems();
-        }
-
-        function selectSlashCommand(commandId = '') {
-            const choice = availableSlashCommandChoices().find(item => item.id === commandId) || availableSlashCommandChoices()[slashCommandPickerIndex];
-            if (!choice) return;
-            closeSlashCommandPicker();
-            if (choice.id === 'image') {
-                activateComposerImageMode({ aspectRatio: '1:1' });
-                return;
-            }
-            const input = document.getElementById('text-input');
-            if (!input) return;
-            input.value = choice.template || '';
-            input.dataset.inputSource = 'slash';
-            input.focus();
-            if (Array.isArray(choice.select)) {
-                input.setSelectionRange?.(choice.select[0], choice.select[1]);
-            } else {
-                input.setSelectionRange?.(input.value.length, input.value.length);
-            }
-            handleComposerInput();
-        }
-
-        function initSlashCommandPicker() {
-            if (window.__slashCommandPickerInit) return;
-            window.__slashCommandPickerInit = true;
-            const input = document.getElementById('text-input');
-            if (!input) return;
-            input.addEventListener('paste', handleComposerPaste);
-            input.addEventListener('keydown', event => {
-                const picker = getSlashCommandPicker();
-                if (picker) {
-                    if (event.key === 'ArrowDown') {
-                        event.preventDefault();
-                        moveSlashCommandPicker(1);
-                        return;
-                    }
-                    if (event.key === 'ArrowUp') {
-                        event.preventDefault();
-                        moveSlashCommandPicker(-1);
-                        return;
-                    }
-                    if (event.key === 'Enter') {
-                        event.preventDefault();
-                        selectSlashCommand();
-                        return;
-                    }
-                    if (event.key === 'Escape') {
-                        event.preventDefault();
-                        closeSlashCommandPicker();
-                        return;
-                    }
-                }
-                if (event.key !== '/') return;
-                const value = input.value || '';
-                const selectedAll = input.selectionStart === 0 && input.selectionEnd === value.length;
-                const nearEmpty = !value.trim() || selectedAll;
-                if (!nearEmpty) return;
-                event.preventDefault();
-                openSlashCommandPicker();
-            });
-            input.addEventListener('input', () => {
-                const value = input.value || '';
-                const trimmed = value.trim();
-                if (trimmed === '/') {
-                    if (!getSlashCommandPicker()) openSlashCommandPicker();
-                    return;
-                }
-                if (getSlashCommandPicker() && trimmed !== '') {
-                    closeSlashCommandPicker();
-                }
-            });
-            window.addEventListener('resize', () => positionSlashCommandPicker(getSlashCommandPicker()));
-            document.addEventListener('mousedown', event => {
-                const picker = getSlashCommandPicker();
-                const inputEl = document.getElementById('text-input');
-                if (!picker) return;
-                if (picker.contains(event.target) || inputEl?.contains(event.target)) return;
-                closeSlashCommandPicker();
-            });
-        }
+        function closeSlashCommandPicker() { window.JarvisSlashCommands?.close(); }
+        function initSlashCommandPicker() { window.JarvisSlashCommands?.install(); }
 
         function saveAssistantModes() {
             try {
@@ -14194,6 +13986,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             menu.classList.toggle('hidden', !willOpen);
             btn.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
             btn.classList.toggle('is-open', willOpen);
+            window.JarvisComposerTools?.menuChanged(willOpen);
             if (willOpen) {
                 window.JarvisAttachments?.showComposerMenuGroup?.(menu, 'root');
             }
@@ -14225,7 +14018,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 const size = Number(item?.size) > 0
                     ? escapeHtml(window.JarvisAttachments?.formatBytes?.(item.size) || `${item.size} B`)
                     : '';
-                const kind = String(item?.kind || 'file').toLowerCase();
+                const kind = /^image\//i.test(item?.mimeType || '') || /\.(?:png|jpe?g|webp|gif|heic|avif)$/i.test(item?.name || '') ? 'image' : String(item?.kind || 'file').toLowerCase();
                 const ocrSnippet = item?.extractedText ? String(item.extractedText).trim() : '';
                 const ocrPreview = ocrSnippet ? `
                     <details class="attachment-ocr-details">
@@ -14251,7 +14044,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                             ${ocrPreview}
                         </div>`;
                 }
-                const icon = kind === 'pdf' ? 'PDF' : (kind === 'doc' ? 'DOC' : (kind === 'ppt' ? 'PPT' : 'FILE'));
+                const icon = kind === 'image' ? 'IMAGE' : kind === 'pdf' ? 'PDF' : (kind === 'doc' ? 'DOC' : (kind === 'ppt' ? 'PPT' : 'FILE'));
                 return `
                     <div class="chat-attachment-card-wrapper">
                         <div class="chat-attachment-card">
@@ -14752,9 +14545,7 @@ ${code}
             if (input && input.value.trim().length > 2) {
                 triggerPredictiveSocketPrewarm();
             }
-            if (input && input.value.trim() !== '/') {
-                closeSlashCommandPicker();
-            }
+            window.JarvisSlashCommands?.sync();
             const inputBar = document.getElementById('input-bar-inner');
             if (inputBar && input) {
                 inputBar.classList.toggle('composer-has-mode', !!input.dataset.inputSource || input.value.trim() === '/');
@@ -14779,7 +14570,7 @@ ${code}
 
         function setWebSearchMode(mode = 'off', options = {}) {
             // Normalize: 'auto' treated as 'off' — classifier no longer auto-triggers live search
-            const normalized = mode === 'force' ? 'force' : 'off';
+            const normalized = mode === 'force' && (!window.JarvisCapabilities?.hasLoaded() || window.JarvisCapabilities.isAvailable('search')) ? 'force' : 'off';
             _composerWebMode = normalized;
             if (normalized === 'force') _activeCapabilityPill = 'live_search';
             else if (_activeCapabilityPill === 'live_search') _activeCapabilityPill = null;
@@ -14830,7 +14621,7 @@ ${code}
         }
 
         function handleComposerKeydown(event) {
-            if (!event || event.isComposing || event.keyCode === 229) return;
+            if (!event || event.defaultPrevented || event.isComposing || event.keyCode === 229) return;
             if (event.altKey && (event.key === 'w' || event.key === 'W')) {
                 event.preventDefault();
                 cycleWebSearchMode();

@@ -1,3 +1,4 @@
+import { visionFailurePayload, normalizeGeminiGenerationConfig } from './_lib/model-failure.js';
 import { publicAnswer, createAnswerFilter } from './_lib/answer-visibility.js';
 import { normalizeUserInstructions, userPreferenceDirective } from './_lib/answer-preferences.js';
 import { withRequestLifecycle, fetchWithLifecycle as fetch, runWithSignal } from './_lib/request-lifecycle.js';
@@ -675,17 +676,7 @@ async function getInstantFactHelper() {
         return [...new Set([userSelected, configured, ...visionModels].filter(Boolean))];
     }
 
-    function resolveGeminiApiModel(model = '') {
-        const raw = String(model || '').trim();
-        const lower = raw.toLowerCase();
-        if (lower === 'gemini-4-hydrogen' || lower === 'gemini-3.8-flash' || lower === 'gemini-3.7-flash') {
-            return 'gemini-2.5-flash';
-        }
-        if (lower === 'gemini-4-pro') {
-            return 'gemini-2.5-pro';
-        }
-        return raw;
-    }
+    function resolveGeminiApiModel(model = '') { return String(model || '').trim().replace(/^models\//, ''); }
 
     function getMaxOutputTokensForGemini(model = '', requested = 65536) {
         const raw = String(model || '').toLowerCase();
@@ -2619,18 +2610,36 @@ async function handler(req, res) {
             : clampInt(lengthPolicy?.maxTokens, 65536, 256, 65536);
         const maxTokens = targetMaxTokens + reasoningAllowance;
         const hasImages = Array.isArray(images) && images.length > 0;
+        const failures = [];
+        const hasGroq = getAllGroqApiKeys(options?.customGroqKey).length > 0;
+        const hasGemini = Boolean(options?.customGeminiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
+        const perProviderLimit = hasGroq && hasGemini ? 1 : 2;
+
+        let attemptsRemaining = 2;
+        const providerCalls = { groq: 0, gemini: 0 };
+        const generationFetch = async (url, init, settings) => {
+            const provider = url.includes('api.groq.com') ? 'groq' : 'gemini';
+            if (attemptsRemaining <= 0 || providerCalls[provider] >= perProviderLimit) throw Object.assign(new Error('Model attempt budget exhausted'), { code: 'attempt_budget_exhausted' });
+            attemptsRemaining--; providerCalls[provider]++;
+            try {
+                const result = await fetchWithTimeoutRetry(url, init, { ...settings, retries: 0 });
+                if (!result.ok) failures.push({ status: result.status });
+                return result;
+            } catch (error) { failures.push({ name: error?.name }); throw error; }
+        };
 
         const tryRunGroq = async () => {
             const effectiveGroqKey = String(options?.customGroqKey || '').trim();
             const keys = getAllGroqApiKeys(effectiveGroqKey);
             if (!keys.length) return null;
-            const groqConfiguredModel = userSelectedModel || String(process.env.GROQ_MODEL || '').trim();
+            const groqConfiguredModel = (hasImages ? String(process.env.GROQ_VISION_MODEL || '').trim() : '') || userSelectedModel || String(process.env.GROQ_MODEL || '').trim();
             const groqCandidates = hasImages
                 ? getPreferredGroqVisionCandidates(groqConfiguredModel, userSelectedModel)
                 : getPreferredGroqCandidates(groqConfiguredModel, { preferSpeed: speedPreferred, tier: routingTier, userSelectedModel, isReasoningQuery });
 
             for (const key of keys) {
                 for (const model of groqCandidates) {
+                    if (attemptsRemaining <= 0 || providerCalls.groq >= perProviderLimit) return null;
                     let messages = Array.isArray(options?.structuredMessages) && options.structuredMessages.length > 0
                         ? options.structuredMessages.map(m => ({ ...m }))
                         : [{ role: 'user', content: finalPrompt }];
@@ -2667,7 +2676,7 @@ async function handler(req, res) {
                     }
 
                     try {
-                        const response = await fetchWithTimeoutRetry('https://api.groq.com/openai/v1/chat/completions', {
+                        const response = await generationFetch('https://api.groq.com/openai/v1/chat/completions', {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json',
@@ -2706,13 +2715,14 @@ async function handler(req, res) {
         const tryRunGemini = async () => {
             const geminiApiKey = String(options?.customGeminiKey || '').trim() || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
             if (!geminiApiKey) return null;
-            const geminiConfiguredModel = String(process.env.GEMINI_MODEL || '').trim();
+            const geminiConfiguredModel = String((hasImages && process.env.GEMINI_VISION_MODEL) || process.env.GEMINI_MODEL || '').trim();
             const visionLane = hasImages ? (options?.visionLane || classifyVisionLane(finalPrompt, true)) : 'none';
             const rawGeminiCandidates = hasImages
                 ? getPreferredGeminiVisionCandidates(geminiConfiguredModel, userSelectedModel, { visionLane })
                 : getPreferredGeminiCandidates(geminiConfiguredModel, userSelectedModel, { preferSpeed: speedPreferred, tier: routingTier });
             const geminiCandidates = filterAvailableModelCandidates('gemini', rawGeminiCandidates);
             for (const model of geminiCandidates) {
+                if (attemptsRemaining <= 0 || providerCalls.gemini >= perProviderLimit) return null;
                 const parts = [{ text: finalPrompt }];
                 if (hasImages) {
                     for (const img of images) {
@@ -2736,7 +2746,7 @@ async function handler(req, res) {
                         contents = formatted;
                     }
                 }
-                const isMathTarget = isMathematicalOrQuantitativeQuery(prompt, { hasImages: Boolean(images?.length) });
+                const isMathTarget = isMathematicalOrQuantitativeQuery(effectiveMsg, { hasImages: Boolean(images?.length) });
                 const isFineGrainedVision = hasImages && visionLane === 'fine_grained_id';
                 const shouldSuppressGeminiReasoning = !isMathTarget && !isFineGrainedVision && (
                     hasImages ||
@@ -2764,6 +2774,7 @@ async function handler(req, res) {
                 } else if (isFineGrainedVision && supportsGeminiThinking(model)) {
                     geminiGenConfig.thinkingConfig = { thinkingBudget: 1024 };
                 }
+                normalizeGeminiGenerationConfig(model, geminiGenConfig);
                 const geminiBody = {
                     contents,
                     generationConfig: geminiGenConfig
@@ -2773,7 +2784,7 @@ async function handler(req, res) {
                 }
                 try {
                     const apiModel = resolveGeminiApiModel(model);
-                    const doGeminiRequest = (bodyObj) => fetchWithTimeoutRetry(
+                    const doGeminiRequest = (bodyObj) => generationFetch(
                         `https://generativelanguage.googleapis.com/v1beta/models/${apiModel}:generateContent?key=${geminiApiKey}`,
                         {
                             method: 'POST',
@@ -2786,7 +2797,7 @@ async function handler(req, res) {
                         }
                     );
                     let response = await doGeminiRequest(geminiBody);
-                    if (response.status === 400 && geminiGenConfig.mediaResolution) {
+                    if (response.status === 400 && geminiGenConfig.mediaResolution && perProviderLimit > 1 && attemptsRemaining > 0) {
                         const fallbackGenConfig = { ...geminiGenConfig };
                         delete fallbackGenConfig.mediaResolution;
                         response = await doGeminiRequest({ ...geminiBody, generationConfig: fallbackGenConfig });
@@ -2847,18 +2858,7 @@ async function handler(req, res) {
             attemptIndex++;
         }
 
-        if (hasImages) {
-            return {
-                ok: true,
-                parsedResponse: {
-                    intent: 'general_chat',
-                    response: 'Image recognition requires a Gemini (`GEMINI_API_KEY`) or Groq Vision (`GROQ_API_KEY`) API key configured in the environment. Please configure your API key to enable visual analysis.',
-                    action: null
-                },
-                modelUsed: 'none',
-                provider: 'notice'
-            };
-        }
+        if (hasImages) return { ok: false, payload: visionFailurePayload(hasGroq || hasGemini, failures) };
 
         const effectiveGroq = String(options?.customGroqKey || '').trim();
         const effectiveGemini = String(options?.customGeminiKey || '').trim();
@@ -2903,12 +2903,17 @@ async function handler(req, res) {
         const maxTokens = targetMaxTokens + reasoningAllowance;
         const hasImages = Array.isArray(images) && images.length > 0;
 
+
+        const failures = [];
+        const hasGroq = getAllGroqApiKeys(options?.customGroqKey).length > 0;
+        const hasGemini = Boolean(options?.customGeminiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
+        const perProviderLimit = hasGroq && hasGemini ? 1 : 2;
         let attemptsRemaining = 2;
         const tryStreamGroq = async () => {
             const effectiveGroqKey = String(options?.customGroqKey || '').trim();
             const keys = getAllGroqApiKeys(effectiveGroqKey);
             if (!keys.length) return null;
-            const groqConfiguredModel = userSelectedModel || String(process.env.GROQ_MODEL || '').trim();
+            const groqConfiguredModel = (hasImages ? String(process.env.GROQ_VISION_MODEL || '').trim() : '') || userSelectedModel || String(process.env.GROQ_MODEL || '').trim();
             const groqCandidates = hasImages
                 ? getPreferredGroqVisionCandidates(groqConfiguredModel, userSelectedModel)
                 : getPreferredGroqCandidates(groqConfiguredModel, { preferSpeed: speedPreferred, tier: routingTier, userSelectedModel, isReasoningQuery });
@@ -2937,6 +2942,7 @@ async function handler(req, res) {
                         onDelta: perModelDelta,
                         options
                     });
+                    if (!result?.ok) failures.push(result || {});
                     if (result?.ok && !isRawToolCallJson(result?.text)) {
                         advanceGroqKeyRotation();
                         return result;
@@ -2953,13 +2959,15 @@ async function handler(req, res) {
         const tryStreamGemini = async () => {
             const geminiApiKey = String(options?.customGeminiKey || '').trim() || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
             if (!geminiApiKey) return null;
-            const geminiConfiguredModel = String(process.env.GEMINI_MODEL || '').trim();
+            const geminiConfiguredModel = String((hasImages && process.env.GEMINI_VISION_MODEL) || process.env.GEMINI_MODEL || '').trim();
             const visionLane = hasImages ? (options?.visionLane || classifyVisionLane(finalPrompt, true)) : 'none';
             const rawGeminiCandidates = hasImages
                 ? getPreferredGeminiVisionCandidates(geminiConfiguredModel, userSelectedModel, { visionLane })
                 : getPreferredGeminiCandidates(geminiConfiguredModel, userSelectedModel, { preferSpeed: speedPreferred, tier: routingTier });
             const geminiCandidates = filterAvailableModelCandidates('gemini', rawGeminiCandidates);
+            let geminiAttempts = 0;
             for (const model of geminiCandidates) {
+                if (geminiAttempts++ >= perProviderLimit) return null;
                 let currentModelDeltasEmitted = false;
                 const perModelDelta = (delta) => {
                     currentModelDeltasEmitted = true;
@@ -2976,9 +2984,10 @@ async function handler(req, res) {
                     maxTokens,
                     timeoutMs: clampInt(lengthPolicy?.timeoutMs, STREAM_MODEL_FETCH_TIMEOUT_MS, 1000, STREAM_MODEL_FETCH_TIMEOUT_MS),
                     onDelta: perModelDelta,
-                    options: hasImages ? { ...options, visionLane } : options
+                    options: { ...options, visionLane, allowCompatibilityRetry: false }
                 });
                 if (result.ok) return result;
+                failures.push(result);
                 if (currentModelDeltasEmitted && typeof options?.onReset === 'function') {
                     options.onReset();
                 }
@@ -2996,16 +3005,7 @@ async function handler(req, res) {
             if (result) return result;
         }
 
-        if (hasImages) {
-            const notice = 'Image recognition requires a Gemini (`GEMINI_API_KEY`) or Groq Vision (`GROQ_API_KEY`) API key configured in the environment. Please configure your API key to enable visual analysis.';
-            onDelta(notice);
-            return {
-                ok: true,
-                provider: 'notice',
-                modelUsed: 'none',
-                text: notice
-            };
-        }
+        if (hasImages) return { ok: false, payload: visionFailurePayload(hasGroq || hasGemini, failures) };
 
         const effectiveGroq = String(options?.customGroqKey || '').trim();
         const effectiveGemini = String(options?.customGeminiKey || '').trim();
@@ -3104,7 +3104,7 @@ async function handler(req, res) {
                 if (status === 401 || status === 429 || (status >= 500 && status < 600)) {
                     recordKeyFailure(apiKey, status === 429 || status >= 500);
                 }
-                return { ok: false };
+                return { ok: false, status: response.status };
             }
             let text = '';
             let inReasoning = false;
@@ -3181,9 +3181,9 @@ async function handler(req, res) {
             // If the model solely emitted reasoning thoughts or truncated mid-header, cascade to next model
             recordKeyFailure(apiKey, false);
             return { ok: false };
-        } catch (_) {
+        } catch (error) {
             recordKeyFailure(apiKey, false);
-            return { ok: false };
+            return { ok: false, name: error?.name };
         } finally {
             if (initialTimer) clearTimeout(initialTimer);
             if (idleTimer) clearTimeout(idleTimer);
@@ -3265,6 +3265,7 @@ async function handler(req, res) {
             } else if (isFineGrainedVision && supportsGeminiThinking(model)) {
                 generationConfig.thinkingConfig = { thinkingBudget: 1024 };
             }
+            normalizeGeminiGenerationConfig(model, generationConfig);
             const reqBody = {
                 contents,
                 generationConfig
@@ -3287,7 +3288,7 @@ async function handler(req, res) {
                 }
             );
             let response = await doStreamFetch(reqBody);
-            if (response.status === 400 && generationConfig.mediaResolution) {
+            if (response.status === 400 && generationConfig.mediaResolution && options?.allowCompatibilityRetry !== false) {
                 const fallbackGenConfig = { ...generationConfig };
                 delete fallbackGenConfig.mediaResolution;
                 response = await doStreamFetch({ ...reqBody, generationConfig: fallbackGenConfig });
@@ -3296,7 +3297,7 @@ async function handler(req, res) {
                 markModelTemporarilyUnavailable('gemini', model, response.status);
                 return { ok: false };
             }
-            if (!response.ok || !response.body) return { ok: false };
+            if (!response.ok || !response.body) return { ok: false, status: response.status };
             let text = '';
             let inReasoning = false;
             let groundingSources = [];
@@ -3384,8 +3385,8 @@ async function handler(req, res) {
                     sources: groundingSources.length > 0 ? groundingSources : undefined
                 }
                 : { ok: false };
-        } catch (_) {
-            return { ok: false };
+        } catch (error) {
+            return { ok: false, name: error?.name };
         } finally {
             if (initialTimer) clearTimeout(initialTimer);
             if (idleTimer) clearTimeout(idleTimer);
