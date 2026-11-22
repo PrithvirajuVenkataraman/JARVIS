@@ -1,4 +1,4 @@
-import { applyApiSecurity, getSealedSecretsPublicKey } from './_lib/security.js';
+import { applyApiSecurity, getSealedSecretsPublicKey, isPersistentByokConfigured } from './_lib/security.js';
 import { getCostControls } from './_lib/cost-controls.js';
 import { isTelemetryExporterConfigured } from './_lib/telemetry-exporter.js';
 import handleFeedback from './_lib/feedback-handler.js';
@@ -26,11 +26,23 @@ function isPublicFactSearchEnabled() {
 
 export function buildDiagnosticsStatus() {
   const costControls = getCostControls();
+  const chat = ['GROQ_API_KEY', 'GROQ_KEY', 'GROQ_API_KEYS', 'GEMINI_API_KEY', 'GOOGLE_API_KEY'].some(hasEnv);
+  const byok = isPersistentByokConfigured();
+  const liveSearch = isEnabled('LIVE_RETRIEVAL_ENABLED');
+  const images = isEnabled('JARVIS_IMAGE_FREE_TIER_ENABLED') && (hasEnv('GEMINI_API_KEY') || hasEnv('GOOGLE_API_KEY'));
+  const capability = (available, reasonCode) => ({ available, reasonCode: available ? 'available' : reasonCode });
     return {
+        capabilities: {
+            chat: capability(chat, 'provider_not_configured'),
+            search: capability(liveSearch, 'retrieval_disabled'),
+            vision: capability(chat, 'provider_not_configured'),
+            images: capability(images, 'free_image_backend_unavailable'),
+            byok: capability(byok, 'persistent_keypair_required')
+        },
         model: {
             groqConfigured: hasEnv('GROQ_API_KEY'),
             geminiConfigured: hasEnv('GEMINI_API_KEY') || hasEnv('GOOGLE_API_KEY'),
-            byokSupported: true,
+            byokSupported: byok,
             byokPublicKey: getSealedSecretsPublicKey()
         },
         streaming: {
