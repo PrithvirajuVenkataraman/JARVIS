@@ -76,7 +76,7 @@
     },
     {
       "source": "/api/verify",
-      "destination": "/api/diagnostics?__route=verify"
+      "destination": "/api/diagnostics?__route=verify" 
     },
     {
       "source": "/",
