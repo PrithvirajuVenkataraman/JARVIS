@@ -6457,6 +6457,7 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             const pills = document.querySelectorAll('.empty-state-pill[data-capability]');
             pills.forEach(pill => {
                 const cap = pill.getAttribute('data-capability');
+                if (cap === 'image_generation') { pill.removeAttribute('aria-pressed'); return; }
                 const isActive = cap === _activeCapabilityPill;
                 pill.classList.toggle('is-active', isActive);
                 pill.setAttribute('aria-pressed', isActive ? 'true' : 'false');

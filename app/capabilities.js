@@ -24,6 +24,8 @@ export function applyCapabilities(value) {
             element.dataset.capabilityUnavailable = available ? 'false' : 'true';
         }
     }
+    const welcome = document.querySelector('.empty-state-capabilities');
+    if (welcome) welcome.dataset.actionCount = String([...welcome.querySelectorAll('.empty-state-pill')].filter(button => !button.hidden).length);
     if (!isAvailable('search') && (previous?.search?.available || document.getElementById('web-search-toggle-btn')?.dataset.webMode === 'force')) window.setWebSearchMode?.('off', { persist: false });
     if (!isAvailable('images') && previous?.images?.available) window.deactivateComposerImageMode?.();
     if (JSON.stringify(previous) !== JSON.stringify(value)) window.dispatchEvent(new Event('jarvis:capabilities'));

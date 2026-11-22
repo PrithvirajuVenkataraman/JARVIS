@@ -5,7 +5,7 @@ test.beforeEach(async ({ page }) => {
     await page.addInitScript(() => localStorage.setItem('jarvis_permission_intro_v1', 'true'));
     await page.route('https://**/*', route => route.abort());
     await page.goto('/'); await page.waitForFunction(() => window.__jarvisModernReady);
-    await expect(page.locator('#web-search-toggle-btn')).not.toHaveAttribute('data-capability-unavailable', 'true');
+    await expect(page.locator('#web-search-toggle-btn')).toHaveAttribute('data-capability-unavailable', 'false');
 });
 
 test('slash filtering selects on Enter without sending, then sends the completed draft once', async ({ page }) => {
@@ -19,6 +19,21 @@ test('slash filtering selects on Enter without sending, then sends the completed
     expect(sends).toBe(0); await expect(page.locator('.chat-row[data-role=user]')).toHaveCount(0);
     await input.fill('summarize this: Plants use light to produce energy.'); await input.press('Enter');
     await expect(page.locator('#request-status')).toHaveText('Response finished.'); expect(sends).toBe(1);
+});
+
+test('welcome image shortcut uses configured availability and preserves the draft', async ({ page }) => {
+    const shortcut = page.locator('.empty-state-pill[data-capability=image_generation]');
+    await expect(shortcut).toBeVisible();
+    await expect(page.locator('.empty-state-capabilities')).toHaveAttribute('data-action-count', '3');
+    let generations = 0; page.on('request', request => { if (request.url().includes('/api/image-proxy')) generations++; });
+    await page.locator('#text-input').fill('A quiet mountain lake'); await shortcut.click();
+    await expect(page.locator('#composer-image-chip')).toBeVisible();
+    await expect(page.locator('#text-input')).toHaveValue('A quiet mountain lake'); expect(generations).toBe(0);
+    await page.evaluate(() => window.JarvisCapabilities.applyCapabilities(Object.fromEntries(['chat', 'search', 'vision', 'images', 'byok'].map(name => [name, { available: name !== 'images', reasonCode: 'fixture' }]))));
+    await expect(shortcut).toBeHidden(); await expect(page.locator('#composer-image-chip')).toHaveCount(0);
+    await expect(page.locator('.empty-state-capabilities')).toHaveAttribute('data-action-count', '2');
+    await page.reload(); await page.waitForFunction(() => window.__jarvisModernReady);
+    await expect(shortcut).toBeVisible();
 });
 
 test('picker navigation preserves drafts, composition, payloads, and changing capabilities', async ({ page }) => {
