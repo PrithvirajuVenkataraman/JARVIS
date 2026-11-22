@@ -4,7 +4,7 @@
       "maxDuration": 60,
       "supportsCancellation": true,
       "excludeFiles": "{.github,docs,tests,tools,scripts,scratch,katex-fonts,dist,build}/**"
-    }
+    } 
   },
   "headers": [
     {
