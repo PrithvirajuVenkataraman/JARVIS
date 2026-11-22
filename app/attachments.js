@@ -253,7 +253,7 @@ export async function ingestAllForMessage(attachments = [], userText = '') {
                 attachment.ocrMethod = 'single_pass_native_image';
                 return { attachment, isImg, imagePayload, result };
             }
-            const result = await ingestAttachmentWithFallback(attachment);
+            const result = await ingestAttachmentWithFallback(attachment, userText);
             attachment.extractedText = String(result.text || '').trim();
             attachment.ocrMethod = result.method || '';
             return { attachment, isImg, imagePayload, result };
@@ -358,18 +358,22 @@ function shouldRankAttachmentText(query) {
     return pinpointScore > 0.15 && pinpointScore > globalScore;
 }
 
-export async function ingestAttachmentWithFallback(attachment) {
+export async function ingestAttachmentWithFallback(attachment, query = '') {
     const attempts = [];
 
-    const localText = await extractLocally(attachment).catch(error => ({
+    const localText = await extractLocally(attachment, query).catch(error => {
+        if (error.name === 'AbortError') throw error;
+        return ({
         ok: false,
+        blocked: isTextLikeFile(attachment?.file || {}) || error.code === 'document_credentials',
         text: '',
         method: 'client',
         provider: 'client',
         message: String(error?.message || error),
         attempts: [{ stage: 'client', ok: false, method: 'client_error', error: String(error?.message || error) }]
-    }));
+    }); });
     attempts.push(...(localText.attempts || []));
+    if (localText.blocked) return { ...localText, message: 'The text could not be read safely on this device. No server upload was attempted.' };
     if (isPdfFile(attachment?.file || attachment)) {
         return await ingestPdfAttachmentWithVisuals(attachment, localText, attempts);
     }
@@ -508,7 +512,7 @@ function localResultSafe(localText) {
     return { text: '', method: localText?.method || 'client' };
 }
 
-async function extractLocally(attachment) {
+async function extractLocally(attachment, query = '') {
     const attempts = [];
     const file = attachment?.file;
     if (!file) {
@@ -516,6 +520,11 @@ async function extractLocally(attachment) {
     }
 
     if (isTextLikeFile(file)) {
+        if (globalThis.JarvisRecall?.selectDocumentFile) {
+            const selected = await globalThis.JarvisRecall.selectDocumentFile(file, attachment.id, query);
+            if (!selected.saved) globalThis.showTemporaryMessage?.('Document available for this request; browser storage could not keep a copy for later.');
+            return { ok: true, text: selected.text, method: selected.partial ? 'selected_text_passages' : 'client_text', provider: 'client', partial: selected.partial, coverage: selected.coverage, attempts };
+        }
         const text = await readFileAsText(file);
         attempts.push({ stage: 'client_text', ok: Boolean(text), method: 'client_text' });
         if (text) {
@@ -1774,7 +1783,7 @@ function decodeXmlEntities(value) {
 function clipText(text) {
     const value = String(text || '').replace(/\u0000/g, '').trim();
     if (!value) return '';
-    return value.length > MAX_EXTRACT_CHARS ? `${value.slice(0, MAX_EXTRACT_CHARS)}\n\n[Truncated]` : value;
+    return value.length > MAX_EXTRACT_CHARS ? `${value.slice(0, MAX_EXTRACT_CHARS)}\n\n[Partial extraction: first ${MAX_EXTRACT_CHARS} of ${value.length} characters. The original file is retained; do not claim the entire source was read.]` : value;
 }
 
 export function formatBytes(bytes) {
@@ -1807,6 +1816,7 @@ export function renderAttachmentTray(container, attachments, onRemove, options =
                 <div class="composer-attachment-meta">
                     <span class="composer-attachment-name">${escapeHtml(item.name)}</span>
                     <span class="composer-attachment-size">${escapeHtml(formatBytes(item.size))}</span>
+                    ${item.pastedText ? `<button type="button" class="paste-chip-action" data-paste-preview="${escapeHtml(item.id)}">Preview</button><button type="button" class="paste-chip-action" data-paste-inline="${escapeHtml(item.id)}">Insert inline</button>` : ''}
                 </div>
                 <button type="button" class="composer-attachment-remove" data-remove-attachment="${escapeHtml(item.id)}" aria-label="Remove ${escapeHtml(item.name)}">×</button>
             </div>

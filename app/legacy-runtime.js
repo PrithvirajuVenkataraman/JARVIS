@@ -5005,6 +5005,7 @@ async function streamChatCompletion(payload, options = {}) {
                 sources: finalSources,
                 entity: donePayload.entity || null,
                 notableWorks: donePayload.notableWorks || [],
+                verification: donePayload.verification,
                 modelUsed: donePayload.modelUsed || streamMeta.modelUsed || streamMeta.model || '',
                 provider: donePayload.provider || streamMeta.provider || '',
                 failover: donePayload.failover || streamMeta.failover || false,
@@ -5438,7 +5439,7 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
         // Multi-tier conversational context across entire conversation thread (Tier 1 verbatim window, Tier 2 semantic retrieval, Tier 3 rolling milestone summary)
         let multiTierContext = null;
         if (typeof window.JarvisConversation?.buildMultiTierContext === 'function') {
-            multiTierContext = window.JarvisConversation.buildMultiTierContext({
+            multiTierContext = await window.JarvisRecall.buildContext(window.JarvisConversation, {
                 message: normalizedUserMessage,
                 maxRecentTurns: 40,
                 maxContextChars: 64000,
@@ -5500,7 +5501,7 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
                 responseLength: responseMode,
                 responseFormat: formatMode,
                 responseStyle,
-                customSystemPrompt: systemDirectives,
+                customSystemPrompt,
                 learnedDirectives: (() => {
                     if (!personalizationActive) return [];
                     try {
@@ -6261,167 +6262,13 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
             return states;
         }
 
-        async function initStartupPermissions(forceModal = false) {
-            try {
-                const states = await checkAppPermissionsState();
-                if (states.geolocation === 'granted') {
-                    getCurrentPositionAsync({ enableHighAccuracy: false, timeout: (window.APP_CONFIG || APP_CONFIG).timeouts.geolocationMs, maximumAge: (window.APP_CONFIG || APP_CONFIG).timeouts.geolocationCacheMs }).catch(() => {});
-                }
-                const allGranted = states.geolocation === 'granted' && states.microphone === 'granted';
-                const dismissed = sessionStorage.getItem('jarvis_permissions_dismissed');
-                if (forceModal || (!allGranted && !dismissed)) {
-                    setTimeout(() => {
-                        // Permissions are requested only after a feature action.
-                    }, 650);
-                }
-            } catch (_) {}
-        }
+        async function initStartupPermissions() { /* The module owns first-visit setup. */ }
 
-        function closeStartupPermissionsModal() {
-            sessionStorage.setItem('jarvis_permissions_dismissed', 'true');
-            const modal = document.getElementById('startup-permissions-modal');
-            if (modal) {
-                modal.classList.add('fade-out');
-                setTimeout(() => modal.remove(), 200);
-            }
-        }
+        function closeStartupPermissionsModal() { window.JarvisPermissions.close(); }
 
-        function showStartupPermissionsModal(initialStates = null) {
-            const existing = document.getElementById('startup-permissions-modal');
-            if (existing) existing.remove();
+        function showStartupPermissionsModal() { return window.JarvisPermissions.show(); }
 
-            const micGranted = window.__jarvisMicGranted || initialStates?.microphone === 'granted';
-            const camGranted = window.__jarvisCameraGranted || initialStates?.camera === 'granted';
-            const locGranted = window.__jarvisLocationGranted || initialStates?.geolocation === 'granted';
-
-            const modal = document.createElement('div');
-            modal.id = 'startup-permissions-modal';
-            modal.className = 'permissions-modal-backdrop';
-            modal.setAttribute('role', 'dialog');
-            modal.setAttribute('aria-modal', 'true');
-            modal.setAttribute('aria-labelledby', 'permissions-modal-heading');
-            modal.innerHTML = `
-                <div class="permissions-modal-panel">
-                    <div class="permissions-modal-header">
-                        <div>
-                            <h2 id="permissions-modal-heading" class="permissions-modal-title">Enable Jarvis Features</h2>
-                            <p class="permissions-modal-desc">Enable permissions to unlock 1-click voice conversation, live camera recognition, and accurate local weather.</p>
-                        </div>
-                        <button type="button" class="permissions-modal-close" onclick="closeStartupPermissionsModal()" aria-label="Close permissions dialog">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
-                                <line x1="18" y1="6" x2="6" y2="18"></line>
-                                <line x1="6" y1="6" x2="18" y2="18"></line>
-                            </svg>
-                        </button>
-                    </div>
-                    <div class="permissions-items-list">
-                        <div class="permissions-item-card">
-                            <div class="permissions-item-left">
-                                <div class="permissions-item-icon" aria-hidden="true">
-                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
-                                </div>
-                                <div class="permissions-item-info">
-                                    <strong>Microphone</strong>
-                                    <span>Voice Converse & instant speech commands</span>
-                                </div>
-                            </div>
-                            <span id="perm-badge-mic" class="permissions-item-badge ${micGranted ? 'is-granted' : 'is-prompt'}">${micGranted ? 'Enabled' : 'Required'}</span>
-                        </div>
-                        <div class="permissions-item-card">
-                            <div class="permissions-item-left">
-                                <div class="permissions-item-icon" aria-hidden="true">
-                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>
-                                </div>
-                                <div class="permissions-item-info">
-                                    <strong>Camera & Media</strong>
-                                    <span>Live object, scene & document recognition</span>
-                                </div>
-                            </div>
-                            <span id="perm-badge-cam" class="permissions-item-badge ${camGranted ? 'is-granted' : 'is-prompt'}">${camGranted ? 'Enabled' : 'Optional'}</span>
-                        </div>
-                        <div class="permissions-item-card">
-                            <div class="permissions-item-left">
-                                <div class="permissions-item-icon" aria-hidden="true">
-                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
-                                </div>
-                                <div class="permissions-item-info">
-                                    <strong>Location</strong>
-                                    <span>Live local weather, travel & "Where am I"</span>
-                                </div>
-                            </div>
-                            <span id="perm-badge-loc" class="permissions-item-badge ${locGranted ? 'is-granted' : 'is-prompt'}">${locGranted ? 'Enabled' : 'Optional'}</span>
-                        </div>
-                    </div>
-                    <div class="permissions-modal-actions">
-                        <button id="permissions-grant-all-btn" type="button" class="permissions-btn-primary" onclick="requestAllStartupPermissions()">Enable All (1-Click)</button>
-                        <button type="button" class="permissions-btn-secondary" onclick="closeStartupPermissionsModal()">Continue with defaults</button>
-                    </div>
-                </div>
-            `;
-            document.body.appendChild(modal);
-        }
-
-        async function requestAllStartupPermissions() {
-            const btn = document.getElementById('permissions-grant-all-btn');
-            if (btn) {
-                btn.textContent = 'Requesting...';
-                btn.disabled = true;
-            }
-            try {
-                if (navigator?.mediaDevices?.getUserMedia) {
-                    try {
-                        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
-                        window.__jarvisMicGranted = true;
-                        window.__jarvisCameraGranted = true;
-                        stream.getTracks().forEach(t => t.stop());
-                        const bMic = document.getElementById('perm-badge-mic');
-                        if (bMic) { bMic.textContent = 'Enabled'; bMic.className = 'permissions-item-badge is-granted'; }
-                        const bCam = document.getElementById('perm-badge-cam');
-                        if (bCam) { bCam.textContent = 'Enabled'; bCam.className = 'permissions-item-badge is-granted'; }
-                    } catch (mediaErr) {
-                        try {
-                            const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                            window.__jarvisMicGranted = true;
-                            audioStream.getTracks().forEach(t => t.stop());
-                            const bMic = document.getElementById('perm-badge-mic');
-                            if (bMic) { bMic.textContent = 'Enabled'; bMic.className = 'permissions-item-badge is-granted'; }
-                        } catch (_) {}
-                        try {
-                            const videoStream = await navigator.mediaDevices.getUserMedia({ video: true });
-                            window.__jarvisCameraGranted = true;
-                            videoStream.getTracks().forEach(t => t.stop());
-                            const bCam = document.getElementById('perm-badge-cam');
-                            if (bCam) { bCam.textContent = 'Enabled'; bCam.className = 'permissions-item-badge is-granted'; }
-                        } catch (_) {}
-                    }
-                }
-                if (navigator?.geolocation?.getCurrentPosition) {
-                    try {
-                        await new Promise(resolve => {
-                            navigator.geolocation.getCurrentPosition(
-                                pos => {
-                                    window.__jarvisLocationGranted = true;
-                                    const bLoc = document.getElementById('perm-badge-loc');
-                                    if (bLoc) { bLoc.textContent = 'Enabled'; bLoc.className = 'permissions-item-badge is-granted'; }
-                                    resolve(pos);
-                                },
-                                () => resolve(null),
-                                { enableHighAccuracy: false, timeout: 5000, maximumAge: 300000 }
-                            );
-                        });
-                    } catch (_) {}
-                }
-                if (btn) {
-                    btn.textContent = 'Permissions Ready ✓';
-                }
-                showTemporaryMessage('Permissions enabled! Voice converse, vision, and location are ready.');
-                setTimeout(() => {
-                    closeStartupPermissionsModal();
-                }, 400);
-            } catch (err) {
-                closeStartupPermissionsModal();
-            }
-        }
+        async function requestAllStartupPermissions() { return window.JarvisPermissions.show(); }
         void initStartupPermissions();
 
         function hasAnyRenderedChatMessages() {
@@ -6640,36 +6487,14 @@ let showRoutingDebugBadge = (window.APP_CONFIG || APP_CONFIG).defaults.showRouti
         }
 
         function updateComposerModeIndicatorUi() {
-            const badge = document.getElementById('composer-mode-badge');
-            const iconContainer = document.getElementById('composer-mode-icon');
-            if (!badge || !iconContainer) return;
-
-            const isWebForced = typeof getWebSearchMode === 'function' ? getWebSearchMode() === 'force' : _composerWebMode === 'force';
-            const isWebSearch = _activeCapabilityPill === 'live_search' || isWebForced;
-            const isDocumentOcr = _activeCapabilityPill === 'document_ocr';
-
-            badge.classList.remove('is-reasoning', 'is-document');
-
-            if (isWebSearch) {
-                badge.classList.remove('hidden');
-                badge.title = 'Live Web Search active (click to turn off)';
-                badge.setAttribute('aria-label', 'Live Web Search active — click to turn off');
-                iconContainer.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.2" y2="16.2"></line></svg>';
-                return;
-            }
-
-            if (isDocumentOcr) {
-                badge.classList.remove('hidden');
-                badge.classList.add('is-document');
-                badge.title = 'Document OCR active (click to turn off)';
-                badge.setAttribute('aria-label', 'Document OCR active — click to turn off');
-                iconContainer.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>';
-                return;
-            }
-
-            badge.classList.add('hidden');
-            iconContainer.innerHTML = '';
-        }
+  document.getElementById('composer-mode-badge')?.remove();
+  let tray = document.getElementById('composer-mode-chips');
+  if (!tray) { tray = document.createElement('div'); tray.id = 'composer-mode-chips'; tray.className = 'composer-mode-chips'; const bar = document.getElementById('input-bar-inner'); bar?.before(tray); }
+  tray.replaceChildren();
+  const web = typeof getWebSearchMode === 'function' && getWebSearchMode() === 'force';
+  const label = web ? 'Web search' : _activeCapabilityPill === 'document_ocr' ? 'Document mode' : '';
+  if (label) { const button = document.createElement('button'); button.type = 'button'; button.className = 'composer-mode-chip'; button.textContent = label + ' ×'; button.setAttribute('aria-label', 'Turn off ' + label); button.addEventListener('click', handleComposerModeBadgeClick); tray.append(button); }
+ }
 
         function handleComposerModeBadgeClick() {
             resetCapabilityPillsUi();
@@ -6835,6 +6660,7 @@ function showHelpModal(...args) { return globalThis.JarvisLazy.loadClassic('sett
 /*end-lazy-feature*/
 
         function switchSettingsView(viewName) {
+ if (viewName !== 'custom_instructions' && window.__currentSettingsView === 'custom_instructions' && !window.JarvisSettings.allowNavigation(() => switchSettingsView(viewName))) return;
             window.__currentSettingsView = viewName;
             currentSettingsView = viewName;
             const mainView = document.getElementById('settings-view-main');
@@ -7302,13 +7128,7 @@ function showHelpModal(...args) { return globalThis.JarvisLazy.loadClassic('sett
             }
         }
 
-        function saveCustomInstructionsAndReturn() {
-            const input = document.getElementById('custom-system-prompt-input');
-            if (input) {
-                setCustomSystemPrompt(input.value, false);
-            }
-            switchSettingsView('main');
-        }
+        function saveCustomInstructionsAndReturn() { return window.JarvisSettings.commit(); }
 
         // ====================================================================
         // GitHub Secrets-Style Asymmetric Sealing (Client Web Crypto)
@@ -7613,7 +7433,7 @@ function showHelpModal(...args) { return globalThis.JarvisLazy.loadClassic('sett
             if (event.key === 'Escape') {
                 event.preventDefault();
                 if (window.__currentSettingsView === 'custom_instructions') {
-                    saveCustomInstructionsAndReturn();
+                    closeHelpModal();
                 } else {
                     closeHelpModal();
                 }
@@ -7844,7 +7664,7 @@ function showHelpModal(...args) { return globalThis.JarvisLazy.loadClassic('sett
                     visionDetailLevel,
                     visionShowEvidence
                 }));
-            } catch (e) { console.error('Error saving assistant modes:', e); }
+            return true; } catch (_) { return false; }
         }
 
         function getSendIconSvg() {
@@ -8429,6 +8249,8 @@ function showHelpModal(...args) { return globalThis.JarvisLazy.loadClassic('sett
 
 
         function stopActiveGeneration(reason = 'manual') {
+ window.JarvisLocation?.cancel();
+ window.JarvisRecall?.cancel();
             const liveResearch = window.JarvisLiveResearch?.activeController;
             const hadLiveResearch = Boolean(liveResearch && !liveResearch.isTerminal);
             if (hadLiveResearch) {
@@ -8550,7 +8372,7 @@ function showHelpModal(...args) { return globalThis.JarvisLazy.loadClassic('sett
             updateModeButtonGroup('vision-detail', visionDetailLevel);
             updateModeButtonGroup('vision-evidence', visionShowEvidence ? 'on' : 'off');
             const customInput = document.getElementById('custom-system-prompt-input');
-            if (customInput && customInput.value !== customSystemPrompt) {
+            if (customInput && window.__currentSettingsView !== 'custom_instructions' && customInput.value !== customSystemPrompt) {
                 customInput.value = customSystemPrompt;
             }
         }
@@ -8623,10 +8445,11 @@ function showHelpModal(...args) { return globalThis.JarvisLazy.loadClassic('sett
             window.customSystemPrompt = customSystemPrompt;
             window.JarvisConversation?.setPreferences({ customSystemPrompt });
             window.JarvisState?.setPreferences({ customSystemPrompt });
-            saveAssistantModes();
+            const persisted = saveAssistantModes();
             updateCustomInstructionsStatus();
             if (announce) showTemporaryMessage(customSystemPrompt ? 'Custom instructions saved.' : 'Custom instructions cleared.');
-        }
+ return persisted;
+ }
 
         function applyCustomSystemPromptAndClose() {
             const input = document.getElementById('custom-system-prompt-input');
@@ -8744,6 +8567,7 @@ function showHelpModal(...args) { return globalThis.JarvisLazy.loadClassic('sett
         }
 
         function closeHelpModal() {
+ if (!window.JarvisSettings.allowNavigation(() => closeHelpModal())) return;
             window.__currentSettingsView = 'main';
             currentSettingsView = 'main';
             const modal = document.getElementById('help-modal');
@@ -11332,123 +11156,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             };
         }
 
-        function generateContextualThoughtSteps(userPrompt, _phase = 'thinking') {
-            const raw = String(userPrompt || '').trim();
-            if (!raw || raw.length < 3 || /^(hi|hello|hey|thanks|thank you|ok|okay|bye|goodbye)[!.?]?$/i.test(raw)) return [];
-            const lower = raw.toLowerCase();
-
-            // 0. Casual, Conversational, Identity, Location & Presence (No fake thinking)
-            if (/\b(where\s+(?:am\s+i|i\s+am|are\s+you)|who\s+are\s+you|what(?:'s|\s+is)\s+your\s+name|how\s+are\s+you|what\s+can\s+you\s+do|can\s+you\s+hear\s+me|tell\s+me\s+about\s+yourself|help(?:\s+me)?|test|testing|what's\s+up|good\s+(?:morning|evening|afternoon|night))\b/i.test(lower)) {
-                return [];
-            }
-
-            // 1. Current Company Role / Executive Leadership (e.g. CEO of Company X)
-            if (/\b(ceo|cfo|cto|coo|founder|co-founder|chairman|chairperson|managing director|president of|executive of)\b/i.test(lower) && !/\b(prime minister|chief minister|president of india|president of the united states|president of us|president of france)\b/i.test(lower)) {
-                return [
-                    { title: 'Searching', body: 'Retrieving official corporate records & executive filings' },
-                    { title: 'Verifying', body: 'Cross-verifying active leadership tenure and exact role' }
-                ];
-            }
-
-            // 2. Government & Public Officeholder (e.g. CM of Tamil Nadu, PM of India, Mayor of London)
-            if (/\b(prime minister|chief minister|pm|cm|governor|mayor|president|minister of|chancellor|secretary general|premier)\b/i.test(lower)) {
-                return [
-                    { title: 'Searching', body: 'Querying official gazettes & verified knowledge graphs' },
-                    { title: 'Verifying', body: 'Validating current active officeholder tenure' }
-                ];
-            }
-
-            // 3. Current News / Live Events / Sports / Market Prices
-            if (/\b(news|latest|current|update|today|yesterday|tomorrow|live(?:\s+stream|\s+score|\s+match)?|match score|live score|vs\s+[a-z]+(?:\s+fc)?|stock price|stock market|cryptocurrency price|crypto price|weather|event|launched|\d{4})\b/i.test(lower) && !/\b(did\s+[a-z]+\s+score|who\s+scored|how\s+many\s+(?:goals|runs|centuries|100'?s|points)\s+did)\b/i.test(lower)) {
-                return [
-                    { title: 'Searching', body: 'Querying verified real-time sources' },
-                    { title: 'Synthesizing', body: 'Formulating grounded summary with verified sources' }
-                ];
-            }
-
-            // 4. Coding / Technical / Algorithms
-            if (/\b(code|function|bug|error|script|regex|sql|python|javascript|typescript|react|api|html|css|algorithm|quicksort|debounce|class|method|component|programming)\b/i.test(lower)) {
-                return [
-                    { title: 'Deconstructing', body: 'Analyzing algorithmic complexity, interface contract, and edge cases' },
-                    { title: 'Synthesizing', body: 'Formulating idiomatic, production-ready implementation with optimal bounds' }
-                ];
-            }
-
-            // 5. Mathematics & Symbolic Calculations
-            if (/\b(calculate|solve|equation|formula|integral|derivative|derivative of|matrix|calculus|algebra|polynomial|arithmetic)\b/i.test(lower)) {
-                return [
-                    { title: 'Deconstructing', body: 'Applying mathematical theorems and differentiation or algebraic identities' },
-                    { title: 'Calculating', body: 'Deriving rigorous step-by-step solution with term-by-term verification' }
-                ];
-            }
-
-            // 6. Physics, Astronomy & Relativity
-            if (/\b(physics|gravitational|black hole|dilation|time dilation|relativity|quantum|thermodynamics|mechanics|optics|entropy)\b/i.test(lower)) {
-                return [
-                    { title: 'Deconstructing', body: 'Evaluating core physical laws, relativistic metrics, and governing principles' },
-                    { title: 'Synthesizing', body: 'Structuring comprehensive conceptual explanation with mathematical fidelity' }
-                ];
-            }
-
-            // 7. Biology, Medicine & Molecular Genetics
-            if (/\b(biology|crispr|crispr-cas9|gene|genetics|dna|rna|molecular|protein|cell|photosynthesis|enzyme|cellular|organism)\b/i.test(lower)) {
-                return [
-                    { title: 'Mechanisms', body: 'Tracing molecular pathways, enzymatic mechanisms, and structural interactions' },
-                    { title: 'Synthesizing', body: 'Formulating rigorous biological synthesis with contemporary scientific evidence' }
-                ];
-            }
-
-            // 8. History & Civilizations
-            if (/\b(history|historical|roman empire|collapse|ancient|dynasty|empire|civilization|revolution|century|archaeological|treaty)\b/i.test(lower)) {
-                return [
-                    { title: 'Contextualizing', body: 'Analyzing socioeconomic decay, military pressures, and institutional factors' },
-                    { title: 'Synthesizing', body: 'Correlating primary accounts with historiographical consensus across key milestones' }
-                ];
-            }
-
-            // 9. Geography & Geopolitics
-            if (/\b(geography|capital of|canberra|country|continent|territory|borders|capital city|latitude|longitude)\b/i.test(lower)) {
-                return [
-                    { title: 'Researching', body: 'Reviewing territorial records, historical compromises, and constitutional acts' },
-                    { title: 'Synthesizing', body: 'Formulating grounded geographical and historical context' }
-                ];
-            }
-
-            // 10. Architectural / Technical Comparison
-            if (/\b(compare|comparison|versus|vs\.?|trade-offs?|pros and cons|postgresql vs|mongodb)\b/i.test(lower)) {
-                return [
-                    { title: 'Evaluating', body: 'Benchmarking architectural trade-offs, concurrency models, and storage semantics' },
-                    { title: 'Synthesizing', body: 'Formulating comparative matrix with workload-specific recommendations' }
-                ];
-            }
-
-            // 11. Economics, Finance & Monetary Policy
-            if (/\b(economics?|economy|inflation|interest rate|central bank|monetary|fiscal|gdp|recession|market dynamics)\b/i.test(lower)) {
-                return [
-                    { title: 'Deconstructing', body: 'Mapping monetary transmission channels, policy rates, and macroeconomic variables' },
-                    { title: 'Synthesizing', body: 'Evaluating market expectations, price stability dynamics, and policy impacts' }
-                ];
-            }
-
-            // 12. Procedural Guides, Recipes & Culinary Chemistry
-            if (/\b(recipe|sourdough|bread|hydration|baking|bake|cook|culinary|step-by-step guide|procedural)\b/i.test(lower)) {
-                return [
-                    { title: 'Formulating', body: 'Calculating baker percentages, hydration ratios, and fermentation timing' },
-                    { title: 'Synthesizing', body: 'Structuring step-by-step procedural technique with proofing and temperature controls' }
-                ];
-            }
-
-            // 13. Translation / Languages
-            if (/\b(translate|translation|in spanish|in french|in tamil|in hindi|in german|in japanese|meaning of|define)\b/i.test(lower)) {
-                return [
-                    { title: 'Analyzing', body: 'Extracting source terminology and idiomatic context' },
-                    { title: 'Translating', body: 'Preserving grammatical precision and natural phrasing' }
-                ];
-            }
-
-            // No fake steps for general / conversational queries
-            return [];
-        }
+        function generateContextualThoughtSteps(_userPrompt, _phase = 'thinking') { return []; }
 
         window.toggleThinkingProcessCard = function(card, event) {
             if (event) event.stopPropagation();
@@ -11483,63 +11191,11 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             };
         }
 
-        function buildThinkingProcessHtml(thoughtContent, steps = [], elapsedSeconds = 2.1, isStreaming = false, selfHealing = null, modelInfo = null, telemetry = null) {
-            const hasThoughts = Boolean((thoughtContent && String(thoughtContent).trim().length > 0) || (steps && steps.length > 0) || (selfHealing && selfHealing.thought));
-            if (!hasThoughts) return '';
-            const stateClass = isStreaming ? 'is-active is-expanded' : 'is-finished';
-            const timerText = isStreaming ? `Thinking... ${elapsedSeconds}s` : `Thought for ${elapsedSeconds}s`;
-            const modelTagHtml = modelInfo && modelInfo.label
-                ? `<span class="thinking-model-tag ${modelInfo.isFailover ? 'is-failover' : ''}">${escapeHtml(modelInfo.label)}</span>`
-                : '';
-            let bodyContentHtml = '';
-            if (thoughtContent) {
-                bodyContentHtml = `<div class="thinking-raw-content">${escapeHtml(thoughtContent)}</div>`;
-            } else if (steps && steps.length > 0) {
-                bodyContentHtml = `
-                    <div class="thinking-chain-of-thought">
-                        ${steps.map((step, idx) => {
-                            const item = formatThinkingStep(step);
-                            return `
-                                <div class="thinking-cot-step">
-                                    <span class="thinking-cot-number">${idx + 1}</span>
-                                    <div class="thinking-cot-text">
-                                        ${item.title ? `<span class="thinking-cot-title">${escapeHtml(item.title)}:</span>` : ''}
-                                        <span class="thinking-cot-body">${escapeHtml(item.body || item.title)}</span>
-                                    </div>
-                                </div>
-                            `;
-                        }).join('')}
-                    </div>
-                `;
-            }
-
-            if (selfHealing && selfHealing.thought) {
-                bodyContentHtml += `
-                    <div class="thinking-step is-self-healing">
-                        <span class="thinking-step-icon">&#9889;</span>
-                        <span class="thinking-step-text">${escapeHtml(selfHealing.thought)}</span>
-                    </div>
-                `;
-            }
-            
-            return `
-                <div class="thinking-process-card ${stateClass}" onclick="window.toggleThinkingProcessCard(this, event)">
-                    <div class="thinking-header" role="button" tabindex="0" aria-expanded="${isStreaming ? 'true' : 'false'}" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();window.toggleThinkingProcessCard(this.closest('.thinking-process-card')||this, event);}">
-                        <div class="thinking-header-left">
-                            <span class="thinking-pulse-dot"></span>
-                            <span class="thinking-timer">${timerText}</span>
-                            ${modelTagHtml}
-                        </div>
-                        <svg class="thinking-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <polyline points="6 9 12 15 18 9"></polyline>
-                        </svg>
-                    </div>
-                    <div class="thinking-body">
-                        ${bodyContentHtml}
-                    </div>
-                </div>
-            `;
-        }
+        function buildThinkingProcessHtml(_thoughtContent, _steps = [], _elapsedSeconds = 0, _isStreaming = false, _selfHealing = null, _modelInfo = null, telemetry = null) {
+  const labels = { retrieval: 'Context retrieved', sources: 'Sources retrieved', arithmetic: 'Arithmetic checked' };
+  const stages = Array.isArray(telemetry?.completedStages) ? telemetry.completedStages.filter(stage => labels[stage]) : [];
+  return stages.length ? '<details class="answer-checks"><summary>Process</summary><ul>' + stages.map(stage => '<li>' + labels[stage] + '</li>').join('') + '</ul></details>' : '';
+ }
 
         function addChatMessage(text, isUser = true, typewriter = null, meta = {}) {
             const renderStartedAt = performance.now();
@@ -12264,7 +11920,9 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 }
             }
             maybeAutoScroll(document.getElementById('chat-container'));
-        }
+
+ if (meta.streaming === false) window.JarvisAnswerChecks?.render(row, meta.verification);
+}
 
         function finalizeStreamingAssistantMessage(messageId, text, meta = {}) {
             let cleanText = String(text || '').trim();
@@ -14546,6 +14204,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
         }
 
         function refreshComposerAttachmentTray() {
+            window.JarvisPaste?.prune();
             const tray = document.getElementById('composer-attachment-tray');
             window.JarvisAttachments?.renderAttachmentTray?.(
                 tray,
@@ -15105,55 +14764,9 @@ ${code}
             updateComposerPlaceholder();
         }
 
-        function normalizePastedPromptText(text) {
-            return String(text || '')
-                .replace(/\r\n?/g, '\n')
-                .replace(/[ \t]+\n/g, '\n')
-                .replace(/\n{4,}/g, '\n\n')
-                .replace(/[ \t]{3,}/g, ' ')
-                .trim();
-        }
+        function normalizePastedPromptText(text) { return String(text || ''); }
 
-        async function handleComposerPaste(event) {
-            const clipboardData = event?.clipboardData;
-            if (!clipboardData) return;
-
-            // 1. Intercept pasted media / files (screenshots, image copies, dropped files)
-            const pastedFiles = [];
-            if (clipboardData.files && clipboardData.files.length > 0) {
-                for (let i = 0; i < clipboardData.files.length; i++) {
-                    pastedFiles.push(clipboardData.files[i]);
-                }
-            } else if (clipboardData.items && clipboardData.items.length > 0) {
-                for (let i = 0; i < clipboardData.items.length; i++) {
-                    const item = clipboardData.items[i];
-                    if (item.kind === 'file') {
-                        const file = item.getAsFile?.();
-                        if (file) pastedFiles.push(file);
-                    }
-                }
-            }
-
-            if (pastedFiles.length > 0) {
-                event.preventDefault();
-                await handleComposerAttachmentSelection(pastedFiles);
-                return;
-            }
-
-            // 2. Text paste handling & prompt normalization
-            const input = document.getElementById('text-input');
-            const raw = clipboardData.getData?.('text');
-            if (!input || typeof raw !== 'string') return;
-            const cleaned = normalizePastedPromptText(raw);
-            if (cleaned === raw) return;
-            event.preventDefault();
-            const start = Number(input.selectionStart || 0);
-            const end = Number(input.selectionEnd || start);
-            input.value = `${input.value.slice(0, start)}${cleaned}${input.value.slice(end)}`;
-            const caret = start + cleaned.length;
-            input.setSelectionRange?.(caret, caret);
-            handleComposerInput();
-        }
+        async function handleComposerPaste(event) { return window.JarvisPaste.handlePaste(event); }
 
         /* ==========================================================================
            3-State Smart Web Search Controller (Auto / ON / OFF)
@@ -23856,8 +23469,10 @@ function promptClearAllDataConfirmation() {
     });
 }
 
-        function deleteAllLocalDataNow() {
+        async function deleteAllLocalDataNow() {
             try {
+ await window.JarvisRecall?.clearAll();
+
                 const keys = [];
                 for (let i = 0; i < localStorage.length; i++) {
                     const k = localStorage.key(i);
@@ -27197,95 +26812,9 @@ DO NOT make up dish names! Only include dishes you're 100% sure exist in that re
             buildDynamicLocationSuiteHtml
         };
 
-        async function completeCurrentLocationRequest(position, originalText = '') {
-            showThinkingIndicator('Acquiring your location, weather & air quality...');
-            try {
-                const lat = position.coords.latitude;
-                const lon = position.coords.longitude;
-                let exactAddress = '';
-                let addressData = {};
+        async function completeCurrentLocationRequest(_position, originalText = '') { return window.JarvisLocation.request(originalText); }
 
-                const suite = globalThis.JarvisLocationSuite || {
-                    fetchLiveWeatherForCoords,
-                    fetchLiveAirQualityForCoords,
-                    fetchNearbyAmenities,
-                    buildDynamicLocationSuiteHtml
-                };
-
-                // Parallel fetch: Reverse Geocoding + Live Weather + Air Quality (AQI)
-                const [reverseResult, weatherResult, aqiResult] = await Promise.allSettled([
-                    fetch(
-                        `${(window.APP_CONFIG || APP_CONFIG).externalUrls.nominatimReverse}?lat=${lat}&lon=${lon}&format=json`,
-                        { headers: { 'User-Agent': 'JARVISAssistant/1.0' }, signal: createTimeoutSignal(4000) }
-                    ).then(r => r.ok ? r.json() : null).catch(() => null),
-                    typeof suite.fetchLiveWeatherForCoords === 'function' ? suite.fetchLiveWeatherForCoords(lat, lon) : fetchLiveWeatherForCoords(lat, lon),
-                    typeof suite.fetchLiveAirQualityForCoords === 'function' ? suite.fetchLiveAirQualityForCoords(lat, lon) : fetchLiveAirQualityForCoords(lat, lon)
-                ]);
-
-                const reverseData = reverseResult.status === 'fulfilled' ? reverseResult.value : null;
-                const weather = weatherResult.status === 'fulfilled' ? weatherResult.value : null;
-                const aqi = aqiResult.status === 'fulfilled' ? aqiResult.value : null;
-
-                if (reverseData) {
-                    addressData = reverseData.address || {};
-                    exactAddress = reverseData.display_name || '';
-                } else if (position.approximateDetails) {
-                    const ap = position.approximateDetails;
-                    addressData = {
-                        city: ap.city || '',
-                        state: ap.region || '',
-                        country: ap.country || '',
-                        postcode: ap.postal || ''
-                    };
-                    exactAddress = [ap.city, ap.region, ap.country].filter(Boolean).join(', ');
-                }
-
-                const isApproximate = Boolean(position.isApproximate || position.coords?.isApproximate);
-                const latitude = Number(lat.toFixed(6));
-                const longitude = Number(lon.toFixed(6));
-
-                // Save to window.userLocation for session context
-                window.userLocation = {
-                    latitude,
-                    longitude,
-                    exactAddress,
-                    address: addressData,
-                    weather,
-                    aqi,
-                    isApproximate,
-                    updatedAt: Date.now()
-                };
-
-                const buildCardFn = typeof suite.buildDynamicLocationSuiteHtml === 'function'
-                    ? suite.buildDynamicLocationSuiteHtml
-                    : buildDynamicLocationSuiteHtml;
-
-                const cardHtml = buildCardFn({
-                    latitude,
-                    longitude,
-                    exactAddress,
-                    address: addressData,
-                    weather,
-                    aqi,
-                    showAmenities: false,
-                    isApproximate,
-                    brief: true
-                });
-
-                const areaLabel = addressData.city || addressData.town || addressData.suburb || exactAddress || 'your area';
-                addChatMessage(cardHtml, false, false);
-                saveToHistory(originalText || 'where am i', `Current location in ${areaLabel} (${latitude}, ${longitude}).`);
-            } finally {
-                hideThinkingIndicator();
-            }
-        }
-
-        async function handleCurrentLocationRequest(originalText = '') {
-            await requestLocationForFeature({
-                type: 'whereami',
-                query: String(originalText || '').trim()
-            });
-        }
+        async function handleCurrentLocationRequest(originalText = '') { return window.JarvisLocation.request(originalText); }
 
         function isLikelyPersonalName(value) {
             const raw = String(value || '').trim();
@@ -31061,6 +30590,8 @@ function confirmChatDeleteDialog() {
 }
 
 function deleteChatSession(session) {
+ if (session?.id) void window.JarvisRecall?.deleteSession(session.id).catch(() => showTemporaryMessage('Could not remove cached document text. Please retry clearing local data.'));
+
     if (!session) return;
     const wasActiveSession = session.id === activeChatSessionId;
     rememberDeletedChatSession(session);

@@ -7,6 +7,9 @@ export function installDialogController() {
     });
     let inerted = [];
     let scheduled = false;
+    let stack = [];
+    const dialogFocus = new WeakMap();
+    document.addEventListener('focusin', event => { if (current?.contains(event.target)) dialogFocus.set(current, event.target); });
     const visible = el => {
         const style = getComputedStyle(el);
         return el.getBoundingClientRect().width > 0 && style.visibility !== 'hidden' && style.display !== 'none' && Number(style.opacity) !== 0;
@@ -17,11 +20,18 @@ export function installDialogController() {
     const sync = () => {
         scheduled = false;
         const all = [...document.querySelectorAll('[role="dialog"], [role="alertdialog"]')];
-        for (const dialog of all) { const shown = visible(dialog); dialog.setAttribute('aria-hidden', String(!shown)); dialog.inert = !shown; }
         const dialogs = all.filter(visible);
-        const next = dialogs.at(-1) || null;
-        if (next === current) return;
+        stack = stack.filter(dialog => dialogs.includes(dialog));
+        for (const dialog of dialogs) if (!stack.includes(dialog)) stack.push(dialog);
+        const next = stack.at(-1) || null;
+        const changed = next !== current;
         restoreBackground();
+        for (const dialog of all) { dialog.setAttribute('aria-hidden', String(dialog !== next)); dialog.inert = dialog !== next; }
+        for (const [index, dialog] of stack.entries()) {
+            let root = dialog; while (root.parentElement && root.parentElement !== document.body) root = root.parentElement;
+            const order = String(10000 + index * 10);
+            if (root.style.zIndex !== order) root.style.zIndex = order;
+        }
         if (!next) {
             current = null;
             if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
@@ -38,8 +48,9 @@ export function installDialogController() {
             }
         }
         next.setAttribute('aria-modal', 'true');
-        if (!next.contains(document.activeElement)) {
-            const target = focusables(next)[0] || next;
+        if (changed || !next.contains(document.activeElement)) {
+            const remembered = dialogFocus.get(next);
+            const target = remembered?.isConnected && next.contains(remembered) && visible(remembered) ? remembered : focusables(next)[0] || next;
             if (target === next) next.tabIndex = -1;
             target.focus({ preventScroll: true });
         }

@@ -1,3 +1,4 @@
+import { userPreferenceDirective } from './answer-preferences.js';
 import { fetchWithLifecycle as fetch } from './request-lifecycle.js';
 import { createHash } from 'node:crypto';
 import { RESEARCH_LIMITS, researchTimeoutSignal } from '../../app/search/research-contract.mjs';
@@ -338,7 +339,7 @@ export async function runResearch(query, options = {}, dependencies = {}) {
             unresolved: validation?.gaps || [],
             sourceExcerpts: formatResearchEvidence(selected, `${plan.query} ${requirements.map(r => r.description).join(' ')}`)
         });
-        const modelOptions = { system: ANSWER_SYSTEM, prompt, json: true, signal: scope.signal, timeoutMs: Math.max(1, Math.min(RESEARCH_LIMITS.SYNTHESIS_MS, timeLeft() - 100)), budget: ledger, stage: final ? 'final_answer' : 'initial_answer', reserveAttempts: final ? 0 : 2, maxAttempts: 2, maxOutputTokens: 2400, customGroqKey: options.customGroqKey, customGeminiKey: options.customGeminiKey, selectedModel: options.selectedModel, requirements, sources: selected };
+        const modelOptions = { system: ANSWER_SYSTEM + userPreferenceDirective(options.preferences), prompt, json: true, signal: scope.signal, timeoutMs: Math.max(1, Math.min(RESEARCH_LIMITS.SYNTHESIS_MS, timeLeft() - 100)), budget: ledger, stage: final ? 'final_answer' : 'initial_answer', reserveAttempts: final ? 0 : 2, maxAttempts: 2, maxOutputTokens: 2400, customGroqKey: options.customGroqKey, customGeminiKey: options.customGeminiKey, selectedModel: options.selectedModel, requirements, sources: selected };
         const payload = await bounded(signal => (dependencies.generate || dependencies.synthesize || callResearchModel)({ ...modelOptions, signal }), modelOptions.timeoutMs, scope.signal).catch(() => null);
         if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
             const checked = mergeResearchValidation(validation, payload, requirements, selected);

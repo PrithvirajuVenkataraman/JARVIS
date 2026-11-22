@@ -1,3 +1,4 @@
+import { userPreferenceDirective } from './_lib/answer-preferences.js';
 import { withRequestLifecycle, fetchWithLifecycle as fetch } from './_lib/request-lifecycle.js';
 export const config = { maxDuration: 60 };
 import { applyApiSecurity, unsealSecret } from './_lib/security.js';
@@ -166,7 +167,7 @@ async function handler(req, res) {
                     providers, 
                     mimeType: normalizedMimeType, 
                     imageBase64, 
-                    userPrompt: prompt 
+                    userPrompt: prompt + userPreferenceDirective(req.body?.preferences)
                 });
             } catch (_) {}
             let result = null;
@@ -176,7 +177,7 @@ async function handler(req, res) {
                         providers, 
                         mimeType: normalizedMimeType, 
                         imageBase64, 
-                        userPrompt: prompt 
+                        userPrompt: prompt + userPreferenceDirective(req.body?.preferences)
                     })
                     : fastResult; 
             } catch (_) {
@@ -196,7 +197,7 @@ async function handler(req, res) {
                 providers,
                 mimeType: normalizedMimeType,
                 imageBase64,
-                userPrompt: prompt
+                userPrompt: prompt + userPreferenceDirective(req.body?.preferences)
             });
             return res.status(200).json({
                 success: true,
@@ -210,7 +211,7 @@ async function handler(req, res) {
                 providers,
                 mimeType: normalizedMimeType,
                 imageBase64,
-                userPrompt: prompt
+                userPrompt: prompt + userPreferenceDirective(req.body?.preferences)
             });
             return res.status(200).json({
                 success: true,
@@ -220,7 +221,7 @@ async function handler(req, res) {
             });
         }
 
-        const systemPrompt = buildVisionPrompt(prompt, task);
+        const systemPrompt = buildVisionPrompt(prompt, task) + userPreferenceDirective(req.body?.preferences);
         const rawText = await callVisionText({
             providers,
             systemPrompt,

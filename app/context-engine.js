@@ -1,3 +1,5 @@
+import { selectExchanges } from './context-retrieval.js';
+import { selectDocumentText } from './text-chunks.js';
 export function textToEmbeddingVector(text, dim = 512) {
     const v = new Float32Array(dim);
     const tokens = String(text || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').trim().split(/\s+/).filter(Boolean);
@@ -1193,104 +1195,9 @@ export function buildCompactedContext(turns = [], options = {}) {
  * Groups turns into conversational exchanges (user query + assistant reply).
  */
 export function retrievePastTurns(turns = [], query = '', options = {}) {
-    const cleanQuery = cleanText(query);
-    if (!cleanQuery || !Array.isArray(turns) || turns.length === 0) return [];
-
-    const excludeTurnIds = new Set(options.excludeTurnIds || []);
-    const maxPairs = clamp(options.maxPairs || options.topK, 2, 1, 6);
-    const queryVec = textToEmbeddingVector(cleanQuery);
-
-    const isRetrospective = /\b(?:earlier|previously|before|prior|remember|you said|i said|what did (?:i|we|you) (?:say|decide|discuss|mention)|as mentioned|what was (?:the|that|my)|last time|earlier on|we talked about|what was our|conclusion)\b/i.test(cleanQuery);
-    const minSimilarity = isRetrospective ? 0.08 : 0.16;
-
-    // Group turns into chronological exchanges (user turn and following assistant turn)
-    const exchanges = [];
-    const stopWords = new Set(['what', 'did', 'say', 'earlier', 'before', 'prior', 'remember', 'the', 'that', 'this', 'was', 'were', 'our', 'you', 'can', 'could', 'would', 'tell', 'remind', 'about', 'with', 'from', 'again', 'when', 'how', 'why', 'who']);
-    const queryKeywords = tokenize(cleanQuery).filter(w => w.length >= 2 && !stopWords.has(w.toLowerCase()));
-
-    for (let i = 0; i < turns.length; i++) {
-        const turn = turns[i];
-        if (turn.role === 'user') {
-            const assistantTurn = (i + 1 < turns.length && turns[i + 1].role === 'assistant') ? turns[i + 1] : null;
-            const turnId = turn.id || String(i);
-            const asstId = assistantTurn ? (assistantTurn.id || String(i + 1)) : '';
-
-            if (!excludeTurnIds.has(turnId) && (!asstId || !excludeTurnIds.has(asstId))) {
-                const combinedText = `${turn.text} ${assistantTurn ? assistantTurn.text : ''}`;
-                const combinedVec = textToEmbeddingVector(combinedText);
-                const turnVec = turn.embedding || textToEmbeddingVector(turn.text);
-                let sim = Math.max(
-                    vectorCosineSimilarity(queryVec, combinedVec),
-                    vectorCosineSimilarity(queryVec, turnVec)
-                );
-
-                let matchedKw = [];
-                if (queryKeywords.length > 0) {
-                    const lowerExchange = combinedText.toLowerCase();
-                    let hitCount = 0;
-                    for (const kw of queryKeywords) {
-                        const kwLower = kw.toLowerCase();
-                        if (lowerExchange.includes(kwLower)) {
-                            hitCount += 1;
-                            matchedKw.push(kw);
-                            if (kw.length >= 3 && kw === kw.toUpperCase()) {
-                                hitCount += 1; // Acronym priority
-                            }
-                        }
-                    }
-                    if (hitCount > 0) {
-                        sim += 0.20 * Math.min(4, hitCount);
-                    }
-                }
-
-                exchanges.push({
-                    userTurn: turn,
-                    assistantTurn,
-                    similarity: sim,
-                    reason: matchedKw.length ? `keyword: ${matchedKw.join(', ')}` : `similarity: ${sim.toFixed(2)}`,
-                    index: i
-                });
-            }
-        }
-    }
-
-    let matches = exchanges.filter(e => e.similarity >= minSimilarity);
-
-    // If query is explicitly retrospective (e.g. "what did we discuss earlier?")
-    // but specific lexical/vector similarity was low, intelligently retrieve the foundational earlier exchanges
-    if (isRetrospective && matches.length === 0 && exchanges.length > 0) {
-        matches = exchanges.slice(0, maxPairs).map(e => ({
-            ...e,
-            similarity: 0.5,
-            reason: 'foundational earlier exchange'
-        }));
-    }
-
-    matches.sort((a, b) => b.similarity - a.similarity);
-    const topMatches = matches.slice(0, maxPairs);
-    // Restore chronological order
-    topMatches.sort((a, b) => a.index - b.index);
-
-    const retrieved = [];
-    for (const match of topMatches) {
-        retrieved.push({
-            role: 'user',
-            text: match.userTurn.text,
-            id: match.userTurn.id || '',
-            turnId: match.userTurn.turnId || '',
-            retrievalReason: match.reason
-        });
-        if (match.assistantTurn) {
-            retrieved.push({
-                role: 'assistant',
-                text: match.assistantTurn.text,
-                id: match.assistantTurn.id || '',
-                turnId: match.assistantTurn.turnId || '',
-                retrievalReason: match.reason
-            });
-        }
-    }
-    return retrieved;
+ const excluded = new Set(options.excludeTurnIds || []);
+ const available = turns.filter(turn => !excluded.has(turn.id) && !excluded.has(turn.turnId));
+ return selectExchanges(available, query, Math.max(1, Math.min(4, options.topK || options.maxPairs || 2))).map(turn => ({ ...turn, retrievalReason: 'Relevant earlier exchange' }));
 }
 
 /**
@@ -1325,7 +1232,7 @@ export function buildMultiTierContext(state, options = {}) {
         let text = t.role === 'assistant' ? pruneSearchNoiseFromText(t.text) : String(t.text || '').trim();
         // Token-aware pruning: older recent turns get capped to 800 chars, preserving core answer without runaways
         if (!isLatest && text.length > 800) {
-            text = truncateAtWordBoundary(text, 800);
+            text = selectDocumentText(text, currentMessage, 2400).text;
         }
         return { role: t.role, text };
     });
@@ -1334,7 +1241,7 @@ export function buildMultiTierContext(state, options = {}) {
     const olderTurns = allTurns.filter(t => !recentTurnIds.has(t.id) && !recentTurnIds.has(t.turnId));
 
     // Tier 2: Semantic Turn Retrieval from older turns
-    const retrievedTurnsRaw = olderTurns.length > 0 && currentMessage
+    const retrievedTurnsRaw = Array.isArray(options.retrievedTurns) ? options.retrievedTurns : olderTurns.length > 0 && currentMessage
         ? retrievePastTurns(olderTurns, currentMessage, {
             excludeTurnIds: recentTurnIds,
             topK: clamp(options.topK || 2, 2, 1, 4)
@@ -1343,7 +1250,7 @@ export function buildMultiTierContext(state, options = {}) {
     const retrievedTurns = retrievedTurnsRaw.map(t => {
         let text = t.role === 'assistant' ? pruneSearchNoiseFromText(t.text) : String(t.text || '').trim();
         if (text.length > 500) {
-            text = truncateAtWordBoundary(text, 500);
+            text = selectDocumentText(text, currentMessage, 2400).text;
         }
         return { role: t.role, text };
     });
@@ -1441,7 +1348,7 @@ export function buildMultiTierContext(state, options = {}) {
 
 export function pruneSearchNoiseFromText(text = '') {
     if (!text) return '';
-    let cleaned = String(text).replace(/\r\n/g, '\n');
+    let cleaned = String(text).replace(/\r\n/g, '\n').replace(/<think>[\s\S]*?(?:<\/think>|$)/gi, '');
     // Strip verification reports and debug blocks
     cleaned = cleaned.replace(/(?:\n{2,}|\s{2,}|\s+)===\s*(?:SOURCE METADATA|VERIFICATION REPORT)\s*===[\s\S]*$/i, '');
     // Strip trailing source sections: Sources:, Verified Sources:, Source Excerpts:, Citations:, References:

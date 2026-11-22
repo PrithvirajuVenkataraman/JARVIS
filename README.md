@@ -32,7 +32,9 @@ npm run test:browser
 
 `check` runs syntax checks, ESLint for the extracted modules, incremental JavaScript type checks, and the deterministic behavior suites. Browser tests use a local fixture backend without real provider credentials or paid API calls. Install the browser engines once with `PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install chromium firefox webkit` (PowerShell: set `$env:PLAYWRIGHT_BROWSERS_PATH='0'` first).
 
-The browser suite covers Chromium, Firefox, and WebKit at 320, 390, 768, 1024, and 1440px; IME input; Stop behavior; sanitization; dialog focus; accessibility; offline reloads; failed worker upgrades; and math rendering. Screenshots, traces, reports, and the throttled loading baseline are saved under `scratch/`. Browser emulation does not replace testing an actual iPhone/Android software keyboard. Playwright service-worker offline network control is Chromium-only; offline emulation is explicitly skipped for Firefox/WebKit, while failed-upgrade behavior is still tested in all three engines. See https://playwright.dev/docs/service-workers.
+The browser suite covers Chromium, Firefox, and WebKit at 320, 390, 768, 1024, and 1440px; IME input; Stop behavior; sanitization; dialog focus; accessibility; lossless clipboard attachments; saved instructions; first-visit and partial permissions; minimal device location; conversation-scoped document recovery; offline reloads; failed worker upgrades; and math rendering. Screenshots, traces, reports, and the throttled loading baseline are saved under `scratch/`. Browser emulation does not replace testing an actual iPhone/Android software keyboard. Playwright service-worker offline network control is Chromium-only; offline emulation is explicitly skipped for Firefox/WebKit, while failed-upgrade behavior is still tested in all three engines. See https://playwright.dev/docs/service-workers.
+
+`npm run test:core` runs the clipboard, permissions, location, retrieval, credential scanning, cancellation, preference, and arithmetic regressions independently. The default browser suite does not download a model. To exercise real local inference and verified cache reuse in all three engines, set `JARVIS_REAL_MODEL_TEST=true` and run `npm run test:browser -- --grep "optional local model"` (PowerShell: `$env:JARVIS_REAL_MODEL_TEST='true'`). This opt-in test downloads public model assets without calling an inference provider.
 
 `npm run test:math` runs the bundled KaTeX regressions. `npm run test:math:browser -- --screenshots` also runs the focused Chrome layout check. Set `CHROME_PATH` when Chrome is not installed in a detected default location.
 
@@ -65,7 +67,17 @@ Chat, writing, translation, document/image questions, and research depend on con
 
 Image generation currently uses a configured server proxy. It is **not on-device diffusion**. It is disabled and hidden by default; only enable `JARVIS_IMAGE_FREE_TIER_ENABLED=true` after verifying a suitable free backend and its quota. No paid image fallback is added by this project.
 
-Document parsing is bundled locally and loaded when needed. Image OCR/understanding still requires a configured vision provider. Permissions are requested through feature actions rather than a blocking startup prompt.
+Document parsing is bundled locally and loaded when needed. Image OCR/understanding still requires a configured vision provider. A dismissible first-visit permission introduction has one Enable permissions action; the browser controls the individual microphone, camera, and location approval prompts. Features remain usable independently when only some permissions are granted.
+
+Long clipboard text (8,000 characters or 80 lines) becomes a UTF-8 attachment. Short formulas stay inline, and indentation/LaTeX are preserved. Attachments can be previewed or moved back into the composer. Text retrieval runs in a worker; selected passages explicitly disclose partial coverage instead of claiming an entire large document was read.
+
+Enhanced local recall is optional per device. It uses the pinned quantized `Xenova/all-MiniLM-L6-v2` model: roughly 23 MB of English model weights plus additional locally bundled WASM runtime assets. Downloads are verified against fixed hashes and cached when browser storage permits. Chat never waits for model downloading. Unsupported devices, offline downloads, or unavailable caches use lightweight retrieval. This feature does not add a server inference service or an ANN database. Browser caches can be evicted; cached availability is not guaranteed.
+
+Custom Instructions apply when Done is selected. Other dismissal paths warn about unsaved edits. Saved instructions are reply preferences, while current explicit requests, security controls, and evidence requirements retain precedence.
+
+“Where am I?” uses the device position and one reverse-geocoding lookup, returning a place name and coordinates. It does not fetch weather, air quality, or an IP-based estimate. Precise positioning can be unavailable even after browser permission is granted.
+
+The answer UI does not display private model reasoning or fabricated thinking narratives. Optional verification metadata covers supported arithmetic equalities only; it does not certify an entire proof. Failed checks preserve the original claim rather than silently changing its numbers.
 
 Saved chats support search, rename, pin, deletion, and backup/restore. Deletions are retained as durable tombstones. Storage failures produce a visible notification; a browser refusing persistence cannot be treated as a successful save.
 
@@ -89,4 +101,4 @@ Encrypted values can still be read and replayed by scripts with access to the or
 
 Chat history, drafts, memory, and preferences remain on the device when persistence is enabled. Local performance diagnostics contain only timings and stage names. Optional external telemetry integrations require separate configuration.
 
-The supported baseline is the current and previous major Chrome, Edge, Firefox, and Safari versions, including low-end hardware. No paid hosting, telemetry, browser grid, or model service was introduced by this modernization.
+The supported baseline is the current and previous major Chrome, Edge, Firefox, and Safari versions, including low-end hardware. Optional local inference is a progressive enhancement, not a guarantee for every device. No paid hosting, telemetry, browser grid, or model service was introduced by this modernization.

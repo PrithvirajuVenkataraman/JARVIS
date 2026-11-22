@@ -1499,11 +1499,9 @@ assert.ok(indexHtml.includes('class="help-modal-back-btn settings-subview-back-b
 assert.ok(indexHtml.includes('id="custom-instructions-subview-title"'), 'Custom instructions subview title must exist');
 assert.ok(indexHtml.includes('class="settings-back-label">Settings</span>'), 'Settings back label must exist');
 
-// Verify Escape key handling (subview goes back to main; main closes modal)
-assert.ok(
-    indexHtml.includes("if (window.__currentSettingsView === 'custom_instructions') {\n                    saveCustomInstructionsAndReturn();\n                } else {\n                    closeHelpModal();\n                }"),
-    'Escape key must return from sub-view first with auto-save before closing modal'
-);
+// Closing the editor must delegate to the unsaved-change guard; Done alone saves.
+assert.ok(indexHtml.includes('window.JarvisSettings.allowNavigation'), 'Settings navigation must guard unsaved changes');
+assert.ok(indexHtml.includes('window.JarvisSettings.commit()'), 'Done delegates to explicit commit');
 
 // Verify Custom Instructions status span and chevron
 assert.ok(indexHtml.includes('id="custom-instructions-status"'), 'Custom instructions status indicator must exist');

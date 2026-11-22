@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
 import { gzipSync } from 'node:zlib';
 const directory = resolve('dist');
-const mime = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.woff2': 'font/woff2', '.png': 'image/png', '.svg': 'image/svg+xml' };
+const mime = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.wasm': 'application/wasm', '.css': 'text/css', '.json': 'application/json', '.woff2': 'font/woff2', '.png': 'image/png', '.svg': 'image/svg+xml' };
 const capabilities = Object.fromEntries(['chat', 'search', 'vision', 'images', 'byok'].map(name => [name, { available: name !== 'byok', reasonCode: name === 'byok' ? 'persistent_keypair_required' : 'available' }]));
 let failWorkerUpdate = false;
 const server = http.createServer(async (req, res) => {

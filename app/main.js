@@ -9,8 +9,16 @@ import { installDialogController } from './dialog-controller.js';
 import { installComposerAccessibility } from './composer-controller.js';
 import * as JarvisCapabilities from './capabilities.js';
 import * as JarvisCodeRunner from './code-runner.js';
+import * as JarvisPermissions from './permission-controller.js';
+import * as JarvisLocation from './location-controller.js';
+import * as JarvisPaste from './paste-controller.js';
+import * as JarvisSettings from './settings-controller.js';
+import * as JarvisRecall from './context-retrieval.js';
+import * as JarvisAnswerChecks from './answer-checks.js';
+import { installRequestPreferences } from './request-preferences.js';
+import './core-ux.css';
 
-Object.assign(window, { JarvisStreamRenderer, JarvisPersistence, JarvisPerformance, JarvisCodeRunner, JarvisCapabilities });
+Object.assign(window, { JarvisStreamRenderer, JarvisPersistence, JarvisPerformance, JarvisCodeRunner, JarvisCapabilities, JarvisPermissions, JarvisLocation, JarvisPaste, JarvisSettings, JarvisRecall, JarvisAnswerChecks });
 const scripts = new Map();
 function loadClassic(url) {
     if (!scripts.has(url)) scripts.set(url, new Promise((resolve, reject) => {
@@ -37,6 +45,11 @@ JarvisPerformance.installPerformanceObservers();
 installDialogController();
 installComposerAccessibility();
 JarvisCapabilities.installCapabilityVisibility();
+installRequestPreferences();
+JarvisPermissions.install();
+JarvisPaste.install();
+JarvisLocation.install();
+JarvisRecall.install();
 if (!import.meta.env.DEV && 'serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).then(registration => registration.update()).catch(() => {
         window.dispatchEvent(new CustomEvent('jarvis:offline-unavailable'));

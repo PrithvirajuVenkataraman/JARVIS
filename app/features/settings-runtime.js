@@ -360,7 +360,7 @@ function showHelpModal() {
                     <div id="settings-view-custom-instructions" class="settings-view-panel settings-subview-panel">
                         <!-- Sub-view Header -->
                         <div class="help-modal-header">
-                            <button type="button" onclick="saveCustomInstructionsAndReturn()" class="help-modal-back-btn settings-subview-back-btn" aria-label="Back to settings">
+                            <button type="button" onclick="switchSettingsView('main')" class="help-modal-back-btn settings-subview-back-btn" aria-label="Back to settings">
                                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                     <path d="M19 12H5"></path>
                                     <path d="M12 19l-7-7 7-7"></path>
@@ -383,10 +383,10 @@ function showHelpModal() {
                             <div class="settings-presets-container">
                                 <span class="settings-presets-label">Quick Presets:</span>
                                 <div class="settings-presets-pills">
-                                    <button type="button" class="settings-preset-chip" onclick="applyPresetPrompt('concise')">⚡ Concise</button>
-                                    <button type="button" class="settings-preset-chip" onclick="applyPresetPrompt('teacher')">🎓 Socratic</button>
-                                    <button type="button" class="settings-preset-chip" onclick="applyPresetPrompt('coder')">💻 Senior Dev</button>
-                                    <button type="button" class="settings-preset-chip" onclick="applyPresetPrompt('academic')">🔬 Academic</button>
+                                    <button type="button" class="settings-preset-chip" onclick="applyPresetPrompt('concise')">Concise</button>
+                                    <button type="button" class="settings-preset-chip" onclick="applyPresetPrompt('teacher')">Socratic</button>
+                                    <button type="button" class="settings-preset-chip" onclick="applyPresetPrompt('coder')">Senior Dev</button>
+                                    <button type="button" class="settings-preset-chip" onclick="applyPresetPrompt('academic')">Academic</button>
                                 </div>
                             </div>
 
@@ -896,6 +896,7 @@ function showHelpModal() {
 
             document.querySelector('.page-shell')?.setAttribute('aria-hidden', 'true');
             document.body.appendChild(modal); 
+            window.JarvisSettings?.mount(modal);
             if (typeof refreshPrivacyDataSummary === 'function') refreshPrivacyDataSummary();
             if (typeof initModelSelector === 'function') initModelSelector();
 

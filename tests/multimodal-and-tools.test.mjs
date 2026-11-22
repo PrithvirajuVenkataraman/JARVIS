@@ -2962,11 +2962,11 @@ for (let i = 1; i <= 5; i++) {
     const b = 5 + i * 2;
     const trueProduct = a * b;
     const wrongProduct = trueProduct + (i % 2 === 0 ? 15 : -15);
-    const equationText = `Computed: ${a} * ${b} = ${wrongProduct}.`;
+    const equationText = `${a} * ${b} = ${wrongProduct}`;
 
     const repaired = validateAndRepairCodeAndMath(equationText);
-    assert.equal(repaired.modified, true);
-    assert.match(repaired.text, new RegExp(`${a} \\* ${b} = ${trueProduct}`));
+    assert.equal(repaired.modified, false);
+    assert.equal(repaired.verification.status, 'failed'); assert.equal(repaired.text, equationText);
 }
 console.log('  [PASS] 2.3 Speculative arithmetic property-based verification & auto-repair verified');
 
@@ -2978,7 +2978,7 @@ for (let i = 1; i <= 3; i++) {
     const correct = x * y;
     const chunk = `Calc: ${x} * ${y} = ${correct + 10}. `;
     const emitted = guard.ingest(chunk);
-    assert.match(emitted, new RegExp(`${x} \\* ${y} = ${correct}`));
+    assert.equal(emitted, chunk, 'Streaming checks must preserve the original mathematical claim');
 }
 const flushed = guard.flushRemaining();
 assert.ok(typeof flushed === 'string');

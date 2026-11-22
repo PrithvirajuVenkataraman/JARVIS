@@ -7,6 +7,7 @@ import { join } from 'node:path';
 export default defineConfig({
     publicDir: false,
     server: { hmr: false },
+    worker: { format: 'es' },
     build: { target: 'es2022', manifest: true, cssCodeSplit: true },
     plugins: [{
         name: 'jarvis-production-shell',
@@ -39,7 +40,7 @@ export default defineConfig({
             const visit = key => {
                 const entry = manifest[key]; if (!entry) return;
                 core.add('/' + entry.file);
-                for (const file of [...(entry.css || []), ...(entry.assets || [])]) if (!/(?:settings|vision)-runtime|image-generator-worker/.test(file)) core.add('/' + file);
+                for (const file of [...(entry.css || []), ...(entry.assets || [])]) if (!/(?:settings|vision)-runtime|image-generator-worker|recall-worker|ort-wasm|\.wasm$/.test(file)) core.add('/' + file);
                 for (const dependency of entry.imports || []) visit(dependency);
             };
             visit('index.html');

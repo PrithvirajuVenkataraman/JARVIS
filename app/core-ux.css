@@ -1,0 +1,59 @@
+/* Core UI uses neutral component colors; scientific content keeps its own styles. */
+:root { --core-surface:#17191d; --core-raised:#202328; --core-border:#34373e; --core-text:#f4f4f5; --core-muted:#a1a1aa; }
+body #input-bar-inner.composer-shell { border:1px solid var(--core-border)!important; background:#17191d!important; box-shadow:none!important; }
+body #input-bar-inner.composer-shell:focus-within { border-color:#777b83!important; box-shadow:none!important; }
+body #composer-mode-badge { display:none!important; }
+.composer-mode-chips { display:flex; gap:8px; flex-wrap:wrap; padding:0 4px 8px; }
+.composer-mode-chips:empty { display:none; }
+.composer-mode-chip { border:1px solid var(--core-border); background:var(--core-raised); color:var(--core-text); border-radius:8px; min-height:36px; padding:5px 10px; }
+body #help-modal .help-modal-enhanced { background:#111317!important; color:var(--core-text); border:1px solid #30343b!important; box-shadow:0 16px 64px #0008!important; }
+body #help-modal .settings-group-card { background:#191c21!important; border-color:#30343b!important; }
+body #help-modal .settings-icon-badge { color:#d4d4d8!important; background:#272a30!important; border-color:#34373e!important; box-shadow:none!important; }
+body #help-modal .help-modal-back-btn, body #help-modal .settings-action-btn, body #help-modal .settings-chip-btn, body #help-modal .settings-preset-chip, body #help-modal .settings-ghost-btn { background:#24272c!important; border:1px solid #3a3e45!important; color:#f4f4f5!important; box-shadow:none!important; }
+body #help-modal :is(.help-modal-back-btn,.help-modal-ok-btn,.settings-action-btn,.settings-chip-btn,.settings-preset-chip,.settings-ghost-btn) { min-height:44px!important; min-width:44px!important; }
+.recall-toggle-hit { display:grid; place-items:center; min-width:44px; min-height:44px; cursor:pointer; }
+body #help-modal .settings-row-status.configured { color:#e4e4e7!important; background:#292d33!important; border-color:#41454d!important; }
+body #help-modal .settings-switch-input:checked + .settings-switch-slider { background:#d4d4d8!important; border-color:#d4d4d8!important; }
+body #help-modal .settings-switch-input:checked + .settings-switch-slider::before { background:#18181b!important; }
+body #help-modal .custom-system-prompt-input { background:#0d0f12!important; border-color:#34373e!important; color:#f4f4f5!important; }
+body #help-modal :is(button,input,textarea,select):focus-visible { outline:2px solid #d4d4d8!important; outline-offset:3px; }
+body #help-modal .settings-modal-heading { color:#f4f4f5!important; text-shadow:none!important; }
+.settings-save-status { color:var(--core-muted); font-size:13px; min-height:1.5em; }
+.answer-verification { color:var(--core-muted); font-size:12px; margin-top:12px; }
+.answer-verification summary { cursor:pointer; padding:6px 0; }
+#local-recall-enabled { width:24px; height:24px; flex:none; accent-color:#d4d4d8; }
+body #jarvis-toast-region { pointer-events:none; }
+body .jarvis-toast-pill { border-radius:10px!important; background:#24262b!important; border:1px solid #393c43!important; box-shadow:0 3px 16px #0005!important; font-size:13px!important; max-width:min(440px,calc(100vw - 32px))!important; }
+body .jarvis-toast-pill::before { display:none!important; }
+body .permissions-modal-panel { position:relative; display:block; max-width:440px; width:calc(100vw - 32px); max-height:calc(100dvh - 32px); overflow:auto; padding:28px; border:1px solid #34373e; border-radius:16px; background:#17191d; color:var(--core-text); box-shadow:0 12px 64px #0008; }
+.permissions-modal-panel button:focus-visible { outline:2px solid #d4d4d8; outline-offset:2px; }
+.permissions-modal-panel h2 { font-size:21px; line-height:1.3; margin:0 52px 12px 0; }
+.permissions-modal-panel p { font-size:14px; line-height:1.5; color:var(--core-muted); }
+.permission-close { position:absolute; top:8px; right:8px; width:44px; height:44px; border:0; color:#d4d4d8; background:transparent; font-size:24px; }
+.permission-rows { margin:20px 0; }
+.permission-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 0; border-bottom:1px solid #30343b; font-size:13px; }
+.permission-row strong,.permission-row div span { display:block; }
+.permission-row div span { color:var(--core-muted); margin-top:4px; }
+.permission-row [data-permission] { color:#d4d4d8; text-align:right; min-width:82px; font-size:12px; }
+.permission-enable { width:100%; min-height:44px; border:0; border-radius:10px; background:#f4f4f5; color:#111317; font-weight:650; }
+.permission-enable:disabled { opacity:.7; }
+.permission-later { display:block; margin:8px auto 0; min-height:44px; border:0; color:#d4d4d8; background:transparent; }
+.permission-result { min-height:1em; margin:12px 0; }
+.permission-result:empty { display:none; }
+.location-reply { padding:0!important; border:0!important; background:transparent!important; box-shadow:none!important; }
+.location-reply p { margin:0 0 6px; }
+.location-reply p + p { color:var(--core-muted); font-size:.9em; }
+.location-reply button,.paste-chip-action { min-height:36px; background:transparent; color:#e4e4e7; border:1px solid #454851; border-radius:7px; padding:3px 8px; font-size:12px; }
+.text-preview-backdrop { position:fixed; inset:0; z-index:10050; background:#0009; display:grid; place-items:center; padding:16px; }
+.text-preview-panel { width:min(800px,100%); max-height:85dvh; overflow:auto; background:#17191d; border:1px solid #34373e; border-radius:14px; padding:16px; }
+.text-preview-panel button { display:block; margin:0 0 12px auto; min-width:64px; min-height:44px; border:0; border-radius:8px; background:#f4f4f5; color:#111; }
+.text-preview-panel pre { white-space:pre-wrap; overflow-wrap:anywhere; font-size:13px; color:#e4e4e7; }
+@media(max-width:640px) { .permissions-modal-panel { padding:24px 20px; } .permission-row { gap:8px; } }
+@media(max-width:400px) {
+    body .permissions-modal-panel { padding:20px; }
+    .permissions-modal-panel h2 { font-size:19px; }
+    .permissions-modal-panel p { font-size:13px; line-height:1.45; }
+    .permission-rows { margin:12px 0; }
+    .permission-row { padding:8px 0; }
+    .permission-later { margin-top:4px; }
+}

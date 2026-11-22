@@ -355,7 +355,7 @@ assert.equal(customPromptRequest.ok, true);
 assert.equal(customPromptRequest.value.preferences.customSystemPrompt, SAMPLE.customPrompt);
 assert.match(
     chatTest.buildServerSystemPrompt(customPromptRequest.value.preferences),
-    /custom reply instructions as tone and formatting preferences only/i
+    /current explicit user request takes precedence/i
 );
 const popCultureRequest = chatTest.normalizeChatRequest({
     message: `who is ${fixtureSubject('Character')} character`,
@@ -2902,9 +2902,9 @@ console.log('5. Testing SSE event lifecycle and reasoning token emission...');
 
         assert.equal(result.ok, true);
         const fullStreamText = streamedDeltas.join('');
-        assert.ok(fullStreamText.includes('<think>'), 'Stream must contain <think> opening tag');
-        assert.ok(fullStreamText.includes('Analyzing the mathematical properties...'), 'Stream must include reasoning tokens');
-        assert.ok(fullStreamText.includes('</think>'), 'Stream must contain </think> closing tag');
+        assert.ok(!fullStreamText.includes('<think>'), 'Private reasoning tags must stay out of the stream');
+        assert.ok(!fullStreamText.includes('Analyzing the mathematical properties...'), 'Private reasoning must stay out of the stream');
+        assert.ok(!fullStreamText.includes('</think>'), 'Private reasoning closing tags must stay out of the stream');
         assert.ok(fullStreamText.includes('The hypotenuse length is 5.'), 'Stream must include final answer content');
 
         console.log('  [PASS] Reasoning tokens (<think>) emitted and stream contract preserved.');

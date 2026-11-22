@@ -572,6 +572,7 @@ export async function handleStreamingWebRag(req, res, { rawQuery, limit = 8, cus
             context: Array.isArray(req.body?.context) ? req.body.context : [],
             timeZone: req.body?.timeZone,
             selectedModel: req.body?.selectedModel,
+            preferences: req.body?.preferences,
             timeoutMs: RESEARCH_LIMITS.TOTAL_MS,
             signal: controller.signal,
             onEvent: async (event, data) => {
@@ -850,6 +851,7 @@ async function handler(req, res) {
                     context: contextTurns,
                     timeZone: req.body?.timeZone,
                     selectedModel: req.body?.selectedModel,
+            preferences: req.body?.preferences,
                     timeoutMs: Math.min(Number(req.body?.timeoutMs) || RESEARCH_LIMITS.TOTAL_MS, RESEARCH_LIMITS.TOTAL_MS),
                     customGeminiKey: customGemini,
                     customGroqKey: customGroq,
