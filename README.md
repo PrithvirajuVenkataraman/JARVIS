@@ -1,184 +1,92 @@
 # JARVIS
 
-JARVIS is a browser-based assistant for chat, writing, planning, translation, weather, live vision, saved chats, local memory, source checking, attachments, and everyday help.
+A browser assistant for chat, writing, source-backed research, documents, image understanding, and saved conversations. The interface uses vanilla JavaScript, a Vite production build, and Node/Vercel API routes.
 
-Static frontend + Node/Vercel API routes. No frontend build step.
+## Development
 
-## File Map
+Requires Node 22.23.4 (the same version used in CI).
 
-- `.gitignore` - Ignores local dependencies and generated files.
-- `README.md` - Documents features, setup notes, environment variables, and this file map.
-- `models.md` - Technical specification of all AI models, provider hierarchies, Vision/Voice/RAG cascades, and token speeds.
-- `system_design.md` - System architecture specification, concurrency models, circuit breakers, and RAG pipelines.
-- `index.html` - Main browser UI and inline app logic for chat, Live Vision, voice, routing, history, and tools.
-- `package.json` - Project metadata, dependencies, Vercel settings, and npm scripts.
-- `science-format.js` - Deterministic formatting helpers for scientific notation, formulas, and units.
-- `styles.css` - Shared styling for the assistant UI, composer, modals, chat, vision preview, and responsive layout.
-- `vercel.json` - Vercel routing, function duration, and permissions headers.
-- `api/index.js` - API router that dispatches serverless requests to supported route handlers.
-- `api/chat-groq.js` - Main chat/model endpoint with routing, streaming, safety, memory/context use, and quality review.
-- `api/current-facts.js` - Current-fact endpoint for live/public-source fact resolution.
-- `api/diagnostics.js` - Deployment diagnostics endpoint for configured providers and feature availability.
-- `api/extract-url.js` - URL extraction endpoint backed by the Crawl4AI client.
-- `api/ingest-attachment.js` - Server-side attachment ingestion endpoint for files and OCR fallback.
-- `api/markets.js` - Market-style lookup endpoint for financial or asset queries.
-- `api/rank-texts.js` - Text ranking endpoint used to select relevant attachment chunks.
-- `api/search.js` - Search and retrieval endpoint with live-source routing and answer synthesis helpers.
-- `api/vision.js` - Vision endpoint for scene understanding, OCR, translation, math solving, and paper overlays.
-- `api/_lib/attachment-ingest.js` - Shared server attachment parsing and image/PDF OCR fallback helpers.
-- `api/_lib/cost-controls.js` - Shared request budgeting and token/cost guard helpers.
-- `api/_lib/crawl4ai-client.js` - Crawl4AI integration and readable webpage extraction helpers.
-- `api/_lib/embeddings.js` - Embedding and reranking helpers for semantic retrieval.
-- `api/_lib/query-target-cleanup.js` - Query subject cleanup and metadata extraction helpers.
-- `api/_lib/security.js` - Shared API security headers, CORS, body limits, and rate limiting.
-- `api/_lib/safety-guard.js` - Unified 4-stage content safety guardrails shared across Normal LLM Chat, Live Web Search, Vision, and Image Generation tags.
-- `api/_lib/vision-extract.js` - Lightweight image OCR helper used by attachment ingestion.
-- `api/_lib/free-live/classifier.js` - Free live-search intent classifier.
-- `api/_lib/free-live/providers.js` - Free/public live-source provider integrations.
-- `api/_lib/free-live/source-registry.js` - Registry of public live-source categories and metadata.
-- `api/_lib/latest/latest-cache.js` - Cache helpers for latest/current-source items.
-- `api/_lib/latest/latest-ingest.js` - Latest-source ingestion helpers.
-- `api/_lib/latest/latest-sources.js` - Latest-source definitions and source metadata.
-- `api/_lib/latest/router.js` - Latest/current-intent routing helpers.
-- `app/agent-workflows.js` - Client workflow detection and multimodal follow-up prompt builders.
-- `app/api-client.js` - Browser API client wrapper for JSON requests and timeouts.
-- `app/attachments.js` - Client attachment selection, local extraction, server fallback, and tray rendering.
-- `app/bootstrap.js` - Browser module bootstrap that wires app modules onto `window`.
-- `app/context-copilot-ui.js` - Ambiguous-context clarification UI builders.
-- `app/context-engine.js` - Local conversation context engine for follow-ups, topic switches, and pending clarifications.
-- `app/converse-state.js` - Converse/voice state tracker.
-- `app/emergency-sos.js` - Satellite-style Emergency SOS and distress dispatch system with precision GPS and battery telemetry.
-- `app/failure-policy.js` - Failure classification and recovery-card policy helpers.
-- `app/frontend-routing.js` - Client-side route decisions for fast answers, live search, image generation, and sensitive requests.
-- `app/image-generation-config.js` - Dynamic configuration engine for zero-cost WebGPU image generation and client fallback.
-- `app/image-storage.js` - Local IndexedDB persistence for generated AI images and history gallery.
-- `app/image-generator-worker.js` - Background Web Worker for non-blocking WebGPU diffusion and procedural canvas rendering.
-- `app/image-generator.js` - Main-thread image generation orchestrator, worker lifecycle manager, and WebGPU detector.
-- `app/instant-replies.js` - Local instant replies for simple app/about/greeting prompts.
-- `app/memory-quality.js` - Memory cleanup, forgetting, and used-memory display helpers.
-- `app/observability.js` - Lightweight client event and diagnostic logging helpers.
-- `app/place-grounding.js` - Place-result scoring and relevance helpers.
-- `app/session-recovery.js` - Draft and active-session recovery helpers.
-- `app/source-transparency.js` - Source footer rendering and answer/source splitting helpers.
-- `app/speech-input.js` - Browser speech recognition and voice input orchestration.
-- `app/state.js` - Shared client state container and reset helpers.
-- `app/storage.js` - Browser storage helpers for persisted app data.
-- `app/workspace-durability.js` - Dual-tier IndexedDB durable session storage, BroadcastChannel multi-tab LWW sync, and PBKDF2 + AES-256-GCM encrypted portable backup/restore.
-- `app/interactive-illustrations.js` - XSS-safe 60fps in-answer interactive & animated illustration engine (`flow`, `orbit`, `wave`, `sort`, `bars`, `projectile`, `steps`).
-- `app/self-improving-memory.js` - Continual recursive self-improvement memory engine (credit assignment, implicit signals, failure ledger, sleep consolidation, policy snapshots & auto-rollback).
-- `tests/api-contracts.test.mjs` - API contract and behavior tests for server routes.
-- `tests/check-inline-script.mjs` - Syntax check for the inline script embedded in `index.html`.
-- `tests/context-engine.test.mjs` - Unit tests for local context resolution behavior.
-- `tests/deterministic-checks.mjs` - Deterministic source-contract checks for key app behavior and regressions.
-- `tests/emergency-sos.test.mjs` - Unit tests for emergency contacts CRUD, distress telemetry, and dispatch URL formatting.
-- `tests/hygiene-scanner.test.mjs` - Tests for hardcoded-content hygiene scanning.
-- `tests/image-generator.test.mjs` - Unit tests for image generation routing, config, storage, and tool dispatching.
-- `tests/math-rendering.test.mjs` - Regression tests using the bundled KaTeX engine, Markdown formatting, and streaming delimiters.
-- `tests/browser-math-rendering.mjs` - Isolated Chrome checks for sanitized desktop/mobile equation layout and local math fonts.
-- `tests/speech-input.test.mjs` - Unit tests for speech input behavior.
-- `tools/hardcoded-content-allowlist.mjs` - Allowlist for intentional hardcoded content scanner matches.
-- `tools/hardcoded-content-scanner.mjs` - Scanner for unwanted hardcoded user-facing content.
-- `tools/local-dev-server.mjs` - Local static/API development server.
+```sh
+npm ci
+npm run dev
+```
 
-Run `npm run test:math` for math regressions (also included in `npm run check`). Run `npm run test:math:browser` for browser layout checks; set `CHROME_PATH` if Chrome/Chromium is not at a detected default location. Add `-- --screenshots` to save previews under `scratch/math-rendering/`.
+Copy `.env.example` to `.env.local` and configure the providers you use. API keys stay on the server. Local development serves the UI and API on port 3000.
 
-## Exact Features
+```sh
+npm run build
+npm run preview
+```
 
-- Text chat, explanations, summaries, writing help & planning
-- Streaming answers, with JSON fallback for reviewed or structured routes
-- Enterprise Voice-to-Text (VTT / Dictation) with spoken punctuation parsing and tech acronym auto-capitalization
-- Modern circular send button (32px disc with vertical upward arrow `↑` and dynamic active/disabled/stop states)
-- **Zero-Cost Local & Fallback AI Image Generation**: 100% on-device WebGPU diffusion (`LCM-Dreamshaper-v7` / `SD-Turbo`, 4-step distilled diffusion, 512x512) running in a dedicated background Web Worker without blocking the 60 FPS UI thread. Zero API cost, unlimited generation, local model weight caching in IndexedDB/CacheStorage, click-to-zoom Lightbox, action bar (Regenerate, Download, Copy, Zoom, Edit), and a slide-out Image History gallery modal. Graceful zero-cost client fallback for devices without WebGPU with 0 Vercel server compute hours used.
-- Emergency SOS with emergency contacts management, precision GPS & battery telemetry, and multi-channel distress dispatch (SMS, WhatsApp, Phone, Web Share)
-- Live Vision, and file attachments (PDF, DOCX, PPTX, images, text)
-- Saved chats with search, restore, rename, pin, share, and delete
-- Local Memory Manager for explicit saved memory
-- Prompt-based translation and slash command picker
-- Weather, location, itinerary, and everyday planning help
-- Answer verification against retrieved sources
-- Local preferences, chat history, regeneration, interruption, and feedback
-- **Parallel Deep Webpage Article Scraper**: Concurrent 2.5s HTML body reader extracting full article text for live news and leadership facts.
-- **Strict Zero-Parametric Anti-Hallucination Grounding**: Overrides model pre-training knowledge cutoffs for live political leaders, direct incumbent name resolution, and dynamic past-tense predecessor filtering.
-- Crawl4AI fallback for readable extraction when configured
+The production frontend is emitted to `dist/`. Vercel builds this directory while retaining the existing `/api/*` functions and rewrites.
 
-## Standout Feature: Context Copilot & Deep Web RAG
+See [GitHub upload and Vercel Hobby deployment](docs/github-and-vercel.md) for the exact files to commit, exclusions, and project settings. Commit `package-lock.json`; keep credentials and generated artifacts out of the repository.
 
-Context Copilot resolves follow-ups like "latest on it", "compare it", "tell me more", and "source?" locally.
+## Quality checks
 
-For live world queries (e.g. "Who is the CM of Tamil Nadu?"), the retrieval pipeline automatically routes around static encyclopedia overviews, deep-crawls top news/government body paragraphs in parallel, and applies zero-parametric prompt pinning so the current leader is named immediately in sentence 1.
+```sh
+npm run check
+npm run build
+npm run test:browser
+```
 
-It is local, deterministic, private, and free-for-life. Models still generate answers; the follow-up decision stays in the app. Specialized transformer APIs (NVIDIA embeddings/rerank) improve search ranking and semantic memory/attachment recall, but they do not replace Context Copilot routing.
+`check` runs syntax checks, ESLint for the extracted modules, incremental JavaScript type checks, and the deterministic behavior suites. Browser tests use a local fixture backend without real provider credentials or paid API calls. Install the browser engines once with `PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install chromium firefox webkit` (PowerShell: set `$env:PLAYWRIGHT_BROWSERS_PATH='0'` first).
 
-## Memory
+The browser suite covers Chromium, Firefox, and WebKit at 320, 390, 768, 1024, and 1440px; IME input; Stop behavior; sanitization; dialog focus; accessibility; offline reloads; failed worker upgrades; and math rendering. Screenshots, traces, reports, and the throttled loading baseline are saved under `scratch/`. Browser emulation does not replace testing an actual iPhone/Android software keyboard. Playwright service-worker offline network control is Chromium-only; offline emulation is explicitly skipped for Firefox/WebKit, while failed-upgrade behavior is still tested in all three engines. See https://playwright.dev/docs/service-workers.
 
-- **Short-term:** active chat context and follow-ups
-- **Saved chats:** each chat keeps its own messages and context
-- **Long-term:** only what the user explicitly asks JARVIS to remember, via Memory Manager
+`npm run test:math` runs the bundled KaTeX regressions. `npm run test:math:browser -- --screenshots` also runs the focused Chrome layout check. Set `CHROME_PATH` when Chrome is not installed in a detected default location.
 
-## Prompt-Based Translation
+Release checks require a passing `check`, production build, browser suite, and reviewed screenshots. Core Web Vitals targets are LCP <=2.5s, INP <=200ms, and CLS <=0.1; production performance has not been certified against those targets.
 
-Examples: `translate "How much does this cost?" to Tamil`, `say this in Hindi: I need help`, `what does "vanakkam" mean in English`, `translate to Kannada`
+## Architecture
 
-## Sidebar And Options
+- `index.html`: application markup. `app/main.js`: frontend entrypoint and module lifecycle.
+- `app/legacy-runtime.js`: remaining classic application compatibility code. New work belongs in the extracted modules; this file is not a claim that the entire application has been rewritten.
+- `app/api-client.js`: JSON requests, merged headers, cancellation, timeout, and response validation.
+- `app/markup-security.js`: locally bundled DOMPurify, math-compatible sanitization, and delegated content actions.
+- `app/markdown-renderer.js`, `app/math-renderer.js`, `app/stream-renderer.js`: Markdown, KaTeX, bounded expression caching, and stable DOM updates during streaming.
+- `app/composer-controller.js`, `app/dialog-controller.js`: accessible request announcements, composition handling, focus containment, and restoration.
+- `app/workspace-durability.js`, `app/persistence-controller.js`: IndexedDB sessions, durable deletion tombstones, coalesced writes, and a 15-session localStorage hot cache.
+- `app/capabilities.js`: diagnostics-driven feature visibility. Unavailable features are hidden from normal flows.
+- `app/features/`: settings and camera code loaded on demand. Attachments, document parsers, and image generation are also loaded on demand.
+- `app/code-runner.js`: isolated, explicitly requested JavaScript execution; code cannot access application storage.
+- `app/performance-metrics.js`: bounded local performance measurements without prompt, response, or credential collection.
+- `api/chat-groq.js`, `api/vision.js`, `api/search.js`: chat, image understanding, and research endpoints.
+- `api/_lib/request-lifecycle.js`: request-wide 52-second deadline, upstream cancellation, and two-model-attempt budget.
+- `api/diagnostics.js`: provider configuration and capability availability. It exposes no private keys or provider credentials.
+- `vite.config.js`, `sw.js`: hashed production assets and an offline manifest generated from the build. Optional feature chunks are cached after use.
+- `tools/local-dev-server.mjs`: Vite development middleware and local API adapter; `--preview` serves `dist/`.
 
-Left sidebar: New chat, Search chats, Vision Analysis, Memory, System Instructions, Emergency SOS, and saved chats. Long-press or right-click a saved chat to rename, pin, share, or delete it.
+Generated answer replay is disabled. Public retrieval caches and deterministic local replies remain available. No shared answer cache may replay content across preferences, contexts, or images.
 
-Help & Options holds custom system instructions only.
+## Features and availability
 
-## Fast Answers And Verification
+Chat, writing, translation, document/image questions, and research depend on configured providers and their quotas. There is no promise of unlimited inference. Deterministic context routing and local persistence do not require paid infrastructure.
 
-Normal answers stream. Press `/` for Translate, Verify, Vision, Summarize, Professional, and Study templates.
+Image generation currently uses a configured server proxy. It is **not on-device diffusion**. It is disabled and hidden by default; only enable `JARVIS_IMAGE_FREE_TIER_ENABLED=true` after verifying a suitable free backend and its quota. No paid image fallback is added by this project.
 
-Prompts like `in n words` and `under n words` are treated as explicit word-count requirements.
+Document parsing is bundled locally and loaded when needed. Image OCR/understanding still requires a configured vision provider. Permissions are requested through feature actions rather than a blocking startup prompt.
 
-**Verification** checks the previous answer against retrieved evidence and returns a short report. Users do not need to provide links.
+Saved chats support search, rename, pin, deletion, and backup/restore. Deletions are retained as durable tombstones. Storage failures produce a visible notification; a browser refusing persistence cannot be treated as a successful save.
 
-## Feedback, Quality Review, and RLAIF
+## Configuration
 
-RLAIF-style signals stay inside this app. They do not train Groq, Gemini, Exa, NVIDIA, or any underlying model.
+Set server variables in Vercel or `.env.local`:
 
-- **Thumbs up/down:** stored in browser `localStorage` as topic/query preference signals for later soft hints
-- **Local style learning:** shorter / simpler / structured preferences from how you ask
-- **AI quality critic:** optional second-pass review/rewrite for risky answers before you see them
+- Chat: `GROQ_API_KEY` / `GROQ_KEY`, `GROQ_API_KEYS`, `GEMINI_API_KEY` / `GOOGLE_API_KEY`.
+- Models: `GROQ_MODEL`, `GEMINI_MODEL`, `GROQ_VISION_MODEL`, `GEMINI_VISION_MODEL`.
+- Retrieval: `LIVE_RETRIEVAL_ENABLED`, `JARVIS_PUBLIC_FACT_SEARCH`, `SEARXNG_URL`, `CRAWL4AI_URL` / `CRAWL4AI_ENDPOINT`, `CRAWL4AI_TOKEN`; optional provider keys as documented in `.env.example`.
+- Limits: `JARVIS_QUALITY_CRITIC_ENABLED`, `JARVIS_STREAM_QUALITY_REVIEW`, token limits, `RATE_LIMIT_WINDOW_MS`, `RATE_LIMIT_MAX`, `CORS_ALLOWED_ORIGINS`.
+- Saved BYOK: `JARVIS_BYOK_PRIVATE_KEY` and `JARVIS_BYOK_PUBLIC_KEY`, a matching RSA keypair of at least 2048 bits. Both are required before the saved-key UI is offered.
 
-Local keys: `jarvis_learned_preferences`, `jarvis_local_answer_style_learning`
+Diagnostics adds `capabilities.chat`, `.search`, `.vision`, `.images`, and `.byok`, each containing `available` and `reasonCode`. Existing API routes and diagnostics fields remain compatible. Unreadable sealed credentials return `byok_reconfiguration_required` rather than silently using platform credentials.
 
-## Environment
+## Privacy and credentials
 
-Live search is disabled by default. Use `LIVE_RETRIEVAL_ENABLED=true` with search/model keys for source-backed current-fact flows.
+Saved BYOK credentials use client-side RSA-OAEP/AES-GCM sealing. Plaintext fallback storage is prohibited. Keep the server keypair stable across instances and deployments; a lost keypair requires users to save their provider key again. Existing encrypted values are retained when reconfiguration is necessary.
 
-Set vars in Vercel (or local `.env`). Keep API keys server-side.
+Encrypted values can still be read and replayed by scripts with access to the origin. A masked, write-only settings field is a UX property, not protection against a compromised origin or browser extension.
 
-**Chat**
-- `GROQ_API_KEY` / `GROQ_KEY`
-- `GEMINI_API_KEY` / `GOOGLE_API_KEY`
-- `GROQ_MODEL`, `GEMINI_MODEL`, `GROQ_VISION_MODEL`, `GEMINI_VISION_MODEL`
-- `GROQ_QUALITY_MODEL`, `GEMINI_QUALITY_MODEL`, `GROQ_SAFETY_MODEL`, `GEMINI_SEARCH_MODEL`
-- `CHAT_ROUTER_MODE`
+Chat history, drafts, memory, and preferences remain on the device when persistence is enabled. Local performance diagnostics contain only timings and stage names. Optional external telemetry integrations require separate configuration.
 
-**Live search / retrieval**
-- `LIVE_RETRIEVAL_ENABLED`, `JARVIS_PUBLIC_FACT_SEARCH`
-- `EXA_API_KEY` / `EXA_KEY`, `SERPER_API_KEY` / `SERPER_KEY`
-- `NVIDIA_API_KEY` / `NVIDIA_NIM_API_KEY`, `NVIDIA_EMBEDDING_MODEL`, `NVIDIA_RERANK_MODEL`, `NVIDIA_RERANK_ENABLED`
-- `CRAWL4AI_URL` / `CRAWL4AI_ENDPOINT`, `CRAWL4AI_TOKEN`
-- `SEARXNG_URL`, `WEB_SEARCH_ENABLED`, `REDIS_URL`
-
-**Cost / quality / guards**
-- `JARVIS_QUALITY_CRITIC_ENABLED`, `JARVIS_STREAM_QUALITY_REVIEW`
-- `JARVIS_DEFAULT_MAX_TOKENS`, `JARVIS_FAST_MAX_TOKENS`, `JARVIS_STREAM_MAX_TOKENS`
-- `CORS_ALLOWED_ORIGINS`, `JARVIS_CSP`, `RATE_LIMIT_WINDOW_MS`, `RATE_LIMIT_MAX`, `NODE_ENV`
-- `JARVIS_BYOK_PRIVATE_KEY`, `JARVIS_BYOK_PUBLIC_KEY` (optional persistent RSA keypair for BYOK sealed box)
-
-## Bring Your Own Key (BYOK) & Sealed Secrets
-
-Users can configure personal Groq and Google Gemini API keys in Settings to unlock dedicated rate limits and bypass platform quotas:
-- **GitHub Secrets-Style Asymmetric Sealing**: Raw keys are never stored in browser storage. The browser encrypts keys client-side using native Web Crypto (`window.crypto.subtle`) with envelope encryption (ephemeral AES-256-GCM + RSA-OAEP SHA-256 with the server's public key).
-- **Write-Only UX**: Once saved, the secret cannot be read back by client scripts, extensions, or DevTools. Only a masked preview (`gsk_••••••••3a9f`) is shown.
-- **Ephemeral RAM Unsealing**: Keys are decrypted exclusively in ephemeral server execution RAM for the single inference request, with zero persistence on disk or database.
-
-## Privacy Notes
-
-- Chat history, memory, preferences, and feedback use browser localStorage when persistence is enabled
-- Camera, microphone, and location need browser permission
-- Provider API keys configured via BYOK are cryptographically sealed with RSA-OAEP + AES-256-GCM before saving
-- Platform provider API keys remain strictly server-side
+The supported baseline is the current and previous major Chrome, Edge, Firefox, and Safari versions, including low-end hardware. No paid hosting, telemetry, browser grid, or model service was introduced by this modernization.
