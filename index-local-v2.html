@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+    <meta name="theme-color" content="#07090e">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="JARVIS">
+    <title>JARVIS - AI Assistant</title>
+    <meta name="description" content="A browser assistant for chat, writing, research, documents, image understanding, and voice input.">
+    
+    <!-- Open Graph / Social Media -->
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="JARVIS - AI Assistant">
+    <meta property="og:description" content="A browser assistant for chat, writing, research, documents, image understanding, and voice input.">
+    
+    <!-- Twitter / X -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="JARVIS - AI Assistant">
+    <meta name="twitter:description" content="A browser assistant for chat, writing, research, documents, image understanding, and voice input.">
+
+    <!-- PWA Manifest & App Icons -->
+    <link rel="manifest" href="/manifest.json">
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2338bdf8' stroke-width='2'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='m4.93 4.93 4.24 4.24'/%3E%3Cpath d='m14.83 9.17 4.24-4.24'/%3E%3Cpath d='m14.83 14.83 4.24 4.24'/%3E%3Cpath d='m9.17 14.83-4.24 4.24'/%3E%3C/svg%3E">
+    <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2338bdf8' stroke-width='2'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='m4.93 4.93 4.24 4.24'/%3E%3Cpath d='m14.83 9.17 4.24-4.24'/%3E%3Cpath d='m14.83 14.83 4.24 4.24'/%3E%3Cpath d='m9.17 14.83-4.24 4.24'/%3E%3C/svg%3E">
+
+    <!-- KaTeX engine and fonts are bundled locally. -->
+    <script defer src="/katex.min.js"></script>
+    <link rel="stylesheet" href="/generated-tailwind.css">
+    <link rel="stylesheet" href="/styles.css">
+    <script defer src="/science-format.js"></script>
+    <script type="module" src="/app/main.js"></script>
+</head>
+<body class="dark min-h-screen bg-black text-white">
+
+    
+    <div id="offline-banner" class="offline-banner hidden" role="status" aria-live="polite">
+        Offline mode: some features may be unavailable
+    </div>
+
+    <div id="chat-sidebar-backdrop" class="chat-sidebar-backdrop hidden" onclick="closeChatSidebar()" aria-hidden="true"></div>
+    <aside id="chat-sidebar-panel" class="chat-sidebar-panel" aria-label="Chat history" aria-hidden="true">
+        <div class="sidebar-drag-handle" id="sidebar-drag-handle" aria-hidden="true"></div>
+        <div class="chat-sidebar-header">
+            <div class="chat-sidebar-brand" aria-hidden="true">
+                <svg class="jarvis-sidebar-logo" width="34" height="34" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+                    <circle cx="32" cy="32" r="17.2" stroke="#baf5ff" stroke-width="3.3"></circle>
+                    <circle cx="32" cy="32" r="22.8" stroke="#0ea5e9" stroke-width="1.3" opacity="0.95"></circle>
+                    <path d="M18.7 23.3a23 23 0 0 1 12.1-5.1" stroke="#1fb6ff" stroke-width="2.3" stroke-linecap="round"></path>
+                    <path d="M40.7 18.8a23 23 0 0 1 7.7 5.6" stroke="#40dfff" stroke-width="2.3" stroke-linecap="round"></path>
+                    <path d="M47.2 39.8a23 23 0 0 1-7.7 5.5" stroke="#40dfff" stroke-width="2.3" stroke-linecap="round"></path>
+                    <path d="M29 45.8a23 23 0 0 1-11-6" stroke="#1fb6ff" stroke-width="2.3" stroke-linecap="round"></path>
+                    <path d="M23 19.8h7.8" stroke="#63e8ff" stroke-width="3.6" stroke-linecap="butt"></path>
+                    <path d="M33.7 18.2h8" stroke="#63e8ff" stroke-width="3.6" stroke-linecap="butt" transform="rotate(28 33.7 18.2)"></path>
+                    <path d="M45.2 31h6.6" stroke="#63e8ff" stroke-width="3.6" stroke-linecap="butt" transform="rotate(83 45.2 31)"></path>
+                    <path d="M34.4 45.6h8.2" stroke="#20d8f6" stroke-width="3.6" stroke-linecap="butt"></path>
+                    <path d="M13.7 32.5h6.7" stroke="#63e8ff" stroke-width="3.6" stroke-linecap="butt" transform="rotate(95 13.7 32.5)"></path>
+                    <text x="32" y="35.5" text-anchor="middle" fill="#dffaff" font-size="8.2" font-family="Arial, Helvetica, sans-serif" font-weight="700" letter-spacing="1.1">JARVIS</text>
+                </svg>
+            </div>
+            <button type="button" class="chat-sidebar-close" onclick="closeChatSidebar()" aria-label="Close chat history">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+                    <rect x="4" y="5" width="16" height="14" rx="2"></rect>
+                    <path d="M15 5v14"></path>
+                </svg>
+            </button>
+        </div>
+        <div class="chat-sidebar-nav" aria-label="Main chat actions">
+            <button type="button" class="chat-sidebar-nav-item is-primary" onclick="startNewChatSession(); closeChatSidebar();">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" aria-hidden="true">
+                    <path d="M12 20h9"></path>
+                    <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"></path>
+                </svg>
+                <span>New chat</span>
+            </button>
+            <button type="button" class="chat-sidebar-nav-item" onclick="focusChatSidebarSearch()">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+                    <circle cx="11" cy="11" r="7"></circle>
+                    <path d="m20 20-3.5-3.5"></path>
+                </svg>
+                <span>Search chats</span>
+            </button>
+            <button type="button" class="chat-sidebar-nav-item" onclick="openSidebarQuickAction('settings')">
+                <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" aria-hidden="true">
+                    <circle cx="12" cy="12" r="3"></circle>
+                    <path d="M19.4 15a1.8 1.8 0 0 0 .36 2l.04.04a2 2 0 0 1-2.83 2.83l-.04-.04a1.8 1.8 0 0 0-2-.36 1.8 1.8 0 0 0-1.1 1.65V21a2 2 0 0 1-4 0v-.06A1.8 1.8 0 0 0 8.7 19.3a1.8 1.8 0 0 0-2 .36l-.04.04a2 2 0 0 1-2.83-2.83l.04-.04a1.8 1.8 0 0 0 .36-2 1.8 1.8 0 0 0-1.65-1.1H2.5a2 2 0 0 1 0-4h.06A1.8 1.8 0 0 0 4.2 8.6a1.8 1.8 0 0 0-.36-2l-.04-.04a2 2 0 0 1 2.83-2.83l.04-.04a1.8 1.8 0 0 0 2 .36A1.8 1.8 0 0 0 9.8 2.5V2a2 2 0 0 1 4 0v.06a1.8 1.8 0 0 0 1.1 1.65 1.8 1.8 0 0 0 2-.36l.04-.04a2 2 0 0 1 2.83 2.83l-.04-.04a1.8 1.8 0 0 0-.36 2 1.8 1.8 0 0 0 1.65 1.1h.06a2 2 0 0 1 0 4h-.06A1.8 1.8 0 0 0 19.4 15z"></path>
+                </svg>
+                <span>Settings</span>
+            </button>
+        </div>
+        <div class="chat-sidebar-search-field">
+            <input id="chat-sidebar-search-input" type="search" placeholder="Search chats & messages..." aria-label="Search chats" oninput="onChatSidebarSearchInput()">
+        </div>
+        <div id="chat-sidebar-section-title" class="chat-sidebar-section-title">Recents</div>
+
+        <div id="chat-sidebar-list" class="chat-sidebar-list" role="list"></div>
+    </aside>
+    <div id="chat-session-menu" class="chat-session-menu hidden" role="menu" aria-label="Chat actions">
+        <button type="button" data-chat-action="rename" onclick="handleChatSessionMenuAction('rename')" role="menuitem">Rename</button>
+        <button type="button" data-chat-action="pin" onclick="handleChatSessionMenuAction('pin')" role="menuitem">Pin</button>
+        <button type="button" data-chat-action="share" onclick="handleChatSessionMenuAction('share')" role="menuitem">Share</button>
+        <button type="button" data-chat-action="delete" onclick="handleChatSessionMenuAction('delete')" role="menuitem">Delete</button>
+    </div>
+    <div id="chat-delete-dialog-backdrop" class="chat-delete-dialog-backdrop hidden" role="presentation" onclick="if (event.target === this) closeChatDeleteDialog()">
+        <section id="chat-delete-dialog" class="chat-delete-dialog" role="dialog" aria-modal="true" aria-labelledby="chat-delete-dialog-title">
+            <h2 id="chat-delete-dialog-title">Delete</h2>
+            <p id="chat-delete-dialog-text">Delete ''</p>
+            <div class="chat-delete-dialog-actions">
+                <button type="button" class="chat-delete-dialog-btn secondary" onclick="closeChatDeleteDialog()">No</button>
+                <button type="button" class="chat-delete-dialog-btn danger" onclick="confirmChatDeleteDialog()">Yes</button>
+            </div>
+        </section>
+    </div>
+    <div id="confirm-action-dialog-backdrop" class="chat-delete-dialog-backdrop hidden" role="presentation" onclick="if (event.target === this) closeConfirmActionDialog(false)">
+        <section id="confirm-action-dialog" class="chat-delete-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-action-dialog-title">
+            <h2 id="confirm-action-dialog-title">Confirm</h2>
+            <p id="confirm-action-dialog-text">Are you sure?</p>
+            <div class="chat-delete-dialog-actions">
+                <button id="confirm-action-dialog-no" type="button" class="chat-delete-dialog-btn secondary" onclick="closeConfirmActionDialog(false)">No</button>
+                <button id="confirm-action-dialog-yes" type="button" class="chat-delete-dialog-btn danger" onclick="closeConfirmActionDialog(true)">Yes</button>
+            </div>
+        </section>
+    </div>
+    <div id="text-input-dialog-backdrop" class="text-input-dialog-backdrop hidden" role="presentation" onclick="handleTextInputDialogBackdropClick(event)">
+        <section class="text-input-dialog" role="dialog" aria-modal="true" aria-labelledby="text-input-dialog-title" onclick="handleTextInputDialogCardClick(event)">
+            <h2 id="text-input-dialog-title">Edit message</h2>
+            <textarea id="text-input-dialog-value" rows="4" aria-label="Edit message"></textarea>
+            <div class="text-input-dialog-actions">
+                <button type="button" class="text-input-dialog-btn secondary" onclick="closeTextInputDialog(null)">Cancel</button>
+                <button type="button" class="text-input-dialog-btn primary" onclick="submitTextInputDialog()">Save</button>
+            </div>
+        </section>
+    </div>
+
+    <!-- AI Image Lightbox Modal -->
+    <div id="image-lightbox-overlay" class="image-lightbox-overlay" onclick="handleImageLightboxBackdropClick(event)" role="dialog" aria-modal="true" aria-label="Image preview">
+        <div class="image-lightbox-container">
+            <button type="button" class="image-lightbox-close-btn" onclick="closeImageLightbox()" aria-label="Close image preview">&times;</button>
+            <img id="image-lightbox-img" class="image-lightbox-img" src="" alt="Full view">
+            <div id="image-lightbox-caption" class="image-lightbox-caption" style="display: none;"></div>
+            <div class="image-lightbox-toolbar">
+                <button type="button" class="image-gen-action-btn" onclick="downloadLightboxImage()" aria-label="Download image">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                    <span>Download</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- AI Image History Gallery Modal -->
+    <div id="image-gallery-modal" class="image-gallery-modal" onclick="if (event.target === this) closeImageGalleryModal()" role="dialog" aria-modal="true" aria-label="Generated Images Gallery">
+        <div class="image-gallery-panel" onclick="event.stopPropagation()">
+            <div class="image-gallery-header">
+                <div class="image-gallery-title">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                    <span>Generated Images</span>
+                    <span id="image-gallery-count" class="image-gallery-count">0</span>
+                </div>
+                <button type="button" class="image-gallery-close-btn" onclick="closeImageGalleryModal()" aria-label="Close gallery">&times;</button>
+            </div>
+            <div id="image-gallery-body" class="image-gallery-body">
+                <div id="image-gallery-grid" class="image-gallery-grid"></div>
+            </div>
+        </div>
+    </div>
+
+        <!-- Full-Height Edge-to-Edge AI Workspace Container -->
+    <div id="app-root" class="app-root flex flex-col min-h-screen">
+        <!-- Sticky Top Navigation Bar -->
+        <header id="app-header" class="app-header">
+            <div class="header-left flex items-center gap-2">
+                <button id="chat-sidebar-toggle" class="header-icon-btn" type="button" onclick="toggleChatSidebar()" aria-label="Open chat history" aria-expanded="false" aria-controls="chat-sidebar-panel" title="Toggle chat history (Ctrl+Shift+S)">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <rect x="4" y="5" width="16" height="14" rx="2"></rect>
+                        <path d="M9 5v14"></path>
+                        <path d="M13 9h4"></path>
+                        <path d="M13 13h3"></path>
+                    </svg>
+                </button>
+                <button id="header-new-chat-btn" class="header-icon-btn" type="button" onclick="startNewChatSession()" aria-label="Start new chat" title="New chat (Ctrl+O)">
+                    <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <path d="M12 20h9"></path>
+                        <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"></path>
+                    </svg>
+                </button>
+            </div>
+
+            <div class="header-center flex items-center justify-center">
+                <span class="header-brand-title font-bold tracking-wider text-sm">JARVIS</span>
+            </div>
+
+            <div class="header-right flex items-center gap-1.5">
+            </div>
+        </header>
+
+        <!-- Hidden legacy anchors for backwards compatibility -->
+        <div id="legacy-anchors-shell" class="hidden" aria-hidden="true" style="display: none !important;">
+            <h1 id="title" class="jarvis-top-title">JARVIS</h1>
+            <p id="subtitle" class="hidden"></p>
+            <div id="main-card"></div>
+            <div id="chat-layout"></div>
+            <div id="utility-panel"></div>
+            <div id="chat-panel"></div>
+            <div id="weather-card" class="hidden weather-card-enhanced">
+                <p id="location-name"></p>
+                <button id="expand-forecast-btn" onclick="toggleForecast()"><svg id="expand-forecast-icon"></svg></button>
+                <p id="temperature"></p>
+                <p id="weather-advice"></p>
+                <div id="aqi-section" class="hidden"></div>
+                <div id="forecast-container" class="hidden"></div>
+            </div>
+            <select id="enterprise-persona-select" onchange="setEnterprisePersona(this.value)">
+                <option value="general">Default Assistant</option>
+                <option value="architect">Senior Architect</option>
+                <option value="executive">Executive Brief</option>
+                <option value="analyst">Technical Analyst</option>
+            </select>
+        </div>
+
+        <!-- Main Chat Stream Viewport -->
+        <main id="chat-main" class="chat-main flex-1 overflow-y-auto custom-scrollbar">
+            <div id="chat-center-column" class="chat-center-column max-w-3xl mx-auto w-full px-4 sm:px-6 pt-4 pb-36">
+                <!-- Interactive Empty State Hero -->
+                <div id="chat-empty-state" class="chat-empty-state">
+                    <div class="empty-state-emblem-wrap">
+                        <div class="empty-state-emblem-glow" aria-hidden="true"></div>
+                        <svg class="empty-state-emblem" width="60" height="60" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+                            <circle cx="32" cy="32" r="17.2" stroke="#38bdf8" stroke-width="3"></circle>
+                            <circle cx="32" cy="32" r="23" stroke="#0ea5e9" stroke-width="1.2" opacity="0.85"></circle>
+                            <path d="M18.7 23.3a23 23 0 0 1 12.1-5.1" stroke="#38bdf8" stroke-width="2.4" stroke-linecap="round"></path>
+                            <path d="M40.7 18.8a23 23 0 0 1 7.7 5.6" stroke="#38bdf8" stroke-width="2.4" stroke-linecap="round"></path>
+                            <path d="M47.2 39.8a23 23 0 0 1-7.7 5.5" stroke="#38bdf8" stroke-width="2.4" stroke-linecap="round"></path>
+                            <path d="M29 45.8a23 23 0 0 1-11-6" stroke="#38bdf8" stroke-width="2.4" stroke-linecap="round"></path>
+                            <text x="32" y="35.5" text-anchor="middle" fill="#e0f2fe" font-size="8" font-family="system-ui, -apple-system, sans-serif" font-weight="750" letter-spacing="1">JARVIS</text>
+                        </svg>
+                    </div>
+                    <h2 class="empty-state-headline">What can I help with today?</h2>
+                    <p class="empty-state-sub">Ask a question, write something, or explore an idea.</p>
+                    <div class="empty-state-capabilities" aria-label="Key capabilities" role="toolbar">
+                        <button type="button" class="empty-state-pill" data-capability="live_search" onclick="handleCapabilityPillClick('live_search')" title="Activate live web search mode">
+                            <span class="capability-icon" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18"/></svg></span>
+                            <span class="capability-copy"><span class="capability-label">Web search</span><span class="capability-description">Search the web</span></span>
+                            <svg class="capability-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5"/></svg>
+                        </button>
+                        <button type="button" class="empty-state-pill" data-capability="document_ocr" onclick="handleCapabilityPillClick('document_ocr')" title="Attach document or PDF for OCR">
+                            <span class="capability-icon" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9zM14 3v6h6M8 13h8M8 17h5"/></svg></span>
+                            <span class="capability-copy"><span class="capability-label">Documents</span><span class="capability-description">Upload a file</span></span>
+                            <svg class="capability-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5"/></svg>
+                        </button>
+                        <button type="button" class="empty-state-pill" data-capability="image_generation" onclick="triggerImageGenerationPrompt()" title="Describe an image to create" hidden>
+                            <span class="capability-icon" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.5"/><path d="m3 17 6-6 5 5 3-3 4 4"/></svg></span>
+                            <span class="capability-copy"><span class="capability-label">Create image</span><span class="capability-description">Describe an idea</span></span>
+                            <svg class="capability-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5"/></svg>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Chat History Feed -->
+                <div id="chat-container" class="chat-container space-y-4"></div>
+
+                <!-- Floating Jump To Latest Button -->
+                <button id="jump-to-latest-btn" class="chat-scroll-jump hidden" onclick="jumpToLatest()" type="button" title="Jump to latest message" aria-label="Jump to latest message">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                        <polyline points="19 12 12 19 5 12"></polyline>
+                    </svg>
+                </button>
+            </div>
+        </main>
+    </div>
+
+    <!-- Full-Screen Drag and Drop Overlay -->
+    <div id="drag-drop-overlay" class="drag-drop-overlay hidden" aria-hidden="true">
+        <div class="drag-drop-backdrop"></div>
+        <div class="drag-drop-content">
+            <div class="drag-drop-icon">
+                <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="17 8 12 3 7 8"></polyline>
+                    <line x1="12" y1="3" x2="12" y2="15"></line>
+                </svg>
+            </div>
+            <h3 class="drag-drop-title">Drop files or images here</h3>
+            <p class="drag-drop-desc">Upload documents, PDFs, screenshots, or photos for instant OCR & analysis</p>
+        </div>
+    </div>
+
+<div id="loading-overlay" class="loading-overlay hidden">
+        <div class="glass-card p-8 text-center max-w-sm mx-4">
+            <div class="typing-indicator justify-center mb-4">
+                <div class="typing-dot"></div>
+                <div class="typing-dot"></div>
+                <div class="typing-dot"></div>
+            </div>
+            <div class="loading-text text-gray-700 dark:text-gray-200 font-medium" id="loading-text">Assistant is thinking...</div>
+        </div>
+    </div>
+
+    <!-- Scroll-To-Bottom Floating Button -->
+    <button id="scroll-to-bottom-btn" class="scroll-to-bottom-pill" onclick="scrollToBottom()" type="button" title="Jump to latest message" aria-label="Jump to latest message">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <polyline points="19 12 12 19 5 12"></polyline>
+        </svg>
+    </button>
+
+    <!-- ChatGPT-style Input at Bottom - Enhanced -->
+    <div id="input-bar-container" class="fixed bottom-0 left-0 right-0 floating-input-bar z-40">
+        <div class="composer-wrap">
+            <div id="composer-attachment-tray" class="composer-attachment-tray hidden" aria-live="polite"></div>
+            <div id="composer-selection-tray" class="composer-selection-tray hidden" aria-live="polite"></div>
+            <div id="composer-dlp-tray" class="composer-dlp-tray hidden" aria-live="assertive"></div>
+            <div id="input-bar-inner" class="composer-shell modern-input">
+                <div class="composer-leading">
+                    <div class="composer-actions">
+                        <button
+                            id="composer-plus-btn"
+                            type="button"
+                            class="composer-plus-btn"
+                            onclick="toggleComposerActionsMenu()"
+                            aria-expanded="false"
+                            aria-haspopup="menu"
+                            aria-controls="composer-actions-menu"
+                            aria-label="Add photos or files"
+                            title="Add photos or files">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+                                <path d="M12 5v14"></path>
+                                <path d="M5 12h14"></path>
+                            </svg>
+                        </button>
+                        <div id="composer-actions-menu" class="composer-actions-menu hidden" role="menu" aria-label="Composer actions">
+                            <div class="composer-action-group" data-composer-group="root">
+                                <button type="button" class="composer-action-item" data-composer-action="file-browse" role="menuitem">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m8 12 6-6a3 3 0 0 1 4 4l-8 8a5 5 0 0 1-7-7l9-9"/></svg>
+                                    <span class="composer-menu-label">Add photos &amp; files</span><small>Upload from your device</small>
+                                </button>
+                                <button id="composer-image-btn" type="button" class="composer-action-item" data-capability="image_generation" onclick="triggerImageGenerationPrompt()" role="menuitem" title="Create an image with the configured provider">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.5"/><path d="m3 17 6-6 5 5 3-3 4 4"/></svg>
+                                    <span class="composer-menu-label">Create image</span><small>Describe an image</small>
+                                </button>
+                                <button
+                                    id="web-search-toggle-btn"
+                                    type="button"
+                                    class="composer-action-item composer-web-search-menuitem"
+                                    onclick="cycleWebSearchMode()"
+                                    data-web-mode="off"
+                                    role="menuitemcheckbox"
+                                    aria-checked="false"
+                                    title="Live Web Search (OFF — click to turn on)"
+                                    aria-label="Live Web Search OFF">
+                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                                            <circle cx="12" cy="12" r="10"></circle>
+                                            <line x1="2" y1="12" x2="22" y2="12"></line>
+                                            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1 4-10z"></path>
+                                        </svg>
+                                        <span class="composer-menu-label">Web search</span><small>Find current information</small>
+                                    <span class="web-search-mode-label sr-only">OFF</span>
+                                </button>
+                            </div>
+                            <div class="composer-action-group hidden" data-composer-group="photos">
+                                <button type="button" class="composer-action-item composer-action-back" data-composer-nav="root" role="menuitem">Back</button>
+                                <button type="button" class="composer-action-item" data-composer-action="photo-camera" role="menuitem">Take Photo</button>
+                                <button type="button" class="composer-action-item" data-composer-action="photo-library" role="menuitem">Photo Library</button>
+                            </div>
+                            <div class="composer-action-group hidden" data-composer-group="files">
+                                <button type="button" class="composer-action-item composer-action-back" data-composer-nav="root" role="menuitem">Back</button>
+                                <button type="button" class="composer-action-item" data-composer-action="file-browse" role="menuitem">Browse Files</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div id="composer-entry" class="composer-entry" role="combobox" aria-label="Message commands" aria-haspopup="listbox" aria-expanded="false">
+                <textarea
+                    id="text-input"
+                    rows="1"
+                    placeholder="Ask Jarvis..."
+                    class="composer-input"
+                    onkeydown="handleComposerKeydown(event)"
+                    oninput="handleComposerInput()" aria-label="Message JARVIS"></textarea>
+                </div>
+                <div id="vtt-waveform-container" class="composer-voice-visualizer hidden" aria-hidden="true">
+                    <div class="composer-voice-waveform" id="composer-voice-waveform">
+                        <span class="voice-wave-bar" style="--bar-index:0; --bar-scale:0.12"></span>
+                        <span class="voice-wave-bar" style="--bar-index:1; --bar-scale:0.12"></span>
+                        <span class="voice-wave-bar" style="--bar-index:2; --bar-scale:0.12"></span>
+                        <span class="voice-wave-bar" style="--bar-index:3; --bar-scale:0.12"></span>
+                        <span class="voice-wave-bar" style="--bar-index:4; --bar-scale:0.12"></span>
+                        <span class="voice-wave-bar" style="--bar-index:5; --bar-scale:0.12"></span>
+                        <span class="voice-wave-bar" style="--bar-index:6; --bar-scale:0.12"></span>
+                        <span class="voice-wave-bar" style="--bar-index:7; --bar-scale:0.12"></span>
+                        <span class="voice-wave-bar" style="--bar-index:8; --bar-scale:0.12"></span>
+                        <span class="voice-wave-bar" style="--bar-index:9; --bar-scale:0.12"></span>
+                        <span class="voice-wave-bar" style="--bar-index:10; --bar-scale:0.12"></span>
+                        <span class="voice-wave-bar" style="--bar-index:11; --bar-scale:0.12"></span>
+                        <span class="voice-wave-bar" style="--bar-index:12; --bar-scale:0.12"></span>
+                        <span class="voice-wave-bar" style="--bar-index:13; --bar-scale:0.12"></span>
+                    </div>
+                </div>
+                <div class="composer-trailing">
+                    <button
+                        id="composer-think-btn"
+                        type="button"
+                        class="composer-think-btn"
+                        onclick="toggleDeepReasoningMode()"
+                        title="Deep Reasoning (Think) — toggle on/off"
+                        aria-label="Deep Reasoning (Think)"
+                        aria-pressed="false">
+                        <svg class="composer-think-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 4.44-2.04z"></path>
+                            <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-4.44-2.04z"></path>
+                        </svg>
+                        <span class="composer-think-label">Think</span>
+                    </button>
+                    <button
+                        id="voice-to-text-btn"
+                        type="button"
+                        class="composer-icon-btn speech-input-btn vtt-shifted-left"
+                        onclick="toggleVoiceToText(event)"
+                        title="Voice typing (Dictation)" aria-label="Voice typing (Dictation)"
+                        aria-pressed="false">
+                        <svg class="vtt-mic-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                            <rect x="9" y="2" width="6" height="12" rx="3"></rect>
+                            <path d="M5 10a7 7 0 0 0 14 0"></path>
+                            <path d="M12 17v5"></path>
+                            <path d="M8 22h8"></path>
+                        </svg>
+                        <span class="vtt-loader-spinner" aria-hidden="true"></span>
+                    </button>
+                    <button
+                        id="send-message-btn"
+                        type="button"
+                        class="composer-send-btn"
+                        onclick="handlePrimaryActionButtonClick()"
+                        title="Send message"
+                        aria-label="Send message"
+                        disabled>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <line x1="12" y1="19" x2="12" y2="5"></line>
+                            <polyline points="5 12 12 5 19 12"></polyline>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+            <div class="speech-input-meta">
+                <span id="speech-input-status" role="status" aria-live="polite"></span>
+            </div>
+            <input type="file" id="composer-photo-library-input" class="hidden" accept="image/*,.heic,.heif,.heics,.heifs,.avif,.dng,.raw,.cr2,.cr3,.nef,.nrw,.arw,.raf,.rw2,.orf,.pef,.jp2,.j2k,.jpf,.jpx,.jpm,.pict,.pct,.psd,.jpeg,.jpg,.png,.webp,.gif,.bmp,.tiff,.tif" multiple>
+            <input type="file" id="composer-photo-camera-input" class="hidden" accept="image/*,.heic,.heif,.dng,.jpeg,.jpg,.png" capture="environment">
+            <input type="file" id="composer-file-input" class="hidden" accept="*/*" multiple>
+            <p id="footer-disclaimer" class="composer-disclaimer">AI can make mistakes. <button type="button" class="composer-disclaimer-btn" onclick="openImportantInfoModal()">Check important info.</button></p>
+        </div>
+    </div>
+    <!-- Live camera preview removed (dedicated file attachment OCR pipeline active) -->
+
+    <!-- Converse live overlay removed (Enterprise VTT mode active) -->
+
+<!-- Application logic loads from the module entrypoint. -->
+
+
+<!-- ===== Global Attraction Intelligence + Real-Place Itinerary Engine ===== -->
+
+
+
+<!-- ===== Distance-Aware Itinerary Engine ===== -->
+
+
+
+<!-- ===== Travel Time Estimation Engine ===== -->
+
+
+</body>
+</html>
