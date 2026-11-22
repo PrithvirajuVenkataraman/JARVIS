@@ -164,7 +164,7 @@ body #help-modal .settings-row:has(.settings-switch) { flex-wrap:nowrap!importan
     body .empty-state-sub { font-size:15px; }
     body .chat-empty-state { padding:16px 12px; }
     body .empty-state-emblem-wrap { margin-bottom:12px; }
-    body .empty-state-emblem { width:40px; height:40px; }
+    body .empty-state-emblem { width:40px; height:40px; } 
     body .empty-state-headline { font-size:24px; }
     body .empty-state-capabilities { margin-bottom:0; gap:6px; }
     body #input-bar-inner.is-voice-active .composer-voice-visualizer { grid-area:input; }
