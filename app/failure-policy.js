@@ -1,3 +1,5 @@
+import { isPayloadTooLarge, PAYLOAD_TOO_LARGE_MESSAGE } from './request-payload.js';
+
 function compactText(value) {
     return String(value || '').replace(/\s+/g, ' ').trim();
 }
@@ -20,6 +22,10 @@ export function classifyFailure(failureOrReason, context = {}) {
             userActions: [],
             message: 'Request aborted.'
         };
+    }
+
+    if (isPayloadTooLarge(failureOrReason) || isPayloadTooLarge({ code: codeHint })) {
+        return { code: 'request_too_large', recoverable: false, userActions: [], message: PAYLOAD_TOO_LARGE_MESSAGE };
     }
 
     if (
@@ -113,6 +119,8 @@ export function buildUserFacingErrorMessage(failureOrReason, context = {}) {
     if (/^vision_/.test(String(failureOrReason?.code || '')) && failureOrReason?.message) return String(failureOrReason.message);
     const failure = classifyFailure(failureOrReason, context);
     switch (failure.code) {
+        case 'request_too_large':
+            return PAYLOAD_TOO_LARGE_MESSAGE;
         case 'network_timeout':
             return 'The answer is taking longer than expected. You can retry, or ask a shorter follow-up.';
         case 'model_empty':

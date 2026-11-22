@@ -4,10 +4,10 @@ import * as JarvisMarkupSecurity from './markup-security.js';
 globalThis.JarvisMarkupSecurity = JarvisMarkupSecurity;
 JarvisMarkupSecurity.installAssistantActions();
 import { createConversationEngine } from './context-engine.js?v=2.4.1';
-import { ApiError, postJson } from './api-client.js?v=2.4.1';
+import { ApiError, postJson, prepareRequestPayload, serializeRequestPayload, isPayloadTooLarge, PAYLOAD_TOO_LARGE_MESSAGE } from './api-client.js?v=2.4.1';
 
 // Expose JarvisApi immediately so downstream modules always have access
-globalThis.JarvisApi = Object.freeze({ ApiError, postJson });
+globalThis.JarvisApi = Object.freeze({ ApiError, postJson, prepareRequestPayload, serializeRequestPayload, isPayloadTooLarge, PAYLOAD_TOO_LARGE_MESSAGE });
 import { createApplicationState } from './state.js?v=2.4.1';
 import { createSafeStorage } from './storage.js?v=2.4.1';
 import { installSpeechInputUI } from './speech-input.js?v=2.4.1';
@@ -61,7 +61,6 @@ const engine = createConversationEngine({
 globalThis.InteractionState = InteractionState;
 globalThis.JarvisInteractionState = createInteractionStateMachine();
 globalThis.JarvisConversation = engine;
-globalThis.JarvisApi = Object.freeze({ ApiError, postJson });
 globalThis.JarvisState = createApplicationState();
 globalThis.JarvisStorage = createSafeStorage();
 globalThis.JarvisFrontendRouting = Object.freeze({ ...JarvisFrontendRouting });

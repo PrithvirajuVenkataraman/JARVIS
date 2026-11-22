@@ -1,4 +1,6 @@
 import { formatBytes } from './file-format.js';
+import { postJson as postApiJson } from './api-client.js';
+import { jsonByteLength, MAX_JSON_REQUEST_BYTES } from './request-payload.js';
 import * as BM25Module from './bm25.js?v=2.0.5';
 
 const BM25Index = BM25Module.BM25Index;
@@ -121,7 +123,7 @@ const pendingAttachments = [];
 // Sliding Window Multimodal Memory for multi-turn visual dialogue continuity (ChatGPT/Gemini style)
 const activeSessionImages = [];
 const MAX_ACTIVE_SESSION_IMAGES = 3;
-const MAX_TOTAL_IMAGE_PAYLOAD_BYTES = 4 * 1024 * 1024; // 4MB safe boundary for Vercel Hobby serverless
+const MAX_TOTAL_IMAGE_PAYLOAD_BYTES = 3_000_000; // Encoded characters; reserve space for JSON and chat context.
 
 export function getActiveSessionImages() {
     return activeSessionImages.map(img => ({ ...img }));
@@ -207,6 +209,13 @@ export async function addFilesToComposer(fileList = []) {
 export function takePendingForSend() {
     const items = pendingAttachments.splice(0, pendingAttachments.length);
     return items;
+}
+
+export function restorePendingAttachments(items = []) {
+    for (const item of items) {
+        if (!item?.id || pendingAttachments.length >= MAX_ATTACHMENTS || pendingAttachments.some(existing => existing.id === item.id)) continue;
+        pendingAttachments.push(item);
+    }
 }
 
 export async function ingestAllForMessage(attachments = [], userText = '') {
@@ -594,18 +603,7 @@ async function extractLocally(attachment, query = '') {
 async function ingestOnServer(attachment, localResult = {}) {
     const clientText = hasUsefulExtractedText(localResult?.text) ? String(localResult.text || '') : '';
     let base64 = '';
-    const fileSize = attachment?.file?.size || 0;
     if (!clientText) {
-        if (fileSize > 3.5 * 1024 * 1024) {
-            return {
-                ok: false,
-                text: '',
-                method: 'server_skipped_large_file',
-                provider: 'client',
-                message: 'File size exceeds serverless transfer threshold (3.5MB); proceeding with client visual pipeline.',
-                attempts: [{ stage: 'server', ok: false, method: 'server_skipped_large_file', error: 'File size exceeds serverless threshold' }]
-            };
-        }
         base64 = await resolveAttachmentBase64(attachment, { allowEmpty: true }).catch(() => '');
     }
     if (!clientText && !base64) {
@@ -616,13 +614,21 @@ async function ingestOnServer(attachment, localResult = {}) {
         : (attachment.mimeType || guessMimeFromName(attachment.name));
     attachment.mimeType = finalMime;
     logAttachmentIngestDiagnostics(attachment, { base64, clientText });
-    const data = await postJson('/api/ingest-attachment', {
+    const serverPayload = {
         filename: attachment.name,
         mimeType: finalMime,
         base64,
         clientText,
         clientMethod: String(localResult?.method || '')
-    }, { timeoutMs: 8000 });
+    };
+    if (jsonByteLength(serverPayload) > MAX_JSON_REQUEST_BYTES) {
+        return {
+            ok: false, text: '', method: 'server_skipped_large_file', provider: 'client',
+            message: 'Processing this document on your device because it is too large to upload in one request.',
+            attempts: [{ stage: 'server', ok: false, method: 'server_skipped_large_file', error: 'Encoded request exceeds transfer budget' }]
+        };
+    }
+    const data = await postJson('/api/ingest-attachment', serverPayload, { timeoutMs: 8000 });
     return {
         ok: Boolean(data?.ok || data?.success) && hasUsefulExtractedText(data?.text),
         text: String(data?.text || ''),
@@ -1869,27 +1875,7 @@ function escapeHtml(value) {
 }
 
 async function postJson(path, payload, options = {}) {
-    if (globalThis.JarvisApi?.postJson) {
-        return globalThis.JarvisApi.postJson(path, payload, options);
-    }
-    const timeoutMs = Number(options.timeoutMs) || 30000;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-        const response = await fetch(path, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            signal: controller.signal,
-            body: JSON.stringify(payload || {})
-        });
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok || data?.success === false) {
-            throw new Error(data?.error?.message || data?.message || `Request failed (${response.status})`);
-        }
-        return data;
-    } finally {
-        clearTimeout(timeout);
-    }
+    return (globalThis.JarvisApi?.postJson || postApiJson)(path, payload, options);
 }
 
 export function showComposerMenuGroup(menu, groupName) {

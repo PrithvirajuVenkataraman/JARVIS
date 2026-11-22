@@ -1,3 +1,6 @@
+import { prepareRequestPayload, serializeRequestPayload, isPayloadTooLarge, PAYLOAD_TOO_LARGE_MESSAGE } from './request-payload.js';
+export { prepareRequestPayload, serializeRequestPayload, isPayloadTooLarge, PAYLOAD_TOO_LARGE_MESSAGE };
+
 export class ApiError extends Error {
     constructor(message, options = {}) {
         super(message);
@@ -24,16 +27,17 @@ export async function postJson(path, payload, options = {}) {
         }
         const headers = new Headers(options.headers || {});
         if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+        const prepared = await prepareRequestPayload(payload ?? {}, { signal: controller.signal });
         const response = await fetch(path, {
             method: 'POST',
             headers,
             signal: controller.signal,
-            body: JSON.stringify(payload ?? {})
+            body: serializeRequestPayload(prepared)
         });
         const data = await response.json().catch(() => null);
         if (!response.ok || data?.success === false) {
             const error = data?.error;
-            const code = String(error?.code || data?.code || 'request_failed');
+            const code = response.status === 413 ? 'request_too_large' : String(error?.code || data?.code || 'request_failed');
             throw new ApiError(
                 formatApiErrorMessage(response.status, code, error?.message || error),
                 {
@@ -55,7 +59,7 @@ export async function postJson(path, payload, options = {}) {
                 retryable: timedOut
             });
         }
-        if (error instanceof ApiError) throw error;
+        if (error instanceof ApiError || isPayloadTooLarge(error)) throw error;
         throw new ApiError('The service is unavailable. Please try again.', {
             code: 'network_error',
             retryable: true,
@@ -76,6 +80,7 @@ export async function callLLM(prompt, isVision = false) {
 }
 
 function formatApiErrorMessage(status, code, message) {
+    if (status === 413) return PAYLOAD_TOO_LARGE_MESSAGE;
     if (status === 403 && code === 'origin_not_allowed') {
         return 'This deployment is blocking same-origin API calls. Add the site URL to CORS_ALLOWED_ORIGINS or allow same-origin requests.';
     }

@@ -15,6 +15,92 @@ import { __test as chat } from '../api/chat-groq.js';
 import { visionFailurePayload } from '../api/_lib/model-failure.js';
 import { lazyModule } from '../app/lazy-features.js';
 import { formatBytes } from '../app/file-format.js';
+import { prepareRequestPayload, serializeRequestPayload, jsonByteLength, MAX_JSON_REQUEST_BYTES, isPayloadTooLarge } from '../app/request-payload.js';
+import { classifyFailure, buildUserFacingErrorMessage, shouldShowFailureFallbackCard } from '../app/failure-policy.js';
+import { installRequestPreferences } from '../app/request-preferences.js';
+
+test('payload failures never offer a transient retry or web-search fallback', () => {
+    const error = { status: 413, message: 'Request failed' };
+    assert.equal(classifyFailure(error).recoverable, false);
+    assert.deepEqual(classifyFailure(error).userActions, []);
+    assert.match(buildUserFacingErrorMessage(error), /smaller image/);
+    assert.equal(shouldShowFailureFallbackCard(error, 'Read my attachment'), false);
+});
+
+test('the final transport budget includes appended custom instructions', async () => {
+    const savedWindow = globalThis.window, savedLocation = globalThis.location;
+    let calls = 0;
+    try {
+        globalThis.location = new URL('https://jarvis.example/');
+        globalThis.window = { customSystemPrompt: '\u6f22'.repeat(1200), fetch: async (_url, init) => {
+            calls++; assert.equal(JSON.parse(init.body).preferences.customSystemPrompt.length, 1200);
+            return Response.json({ success: true });
+        } };
+        installRequestPreferences();
+        await assert.rejects(window.fetch('/api/chat-groq', { body: JSON.stringify({ message: 'A'.repeat(MAX_JSON_REQUEST_BYTES - 100) }) }), isPayloadTooLarge);
+        assert.equal(calls, 0);
+        await window.fetch('/api/chat-groq', { body: JSON.stringify({ message: 'Small request' }) });
+        assert.equal(calls, 1);
+    } finally {
+        if (savedWindow === undefined) delete globalThis.window; else globalThis.window = savedWindow;
+        if (savedLocation === undefined) delete globalThis.location; else globalThis.location = savedLocation;
+    }
+});
+
+test('request budgets count UTF-8 JSON and reject oversized text before fetch', async () => {
+    const payload = { message: '\u6f22'.repeat(1_400_000) };
+    assert.ok(payload.message.length < MAX_JSON_REQUEST_BYTES);
+    assert.throws(() => serializeRequestPayload(payload), isPayloadTooLarge);
+    const original = globalThis.fetch;
+    let calls = 0;
+    try {
+        globalThis.fetch = async () => { calls++; return Response.json({ success: true }); };
+        await assert.rejects(postJson('/api/chat-groq', payload), error => isPayloadTooLarge(error) && !error.retryable);
+        assert.equal(calls, 0);
+        globalThis.fetch = async () => { calls++; return new Response('FUNCTION_PAYLOAD_TOO_LARGE', { status: 413 }); };
+        await assert.rejects(postJson('/api/chat-groq', { message: 'Read the image' }), error => error.status === 413 && error.code === 'request_too_large' && !error.retryable && /smaller image/.test(error.message));
+        assert.equal(calls, 1);
+    } finally { globalThis.fetch = original; }
+});
+
+test('multiple inline images share the complete request budget without losing context or originals', async () => {
+    const images = ['first.png', 'second.png', 'third.png'].map(name => ({ name, mimeType: 'image/png', base64: 'A'.repeat(2_000_000) }));
+    const payload = { message: 'Explain all three diagrams', context: '\u6f22'.repeat(100_000), preferences: { customSystemPrompt: 'Use concise steps.' }, images };
+    const calls = [];
+    const prepared = await prepareRequestPayload(payload, { resizeImage: async (base64, mimeType, allowance) => {
+        calls.push({ size: base64.length, mimeType, allowance }); return 'B'.repeat(allowance);
+    } });
+    assert.equal(calls.length, 3);
+    assert.ok(jsonByteLength(prepared) < MAX_JSON_REQUEST_BYTES);
+    assert.equal(prepared.context, payload.context); assert.deepEqual(prepared.preferences, payload.preferences);
+    assert.deepEqual(prepared.images.map(image => image.name), images.map(image => image.name));
+    assert.ok(prepared.images.every(image => image.mimeType === 'image/jpeg'));
+    assert.ok(images.every(image => image.base64.length === 2_000_000 && image.mimeType === 'image/png'));
+    const small = { images: [{ base64: 'small-lossless-image', mimeType: 'image/png' }] };
+    assert.equal(await prepareRequestPayload(small), small);
+});
+
+test('oversized vision and ingestion images are bounded, and failed or canceled resizing never sends originals', async () => {
+    for (const key of ['imageBase64', 'base64']) {
+        const payload = { [key]: 'A'.repeat(5_000_000), mimeType: 'image/png', prompt: 'Read the formula' };
+        const result = await prepareRequestPayload(payload, { resizeImage: async () => 'B'.repeat(500_000) });
+        assert.equal(result[key].length, 500_000); assert.equal(result.mimeType, 'image/jpeg');
+        assert.equal(payload[key].length, 5_000_000);
+        await assert.rejects(prepareRequestPayload(payload, { resizeImage: async () => 'B'.repeat(5_000_000) }), isPayloadTooLarge);
+        const controller = new AbortController();
+        await assert.rejects(prepareRequestPayload(payload, { signal: controller.signal, resizeImage: async () => { controller.abort(); return 'B'; } }), error => error.name === 'AbortError');
+    }
+});
+
+test('rejected attachment batches can be restored without duplicate files', async () => {
+    const attachments = await import('../app/attachments.js');
+    attachments.clearPendingAttachments();
+    const items = [{ id: 'retry-image', name: 'diagram.png', base64: 'source-pixels' }];
+    attachments.restorePendingAttachments(items); attachments.restorePendingAttachments(items);
+    assert.equal(attachments.getPendingAttachments().length, 1);
+    assert.equal(attachments.takePendingForSend()[0], items[0]);
+    assert.equal(attachments.getPendingAttachments().length, 0);
+});
 
 test('restored attachment sizes remain synchronous before lazy document parsers load', () => {
     const attachments = lazyModule(() => { throw new Error('Formatting must not import document parsers'); }, { formatBytes });

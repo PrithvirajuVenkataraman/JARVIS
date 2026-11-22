@@ -4716,7 +4716,7 @@ async function streamChatCompletion(payload, options = {}) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal,
-        body: JSON.stringify({
+        body: window.JarvisApi.serializeRequestPayload({
             ...payload,
             webMode: payload?.webMode || (typeof getWebSearchMode === 'function' ? getWebSearchMode() : 'auto'),
             isWebForced: Boolean(payload?.isWebForced ?? ((payload?.webMode || (typeof getWebSearchMode === 'function' ? getWebSearchMode() : 'auto')) === 'force')),
@@ -4730,9 +4730,9 @@ async function streamChatCompletion(payload, options = {}) {
     if (!contentType.includes('text/event-stream')) {
         const data = await parseJsonResponseSafely(response);
         if (!response.ok) {
-            const err = new Error(String(data?.error?.message || data?.response || 'AI request failed.'));
+            const err = new Error(response.status === 413 ? window.JarvisApi.PAYLOAD_TOO_LARGE_MESSAGE : String(data?.error?.message || data?.response || 'AI request failed.'));
             err.status = response.status;
-            err.code = data?.error?.code || (response.status === 503 ? 'service_unavailable' : 'request_failed');
+            err.code = response.status === 413 ? 'request_too_large' : (data?.error?.code || (response.status === 503 ? 'service_unavailable' : 'request_failed'));
             throw err;
         }
         const text = String(data?.response || data?.text || data?.answer || '').trim();
@@ -5551,11 +5551,6 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
                     ? requestOptions.images
                     : (Array.isArray(requestOptions?.grounding?.images) && requestOptions.grounding.images.length > 0 ? requestOptions.grounding.images : undefined);
                 if (direct && Array.isArray(direct)) {
-                    for (const img of direct) {
-                        if (img && typeof window.JarvisAttachments?.recordActiveSessionImage === 'function') {
-                            window.JarvisAttachments.recordActiveSessionImage(img);
-                        }
-                    }
                     return direct;
                 }
                 const activeSession = window.JarvisAttachments?.getActiveSessionImages?.();
@@ -5564,6 +5559,8 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
             routingMessage: String(requestOptions?.routingMessage || requestOptions?.displayUserMessage || '').trim() || undefined,
             displayUserMessage: String(requestOptions?.displayUserMessage || '').trim() || undefined
         };
+        requestPayload = await window.JarvisApi.prepareRequestPayload(requestPayload, { signal: controller.signal });
+        for (const image of requestPayload.images || []) window.JarvisAttachments?.recordActiveSessionImage?.(image);
         latencyTrace.apiStartedAt = performance.now();
         logLatencyTrace('chat_api_start', {
             requestId: latencyTrace.requestId,
@@ -5723,7 +5720,7 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
         window.__jarvisServiceUnavailable = false;
         return data;
     } catch (error) {
-        if (isAbortError(error)) {
+        if (controller.signal.aborted || isAbortError(error)) {
             return {
                 response: '',
                 intent: 'aborted',
@@ -5737,6 +5734,16 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
 
         const targetMessageId = String(error?.assistantMessageId || data?.assistantMessageId || '').trim();
         const targetRow = targetMessageId ? document.getElementById(targetMessageId) : null;
+        const payloadFailure = () => {
+            const notice = window.JarvisApi.PAYLOAD_TOO_LARGE_MESSAGE;
+            if (targetRow) {
+                targetRow.__fallbackActive = true;
+                targetRow.__fallbackCompleted = true;
+                updateStreamingAssistantMessage(targetMessageId, notice, { userMessage: normalizedUserMessage, streaming: false, provider: 'system' });
+            }
+            return { response: notice, intent: 'request_too_large', code: 'request_too_large', status: 413, retryable: false, assistantMessageId: targetMessageId };
+        };
+        if (window.JarvisApi.isPayloadTooLarge(error)) return payloadFailure();
 
         const isPermanentProviderFailure = (err) =>
             err?.code === 'missing_credentials' ||
@@ -5802,6 +5809,7 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
                     };
                 }
             } catch (directErr) {
+                if (window.JarvisApi.isPayloadTooLarge(directErr)) return payloadFailure();
                 console.warn('[askGeminiAI] Direct non-streaming API fallback failed:', directErr?.message || directErr);
             }
         }
@@ -5868,8 +5876,8 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
             // Enterprise Vision Fallback: If chat-groq fails, directly invoke /api/vision with attached image
             if (!isAbortError(error)) {
                 try {
-                    const rawImages = Array.isArray(requestOptions?.images) && requestOptions.images.length > 0
-                        ? requestOptions.images
+                    const rawImages = Array.isArray(requestPayload?.images) && requestPayload.images.length > 0
+                        ? requestPayload.images
                         : (Array.isArray(requestOptions?.grounding?.images) ? requestOptions.grounding.images : []);
                     const primaryImg = rawImages.find(img => img && (img.base64 || img.data || img.url));
                     if (primaryImg) {
@@ -5924,6 +5932,7 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
                         }
                     }
                 } catch (visionFallbackError) {
+                    if (window.JarvisApi.isPayloadTooLarge(visionFallbackError)) return payloadFailure();
                     console.warn('[askGeminiAI] Cascade to /api/vision fallback also failed:', visionFallbackError?.message || visionFallbackError);
                 }
             }
@@ -14905,6 +14914,7 @@ async function sendTextInput(submission = {}) {
                 lastSubmissionTimestamp = now;
 
                 const outgoingText = text;
+                let preserveRejectedDraft = false;
                 const attachmentsForSend = window.JarvisAttachments?.takePendingForSend?.() || [];
                 const attachmentMeta = window.JarvisAttachments?.buildChatAttachmentMeta?.(attachmentsForSend) ||
                     attachmentsForSend.map(item => ({
@@ -15221,6 +15231,15 @@ async function sendTextInput(submission = {}) {
                         });
                         if (result?.aborted) return;
                         let answer = String(result?.response || result?.text || '').trim();
+                        if (result?.code === 'request_too_large') {
+                            preserveRejectedDraft = true;
+                            window.JarvisAttachments?.restorePendingAttachments?.(attachmentsForSend);
+                            refreshComposerAttachmentTray();
+                            if (!input.value.trim()) input.value = outgoingText;
+                            autoResizeComposerTextarea();
+                            toggleSendButton();
+                            input.dispatchEvent(new Event('input', { bubbles: true }));
+                        }
                         if (answerAsksForMissingAttachment(answer)) {
                             const hasValidImageData = hasImageAttachments && Array.isArray(attachmentContext?.grounding?.images) &&
                                 attachmentContext.grounding.images.some(img => typeof img?.base64 === 'string' && img.base64.trim().length > 50);
@@ -15384,8 +15403,10 @@ Answer the user directly and conversationally based on the quoted context.`;
                             : null,
                         source: inputSource
                     });
-                    clearSubmittedPromptBox(outgoingText, normalizedOutgoingText);
-                    window.JarvisSessionRecovery?.clearComposerDraft?.();
+                    if (!preserveRejectedDraft) {
+                        clearSubmittedPromptBox(outgoingText, normalizedOutgoingText);
+                        window.JarvisSessionRecovery?.clearComposerDraft?.();
+                    }
                     restoreResponseRenderContext(previousRenderContext);
                     if (typeof resetCapabilityPillsUi === 'function') {
                         resetCapabilityPillsUi();

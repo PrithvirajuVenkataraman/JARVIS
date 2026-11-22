@@ -45,6 +45,7 @@ Release checks require a passing `check`, production build, browser suite, and r
 - `index.html`: application markup. `app/main.js`: frontend entrypoint and module lifecycle.
 - `app/legacy-runtime.js`: remaining classic application compatibility code. New work belongs in the extracted modules; this file is not a claim that the entire application has been rewritten.
 - `app/api-client.js`: JSON requests, merged headers, cancellation, timeout, and response validation.
+- `app/request-payload.js`: UTF-8 request-size budgeting and bounded image resizing before upload; oversized messages stop without fallback retries.
 - `app/markup-security.js`: locally bundled DOMPurify, math-compatible sanitization, and delegated content actions.
 - `app/markdown-renderer.js`, `app/math-renderer.js`, `app/stream-renderer.js`: Markdown, KaTeX, bounded expression caching, and stable DOM updates during streaming.
 - `app/composer-controller.js`, `app/dialog-controller.js`: accessible request announcements, composition handling, focus containment, and restoration.

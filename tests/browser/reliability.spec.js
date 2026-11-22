@@ -49,6 +49,65 @@ test('sanitization strips executable attributes while math and trusted actions w
     await expect(page.locator('#action-test [data-assistant-action="code-wrap"]')).toHaveAttribute('aria-pressed', 'true');
 });
 
+test.describe('attachment request transport', () => {
+// Keep API interception deterministic; worker/offline behavior has separate coverage.
+test.use({ serviceWorkers: 'block' });
+
+test('large image requests are resized before transport without losing images or instructions', async ({ page }) => {
+    const requests = [];
+    await page.route('**/api/chat-groq', async route => {
+        if (route.request().method() === 'POST') requests.push(route.request().postDataJSON());
+        await route.continue();
+    });
+    const result = await page.evaluate(async () => {
+        const canvas = document.createElement('canvas'); canvas.width = canvas.height = 1100;
+        const context = canvas.getContext('2d'), pixels = context.createImageData(1100, 1100);
+        let seed = 17;
+        for (let index = 0; index < pixels.data.length; index += 4) {
+            for (let channel = 0; channel < 3; channel++) { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; pixels.data[index + channel] = seed >>> 24; }
+            pixels.data[index + 3] = 255;
+        }
+        context.putImageData(pixels, 0, 0);
+        const base64 = canvas.toDataURL('image/png').split(',')[1];
+        const images = [1, 2, 3].map(number => ({ name: `diagram-${number}.png`, mimeType: 'image/png', base64 }));
+        window.customSystemPrompt = 'Use concise steps and preserve mathematical symbols.';
+        const reply = await window.askGeminiAI('Explain the attached diagrams.', { images, stream: true });
+        return { originalLength: base64.length * images.length, answer: reply.response };
+    });
+    expect(result.originalLength).toBeGreaterThan(4_000_000);
+    expect(result.answer).toContain('substitution');
+    const request = requests.find(body => body.images?.length === 3);
+    expect(request).toBeTruthy();
+    expect(new TextEncoder().encode(JSON.stringify(request)).length).toBeLessThanOrEqual(4_000_000);
+    expect(request.images.map(image => image.name)).toEqual(['diagram-1.png', 'diagram-2.png', 'diagram-3.png']);
+    expect(request.images.every(image => image.mimeType === 'image/jpeg')).toBe(true);
+    expect(request.preferences.customSystemPrompt).toContain('preserve mathematical symbols');
+});
+
+test('HTTP 413 stops attachment fallbacks and restores the prompt and files', async ({ page }) => {
+    await page.waitForFunction(() => document.querySelector('#web-search-toggle-btn')?.dataset.capabilityUnavailable === 'false');
+    const attempts = [];
+    await page.route('**/api/chat-groq', async route => {
+        const request = route.request();
+        if (request.method() !== 'POST') return route.continue();
+        const body = request.postDataJSON();
+        if (body.images?.length) attempts.push('chat');
+        await route.fulfill({ status: 413, contentType: 'text/plain', body: 'FUNCTION_PAYLOAD_TOO_LARGE' });
+    });
+    for (const endpoint of ['vision', 'search']) await page.route(`**/api/${endpoint}`, async route => {
+        attempts.push(endpoint); await route.fulfill({ status: 503, contentType: 'application/json', body: '{"success":false}' });
+    });
+    await page.locator('#composer-photo-library-input').setInputFiles({ name: 'formula.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64') });
+    await page.waitForFunction(() => window.JarvisAttachments.getPendingAttachments().length === 1);
+    const input = page.locator('#text-input'); await input.fill('Explain this formula.'); await input.press('Enter');
+    await expect(page.locator('.assistant-message-text').last()).toContainText('This message is too large to send.');
+    await expect(page.locator('#send-message-btn')).not.toHaveClass(/composer-send-stop/);
+    await expect(input).toHaveValue('Explain this formula.');
+    expect(await page.evaluate(() => window.JarvisAttachments.getPendingAttachments().map(file => file.name))).toEqual(['formula.png']);
+    expect(attempts).toEqual(['chat']);
+});
+});
+
 test('IME composition does not submit and stop responds immediately', async ({ page }) => {
     const input = page.locator('#text-input');
     await input.fill('Composition fixture');
