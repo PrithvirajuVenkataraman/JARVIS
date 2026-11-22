@@ -13,7 +13,7 @@
  *   node scripts/verify-searx-instances.mjs [--query="canary"] [--timeout=3000] [--output=report.json]
  */
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -177,7 +177,9 @@ async function runVerification() {
         results
     };
 
-    const outPath = join(__dirname, `../app/search/searxng-verification-report-${outputReport.auditDate}.json`);
+    const reportDirectory = join(__dirname, '../scratch/search-verification');
+    mkdirSync(reportDirectory, { recursive: true });
+    const outPath = join(reportDirectory, `searxng-verification-report-${outputReport.auditDate}.json`);
     writeFileSync(outPath, JSON.stringify(outputReport, null, 2), 'utf-8');
     console.log(`Full report saved to: ${outPath}`);
 }
