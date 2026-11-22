@@ -498,3 +498,13 @@ When explaining processes, algorithms, physics, orbital mechanics, or multi-step
 - **Continual Recursive Self-Improvement (`app/self-improving-memory.js`)**: Extends closed-loop preference learning with turn-scoped Bayesian credit assignment (`alpha`/`beta` utility scoring & auto-demotion), implicit behavioral signal mining (Copy, Export, Save, Regenerate), a semantic **Personal Failure Ledger**, periodic **Sleep/Consolidation** rule compression & 14-day temporal decay, **Versioned Policy Snapshots + Auto-Rollback**, immutable safety invariants, and UCB1 per-intent model bandit telemetry. See [`docs/memory.md`](./docs/memory.md).
 
 
+
+## Implemented reliability boundaries (November 2026)
+
+The frontend builds through Vite; runtime Tailwind CDN compilation was removed. `app/main.js` loads the compatibility runtime and owns extracted request, markup-security, streaming, persistence, capability, performance, and dialog modules. Settings, camera initialization, image generation, attachments, and document parsers load on demand. The compatibility runtime remains a migration boundary rather than a fully modular rewrite.
+
+Generated answer replay is disabled. Chat, search, and vision share a request-wide deadline and bounded model-attempt budget. Optional entity enrichment cannot hold chat completion open. Vision translation performs OCR and translation in one multimodal generation, leaving room for provider failover.
+
+Production offline manifests derive from build contents. Failed precaching rejects installation without replacing the active worker. Previous-cache retention supports already-open tabs. Browser regression tests run against the production build in Chromium, Firefox, and WebKit; real-device software keyboard validation remains separate.
+
+Provider availability and persisted BYOK readiness are explicit diagnostics capabilities. Persistent saved credentials require matching server RSA keys; no process-local key generation or plaintext browser-storage fallback is used. Image generation is a server-backed optional feature, not local diffusion.

@@ -1,0 +1,36 @@
+name: Quality
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.4'
+      - name: Install
+        run: npm ci
+      - name: Run checks
+        run: npm run check
+      - name: Production build
+        run: npm run build
+      - name: Install browser engines
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: '0'
+        run: npx playwright install --with-deps chromium firefox webkit
+      - name: Browser regression tests
+        run: npm run test:browser
+      - name: Upload browser evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-results
+          path: scratch/browser-results
+

@@ -1,3 +1,4 @@
+import { fetchWithLifecycle as fetch } from './request-lifecycle.js';
 /**
  * @file api/_lib/visual-answer-engine.js
  * @description Universal Entity Recognition, Media Retrieval, and Notable Works Discovery Engine.

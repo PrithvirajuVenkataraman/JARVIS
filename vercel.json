@@ -4,7 +4,7 @@
       "maxDuration": 60,
       "supportsCancellation": true,
       "excludeFiles": "{.github,docs,tests,tools,scripts,scratch,katex-fonts,dist,build}/**"
-    } 
+    }
   },
   "headers": [
     {
@@ -76,7 +76,7 @@
     },
     {
       "source": "/api/verify",
-      "destination": "/api/diagnostics?__route=verify" 
+      "destination": "/api/diagnostics?__route=verify"
     },
     {
       "source": "/",

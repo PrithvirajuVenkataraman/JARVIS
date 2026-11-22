@@ -1,0 +1,38 @@
+# Install dependencies and generate dist/ on Vercel from the lockfile.
+.git/
+node_modules/
+dist/
+build/
+generated-tailwind.css
+.vercel/
+
+# Never upload local secrets or agent state.
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+.agents/
+.codex/
+.claude/
+.aws/
+
+# Keep these in GitHub for development, not in deployment uploads.
+.github/
+docs/
+tests/
+tools/
+scripts/
+*.md
+playwright.config.js
+eslint.config.js
+jsconfig.check.json
+scratch/
+coverage/
+playwright-report/
+test-results/
+.cache/
+*.log
+*.tsbuildinfo
+app/search/searxng-verification-report-*.json

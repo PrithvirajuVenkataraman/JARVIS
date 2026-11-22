@@ -1,3 +1,4 @@
+import { unsealSecret } from './_lib/security.js';
 export const config = { maxDuration: 60 };
 
 const DEFAULT_IMAGE_NEGATIVE_PROMPT = 'text,watermark,words,letters,signature,typography,lowres,blurry';
@@ -14,7 +15,7 @@ function getEnvGeminiApiKey() {
 
 function resolveCandidateApiKeys(customApiKey = '', req = null, params = {}) {
     const keys = [];
-    const clientKey = String(
+    const rawClientKey = String(
         customApiKey ||
         params?.apiKey ||
         params?.gemini_api_key ||
@@ -23,6 +24,8 @@ function resolveCandidateApiKeys(customApiKey = '', req = null, params = {}) {
         req?.headers?.['x-goog-api-key'] ||
         ''
     ).trim();
+    const clientKey = unsealSecret(rawClientKey);
+    if (rawClientKey.startsWith('jarvis_sealed_v1:') && !clientKey) return [];
     if (clientKey) keys.push(clientKey);
 
     const envKey = getEnvGeminiApiKey();
@@ -479,6 +482,9 @@ async function generateAiHordeImageBuffer(prompt, {
 }
 
 export async function imageProxyHandler(req, res) {
+    if (process.env.JARVIS_IMAGE_FREE_TIER_ENABLED !== 'true') {
+        return res.status(503).json({success:false,error:{code:'free_image_backend_unavailable',message:'Image generation is unavailable on this deployment.'}});
+    }
     if (req.method === 'OPTIONS') {
         if (typeof res.setHeader === 'function') {
             res.setHeader('Access-Control-Allow-Origin', '*');

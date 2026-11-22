@@ -1,3 +1,4 @@
+import { withRequestLifecycle, fetchWithLifecycle as fetch } from './_lib/request-lifecycle.js';
 export const config = { maxDuration: 60 };
 import { applyApiSecurity, unsealSecret } from './_lib/security.js';
 import { classifyImageLocally } from './_lib/local-vision-classifier.js';
@@ -55,7 +56,8 @@ function normalizeVisionMimeType(raw, base64 = '') {
 const MAX_IMAGE_BASE64_CHARS = 8 * 1024 * 1024;
 const PROVIDER_TIMEOUT_MS = 8_000;
 
-export default async function handler(req, res) {
+export default withRequestLifecycle(handler);
+async function handler(req, res) {
     const guard = applyApiSecurity(req, res, {
         methods: ['POST'],
         routeKey: 'vision',
@@ -67,6 +69,7 @@ export default async function handler(req, res) {
 
     if (req.body?.task === 'health_check') {
         const providers = getVisionProviders(req);
+    if (providers.credentialError) return sendVisionError(res, 400, 'byok_reconfiguration_required', 'Saved credentials could not be decrypted. Please save your API key again.');
         return res.status(200).json({
             success: true,
             configured: !!(providers.groqApiKey || providers.geminiApiKey),
@@ -339,8 +342,10 @@ function getVisionProviders(req = null) {
         ''
     ).trim();
     const customGemini = unsealSecret(rawGemini);
+    const credentialError = (rawGroq.startsWith('jarvis_sealed_v1:') && !customGroq) || (rawGemini.startsWith('jarvis_sealed_v1:') && !customGemini);
 
     return {
+        credentialError,
         groqApiKey: customGroq || process.env.GROQ_API_KEY || process.env.GROQ_KEY || '',
         geminiApiKey: customGemini || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '',
         groqVisionModel: String(process.env.GROQ_VISION_MODEL || '').trim(),
@@ -387,7 +392,7 @@ async function callGroqVisionText({ apiKey, configuredModel, systemPrompt, mimeT
     ]);
     const dataUrl = `data:${mimeType || 'image/jpeg'};base64,${imageBase64}`;
 
-    for (const model of candidates) {
+    for (const model of candidates.slice(0, 1)) {
         try {
             const response = await fetchWithTimeout('https://api.groq.com/openai/v1/chat/completions', {
                 method: 'POST',
@@ -430,8 +435,8 @@ async function callGeminiVision({ apiKey, configuredModel = '', systemPrompt, mi
         ...GEMINI_MODEL_FALLBACKS
     ]);
 
-    for (const apiVersion of GEMINI_API_VERSIONS) {
-        for (const model of modelFallbacks) {
+    for (const apiVersion of GEMINI_API_VERSIONS.slice(0, 1)) {
+        for (const model of modelFallbacks.slice(0, 1)) {
             if (apiVersion === 'v1' && /^gemini-(?:4|3\.|2\.5)/i.test(model)) continue;
             try {
                 const baseGenConfig = {
@@ -538,7 +543,7 @@ async function callGroqText({ apiKey, configuredModel, systemPrompt, userPrompt,
         ...GROQ_TEXT_MODEL_FALLBACKS
     ].filter(Boolean);
 
-    for (const model of candidates) {
+    for (const model of candidates.slice(0, 1)) {
         try {
             const response = await fetchWithTimeout('https://api.groq.com/openai/v1/chat/completions', {
                 method: 'POST',
@@ -572,8 +577,8 @@ async function callGeminiText({ apiKey, configuredModel = '', systemPrompt, user
         ...GEMINI_MODEL_FALLBACKS
     ].filter(Boolean);
 
-    for (const apiVersion of GEMINI_API_VERSIONS) {
-        for (const model of modelFallbacks) {
+    for (const apiVersion of GEMINI_API_VERSIONS.slice(0, 1)) {
+        for (const model of modelFallbacks.slice(0, 1)) {
             try {
                 const response = await fetchWithTimeout(
                     `https://generativelanguage.googleapis.com/${apiVersion}/models/${model}:generateContent?key=${apiKey}`,
@@ -939,140 +944,27 @@ async function runMathOcrSolvePipeline({ providers, mimeType, imageBase64, userP
 }
 
 async function runTranslateToEnglishPipeline({ providers, mimeType, imageBase64, userPrompt }) {
-    const extractionPrompt = [
-        'Extract text from this image with high fidelity.',
-        'The source language may be in any natural language, script, or multilingual text.',
-        'Return strict JSON only:',
-        '{',
-        '  "summary": "short useful summary",',
-        '  "textDetected": ["snippet 1", "snippet 2"],',
-        '  "fullText": "all readable text in original language and order"',
-        '}',
-        'Rules:',
-        '- Preserve original script and punctuation.',
-        '- Do not translate at this stage.'
-    ].join('\n');
-
-    const ocrRawText = await callVisionText({
-        providers,
-        systemPrompt: extractionPrompt,
-        mimeType,
-        imageBase64
-    });
-    if (!ocrRawText) throw new Error('Translation OCR stage returned empty response');
-
-    const ocrJson = extractJsonFromText(ocrRawText) || {};
-    const sourceText = normalizeMathOcrText(ocrJson);
-    if (!sourceText) {
-        throw new Error('Could not detect readable text for translation');
-    }
-
-    const translatorSystemPrompt = [
-        'You are a precise translation engine.',
-        'Translate all provided text to natural English.',
-        'The source may be in any natural language, script, or multilingual text.',
-        'Keep numbers, units, names, and technical terms intact unless translation is obvious.',
-        'Return strict JSON only:',
-        '{',
-        '  "detectedLanguage": "<best guess language name>",',
-        '  "englishText": "<full English translation>",',
-        '  "notes": ["optional short notes about ambiguity"]',
-        '}',
-        'No markdown, no code fences, no prose outside JSON.'
-    ].join('\n');
-
-    let translationJson = null;
-    let englishText = '';
-    let detectedLanguage = '';
-    let lastTranslationError = null;
-    const maxRetries = 2;
-
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-        try {
-            const retryNote = attempt > 0
-                ? '\nNote: Previous response was invalid, empty, or returned untranslated text. You MUST return valid JSON with a clear, accurate English translation.'
-                : '';
-            const translationText = await callModelText({
-                providers,
-                systemPrompt: translatorSystemPrompt + retryNote,
-                userPrompt: [
-                    `User intent: ${String(userPrompt || 'Translate this image text to English.').trim()}`,
-                    'Source text:',
-                    sourceText
-                ].join('\n\n'),
-                maxOutputTokens: 2500
-            });
-
-            if (!translationText) {
-                throw new Error('Translation model returned empty text');
-            }
-
-            const parsed = extractJsonFromText(translationText) || safeParseJson(translationText);
-            if (!parsed || typeof parsed !== 'object') {
-                throw new Error('Translation stage returned invalid JSON');
-            }
-
-            const candidateEnglish = String(parsed.englishText || '').trim();
-            if (!candidateEnglish) {
-                throw new Error('Translation stage returned empty English text');
-            }
-
-            const candidateLang = String(parsed.detectedLanguage || '').trim();
-
-            // Untranslated validation: never silently treat untranslated foreign text as an English translation
-            const normSource = sourceText.toLowerCase().replace(/[^a-z0-9]/g, '');
-            const normTarget = candidateEnglish.toLowerCase().replace(/[^a-z0-9]/g, '');
-            const isNonEnglishLang = candidateLang && !/^english$/i.test(candidateLang);
-            const isIdentical = normSource.length > 3 && normSource === normTarget;
-            const hasNonLatinSource = /[^\u0000-\u007F]/.test(sourceText);
-            const hasNonLatinTarget = /[\u0400-\u04FF\u4E00-\u9FFF\u3040-\u309F\u30A0-\u30FF\u0600-\u06FF\u0900-\u097F\u0B80-\u0BFF\u0C00-\u0C7F\u0D00-\u0D7F]/.test(candidateEnglish);
-
-            if ((isNonEnglishLang && isIdentical) || (hasNonLatinSource && hasNonLatinTarget)) {
-                throw new Error(`Translation model returned untranslated text for language: ${candidateLang || 'unknown'}`);
-            }
-
-            translationJson = parsed;
-            englishText = candidateEnglish;
-            detectedLanguage = candidateLang;
-            break;
-        } catch (err) {
-            lastTranslationError = err;
-            if (attempt < maxRetries) {
-                await new Promise(r => setTimeout(r, 200 * (attempt + 1)));
-            }
-        }
-    }
-
-    const languageLine = detectedLanguage ? `Language: ${detectedLanguage}` : 'Language: Unknown';
-
-    if (!englishText) {
-        // Clear fallback for persistent translation failures
-        return {
-            response: `Original text:\n${sourceText}\n\nTranslation unavailable: The text could not be translated to English at this time.\n\n${languageLine}`,
-            details: {
-                pipeline: 'ocr-translate',
-                fullText: sourceText,
-                textDetected: Array.isArray(ocrJson?.textDetected) ? ocrJson.textDetected : [sourceText],
-                ocr: ocrJson,
-                translation: {
-                    detectedLanguage: detectedLanguage || 'Unknown',
-                    englishText: '',
-                    untranslated: true,
-                    error: lastTranslationError?.message || 'Translation unavailable after bounded retries'
-                }
-            }
-        };
-    }
-
+    // OCR and translation share one multimodal generation, leaving an attempt for failover.
+    const raw = await callVisionText({ providers, mimeType, imageBase64, systemPrompt: [
+        'Read all visible text and translate it faithfully into English in one pass.',
+        'Preserve the original script, names, punctuation, numbers, and units.',
+        'Return only JSON: {"fullText":"original source text","textDetected":["source snippets"],"translation":{"detectedLanguage":"language","englishText":"complete English translation","notes":[]}}.',
+        'If a word is unreadable, mark it as unclear instead of inventing it.',
+        'User intent: ' + String(userPrompt || '')
+    ].join('\n') });
+    const ocrJson = extractJsonFromText(raw) || {};
+    const sourceText = String(ocrJson.fullText || '').trim();
+    const translationJson = ocrJson.translation || {};
+    const englishText = String(translationJson.englishText || '').trim();
+    const language = String(translationJson.detectedLanguage || 'Unknown').trim();
+    if (!sourceText) throw new Error('The image text could not be read reliably. Please retry with a clearer image.');
+    if (!englishText || isUntranslatedSource(sourceText, englishText, language)) return {
+        response: 'Original text:\n' + sourceText + '\n\nTranslation unavailable: The text could not be translated to English at this time.',
+        details: {pipeline:'ocr-translate',fullText:sourceText,textDetected:ocrJson.textDetected || [sourceText],translation:{detectedLanguage:language,englishText:'',untranslated:true}}
+    };
     return {
-        response: `Original text:\n${sourceText}\n\nEnglish translation:\n${englishText}\n\n${languageLine}`,
-        details: {
-            pipeline: 'ocr-translate',
-            fullText: sourceText,
-            textDetected: Array.isArray(ocrJson?.textDetected) ? ocrJson.textDetected : [sourceText],
-            ocr: ocrJson,
-            translation: translationJson
-        }
+        response: 'Original text:\n' + sourceText + '\n\nEnglish translation:\n' + englishText + '\n\nLanguage: ' + language,
+        details: {pipeline:'ocr-translate', fullText:sourceText, textDetected:ocrJson.textDetected || [sourceText], ocr:ocrJson, translation:translationJson}
     };
 }
 
@@ -1566,3 +1458,9 @@ export const __test = {
     isSceneVisionTask,
     getVisionProviders
 };
+
+export function isUntranslatedSource(source, translated, language = '') {
+    const same = String(source).normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '') === String(translated).normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+    const foreignScript = /[\u0400-\u04ff\u4e00-\u9fff\u0600-\u06ff\u0900-\u0dff\u3040-\u30ff]/.test(String(source));
+    return same && (!/^english$/i.test(language) || foreignScript);
+}

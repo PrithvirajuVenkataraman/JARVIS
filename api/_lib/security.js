@@ -233,52 +233,30 @@ function sendSecurityError(res, status, code, message) {
 const SEALED_SECRET_PREFIX = 'jarvis_sealed_v1:';
 
 function getSealedSecretsKeyPair() {
-    if (globalThis.__jarvisSealedSecretsKeyPair) {
-        return globalThis.__jarvisSealedSecretsKeyPair;
-    }
-
-    const envPrivate = String(process.env.JARVIS_BYOK_PRIVATE_KEY || '').trim();
-    const envPublic = String(process.env.JARVIS_BYOK_PUBLIC_KEY || '').trim();
-
-    if (envPrivate && envPublic) {
-        try {
-            const jwk = crypto.createPublicKey(envPublic).export({ format: 'jwk' });
-            jwk.alg = 'RSA-OAEP-256';
-            jwk.key_ops = ['encrypt'];
-            const pair = {
-                publicKeyPem: envPublic,
-                privateKeyPem: envPrivate,
-                jwk,
-                keyId: 'jarvis-env-key'
-            };
-            globalThis.__jarvisSealedSecretsKeyPair = pair;
-            return pair;
-        } catch (_) {}
-    }
-
-    const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', {
-        modulusLength: 2048,
-        publicKeyEncoding: { type: 'spki', format: 'pem' },
-        privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
-    });
-
-    const jwk = crypto.createPublicKey(publicKey).export({ format: 'jwk' });
-    jwk.alg = 'RSA-OAEP-256';
-    jwk.key_ops = ['encrypt'];
-
-    const pair = {
-        publicKeyPem: publicKey,
-        privateKeyPem: privateKey,
-        jwk,
-        keyId: 'jarvis-sealed-v1'
-    };
-
-    globalThis.__jarvisSealedSecretsKeyPair = pair;
-    return pair;
+    const privateKeyPem = String(process.env.JARVIS_BYOK_PRIVATE_KEY || '').trim();
+    const publicKeyPem = String(process.env.JARVIS_BYOK_PUBLIC_KEY || '').trim();
+    if (!privateKeyPem || !publicKeyPem) return null;
+    const fingerprint = crypto.createHash('sha256').update(publicKeyPem).update(privateKeyPem).digest('hex');
+    if (globalThis.__jarvisSealedSecretsKeyPair?.fingerprint === fingerprint) return globalThis.__jarvisSealedSecretsKeyPair;
+    try {
+        const publicKey = crypto.createPublicKey(publicKeyPem);
+        const privateKey = crypto.createPrivateKey(privateKeyPem);
+        const actual = crypto.createPublicKey(privateKey).export({type:'spki',format:'der'});
+        const expected = publicKey.export({type:'spki',format:'der'});
+        if (!actual.equals(expected) || publicKey.asymmetricKeyType !== 'rsa' || publicKey.asymmetricKeyDetails.modulusLength < 2048) return null;
+        const jwk = publicKey.export({ format: 'jwk' });
+        jwk.alg = 'RSA-OAEP-256'; jwk.key_ops = ['encrypt'];
+        const pair = {privateKeyPem, publicKeyPem, jwk, fingerprint, keyId: crypto.createHash('sha256').update(expected).digest('hex').slice(0,16)};
+        globalThis.__jarvisSealedSecretsKeyPair = pair;
+        return pair;
+    } catch { return null; }
 }
+
+export function isPersistentByokConfigured() { return Boolean(getSealedSecretsKeyPair()); }
 
 export function getSealedSecretsPublicKey() {
     const pair = getSealedSecretsKeyPair();
+    if (!pair) return null;
     return {
         keyId: pair.keyId,
         jwk: pair.jwk,
@@ -334,7 +312,8 @@ export function sealSecret(rawSecret, optionalPublicKeyPem = null) {
     if (!cleanSecret) return '';
 
     const pair = getSealedSecretsKeyPair();
-    const pubKey = optionalPublicKeyPem || pair.publicKeyPem;
+    const pubKey = optionalPublicKeyPem || pair?.publicKeyPem;
+    if (!pubKey) throw new Error('Saved BYOK requires a persistent RSA keypair.');
 
     const aesKey = crypto.randomBytes(32);
     const iv = crypto.randomBytes(12);

@@ -1,3 +1,4 @@
+import { fetchWithLifecycle as fetch } from './request-lifecycle.js';
 import { cleanSnippetText } from './snippet-sanitizer.js';
 import { isPublicWebUrl } from './public-web-url.js';
 import { comparisonParts, normalizeResearchAliases } from './research-evidence.js';

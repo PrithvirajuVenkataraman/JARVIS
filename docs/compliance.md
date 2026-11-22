@@ -208,7 +208,7 @@ Four configuration flags allow instantaneous control and rollback:
 
 ## 9. Unified Content Safety & Harm Guardrails (`api/_lib/safety-guard.js`)
 
-JARVIS enforces a single shared content-safety policy across **Normal LLM Chat** (`api/chat-groq.js`), **Live Web Search & Research** (`api/search.js`, `api/_lib/research-engine.js`), **Vision** (`api/vision.js`), and **Image Generation tags** (`:::image[...]`): 
+JARVIS enforces a single shared content-safety policy across **Normal LLM Chat** (`api/chat-groq.js`), **Live Web Search & Research** (`api/search.js`, `api/_lib/research-engine.js`), **Vision** (`api/vision.js`), and **Image Generation tags** (`:::image[...]`):
 
 ### 9.1 Policy Boundary ("Open-by-Default, Hard-Stop Only on Harm")
 - **Open & Helpful by Default**: Legitimate science, clinical/medical QA (with educational doctor disclaimer), history, law, politics, creative writing, mythology, astrology, and academic analysis are answered directly without unnecessary refusals.

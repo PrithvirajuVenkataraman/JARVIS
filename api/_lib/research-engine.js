@@ -1,3 +1,4 @@
+import { fetchWithLifecycle as fetch } from './request-lifecycle.js';
 import { createHash } from 'node:crypto';
 import { RESEARCH_LIMITS, researchTimeoutSignal } from '../../app/search/research-contract.mjs';
 import { normalizeEvidence, evidenceText, formatResearchEvidence, researchTerms, canonicalResearchUrl, assessSourceRelevance, rankResearchEvidence, matchesProtectedEntities, buildResearchRequirements, validateResearchAnswer, mergeResearchValidation } from './research-evidence.js';

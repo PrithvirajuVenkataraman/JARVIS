@@ -1,3 +1,4 @@
+import { withRequestLifecycle, fetchWithLifecycle as fetch } from './_lib/request-lifecycle.js';
 export const config = { maxDuration: 60 };
 
 import { createHash } from 'node:crypto';
@@ -644,7 +645,8 @@ function applySearchDlpGuard(res, queryText) {
     return { blocked: false, text: result.sanitizedText };
 }
 
-export default async function handler(req, res) {
+export default withRequestLifecycle(handler);
+async function handler(req, res) {
     const guard = applyApiSecurity(req, res, {
         methods: ['POST'],
         routeKey: 'search',
