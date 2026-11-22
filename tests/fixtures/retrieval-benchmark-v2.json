@@ -1,0 +1,786 @@
+[
+  {
+    "id": "claim-01",
+    "query": "Three persons in the world can travel without the passport.",
+    "category": "declarative_claim",
+    "split": "tuning",
+    "claim": {
+      "isClaim": true,
+      "expectedVerdict": "supported",
+      "claimCheckQuery": "can three people travel without passport is this true"
+    },
+    "goldEntities": ["King Charles", "Naruhito", "Masako"],
+    "rubric": {
+      "mustMention": ["British monarch", "Emperor", "Empress"],
+      "verdictRequirement": "Identifies the British monarch and the Japanese Emperor and Empress as passport exempt."
+    }
+  },
+  {
+    "id": "claim-02",
+    "query": "Humans use only 10 percent of their brain capacity.",
+    "category": "declarative_claim",
+    "split": "tuning",
+    "claim": {
+      "isClaim": true,
+      "expectedVerdict": "refuted",
+      "claimCheckQuery": "do humans only use 10 percent of their brain myth fact"
+    },
+    "goldEntities": ["neurology", "neuroscience", "myth"],
+    "rubric": {
+      "mustMention": ["myth", "misconception", "fMRI", "brain"],
+      "verdictRequirement": "States that the 10 percent claim is a widely debunked neurological myth."
+    }
+  },
+  {
+    "id": "claim-03",
+    "query": "The Great Wall of China is visible to the naked human eye from low Earth orbit.",
+    "category": "declarative_claim",
+    "split": "held_out",
+    "claim": {
+      "isClaim": true,
+      "expectedVerdict": "refuted",
+      "claimCheckQuery": "is Great Wall of China visible from space naked eye NASA"
+    },
+    "goldEntities": ["NASA", "astronauts", "low Earth orbit"],
+    "rubric": {
+      "mustMention": ["NASA", "not visible", "naked eye"],
+      "verdictRequirement": "Confirms that astronauts and NASA have verified the wall is not visible without optical aid."
+    }
+  },
+  {
+    "id": "claim-04",
+    "query": "The Vatican City is the smallest recognized independent state in the world by area and population.",
+    "category": "declarative_claim",
+    "split": "tuning",
+    "claim": {
+      "isClaim": true,
+      "expectedVerdict": "supported",
+      "claimCheckQuery": "is Vatican City smallest independent state in world"
+    },
+    "goldEntities": ["Vatican City", "Rome", "Holy See", "0.49"],
+    "rubric": {
+      "mustMention": ["Vatican", "smallest", "area"],
+      "verdictRequirement": "Confirms Vatican City is the smallest sovereign state by both area and population."
+    }
+  },
+  {
+    "id": "claim-05",
+    "query": "Albert Einstein failed his high school mathematics class as a young student.",
+    "category": "declarative_claim",
+    "split": "tuning",
+    "claim": {
+      "isClaim": true,
+      "expectedVerdict": "refuted",
+      "claimCheckQuery": "did Einstein fail math class in school myth fact"
+    },
+    "goldEntities": ["Einstein", "calculus", "myth"],
+    "rubric": {
+      "mustMention": ["false", "myth", "mastered calculus", "high marks"],
+      "verdictRequirement": "Explains that Einstein excelled at mathematics and the failure story arose from a reversed grading scale."
+    }
+  },
+  {
+    "id": "claim-06",
+    "query": "Goldfish have a memory span of only three seconds.",
+    "category": "declarative_claim",
+    "split": "tuning",
+    "claim": {
+      "isClaim": true,
+      "expectedVerdict": "refuted",
+      "claimCheckQuery": "goldfish memory span 3 seconds myth research"
+    },
+    "goldEntities": ["goldfish", "memory", "months"],
+    "rubric": {
+      "mustMention": ["myth", "months", "experiments", "learning"],
+      "verdictRequirement": "States goldfish memory lasts for weeks to months, debunking the 3-second myth."
+    }
+  },
+  {
+    "id": "claim-07",
+    "query": "Bananas share roughly 50 percent of their DNA with human beings.",
+    "category": "declarative_claim",
+    "split": "held_out",
+    "claim": {
+      "isClaim": true,
+      "expectedVerdict": "partially_supported",
+      "claimCheckQuery": "do humans share 50 percent DNA with bananas genetics"
+    },
+    "goldEntities": ["genes", "genome", "homologous", "proteins"],
+    "rubric": {
+      "mustMention": ["genes", "cellular functions", "homologs", "DNA"],
+      "verdictRequirement": "Clarifies that roughly 50% of human genes have counterparts in bananas due to conserved cellular housekeeping."
+    }
+  },
+  {
+    "id": "claim-08",
+    "query": "Bulls become enraged by the color red during a bullfight.",
+    "category": "declarative_claim",
+    "split": "tuning",
+    "claim": {
+      "isClaim": true,
+      "expectedVerdict": "refuted",
+      "claimCheckQuery": "do bulls hate the color red dichromatic vision"
+    },
+    "goldEntities": ["color blind", "movement", "cape", "muleta"],
+    "rubric": {
+      "mustMention": ["movement", "dichromatic", "colorblind", "cape"],
+      "verdictRequirement": "Explains bulls are red-blind and react to the waving motion of the matador's cape."
+    }
+  },
+  {
+    "id": "claim-09",
+    "query": "Mount Everest is the highest mountain on Earth measured from base to peak.",
+    "category": "declarative_claim",
+    "split": "tuning",
+    "claim": {
+      "isClaim": true,
+      "expectedVerdict": "partially_supported",
+      "claimCheckQuery": "highest mountain base to peak Mauna Kea Everest"
+    },
+    "goldEntities": ["Mauna Kea", "sea level", "Hawaii", "Everest"],
+    "rubric": {
+      "mustMention": ["sea level", "Mauna Kea", "base to peak"],
+      "verdictRequirement": "Distinguishes Everest (highest altitude above sea level) from Mauna Kea (tallest base-to-peak)."
+    }
+  },
+  {
+    "id": "claim-10",
+    "query": "Glass is a slow flowing liquid rather than a true solid.",
+    "category": "declarative_claim",
+    "split": "tuning",
+    "claim": {
+      "isClaim": true,
+      "expectedVerdict": "refuted",
+      "claimCheckQuery": "is glass a slow moving liquid or amorphous solid"
+    },
+    "goldEntities": ["amorphous solid", "viscosity", "cathedral glass"],
+    "rubric": {
+      "mustMention": ["amorphous solid", "myth", "medieval glass manufacturing"],
+      "verdictRequirement": "Clarifies that glass is an amorphous solid that does not flow at room temperature."
+    }
+  },
+  {
+    "id": "claim-11",
+    "query": "Lightning never strikes the same place twice.",
+    "category": "declarative_claim",
+    "split": "held_out",
+    "claim": {
+      "isClaim": true,
+      "expectedVerdict": "refuted",
+      "claimCheckQuery": "does lightning strike the same place twice science"
+    },
+    "goldEntities": ["Empire State Building", "lightning rod", "strikes"],
+    "rubric": {
+      "mustMention": ["myth", "repeatedly", "Empire State"],
+      "verdictRequirement": "Notes that tall structures like the Empire State Building are struck dozens of times annually."
+    }
+  },
+  {
+    "id": "claim-12",
+    "query": "Sharks cannot get cancer.",
+    "category": "declarative_claim",
+    "split": "tuning",
+    "claim": {
+      "isClaim": true,
+      "expectedVerdict": "refuted",
+      "claimCheckQuery": "can sharks get cancer marine biology myth"
+    },
+    "goldEntities": ["cartilage", "tumors", "cancer", "sharks"],
+    "rubric": {
+      "mustMention": ["myth", "tumors documented", "cartilage supplement myth"],
+      "verdictRequirement": "Explains that sharks do get cancer and documented tumors have been recorded in over 20 species."
+    }
+  },
+  {
+    "id": "claim-13",
+    "query": "Carrots dramatically improve night vision in humans.",
+    "category": "declarative_claim",
+    "split": "tuning",
+    "claim": {
+      "isClaim": true,
+      "expectedVerdict": "partially_supported",
+      "claimCheckQuery": "do carrots improve night vision WWII radar propaganda"
+    },
+    "goldEntities": ["vitamin A", "WWII", "radar", "propaganda", "retina"],
+    "rubric": {
+      "mustMention": ["vitamin A", "WWII propaganda", "radar disguise"],
+      "verdictRequirement": "Details that vitamin A prevents deficiency blindness, but the claim originated as British WWII radar propaganda."
+    }
+  },
+  {
+    "id": "claim-14",
+    "query": "Napoleon Bonaparte was unusually short compared to average French men of his era.",
+    "category": "declarative_claim",
+    "split": "tuning",
+    "claim": {
+      "isClaim": true,
+      "expectedVerdict": "refuted",
+      "claimCheckQuery": "how tall was Napoleon French inches British inches average"
+    },
+    "goldEntities": ["French inches", "5 feet 6 inches", "British propaganda", "Napoleon"],
+    "rubric": {
+      "mustMention": ["average height", "French pouce vs British inches", "propaganda"],
+      "verdictRequirement": "Clarifies Napoleon was around 5 ft 6 in, average for French men of his time, with the myth spurred by French inch conversions and Gillray cartoons."
+    }
+  },
+  {
+    "id": "claim-15",
+    "query": "Waking a sleepwalker causes them to suffer a heart attack or permanent brain damage.",
+    "category": "declarative_claim",
+    "split": "held_out",
+    "claim": {
+      "isClaim": true,
+      "expectedVerdict": "refuted",
+      "claimCheckQuery": "is it dangerous to wake a sleepwalker medical myth"
+    },
+    "goldEntities": ["sleepwalking", "somnambulism", "disorientation"],
+    "rubric": {
+      "mustMention": ["myth", "disorientation", "safe to guide back to bed"],
+      "verdictRequirement": "Explains waking a sleepwalker is safe though they may be startled or disoriented."
+    }
+  },
+
+  {
+    "id": "wh-01",
+    "query": "Who is the current Secretary General of the United Nations in 2026?",
+    "category": "wh_question",
+    "split": "tuning",
+    "claim": { "isClaim": false, "expectedVerdict": "neutral" },
+    "goldEntities": ["António Guterres"],
+    "rubric": {
+      "mustMention": ["António Guterres", "Portugal"],
+      "verdictRequirement": "States António Guterres is the current Secretary-General."
+    }
+  },
+  {
+    "id": "wh-02",
+    "query": "Who is the Prime Minister of the United Kingdom following the 2024 general election?",
+    "category": "wh_question",
+    "split": "tuning",
+    "claim": { "isClaim": false, "expectedVerdict": "neutral" },
+    "goldEntities": ["Keir Starmer", "Labour Party"],
+    "rubric": {
+      "mustMention": ["Keir Starmer", "Labour"],
+      "verdictRequirement": "Identifies Sir Keir Starmer as UK Prime Minister following the July 2024 general election."
+    }
+  },
+  {
+    "id": "wh-03",
+    "query": "Which country won the ICC Men's T20 World Cup in June 2024?",
+    "category": "wh_question",
+    "split": "tuning",
+    "claim": { "isClaim": false, "expectedVerdict": "neutral" },
+    "goldEntities": ["India", "South Africa", "Barbados"],
+    "rubric": {
+      "mustMention": ["India", "South Africa", "final"],
+      "verdictRequirement": "States India defeated South Africa in the final in Barbados to win the 2024 T20 World Cup."
+    }
+  },
+  {
+    "id": "wh-04",
+    "query": "Who directed the film Oppenheimer that won Best Picture at the 96th Academy Awards?",
+    "category": "wh_question",
+    "split": "held_out",
+    "claim": { "isClaim": false, "expectedVerdict": "neutral" },
+    "goldEntities": ["Christopher Nolan"],
+    "rubric": {
+      "mustMention": ["Christopher Nolan"],
+      "verdictRequirement": "Identifies Christopher Nolan as director of Oppenheimer."
+    }
+  },
+  {
+    "id": "wh-05",
+    "query": "Who was appointed CEO of Starbucks in August 2024 to lead its turnaround?",
+    "category": "wh_question",
+    "split": "tuning",
+    "claim": { "isClaim": false, "expectedVerdict": "neutral" },
+    "goldEntities": ["Brian Niccol", "Chipotle"],
+    "rubric": {
+      "mustMention": ["Brian Niccol", "Chipotle"],
+      "verdictRequirement": "Names Brian Niccol, former Chipotle CEO, as Starbucks CEO."
+    }
+  },
+  {
+    "id": "wh-06",
+    "query": "Which nation hosted the 2024 Summer Olympic Games?",
+    "category": "wh_question",
+    "split": "tuning",
+    "claim": { "isClaim": false, "expectedVerdict": "neutral" },
+    "goldEntities": ["France", "Paris"],
+    "rubric": {
+      "mustMention": ["Paris", "France"],
+      "verdictRequirement": "States Paris, France hosted the 2024 Summer Olympics."
+    }
+  },
+  {
+    "id": "wh-07",
+    "query": "Who is the Chief Justice of the United States Supreme Court?",
+    "category": "wh_question",
+    "split": "tuning",
+    "claim": { "isClaim": false, "expectedVerdict": "neutral" },
+    "goldEntities": ["John Roberts", "John G. Roberts Jr."],
+    "rubric": {
+      "mustMention": ["John Roberts"],
+      "verdictRequirement": "Identifies John Roberts as Chief Justice."
+    }
+  },
+  {
+    "id": "wh-08",
+    "query": "Who was elected President of Mexico in the June 2024 general election?",
+    "category": "wh_question",
+    "split": "held_out",
+    "claim": { "isClaim": false, "expectedVerdict": "neutral" },
+    "goldEntities": ["Claudia Sheinbaum", "Morena"],
+    "rubric": {
+      "mustMention": ["Claudia Sheinbaum", "first woman president"],
+      "verdictRequirement": "Names Claudia Sheinbaum as Mexico's elected president."
+    }
+  },
+  {
+    "id": "wh-09",
+    "query": "What is the capital city of Australia?",
+    "category": "wh_question",
+    "split": "tuning",
+    "claim": { "isClaim": false, "expectedVerdict": "neutral" },
+    "goldEntities": ["Canberra"],
+    "rubric": {
+      "mustMention": ["Canberra"],
+      "verdictRequirement": "Directly names Canberra, distinguishing it from Sydney or Melbourne."
+    }
+  },
+  {
+    "id": "wh-10",
+    "query": "Who was the first person to walk on the surface of the Moon during the Apollo 11 mission?",
+    "category": "wh_question",
+    "split": "tuning",
+    "claim": { "isClaim": false, "expectedVerdict": "neutral" },
+    "goldEntities": ["Neil Armstrong", "1969", "Apollo 11"],
+    "rubric": {
+      "mustMention": ["Neil Armstrong", "1969"],
+      "verdictRequirement": "Names Neil Armstrong on July 20, 1969."
+    }
+  },
+  {
+    "id": "wh-11",
+    "query": "Which country won the UEFA European Championship (Euro 2024) in Germany?",
+    "category": "wh_question",
+    "split": "tuning",
+    "claim": { "isClaim": false, "expectedVerdict": "neutral" },
+    "goldEntities": ["Spain", "England", "Berlin"],
+    "rubric": {
+      "mustMention": ["Spain", "England", "final"],
+      "verdictRequirement": "States Spain defeated England 2-1 to win Euro 2024."
+    }
+  },
+  {
+    "id": "wh-12",
+    "query": "Who wrote the dystopian novel 1984 published in 1949?",
+    "category": "wh_question",
+    "split": "held_out",
+    "claim": { "isClaim": false, "expectedVerdict": "neutral" },
+    "goldEntities": ["George Orwell", "Eric Arthur Blair"],
+    "rubric": {
+      "mustMention": ["George Orwell"],
+      "verdictRequirement": "Names George Orwell."
+    }
+  },
+  {
+    "id": "wh-13",
+    "query": "Who is the president of the European Commission serving a second term beginning in 2024?",
+    "category": "wh_question",
+    "split": "tuning",
+    "claim": { "isClaim": false, "expectedVerdict": "neutral" },
+    "goldEntities": ["Ursula von der Leyen"],
+    "rubric": {
+      "mustMention": ["Ursula von der Leyen"],
+      "verdictRequirement": "Names Ursula von der Leyen re-elected for a second term."
+    }
+  },
+  {
+    "id": "wh-14",
+    "query": "What is the deepest natural trench in the Earth's oceans?",
+    "category": "wh_question",
+    "split": "tuning",
+    "claim": { "isClaim": false, "expectedVerdict": "neutral" },
+    "goldEntities": ["Mariana Trench", "Challenger Deep", "Pacific Ocean"],
+    "rubric": {
+      "mustMention": ["Mariana Trench", "Challenger Deep"],
+      "verdictRequirement": "Identifies the Mariana Trench / Challenger Deep in the western Pacific."
+    }
+  },
+  {
+    "id": "wh-15",
+    "query": "Who discovered the structure of penicillin and won the Nobel Prize in Chemistry in 1964?",
+    "category": "wh_question",
+    "split": "tuning",
+    "claim": { "isClaim": false, "expectedVerdict": "neutral" },
+    "goldEntities": ["Dorothy Hodgkin", "Dorothy Crowfoot Hodgkin", "X-ray crystallography"],
+    "rubric": {
+      "mustMention": ["Dorothy Hodgkin", "crystallography"],
+      "verdictRequirement": "Identifies Dorothy Hodgkin for determining the molecular structure of penicillin and B12."
+    }
+  },
+
+  {
+    "id": "comp-01",
+    "query": "Compare the battery range, charging speed, and motor output of Tesla Model Y Long Range versus Hyundai Ioniq 5 AWD.",
+    "category": "comparison",
+    "split": "tuning",
+    "claim": { "isClaim": false, "expectedVerdict": "neutral" },
+    "goldEntities": ["Tesla Model Y", "Hyundai Ioniq 5", "800V", "Supercharger", "EPA"],
+    "rubric": {
+      "mustMention": ["Model Y", "Ioniq 5", "range", "charging", "800V architecture"],
+      "verdictRequirement": "Compares EPA range, 800V vs 400V charging speeds, and AWD horsepower/torque."
+    }
+  },
+  {
+    "id": "comp-02",
+    "query": "What are the key technical differences between HTTP/2 multiplexing and HTTP/3 QUIC streams?",
+    "category": "comparison",
+    "split": "tuning",
+    "claim": { "isClaim": false, "expectedVerdict": "neutral" },
+    "goldEntities": ["TCP", "UDP", "QUIC", "head-of-line blocking", "HTTP/2", "HTTP/3"],
+    "rubric": {
+      "mustMention": ["head-of-line blocking", "TCP vs UDP", "QUIC", "handshake latency"],
+      "verdictRequirement": "Explains how HTTP/3 solves TCP head-of-line blocking at the transport layer via UDP-based QUIC."
+    }
+  },
+  {
+    "id": "comp-03",
+    "query": "Compare Rust and Go memory management models regarding garbage collection, compile-time borrow checking, and runtime overhead.",
+    "category": "comparison",
+    "split": "held_out",
+    "claim": { "isClaim": false, "expectedVerdict": "neutral" },
+    "goldEntities": ["borrow checker", "garbage collection", "Rust", "Go", "zero-cost abstractions"],
+    "rubric": {
+      "mustMention": ["borrow checker", "garbage collector", "ownership", "runtime overhead"],
+      "verdictRequirement": "Compares Rust's compile-time ownership/borrow checker with Go's concurrent mark-sweep garbage collector."
+    }
+  },
+  {
+    "id": "comp-04",
+    "query": "Compare SQLite and PostgreSQL in terms of deployment architecture, concurrency handling, and enterprise scale.",
+    "category": "comparison",
+    "split": "tuning",
+    "claim": { "isClaim": false, "expectedVerdict": "neutral" },
+    "goldEntities": ["serverless", "client-server", "WAL mode", "PostgreSQL", "SQLite"],
+    "rubric": {
+      "mustMention": ["embedded / in-process", "client-server", "concurrency", "WAL"],
+      "verdictRequirement": "Contrasts SQLite as an in-process embedded file database with PostgreSQL as a distributed client-server RDBMS."
+    }
+  },
+  {
+    "id": "comp-05",
+    "query": "Compare OLED and Mini-LED display technologies on peak brightness, black levels, and risk of burn-in.",
+    "category": "comparison",
+    "split": "tuning",
+    "claim": { "isClaim": false, "expectedVerdict": "neutral" },
+    "goldEntities": ["OLED", "Mini-LED", "local dimming", "burn-in", "nits", "contrast ratio"],
+    "rubric": {
+      "mustMention": ["infinite contrast / true black", "higher peak brightness", "burn-in risk"],
+      "verdictRequirement": "Highlights OLED's per-pixel emissive blacks vs Mini-LED's higher peak brightness and zero burn-in risk."
+    }
+  },
+  {
+    "id": "comp-06",
+    "query": "Compare React Server Components (RSC) versus traditional Client-Side Rendering (CSR) on bundle size and initial page load.",
+    "category": "comparison",
+    "split": "held_out",
+    "claim": { "isClaim": false, "expectedVerdict": "neutral" },
+    "goldEntities": ["zero-bundle-size", "hydration", "RSC", "CSR", "waterfall"],
+    "rubric": {
+      "mustMention": ["bundle size", "server execution", "client hydration", "RSC"],
+      "verdictRequirement": "Details how RSC eliminates component JavaScript from client bundles while CSR ships full component trees."
+    }
+  },
+  {
+    "id": "comp-07",
+    "query": "Compare the James Webb Space Telescope (JWST) and the Hubble Space Telescope regarding observing wavelengths and mirror size.",
+    "category": "comparison",
+    "split": "tuning",
+    "claim": { "isClaim": false, "expectedVerdict": "neutral" },
+    "goldEntities": ["JWST", "Hubble", "infrared", "optical", "6.5 meters", "2.4 meters"],
+    "rubric": {
+      "mustMention": ["infrared", "optical/ultraviolet", "6.5m vs 2.4m mirror", "L2 orbit"],
+      "verdictRequirement": "Contrasts JWST's primary infrared focus and 6.5m segmented mirror at L2 with Hubble's optical/UV focus and 2.4m mirror in LEO."
+    }
+  },
+  {
+    "id": "comp-08",
+    "query": "Compare Docker container virtualization versus Kernel Virtual Machines (KVM) on startup latency and isolation boundaries.",
+    "category": "comparison",
+    "split": "tuning",
+    "claim": { "isClaim": false, "expectedVerdict": "neutral" },
+    "goldEntities": ["shared kernel", "cgroups", "namespaces", "hypervisor", "hardware virtualization"],
+    "rubric": {
+      "mustMention": ["shared host kernel", "hardware hypervisor", "sub-second startup", "isolation boundary"],
+      "verdictRequirement": "Distinguishes OS-level container isolation (namespaces/cgroups) from full hardware hypervisor virtualization."
+    }
+  },
+  {
+    "id": "comp-09",
+    "query": "Compare GraphQL and REST API architectural styles regarding over-fetching, schema enforcement, and network round trips.",
+    "category": "comparison",
+    "split": "tuning",
+    "claim": { "isClaim": false, "expectedVerdict": "neutral" },
+    "goldEntities": ["over-fetching", "under-fetching", "single endpoint", "schema definition", "HTTP verbs"],
+    "rubric": {
+      "mustMention": ["over-fetching", "under-fetching", "single endpoint vs multiple resources", "strongly typed schema"],
+      "verdictRequirement": "Contrasts GraphQL client-specified payloads and single endpoint with REST resource-oriented endpoints."
+    }
+  },
+  {
+    "id": "comp-10",
+    "query": "Compare Apache Kafka and RabbitMQ message broker architectures on message persistence, consumer model, and throughput.",
+    "category": "comparison",
+    "split": "held_out",
+    "claim": { "isClaim": false, "expectedVerdict": "neutral" },
+    "goldEntities": ["distributed commit log", "smart broker", "pull vs push", "replayability", "AMQP"],
+    "rubric": {
+      "mustMention": ["distributed append-only log", "queue/push model", "partitioning", "message replay"],
+      "verdictRequirement": "Explains Kafka's distributed partition log with consumer offsets vs RabbitMQ's traditional queuing with broker-managed state."
+    }
+  },
+
+  {
+    "id": "def-01",
+    "query": "What is the six month validity passport rule for international air travel?",
+    "category": "definition_policy",
+    "split": "tuning",
+    "claim": { "isClaim": false, "expectedVerdict": "neutral" },
+    "goldEntities": ["6 months", "passport expiration", "entry requirements", "Schengen"],
+    "rubric": {
+      "mustMention": ["six months", "entry date or departure date", "denied boarding"],
+      "verdictRequirement": "Defines the requirement that a passport remain valid for 6 months beyond travel dates enforced by many countries."
+    }
+  },
+  {
+    "id": "def-02",
+    "query": "What are the primary compliance deadlines and requirements established by the European Union AI Act?",
+    "category": "definition_policy",
+    "split": "tuning",
+    "claim": { "isClaim": false, "expectedVerdict": "neutral" },
+    "goldEntities": ["EU AI Act", "prohibited practices", "high-risk systems", "GPAI", "2024", "2026"],
+    "rubric": {
+      "mustMention": ["phased implementation", "prohibited systems", "high-risk AI", "general-purpose AI"],
+      "verdictRequirement": "Details the tiered compliance schedule starting in late 2024 through 2026."
+    }
+  },
+  {
+    "id": "def-03",
+    "query": "What is the legal definition and protection scope of the public domain in United States copyright law?",
+    "category": "definition_policy",
+    "split": "held_out",
+    "claim": { "isClaim": false, "expectedVerdict": "neutral" },
+    "goldEntities": ["public domain", "copyright expiration", "95 years", "fair use"],
+    "rubric": {
+      "mustMention": ["expiration of copyright", "free to use without permission", "95 years for corporate works"],
+      "verdictRequirement": "Defines public domain as works no longer protected by copyright that may be freely adapted."
+    }
+  },
+  {
+    "id": "def-04",
+    "query": "What is the Real ID requirement for United States domestic air travel and its mandatory enforcement deadline?",
+    "category": "definition_policy",
+    "split": "tuning",
+    "claim": { "isClaim": false, "expectedVerdict": "neutral" },
+    "goldEntities": ["REAL ID", "May 7, 2025", "TSA", "Department of Homeland Security"],
+    "rubric": {
+      "mustMention": ["May 7, 2025", "TSA checkpoints", "star marking", "DHS"],
+      "verdictRequirement": "Identifies the May 7, 2025 enforcement deadline for Real ID compliant identification at airport checkpoints."
+    }
+  },
+  {
+    "id": "def-05",
+    "query": "How does the zero trust security model define network perimeter defenses and authentication principles?",
+    "category": "definition_policy",
+    "split": "tuning",
+    "claim": { "isClaim": false, "expectedVerdict": "neutral" },
+    "goldEntities": ["never trust, always verify", "least privilege", "microsegmentation", "identity verification"],
+    "rubric": {
+      "mustMention": ["never trust, always verify", "assume breach", "least privilege access"],
+      "verdictRequirement": "Outlines the core zero trust pillars: continuous validation, least privilege, and assumed breach."
+    }
+  },
+  {
+    "id": "def-06",
+    "query": "What is the Schengen 90/180 day rule for visa-free tourists traveling in Europe?",
+    "category": "definition_policy",
+    "split": "held_out",
+    "claim": { "isClaim": false, "expectedVerdict": "neutral" },
+    "goldEntities": ["90 days", "180-day period", "rolling window", "Schengen Area"],
+    "rubric": {
+      "mustMention": ["90 days within any 180-day period", "rolling window calculation"],
+      "verdictRequirement": "Explains the rolling 180-day window limitation for short-stay visa-free travelers in the Schengen zone."
+    }
+  },
+  {
+    "id": "def-07",
+    "query": "What is the difference between a copyright, a trademark, and a patent in intellectual property law?",
+    "category": "definition_policy",
+    "split": "tuning",
+    "claim": { "isClaim": false, "expectedVerdict": "neutral" },
+    "goldEntities": ["creative expression", "brand identifiers", "inventions and processes"],
+    "rubric": {
+      "mustMention": ["copyright protects creative works", "trademark protects brand identity", "patent protects functional inventions"],
+      "verdictRequirement": "Clearly delineates the three legal scopes: authorship, commerce symbols, and technological inventions."
+    }
+  },
+  {
+    "id": "def-08",
+    "query": "What is the Federal Reserve 2 percent inflation target mandate and how is it measured?",
+    "category": "definition_policy",
+    "split": "tuning",
+    "claim": { "isClaim": false, "expectedVerdict": "neutral" },
+    "goldEntities": ["PCE price index", "Personal Consumption Expenditures", "dual mandate", "price stability"],
+    "rubric": {
+      "mustMention": ["PCE price index", "price stability", "maximum employment", "dual mandate"],
+      "verdictRequirement": "Specifies that the Fed measures its 2% target using the headline Personal Consumption Expenditures (PCE) price index."
+    }
+  },
+  {
+    "id": "def-09",
+    "query": "What are the rules and requirements for an airline passenger claiming denied boarding compensation under EU Regulation 261/2004?",
+    "category": "definition_policy",
+    "split": "tuning",
+    "claim": { "isClaim": false, "expectedVerdict": "neutral" },
+    "goldEntities": ["EU 261", "involuntary denied boarding", "250 to 600 euros", "extraordinary circumstances"],
+    "rubric": {
+      "mustMention": ["compensation tiers (250€, 400€, 600€)", "flight distance", "extraordinary circumstances exemption"],
+      "verdictRequirement": "Summarizes compensation bands based on flight distance and exceptions for safety/extraordinary events."
+    }
+  },
+  {
+    "id": "def-10",
+    "query": "What is the statutory definition of Qualified Immunity in United States civil rights litigation?",
+    "category": "definition_policy",
+    "split": "held_out",
+    "claim": { "isClaim": false, "expectedVerdict": "neutral" },
+    "goldEntities": ["clearly established statutory or constitutional rights", "government officials", "Section 1983"],
+    "rubric": {
+      "mustMention": ["clearly established law", "shield government officials from liability", "reasonable officer standard"],
+      "verdictRequirement": "Defines the doctrine protecting government officials from liability unless they violated clearly established law."
+    }
+  },
+
+  {
+    "id": "rec-01",
+    "query": "What are the major new features and breaking changes in Next.js 15 released in late 2024?",
+    "category": "recency_sensitive",
+    "split": "tuning",
+    "claim": { "isClaim": false, "expectedVerdict": "neutral" },
+    "goldEntities": ["React 19", "async request APIs", "caching default changes", "Turbopack"],
+    "rubric": {
+      "mustMention": ["React 19 support", "uncached fetch by default", "async cookies/headers"],
+      "verdictRequirement": "Highlights Next.js 15 breaking changes: fetch/route handlers uncached by default and async request APIs."
+    }
+  },
+  {
+    "id": "rec-02",
+    "query": "What is the mission timeline and crew roster for NASA's Artemis II lunar orbital mission?",
+    "category": "recency_sensitive",
+    "split": "tuning",
+    "claim": { "isClaim": false, "expectedVerdict": "neutral" },
+    "goldEntities": ["Reid Wiseman", "Victor Glover", "Christina Koch", "Jeremy Hansen", "Orion", "SLS"],
+    "rubric": {
+      "mustMention": ["Wiseman", "Glover", "Koch", "Hansen", "lunar flyby"],
+      "verdictRequirement": "Identifies the four Artemis II astronauts and describes the crewed lunar flyby test flight."
+    }
+  },
+  {
+    "id": "rec-03",
+    "query": "What are the key features introduced in the Python 3.13 release regarding free-threaded execution and JIT compiler?",
+    "category": "recency_sensitive",
+    "split": "tuning",
+    "claim": { "isClaim": false, "expectedVerdict": "neutral" },
+    "goldEntities": ["free-threaded", "GIL removal", "PEP 703", "experimental JIT", "Python 3.13"],
+    "rubric": {
+      "mustMention": ["disable GIL / free-threaded mode", "experimental copy-and-patch JIT", "improved interactive REPL"],
+      "verdictRequirement": "Details the experimental free-threaded (no-GIL) build and copy-and-patch JIT compiler in Python 3.13."
+    }
+  },
+  {
+    "id": "rec-04",
+    "query": "What were the primary outcomes and global agreements reached at the COP28 climate summit in Dubai?",
+    "category": "recency_sensitive",
+    "split": "held_out",
+    "claim": { "isClaim": false, "expectedVerdict": "neutral" },
+    "goldEntities": ["UAE Consensus", "transitioning away from fossil fuels", "loss and damage fund", "Dubai"],
+    "rubric": {
+      "mustMention": ["transitioning away from fossil fuels", "tripling renewable energy by 2030", "loss and damage fund"],
+      "verdictRequirement": "Summarizes the first global stocktake call to transition away from fossil fuels in energy systems."
+    }
+  },
+  {
+    "id": "rec-05",
+    "query": "What is the current status of the Boeing Starliner spacecraft following the 2024 Crew Flight Test?",
+    "category": "recency_sensitive",
+    "split": "tuning",
+    "claim": { "isClaim": false, "expectedVerdict": "neutral" },
+    "goldEntities": ["Starliner", "ISS", "Butch Wilmore", "Suni Williams", "uncrewed return", "Dragon"],
+    "rubric": {
+      "mustMention": ["thruster issues", "uncrewed return to Earth", "crew returning on SpaceX Dragon"],
+      "verdictRequirement": "Notes that Starliner returned uncrewed in September 2024 with astronauts returning on SpaceX Crew-9."
+    }
+  },
+  {
+    "id": "rec-06",
+    "query": "What are the major specifications and features of the Apple iPhone 16 Pro camera system announced in September 2024?",
+    "category": "recency_sensitive",
+    "split": "tuning",
+    "claim": { "isClaim": false, "expectedVerdict": "neutral" },
+    "goldEntities": ["Camera Control button", "48MP Ultra Wide", "5x telephoto", "4K 120 fps Dolby Vision"],
+    "rubric": {
+      "mustMention": ["Camera Control button", "48MP ultra-wide sensor", "5x optical zoom on both sizes"],
+      "verdictRequirement": "Details the dedicated Camera Control button, 48MP ultra-wide camera, and 5x tetraprism lens."
+    }
+  },
+  {
+    "id": "rec-07",
+    "query": "What was the magnitude, epicenter, and impact of the Noto Peninsula earthquake that struck Japan on January 1, 2024?",
+    "category": "recency_sensitive",
+    "split": "held_out",
+    "claim": { "isClaim": false, "expectedVerdict": "neutral" },
+    "goldEntities": ["magnitude 7.6", "Ishikawa Prefecture", "Noto Peninsula", "tsunami"],
+    "rubric": {
+      "mustMention": ["7.6 magnitude", "Ishikawa Prefecture / Noto", "tsunami warnings", "infrastructure damage"],
+      "verdictRequirement": "Reports the M7.6 quake on New Year's Day 2024 in Ishikawa Prefecture."
+    }
+  },
+  {
+    "id": "rec-08",
+    "query": "What are the new rules and fees introduced in Venice, Italy in 2024 regarding day-tripper tourist access fees?",
+    "category": "recency_sensitive",
+    "split": "tuning",
+    "claim": { "isClaim": false, "expectedVerdict": "neutral" },
+    "goldEntities": ["5 euro access fee", "day-trippers", "QR code", "peak days", "Venice"],
+    "rubric": {
+      "mustMention": ["5 euro fee", "day-trippers (non-overnight guests)", "selected peak days"],
+      "verdictRequirement": "Describes the 5 euro pilot entry fee and QR code registration for day tourists on peak days."
+    }
+  },
+  {
+    "id": "rec-09",
+    "query": "What are the core technical capabilities of the Gemini 1.5 Pro model announced by Google regarding context window size?",
+    "category": "recency_sensitive",
+    "split": "tuning",
+    "claim": { "isClaim": false, "expectedVerdict": "neutral" },
+    "goldEntities": ["1 million tokens", "2 million tokens", "MoE", "long context window", "multimodal"],
+    "rubric": {
+      "mustMention": ["1 million to 2 million tokens", "long context retrieval", "audio/video multimodal input"],
+      "verdictRequirement": "Highlights the 1M to 2M token context window and near-perfect needle-in-a-haystack retrieval."
+    }
+  },
+  {
+    "id": "rec-10",
+    "query": "Which team won the 2024 Super Bowl LVIII championship in Las Vegas?",
+    "category": "recency_sensitive",
+    "split": "held_out",
+    "claim": { "isClaim": false, "expectedVerdict": "neutral" },
+    "goldEntities": ["Kansas City Chiefs", "San Francisco 49ers", "Patrick Mahomes", "overtime"],
+    "rubric": {
+      "mustMention": ["Kansas City Chiefs", "San Francisco 49ers", "overtime victory"],
+      "verdictRequirement": "Identifies the Kansas City Chiefs defeating the 49ers in overtime in February 2024."
+    }
+  }
+]
