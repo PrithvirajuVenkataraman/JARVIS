@@ -1,0 +1,919 @@
+/**
+ * Comprehensive, modular markdown and code block renderer for JARVIS.
+ * Integrates syntax highlighting, LaTeX math, citations, tables, and lists.
+ */
+
+import { highlightCode } from './code-highlighter.js';
+import { renderMathInText, formatLatexExpression, replaceCurrencyAmounts } from './math-renderer.js';
+import { renderInteractiveVisualMarkup } from './interactive-illustrations.js';
+
+/**
+ * Strips fact tags, lenticular brackets, and trailing citation numbers / bracket markers from bullet points.
+ * Ensures that lines ending with e.g. "【f1】 .", "[1] .", "(1).", "1." have those citation markers removed
+ * and trailing punctuation cleanly preserved.
+ */
+export function cleanBulletEndCitations(text, isItem = false) {
+    if (!text || typeof text !== 'string') return '';
+    return text.split('\n').map(line => {
+        // Strip accidentally prefixed bullet markers from headings: "- ## Heading" -> "## Heading"
+        line = line.replace(/^[\s\-*•+–—]+\s*(#{1,6}\s+)/, '$1');
+        // Collapse redundant double/triple bullet prefixes at line start: e.g. "- - ", "• - ", "– - " -> "- "
+        line = line.replace(/^[\s\-*•+–—]{2,}\s*/, '- ');
+
+        let cleaned = line
+            .replace(/\s*【[^】]*】\s*([.,;!?]?)/g, '$1')
+            .replace(/\s*\[f\d+(?:\s*,\s*f?\d+)*\]\s*([.,;!?]?)/g, '$1');
+
+        const bulletMatch = cleaned.match(/^(\s*(?:[-*•+]|\d+\.)\s+)(.*)$/);
+        if (bulletMatch) {
+            const prefix = bulletMatch[1];
+            let body = bulletMatch[2];
+            body = body.replace(/^[\s\-*•+–—]+(?:\s+|$)/, '');
+            // Strip trailing citations in brackets or parentheses: [f1] ., [1] ., (1)., 【f1】 ., [2] .
+            body = body.replace(/(?:[\s\u00A0]*(?:【[^】]*】|\[f?\d+(?:\s*,\s*f?\d+)*\]|\([1-9]\d{0,1}\)))+[\s\u00A0]*([.,;!?]?)$/g, '$1');
+            body = body.replace(/([.,;!?])\s*(?:【[^】]*】|\[f?\d+(?:\s*,\s*f?\d+)*\]|\([1-9]\d{0,1}\))\s*$/g, '$1');
+            body = body.replace(/[\s\u00A0]+([.,;!?])/g, '$1').trimEnd();
+            return isItem ? body : `${prefix}${body}`;
+        }
+
+        if (isItem) {
+            cleaned = cleaned.replace(/^[\s\-*•+–—]+(?:\s+|$)/, '');
+            cleaned = cleaned.replace(/(?:[\s\u00A0]*(?:【[^】]*】|\[f?\d+(?:\s*,\s*f?\d+)*\]|\([1-9]\d{0,1}\)))+[\s\u00A0]*([.,;!?]?)$/g, '$1');
+            cleaned = cleaned.replace(/([.,;!?])\s*(?:【[^】]*】|\[f?\d+(?:\s*,\s*f?\d+)*\]|\([1-9]\d{0,1}\))\s*$/g, '$1');
+            cleaned = cleaned.replace(/[\s\u00A0]+([.,;!?])/g, '$1').trimEnd();
+        }
+
+        return cleaned;
+    }).join('\n');
+}
+
+/**
+ * Universal, punctuation-aware sentence splitter.
+ * Protects abbreviations, initials (e.g. J. B. Krishna), dates (Nov 20, 1950), decimals (3.14),
+ * and URLs/code tokens (Next.js) from being incorrectly segmented.
+ */
+export function splitReadableSentences(text) {
+    const raw = String(text || '').replace(/\s+/g, ' ').trim();
+    if (!raw) return [];
+
+    const MONTHS = new Set(['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'sept', 'oct', 'nov', 'dec']);
+    const ABBRS = new Set([
+        'mr', 'mrs', 'ms', 'dr', 'prof', 'sr', 'jr', 'vs', 'etc', 'eg', 'ie', 'al', 'approx',
+        'dept', 'fig', 'no', 'vol', 'st', 'inc', 'corp', 'co', 'ltd', 'gen', 'rep', 'sen', 'capt',
+        'col', 'maj', 'lt', 'sgt', 'rev', 'hon', 'gov', 'pres', 'vp', ...MONTHS
+    ]);
+    const sentences = [];
+    let start = 0;
+
+    for (let i = 0; i < raw.length; i += 1) {
+        const char = raw[i];
+        if (!/[.!?]/.test(char)) continue;
+
+        const prev = raw[i - 1] || '';
+        const next = raw[i + 1] || '';
+
+        // Numbers/decimals: e.g. 3.14 or v2.0
+        if (char === '.' && /\d/.test(prev) && /\d/.test(next)) continue;
+
+        // Ellipsis: .. or ...
+        if (char === '.' && (prev === '.' || next === '.')) continue;
+
+        // Must be followed by whitespace or end of string
+        if (next && !/\s/.test(next)) continue;
+
+        // Check word ending at this punctuation
+        const sub = raw.slice(start, i + 1).trim();
+        const lastWordMatch = sub.match(/([a-zA-Z.]+)[.!?]$/);
+        if (lastWordMatch && char === '.') {
+            const word = lastWordMatch[1].replace(/\.$/, '');
+            // Multi-dot initialisms like U.S. or e.g. or single letters like J. or B.
+            if (/^[A-Za-z]$/.test(word) || /^[A-Za-z](\.[A-Za-z])+$/.test(lastWordMatch[1])) continue;
+            if (ABBRS.has(word.toLowerCase())) continue;
+        }
+
+        // Lookahead: cannot be a date remainder like '20, 1950' or '17, 2026'
+        const remainder = raw.slice(i + 1).trim();
+        if (/^\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4}/.test(remainder)) continue;
+        // Don't split if current word is a single initial/abbreviation followed by an initial: e.g. "J." followed by "B." or "Dr." followed by "A."
+        if (lastWordMatch && (/^[A-Za-z]$/.test(lastWordMatch[1].replace(/\.$/, '')) || ABBRS.has(lastWordMatch[1].replace(/\.$/, '').toLowerCase())) && /^[A-Z]\.\s+/i.test(remainder)) continue;
+        // Lookahead: must be followed by an uppercase letter, quote, bracket, or end of string
+        if (remainder && !/^[A-Z\"“'‘(\[]/.test(remainder)) continue;
+
+        if (sub) sentences.push(sub);
+        start = i + 1;
+    }
+
+    const tail = raw.slice(start).trim();
+    if (tail) {
+        if (sentences.length > 0 && (/^[A-Za-z]\.?$/.test(tail) || tail.length < 15 || !/[.!?]$/.test(tail))) {
+            sentences[sentences.length - 1] += ' ' + tail;
+        } else {
+            sentences.push(tail);
+        }
+    }
+
+    return sentences;
+}
+
+/**
+ * Converts pseudo-lists (ordinary explanatory paragraphs or biographies disguised as bullet points)
+ * into natural paragraphs, while strictly preserving genuine lists (steps, recipes, specs, short items).
+ */
+export function deBulletizePseudoListIfNeeded(text) {
+    if (!text || typeof text !== 'string') return text;
+    // Fast return if no bullet markers
+    if (!/^\s*[-*•+]\s+/m.test(text)) return text;
+
+    const lines = text.split('\n');
+    const bulletIndices = [];
+    const bulletItems = [];
+
+    for (let idx = 0; idx < lines.length; idx++) {
+        const line = lines[idx];
+        const match = line.match(/^\s*[-*•+]\s+(.*)$/);
+        if (match) {
+            bulletIndices.push(idx);
+            bulletItems.push(match[1].trim());
+        }
+    }
+
+    // Only inspect if 3 or more bullet items exist
+    if (bulletItems.length < 3) return text;
+
+    // Reject conversion if genuine procedure, step, or recipe list (math derivations are de-bulletized)
+    const hasProceduralKeywords = bulletItems.some(item => {
+        const isMathStep = /(?:\$|\\|@@JARVIS_MATH_BLOCK_|\\frac|\\sqrt|=|\\times|\+|-|\/)/.test(item);
+        if (isMathStep) return false;
+        return /^(?:install\b|run\b|curl\b|git\b|npm\b|pip\b|sudo\b|open\b|click\b|select\b|mix\b|bake\b|boil\b|whisk\b)/i.test(item);
+    });
+    if (hasProceduralKeywords) return text;
+
+    // Reject conversion if key-value attribute list (e.g. "- **RAM**: 16GB" or "- Chip: M3")
+    const hasKeyValueBullets = bulletItems.filter(item =>
+        /^(?:\*\*[^*]{2,30}\*\*|[A-Za-z\s]{2,25}):\s+/.test(item)
+    ).length >= 2;
+    if (hasKeyValueBullets) return text;
+
+    // Check how many items are long, complete grammatical sentences
+    const longSentenceBullets = bulletItems.filter(item => {
+        const clean = item.replace(/\[\^?\d+\](?:\([^)]+\))?/g, '').trim();
+        return clean.length >= 65 && /[.!?]$/.test(clean);
+    });
+
+    // Detect mathematical derivations disguised as bullet points (must have equals or explicit math formulas)
+    const mathBullets = bulletItems.filter(item =>
+        /(?:\$|\\frac|\\sqrt|\\times|\\approx|\\pm|\\cdot|\\text\{|[=≠≤≥]|d\([A-Za-z0-9_]+\)\s*[=+\-])/i.test(item)
+    );
+    const isMathDerivationList = bulletItems.length >= 2 && (mathBullets.length / bulletItems.length) >= 0.5;
+
+    const isPseudoList = isMathDerivationList || ((longSentenceBullets.length / bulletItems.length) >= 0.75);
+    if (!isPseudoList) return text;
+
+    // De-bulletize: Convert pseudo-bullets into flowing prose grouped in natural paragraphs
+    const newLines = [...lines];
+    const proseSentences = bulletItems.map(item => {
+        let clean = item.replace(/^[\s\-*•+–—]+(?:\s+|$)/, '');
+        return cleanBulletEndCitations(clean, true).trim();
+    }).filter(Boolean);
+
+    // Group into paragraphs: math steps each get their own line/paragraph; prose groups 2-3 sentences
+    const paragraphs = [];
+    let current = [];
+    let currentLen = 0;
+
+    for (const sent of proseSentences) {
+        current.push(sent);
+        currentLen += sent.length;
+        if (isMathDerivationList || (current.length >= 2 && (currentLen >= 200 || current.length >= 3))) {
+            paragraphs.push(current.join(' '));
+            current = [];
+            currentLen = 0;
+        }
+    }
+    if (current.length > 0) {
+        paragraphs.push(current.join(' '));
+    }
+
+    const firstIdx = bulletIndices[0];
+    const lastIdx = bulletIndices[bulletIndices.length - 1];
+    const before = newLines.slice(0, firstIdx).filter(l => l !== undefined);
+    const after = newLines.slice(lastIdx + 1).filter(l => l !== undefined);
+
+    const resultParts = [];
+    if (before.length) resultParts.push(before.join('\n').trimEnd());
+    resultParts.push(paragraphs.join('\n\n'));
+    if (after.length) resultParts.push(after.join('\n').trimStart());
+
+    return resultParts.filter(Boolean).join('\n\n');
+}
+
+function escapeHtml(text) {
+    return String(text || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+export function getDomainMonogramSvg(domain = '') {
+    const cleanDomain = String(domain || '').replace(/^https?:\/\//i, '').replace(/^www\./i, '').split('/')[0].split(':')[0];
+    const letter = (cleanDomain.charAt(0) || 'S').toUpperCase();
+    let hash = 0;
+    for (let i = 0; i < cleanDomain.length; i++) {
+        hash = (hash << 5) - hash + cleanDomain.charCodeAt(i);
+        hash |= 0;
+    }
+    const hue = Math.abs(hash) % 360;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><rect width="32" height="32" rx="16" fill="hsl(${hue}, 60%, 38%)"/><text x="50%" y="54%" font-family="system-ui, -apple-system, sans-serif" font-size="18" font-weight="700" fill="#ffffff" dominant-baseline="central" text-anchor="middle">${letter}</text></svg>`;
+    return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+export function findSourceById(sources, id) {
+    if (!Array.isArray(sources) || !sources.length || id === null || id === undefined) return null;
+    const cleanId = String(id).trim().replace(/^[f#]/i, '');
+    const numId = Number(cleanId);
+    return sources.find(s => String(s.id) === String(id) || String(s.id) === cleanId || s.id === numId)
+        || (!isNaN(numId) && numId >= 1 && numId <= sources.length ? sources[numId - 1] : null);
+}
+
+export function renderSourceLogoBadge(source, id) {
+    let domain = source?.domain;
+    if (!domain && source?.url) {
+        try { domain = new URL(source.url).hostname.replace(/^www\./i, ''); } catch { domain = 'web'; }
+    }
+    domain = escapeHtml(domain || (id ? `src-${id}` : 'web'));
+    const title = escapeHtml(source?.title || domain);
+    const url = escapeHtml(source?.url || '#');
+    const favicon = escapeHtml(source?.favicon || `/api/favicon?domain=${encodeURIComponent(domain)}`);
+    const fallbackSvg = getDomainMonogramSvg(domain);
+
+    return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="citation-source-logo" data-source-id="${id}" title="${title} (${domain})"><img class="citation-logo-icon" src="${favicon}" alt="${domain}" loading="lazy" onerror="this.onerror=null;this.src='${fallbackSvg}';" /></a>`;
+}
+
+function isMathCodeBlock(lang = '', code = '') {
+    const normalizedLang = String(lang || '').trim().toLowerCase();
+    if (['math', 'latex', 'tex', 'katex', 'calc', 'formula', 'equation', 'algebra', 'derivation', 'geometry', 'steps'].includes(normalizedLang)) {
+        return true;
+    }
+    const trimmed = String(code || '').trim();
+    if (!trimmed) return false;
+
+    // Make sure it doesn't look like actual programming code
+    const hasCodeKeywords = /\b(?:function|def|import|from|class|const|let|var|return|console\.log|public|private|interface|struct|namespace|package|void|static|val|fn)\b/.test(trimmed);
+    if (hasCodeKeywords) return false;
+
+    // Check if it contains characteristic LaTeX math markers or environment tags
+    const hasMathCommands = /\\(?:frac|sqrt|boxed|begin\{(?:aligned|align|split|gather|cases|matrix|bmatrix|pmatrix)\}|approx|times|cdot|sum|int|partial|alpha|beta|gamma|theta|pi|le|ge|neq|pm|quad|qquad|text|mathrm|mathbf)\b/.test(trimmed);
+    const hasDanglingMathEnv = /\\(?:end\{(?:aligned|align|cases|matrix)\})/.test(trimmed);
+    if (hasMathCommands || hasDanglingMathEnv) return true;
+
+    // Intercept unlabeled, calc, text, or formula code blocks containing arithmetic/algebra
+    if (['', 'text', 'txt', 'plaintext', 'calc', 'formula'].includes(normalizedLang)) {
+        const lines = trimmed.split('\n').map(l => l.trim()).filter(Boolean);
+        if (lines.length > 0) {
+            let mathLines = 0;
+            for (const line of lines) {
+                if (/[=≈≠≤≥<>]/.test(line) && /[\d\w]/.test(line)) {
+                    mathLines++;
+                } else if (/^(?:Step\s*\d+:?|Therefore|Hence|Since|So|Given|We have)/i.test(line)) {
+                    mathLines++;
+                } else if (/^[\d\w\s()+\-*/^=._]+$/.test(line) && /[+\-*/^]/.test(line)) {
+                    mathLines++;
+                }
+            }
+            if (mathLines >= Math.ceil(lines.length * 0.5)) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+/**
+ * Automatically balances unclosed code fences, LaTeX display and inline math blocks,
+ * and environments during token-by-token live streaming to prevent layout shift and popping.
+ * @param {string} rawText
+ * @returns {string} Balanced text
+ */
+export function balanceDelimitersForStreaming(rawText = '') {
+    let text = String(rawText || '');
+    if (!text) return '';
+
+    // 1. Balance unclosed code blocks ```
+    const codeFenceMatches = text.match(/```/g) || [];
+    if (codeFenceMatches.length % 2 === 1) {
+        text += '\n```\n';
+    }
+
+    // 2. Balance unclosed display math $$
+    const displayMathMatches = text.match(/(?<!\\)\$\$/g) || [];
+    if (displayMathMatches.length % 2 === 1) {
+        // Also check if there's an unclosed LaTeX environment inside the display math block
+        const envOpenMatches = [...text.matchAll(/\\begin\{([a-zA-Z*]+)\}/g)];
+        const envCloseMatches = [...text.matchAll(/\\end\{([a-zA-Z*]+)\}/g)];
+        const openStack = [];
+        for (const m of envOpenMatches) {
+            openStack.push(m[1]);
+        }
+        for (const m of envCloseMatches) {
+            const idx = openStack.lastIndexOf(m[1]);
+            if (idx !== -1) openStack.splice(idx, 1);
+        }
+        while (openStack.length > 0) {
+            const envName = openStack.pop();
+            text += `\n\\end{${envName}}`;
+        }
+        text += '\n$$\n';
+    } else {
+        // Even if $$ is balanced, check for open LaTeX environments
+        const envOpenMatches = [...text.matchAll(/\\begin\{([a-zA-Z*]+)\}/g)];
+        const envCloseMatches = [...text.matchAll(/\\end\{([a-zA-Z*]+)\}/g)];
+        const openStack = [];
+        for (const m of envOpenMatches) {
+            openStack.push(m[1]);
+        }
+        for (const m of envCloseMatches) {
+            const idx = openStack.lastIndexOf(m[1]);
+            if (idx !== -1) openStack.splice(idx, 1);
+        }
+        while (openStack.length > 0) {
+            const envName = openStack.pop();
+            text += `\n\\end{${envName}}`;
+        }
+    }
+
+    // 3. Balance unclosed display math \[ and \]
+    const openDisplay = (text.match(/\\\[/g) || []).length;
+    const closeDisplay = (text.match(/\\\]/g) || []).length;
+    if (openDisplay > closeDisplay) {
+        text += '\n\\]\n'.repeat(openDisplay - closeDisplay);
+    }
+
+    // 4. Balance unclosed inline math \( and \)
+    const openInline = (text.match(/\\\(/g) || []).length;
+    const closeInline = (text.match(/\\\)/g) || []).length;
+    if (openInline > closeInline) {
+        text += '\\)'.repeat(openInline - closeInline);
+    }
+
+    // 5. Balance unclosed inline math $
+    const inlineSource = replaceCurrencyAmounts(text
+        .replace(/```[\s\S]*?```/g, '')
+        .replace(/(?<!\\)\$\$[\s\S]*?(?<!\\)\$\$/g, '')
+        .replace(/\\\([\s\S]*?\\\)/g, '')
+        .replace(/\\\[[\s\S]*?\\\]/g, ''));
+    const inlineDollars = (inlineSource.match(/(?<![\\$])\$(?!\$)/g) || []).length;
+    if (inlineDollars % 2 === 1) {
+        text += '$';
+    }
+
+    // 6. Balance dangling LaTeX commands (e.g. truncated mid-token like \frac{1 or \sqrt{x)
+    if (/\\(?:frac|dfrac|tfrac)\s*\{[^{}]*\}\s*$/.test(text)) {
+        text += '{}';
+    } else if (/\\(?:frac|dfrac|tfrac)\s*\{[^{}]*$/.test(text)) {
+        text += '}{}';
+    } else if (/\\(?:frac|dfrac|tfrac)\s*$/.test(text)) {
+        text += '{}{}';
+    }
+    if (/\\sqrt\s*\{[^{}]*$/.test(text)) {
+        text += '}';
+    }
+    if (/\\boxed\s*\{[^{}]*$/.test(text)) {
+        text += '}';
+    }
+
+    return text;
+}
+
+/**
+ * Auto-wraps bare un-delimited LaTeX display equations and math clauses so they render
+ * cleanly through KaTeX rather than leaking raw backslashes and symbols into the UI.
+ * @param {string} rawText
+ * @returns {string} Text with properly delimited math blocks
+ */
+export function autoWrapBareLatexMath(rawText = '') {
+    if (!rawText || typeof rawText !== 'string') return rawText;
+
+    // Upfront normalization: convert \(...\) and \[...\] delimiters into standard $ and $$ blocks
+    let normalized = rawText
+        .replace(/\\\(([\s\S]+?)\\\)/g, (_, m) => `$${m.trim()}$`)
+        .replace(/\\\[([\s\S]+?)\\\]/g, (_, m) => `$$\n${m.trim()}\n$$`);
+
+    const parts = normalized.split(/(```[\s\S]*?```|\$\$[\s\S]*?\$\$)/g);
+    for (let p = 0; p < parts.length; p++) {
+        // Skip fenced code blocks or already delimited display math
+        if (p % 2 === 1) continue;
+
+        let part = parts[p];
+        const lines = part.split('\n');
+        for (let l = 0; l < lines.length; l++) {
+            let line = lines[l].trim();
+            if (!line) continue;
+            if (line.startsWith('#') || line.startsWith('>') || line.startsWith('|') || line.startsWith(':::')) continue;
+
+            // If line already contains $ or ` delimiters, it is already delimited — NEVER wrap into $$ or modify
+            if (line.includes('$') || line.includes('`')) {
+                lines[l] = line;
+                continue;
+            }
+
+            const hasMathCommand = /\\(?:int|iint|iiint|oint|sum|prod|frac|dfrac|tfrac|sqrt|boxed|sec|csc|cot|sin|cos|tan|lim|partial|nabla|log|ln|exp|pmatrix|bmatrix|vmatrix|aligned|cases)\b/.test(line);
+            const hasMathRel = /[=≈≠≤≥<>]|\\(?:Longrightarrow|Rightarrow|rightarrow|to|iff|approx|equiv)\b/.test(line);
+
+            const isProseStart = /^(?:Let|If|Since|Where|Because|Recall|Notice|Note|Here|Then|Thus|Hence|Therefore|Substituting|Substitute|We|You|The|This|Express|Find|Compute|Calculate|Determine|Simplify|Consider|Now|Set|Given|With|Check|Assume|Define|Step\s*\d+)\b/i.test(line);
+
+            // Count English prose words of 3+ letters outside of LaTeX commands and standard math functions
+            const proseWords = line.replace(/\\(?:[a-zA-Z]+)/g, '').match(/\b[a-zA-Z]{3,}\b/g) || [];
+            const mathWordSet = new Set(['sin', 'cos', 'tan', 'sec', 'csc', 'cot', 'log', 'ln', 'lim', 'exp', 'det', 'max', 'min', 'and', 'for', 'mod']);
+            const nonMathWords = proseWords.filter(w => !mathWordSet.has(w.toLowerCase()));
+            const hasProseWords = nonMathWords.length >= 2;
+
+            const isDisplayMathCandidate = !isProseStart && !hasProseWords && (hasMathCommand && hasMathRel || /^\\(?:int|sum|frac|sqrt|lim|boxed)\b/.test(line));
+
+            // 1. Pure standalone equation line without $$ delimiters: e.g. "\sec^{2}x dx = 2t dt \Longrightarrow dx=\frac{2t dt}{1+\tan^2 x} ..." or "\boxed{\int \tan x dx = ...}"
+            if (isDisplayMathCandidate) {
+                lines[l] = `$$\n${line}\n$$`;
+            } else {
+                // 2. Inline math inside introductory clause: e.g. "Because tan x = \frac{\sin x}{\cos x}, set" or "Let t = \sqrt{\tan x} \Rightarrow \tan x = t^2,"
+                const introRegex = /^(Let|Where|Since|If|When|So|Thus|Hence|Because|Recall\s+that|Notice\s+that|Using(?:\s+the\s+identity)?|Given|We\s+have|With|Set|Substituting|Substitute)\s+([^,.:;\n]+(?:=|\\(?:Longrightarrow|Rightarrow|to|in))[^\n,.:;]*)/i;
+                if (introRegex.test(line)) {
+                    line = line.replace(introRegex, (_, intro, mathClause) => {
+                        if (mathClause.includes('$')) return `${intro} ${mathClause}`;
+                        return `${intro} $${mathClause.trim()}$`;
+                    });
+                }
+                // 3. Wrap any bare un-delimited \frac{...}{...} or \boxed{...} in prose lines into inline math
+                if (!line.includes('$')) {
+                    line = line.replace(/\\frac\{[^{}]+\}\{[^{}]+\}/g, m => `$${m}$`);
+                    line = line.replace(/\\boxed\{[^{}]+\}/g, m => `$${m}$`);
+                }
+                lines[l] = line;
+            }
+        }
+        parts[p] = lines.join('\n');
+    }
+
+    return parts.join('');
+}
+
+export function renderMarkdown(rawText = '', options = {}) {
+    if (typeof rawText !== 'string') return '';
+    let text = rawText.trim();
+    if (!text) return '';
+
+    // Automatically balance unclosed code fences and math blocks during streaming
+    text = balanceDelimitersForStreaming(text);
+
+    // Auto-wrap bare un-delimited LaTeX display equations and math clauses for KaTeX
+    text = autoWrapBareLatexMath(text);
+
+    // Convert pseudo-lists (explanatory prose in bullets) into natural paragraphs if not streaming
+    if (options?.streaming !== true) {
+        text = deBulletizePseudoListIfNeeded(text);
+    }
+
+    // Step 1: Extract math blocks and programming code blocks before any other substitutions
+    const codeBlocks = [];
+    const mathBlocks = [];
+
+    // 1a. Code blocks (including fenced math/latex code blocks)
+    text = text.replace(/```([a-zA-Z0-9_\-+]*)\n?([\s\S]*?)```/g, (_, lang, code) => {
+        const rawCode = code.replace(/\n$/, '');
+        if (isMathCodeBlock(lang, rawCode)) {
+            const mathIdx = mathBlocks.length;
+            mathBlocks.push(rawCode.trim());
+            return `\n\n@@JARVIS_MATH_BLOCK_${mathIdx}@@\n\n`;
+        }
+        const idx = codeBlocks.length;
+        codeBlocks.push({ lang: (lang || '').trim(), code: rawCode });
+        return `\n\n@@JARVIS_CODE_BLOCK_${idx}@@\n\n`;
+    });
+
+    // 1b. Display math: $$ ... $$
+    text = text.replace(/(?<!\\)\$\$([\s\S]+?)(?<!\\)\$\$/g, (_, math) => {
+        const mathIdx = mathBlocks.length;
+        mathBlocks.push(math.trim());
+        return `\n\n@@JARVIS_MATH_BLOCK_${mathIdx}@@\n\n`;
+    });
+
+    // 1c. Display math: \[ ... \]
+    text = text.replace(/\\\[([\s\S]+?)\\\]/g, (_, math) => {
+        const mathIdx = mathBlocks.length;
+        mathBlocks.push(math.trim());
+        return `\n\n@@JARVIS_MATH_BLOCK_${mathIdx}@@\n\n`;
+    });
+
+    // 1d. Standalone environments; skip environments already inside inline math.
+    text = text.replace(/(?<!\\)\$(?!\$)(?:\\[^\n]|[^$\\\n])+?(?<!\\)\$|\\begin\s*\{([a-zA-Z*]+)\}([\s\S]*?)\\end\s*\{\1\}/g, (match) => {
+        if (match.startsWith('$')) return match;
+        const mathIdx = mathBlocks.length;
+        mathBlocks.push(match.trim());
+        return `\n\n@@JARVIS_MATH_BLOCK_${mathIdx}@@\n\n`;
+    });
+
+    // 1e. For mathematical problems and derivations, bulletins are not required.
+    // Strip bullet markers wrapping math display equations, math steps, or math narrative lines.
+    if (mathBlocks.length > 0 || /(?:\$|\\frac|\\sqrt|\\int|\\sum|\\approx|\\boxed)/.test(text)) {
+        text = text.replace(/^[\s\-*•+–—]+\s*(@@JARVIS_MATH_BLOCK_\d+@@)/gm, '$1');
+        text = text.replace(/^[\s\-*•+–—]+\s*(Step\s*\d+[\s:.\-])/gmi, '$1');
+        text = text.replace(/^[\s\-*•+–—]+\s*(Substitute\b|Applying\b|Therefore\b|Hence\b|Thus\b|Solving\b|Simplifying\b|Expanding\b|Factoring\b|Divide\b|Multiply\b|Add\b|Subtract\b|Differentiating\b|Integrating\b|We get\b|This gives\b|The (?:final )?(?:answer|result|solution|value|root) is\b)/gmi, '$1');
+        if (mathBlocks.length >= 2 || (mathBlocks.length >= 1 && /Step\s*\d+/i.test(text))) {
+            text = text.replace(/^[\s\-*•+–—]+\s+/gm, '');
+        }
+    }
+
+    // Step 2: Line-by-line block parsing (headers, lists, tables, blockquotes, paragraphs)
+    const lines = text.split('\n');
+    const out = [];
+    let i = 0;
+
+    while (i < lines.length) {
+        let line = lines[i];
+        // Strip accidentally prefixed bullet markers from headings: e.g. "- ## Heading" -> "## Heading"
+        line = line.replace(/^[\s\-*•+–—]+\s*(#{1,6}\s+)/, '$1');
+        const trim = line.trim();
+
+        if (trim.startsWith('@@JARVIS_CODE_BLOCK_') && trim.endsWith('@@')) {
+            out.push(trim);
+            i += 1;
+            continue;
+        }
+
+        if (trim.startsWith('@@JARVIS_MATH_BLOCK_') && trim.endsWith('@@')) {
+            out.push(trim);
+            i += 1;
+            continue;
+        }
+
+        if (/^#{1,4}\s+/.test(line)) {
+            const level = line.match(/^(#{1,4})\s+/)[1].length;
+            const headingText = line.replace(/^#{1,4}\s+/, '');
+            const tag = `h${Math.min(level + 1, 5)}`;
+            out.push(`<${tag} class="assistant-md-heading">${escapeHtml(headingText)}</${tag}>`);
+            i += 1;
+            continue;
+        }
+
+        if (/^\s*>/.test(line)) {
+            const bqLines = [];
+            while (i < lines.length && /^\s*>/.test(String(lines[i] || ''))) {
+                bqLines.push(String(lines[i]).replace(/^\s*>\s?/, ''));
+                i += 1;
+            }
+            out.push(`<blockquote class="assistant-md-blockquote">${escapeHtml(bqLines.join('\n'))}</blockquote>`);
+            continue;
+        }
+
+        if (/^\s*[-*•+]\s+/.test(line)) {
+            const items = [];
+            while (i < lines.length && /^\s*[-*•+]\s+/.test(String(lines[i] || ''))) {
+                let item = String(lines[i]).replace(/^\s*[-*•+]\s+/, '');
+                // Strip duplicate/unwanted leading dashes, bullets, or list punctuation inside the item (e.g. "- -", "• -")
+                item = item.replace(/^[\s\-*•+–—]+(?:\s+|$)/, '');
+                item = cleanBulletEndCitations(item, true);
+                const trimmedItem = item.trim();
+                // Merge orphaned fragments / single initials resulting from broken sentence splitting (e.g. "under J." -> "B." -> "Krishna.")
+                const prevItem = items[items.length - 1];
+                const prevEndsWithInitial = prevItem && (/\b[A-Za-z]\.$/.test(prevItem) || /\b[A-Za-z]\.\s+[A-Za-z]\.$/.test(prevItem));
+                const isInitial = /^[A-Za-z]\.?$/.test(trimmedItem);
+                const isShortWordOrName = /^[A-Z][a-z0-9]{1,15}\.?$/.test(trimmedItem);
+
+                if (items.length > 0 && (isInitial || (prevEndsWithInitial && isShortWordOrName))) {
+                    items[items.length - 1] += ' ' + trimmedItem;
+                } else if (trimmedItem) {
+                    items.push(trimmedItem);
+                }
+                i += 1;
+            }
+            out.push(`<ul class="assistant-md-list">${items.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`);
+            continue;
+        }
+
+        if (/^\s*\d+\.\s+/.test(line)) {
+            const items = [];
+            while (i < lines.length && /^\s*\d+\.\s+/.test(String(lines[i] || ''))) {
+                let item = String(lines[i]).replace(/^\s*\d+\.\s+/, '');
+                // Strip duplicate/unwanted leading dashes, bullets, or list punctuation inside the item
+                item = item.replace(/^[\s\-*•+–—]+(?:\s+|$)/, '');
+                item = cleanBulletEndCitations(item, true);
+                const trimmedItem = item.trim();
+                const prevItem = items[items.length - 1];
+                const prevEndsWithInitial = prevItem && (/\b[A-Za-z]\.$/.test(prevItem) || /\b[A-Za-z]\.\s+[A-Za-z]\.$/.test(prevItem));
+                const isInitial = /^[A-Za-z]\.?$/.test(trimmedItem);
+                const isShortWordOrName = /^[A-Z][a-z0-9]{1,15}\.?$/.test(trimmedItem);
+
+                if (items.length > 0 && (isInitial || (prevEndsWithInitial && isShortWordOrName))) {
+                    items[items.length - 1] += ' ' + trimmedItem;
+                } else if (trimmedItem) {
+                    items.push(trimmedItem);
+                }
+                i += 1;
+            }
+            out.push(`<ol class="assistant-md-olist">${items.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ol>`);
+            continue;
+        }
+
+        const isPipeRow = /^\s*\|.+\|\s*$/.test(line);
+        const nextLine = i + 1 < lines.length ? String(lines[i + 1] || '') : '';
+        const isSeparator = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(nextLine);
+        if (isPipeRow && isSeparator) {
+            const tableRows = [line];
+            i += 2;
+            while (i < lines.length && /^\s*\|.+\|\s*$/.test(String(lines[i] || ''))) {
+                tableRows.push(String(lines[i]));
+                i += 1;
+            }
+            const cells = row => row.trim().replace(/^\||\|$/g, '').split('|').map(c => escapeHtml(c.trim()));
+            const header = cells(tableRows[0]);
+            const body = tableRows.slice(1).map(cells);
+            out.push(
+                `<div class="assistant-md-table-wrap">
+                    <div class="assistant-table-toolbar">
+                        <span class="assistant-table-badge">Data Table</span>
+                        <div class="assistant-table-actions">
+                            <div class="table-pencil-dropdown-wrapper">
+                                <button type="button" class="table-pencil-trigger-btn" data-assistant-action="table-menu" title="Table options (Copy, Download)" aria-label="Table options">
+                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                        <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path>
+                                        <path d="m15 5 4 4"></path>
+                                    </svg>
+                                </button>
+                                <div class="table-pencil-menu hidden">
+                                    <button type="button" class="table-pencil-menu-item" data-assistant-action="table-copy" title="Copy table for Excel or Sheets">
+                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                                        <span>Copy</span>
+                                    </button>
+                                    <button type="button" class="table-pencil-menu-item" data-assistant-action="table-download" title="Download as CSV (Excel compatible)">
+                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                                        <span>Download</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="assistant-table-scroll-container" tabindex="0" role="region" aria-label="Scrollable table">
+                        <table class="assistant-md-table"><thead><tr>${header.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${body.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table>
+                    </div>
+                </div>`
+            );
+            continue;
+        }
+
+        if (trim) {
+            const para = [];
+            while (
+                i < lines.length &&
+                String(lines[i] || '').trim() &&
+                !/^\s*[-*]\s+/.test(String(lines[i] || '')) &&
+                !/^\s*\d+\.\s+/.test(String(lines[i] || '')) &&
+                !/^\s*>/.test(String(lines[i] || '')) &&
+                !/^(#{1,4})\s+/.test(String(lines[i] || '')) &&
+                !/^\s*\|.+\|\s*$/.test(String(lines[i] || '')) &&
+                !(String(lines[i] || '').trim().startsWith('@@JARVIS_CODE_BLOCK_') && String(lines[i] || '').trim().endsWith('@@')) &&
+                !(String(lines[i] || '').trim().startsWith('@@JARVIS_MATH_BLOCK_') && String(lines[i] || '').trim().endsWith('@@'))
+            ) {
+                para.push(String(lines[i]));
+                i += 1;
+            }
+            let pContent = escapeHtml(para.join('\n')).replace(/\n/g, '<br>');
+            pContent = pContent.replace(/(^|<br>)(?:<strong>)?(Step\s*\d+[\s:.\-][^<]*?)(?:<\/strong>)?(?=<br>|$)/gim, '$1<span class="math-step-label">$2</span>');
+            out.push(`<p class="assistant-md-p">${pContent}</p>`);
+            continue;
+        }
+
+        out.push('<br>');
+        i += 1;
+    }
+
+    let html = out.join('\n');
+
+    // Inline formatting: math, inline code, bold, italics, links & citations
+    const inlineMath = [];
+    const storeInlineMath = (markup) => `@@JARVIS_INLINE_MATH_${inlineMath.push(markup) - 1}@@`;
+    html = renderMathInText(html, { storeMath: storeInlineMath });
+
+    // Handle backticked content: route math expressions to inline math instead of code badge boxes
+    html = html.replace(/`([^`\n]+)`/g, (match, inner) => {
+        const trimmed = inner.trim();
+        const isExplicitMath = /^\$[^$]+\$$/.test(trimmed) ||
+                               /\\(?:frac|sqrt|boxed|approx|times|cdot|pm|le|ge|neq|alpha|beta|gamma|pi|theta|text|mathrm|mathbf|sum|int|partial|nabla|infty|degree|circ)\b/.test(trimmed);
+        const isEquationOrRelation = /^[a-zA-Z0-9_\(\)]+\s*(?:=|≈|&asymp;|\approx|\+|-|\*|\/|\\times|\\approx|≠|<=|>=|<|>|\\le|\\ge|\\neq)\s*[\d\w\s\\.+*/^_-]+/.test(trimmed);
+        const isCoordinate = /^\([a-zA-Z0-9_+-]+,\s*[a-zA-Z0-9_+-]+\)$/.test(trimmed);
+        const isSubSuper = /^[a-zA-Z]\s*[\^_]\{?[\w\d+-]+\}?$/.test(trimmed);
+        const isArithmetic = /^(?:[\d\w_]+\s*[\+\-\*\/\^]\s*)+[\d\w_]+$/.test(trimmed) && /[+\-*/^]/.test(trimmed) && !/[a-zA-Z]{5,}/.test(trimmed);
+        const isDifferentialOrCalculus = /\b(?:d[x-z]|d[u-w]|dt)\b/.test(trimmed) && /\b(?:x|y|z|u|v|w|t|tan|sin|cos|sec|cot|csc|ln|log|\d+)\b/.test(trimmed);
+
+        const isMath = isExplicitMath || isEquationOrRelation || isCoordinate || isSubSuper || isArithmetic || isDifferentialOrCalculus;
+
+        if (isMath) {
+            const cleanExpr = trimmed.replace(/^\$|\$$/g, '');
+            return storeInlineMath(`<span class="math-inline">${formatLatexExpression(cleanExpr, false)}</span>`);
+        }
+        return `<code class="assistant-md-inline-code">${inner}</code>`;
+    });
+
+    const sources = Array.isArray(options?.sources) ? options.sources : (Array.isArray(options?.meta?.sources) ? options.meta.sources : []);
+
+    // Bold + Italic (*** or ___)
+    html = html.replace(/\*\*\*([^*]+)\*\*\*/g, '<strong><em>$1</em></strong>');
+    html = html.replace(/___([^_]+)___/g, '<strong><em>$1</em></strong>');
+
+    // Bold (** or __)
+    html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    html = html.replace(/__([^_]+)__/g, '<strong>$1</strong>');
+
+    // Strikethrough (~~)
+    html = html.replace(/~~([^~]+)~~/g, '<del>$1</del>');
+
+    // Italics (*italic* and _italic_)
+    html = html.replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '<em>$1</em>');
+    html = html.replace(/(?<![\w\\])_(?![\s_])([^\n_]+?)(?<![\s_])_(?![\w])/g, '<em>$1</em>');
+    html = html.replace(/\[\^(\d+)\]\((https?:\/\/[^)]+)\)/g, (match, id, url) => {
+        const source = findSourceById(sources, id);
+        if (source) {
+            return renderSourceLogoBadge(source, id);
+        }
+        return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="citation-badge" title="Source [${id}]"><sup>[${id}]</sup></a>`;
+    });
+    html = html.replace(/\[\^(\d+)\]/g, (match, id) => {
+        const source = findSourceById(sources, id);
+        return renderSourceLogoBadge(source, id);
+    });
+    html = html.replace(/\[\[(\d+)\]\]\((https?:\/\/[^)]+)\)/g, (match, id, url) => {
+        const source = findSourceById(sources, id) || { id, url };
+        return renderSourceLogoBadge(source, id);
+    });
+    html = html.replace(/\[(\d+)\]\((https?:\/\/[^)]+)\)/g, (match, id, url) => {
+        const source = findSourceById(sources, id) || { id, url };
+        return renderSourceLogoBadge(source, id);
+    });
+    html = html.replace(/(?<![\[\w`]|<sup>)(?:\[|【)((?:f?\d+)(?:\s*,\s*f?\d+)*)(?:\]|】)(?![\]\(]|<\/sup>)/g, (match, idsStr) => {
+        const ids = idsStr.split(',').map(s => s.trim()).filter(Boolean);
+        return ids.map(id => {
+            const source = findSourceById(sources, id);
+            return renderSourceLogoBadge(source, id);
+        }).join('');
+    });
+    html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, (match, linkText, url) => {
+        const trimmedText = String(linkText || '').trim();
+        const citeMatch = trimmedText.match(/^\[?(?:f?\d+)\]?$/);
+        if (citeMatch) {
+            const id = trimmedText.replace(/[\[\]f#]/gi, '');
+            const source = findSourceById(sources, id) || { id, url };
+            return renderSourceLogoBadge(source, id);
+        }
+        return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="assistant-link">${linkText}</a>`;
+    });
+
+    // Step 3: Re-inject display math blocks with clean notebook styling (NO code container / copy buttons)
+    html = html.replace(/@@JARVIS_MATH_BLOCK_(\d+)@@/g, (_, idx) => {
+        const mathCode = mathBlocks[Number(idx)];
+        if (!mathCode) return '';
+        return `<div class="math-display-block"><span class="math-display-inner">${formatLatexExpression(mathCode, true)}</span></div>`;
+    });
+    html = html.replace(/(?:<br\s*\/?>\s*)+(<div class="math-display-block">)/g, '$1');
+    html = html.replace(/(<\/div>)\s*(?:<br\s*\/?>\s*)+/g, '$1');
+
+    // Step 4: Re-inject code blocks with syntax highlighting & action buttons
+    html = html.replace(/@@JARVIS_CODE_BLOCK_(\d+)@@/g, (_, idx) => {
+        const block = codeBlocks[Number(idx)];
+        if (!block) return '';
+        const blockId = options?.messageId ? `${options.messageId}_code_${idx}` : `code_block_${idx}`;
+        if (typeof window !== 'undefined') {
+            window._jarvisCodeBlocks = window._jarvisCodeBlocks || {};
+            window._jarvisCodeBlocks[blockId] = {
+                lang: block.lang || 'code',
+                code: block.code || ''
+            };
+        }
+        const isVisualBlock = /^(visual|animation|illustration)$/i.test(block.lang || '');
+        if (isVisualBlock && block.code.trim() && options?.streaming !== true) {
+            const visualHtml = renderInteractiveVisualMarkup(block.code, blockId);
+            if (visualHtml) return visualHtml;
+        }
+        const langLabel = block.lang ? escapeHtml(block.lang.toUpperCase()) : 'CODE';
+        const isPython = /^(python|py|python3)$/i.test(block.lang || '');
+        const isHtml = /^(html|htm)$/i.test(block.lang || '');
+        const isJs = /^(javascript|js|typescript|ts)$/i.test(block.lang || '');
+
+        let runBtnHtml = '';
+        if (isPython) {
+            runBtnHtml = `<button type="button" class="code-header-btn code-run-btn" data-assistant-action="code-run-python" data-block-id="${blockId}" title="Run code in Python WebAssembly (Pyodide)">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                <span>Run</span>
+            </button>`;
+        } else if (isJs) {
+            runBtnHtml = `<button type="button" class="code-header-btn code-run-btn" data-assistant-action="code-run-js" data-block-id="${blockId}" title="Run JavaScript in client sandbox">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                <span>Run</span>
+            </button>`;
+        }
+
+        const lineCount = String(block.code || '').split('\n').length;
+        const isCollapsible = lineCount > 28;
+        const startCollapsed = isCollapsible && options?.streaming !== true;
+
+        const wrapBtnHtml = `<button type="button" class="code-header-btn code-wrap-btn" data-assistant-action="code-wrap" data-block-id="${blockId}" title="Toggle word wrap" aria-pressed="false">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"></line><path d="M3 12h15a3 3 0 1 1 0 6h-4"></path><polyline points="16 16 14 18 16 20"></polyline><line x1="3" y1="18" x2="10" y2="18"></line></svg>
+            <span>Wrap</span>
+        </button>`;
+
+        const collapseBtnHtml = isCollapsible
+            ? `<button type="button" class="code-header-btn code-collapse-btn" data-assistant-action="code-collapse" data-block-id="${blockId}" title="${startCollapsed ? 'Expand full code' : 'Collapse code'}" aria-expanded="${startCollapsed ? 'false' : 'true'}">
+                <span>${startCollapsed ? 'Expand' : 'Collapse'}</span>
+            </button>`
+            : '';
+
+        const copyBtnHtml = `<button type="button" class="code-header-btn" data-assistant-action="code-copy" data-block-id="${blockId}" title="Copy code">
+            <span class="code-copy-icon"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></span>
+            <span>Copy</span>
+        </button>`;
+
+        const highlighted = highlightCode(block.code, block.lang);
+
+        let previewHtml = '';
+        if (isHtml && block.code.trim() && options?.streaming !== true) {
+            const escapedCode = String(block.code || '')
+                .replace(/&/g, '&amp;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+            previewHtml = `
+                <div class="assistant-code-preview-wrap" id="preview_wrap_${blockId}">
+                    <div class="assistant-code-preview-header">
+                        <div class="assistant-code-preview-title">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"></circle><polygon points="10 8 16 12 10 16 10 8"></polygon></svg>
+                            <span>Live Interactive Preview</span>
+                        </div>
+                        <div class="assistant-code-preview-actions">
+                            <button type="button" class="code-preview-btn" data-assistant-action="preview-toggle" data-block-id="${blockId}" title="Collapse / Expand Preview">Toggle</button>
+                            <button type="button" class="code-preview-btn" data-assistant-action="preview-refresh" data-block-id="${blockId}" title="Reload Preview">Refresh</button>
+                            <button type="button" class="code-preview-btn" data-assistant-action="preview-download" data-block-id="${blockId}" title="Download the HTML file">Download</button>
+                        </div>
+                    </div>
+                    <div class="assistant-code-preview-body" id="preview_body_${blockId}">
+                        <div class="assistant-code-preview-placeholder">Use Toggle to open a sandboxed preview.</div>
+                    </div>
+                </div>`;
+        }
+
+        const expandOverlayHtml = isCollapsible
+            ? `<div class="code-expand-fade" aria-hidden="${startCollapsed ? 'false' : 'true'}"><button type="button" class="code-expand-overlay-btn" data-assistant-action="code-collapse" data-block-id="${blockId}">Show all ${lineCount} lines</button></div>`
+            : '';
+
+        return `
+            <div class="assistant-md-code-container${startCollapsed ? ' is-collapsed' : ''}" id="container_${blockId}" data-line-count="${lineCount}">
+                <div class="assistant-md-code-header">
+                    <div class="assistant-md-code-meta">
+                        <span class="assistant-md-code-lang">${langLabel}</span>
+                        <span class="assistant-md-code-lines">${lineCount} ${lineCount === 1 ? 'line' : 'lines'}</span>
+                    </div>
+                    <div class="assistant-md-code-actions">
+                        ${runBtnHtml}
+                        ${wrapBtnHtml}
+                        ${collapseBtnHtml}
+                        ${copyBtnHtml}
+                    </div>
+                </div>
+                <div class="assistant-md-code-body">
+                    <pre class="assistant-md-code-block"><code class="lang-${escapeHtml(block.lang || 'text')}">${highlighted}</code></pre>
+                    ${expandOverlayHtml}
+                </div>
+                ${previewHtml}
+                <div class="assistant-code-output" id="output_${blockId}" style="display:none;"></div>
+            </div>
+        `;
+    });
+
+    return html.replace(/@@JARVIS_INLINE_MATH_(\d+)@@/g, (_, idx) => inlineMath[Number(idx)] || '');
+}
+
+export function toggleTablePencilMenu(triggerOrItem, forceState) {
+    const wrap = triggerOrItem?.closest?.('.table-pencil-dropdown-wrapper');
+    const menu = wrap?.querySelector?.('.table-pencil-menu');
+    if (!menu) return;
+    const shouldOpen = typeof forceState === 'boolean' ? forceState : menu.classList.contains('hidden');
+    if (typeof document !== 'undefined') {
+        document.querySelectorAll('.table-pencil-menu:not(.hidden)').forEach(m => {
+            if (m !== menu) m.classList.add('hidden');
+        });
+    }
+    if (shouldOpen) {
+        menu.classList.remove('hidden');
+    } else {
+        menu.classList.add('hidden');
+    }
+}
+
+if (typeof window !== 'undefined') {
+    window.toggleTablePencilMenu = toggleTablePencilMenu;
+    if (typeof document !== 'undefined' && !window.__jarvisTablePencilListenerAdded) {
+        window.__jarvisTablePencilListenerAdded = true;
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.table-pencil-dropdown-wrapper')) {
+                document.querySelectorAll('.table-pencil-menu:not(.hidden)').forEach(m => m.classList.add('hidden'));
+            }
+        });
+    }
+}
