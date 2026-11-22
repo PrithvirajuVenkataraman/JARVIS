@@ -1,6 +1,6 @@
-import { formatBytes } from './file-format.js';
+import { formatBytes, detectImageMime, imageNameForMime } from './file-format.js';
 import { postJson as postApiJson } from './api-client.js';
-import { jsonByteLength, MAX_JSON_REQUEST_BYTES } from './request-payload.js';
+import { jsonByteLength, MAX_JSON_REQUEST_BYTES, payloadSizeError } from './request-payload.js';
 import * as BM25Module from './bm25.js?v=2.0.5';
 
 const BM25Index = BM25Module.BM25Index;
@@ -61,6 +61,8 @@ const PDF_DIGITAL_PAGE_LIMIT = 100;
 const PDF_VISUAL_PAGE_LIMIT = 100; // expanded to 100 pages for heavy scanned documents (batch-streamed)
 const TEXT_EXTENSIONS = /\.(txt|md|markdown|json|jsonl|csv|tsv|xml|html|htm|css|js|mjs|cjs|ts|tsx|jsx|py|java|cpp|c|h|cs|go|rs|rb|php|sh|yaml|yml|toml|ini|log|sql|rtf|eml|msg)$/i;
 const IMAGE_EXTENSIONS = /\.(jpe?g|pjpeg|png|gif|webp|bmp|dib|tiff?|heic|heif|heics|heifs|avif|avifs|dng|raw|cr[23]|nef|nrw|arw|srf|sr2|raf|rw2|orf|pef|jp2|j2k|jpf|jpx|jpm|pict?|pct|pic|psd|ico|cur|svgz?)$/i;
+const RAW_IMAGE_EXTENSIONS = /\.(dng|raw|cr[23]|nef|nrw|arw|srf|sr2|raf|rw2|orf|pef)$/i;
+const VISION_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 const XLSX_EXTENSIONS = /\.(xlsx|xls|ods)$/i;
 const ZIP_EXTENSIONS = /\.(zip|cbz)$/i;
 const EPUB_EXTENSIONS = /\.epub$/i;
@@ -199,9 +201,13 @@ export async function addFilesToComposer(fileList = []) {
             errors.push(validation.message);
             continue;
         }
-        const attachment = await createPendingAttachment(file);
-        pendingAttachments.push(attachment);
-        added.push(attachment);
+        try {
+            const attachment = await createPendingAttachment(file);
+            pendingAttachments.push(attachment);
+            added.push(attachment);
+        } catch (error) {
+            errors.push(String(error?.message || 'This file could not be prepared.'));
+        }
     }
     return { added, errors };
 }
@@ -245,7 +251,7 @@ export async function ingestAllForMessage(attachments = [], userText = '') {
                     const finalMime = normalizeImageMime(attachment.mimeType, attachment.name, base64);
                     attachment.mimeType = finalMime;
                     imagePayload = {
-                        name: attachment.name,
+                        name: attachment.preparedName || attachment.name,
                         mimeType: finalMime,
                         base64
                     };
@@ -697,7 +703,10 @@ async function ingestViaVision(attachment) {
 
 async function resolveAttachmentBase64(attachment, options = {}) {
     const existing = String(attachment?.base64 || '').trim();
-    if (existing) return existing;
+    if (existing) {
+        if (isImageAttachment(attachment) && !VISION_IMAGE_TYPES.has(encodedImageMime(existing))) throw unsupportedImageError(attachment.name);
+        return existing;
+    }
     if (attachment?.preEncodedPromise) {
         try {
             const preEncoded = String(await attachment.preEncodedPromise || '').trim();
@@ -713,7 +722,8 @@ async function resolveAttachmentBase64(attachment, options = {}) {
         throw new Error(`Missing file data for ${attachment?.name || 'attachment'}. Please reattach the file and try again.`);
     }
     const isImg = isImageAttachment(attachment);
-    const encoded = String((isImg ? await compressImageFileToBase64(file).catch(() => fileToBase64(file)) : await fileToBase64(file)) || '').trim();
+    const encoded = String((isImg ? await compressImageFileToBase64(file) : await fileToBase64(file)) || '').trim();
+    if (isImg && !VISION_IMAGE_TYPES.has(encodedImageMime(encoded))) throw unsupportedImageError(attachment.name);
     if (encoded) {
         attachment.base64 = encoded;
     }
@@ -747,15 +757,28 @@ function validateFile(file) {
     return { ok: true };
 }
 
+function encodedImageMime(base64) {
+    try { return detectImageMime(Uint8Array.from(atob(base64.slice(0, 32)), character => character.charCodeAt(0))); }
+    catch { return ''; }
+}
+
+function unsupportedImageError(name, raw = false) {
+    return Object.assign(new Error(raw
+        ? `${name} is a camera RAW file. Export it as JPEG or PNG before attaching it.`
+        : `${name || 'This image'} could not be opened on this device. Export it as JPEG or PNG and try again.`), { code: 'unsupported_media' });
+}
+
 async function createPendingAttachment(file) {
-    const isImage = (file.type || '').startsWith('image/') || IMAGE_EXTENSIONS.test(file.name || '');
+    const detectedMime = detectImageMime(new Uint8Array(await file.slice(0, 32).arrayBuffer()));
+    const isImage = Boolean(detectedMime) || (file.type || '').startsWith('image/') || IMAGE_EXTENSIONS.test(file.name || '');
+    if (RAW_IMAGE_EXTENSIONS.test(file.name || '') && (!detectedMime || detectedMime === 'image/tiff')) throw unsupportedImageError(file.name, true);
     let fileName = String(file.name || '').trim();
     if (!fileName || fileName === 'blob' || fileName === 'image.png') {
-        const ext = file.type ? (file.type.split('/')[1]?.replace('jpeg', 'jpg') || 'png') : 'png';
+        const mimeType = detectedMime || file.type;
+        const ext = mimeType ? (mimeType.split('/')[1]?.replace('jpeg', 'jpg') || 'png') : 'png';
         fileName = `pasted-media-${Date.now()}.${ext}`;
     }
-    const storedMimeType = isImage ? (file.type || 'image/jpeg') : (file.type || guessMimeFromName(fileName));
-    const previewUrl = isImage && typeof URL?.createObjectURL === 'function' ? URL.createObjectURL(file) : '';
+    const storedMimeType = detectedMime || file.type || guessMimeFromName(fileName);
     const attachment = {
         id: `att_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         name: fileName,
@@ -763,23 +786,28 @@ async function createPendingAttachment(file) {
         size: file.size || 0,
         file,
         base64: '',
-        previewUrl,
+        previewUrl: '',
         preEncodedPromise: null
     };
 
     if (isImage) {
-        // Eager non-blocking pre-encoding: starts immediately while the user types so Send has 0ms encode wait.
-        attachment.preEncodedPromise = compressImageFileToBase64(file)
-            .catch(() => fileToBase64(file))
+        // A chip is ready only after the browser has produced a valid preview and payload.
+        const source = storedMimeType !== file.type ? new File([file], fileName, { type: storedMimeType, lastModified: file.lastModified }) : file;
+        attachment.preEncodedPromise = compressImageFileToBase64(source)
             .then((encoded) => {
                 const clean = String(encoded || '').trim();
-                if (clean) {
-                    attachment.base64 = clean;
-                    attachment.mimeType = normalizeImageMime(file.type || 'image/jpeg', fileName, clean);
-                }
+                const mimeType = encodedImageMime(clean);
+                if (!clean || !VISION_IMAGE_TYPES.has(mimeType)) throw unsupportedImageError(fileName);
+                attachment.base64 = clean;
+                attachment.mimeType = mimeType;
+                attachment.preparedName = imageNameForMime(fileName, mimeType);
+                const bytes = Uint8Array.from(atob(clean), character => character.charCodeAt(0));
+                attachment.preparedSize = bytes.length;
+                attachment.previewUrl = URL.createObjectURL(new Blob([bytes], { type: mimeType }));
                 return clean;
-            })
-            .catch(() => '');
+            });
+        try { await attachment.preEncodedPromise; }
+        catch { throw unsupportedImageError(fileName); }
     } else {
         attachment.base64 = await fileToBase64(file);
     }
@@ -937,7 +965,8 @@ async function compressImageFileToBase64(file, maxDimension = 1600, quality = 0.
         try {
             objectUrl = URL.createObjectURL(file);
         } catch (_) {
-            return fileToBase64(file).then(resolve).catch(reject);
+            reject(unsupportedImageError(file.name));
+            return;
         }
 
         const img = new Image();
@@ -981,12 +1010,12 @@ async function compressImageFileToBase64(file, maxDimension = 1600, quality = 0.
                 resolve(base64);
             } catch (err) {
                 URL.revokeObjectURL(objectUrl);
-                fileToBase64(file).then(resolve).catch(reject);
+                reject(err);
             }
         };
         img.onerror = () => {
             URL.revokeObjectURL(objectUrl);
-            fileToBase64(file).then(resolve).catch(reject);
+            reject(unsupportedImageError(file.name));
         };
         img.src = objectUrl;
     });
@@ -1084,7 +1113,7 @@ function dedupeSections(sections = []) {
 export function buildChatAttachmentMeta(attachments = []) {
     return (Array.isArray(attachments) ? attachments : []).map(item => {
         const mimeType = item?.mimeType || guessMimeFromName(item?.name || '');
-        const name = String(item?.name || 'attachment');
+        const name = String(item?.preparedName || item?.name || 'attachment');
         const isImage = /^image\//i.test(mimeType) || IMAGE_EXTENSIONS.test(name);
         const kind = isImage
             ? 'image'
@@ -1098,8 +1127,10 @@ export function buildChatAttachmentMeta(attachments = []) {
         return {
             id: String(item?.id || ''),
             name,
+            originalName: String(item?.name || name),
             mimeType,
-            size: Number(item?.size) || 0,
+            size: Number(item?.preparedSize || item?.size) || 0,
+            originalSize: Number(item?.size) || 0,
             kind,
             previewUrl,
             extractedText: String(item?.extractedText || item?.text || '').trim(),
@@ -1158,110 +1189,26 @@ function readFileAsText(file) {
 
 export async function downsampleImageFileToSafeBase64(file, maxBytes = 3.2 * 1024 * 1024) {
     if (!file) return '';
-    const isImage = (file.type && file.type.startsWith('image/')) ||
-                    /\.(jpe?g|png|webp|bmp|gif|tiff?|avif|heic|heif)$/i.test(file.name || '');
-
-    // If not an image or already small (< 2.2 MB), read directly without canvas overhead
-    if (!isImage || (file.size && file.size <= 2.2 * 1024 * 1024)) {
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => {
-                const result = String(reader.result || '');
-                const comma = result.indexOf(',');
-                resolve(comma >= 0 ? result.slice(comma + 1) : result);
-            };
-            reader.onerror = () => reject(reader.error || new Error('Could not encode file.'));
-            reader.readAsDataURL(file);
-        });
+    const detectedMime = detectImageMime(new Uint8Array(await file.slice(0, 32).arrayBuffer()));
+    const isImage = Boolean(detectedMime) || /^image\//i.test(file.type || '') || IMAGE_EXTENSIONS.test(file.name || '');
+    if (!isImage) return fileToBase64(file);
+    if (RAW_IMAGE_EXTENSIONS.test(file.name || '') && (!detectedMime || detectedMime === 'image/tiff')) throw unsupportedImageError(file.name, true);
+    const source = detectedMime && detectedMime !== file.type ? new File([file], file.name, { type: detectedMime }) : file;
+    for (const [dimension, quality] of [[1600, 0.88], [1280, 0.75], [1024, 0.7], [768, 0.6]]) {
+        const encoded = await compressImageFileToBase64(source, dimension, quality);
+        if (!VISION_IMAGE_TYPES.has(encodedImageMime(encoded))) throw unsupportedImageError(file.name);
+        if (encoded.length * 0.75 <= maxBytes) return encoded;
     }
-
-    if (typeof Image === 'undefined' || typeof document === 'undefined') {
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => {
-                const result = String(reader.result || '');
-                const comma = result.indexOf(',');
-                resolve(comma >= 0 ? result.slice(comma + 1) : result);
-            };
-            reader.onerror = () => reject(reader.error || new Error('Could not encode file.'));
-            reader.readAsDataURL(file);
-        });
-    }
-
-    return new Promise((resolve) => {
-        try {
-            const url = URL.createObjectURL(file);
-            const img = new Image();
-            img.onload = () => {
-                try {
-                    URL.revokeObjectURL(url);
-                    let { width, height } = img;
-                    const MAX_DIM = 2048;
-                    if (width > MAX_DIM || height > MAX_DIM) {
-                        if (width > height) {
-                            height = Math.round((height * MAX_DIM) / width);
-                            width = MAX_DIM;
-                        } else {
-                            width = Math.round((width * MAX_DIM) / height);
-                            height = MAX_DIM;
-                        }
-                    }
-                    const canvas = document.createElement('canvas');
-                    canvas.width = width;
-                    canvas.height = height;
-                    const ctx = canvas.getContext('2d');
-                    ctx.drawImage(img, 0, 0, width, height);
-
-                    let quality = 0.88;
-                    let dataUrl = canvas.toDataURL('image/jpeg', quality);
-                    let comma = dataUrl.indexOf(',');
-                    let b64 = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
-
-                    while (b64.length * 0.75 > maxBytes && quality > 0.40) {
-                        quality -= 0.15;
-                        dataUrl = canvas.toDataURL('image/jpeg', quality);
-                        comma = dataUrl.indexOf(',');
-                        b64 = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
-                    }
-                    resolve(b64);
-                } catch (_) {
-                    const r = new FileReader();
-                    r.onload = () => {
-                        const res = String(r.result || '');
-                        const c = res.indexOf(',');
-                        resolve(c >= 0 ? res.slice(c + 1) : res);
-                    };
-                    r.onerror = () => resolve('');
-                    r.readAsDataURL(file);
-                }
-            };
-            img.onerror = () => {
-                URL.revokeObjectURL(url);
-                const r = new FileReader();
-                r.onload = () => {
-                    const res = String(r.result || '');
-                    const c = res.indexOf(',');
-                    resolve(c >= 0 ? res.slice(c + 1) : res);
-                };
-                r.onerror = () => resolve('');
-                r.readAsDataURL(file);
-            };
-            img.src = url;
-        } catch (_) {
-            const r = new FileReader();
-            r.onload = () => {
-                const res = String(r.result || '');
-                const c = res.indexOf(',');
-                resolve(c >= 0 ? res.slice(c + 1) : res);
-            };
-            r.onerror = () => resolve('');
-            r.readAsDataURL(file);
-        }
-    });
+    throw payloadSizeError();
 }
 
 function fileToBase64(file) {
-    return downsampleImageFileToSafeBase64(file);
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || '').split(',')[1] || '');
+        reader.onerror = () => reject(reader.error || new Error('Could not read this file.'));
+        reader.readAsDataURL(file);
+    });
 }
 
 /**
@@ -1816,8 +1763,8 @@ export function renderAttachmentTray(container, attachments, onRemove, options =
             <div class="composer-attachment-chip" data-attachment-id="${escapeHtml(item.id)}">
                 ${preview}
                 <div class="composer-attachment-meta">
-                    <span class="composer-attachment-name">${escapeHtml(item.name)}</span>
-                    <span class="composer-attachment-size">${escapeHtml(formatBytes(item.size))}</span>
+                    <span class="composer-attachment-name" title="${escapeHtml(item.name)}">${escapeHtml(item.preparedName || item.name)}</span>
+                    <span class="composer-attachment-size">${escapeHtml(formatBytes(item.preparedSize || item.size))}</span>
                     ${item.pastedText ? `<button type="button" class="paste-chip-action" data-paste-preview="${escapeHtml(item.id)}">Preview</button><button type="button" class="paste-chip-action" data-paste-inline="${escapeHtml(item.id)}">Insert inline</button>` : ''}
                 </div>
                 <button type="button" class="composer-attachment-remove" data-remove-attachment="${escapeHtml(item.id)}" aria-label="Remove ${escapeHtml(item.name)}">×</button>

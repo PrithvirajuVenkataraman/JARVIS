@@ -14,10 +14,26 @@ import { buildDiagnosticsStatus } from '../api/diagnostics.js';
 import { __test as chat } from '../api/chat-groq.js';
 import { visionFailurePayload } from '../api/_lib/model-failure.js';
 import { lazyModule } from '../app/lazy-features.js';
-import { formatBytes } from '../app/file-format.js';
+import { formatBytes, detectImageMime, imageNameForMime } from '../app/file-format.js';
 import { prepareRequestPayload, serializeRequestPayload, jsonByteLength, MAX_JSON_REQUEST_BYTES, isPayloadTooLarge } from '../app/request-payload.js';
 import { classifyFailure, buildUserFacingErrorMessage, shouldShowFailureFallbackCard } from '../app/failure-policy.js';
 import { installRequestPreferences } from '../app/request-preferences.js';
+
+test('image bytes determine the format and prepared filenames match the encoded data', async () => {
+    assert.equal(detectImageMime(Uint8Array.from([0xff, 0xd8, 0xff, 0xe0])), 'image/jpeg');
+    assert.equal(detectImageMime(Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])), 'image/png');
+    assert.equal(detectImageMime(Uint8Array.from([0x49, 0x49, 0x2a, 0])), 'image/tiff');
+    assert.equal(detectImageMime(new Uint8Array()), '');
+    assert.equal(imageNameForMime('DSC_0158.NEF', 'image/jpeg'), 'DSC_0158.jpg');
+    assert.equal(imageNameForMime('diagram.png', 'image/jpeg'), 'diagram.jpg');
+    assert.equal(imageNameForMime('photo.jpeg', 'image/jpeg'), 'photo.jpeg');
+    const { buildChatAttachmentMeta } = await import('../app/attachments.js');
+    const source = { name: 'diagram.png', preparedName: 'diagram.jpg', mimeType: 'image/jpeg', size: 1_000_000, preparedSize: 120_000 };
+    const [metadata] = buildChatAttachmentMeta([source]);
+    assert.equal(metadata.name, 'diagram.jpg'); assert.equal(metadata.originalName, 'diagram.png');
+    assert.equal(metadata.size, 120_000); assert.equal(metadata.originalSize, 1_000_000);
+    assert.equal(source.name, 'diagram.png');
+});
 
 test('payload failures never offer a transient retry or web-search fallback', () => {
     const error = { status: 413, message: 'Request failed' };

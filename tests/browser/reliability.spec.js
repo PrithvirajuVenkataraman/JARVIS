@@ -108,6 +108,88 @@ test('HTTP 413 stops attachment fallbacks and restores the prompt and files', as
 });
 });
 
+test.describe('image format safety', () => {
+    test.use({ serviceWorkers: 'block' });
+
+    test('sending waits for image preparation without losing the draft', async ({ page }) => {
+        const requests = []; page.on('request', request => { if (request.url().endsWith('/api/chat-groq') && request.method() === 'POST') requests.push(request.url()); });
+        await page.evaluate(() => {
+            const arrayBuffer = Blob.prototype.arrayBuffer;
+            const ready = new Promise(resolve => { window.__releaseImageHeader = resolve; });
+            Blob.prototype.arrayBuffer = async function () { if (this.size === 32) await ready; return arrayBuffer.call(this); };
+        });
+        const input = page.locator('#text-input'); await input.fill('Explain this formula.');
+        await page.locator('#composer-photo-library-input').setInputFiles({ name: 'formula.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64') });
+        await expect(page.locator('#send-message-btn')).toBeDisabled();
+        await input.press('Enter'); await expect(input).toHaveValue('Explain this formula.'); expect(requests).toEqual([]);
+        await page.evaluate(() => window.__releaseImageHeader());
+        await expect(page.locator('.composer-attachment-name')).toHaveText('formula.png');
+        await expect(page.locator('#send-message-btn')).toBeEnabled();
+    });
+
+    test('a PNG with a RAW extension is identified by its bytes and keeps its original source', async ({ page }) => {
+        await page.locator('#composer-photo-library-input').setInputFiles({ name: 'DSC_0158.NEF', mimeType: 'image/x-nikon-nef', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64') });
+        await expect(page.locator('.composer-attachment-name')).toHaveText('DSC_0158.png');
+        expect(await page.evaluate(() => {
+            const attachment = window.JarvisAttachments.getPendingAttachments()[0];
+            const [metadata] = window.JarvisAttachments.buildChatAttachmentMeta([attachment]);
+            return { name: metadata.name, mimeType: metadata.mimeType, originalName: metadata.originalName, sourceName: attachment.file.name };
+        })).toEqual({ name: 'DSC_0158.png', mimeType: 'image/png', originalName: 'DSC_0158.NEF', sourceName: 'DSC_0158.NEF' });
+        await expect.poll(() => page.locator('.composer-attachment-thumb').evaluate(image => image.complete && image.naturalWidth > 0)).toBe(true);
+    });
+
+    test('JPEG conversion updates the filename, size, and preview without changing the source file', async ({ page }) => {
+        const payload = await page.evaluate(() => {
+            const canvas = document.createElement('canvas'); canvas.width = canvas.height = 500;
+            const context = canvas.getContext('2d'), pixels = context.createImageData(500, 500);
+            let seed = 29;
+            for (let index = 0; index < pixels.data.length; index += 4) {
+                for (let channel = 0; channel < 3; channel++) { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; pixels.data[index + channel] = seed >>> 24; }
+                pixels.data[index + 3] = 255;
+            }
+            context.putImageData(pixels, 0, 0); return canvas.toDataURL('image/png').split(',')[1];
+        });
+        await page.locator('#composer-photo-library-input').setInputFiles({ name: 'diagram.png', mimeType: 'image/png', buffer: Buffer.from(payload, 'base64') });
+        await expect(page.locator('.composer-attachment-name')).toHaveText('diagram.jpg');
+        const metadata = await page.evaluate(() => {
+            const attachment = window.JarvisAttachments.getPendingAttachments()[0];
+            return { ...window.JarvisAttachments.buildChatAttachmentMeta([attachment])[0], sourceName: attachment.file.name };
+        });
+        expect(metadata.originalName).toBe('diagram.png'); expect(metadata.sourceName).toBe('diagram.png');
+        expect(metadata.mimeType).toBe('image/jpeg'); expect(metadata.size).toBeLessThan(metadata.originalSize);
+        await expect.poll(() => page.locator('.composer-attachment-thumb').evaluate(image => image.complete && image.naturalWidth > 0)).toBe(true);
+    });
+
+    test('genuine RAW and undecodable images are rejected before upload with a useful message', async ({ page }) => {
+        const calls = []; page.on('request', request => { if (request.method() === 'POST' && /\/api\/(?:chat-groq|vision|ingest-attachment)$/.test(new URL(request.url()).pathname)) calls.push(request.url()); });
+        await page.locator('#composer-photo-library-input').setInputFiles({ name: 'DSC_0158.NEF', mimeType: 'image/x-nikon-nef', buffer: Buffer.from([0x49, 0x49, 0x2a, 0, 8, 0, 0, 0]) });
+        await expect(page.locator('.jarvis-toast-pill').last()).toContainText('camera RAW file');
+        await expect(page.locator('.composer-attachment-chip')).toHaveCount(0);
+        await page.locator('#composer-photo-library-input').setInputFiles({ name: 'broken.png', mimeType: 'image/png', buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]) });
+        await expect(page.locator('.jarvis-toast-pill').last()).toContainText('could not be opened');
+        await expect(page.locator('.composer-attachment-chip')).toHaveCount(0);
+        expect(calls).toEqual([]);
+    });
+
+    test('expired previews become file badges and quoted filenames cannot execute event handlers', async ({ page }) => {
+        const filename = "photo');window.__filenameExecuted=1;//.png";
+        await page.evaluate(name => {
+            const host = document.createElement('div'); host.id = 'attachment-preview-fixture';
+            host.innerHTML = window.buildUserMessageAttachmentsHtml([{ name, mimeType: 'image/png', previewUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=' }, { name: 'DSC_0158.NEF', mimeType: 'image/jpeg', previewUrl: `blob:${location.origin}/expired-preview` }]);
+            document.body.append(host);
+            window.openImageLightbox = (_url, file) => { window.__previewFilename = file; };
+        }, filename);
+        const host = page.locator('#attachment-preview-fixture');
+        await expect(host.locator('.chat-attachment-card').last()).toContainText('Preview unavailable');
+        await expect(host.locator('.chat-attachment-card').last().locator('img')).toHaveCount(0);
+        await expect(host.locator('.chat-attachment-card').last().locator('.chat-attachment-badge')).toHaveText('RAW');
+        await expect(host.locator('[onclick], [onkeydown], [onerror]')).toHaveCount(0);
+        await host.locator('[data-attachment-preview]').focus(); await page.keyboard.press('Enter');
+        expect(await page.evaluate(() => window.__previewFilename)).toBe(filename);
+        expect(await page.evaluate(() => window.__filenameExecuted)).toBeUndefined();
+    });
+});
+
 test('IME composition does not submit and stop responds immediately', async ({ page }) => {
     const input = page.locator('#text-input');
     await input.fill('Composition fixture');

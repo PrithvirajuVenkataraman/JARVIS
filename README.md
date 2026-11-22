@@ -72,6 +72,8 @@ Document parsing is bundled locally and loaded when needed. Image OCR/understand
 
 Long clipboard text (8,000 characters or 80 lines) becomes a UTF-8 attachment. Short formulas stay inline, and indentation/LaTeX are preserved. Attachments can be previewed or moved back into the composer. Text retrieval runs in a worker; selected passages explicitly disclose partial coverage instead of claiming an entire large document was read.
 
+Image attachments are checked by their file signatures and prepared locally before upload. A converted preview uses its actual format, filename extension, and encoded size; the original source file is retained. Camera RAW files such as NEF must be exported as JPEG or PNG first. An expired preview falls back to a file badge rather than a broken image.
+
 Enhanced local recall is optional per device. It uses the pinned quantized `Xenova/all-MiniLM-L6-v2` model: roughly 23 MB of English model weights plus additional locally bundled WASM runtime assets. Downloads are verified against fixed hashes and cached when browser storage permits. Chat never waits for model downloading. Unsupported devices, offline downloads, or unavailable caches use lightweight retrieval. This feature does not add a server inference service or an ANN database. Browser caches can be evicted; cached availability is not guaranteed.
 
 Custom Instructions apply when Done is selected. Other dismissal paths warn about unsaved edits. Saved instructions are reply preferences, while current explicit requests, security controls, and evidence requirements retain precedence.

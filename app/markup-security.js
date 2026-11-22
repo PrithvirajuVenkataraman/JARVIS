@@ -9,6 +9,14 @@ function safeUrl(value, image = false) {
     } catch { return false; }
 }
 
+export function isSafeImagePreview(value) {
+    if (typeof value !== 'string' || !value || value.startsWith('#')) return false;
+    if (value.startsWith('blob:')) {
+        try { return new URL(value).origin === window.location.origin; } catch { return false; }
+    }
+    return safeUrl(value, true);
+}
+
 // App controls use delegated listeners. Untrusted HTML never supplies executable code.
 DOMPurify.addHook('afterSanitizeAttributes', node => {
     for (const attribute of Array.from(node.attributes || [])) {
@@ -54,6 +62,12 @@ export function installAssistantActions(root = document) {
     };
     root.addEventListener('click', event => {
         const target = event.target instanceof Element ? event.target : null;
+        const attachment = target?.closest('.chat-attachment-list [data-attachment-preview]');
+        if (attachment) {
+            const url = attachment.dataset.attachmentPreview;
+            if (isSafeImagePreview(url)) window.openImageLightbox?.(url, attachment.dataset.attachmentName || 'Image');
+            return;
+        }
         const button = target?.closest('.assistant-message-text [data-assistant-action]');
         if (!button) return;
         const id = button.dataset.blockId;
@@ -77,6 +91,28 @@ export function installAssistantActions(root = document) {
         };
         actions[button.dataset.assistantAction]?.();
     });
+    root.addEventListener('keydown', event => {
+        if (!['Enter', ' '].includes(event.key)) return;
+        const target = event.target instanceof Element ? event.target : null;
+        const attachment = target?.closest('.chat-attachment-list [data-attachment-preview]');
+        if (attachment) { event.preventDefault(); attachment.click?.(); }
+    });
+    root.addEventListener('error', event => {
+        const image = event.target;
+        if (!(image instanceof HTMLImageElement) || !image.classList.contains('chat-attachment-image')) return;
+        const card = image.closest('.chat-attachment-card[data-attachment-preview]');
+        if (!card) return;
+        image.remove();
+        const badge = card.querySelector('.chat-attachment-badge');
+        if (badge) badge.hidden = false;
+        card.classList.remove('is-image');
+        card.removeAttribute('role'); card.removeAttribute('tabindex');
+        card.removeAttribute('data-attachment-preview');
+        card.title = 'Preview unavailable. Reattach a JPEG or PNG image.';
+        const notice = document.createElement('span');
+        notice.className = 'chat-attachment-size'; notice.textContent = 'Preview unavailable';
+        card.querySelector('.chat-attachment-meta')?.append(notice);
+    }, true);
     root.addEventListener('click', event => {
         const target = event.target instanceof Element ? event.target : null;
         const citation = target?.closest('.assistant-message-text .citation-source-logo[data-source-id]');

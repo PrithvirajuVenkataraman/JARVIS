@@ -7545,6 +7545,7 @@ function showHelpModal(...args) { return globalThis.JarvisLazy.loadClassic('sett
             sendBtn.classList.remove('is-converse-ready', 'is-converse-active');
             const isBusy = Boolean(window.JarvisInteractionState?.isBusy?.() || activeRequestController || isAssistantProcessing());
             if (isBusy) {
+                sendBtn.disabled = false;
                 sendBtn.classList.add('composer-send-stop');
                 sendBtn.title = 'Stop generating';
                 sendBtn.setAttribute('aria-label', 'Stop generating');
@@ -7557,7 +7558,12 @@ function showHelpModal(...args) { return globalThis.JarvisLazy.loadClassic('sett
             sendBtn.innerHTML = getSendIconSvg();
             const hasText = Boolean(input && hasSearchableContent(input.value));
             const hasAttachments = window.JarvisAttachments?.hasPendingAttachments?.() === true;
-            const canSend = hasText || hasAttachments;
+            const isPreparing = Number(window.__jarvisAttachmentPreparations || 0) > 0;
+            const canSend = !isPreparing && (hasText || hasAttachments);
+            if (isPreparing) {
+                sendBtn.title = 'Preparing attachments';
+                sendBtn.setAttribute('aria-label', 'Preparing attachments');
+            }
             sendBtn.disabled = !canSend;
             sendBtn.classList.toggle('is-send-ready', canSend);
         }
@@ -14025,6 +14031,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             if (!items.length) return '';
             const cards = items.map(item => {
                 const name = escapeHtml(item?.name || 'attachment');
+                const originalName = escapeHtml(item?.originalName || item?.name || 'attachment');
                 const size = Number(item?.size) > 0
                     ? escapeHtml(window.JarvisAttachments?.formatBytes?.(item.size) || `${item.size} B`)
                     : '';
@@ -14041,11 +14048,13 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                         </div>
                     </details>` : '';
 
-                if (kind === 'image' && item?.previewUrl) {
+                if (kind === 'image' && window.JarvisMarkupSecurity?.isSafeImagePreview(item?.previewUrl)) {
+                    const badge = /\.(nef|nrw|dng|raw|cr[23]|arw|raf|rw2|orf|pef)$/i.test(item.name || '') ? 'RAW' : 'IMAGE';
                     return `
                         <div class="chat-attachment-card-wrapper">
-                            <div class="chat-attachment-card is-image" role="button" tabindex="0" title="Click to view full image" onclick="openImageLightbox('${escapeHtml(item.previewUrl)}', '${name}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openImageLightbox('${escapeHtml(item.previewUrl)}', '${name}');}">
+                            <div class="chat-attachment-card is-image" role="button" tabindex="0" title="View image. Original file: ${originalName}" data-attachment-preview="${escapeHtml(item.previewUrl)}" data-attachment-name="${name}">
                                 <img src="${escapeHtml(item.previewUrl)}" alt="${name}" class="chat-attachment-image">
+                                <span class="chat-attachment-badge" aria-hidden="true" hidden>${badge}</span>
                                 <div class="chat-attachment-meta">
                                     <span class="chat-attachment-name">${name}</span>
                                     ${size ? `<span class="chat-attachment-size">${size}</span>` : ''}
@@ -14071,12 +14080,16 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
         }
 
         async function handleComposerAttachmentSelection(files) {
-            const result = await window.JarvisAttachments?.addFilesToComposer?.(files);
-            if (result?.errors?.length) {
-                showTemporaryMessage(result.errors[0]);
-            }
-            refreshComposerAttachmentTray();
+            window.__jarvisAttachmentPreparations = Number(window.__jarvisAttachmentPreparations || 0) + 1;
             toggleSendButton();
+            try {
+                const result = await window.JarvisAttachments?.addFilesToComposer?.(files);
+                if (result?.errors?.length) showTemporaryMessage(result.errors[0]);
+            } finally {
+                window.__jarvisAttachmentPreparations--;
+                refreshComposerAttachmentTray();
+                toggleSendButton();
+            }
         }
 
         function triggerComposerFilePicker(kind) {
@@ -14790,6 +14803,10 @@ ${code}
         }
 
 async function sendTextInput(submission = {}) {
+            if (Number(window.__jarvisAttachmentPreparations || 0) > 0) {
+                showTemporaryMessage('Preparing attachments. Please wait a moment before sending.');
+                return;
+            }
             const isVoice = submission?.source === 'vtt' || submission?.source === 'converse';
             const vttWave = document.getElementById('vtt-waveform-container');
             const compShell = document.getElementById('input-bar-inner');
