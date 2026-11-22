@@ -15,7 +15,7 @@ Commit the source project to GitHub. Vercel installs the locked dependencies and
 | `.gitignore`, `.vercelignore`, `.env.example` | Exclusions and empty configuration template |
 | `.github/`, `tests/`, `tools/`, `scripts/` | CI, regressions, local development, and maintenance |
 | `eslint.config.js`, `jsconfig.check.json`, `playwright.config.js` | Code quality and browser-test configuration |
-| `README.md`, `CLAUDE.md`, `MODELS.md`, `SYSTEM_DESIGN.md`, `ENTERPRISE_RAG_AND_SYSTEM_ARCHITECTURE.md`, `Live web search.md`, `docs/` | Setup, contributor guidance, and technical reference |
+| `README.md`, `MODELS.md`, `SYSTEM_DESIGN.md`, `ENTERPRISE_RAG_AND_SYSTEM_ARCHITECTURE.md`, `Live web search.md`, `docs/` | Setup and technical reference |
 
 Preserve directory names and include dotfiles when using GitHub's upload interface. Git is preferable because the same commit can record removed files; uploading replacements through the website does not delete old repository files automatically.
 
