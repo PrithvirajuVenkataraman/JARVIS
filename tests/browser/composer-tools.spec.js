@@ -156,7 +156,15 @@ for (const [width, height] of [[320, 568], [390, 844], [768, 1024], [1024, 768],
         for (const selector of ['#composer-plus-btn', '#composer-think-btn', '#voice-to-text-btn', '#send-message-btn']) {
             const bounds = await page.locator(selector).boundingBox(); expect(bounds.width).toBeGreaterThanOrEqual(44); expect(bounds.height).toBeGreaterThanOrEqual(44); expect(bounds.x + bounds.width).toBeLessThanOrEqual(width);
         }
-        await page.locator('#text-input').fill('A long draft '.repeat(30)); await page.screenshot({ path: info.outputPath(`composer-${width}.png`) });
+        const input = page.locator('#text-input');
+        await input.fill('A long draft '.repeat(30));
+        await expect(input).toBeFocused();
+        await expect(input).toHaveCSS('resize', 'none');
+        await expect(input).toHaveCSS('border-top-width', '0px');
+        await expect(input).toHaveCSS('outline-style', 'none');
+        await expect(input).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+        await expect(page.locator('#input-bar-inner')).toHaveCSS('border-top-color', 'rgb(56, 189, 248)');
+        await page.screenshot({ path: info.outputPath(`composer-${width}.png`) });
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
         await page.evaluate(() => window.showHelpModal());
         const recall = page.locator('#settings-local-recall-group'); await recall.scrollIntoViewIfNeeded();
