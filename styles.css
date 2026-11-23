@@ -2357,21 +2357,20 @@ body.dark .composer-action-item:hover {
 }
 
 .chat-bubble-user p {
-    font-size: var(--chat-message-font-size) !important;
-    line-height: var(--chat-message-line-height) !important;
-    font-weight: var(--chat-message-font-weight) !important;
+    font-size: var(--chat-message-font-size);
+    line-height: var(--chat-message-line-height);
+    font-weight: var(--chat-message-font-weight);
 }
 
-.assistant-message-text,
-.assistant-message-text :is(p, li, span, a):not(:where(.math-inline, .math-display-block, .math-inline *, .math-display-block *, .katex, .katex *)) {
-    font-family: var(--app-font-family) !important;
-    white-space: normal !important;
-    word-break: normal !important;
-    overflow-wrap: break-word !important;
-    color: var(--ui-text) !important;
-    line-height: var(--chat-message-line-height) !important;
-    font-size: var(--chat-message-font-size) !important;
-    font-weight: var(--chat-message-font-weight) !important;
+.assistant-message-text {
+    font-family: var(--app-font-family);
+    white-space: normal;
+    word-break: normal;
+    overflow-wrap: break-word;
+    color: var(--ui-text);
+    line-height: var(--chat-message-line-height);
+    font-size: var(--chat-message-font-size);
+    font-weight: var(--chat-message-font-weight);
 }
 
 .assistant-message-text a {
@@ -2379,8 +2378,8 @@ body.dark .composer-action-item:hover {
 }
 
 .assistant-message-text .assistant-md-p {
-    margin: 0 0 0.9rem !important;
-    line-height: 1.65 !important;
+    margin: 0 0 0.9rem;
+    line-height: 1.65;
 }
 
 .assistant-message-text .assistant-md-heading,
@@ -2388,12 +2387,12 @@ body.dark .composer-action-item:hover {
 .assistant-message-text .assistant-md-h2,
 .assistant-message-text .assistant-md-h3,
 .assistant-message-text .assistant-md-h4 {
-    display: block !important;
-    margin: 1.25rem 0 0.55rem !important;
-    color: #f8fafc !important;
-    font-weight: 700 !important;
-    letter-spacing: -0.015em !important;
-    line-height: 1.35 !important;
+    display: block;
+    margin: 1.25rem 0 0.55rem;
+    color: #f8fafc;
+    font-weight: 700;
+    letter-spacing: -0.015em;
+    line-height: 1.35;
 }
 
 body:not(.dark) .assistant-message-text .assistant-md-heading,
@@ -2406,12 +2405,12 @@ body:not(.dark) .assistant-message-text .assistant-md-h4 {
 
 .assistant-message-text h1.assistant-md-heading,
 .assistant-message-text .assistant-md-h1 {
-    font-size: 1.3rem !important;
+    font-size: 1.3rem;
 }
 
 .assistant-message-text h2.assistant-md-heading,
 .assistant-message-text .assistant-md-h2 {
-    font-size: 1.15rem !important;
+    font-size: 1.15rem;
     padding-bottom: 0.3rem;
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
@@ -2423,19 +2422,19 @@ body:not(.dark) .assistant-message-text .assistant-md-h2 {
 
 .assistant-message-text h3.assistant-md-heading,
 .assistant-message-text .assistant-md-h3 {
-    font-size: 1.04rem !important;
+    font-size: 1.04rem;
 }
 
 .assistant-message-text h4.assistant-md-heading,
 .assistant-message-text .assistant-md-h4 {
-    font-size: 0.98rem !important;
+    font-size: 0.98rem;
 }
 
 .assistant-message-text .assistant-md-blockquote,
 .assistant-message-text .assistant-md-quote {
-    margin: 0.85rem 0 !important;
-    padding: 0.65rem 0.95rem !important;
-    border-left: 3px solid #38bdf8 !important;
+    margin: 0.85rem 0;
+    padding: 0.65rem 0.95rem;
+    border-left: 3px solid #38bdf8;
     border-radius: 0 8px 8px 0;
     background: rgba(56, 189, 248, 0.07);
     color: #cbd5e1;
@@ -10944,8 +10943,8 @@ body:not(.dark) .jarvis-toast-pill {
 
 .chat-bubble-user p {
     margin: 0;
-    font-size: 14.5px !important;
-    line-height: 1.55 !important;
+    font-size: var(--chat-message-font-size);
+    line-height: var(--chat-message-line-height);
 }
 
 /* Assistant Message Typography Stream */

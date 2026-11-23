@@ -28,6 +28,17 @@ for (const [width, height] of [[320, 568], [390, 844], [768, 1024], [1024, 768],
         await expect(page.locator('#request-status')).toHaveText('Response finished.');
         expect(await page.locator('.katex-error').count()).toBe(0);
         await page.evaluate(() => document.fonts.ready);
+        expect(await page.evaluate(async () => (await document.fonts.load('400 16px "Inter Variable"')).some(face => face.status === 'loaded'))).toBe(true);
+        for (const selector of ['.chat-bubble-user p', '.assistant-message-text']) {
+            const style = await page.locator(selector).first().evaluate(element => ({ size: parseFloat(getComputedStyle(element).fontSize), family: getComputedStyle(element).fontFamily }));
+            expect(style.size).toBeGreaterThanOrEqual(16); expect(style.family).toContain('Inter Variable');
+        }
+        const actions = page.locator('.assistant-action-row > .assistant-action-icon, .assistant-action-row > .assistant-action-menu-wrap > .assistant-action-icon');
+        await expect(actions).toHaveCount(8);
+        const bounds = await actions.evaluateAll(elements => elements.map(element => { const r = element.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height, right: r.right }; }));
+        for (const rect of bounds) { expect(rect.width).toBeGreaterThanOrEqual(44); expect(rect.height).toBeGreaterThanOrEqual(44); expect(rect.right).toBeLessThanOrEqual(width); }
+        const columns = width <= 480 ? 4 : 8;
+        for (let index = 0; index < bounds.length; index++) expect(Math.abs(bounds[index].y - bounds[Math.floor(index / columns) * columns].y)).toBeLessThan(1);
         await page.screenshot({ path: info.outputPath(`layout-${width}.png`), fullPage: true });
         await info.attach('local-performance', { body: JSON.stringify(await page.evaluate(() => window.JarvisPerformance.getMetrics())), contentType: 'application/json' });
     });

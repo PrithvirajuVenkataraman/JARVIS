@@ -1,3 +1,5 @@
+import '@fontsource-variable/inter';
+import '@fontsource-variable/inter/wght-italic.css';
 import './bootstrap.js';
 import legacyUrl from './legacy-runtime.js?url&no-inline';
 import settingsUrl from './features/settings-runtime.js?url&no-inline';

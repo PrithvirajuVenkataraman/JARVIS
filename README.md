@@ -70,6 +70,8 @@ Image creation uses the anonymous AI Horde community queue directly from the bro
 
 The idle workspace has a centered JARVIS title, a visible sidebar button at the top left, and a composer. The sidebar provides New chat, Search chats, Vision analysis when available, Memory, Custom instructions, Image library, Settings, and saved conversations. Select `+` for composer tools. Generated images have no permanent action buttons: hold or right-click an image for Copy and Download. Keyboard users can focus the image and press Shift+F10 or the context-menu key; Enter opens its preview. Copy exports actual PNG image data to supported clipboards.
 
+Interface text uses locally bundled Inter Variable with system fallbacks. Equations and code retain their own fonts. Font assets and their license are included in the production build; no external font service is required.
+
 Busy image requests keep the prompt and temporarily disable Retry. Server-exposed retry delays are honored, with a one-minute fallback for rate limits. Retrying is always explicit; the app does not resubmit automatically or switch to paid image generation.
 
 Document parsing is bundled locally and loaded when needed. Image OCR/understanding still requires a configured vision provider. A dismissible first-visit permission introduction has one Enable permissions action; the browser controls the individual microphone, camera, and location approval prompts. Features remain usable independently when only some permissions are granted.

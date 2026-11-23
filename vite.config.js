@@ -25,6 +25,7 @@ export default defineConfig({
             for (const name of ['LICENSE', 'NOTICE']) {
                 await copyFile(join('node_modules/@imagemagick/magick-wasm', name), join('dist', `image-decoder-${name}.txt`));
             }
+            await copyFile('node_modules/@fontsource-variable/inter/LICENSE', 'dist/inter-LICENSE.txt');
             for (const name of ['code-sandbox.html', 'code-sandbox.js']) await copyFile(join('app', name), join('dist', name));
             // Vite finalizes HTML after generateBundle. Add the essential classic
             // runtime preload here, before computing the offline build hash.

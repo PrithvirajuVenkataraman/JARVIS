@@ -10,6 +10,15 @@ const context = vm.createContext({});
 vm.runInContext(readFileSync(new URL('../katex.min.js', import.meta.url), 'utf8'), context);
 globalThis.katex = context.katex;
 
+test('blank lines separate Markdown blocks without adding extra visual lines', () => {
+    const rendered = renderMarkdown('## Heading\n\nFirst line\nSecond line\n\n\n- First item\n- Second item\n\n> A quote.');
+    assert.match(rendered, /First line<br>Second line/);
+    assert.equal((rendered.match(/<br>/g) || []).length, 1, 'Only the explicit line break inside the paragraph should remain');
+    assert.match(rendered, /<h3[^>]*>Heading<\/h3>/);
+    assert.match(rendered, /<ul[^>]*>/);
+    assert.match(rendered, /<blockquote[^>]*>/);
+});
+
 test('inline equations preserve the complete KaTeX output through Markdown formatting', () => {
     for (const expression of [
         String.raw`x_i^2 + y_j^2 = z_k^2`,

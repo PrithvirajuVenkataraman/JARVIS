@@ -685,7 +685,7 @@ export function renderMarkdown(rawText = '', options = {}) {
             continue;
         }
 
-        out.push('<br>');
+        // Empty Markdown lines separate blocks; their margins provide the spacing.
         i += 1;
     }
 

@@ -240,11 +240,30 @@ for (const [width, height] of [[320, 568], [390, 844], [768, 1024], [1024, 768],
         await page.screenshot({ path: info.outputPath(`composer-${width}.png`) });
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
         await page.evaluate(() => window.showHelpModal());
+        const modelRow = page.locator('.settings-row').filter({ has: page.locator('.settings-select') });
+        if (width <= 640) {
+            const title = await modelRow.locator('.settings-row-title').boundingBox();
+            const select = await modelRow.locator('.settings-select').boundingBox();
+            expect(Math.abs(title.x - select.x)).toBeLessThan(1);
+        }
         const recall = page.locator('#settings-local-recall-group'); await recall.scrollIntoViewIfNeeded();
         await expect(page.locator('#local-recall-enabled')).toHaveAttribute('role', 'switch');
         expect(await recall.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
         await page.screenshot({ path: info.outputPath(`settings-${width}.png`) });
         const errors = (await new AxeBuilder({ page }).include('#help-modal').withTags(['wcag2a', 'wcag2aa']).analyze()).violations.filter(row => ['serious', 'critical'].includes(row.impact));
         expect(errors).toEqual([]);
+        await page.evaluate(() => window.switchSettingsView('custom_instructions'));
+        const header = page.locator('#settings-view-custom-instructions .help-modal-header');
+        await expect.poll(() => header.evaluate(element => {
+            const title = element.querySelector('.settings-modal-heading').getBoundingClientRect();
+            const frame = element.getBoundingClientRect();
+            return Math.abs(title.x + title.width / 2 - frame.x - frame.width / 2);
+        })).toBeLessThan(1);
+        expect(await header.evaluate(element => {
+            const title = element.querySelector('.settings-modal-heading').getBoundingClientRect();
+            const frame = element.getBoundingClientRect();
+            return title.y >= frame.y && title.bottom <= frame.bottom;
+        })).toBe(true);
+        await page.screenshot({ path: info.outputPath(`custom-instructions-${width}.png`) });
     });
 }
