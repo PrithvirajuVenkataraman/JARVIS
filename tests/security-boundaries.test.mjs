@@ -5,6 +5,18 @@ import { applyApiSecurity } from '../api/_lib/security.js';
 import { bindServerConversation, contextReferenceDirective } from '../api/_lib/answer-preferences.js';
 import { extractWithCrawl4Ai } from '../api/_lib/crawl4ai-client.js';
 import { MockAgent } from 'undici';
+import { resolveEntityVisuals, extractCandidateEntityAndDomain } from '../api/_lib/visual-answer-engine.js';
+
+test('vague follow-ups never become unrelated entity cards or encyclopedia lookups', async () => {
+    const original = globalThis.fetch; let calls = 0;
+    globalThis.fetch = async () => { calls++; throw new Error('A contextual reference must not trigger discovery'); };
+    try {
+        for (const query of ['What was it?', 'Who was she?', 'What is that?', 'What?']) assert.equal(await resolveEntityVisuals(query), null);
+        assert.equal(await resolveEntityVisuals('Ada Lovelace', { reference: { status: 'resolved', evidenceIds: ['previous-answer'] } }), null);
+        assert.equal(calls, 0);
+        assert.equal(extractCandidateEntityAndDomain('Tell me about It novel').domain, 'book');
+    } finally { globalThis.fetch = original; }
+});
 
 test('the locked dispatcher supports the declared Node built-in fetch contract', async () => {
     const dispatcher = new MockAgent();

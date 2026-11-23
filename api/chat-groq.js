@@ -1762,7 +1762,7 @@ async function handler(req, res) {
 
         const enrichment = new AbortController();
         let resolvedVisualData = null;
-        const visualPromise = runWithSignal(enrichment.signal, () => resolveEntityVisuals(effectiveMessage, { timeoutMs: 4500 })).catch(() => null);
+        const visualPromise = runWithSignal(enrichment.signal, () => resolveEntityVisuals(effectiveMessage, { timeoutMs: 4500, reference: req?.body?.contextReference })).catch(() => null);
         visualPromise.then(visualData => {
             resolvedVisualData = visualData;
             if (visualData?.entity && !res.writableEnded && !enrichment.signal.aborted) {

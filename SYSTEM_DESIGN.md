@@ -507,4 +507,4 @@ Generated answer replay is disabled. Chat, search, and vision share a request-wi
 
 Production offline manifests derive from build contents. Failed precaching rejects installation without replacing the active worker. Previous-cache retention supports already-open tabs. Browser regression tests run against the production build in Chromium, Firefox, and WebKit; real-device software keyboard validation remains separate.
 
-Provider availability and persisted BYOK readiness are explicit diagnostics capabilities. Persistent saved credentials require matching server RSA keys; no process-local key generation or plaintext browser-storage fallback is used. Image generation is a server-backed optional feature, not local diffusion.
+Provider configuration and persisted BYOK readiness are explicit diagnostics capabilities; configuration does not certify provider health. Persistent saved credentials require matching server RSA keys; no process-local key generation or plaintext browser-storage fallback is used. Image creation uses the anonymous AI Horde queue directly from the browser, with no Vercel polling function, local diffusion, or paid fallback.

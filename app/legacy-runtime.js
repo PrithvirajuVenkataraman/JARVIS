@@ -10995,7 +10995,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             const providerLabel = isGoogle ? 'Google AI' : 'Groq';
             const failoverTag = isFailover ? ' (Failover)' : ` (${providerLabel})`;
             return {
-                label: `${icon} ${name}${failoverTag}`,
+                label: `${name}${failoverTag}`,
                 name,
                 icon,
                 providerLabel,

@@ -59,6 +59,10 @@ export function extractCandidateEntityAndDomain(query = '') {
     // Strip trailing conversational constraints
     q = q.replace(/\s+(?:in\s+one\s+sentence|briefly|in\s+detail|with\s+sources|with\s+citations)$/i, '').trim();
 
+    // Pronouns and bare question words are references, not named entities. An
+    // explicit title/domain (for example "It novel") still reaches lookup.
+    if (/^(?:it|its|this|that|they|them|these|those|he|him|she|her|there|here|above|earlier|previous|who|what|which|why|where|when|how)$/i.test(q)) return { entity: '', domain: null };
+
     // If remaining string is pure math or numbers, reject
     if (/^[\d\s+\-*/^=().%x×÷]+$/i.test(q)) return { entity: '', domain: null };
 
@@ -542,6 +546,9 @@ export function computeTitleTokenOverlap(candidate, title) {
  * Returns null if the query is not an entity lookup, lacks strict confidence, or violates domain alignment.
  */
 export async function resolveEntityVisuals(query = '', options = {}) {
+    // Context-following turns must not acquire unrelated encyclopedia cards or
+    // incur their lookups. Resolve the conversation before optional discovery.
+    if (options.reference?.status === 'ambiguous' || (Array.isArray(options.reference?.evidenceIds) && options.reference.evidenceIds.length)) return null;
     const { entity: rawCandidate, cleanSubject, domain: targetDomain } = extractCandidateEntityAndDomain(query);
     const candidate = cleanSubject || rawCandidate;
     if (!candidate) return null;

@@ -16,12 +16,15 @@ test('vague references travel from the composer to a clarification with original
         if (!body?.stream) return route.fulfill({ json: { success: true, response: 'Database comparison' } });
         requests.push(body);
         const text = requests.length === 1 ? '1. Redis: a memory cache.\n2. PostgreSQL: relational storage.' : body.contextReference?.status === 'ambiguous' ? 'Do you mean Redis or PostgreSQL?' : 'PostgreSQL supports access controls and encryption in transit.';
-        return route.fulfill({ contentType: 'text/event-stream', body: `event: delta\ndata: ${JSON.stringify({ text })}\n\nevent: done\ndata: ${JSON.stringify({ success: true, response: text })}\n\n` });
+        return route.fulfill({ contentType: 'text/event-stream', body: `event: delta\ndata: ${JSON.stringify({ text })}\n\nevent: done\ndata: ${JSON.stringify({ success: true, response: text, modelUsed: 'openai/gpt-oss-120b', provider: 'groq' })}\n\n` });
     });
     await page.evaluate(() => window.setCustomSystemPrompt('Reply concisely.', false));
     const input = page.locator('#text-input');
     await input.fill('Compare Redis and PostgreSQL.'); await input.press('Enter');
     await expect(page.locator('#request-status')).toHaveText('Response finished.');
+    const modelBadge = page.locator('.assistant-model-badge').first();
+    await expect(modelBadge).not.toContainText(/\p{Extended_Pictographic}/u);
+    await expect(modelBadge).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
     await page.evaluate(() => window.setWebSearchMode('force'));
     await input.fill('Is it secure?'); await input.press('Enter');
     await expect(page.locator('.assistant-message-text').last()).toContainText('Do you mean Redis or PostgreSQL?');
