@@ -124,7 +124,7 @@ body #help-modal .settings-row:has(.settings-switch) { flex-wrap:nowrap; }
 @media(max-width:640px) {
     body #input-bar-inner.composer-shell { display:grid; grid-template-columns:minmax(0,1fr) auto; grid-template-areas:"input input" "leading trailing"; gap:2px 4px; padding:8px; border-radius:24px; }
     .composer-entry { grid-area:input; }
-    body #text-input { padding:8px 10px; }
+    body #input-bar-inner #text-input { padding:8px 10px; }
     body #input-bar-inner .composer-leading { grid-area:leading; min-width:0; }
     body #input-bar-inner .composer-trailing { grid-area:trailing; gap:0; }
     body #input-bar-inner .composer-think-label { display:none; }
@@ -181,7 +181,7 @@ body #help-modal .settings-routing-card { margin:0 0 16px; padding:18px; border-
 .settings-routing-details dd { margin:4px 0 0; color:#ddd; font-size:13px; line-height:1.6; overflow-wrap:anywhere; }
 @media(max-width:520px) { .settings-routing-details { grid-template-columns:1fr; gap:14px; } }
 body, body.dark { --ui-bg:#080808; --ui-surface:var(--core-surface); --ui-surface-elevated:var(--core-raised); --ui-text:var(--core-text); --ui-text-muted:var(--core-muted); --header-bg:#080808; --composer-bg:var(--core-surface); }
-body #text-input { font-size:16px; line-height:1.5; font-weight:400; max-height:min(32dvh, 220px); overflow-y:auto; color:var(--core-text); caret-color:var(--core-text); background:transparent; border:0; border-radius:0; resize:none; appearance:none; box-shadow:none; }
+body #text-input { font-size:16px; line-height:1.5; font-weight:400; padding:8px 4px; max-height:min(32dvh, 220px); overflow-y:auto; color:var(--core-text); caret-color:var(--core-text); background:transparent; border:0; border-radius:0; resize:none; appearance:none; box-shadow:none; }
 /* The enclosing composer supplies the focus indicator for this embedded field. */
 body #text-input:focus-visible { outline:none; }
 body #text-input::placeholder { color:#a0a0a0; opacity:1; }
