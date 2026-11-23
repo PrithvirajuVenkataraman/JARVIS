@@ -12,6 +12,11 @@ export function installDialogController() {
     document.addEventListener('focusin', event => { if (current?.contains(event.target)) dialogFocus.set(current, event.target); });
     const visible = el => {
         const style = getComputedStyle(el);
+        // These overlays fade with opacity. Their explicit state must govern focus and
+        // background inactivity before the first frame and during the closing animation.
+        if (el.matches('.image-lightbox-overlay, .image-gallery-modal')) {
+            return el.classList.contains('is-open') && style.display !== 'none' && el.getBoundingClientRect().width > 0;
+        }
         return el.getBoundingClientRect().width > 0 && style.visibility !== 'hidden' && style.display !== 'none' && Number(style.opacity) !== 0;
     };
     const focusables = dialog => [...dialog.querySelectorAll('button, a[href], input, textarea, select, [tabindex]')]

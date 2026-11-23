@@ -381,7 +381,8 @@ test('refresh and reopening start fresh while saved conversations remain availab
     const legacy = await page.evaluate(() => window.loadHistory());
     expect(legacy.some(turn => turn.user === question)).toBe(true);
     await expect(page.locator('.chat-row')).toHaveCount(0);
-    await expect(page.locator('#chat-empty-state')).toBeVisible();
+    await expect(page.locator('#chat-empty-state')).toBeHidden();
+    await expect(page.locator('#app-header')).toHaveText('JARVIS');
     expect(await page.evaluate(() => window.JarvisConversation.getState().turns.length)).toBe(0);
     const reopened = await context.newPage();
     await reopened.goto('/'); await reopened.waitForFunction(() => window.__jarvisModernReady);

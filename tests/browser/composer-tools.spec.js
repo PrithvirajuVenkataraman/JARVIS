@@ -21,19 +21,25 @@ test('slash filtering selects on Enter without sending, then sends the completed
     await expect(page.locator('#request-status')).toHaveText('Response finished.'); expect(sends).toBe(1);
 });
 
-test('welcome image shortcut uses configured availability and preserves the draft', async ({ page }) => {
-    const shortcut = page.locator('.empty-state-pill[data-capability=image_generation]');
-    await expect(shortcut).toBeVisible();
-    await expect(page.locator('.empty-state-capabilities')).toHaveAttribute('data-action-count', '3');
+test('minimal workspace keeps only JARVIS above the composer and retains tools and settings', async ({ page }) => {
+    const header = page.locator('#app-header');
+    await expect(header).toHaveText('JARVIS'); await expect(header.locator('button')).toHaveCount(1);
+    await expect(header.locator('svg')).toHaveCount(0);
+    await expect(page.locator('.empty-state-capabilities, .empty-state-emblem, .empty-state-headline, .empty-state-sub')).toHaveCount(0);
+    await header.getByRole('button').click();
+    await expect(page.locator('#chat-sidebar-panel')).toHaveAttribute('aria-hidden', 'false');
+    await page.locator('#chat-sidebar-panel').getByRole('button', { name: 'Settings', exact: true }).click();
+    await expect(page.locator('#help-modal')).toBeVisible();
+    await page.keyboard.press('Escape');
     let generations = 0; page.on('request', request => { if (request.url().includes('/api/image-proxy')) generations++; });
-    await page.locator('#text-input').fill('A quiet mountain lake'); await shortcut.click();
+    await page.locator('#text-input').fill('A quiet mountain lake'); await page.locator('#composer-plus-btn').click();
+    await page.locator('#composer-image-btn').click();
     await expect(page.locator('#composer-image-chip')).toBeVisible();
     await expect(page.locator('#text-input')).toHaveValue('A quiet mountain lake'); expect(generations).toBe(0);
     await page.evaluate(() => window.JarvisCapabilities.applyCapabilities(Object.fromEntries(['chat', 'search', 'vision', 'images', 'byok'].map(name => [name, { available: name !== 'images', reasonCode: 'fixture' }]))));
-    await expect(shortcut).toBeHidden(); await expect(page.locator('#composer-image-chip')).toHaveCount(0);
-    await expect(page.locator('.empty-state-capabilities')).toHaveAttribute('data-action-count', '2');
+    await expect(page.locator('#composer-image-btn')).toBeHidden(); await expect(page.locator('#composer-image-chip')).toHaveCount(0);
     await page.reload(); await page.waitForFunction(() => window.__jarvisModernReady);
-    await expect(shortcut).toBeVisible();
+    await page.locator('#composer-plus-btn').click(); await expect(page.locator('#composer-image-btn')).toBeVisible();
 });
 
 test('picker navigation preserves drafts, composition, payloads, and changing capabilities', async ({ page }) => {

@@ -71,16 +71,51 @@ test('free image card handles queue, completion, download type and Stop', async 
     await expect(complete.locator('img')).toBeVisible();
     await expect(page.locator('.chat-row[data-role="assistant"]')).toHaveCount(1);
     expect(await page.evaluate(async () => (await window.JarvisImageStorage.getRecentGeneratedImages()).some(image => image.dataUrl?.startsWith('data:image/png;base64,')))).toBe(true);
+    const image = complete.locator('img');
+    const menu = page.getByRole('menu', { name: 'Image actions', exact: true });
+    await expect(complete.locator('.free-image-actions')).toHaveCount(0);
+    await expect(complete.locator('button:visible')).toHaveCount(0);
+    await expect(menu).toBeHidden();
+    await image.click({ button: 'right' });
+    await expect(menu.getByRole('menuitem')).toHaveText(['Copy', 'Download']);
     const downloadEvent = page.waitForEvent('download');
-    await complete.getByRole('button', { name: 'Download', exact: true }).click();
+    await menu.getByRole('menuitem', { name: 'Download', exact: true }).click();
     expect((await downloadEvent).suggestedFilename()).toMatch(/\.png$/);
+    await expect(menu).toBeHidden(); await expect(image).toBeFocused();
+    await image.press('Shift+F10'); await expect(menu.getByRole('menuitem', { name: 'Copy', exact: true })).toBeFocused();
+    await page.keyboard.press('ArrowDown'); await expect(menu.getByRole('menuitem', { name: 'Download', exact: true })).toBeFocused();
+    await page.keyboard.press('Escape'); await expect(image).toBeFocused(); await expect(menu).toBeHidden();
+    await page.evaluate(() => Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {
+        write: async items => { const blob = await items[0].getType('image/png'); window.__copiedImage = { type: blob.type, bytes: [...new Uint8Array(await blob.arrayBuffer())].slice(0, 4) }; }
+    } }));
+    await image.press('Shift+F10'); await menu.getByRole('menuitem', { name: 'Copy', exact: true }).click();
+    await expect.poll(() => page.evaluate(() => window.__copiedImage)).toEqual({ type: 'image/png', bytes: [137, 80, 78, 71] });
+    const pointer = { pointerId: 7, pointerType: 'touch', isPrimary: true, button: 0, clientX: 180, clientY: 170 };
+    await image.dispatchEvent('pointerdown', pointer); await image.dispatchEvent('pointermove', { ...pointer, clientY: 200 });
+    await page.waitForTimeout(550); await expect(menu).toBeHidden(); await image.dispatchEvent('pointercancel', pointer);
+    await image.dispatchEvent('pointerdown', pointer);
+    await expect(menu).toBeVisible(); await image.dispatchEvent('pointerup', pointer);
+    await image.dispatchEvent('click'); await expect(page.locator('#image-lightbox-overlay')).not.toHaveClass(/is-open/);
+    await page.keyboard.press('Escape');
     for (const width of [320, 390, 768, 1440]) {
         await page.setViewportSize({ width, height: 844 });
-        const boxes = await complete.locator('.free-image-actions button').evaluateAll(buttons => buttons.map(button => ({ width: button.offsetWidth, height: button.offsetHeight, top: button.offsetTop })));
-        expect(boxes.every(box => box.width >= 44 && box.height >= 44)).toBe(true);
-        expect(new Set(boxes.map(box => box.top)).size).toBe(1);
+        await image.press('Shift+F10'); await expect(menu).toBeVisible();
+        const box = await menu.boundingBox(); expect(box.x).toBeGreaterThanOrEqual(0); expect(box.x + box.width).toBeLessThanOrEqual(width);
+        for (const button of await menu.getByRole('menuitem').all()) expect((await button.boundingBox()).height).toBeGreaterThanOrEqual(44);
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+        await page.keyboard.press('Escape');
     }
     await page.setViewportSize({ width: 390, height: 844 });
+    await image.click(); await expect(page.locator('#image-lightbox-overlay')).toHaveClass(/is-open/);
+    await expect(page.locator('#image-lightbox-overlay .image-lightbox-toolbar')).toBeHidden();
+    const preview = page.locator('#image-lightbox-img');
+    await expect.poll(() => preview.evaluate(element => element.complete && element.naturalWidth > 0 && !element.closest('[inert]'))).toBe(true);
+    await preview.focus(); await expect(preview).toBeFocused();
+    await preview.press('Shift+F10'); await expect(menu).toBeVisible();
+    await page.keyboard.press('Escape'); await expect(menu).toBeHidden();
+    await expect(page.locator('#image-lightbox-overlay')).toHaveClass(/is-open/);
+    await page.keyboard.press('Escape'); await expect(page.locator('#image-lightbox-overlay')).not.toHaveClass(/is-open/);
+    await image.focus();
+    await image.press('Shift+F10');
     await page.screenshot({ path: info.outputPath('free-image-mobile.png'), fullPage: true });
 });

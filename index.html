@@ -170,29 +170,7 @@
     <div id="app-root" class="app-root flex flex-col min-h-screen">
         <!-- Sticky Top Navigation Bar -->
         <header id="app-header" class="app-header">
-            <div class="header-left flex items-center gap-2">
-                <button id="chat-sidebar-toggle" class="header-icon-btn" type="button" onclick="toggleChatSidebar()" aria-label="Open chat history" aria-expanded="false" aria-controls="chat-sidebar-panel" title="Toggle chat history (Ctrl+Shift+S)">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                        <rect x="4" y="5" width="16" height="14" rx="2"></rect>
-                        <path d="M9 5v14"></path>
-                        <path d="M13 9h4"></path>
-                        <path d="M13 13h3"></path>
-                    </svg>
-                </button>
-                <button id="header-new-chat-btn" class="header-icon-btn" type="button" onclick="startNewChatSession()" aria-label="Start new chat" title="New chat (Ctrl+O)">
-                    <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                        <path d="M12 20h9"></path>
-                        <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"></path>
-                    </svg>
-                </button>
-            </div>
-
-            <div class="header-center flex items-center justify-center">
-                <span class="header-brand-title font-bold tracking-wider text-sm">JARVIS</span>
-            </div>
-
-            <div class="header-right flex items-center gap-1.5">
-            </div>
+            <button id="chat-sidebar-toggle" class="header-brand-title" type="button" onclick="toggleChatSidebar()" aria-label="JARVIS, open chats and settings" aria-expanded="false" aria-controls="chat-sidebar-panel" title="Chats and settings (Ctrl+Shift+S)">JARVIS</button>
         </header>
 
         <!-- Hidden legacy anchors for backwards compatibility -->
@@ -222,40 +200,7 @@
         <!-- Main Chat Stream Viewport -->
         <main id="chat-main" class="chat-main flex-1 overflow-y-auto custom-scrollbar">
             <div id="chat-center-column" class="chat-center-column max-w-3xl mx-auto w-full px-4 sm:px-6 pt-4 pb-36">
-                <!-- Interactive Empty State Hero -->
-                <div id="chat-empty-state" class="chat-empty-state">
-                    <div class="empty-state-emblem-wrap">
-                        <div class="empty-state-emblem-glow" aria-hidden="true"></div>
-                        <svg class="empty-state-emblem" width="60" height="60" viewBox="0 0 64 64" fill="none" aria-hidden="true">
-                            <circle cx="32" cy="32" r="17.2" stroke="#38bdf8" stroke-width="3"></circle>
-                            <circle cx="32" cy="32" r="23" stroke="#0ea5e9" stroke-width="1.2" opacity="0.85"></circle>
-                            <path d="M18.7 23.3a23 23 0 0 1 12.1-5.1" stroke="#38bdf8" stroke-width="2.4" stroke-linecap="round"></path>
-                            <path d="M40.7 18.8a23 23 0 0 1 7.7 5.6" stroke="#38bdf8" stroke-width="2.4" stroke-linecap="round"></path>
-                            <path d="M47.2 39.8a23 23 0 0 1-7.7 5.5" stroke="#38bdf8" stroke-width="2.4" stroke-linecap="round"></path>
-                            <path d="M29 45.8a23 23 0 0 1-11-6" stroke="#38bdf8" stroke-width="2.4" stroke-linecap="round"></path>
-                            <text x="32" y="35.5" text-anchor="middle" fill="#e0f2fe" font-size="8" font-family="system-ui, -apple-system, sans-serif" font-weight="750" letter-spacing="1">JARVIS</text>
-                        </svg>
-                    </div>
-                    <h2 class="empty-state-headline">What can I help with today?</h2>
-                    <p class="empty-state-sub">Ask a question, write something, or explore an idea.</p>
-                    <div class="empty-state-capabilities" aria-label="Key capabilities" role="toolbar">
-                        <button type="button" class="empty-state-pill" data-capability="live_search" onclick="handleCapabilityPillClick('live_search')" title="Activate live web search mode">
-                            <span class="capability-icon" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18"/></svg></span>
-                            <span class="capability-copy"><span class="capability-label">Web search</span><span class="capability-description">Search the web</span></span>
-                            <svg class="capability-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5"/></svg>
-                        </button>
-                        <button type="button" class="empty-state-pill" data-capability="document_ocr" onclick="handleCapabilityPillClick('document_ocr')" title="Attach document or PDF for OCR">
-                            <span class="capability-icon" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9zM14 3v6h6M8 13h8M8 17h5"/></svg></span>
-                            <span class="capability-copy"><span class="capability-label">Documents</span><span class="capability-description">Upload a file</span></span>
-                            <svg class="capability-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5"/></svg>
-                        </button>
-                        <button type="button" class="empty-state-pill" data-capability="image_generation" onclick="triggerImageGenerationPrompt()" title="Describe an image to create" hidden>
-                            <span class="capability-icon" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.5"/><path d="m3 17 6-6 5 5 3-3 4 4"/></svg></span>
-                            <span class="capability-copy"><span class="capability-label">Create image</span><span class="capability-description">Describe an idea</span></span>
-                            <svg class="capability-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5"/></svg>
-                        </button>
-                    </div>
-                </div>
+                <div id="chat-empty-state" class="chat-empty-state" aria-hidden="true"></div>
 
                 <!-- Chat History Feed -->
                 <div id="chat-container" class="chat-container space-y-4"></div>

@@ -31,7 +31,7 @@ const indexHtml = readAppSource();
 // Header elements: streamlined without model dropdown, theme toggle, or sandbox buttons
 assert.ok(indexHtml.includes('id="app-header"'), 'App header element must exist');
 assert.ok(indexHtml.includes('id="chat-sidebar-toggle"'), 'Sidebar toggle button must exist');
-assert.ok(indexHtml.includes('id="header-new-chat-btn"'), 'New chat header button must exist');
+assert.ok(!indexHtml.includes('id="header-new-chat-btn"'), 'Only the JARVIS title should remain in the header');
 assert.ok(!indexHtml.includes('id="header-command-palette-btn"'), 'Header command palette trigger must be removed end-to-end');
 
 // Verified removed from header completely per user directives
@@ -50,12 +50,12 @@ console.log('  [PASS] 2. Model selector moved to settings modal cleanly');
 assert.ok(indexHtml.includes('id="chat-main"'), 'Main chat viewport must exist');
 assert.ok(indexHtml.includes('id="chat-center-column"'), 'Centered reading column must exist');
 assert.ok(indexHtml.includes('id="chat-empty-state"'), 'Empty state hero must exist');
-assert.ok(indexHtml.includes('class="empty-state-capabilities"'), 'Interactive capability pills container must exist');
-assert.ok(indexHtml.includes("handleCapabilityPillClick('live_search')"), 'Live web search pill must exist');
+assert.ok(!fs.readFileSync('index.html', 'utf8').includes('class="empty-state-capabilities"'), 'The welcome capability cards must be removed');
+assert.ok(indexHtml.includes('id="web-search-toggle-btn"'), 'Web search must remain available from the composer');
 assert.ok(indexHtml.includes('id="composer-think-btn"'), 'Permanent Think (Deep Reasoning) button must exist in prompt box');
 assert.ok(indexHtml.includes('class="composer-think-label"'), 'Think button label must exist');
 assert.ok(indexHtml.includes('function toggleDeepReasoningMode('), 'toggleDeepReasoningMode function must be defined');
-assert.ok(indexHtml.includes("handleCapabilityPillClick('document_ocr')"), 'Document OCR pill must exist');
+assert.ok(indexHtml.includes('id="composer-file-input"'), 'Document upload must remain available from the composer');
 assert.ok(!indexHtml.includes("handleCapabilityPillClick('code_math')"), 'Code & Math pill must be deleted');
 assert.ok(!indexHtml.includes('id="composer-mode-badge"'), 'Empty composer badge must be absent');
 assert.ok(indexHtml.includes('function updateComposerModeIndicatorUi('), 'updateComposerModeIndicatorUi function must be defined');
@@ -65,7 +65,7 @@ assert.ok(!indexHtml.includes('class="starter-cards-grid"'), 'Starter prompt car
 assert.ok(!indexHtml.includes('class="starter-prompt-card"'), 'Starter prompt card buttons must be removed');
 assert.ok(indexHtml.includes('id="chat-container"'), 'Chat container element must exist');
 assert.ok(indexHtml.includes('id="drag-drop-overlay"'), 'Drag and drop overlay must exist');
-console.log('  [PASS] 3. Full-height workspace layout, empty state hero with interactive capability pills, and drag-drop overlay verified');
+console.log('  [PASS] 3. Minimal workspace, composer tools, and drag-drop overlay verified');
 
 // JavaScript UI helper functions & safeguards
 assert.ok(indexHtml.includes('function toggleAppTheme('), 'toggleAppTheme must be defined');

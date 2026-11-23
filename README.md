@@ -68,6 +68,8 @@ Chat, writing, translation, document/image questions, and research depend on con
 
 Image creation uses the anonymous AI Horde community queue directly from the browser. No account, payment, Puter sign-in, Gemini image billing, or Vercel polling function is used. Volunteer capacity and anonymous limits can cause delays or failures. Stop cancels the job; the app never switches to a paid provider. Prompts are sent to community workers, so avoid sensitive information. Set `JARVIS_IMAGE_GENERATION_ENABLED=false` to hide image creation (the legacy disable flag is also respected).
 
+The idle workspace has a JARVIS title and composer. Select the title for chats/settings and `+` for tools. Generated images have no permanent action buttons: hold or right-click an image for Copy and Download. Keyboard users can focus the image and press Shift+F10 or the context-menu key; Enter opens its preview. Copy exports actual PNG image data to supported clipboards.
+
 Document parsing is bundled locally and loaded when needed. Image OCR/understanding still requires a configured vision provider. A dismissible first-visit permission introduction has one Enable permissions action; the browser controls the individual microphone, camera, and location approval prompts. Features remain usable independently when only some permissions are granted.
 
 Long clipboard text (8,000 characters or 80 lines) becomes a UTF-8 attachment. Short formulas stay inline, and indentation/LaTeX are preserved. Attachments can be previewed or moved back into the composer. Text retrieval runs in a worker; selected passages explicitly disclose partial coverage instead of claiming an entire large document was read.

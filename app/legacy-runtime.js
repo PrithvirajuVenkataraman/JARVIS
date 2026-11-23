@@ -12916,7 +12916,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             const dimensions = { '1:1': [512, 512], '16:9': [768, 448], '9:16': [448, 768], '4:3': [640, 512], '3:4': [512, 640] };
             const [width, height] = dimensions[aspectRatio] || dimensions['1:1'];
             const cardId = 'img-card-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
-            addChatMessage(`<div id="${cardId}" class="image-gen-card free-image-card" data-prompt="${escapeHtml(rawPrompt)}" data-aspect-ratio="${escapeHtml(aspectRatio)}"><div class="image-gen-viewport" data-ratio="${escapeHtml(aspectRatio)}"><img class="image-gen-img hidden" alt="${escapeHtml(rawPrompt)}"><div class="free-image-loading"><p class="image-gen-status-text" role="status">Joining the free community queue…</p><p class="free-image-note">AI Horde · No payment or account required. Prompts are processed by community workers. Queues can take several minutes.</p><button type="button" class="free-image-stop">Stop</button><button type="button" class="free-image-retry hidden">Try again</button></div></div><div class="free-image-actions hidden"><button type="button" data-image-download>Download</button><button type="button" data-image-copy>Copy</button><button type="button" data-image-open>View image</button></div></div>`, false, null, { sourceType: 'tool', allowEmpty: false, skipRecord: true });
+            addChatMessage(`<div id="${cardId}" class="image-gen-card free-image-card" data-prompt="${escapeHtml(rawPrompt)}" data-aspect-ratio="${escapeHtml(aspectRatio)}"><div class="image-gen-viewport" data-ratio="${escapeHtml(aspectRatio)}"><img class="image-gen-img hidden" alt="${escapeHtml(rawPrompt)}"><div class="free-image-loading"><p class="image-gen-status-text" role="status">Joining the free community queue…</p><p class="free-image-note">AI Horde · No payment or account required. Prompts are processed by community workers. Queues can take several minutes.</p><button type="button" class="free-image-stop">Stop</button><button type="button" class="free-image-retry hidden">Try again</button></div></div></div>`, false, null, { sourceType: 'tool', allowEmpty: false, skipRecord: true });
             const card = document.getElementById(cardId); if (!card) return;
             const status = card.querySelector('.image-gen-status-text');
             const stop = card.querySelector('.free-image-stop');
@@ -12924,9 +12924,6 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             stop.addEventListener('click', () => controller.abort());
             controller.signal.addEventListener('abort', () => { status.textContent = 'Image creation stopped.'; stop.hidden = true; retry.classList.remove('hidden'); }, { once: true });
             retry.addEventListener('click', () => regenerateImageCard(cardId));
-            card.querySelector('[data-image-download]').addEventListener('click', () => downloadImageCard(cardId));
-            card.querySelector('[data-image-copy]').addEventListener('click', () => copyImageCard(cardId));
-            card.querySelector('[data-image-open]').addEventListener('click', () => openImageLightboxFromCard(cardId));
             try {
                 const result = await window.JarvisImageGenerator.generateImage(rawPrompt, { width, height, signal: controller.signal, onProgress: event => {
                     if (!controller.signal.aborted && card.isConnected) status.textContent = event.message;
@@ -12936,11 +12933,13 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 await img.decode();
                 if (controller.signal.aborted || !card.isConnected) return;
                 img.classList.remove('hidden');
-                img.addEventListener('click', () => openImageLightboxFromCard(cardId));
+                img.tabIndex = 0; img.setAttribute('role', 'button'); img.setAttribute('aria-haspopup', 'menu'); img.setAttribute('aria-expanded', 'false');
+                img.setAttribute('aria-label', 'Generated image. Open preview; hold or press Shift+F10 for Copy and Download.');
+                img.addEventListener('click', event => { event.stopPropagation(); openImageLightboxFromCard(cardId); });
+                img.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openImageLightboxFromCard(cardId); } });
                 card.dataset.imageUrl = result.dataUrl; card.dataset.imageId = result.id;
                 card.querySelector('.image-gen-viewport').classList.add('has-image');
                 card.querySelector('.free-image-loading').hidden = true;
-                card.querySelector('.free-image-actions').classList.remove('hidden');
                 saveToHistory(rawPrompt, `[Generated Image: "${rawPrompt}"]`, { recordContext: true });
             } catch (error) {
                 if (!controller.signal.aborted && card.isConnected) { status.textContent = error.message || 'Image creation could not finish.'; stop.hidden = true; retry.classList.remove('hidden'); }
@@ -13002,7 +13001,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             if (!card) return;
             const url = card.dataset.imageUrl;
             const prompt = card.dataset.prompt || 'ai-image';
-            if (!url) return;
+            if (!window.JarvisMarkupSecurity?.isSafeImagePreview(url)) return;
             const extension = /^data:image\/webp/i.test(url) ? 'webp' : /^data:image\/png/i.test(url) ? 'png' : 'jpg';
             const filename = `${slugifyPrompt(prompt)}.${extension}`;
             if (url.startsWith('data:')) {
@@ -13022,25 +13021,17 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
         window.downloadImageCard = downloadImageCard;
 
         async function copyImageCard(cardId) {
-            const card = document.getElementById(cardId);
-            if (!card) return;
-            const url = card.dataset.imageUrl;
-            if (!url) return;
+            const image = document.getElementById(cardId)?.querySelector('img.image-gen-img');
+            if (!image?.complete || !image.naturalWidth) return;
             try {
-                if (url.startsWith('data:image/')) {
-                    const res = await fetch(url);
-                    const blob = await res.blob();
-                    await navigator.clipboard.write([
-                        new ClipboardItem({ [blob.type]: blob })
-                    ]);
-                    showTemporaryMessage?.('Image copied to clipboard!');
-                    return;
-                }
-                await navigator.clipboard.writeText(url);
-                showTemporaryMessage?.('Image URL copied to clipboard!');
+                if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') throw new Error('Clipboard images are unavailable.');
+                const canvas = document.createElement('canvas'); canvas.width = image.naturalWidth; canvas.height = image.naturalHeight;
+                canvas.getContext('2d').drawImage(image, 0, 0);
+                const png = new Promise((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Image conversion failed.')), 'image/png'));
+                await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
+                showTemporaryMessage?.('Image copied.');
             } catch {
-                await navigator.clipboard.writeText(url);
-                showTemporaryMessage?.('Image URL copied to clipboard!');
+                showTemporaryMessage?.('Could not copy this image. Use Download instead.');
             }
         }
         window.copyImageCard = copyImageCard;
@@ -13050,7 +13041,13 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             if (!card) return;
             const url = card.dataset.imageUrl;
             const prompt = card.dataset.prompt || '';
-            if (url) openImageLightbox(url, prompt);
+            if (url) {
+                openImageLightbox(url, prompt);
+                const preview = document.getElementById('image-lightbox-img');
+                preview.dataset.generatedCardId = cardId; preview.tabIndex = 0;
+                preview.setAttribute('aria-haspopup', 'menu'); preview.setAttribute('aria-expanded', 'false');
+                preview.setAttribute('aria-label', 'Generated image. Hold or press Shift+F10 for Copy and Download.');
+            }
         }
         window.openImageLightboxFromCard = openImageLightboxFromCard;
 
@@ -13106,6 +13103,8 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             const img = document.getElementById('image-lightbox-img');
             const caption = document.getElementById('image-lightbox-caption');
             if (!overlay || !img) return;
+            delete img.dataset.generatedCardId;
+            for (const attribute of ['tabindex', 'aria-label', 'aria-haspopup', 'aria-expanded']) img.removeAttribute(attribute);
             img.src = src;
             img.dataset.prompt = prompt || '';
             overlay.dataset.prompt = prompt || '';
