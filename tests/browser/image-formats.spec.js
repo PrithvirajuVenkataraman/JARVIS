@@ -85,11 +85,19 @@ test('free image card handles queue, completion, download type and Stop', async 
     await image.press('Shift+F10'); await expect(menu.getByRole('menuitem', { name: 'Copy', exact: true })).toBeFocused();
     await page.keyboard.press('ArrowDown'); await expect(menu.getByRole('menuitem', { name: 'Download', exact: true })).toBeFocused();
     await page.keyboard.press('Escape'); await expect(image).toBeFocused(); await expect(menu).toBeHidden();
-    await page.evaluate(() => Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {
-        write: async items => { const blob = await items[0].getType('image/png'); window.__copiedImage = { type: blob.type, bytes: [...new Uint8Array(await blob.arrayBuffer())].slice(0, 4) }; }
-    } }));
+    await page.evaluate(() => {
+        const copy = window.copyImageCard;
+        window.copyImageCard = (...args) => { window.__copyInvoked = true; return copy(...args); };
+        Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {
+            write: async items => {
+                window.__copyWriteCalled = true;
+                try { const blob = await items[0].getType('image/png'); window.__copiedImage = { type: blob.type, bytes: [...new Uint8Array(await blob.arrayBuffer())].slice(0, 4) }; }
+                catch (error) { window.__copyError = error.message; throw error; }
+            }
+        } });
+    });
     await image.press('Shift+F10'); await menu.getByRole('menuitem', { name: 'Copy', exact: true }).click();
-    await expect.poll(() => page.evaluate(() => window.__copiedImage)).toEqual({ type: 'image/png', bytes: [137, 80, 78, 71] });
+    await expect.poll(() => page.evaluate(() => ({ invoked: window.__copyInvoked, writeCalled: window.__copyWriteCalled, error: window.__copyError, image: window.__copiedImage }))).toEqual({ invoked: true, writeCalled: true, error: undefined, image: { type: 'image/png', bytes: [137, 80, 78, 71] } });
     const pointer = { pointerId: 7, pointerType: 'touch', isPrimary: true, button: 0, clientX: 180, clientY: 170 };
     await image.dispatchEvent('pointerdown', pointer); await image.dispatchEvent('pointermove', { ...pointer, clientY: 200 });
     await page.waitForTimeout(550); await expect(menu).toBeHidden(); await image.dispatchEvent('pointercancel', pointer);
@@ -100,6 +108,9 @@ test('free image card handles queue, completion, download type and Stop', async 
     for (const width of [320, 390, 768, 1440]) {
         await page.setViewportSize({ width, height: 844 });
         await image.press('Shift+F10'); await expect(menu).toBeVisible();
+        await page.setViewportSize({ width, height: 840 });
+        await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+        await expect(menu).toBeVisible();
         const box = await menu.boundingBox(); expect(box.x).toBeGreaterThanOrEqual(0); expect(box.x + box.width).toBeLessThanOrEqual(width);
         for (const button of await menu.getByRole('menuitem').all()) expect((await button.boundingBox()).height).toBeGreaterThanOrEqual(44);
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);

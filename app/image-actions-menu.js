@@ -7,30 +7,44 @@ export function install() {
     const menu = document.createElement('div');
     menu.id = 'generated-image-menu'; menu.className = 'image-actions-menu'; menu.hidden = true;
     menu.setAttribute('role', 'menu'); menu.setAttribute('aria-label', 'Image actions');
-    let currentImage = null, press = null, timer, suppressedClick = null;
+    let currentImage = null, press = null, timer, suppressedClick = null, anchor = null, positionFrame = 0;
     const imageAt = target => target instanceof Element ? target.closest('.free-image-card img.image-gen-img, #image-lightbox-img[data-generated-card-id]') : null;
     const cardFor = image => image?.closest('.free-image-card') || document.getElementById(image?.dataset.generatedCardId || '');
     const clearPress = () => { clearTimeout(timer); press = null; };
     const close = (restore = false) => {
         const image = currentImage;
         menu.hidden = true; currentImage = null;
+        cancelAnimationFrame(positionFrame); positionFrame = 0;
         image?.setAttribute('aria-expanded', 'false');
         if (restore && image?.isConnected) image.focus({ preventScroll: true });
     };
     const usable = image => image?.isConnected && image.complete && image.naturalWidth > 0 && isSafeImagePreview(cardFor(image)?.dataset.imageUrl);
-    const open = (image, x, y) => {
-        if (!usable(image)) return;
-        close(); currentImage = image;
-        (image.closest('[role="dialog"]') || document.body).append(menu);
-        menu.inert = false; menu.hidden = false;
-        image.setAttribute('aria-expanded', 'true');
+    const position = () => {
+        if (!usable(currentImage) || !anchor) { close(); return; }
         const viewport = window.visualViewport;
         const left = viewport?.offsetLeft || 0, top = viewport?.offsetTop || 0;
         const width = viewport?.width || innerWidth, height = viewport?.height || innerHeight;
+        const rect = currentImage.getBoundingClientRect();
+        if (rect.bottom <= top || rect.top >= top + height || rect.right <= left || rect.left >= left + width) { close(); return; }
+        // Keep the target still while the chat auto-scrolls or settles its layout.
+        const { x, y } = anchor;
         const bounds = menu.getBoundingClientRect();
         menu.style.left = `${Math.max(left + 8, Math.min(x, left + width - bounds.width - 8))}px`;
         menu.style.top = `${Math.max(top + 8, Math.min(y, top + height - bounds.height - 8))}px`;
-        menu.querySelector('button').focus({ preventScroll: true });
+    };
+    const reposition = () => {
+        if (menu.hidden || positionFrame) return;
+        positionFrame = requestAnimationFrame(() => { positionFrame = 0; position(); });
+    };
+    const open = (image, x, y) => {
+        if (!usable(image)) return;
+        close(); currentImage = image;
+        anchor = { x, y };
+        (image.closest('[role="dialog"]') || document.body).append(menu);
+        menu.inert = false; menu.hidden = false;
+        image.setAttribute('aria-expanded', 'true');
+        position();
+        if (!menu.hidden) menu.querySelector('button').focus({ preventScroll: true });
     };
     for (const [label, action] of [['Copy', 'copyImageCard'], ['Download', 'downloadImageCard']]) {
         const button = document.createElement('button'); button.type = 'button';
@@ -92,8 +106,11 @@ export function install() {
     }, true);
     document.addEventListener('focusin', event => { if (!menu.hidden && !menu.contains(event.target) && event.target !== currentImage) close(); });
     const dismiss = () => { clearPress(); close(); };
-    document.addEventListener('scroll', dismiss, { capture: true, passive: true });
-    window.addEventListener('resize', dismiss); window.addEventListener('pagehide', dismiss);
-    window.visualViewport?.addEventListener('resize', dismiss); window.visualViewport?.addEventListener('scroll', dismiss);
+    // Layout, keyboard and viewport changes can arrive after the opening key event.
+    // Keep the popup in view instead of treating those events as a dismissal gesture.
+    document.addEventListener('scroll', reposition, { capture: true, passive: true });
+    document.addEventListener('wheel', dismiss, { passive: true });
+    window.addEventListener('resize', reposition); window.addEventListener('pagehide', dismiss);
+    window.visualViewport?.addEventListener('resize', reposition); window.visualViewport?.addEventListener('scroll', reposition);
     document.addEventListener('visibilitychange', () => { if (document.hidden) dismiss(); });
 }
