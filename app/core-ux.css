@@ -160,7 +160,25 @@ body #chat-empty-state:empty { display:none!important; }
 .image-lightbox-container:has(#image-lightbox-img[data-generated-card-id]) .image-lightbox-toolbar { display:none!important; }
 .free-image-card img.image-gen-img:focus-visible { outline:2px solid #eee; outline-offset:3px; }
 .chat-row:has(.free-image-card) :is(.assistant-action-bar,.assistant-action-row) { display:none!important; }
-.image-actions-menu { position:fixed; z-index:10000; width:168px; max-width:calc(100vw - 16px); padding:5px; background:#191919; color:#f4f4f5; border:1px solid #383838; border-radius:12px; box-shadow:0 8px 28px #0008; }
-.image-actions-menu[hidden] { display:none!important; }
-.image-actions-menu button { display:block; width:100%; min-height:44px; border:0; border-radius:7px; padding:10px 12px; background:transparent; color:inherit; text-align:left; font:500 14px/1.4 system-ui,sans-serif; cursor:pointer; }
-.image-actions-menu button:hover, .image-actions-menu button:focus-visible { background:#303030; outline:0; }
+body #generated-image-menu { position:fixed; z-index:10000; width:168px; max-width:calc(100vw - 16px); padding:4px; background:#1c1c1c; color:#eee; border:1px solid #363636; border-radius:8px; box-shadow:0 8px 24px #0006; }
+body #generated-image-menu[hidden] { display:none!important; }
+body #generated-image-menu button { display:flex; align-items:center; gap:10px; width:100%; min-height:44px; border:0!important; border-radius:4px; padding:10px 12px; background:transparent!important; color:inherit; text-align:left; font:400 14px/1.4 system-ui,sans-serif; cursor:pointer; box-shadow:none!important; }
+body #generated-image-menu button svg { width:16px; height:16px; flex:none; color:#bbb; }
+body #generated-image-menu button:hover { background:#292929!important; }
+body #generated-image-menu button:focus-visible { background:#292929!important; outline:1px solid #888; outline-offset:-2px; }
+
+/* Status messages use the answer column, not an empty image placeholder. */
+body .free-image-card:not([data-image-state="complete"]) .image-gen-viewport { display:block; min-height:0!important; aspect-ratio:auto!important; height:auto!important; padding:0; border:0; border-radius:0; background:transparent; box-shadow:none; }
+body .free-image-card:not([data-image-state="complete"]) .free-image-loading { padding:8px 0; text-align:left; }
+body .free-image-loading .image-gen-status-text { margin:0; text-align:left; font-size:15px; font-weight:400; line-height:1.6; }
+body .free-image-loading .free-image-note { margin:4px 0 8px; color:#999; font-size:13px; line-height:1.6; }
+body .free-image-card :is(.free-image-stop,.free-image-retry) { min-width:44px; min-height:44px; padding:8px 0; border:0!important; border-radius:3px; background:transparent!important; color:#d4d4d4; font:500 13px/1.4 system-ui,sans-serif; box-shadow:none!important; text-align:left; }
+body .free-image-card :is(.free-image-stop,.free-image-retry):hover:not(:disabled) { color:#fff; text-decoration:underline; text-underline-offset:3px; }
+body .free-image-card :is(.free-image-stop,.free-image-retry):disabled { color:#888; cursor:default; }
+body #help-modal .settings-routing-card { margin:0 0 16px; padding:18px; border-radius:10px; }
+.settings-routing-card h4 { margin:0 0 8px; color:#eee; font-size:15px; line-height:1.5; font-weight:600; }
+.settings-routing-card p { margin:0; color:#aaa; font-size:13px; line-height:1.7; }
+.settings-routing-details { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px 24px; margin:18px 0 0; }
+.settings-routing-details dt { color:#999; font-size:12px; line-height:1.5; }
+.settings-routing-details dd { margin:4px 0 0; color:#ddd; font-size:13px; line-height:1.6; overflow-wrap:anywhere; }
+@media(max-width:520px) { .settings-routing-details { grid-template-columns:1fr; gap:14px; } }

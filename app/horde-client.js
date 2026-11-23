@@ -12,9 +12,18 @@ async function request(path, options = {}) {
     try {
         const response = await fetch(API + path, { ...options, signal: controller.signal, credentials: 'omit',
             headers: { 'Content-Type': 'application/json', apikey: '0000000000', 'Client-Agent': 'JARVIS:1.0:https://jarvisjr.vercel.app' } });
-        if (!response.ok) throw new Error(response.status === 429 || response.status === 403
-            ? 'The free image queue is at capacity. Please try again later.'
-            : 'The free image service is temporarily unavailable. Please try again later.');
+        if (!response.ok) {
+            const rawRetry = response.headers?.get?.('retry-after');
+            const seconds = rawRetry != null && /^\d+(?:\.\d+)?$/.test(rawRetry.trim()) ? Number(rawRetry) : NaN;
+            const requestedWait = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(rawRetry || '') - Date.now();
+            const retryAfterMs = Number.isFinite(requestedWait) ? Math.max(0, Math.min(86400000, requestedWait)) : response.status === 429 ? 60000 : 0;
+            throw Object.assign(new Error(response.status === 429
+                ? 'The free image queue is at capacity. Please try again later.'
+                : 'The free image service is temporarily unavailable. Please try again later.'), {
+                code: response.status === 429 ? 'image_queue_full' : response.status === 403 ? 'image_access_denied' : 'image_service_unavailable',
+                retryAfterMs
+            });
+        }
         return await response.json();
     } catch (error) {
         if (controller.signal.aborted && !options.signal?.aborted) throw new Error('The free image service did not respond in time. Please try again later.', { cause: error });

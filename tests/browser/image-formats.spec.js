@@ -60,13 +60,13 @@ test('free image card handles queue, completion, download type and Stop', async 
     await page.setViewportSize({ width: 390, height: 844 });
     await page.evaluate(() => { window.__imageTask = window.handleImageGenerationRequest('Draw a quiet forest'); });
     const card = page.locator('.free-image-card').last();
-    await expect(card).toContainText('Waiting in the free community queue');
+    await expect(card).toContainText('Waiting for an available image worker');
     await card.getByRole('button', { name: 'Stop', exact: true }).click();
     await expect(card).toContainText('Image creation stopped.');
     await expect.poll(() => methods.filter(method => method === 'DELETE').length).toBe(1);
     expect(submissions).toHaveLength(1);
     done = true;
-    await card.getByRole('button', { name: 'Try again' }).click();
+    await card.getByRole('button', { name: 'Retry' }).click();
     const complete = page.locator('.free-image-card').last();
     await expect(complete.locator('img')).toBeVisible();
     await expect(page.locator('.chat-row[data-role="assistant"]')).toHaveCount(1);
@@ -118,4 +118,35 @@ test('free image card handles queue, completion, download type and Stop', async 
     await image.focus();
     await image.press('Shift+F10');
     await page.screenshot({ path: info.outputPath('free-image-mobile.png'), fullPage: true });
+});
+
+test('capacity errors use a compact status and respect the server cooldown without automatic retries', async ({ page }, info) => {
+    const submissions = [];
+    await page.route('https://aihorde.net/api/v2/**', route => {
+        if (route.request().url().endsWith('/async')) {
+            submissions.push(route.request().postDataJSON());
+            if (submissions.length === 1) return route.fulfill({ status: 429, headers: { 'Retry-After': '2', 'Access-Control-Expose-Headers': 'Retry-After' }, json: { message: 'Busy' } });
+            return route.fulfill({ json: { id: '12345678-1234-1234-1234-123456789abc' } });
+        }
+        return route.fulfill({ json: route.request().url().includes('/check/') ? { done: true } : { generations: [{ img: png.toString('base64') }] } });
+    });
+    await page.waitForFunction(() => window.JarvisCapabilities.isAvailable('images'));
+    await page.evaluate(() => { window.__capacityTask = window.handleImageGenerationRequest('Draw Times Square'); });
+    const card = page.locator('.free-image-card').last();
+    await expect(card).toHaveAttribute('data-image-state', 'error');
+    await expect(card).toContainText('Image creation is busy right now.');
+    await expect(card.getByRole('button', { name: 'Retry shortly', exact: true })).toBeDisabled();
+    for (const width of [320, 390, 1440]) {
+        await page.setViewportSize({ width, height: 844 });
+        const box = await card.locator('.image-gen-viewport').boundingBox();
+        expect(box.height).toBeLessThan(180);
+        expect(await card.locator('.image-gen-viewport').evaluate(element => getComputedStyle(element).borderTopWidth)).toBe('0px');
+    }
+    expect(submissions).toHaveLength(1);
+    const retry = card.getByRole('button', { name: 'Retry', exact: true });
+    await expect(retry).toBeEnabled();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({ path: info.outputPath('capacity-status-mobile.png'), fullPage: true });
+    await retry.click(); await expect(page.locator('.free-image-card').last().locator('img')).toBeVisible();
+    expect(submissions).toHaveLength(2); expect(submissions[1].prompt).toBe(submissions[0].prompt);
 });

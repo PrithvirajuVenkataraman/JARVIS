@@ -42,6 +42,23 @@ test('minimal workspace keeps only JARVIS above the composer and retains tools a
     await page.locator('#composer-plus-btn').click(); await expect(page.locator('#composer-image-btn')).toBeVisible();
 });
 
+test('model routing explains the current preference without promotional badges or fixed model claims', async ({ page }, info) => {
+    await page.evaluate(async () => { await window.showHelpModal(); });
+    await expect(page.locator('#help-modal')).toBeVisible();
+    await page.evaluate(() => window.switchSettingsView('architecture_info'));
+    const routing = page.locator('.settings-routing-card'); await routing.scrollIntoViewIfNeeded();
+    await expect(routing.getByRole('heading', { name: 'Model routing', exact: true })).toBeVisible();
+    await expect(routing).not.toContainText('No Lock-In');
+    await expect(routing).not.toContainText('GPT OSS 120B');
+    await expect(routing).toContainText('Automatic');
+    for (const width of [320, 390, 1440]) {
+        await page.setViewportSize({ width, height: 844 }); await routing.scrollIntoViewIfNeeded();
+        expect(await routing.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+    }
+    await page.setViewportSize({ width: 390, height: 844 }); await routing.scrollIntoViewIfNeeded();
+    await routing.screenshot({ path: info.outputPath('model-routing-mobile.png') });
+});
+
 test('picker navigation preserves drafts, composition, payloads, and changing capabilities', async ({ page }) => {
     const input = page.locator('#text-input'); await input.fill('/'); await input.press('ArrowDown'); await input.press('Enter');
     await expect(input).toHaveValue('Translate this text to [language]: ');

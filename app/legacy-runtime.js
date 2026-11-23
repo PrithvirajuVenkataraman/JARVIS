@@ -12916,22 +12916,24 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             const dimensions = { '1:1': [512, 512], '16:9': [768, 448], '9:16': [448, 768], '4:3': [640, 512], '3:4': [512, 640] };
             const [width, height] = dimensions[aspectRatio] || dimensions['1:1'];
             const cardId = 'img-card-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
-            addChatMessage(`<div id="${cardId}" class="image-gen-card free-image-card" data-prompt="${escapeHtml(rawPrompt)}" data-aspect-ratio="${escapeHtml(aspectRatio)}"><div class="image-gen-viewport" data-ratio="${escapeHtml(aspectRatio)}"><img class="image-gen-img hidden" alt="${escapeHtml(rawPrompt)}"><div class="free-image-loading"><p class="image-gen-status-text" role="status">Joining the free community queue…</p><p class="free-image-note">AI Horde · No payment or account required. Prompts are processed by community workers. Queues can take several minutes.</p><button type="button" class="free-image-stop">Stop</button><button type="button" class="free-image-retry hidden">Try again</button></div></div></div>`, false, null, { sourceType: 'tool', allowEmpty: false, skipRecord: true });
+            addChatMessage(`<div id="${cardId}" class="image-gen-card free-image-card" data-image-state="pending" data-prompt="${escapeHtml(rawPrompt)}" data-aspect-ratio="${escapeHtml(aspectRatio)}"><div class="image-gen-viewport" data-ratio="${escapeHtml(aspectRatio)}"><img class="image-gen-img hidden" alt="${escapeHtml(rawPrompt)}"><div class="free-image-loading"><p class="image-gen-status-text" role="status">Preparing image creation…</p><p class="free-image-note">Free community workers process your prompt. Availability varies.</p><button type="button" class="free-image-stop">Stop</button><button type="button" class="free-image-retry hidden">Retry</button></div></div></div>`, false, null, { sourceType: 'tool', allowEmpty: false, skipRecord: true });
             const card = document.getElementById(cardId); if (!card) return;
             const status = card.querySelector('.image-gen-status-text');
             const stop = card.querySelector('.free-image-stop');
             const retry = card.querySelector('.free-image-retry');
+            const note = card.querySelector('.free-image-note');
             stop.addEventListener('click', () => controller.abort());
-            controller.signal.addEventListener('abort', () => { status.textContent = 'Image creation stopped.'; stop.hidden = true; retry.classList.remove('hidden'); }, { once: true });
+            controller.signal.addEventListener('abort', () => { status.textContent = 'Image creation stopped.'; note.textContent = 'Your prompt is kept.'; card.dataset.imageState = 'stopped'; stop.hidden = true; retry.classList.remove('hidden'); }, { once: true });
             retry.addEventListener('click', () => regenerateImageCard(cardId));
             try {
                 const result = await window.JarvisImageGenerator.generateImage(rawPrompt, { width, height, signal: controller.signal, onProgress: event => {
-                    if (!controller.signal.aborted && card.isConnected) status.textContent = event.message;
+                    if (!controller.signal.aborted && card.isConnected) status.textContent = event.phase === 'queued' ? 'Waiting for an available image worker…' : event.phase === 'generating' ? 'Creating your image…' : 'Preparing image creation…';
                 } });
                 if (controller.signal.aborted || !card.isConnected) return;
                 const img = card.querySelector('img'); img.src = result.dataUrl;
                 await img.decode();
                 if (controller.signal.aborted || !card.isConnected) return;
+                card.dataset.imageState = 'complete';
                 img.classList.remove('hidden');
                 img.tabIndex = 0; img.setAttribute('role', 'button'); img.setAttribute('aria-haspopup', 'menu'); img.setAttribute('aria-expanded', 'false');
                 img.setAttribute('aria-label', 'Generated image. Open preview; hold or press Shift+F10 for Copy and Download.');
@@ -12942,7 +12944,17 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 card.querySelector('.free-image-loading').hidden = true;
                 saveToHistory(rawPrompt, `[Generated Image: "${rawPrompt}"]`, { recordContext: true });
             } catch (error) {
-                if (!controller.signal.aborted && card.isConnected) { status.textContent = error.message || 'Image creation could not finish.'; stop.hidden = true; retry.classList.remove('hidden'); }
+                if (!controller.signal.aborted && card.isConnected) {
+                    card.dataset.imageState = 'error';
+                    status.textContent = error.code === 'image_queue_full' ? 'Image creation is busy right now.' : 'Image creation could not finish.';
+                    note.textContent = error.code === 'image_queue_full' ? 'Your prompt is kept. Please try again shortly.' : 'Your prompt is kept. You can retry later.';
+                    stop.hidden = true; retry.classList.remove('hidden');
+                    const wait = Math.max(0, Number(error.retryAfterMs) || 0);
+                    if (wait) {
+                        retry.disabled = true; retry.textContent = 'Retry shortly';
+                        setTimeout(() => { if (card.isConnected && card.dataset.imageState === 'error') { retry.disabled = false; retry.textContent = 'Retry'; } }, wait);
+                    }
+                }
             } finally { if (window.__jarvisImageTurnController === controller) window.__jarvisImageTurnController = null; }
         }
 

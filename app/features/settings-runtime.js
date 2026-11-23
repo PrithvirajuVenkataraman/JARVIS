@@ -757,44 +757,16 @@ function showHelpModal() {
                                 </p>
                             </div>
 
-                            <!-- Card 5: Multi-Model Orchestration -->
-                            <div class="settings-group-card mb-4" style="padding:14px;">
-                                <div class="flex flex-wrap items-center justify-between gap-2 mb-1.5">
-                                    <h4 class="text-xs font-semibold text-neutral-100 flex items-center gap-2 min-w-0 flex-1">
-                                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#ec4899" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
-                                        <span>5. Independent Multi-Model Orchestration vs. Single-Vendor Lock-in</span>
-                                    </h4>
-                                    <span class="text-[10px] px-2 py-0.5 rounded-full bg-pink-500/10 text-pink-400 border border-pink-500/20 font-medium shrink-0">No Lock-In</span>
-                                </div>
-                                <p class="text-[11px] text-neutral-300 leading-relaxed mt-1">
-                                    <strong>The Difference:</strong> Instead of being locked into a single proprietary provider (e.g. only OpenAI or only Anthropic), JARVIS routes dynamically across specialized open-weight models on Groq with Gemini frontier models maintained as resilient fallbacks:
-                                </p>
-                                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 mt-2.5 text-[10px]">
-                                    <div class="bg-neutral-900/90 border border-neutral-800/90 rounded-md p-2">
-                                        <div class="text-[9px] font-semibold uppercase tracking-wider text-neutral-400 mb-1">Reasoning &amp; Tools</div>
-                                        <div class="text-neutral-200 font-medium">GPT OSS 120B</div>
-                                        <div class="text-neutral-300">GPT OSS 20B</div>
-                                        <div class="text-purple-400 font-medium">Qwen 3.8 27B</div>
-                                    </div>
-                                    <div class="bg-neutral-900/90 border border-neutral-800/90 rounded-md p-2">
-                                        <div class="text-[9px] font-semibold uppercase tracking-wider text-neutral-400 mb-1">Text &amp; Multilingual</div>
-                                        <div class="text-neutral-200 font-medium">GPT OSS 120B</div>
-                                        <div class="text-neutral-300">GPT OSS 20B</div>
-                                        <div class="text-neutral-400">Whisper Large v3</div>
-                                    </div>
-                                    <div class="bg-neutral-900/90 border border-neutral-800/90 rounded-md p-2">
-                                        <div class="text-[9px] font-semibold uppercase tracking-wider text-neutral-400 mb-1">Vision &amp; Safety</div>
-                                        <div class="text-purple-400 font-medium">Qwen 3.8 27B</div>
-                                        <div class="text-emerald-400 font-medium mt-1">Safety GPT OSS 20B</div>
-                                    </div>
-                                    <div class="bg-neutral-900/90 border border-neutral-800/90 rounded-md p-2">
-                                        <div class="text-[9px] font-semibold uppercase tracking-wider text-neutral-400 mb-1">Speech &amp; Fallback</div>
-                                        <div class="text-neutral-300">Whisper v3 / Turbo</div>
-                                        <div class="text-neutral-300">Orpheus EN / AR</div>
-                                        <div class="text-blue-400 font-medium mt-1">Gemini 2.5 / 3.7 (Fallback)</div>
-                                    </div>
-                                </div>
-                            </div>
+                            <section class="settings-group-card settings-routing-card" aria-labelledby="settings-routing-title">
+                                <h4 id="settings-routing-title">Model routing</h4>
+                                <p>Your model preference is used when supported. A configured fallback may handle a request when a provider is unavailable.</p>
+                                <dl class="settings-routing-details">
+                                    <div><dt>Model preference</dt><dd>${escapeHtml(currentSelectedModel === 'auto' ? 'Automatic' : currentSelectedModel)}</dd></div>
+                                    <div><dt>Availability</dt><dd>Depends on provider configuration and quotas</dd></div>
+                                    <div><dt>Voice</dt><dd>Browser support or a configured transcription provider</dd></div>
+                                    <div><dt>Image creation</dt><dd>Free community queue; availability varies</dd></div>
+                                </dl>
+                            </section>
 
                             <!-- Card 6: Responsible Usage & Clinical Boundaries -->
                             <div class="settings-group-card mb-2" style="padding:14px;">

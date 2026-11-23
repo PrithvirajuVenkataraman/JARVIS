@@ -34,7 +34,11 @@ export function install() {
     };
     for (const [label, action] of [['Copy', 'copyImageCard'], ['Download', 'downloadImageCard']]) {
         const button = document.createElement('button'); button.type = 'button';
-        button.setAttribute('role', 'menuitem'); button.textContent = label;
+        button.setAttribute('role', 'menuitem');
+        button.innerHTML = action === 'copyImageCard'
+            ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg>'
+            : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/></svg>';
+        button.append(document.createTextNode(label));
         button.addEventListener('click', () => {
             const image = currentImage, card = cardFor(image);
             close(true);

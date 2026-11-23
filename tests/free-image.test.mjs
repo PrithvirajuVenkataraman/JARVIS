@@ -70,3 +70,14 @@ test('unfulfillable jobs fail immediately and are removed from the queue', async
     try { await assert.rejects(generateFreeImage('Forest'), /No free community worker/); assert.deepEqual(methods, ['POST', 'GET', 'DELETE']); }
     finally { globalThis.fetch = original; }
 });
+test('capacity errors carry the server cooldown and forbidden requests remain distinct', async () => {
+    const original = globalThis.fetch;
+    try {
+        for (const [status, retry, code, wait] of [[429, '2', 'image_queue_full', 2000], [429, null, 'image_queue_full', 60000], [403, null, 'image_access_denied', 0]]) {
+            let calls = 0;
+            globalThis.fetch = async () => { calls++; return { ok: false, status, headers: { get: () => retry } }; };
+            await assert.rejects(generateFreeImage('Times Square'), error => error.code === code && error.retryAfterMs === wait);
+            assert.equal(calls, 1);
+        }
+    } finally { globalThis.fetch = original; }
+});
