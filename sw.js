@@ -31,7 +31,8 @@ self.addEventListener('fetch', event => {
         const cache = await caches.open(CACHE_NAME);
         // A shell belongs to its verified build. Replace it only through a successful
         // worker installation, never with HTML referencing uncached chunks mid-upgrade.
-        if (request.mode === 'navigate') {
+        const appNavigation = request.mode === 'navigate' && ['/', '/index.html'].includes(url.pathname);
+        if (appNavigation) {
             const shell = await cache.match('/index.html');
             if (shell) return shell;
         }
@@ -41,7 +42,7 @@ self.addEventListener('fetch', event => {
             if (response.ok) event.waitUntil(cache.put(request, response.clone()));
             return response;
         } catch {
-            return (await caches.match(request)) || (request.mode === 'navigate' ? await cache.match('/index.html') : null) || new Response('Unavailable offline. Reconnect and retry.', { status: 503 });
+            return (await caches.match(request)) || (appNavigation ? await cache.match('/index.html') : null) || new Response('Unavailable offline. Reconnect and retry.', { status: 503 });
         }
     })());
 });

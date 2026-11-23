@@ -1,3 +1,4 @@
+import { APPLICATION_CSP, SANDBOX_CSP } from '../app/security-policy.js';
 import { generateKeyPairSync } from 'node:crypto';
 import { readAppSource } from './read-app-source.mjs';
 /**
@@ -929,13 +930,13 @@ assert.ok(headerMap['content-security-policy'], 'Content-Security-Policy must be
 
 const csp = headerMap['content-security-policy'];
 assert.ok(csp.includes("default-src 'self'"), 'CSP must define default-src');
-assert.ok(csp.includes("script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://cdn.jsdelivr.net"), 'CSP must allow required script sources');
-assert.ok(csp.includes("style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com"), 'CSP must allow required style sources');
-assert.ok(csp.includes("font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net data:"), 'CSP must allow font sources');
-assert.ok(csp.includes("img-src 'self' data: blob: https:"), 'CSP must allow image sources');
-assert.ok(csp.includes("media-src 'self' blob: data:"), 'CSP must allow media sources');
-assert.ok(csp.includes("connect-src 'self' https: wss: data: blob:"), 'CSP must allow connect sources including data: and blob:');
-assert.ok(csp.includes("worker-src 'self' blob: data:"), 'CSP must allow worker sources including blob: and data:');
+assert.equal(csp, APPLICATION_CSP);
+const scriptPolicy = csp.split(';').find(part => part.trim().startsWith('script-src'));
+assert.ok(!scriptPolicy.includes("'unsafe-inline'") && !scriptPolicy.includes("'unsafe-eval'"));
+assert.ok(!/connect-src[^;]*(?:^|\s)(?:https:|wss:)(?:\s|;)/.test(csp));
+assert.ok(csp.includes("connect-src 'self' blob: https://aihorde.net"));
+assert.ok(csp.includes("worker-src 'self' blob:"));
+assert.ok(SANDBOX_CSP.includes("connect-src 'none'"));
 assert.ok(csp.includes("object-src 'none'"), 'CSP must block object-src');
 assert.ok(csp.includes("base-uri 'self'"), 'CSP must restrict base-uri');
 assert.ok(csp.includes("form-action 'self'"), 'CSP must restrict form-action');
@@ -1114,7 +1115,7 @@ console.log('\n--- Section 4: Frontend UI Markup & Client Architecture ---');
     const vercelJson = JSON.parse(fs.readFileSync(vercelJsonPath, 'utf8'));
     const cspHeader = vercelJson.headers?.[0]?.headers?.find(h => h.key === 'Content-Security-Policy');
     assert.ok(cspHeader, 'vercel.json must define Content-Security-Policy header');
-    assert.ok(cspHeader.value.includes("connect-src 'self' https: wss:"), 'CSP must permit connect-src HTTPS connections');
+    assert.equal(cspHeader.value, APPLICATION_CSP, 'BYOK stays on same-origin API routes under the explicit network policy');
 
     console.log('  [PASS] 4.1 Settings UI, client fetch interceptor, and CSP headers are fully grounded and verified');
 }

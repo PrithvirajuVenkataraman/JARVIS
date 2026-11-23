@@ -1,3 +1,4 @@
+import { evaluateArithmetic } from '../api/_lib/arithmetic.js';
 import { callLLM } from './api-client.js';
 import { PartitionedIVFIndex, textToEmbeddingVector, vectorCosineSimilarity } from './storage.js';
 /**
@@ -151,42 +152,11 @@ export function executeCodeInterpreter(code) {
         );
     }
 
-    try {
-        // Build clean sandbox scope with standard Math and utilities
-        const safeGlobals = {
-            Math,
-            Date,
-            JSON,
-            Array,
-            Object,
-            Number,
-            String,
-            Boolean,
-            RegExp,
-            parseInt,
-            parseFloat,
-            isNaN,
-            isFinite
-        };
-
-        // Wrap expression if it does not contain a return statement
-        const wrapped = raw.includes('return ') ? raw : `return (${raw});`;
-        const paramNames = Object.keys(safeGlobals);
-        const paramValues = Object.values(safeGlobals);
-
-        const fn = new Function(...paramNames, wrapped);
-        const result = fn(...paramValues);
-
-        return {
-            success: true,
-            result: typeof result === 'object' && result !== null ? JSON.stringify(result) : String(result)
-        };
-    } catch (err) {
-        return {
-            success: false,
-            error: String(err?.message || 'Execution error')
-        };
-    }
+    const expression = raw.replace(/^return\s+/, '').replace(/;$/, '');
+    const result = evaluateArithmetic(expression);
+    return result === null
+        ? { success: false, error: 'Server execution supports bounded arithmetic only. Run JavaScript explicitly in the isolated browser runner.' }
+        : { success: true, result: String(result) };
 }
 
 /**

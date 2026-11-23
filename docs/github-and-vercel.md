@@ -84,7 +84,30 @@ Image creation submits and polls the anonymous AI Horde community queue directly
 
 `npm run test:multimodal` includes real codec conversions and mocked free-provider success, quota, validation, and cancellation tests. For optional Nikon NEF and HEIC integration samples, run `node tools/fetch-image-test-samples.mjs`, then rerun multimodal and browser tests. Downloads remain in ignored `scratch/image-fixtures/`, with their SHA256 checksums printed; they are not committed or deployed. Without those samples, integration cases explicitly skip while generated raster fixtures still run. `JARVIS_RAW_TEST_FILE` and `JARVIS_HEIC_TEST_FILE` can point to your own samples.
 
-## When vision reports missing credentials
+## Public-site security configuration
+
+The production site remains public. CORS restricts browser origins; it is not authentication or a global quota guarantee. Same-origin requests are accepted automatically. List any additional approved preview origins exactly in `CORS_ALLOWED_ORIGINS`; unrelated Vercel projects are rejected.
+
+Configure the following **single** rule in the production project's Vercel Firewall, within the existing Hobby allowance. Inspect existing rules first; do not enable a paid feature or add a second rate-limiting rule:
+
+| Field | Value |
+| --- | --- |
+| Name | JARVIS public API |
+| Conditions (all) | Request method equals `POST`; request path starts with `/api/` |
+| Action | Rate Limit |
+| Strategy / counting key | Fixed window / IP |
+| Window / limit | 60 seconds / 20 requests |
+| Exceeded action | HTTP 429, without a JavaScript challenge |
+
+Review and publish the rule in the dashboard, then verify the applied configuration and its traffic counters. This is account configuration and is **not enabled by deploying the repository**. The app retains bounded per-instance rate limits as a fallback; distributed abuse can still consume anonymous provider quotas. See [Vercel rate-limiting limits](https://vercel.com/docs/vercel-firewall/vercel-waf/rate-limiting).
+
+The browser policy no longer permits inline scripts or general JavaScript evaluation in the application. The explicitly requested code runner has a separate opaque-origin sandbox and a no-network policy. HTML previews are inert. Keep the sandbox HTML/JS files and the matching CSP override together when deploying; the build includes them in the verified offline assets.
+
+Public article requests validate DNS addresses at the connection boundary, revalidate redirects, and stop after a bounded response prefix. Remote Crawl4AI extraction is unavailable unless `CRAWL4AI_PUBLIC_EGRESS_VERIFIED=true` confirms that the renderer's own network blocks private addresses, redirects into private networks, and DNS rebinding. Merely setting this flag does not configure that network policy. Direct public HTML extraction remains available without Crawl4AI.
+
+Diagnostics distinguish configured capabilities from runtime health. An enabled capability is not a successful provider health check. Temporary quota or service errors preserve feature entry points and drafts; retries remain manual for image generation. No prompts, source text, answers, or credentials should be sent to monitoring services by default.
+
+## Vision credential troubleshooting
 
 Check `/api/diagnostics` on the actual deployment (`https://jarvisjr.vercel.app/api/diagnostics` for the current production site). `model.groqConfigured`, `model.geminiConfigured`, and `vision.configured` indicate configuration presence; they do not validate credentials or provider quotas. The former chat fallback incorrectly reported missing keys after upstream failures even when both keys were configured. The corrected version reports the failure category and preserves an attempt for the second configured provider. Deploy the matching API changes as well as the frontend.
 

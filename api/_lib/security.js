@@ -1,4 +1,6 @@
+import { APPLICATION_CSP } from '../../app/security-policy.js';
 import crypto from 'node:crypto';
+import net from 'node:net';
 
 const DEFAULT_RATE_WINDOW_MS = 60 * 1000;
 const DEFAULT_RATE_MAX = 60;
@@ -21,17 +23,11 @@ function parseAllowedOrigins() {
 }
 
 function resolveClientIp(req) {
-    const xfwd = String(req?.headers?.['x-forwarded-for'] || '').trim();
-    if (xfwd) {
-        const first = xfwd.split(',')[0].trim();
-        if (first) return first;
-    }
-    return String(
-        req?.headers?.['x-real-ip'] ||
-        req?.socket?.remoteAddress ||
-        req?.connection?.remoteAddress ||
-        'unknown'
-    ).trim();
+    // Vercel overwrites this header. Local servers must use their socket peer;
+    // accepting arbitrary forwarded headers makes per-IP limits spoofable.
+    const platformIp = process.env.VERCEL === '1'
+        ? String(req?.headers?.['x-vercel-forwarded-for'] || '').split(',')[0].trim() : '';
+    return net.isIP(platformIp) ? platformIp : String(req?.socket?.remoteAddress || req?.connection?.remoteAddress || 'unknown');
 }
 
 function parseBodyBytes(req) {
@@ -49,8 +45,7 @@ function setDefaultSecurityHeaders(res) {
     res.setHeader('Referrer-Policy', 'no-referrer');
     res.setHeader('Permissions-Policy', 'camera=(self), microphone=(self), geolocation=(self)');
     res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
-    const csp = String(process.env.JARVIS_CSP || '').trim() ||
-        "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net data:; img-src 'self' data: blob: https:; media-src 'self' blob: data:; connect-src 'self' https: wss: data: blob:; worker-src 'self' blob: data:; frame-src 'self' https://maps.google.com https://www.google.com https://openstreetmap.org https://www.openstreetmap.org https://*.openstreetmap.org; object-src 'none'; base-uri 'self'; form-action 'self';";
+    const csp = String(process.env.JARVIS_CSP || '').trim() || APPLICATION_CSP;
     res.setHeader('Content-Security-Policy', csp);
 }
 
@@ -82,8 +77,10 @@ function applyCors(req, res) {
     const allowedOrigins = parseAllowedOrigins();
     const requestOrigin = String(req?.headers?.origin || '').trim();
     const production = String(process.env.NODE_ENV || '').toLowerCase() === 'production';
-    const requestHost = String(req?.headers?.['x-forwarded-host'] || req?.headers?.host || '').trim().toLowerCase();
-    const sameOrigin = isSameOriginRequest(requestOrigin, requestHost);
+    const requestHost = String(req?.headers?.host || '').trim().toLowerCase();
+    const protocol = production || req?.socket?.encrypted ? 'https:' : 'http:';
+    const sameOrigin = isSameOriginRequest(requestOrigin, requestHost, protocol);
+    res.setHeader('Vary', 'Origin');
 
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Groq-Api-Key, X-Gemini-Api-Key, X-Goog-Api-Key, X-BYOK-Groq, X-BYOK-Gemini');
@@ -97,7 +94,7 @@ function applyCors(req, res) {
         return { ok: true };
     }
 
-    const allowed = requestOrigin && allowedOrigins.includes(requestOrigin);
+    const allowed = requestOrigin && (sameOrigin || allowedOrigins.includes(requestOrigin));
     res.setHeader('Vary', 'Origin');
     if (allowed) {
         res.setHeader('Access-Control-Allow-Origin', requestOrigin);
@@ -111,20 +108,11 @@ function applyCors(req, res) {
     return { ok: false };
 }
 
-function isSameOriginRequest(origin, host) {
+function isSameOriginRequest(origin, host, protocol) {
     if (!origin || !host) return false;
     try {
         const parsed = new URL(origin);
-        const originHost = parsed.host.toLowerCase();
-        const cleanHost = host.toLowerCase();
-        if (originHost === cleanHost) return true;
-        if (cleanHost.includes('localhost') || cleanHost.includes('127.0.0.1')) {
-            return originHost.includes('localhost') || originHost.includes('127.0.0.1');
-        }
-        if (originHost === 'jarvisjr.vercel.app' || (cleanHost.endsWith('.vercel.app') && originHost.endsWith('.vercel.app'))) {
-            return true;
-        }
-        return false;
+        return !parsed.username && !parsed.password && parsed.origin === `${protocol}//${host}` && origin === parsed.origin;
     } catch (_) {
         return false;
     }
@@ -140,6 +128,10 @@ function applyRateLimit(req, res, options = {}) {
     const now = Date.now();
     const resetAt = now + windowMs;
     const store = getRateStore();
+    if (store.size > 10000) {
+        for (const [oldKey, entry] of store) if (entry.resetAt <= now) store.delete(oldKey);
+        if (store.size > 10000) store.delete(store.keys().next().value);
+    }
     const key = `${routeKey}:${ip}`;
     const existing = store.get(key);
     const current = (!existing || existing.resetAt <= now)

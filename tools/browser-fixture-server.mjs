@@ -1,3 +1,4 @@
+import { APPLICATION_CSP, SANDBOX_CSP } from '../app/security-policy.js';
 // Deterministic browser-test backend. This file is never deployed as an API route.
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -9,6 +10,7 @@ const capabilities = Object.fromEntries(['chat', 'search', 'vision', 'images', '
 let failWorkerUpdate = false;
 const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
+    res.setHeader('Content-Security-Policy', url.pathname === '/code-sandbox.html' ? SANDBOX_CSP : APPLICATION_CSP);
     if (url.pathname === '/__test/fail-worker-update') { failWorkerUpdate = true; res.writeHead(204); return res.end(); }
     if (url.pathname === '/sw.js' && failWorkerUpdate) {
         failWorkerUpdate = false;

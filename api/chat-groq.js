@@ -1,6 +1,6 @@
 import { visionFailurePayload, normalizeGeminiGenerationConfig } from './_lib/model-failure.js';
 import { publicAnswer, createAnswerFilter } from './_lib/answer-visibility.js';
-import { normalizeUserInstructions, userPreferenceDirective } from './_lib/answer-preferences.js';
+import { normalizeUserInstructions, userPreferenceDirective, contextReferenceDirective, bindServerConversation } from './_lib/answer-preferences.js';
 import { withRequestLifecycle, fetchWithLifecycle as fetch, runWithSignal } from './_lib/request-lifecycle.js';
 export const config = { maxDuration: 60 };
 import { applyApiSecurity, unsealSecret } from './_lib/security.js';
@@ -1066,8 +1066,11 @@ async function handler(req, res) {
 
             preferences.webMode = preferences.webMode || String(req.body?.webMode || '').trim().toLowerCase();
             preferences.isWebForced = Boolean(preferences.isWebForced || req.body?.isWebForced || req.body?.webMode === 'force' || preferences.webMode === 'force');
-            const systemPrompt = buildServerSystemPrompt(preferences, intent);
+            const referenceMetadata = req.body?.contextReference;
+            const reference = referenceMetadata?.status === 'missing' && (images?.length || grounding?.selectedText || grounding?.sourceAnswer) ? { status: 'resolved' } : referenceMetadata;
+            const systemPrompt = buildServerSystemPrompt(preferences, intent) + contextReferenceDirective(reference);
             const effectiveMessage = buildGroundedUserMessage(sanitizedMessage, intent, grounding, images);
+            request.value.structuredMessages = bindServerConversation(systemPrompt, request.value.structuredMessages, request.value.rollingSummary, request.value.retrievedTurns || [], effectiveMessage);
             const isAttachmentGrounding = isAttachmentGroundingPayload(grounding, intent);
             const clientRoutingProbe = String(req.body?.routingMessage || req.body?.displayUserMessage || '').trim();
             const routingMessage = isAttachmentGrounding
@@ -1078,6 +1081,7 @@ async function handler(req, res) {
                 retrievedTurns: request.value.retrievedTurns || null,
                 query: routingMessage || effectiveMessage
             });
+            const needsContextClarification = ['ambiguous', 'missing'].includes(reference?.status);
             const isInternalSummary = isInternalSummarizerPrompt(effectiveMessage, '');
             if (intent === 'verify_answer') {
                 return await handleVerifyAnswerRequest(res, {
@@ -1087,6 +1091,7 @@ async function handler(req, res) {
                     preferences
                 });
             }
+            if (needsContextClarification) { preferences.webMode = 'off'; preferences.isWebForced = false; }
             const prefersStreamGeneration = req.body?.stream === true &&
                 !isAttachmentGrounding &&
                 (
@@ -1100,7 +1105,9 @@ async function handler(req, res) {
                     isInternalSummary,
                     isAttachmentGrounding
                 });
-            if (req.body?.webMode === 'force' || req.body?.isWebForced === true || /^\/(?:search|live|web)\b/i.test(routingMessage)) {
+            if (needsContextClarification) {
+                routeDecision.webEligible = false; routeDecision.strategy = 'direct'; routeDecision.reason = 'context_clarification';
+            } else if (req.body?.webMode === 'force' || req.body?.isWebForced === true || /^\/(?:search|live|web)\b/i.test(routingMessage)) {
                 routeDecision.webEligible = true;
                 routeDecision.strategy = 'search';
                 routeDecision.reason = 'forced_by_user';
@@ -5069,17 +5076,7 @@ Answer directly.`;
             learnedDirectives.length > 0 ? `LEARNED USER PREFERENCES & HEURISTICS (ADAPTIVE MEMORY):\n${learnedDirectives.map(d => `- ${d}`).join('\n')}` : '',
             isWebForced ? `DEEP-SYNTHESIS REASONING ENGINE PROTOCOL (MANUAL LIVE WEB SEARCH ACTIVE):\nAct as a deep-synthesis reasoning engine. Answer the user's input by performing comprehensive cross-referencing, multi-hop lookups, and logical deduction:\n1. DECONSTRUCT THE INPUT: Never rely on a single source or a single surface-level match. Break the query down into its core parameters, underlying logic, and distinct sub-components. Address each part thoroughly.\n2. PIVOT ON INCOMPLETE DATA: If your initial search or knowledge retrieval yields an incomplete framework—such as referencing a count, a category, an error code, a doctrine, or a structural concept without providing the specific contents, names, or values—do not halt execution. Treat those surface findings as new search parameters and clues. Pivot immediately across all evidence layers to extract the missing data points. Never invent or recall unmentioned entities from parametric memory.\n3. DEDUCTIVE SYNTHESIS: Connect independent datasets logically across the evidence. If Dataset A defines a structural rule, system architecture, or conditional logic, and Dataset B contains the live variables or current entities that fit into that logic, synthesize them to deliver the final, specific solution. However, NEVER use deductive synthesis to substitute, swap out, or override concrete entities, people, or items explicitly named in the source excerpts with external unmentioned entities, and NEVER recall or introduce external trivia from memory.\n4. EPISTEMIC RESOLUTION: Never conclude that an answer is "unavailable" or "unverifiable" simply because a single summary source or initial data layer lacks the complete picture. Drill down to primary documentation, distinct data layers, or adjacent verified frameworks to fully resolve the query.` : '',
             intent === 'deep_reasoning' ? `DEEP REASONING & RECURSIVE VERIFICATION DIRECTIVE:\n- Execute rigorous step-by-step deduction.\n- Before reaching conclusions, explicitly verify: (1) all premises and constraint conditions, (2) deductive consistency without inverted assumptions, (3) elimination of false cases with explicit disproofs.\n- For logic puzzles, test every branch exhaustively and show that alternative assignments yield contradictions.` : '',
-            `MATHEMATICAL & QUANTITATIVE REASONING (EXACT PEDAGOGICAL STRUCTURE - applies to all math, calculus, algebra & geometry):
-- VARIABLE DEFINITIONS: Before substituting any value, state what each symbol or variable represents and its unit.
-- VERIFY RESULTS: For equations, verify it by substituting back into the original equation. For integrals, differentiate the antiderivative and check limits for definite integrals.
-- AMBIGUITY: If an input is unclear, state the ambiguity explicitly. Do not invent a missing value.
-- CLEAN HIERARCHICAL PRESENTATION: Begin directly with a clear title header (e.g. "### Complete Mathematical Solution: $\\int \\sqrt{\\tan x} \\, dx$"). Never output premature or incomplete final formulas before showing the derivation.
-- SEQUENTIAL STEP HEADERS: Structure every derivation into clean, numbered step headers: "#### **Step 1: [Operation Name]**", "#### **Step 2: [Operation Name]**", etc., separated by clean horizontal dividers (\`---\`).
-- STEP COMPOSITION: Every step MUST begin with a concise, explanatory sentence, followed by centered display math in $$...$$ on its own line. Never skip intermediate algebra.
-- COMPONENT DECOMPOSITION: When an integral or expression splits into multiple parts, explicitly define and label them (e.g., "Let this be $I_1 + I_2$", followed by "#### **Step 4: Evaluate $I_1 = \\int ...$**" and "#### **Step 5: Evaluate $I_2 = \\int ...$**").
-- SYSTEMATIC BACK-SUBSTITUTION: Explicitly state the intermediate result with auxiliary substitution variables (e.g., in terms of $t$), then substitute back to the original variables ($x$) with the constant of integration $+ C$ (or units).
-- FINAL ANSWER: End with the complete, fully simplified final expression in display math $$...$$.
-- LaTeX DISCIPLINE: Always enclose every formula, symbol, and variable in $...$ for inline math or $$...$$ on its own line for display math. Always use complete curly braces \`{...}\` for fractions (e.g. \`\\frac{2t}{1 + t^4}\`, never \`\\frac{t2}{t4+1\`) and radicals (\`\\sqrt{2\\tan x}\`). Use standard function names (\\sin, \\cos, \\tan, \\sec, \\ln, \\arctan). Never leave raw LaTeX commands un-delimited.`
+            `MATHEMATICAL & QUANTITATIVE REASONING: Follow the user's requested format and detail. Before substituting any value, state what each symbol or variable represents and its unit when applicable. Use complete inline $...$ or display $$...$$ LaTeX delimiters, balanced braces, and standard mathematical functions. Check algebra, boundary cases and units; substitute the result into the original equation or differentiate an antiderivative when applicable. If the problem is unclear, state the ambiguity explicitly and ask one concise clarification. Do not invent given values. Show enough working to support the answer without forcing decorative titles or numbered headers. Never claim a calculation was verified unless it was actually checked.`
         ];
 
         return sections.filter(Boolean).join('\n\n');

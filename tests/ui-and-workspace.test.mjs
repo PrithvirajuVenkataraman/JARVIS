@@ -271,7 +271,7 @@ console.log('  [PASS] 14. Enterprise Sidebar interaction verified (outside-click
 // 15. Verify Edit Message Modal Focus Retention & Accidental Dismiss Protection
 assert.ok(indexHtml.includes('handleTextInputDialogBackdropClick'), 'handleTextInputDialogBackdropClick must be defined');
 assert.ok(indexHtml.includes('handleTextInputDialogCardClick'), 'handleTextInputDialogCardClick must be defined');
-assert.ok(indexHtml.includes('onclick="handleTextInputDialogBackdropClick(event)"'), 'Backdrop must use handleTextInputDialogBackdropClick');
+assert.ok(fs.readFileSync('app/static-ui-actions.js', 'utf8').includes('handleTextInputDialogBackdropClick(event)') && /id="text-input-dialog-backdrop"[^>]+data-ui-static=/.test(indexHtml), 'Backdrop must use handleTextInputDialogBackdropClick');
 assert.ok(!indexHtml.includes('id="text-input-dialog-backdrop" class="text-input-dialog-backdrop hidden" role="presentation" onclick="if (event.target === this) closeTextInputDialog(null)"'), 'Backdrop must not directly close on accidental click');
 assert.ok(stylesCss.includes('modalAttentionPulse'), 'modalAttentionPulse animation must exist in styles.css');
 assert.ok(stylesCss.includes('.text-input-dialog.modal-attention-pulse'), '.text-input-dialog.modal-attention-pulse class must exist');

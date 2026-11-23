@@ -5759,7 +5759,7 @@ export function isValidCitationSource(source, query = '') {
 }
 
 function hasCrawl4AiConfig() {
-    return Boolean(String(process.env.CRAWL4AI_URL || '').trim());
+    return process.env.CRAWL4AI_PUBLIC_EGRESS_VERIFIED === 'true' && Boolean(String(process.env.CRAWL4AI_URL || process.env.CRAWL4AI_ENDPOINT || '').trim());
 }
 
 function isRelatedToQuery(query, item) {

@@ -10,12 +10,12 @@
     <meta name="apple-mobile-web-app-title" content="JARVIS">
     <title>JARVIS - AI Assistant</title>
     <meta name="description" content="A browser assistant for chat, writing, research, documents, image understanding, and voice input.">
-    
+
     <!-- Open Graph / Social Media -->
     <meta property="og:type" content="website">
     <meta property="og:title" content="JARVIS - AI Assistant">
     <meta property="og:description" content="A browser assistant for chat, writing, research, documents, image understanding, and voice input.">
-    
+
     <!-- Twitter / X -->
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="JARVIS - AI Assistant">
@@ -35,12 +35,12 @@
 </head>
 <body class="dark min-h-screen bg-black text-white">
 
-    
+
     <div id="offline-banner" class="offline-banner hidden" role="status" aria-live="polite">
         Offline mode: some features may be unavailable
     </div>
 
-    <div id="chat-sidebar-backdrop" class="chat-sidebar-backdrop hidden" onclick="closeChatSidebar()" aria-hidden="true"></div>
+    <div id="chat-sidebar-backdrop" class="chat-sidebar-backdrop hidden"  aria-hidden="true" data-ui-static="shell-1"></div>
     <aside id="chat-sidebar-panel" class="chat-sidebar-panel" aria-label="Chat history" aria-hidden="true">
         <div class="sidebar-drag-handle" id="sidebar-drag-handle" aria-hidden="true"></div>
         <div class="chat-sidebar-header">
@@ -60,7 +60,7 @@
                     <text x="32" y="35.5" text-anchor="middle" fill="#dffaff" font-size="8.2" font-family="Arial, Helvetica, sans-serif" font-weight="700" letter-spacing="1.1">JARVIS</text>
                 </svg>
             </div>
-            <button type="button" class="chat-sidebar-close" onclick="closeChatSidebar()" aria-label="Close chat history">
+            <button type="button" class="chat-sidebar-close"  aria-label="Close chat history" data-ui-static="shell-2">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
                     <rect x="4" y="5" width="16" height="14" rx="2"></rect>
                     <path d="M15 5v14"></path>
@@ -68,21 +68,21 @@
             </button>
         </div>
         <div class="chat-sidebar-nav" aria-label="Main chat actions">
-            <button type="button" class="chat-sidebar-nav-item is-primary" onclick="startNewChatSession(); closeChatSidebar();">
+            <button type="button" class="chat-sidebar-nav-item is-primary" data-ui-static="shell-3" >
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" aria-hidden="true">
                     <path d="M12 20h9"></path>
                     <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"></path>
                 </svg>
                 <span>New chat</span>
             </button>
-            <button type="button" class="chat-sidebar-nav-item" onclick="focusChatSidebarSearch()">
+            <button type="button" class="chat-sidebar-nav-item" data-ui-static="shell-4" >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
                     <circle cx="11" cy="11" r="7"></circle>
                     <path d="m20 20-3.5-3.5"></path>
                 </svg>
                 <span>Search chats</span>
             </button>
-            <button type="button" class="chat-sidebar-nav-item" onclick="openSidebarQuickAction('settings')">
+            <button type="button" class="chat-sidebar-nav-item" data-ui-static="shell-5" >
                 <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" aria-hidden="true">
                     <circle cx="12" cy="12" r="3"></circle>
                     <path d="M19.4 15a1.8 1.8 0 0 0 .36 2l.04.04a2 2 0 0 1-2.83 2.83l-.04-.04a1.8 1.8 0 0 0-2-.36 1.8 1.8 0 0 0-1.1 1.65V21a2 2 0 0 1-4 0v-.06A1.8 1.8 0 0 0 8.7 19.3a1.8 1.8 0 0 0-2 .36l-.04.04a2 2 0 0 1-2.83-2.83l.04-.04a1.8 1.8 0 0 0 .36-2 1.8 1.8 0 0 0-1.65-1.1H2.5a2 2 0 0 1 0-4h.06A1.8 1.8 0 0 0 4.2 8.6a1.8 1.8 0 0 0-.36-2l-.04-.04a2 2 0 0 1 2.83-2.83l.04-.04a1.8 1.8 0 0 0 2 .36A1.8 1.8 0 0 0 9.8 2.5V2a2 2 0 0 1 4 0v.06a1.8 1.8 0 0 0 1.1 1.65 1.8 1.8 0 0 0 2-.36l.04-.04a2 2 0 0 1 2.83 2.83l-.04-.04a1.8 1.8 0 0 0-.36 2 1.8 1.8 0 0 0 1.65 1.1h.06a2 2 0 0 1 0 4h-.06A1.8 1.8 0 0 0 19.4 15z"></path>
@@ -91,57 +91,57 @@
             </button>
         </div>
         <div class="chat-sidebar-search-field">
-            <input id="chat-sidebar-search-input" type="search" placeholder="Search chats & messages..." aria-label="Search chats" oninput="onChatSidebarSearchInput()">
+            <input id="chat-sidebar-search-input" type="search" placeholder="Search chats & messages..." aria-label="Search chats" data-ui-static="shell-6" >
         </div>
         <div id="chat-sidebar-section-title" class="chat-sidebar-section-title">Recents</div>
 
         <div id="chat-sidebar-list" class="chat-sidebar-list" role="list"></div>
     </aside>
     <div id="chat-session-menu" class="chat-session-menu hidden" role="menu" aria-label="Chat actions">
-        <button type="button" data-chat-action="rename" onclick="handleChatSessionMenuAction('rename')" role="menuitem">Rename</button>
-        <button type="button" data-chat-action="pin" onclick="handleChatSessionMenuAction('pin')" role="menuitem">Pin</button>
-        <button type="button" data-chat-action="share" onclick="handleChatSessionMenuAction('share')" role="menuitem">Share</button>
-        <button type="button" data-chat-action="delete" onclick="handleChatSessionMenuAction('delete')" role="menuitem">Delete</button>
+        <button type="button" data-chat-action="rename"  role="menuitem" data-ui-static="shell-7">Rename</button>
+        <button type="button" data-chat-action="pin"  role="menuitem" data-ui-static="shell-8">Pin</button>
+        <button type="button" data-chat-action="share"  role="menuitem" data-ui-static="shell-9">Share</button>
+        <button type="button" data-chat-action="delete"  role="menuitem" data-ui-static="shell-10">Delete</button>
     </div>
-    <div id="chat-delete-dialog-backdrop" class="chat-delete-dialog-backdrop hidden" role="presentation" onclick="if (event.target === this) closeChatDeleteDialog()">
+    <div id="chat-delete-dialog-backdrop" class="chat-delete-dialog-backdrop hidden" role="presentation" data-ui-static="shell-11" >
         <section id="chat-delete-dialog" class="chat-delete-dialog" role="dialog" aria-modal="true" aria-labelledby="chat-delete-dialog-title">
             <h2 id="chat-delete-dialog-title">Delete</h2>
             <p id="chat-delete-dialog-text">Delete ''</p>
             <div class="chat-delete-dialog-actions">
-                <button type="button" class="chat-delete-dialog-btn secondary" onclick="closeChatDeleteDialog()">No</button>
-                <button type="button" class="chat-delete-dialog-btn danger" onclick="confirmChatDeleteDialog()">Yes</button>
+                <button type="button" class="chat-delete-dialog-btn secondary" data-ui-static="shell-12" >No</button>
+                <button type="button" class="chat-delete-dialog-btn danger" data-ui-static="shell-13" >Yes</button>
             </div>
         </section>
     </div>
-    <div id="confirm-action-dialog-backdrop" class="chat-delete-dialog-backdrop hidden" role="presentation" onclick="if (event.target === this) closeConfirmActionDialog(false)">
+    <div id="confirm-action-dialog-backdrop" class="chat-delete-dialog-backdrop hidden" role="presentation" data-ui-static="shell-14" >
         <section id="confirm-action-dialog" class="chat-delete-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-action-dialog-title">
             <h2 id="confirm-action-dialog-title">Confirm</h2>
             <p id="confirm-action-dialog-text">Are you sure?</p>
             <div class="chat-delete-dialog-actions">
-                <button id="confirm-action-dialog-no" type="button" class="chat-delete-dialog-btn secondary" onclick="closeConfirmActionDialog(false)">No</button>
-                <button id="confirm-action-dialog-yes" type="button" class="chat-delete-dialog-btn danger" onclick="closeConfirmActionDialog(true)">Yes</button>
+                <button id="confirm-action-dialog-no" type="button" class="chat-delete-dialog-btn secondary" data-ui-static="shell-15" >No</button>
+                <button id="confirm-action-dialog-yes" type="button" class="chat-delete-dialog-btn danger" data-ui-static="shell-16" >Yes</button>
             </div>
         </section>
     </div>
-    <div id="text-input-dialog-backdrop" class="text-input-dialog-backdrop hidden" role="presentation" onclick="handleTextInputDialogBackdropClick(event)">
-        <section class="text-input-dialog" role="dialog" aria-modal="true" aria-labelledby="text-input-dialog-title" onclick="handleTextInputDialogCardClick(event)">
+    <div id="text-input-dialog-backdrop" class="text-input-dialog-backdrop hidden" role="presentation" data-ui-static="shell-17" >
+        <section class="text-input-dialog" role="dialog" aria-modal="true" aria-labelledby="text-input-dialog-title" data-ui-static="shell-18" >
             <h2 id="text-input-dialog-title">Edit message</h2>
             <textarea id="text-input-dialog-value" rows="4" aria-label="Edit message"></textarea>
             <div class="text-input-dialog-actions">
-                <button type="button" class="text-input-dialog-btn secondary" onclick="closeTextInputDialog(null)">Cancel</button>
-                <button type="button" class="text-input-dialog-btn primary" onclick="submitTextInputDialog()">Save</button>
+                <button type="button" class="text-input-dialog-btn secondary" data-ui-static="shell-19" >Cancel</button>
+                <button type="button" class="text-input-dialog-btn primary" data-ui-static="shell-20" >Save</button>
             </div>
         </section>
     </div>
 
     <!-- AI Image Lightbox Modal -->
-    <div id="image-lightbox-overlay" class="image-lightbox-overlay" onclick="handleImageLightboxBackdropClick(event)" role="dialog" aria-modal="true" aria-label="Image preview">
+    <div id="image-lightbox-overlay" class="image-lightbox-overlay"  role="dialog" aria-modal="true" aria-label="Image preview" data-ui-static="shell-21">
         <div class="image-lightbox-container">
-            <button type="button" class="image-lightbox-close-btn" onclick="closeImageLightbox()" aria-label="Close image preview">&times;</button>
+            <button type="button" class="image-lightbox-close-btn"  aria-label="Close image preview" data-ui-static="shell-22">&times;</button>
             <img id="image-lightbox-img" class="image-lightbox-img" src="" alt="Full view">
             <div id="image-lightbox-caption" class="image-lightbox-caption" style="display: none;"></div>
             <div class="image-lightbox-toolbar">
-                <button type="button" class="image-gen-action-btn" onclick="downloadLightboxImage()" aria-label="Download image">
+                <button type="button" class="image-gen-action-btn"  aria-label="Download image" data-ui-static="shell-23">
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
                     <span>Download</span>
                 </button>
@@ -150,15 +150,15 @@
     </div>
 
     <!-- AI Image History Gallery Modal -->
-    <div id="image-gallery-modal" class="image-gallery-modal" onclick="if (event.target === this) closeImageGalleryModal()" role="dialog" aria-modal="true" aria-label="Generated Images Gallery">
-        <div class="image-gallery-panel" onclick="event.stopPropagation()">
+    <div id="image-gallery-modal" class="image-gallery-modal"  role="dialog" aria-modal="true" aria-label="Generated Images Gallery" data-ui-static="shell-24">
+        <div class="image-gallery-panel" data-ui-static="shell-25" >
             <div class="image-gallery-header">
                 <div class="image-gallery-title">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
                     <span>Generated Images</span>
                     <span id="image-gallery-count" class="image-gallery-count">0</span>
                 </div>
-                <button type="button" class="image-gallery-close-btn" onclick="closeImageGalleryModal()" aria-label="Close gallery">&times;</button>
+                <button type="button" class="image-gallery-close-btn"  aria-label="Close gallery" data-ui-static="shell-26">&times;</button>
             </div>
             <div id="image-gallery-body" class="image-gallery-body">
                 <div id="image-gallery-grid" class="image-gallery-grid"></div>
@@ -170,7 +170,7 @@
     <div id="app-root" class="app-root flex flex-col min-h-screen">
         <!-- Sticky Top Navigation Bar -->
         <header id="app-header" class="app-header">
-            <button id="chat-sidebar-toggle" class="header-brand-title" type="button" onclick="toggleChatSidebar()" aria-label="JARVIS, open chats and settings" aria-expanded="false" aria-controls="chat-sidebar-panel" title="Chats and settings (Ctrl+Shift+S)">JARVIS</button>
+            <button id="chat-sidebar-toggle" class="header-brand-title" type="button"  aria-label="JARVIS, open chats and settings" aria-expanded="false" aria-controls="chat-sidebar-panel" title="Chats and settings (Ctrl+Shift+S)" data-ui-static="shell-27">JARVIS</button>
         </header>
 
         <!-- Hidden legacy anchors for backwards compatibility -->
@@ -183,13 +183,13 @@
             <div id="chat-panel"></div>
             <div id="weather-card" class="hidden weather-card-enhanced">
                 <p id="location-name"></p>
-                <button id="expand-forecast-btn" onclick="toggleForecast()"><svg id="expand-forecast-icon"></svg></button>
+                <button id="expand-forecast-btn" data-ui-static="shell-28" ><svg id="expand-forecast-icon"></svg></button>
                 <p id="temperature"></p>
                 <p id="weather-advice"></p>
                 <div id="aqi-section" class="hidden"></div>
                 <div id="forecast-container" class="hidden"></div>
             </div>
-            <select id="enterprise-persona-select" onchange="setEnterprisePersona(this.value)">
+            <select id="enterprise-persona-select" data-ui-static="shell-29" >
                 <option value="general">Default Assistant</option>
                 <option value="architect">Senior Architect</option>
                 <option value="executive">Executive Brief</option>
@@ -206,7 +206,7 @@
                 <div id="chat-container" class="chat-container space-y-4"></div>
 
                 <!-- Floating Jump To Latest Button -->
-                <button id="jump-to-latest-btn" class="chat-scroll-jump hidden" onclick="jumpToLatest()" type="button" title="Jump to latest message" aria-label="Jump to latest message">
+                <button id="jump-to-latest-btn" class="chat-scroll-jump hidden"  type="button" title="Jump to latest message" aria-label="Jump to latest message" data-ui-static="shell-30">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <line x1="12" y1="5" x2="12" y2="19"></line>
                         <polyline points="19 12 12 19 5 12"></polyline>
@@ -244,7 +244,7 @@
     </div>
 
     <!-- Scroll-To-Bottom Floating Button -->
-    <button id="scroll-to-bottom-btn" class="scroll-to-bottom-pill" onclick="scrollToBottom()" type="button" title="Jump to latest message" aria-label="Jump to latest message">
+    <button id="scroll-to-bottom-btn" class="scroll-to-bottom-pill"  type="button" title="Jump to latest message" aria-label="Jump to latest message" data-ui-static="shell-31">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <line x1="12" y1="5" x2="12" y2="19"></line>
             <polyline points="19 12 12 19 5 12"></polyline>
@@ -264,12 +264,12 @@
                             id="composer-plus-btn"
                             type="button"
                             class="composer-plus-btn"
-                            onclick="toggleComposerActionsMenu()"
+
                             aria-expanded="false"
                             aria-haspopup="menu"
                             aria-controls="composer-actions-menu"
                             aria-label="Add photos or files"
-                            title="Add photos or files">
+                            title="Add photos or files" data-ui-static="shell-32">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
                                 <path d="M12 5v14"></path>
                                 <path d="M5 12h14"></path>
@@ -281,7 +281,7 @@
                                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m8 12 6-6a3 3 0 0 1 4 4l-8 8a5 5 0 0 1-7-7l9-9"/></svg>
                                     <span class="composer-menu-label">Add photos &amp; files</span><small>Upload from your device</small>
                                 </button>
-                                <button id="composer-image-btn" type="button" class="composer-action-item" data-capability="image_generation" onclick="triggerImageGenerationPrompt()" role="menuitem" title="Create an image with the configured provider">
+                                <button id="composer-image-btn" type="button" class="composer-action-item" data-capability="image_generation"  role="menuitem" title="Create an image with the configured provider" data-ui-static="shell-33">
                                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.5"/><path d="m3 17 6-6 5 5 3-3 4 4"/></svg>
                                     <span class="composer-menu-label">Create image</span><small>Describe an image</small>
                                 </button>
@@ -289,12 +289,12 @@
                                     id="web-search-toggle-btn"
                                     type="button"
                                     class="composer-action-item composer-web-search-menuitem"
-                                    onclick="cycleWebSearchMode()"
+
                                     data-web-mode="off"
                                     role="menuitemcheckbox"
                                     aria-checked="false"
                                     title="Live Web Search (OFF — click to turn on)"
-                                    aria-label="Live Web Search OFF">
+                                    aria-label="Live Web Search OFF" data-ui-static="shell-34">
                                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
                                             <circle cx="12" cy="12" r="10"></circle>
                                             <line x1="2" y1="12" x2="22" y2="12"></line>
@@ -322,8 +322,8 @@
                     rows="1"
                     placeholder="Ask Jarvis..."
                     class="composer-input"
-                    onkeydown="handleComposerKeydown(event)"
-                    oninput="handleComposerInput()" aria-label="Message JARVIS"></textarea>
+
+                     aria-label="Message JARVIS" data-ui-static="shell-35"></textarea>
                 </div>
                 <div id="vtt-waveform-container" class="composer-voice-visualizer hidden" aria-hidden="true">
                     <div class="composer-voice-waveform" id="composer-voice-waveform">
@@ -348,10 +348,10 @@
                         id="composer-think-btn"
                         type="button"
                         class="composer-think-btn"
-                        onclick="toggleDeepReasoningMode()"
+
                         title="Deep Reasoning (Think) — toggle on/off"
                         aria-label="Deep Reasoning (Think)"
-                        aria-pressed="false">
+                        aria-pressed="false" data-ui-static="shell-36">
                         <svg class="composer-think-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 4.44-2.04z"></path>
                             <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-4.44-2.04z"></path>
@@ -362,9 +362,9 @@
                         id="voice-to-text-btn"
                         type="button"
                         class="composer-icon-btn speech-input-btn vtt-shifted-left"
-                        onclick="toggleVoiceToText(event)"
+
                         title="Voice typing (Dictation)" aria-label="Voice typing (Dictation)"
-                        aria-pressed="false">
+                        aria-pressed="false" data-ui-static="shell-37">
                         <svg class="vtt-mic-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                             <rect x="9" y="2" width="6" height="12" rx="3"></rect>
                             <path d="M5 10a7 7 0 0 0 14 0"></path>
@@ -377,24 +377,24 @@
                         id="send-message-btn"
                         type="button"
                         class="composer-send-btn"
-                        onclick="handlePrimaryActionButtonClick()"
+
                         title="Send message"
                         aria-label="Send message"
-                        disabled>
+                        disabled data-ui-static="shell-38">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <line x1="12" y1="19" x2="12" y2="5"></line>
                             <polyline points="5 12 12 5 19 12"></polyline>
                         </svg>
                     </button>
                 </div>
-            </div> 
+            </div>
             <div class="speech-input-meta">
                 <span id="speech-input-status" role="status" aria-live="polite"></span>
             </div>
             <input type="file" id="composer-photo-library-input" class="hidden" accept="image/*,.nef,.nrw,.arw,.dng,.cr2,.cr3,.raf,.rw2,.orf,.pef,.rwl,.srw,.raw,.kdc,.dcr,.mrw,.x3f,.psb,.jxl,.tga,.qoi,.exr,.hdr,.dds,.pcx,.ppm,.pgm,.pbm,.heic,.heif,.heics,.heifs,.avif,.jp2,.j2k,.jpf,.jpx,.jpm,.pict,.pct,.psd,.jpeg,.jpg,.png,.webp,.gif,.bmp,.tiff,.tif" multiple>
             <input type="file" id="composer-photo-camera-input" class="hidden" accept="image/*,.heic,.heif,.dng,.jpeg,.jpg,.png" capture="environment">
             <input type="file" id="composer-file-input" class="hidden" accept="*/*" multiple>
-            <p id="footer-disclaimer" class="composer-disclaimer">AI can make mistakes. <button type="button" class="composer-disclaimer-btn" onclick="openImportantInfoModal()">Check important info.</button></p>
+            <p id="footer-disclaimer" class="composer-disclaimer">AI can make mistakes. <button type="button" class="composer-disclaimer-btn" data-ui-static="shell-39" >Check important info.</button></p>
         </div>
     </div>
     <!-- Live camera preview removed (dedicated file attachment OCR pipeline active) -->

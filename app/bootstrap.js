@@ -1,4 +1,8 @@
 import { formatBytes } from './file-format.js';
+import * as JarvisTrustedUI from './trusted-ui.js';
+import { staticActions } from './static-ui-actions.js';
+globalThis.JarvisTrustedUI = JarvisTrustedUI;
+JarvisTrustedUI.installTrustedUI(staticActions);
 import { lazyModule } from './lazy-features.js';
 import * as JarvisMarkupSecurity from './markup-security.js';
 globalThis.JarvisMarkupSecurity = JarvisMarkupSecurity;

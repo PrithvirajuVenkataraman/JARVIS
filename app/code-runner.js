@@ -15,21 +15,8 @@ export function executeJavaScript(code, timeoutMs = 5000) {
         };
         const timer = setTimeout(() => { clean(); reject(new Error('Code execution exceeded its time limit.')); }, timeoutMs);
         window.addEventListener('message', receive);
-        const data = JSON.stringify({ code: String(code), token }).replaceAll('<', '\\u003c');
-        const workerProgram = `
-const input=${data};
-const logs=[];
-const format=value=>{try{return typeof value==='string'?value:JSON.stringify(value)}catch{return String(value)}};
-const output={};
-for(const level of ['log','info','warn','error','debug'])output[level]=(...args)=>{if(logs.length<100)logs.push({level,text:args.map(format).join(' ').slice(0,20000)})};
-(async()=>{try{const run=new (Object.getPrototypeOf(async function(){}).constructor)('console',input.code);const result=await run(output);postMessage({token:input.token,logs,result:format(result)})}catch(error){postMessage({token:input.token,error:String(error.message).slice(0,2000)})}})();
-`;
-        const program = JSON.stringify(workerProgram).replaceAll('<', '\\u003c');
-        frame.srcdoc = `<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src 'none'; worker-src blob:; script-src 'unsafe-inline' 'unsafe-eval'; connect-src 'none'"><script>
-const worker = new Worker(URL.createObjectURL(new Blob([${program}], {type:'text/javascript'})));
-worker.onmessage = event => parent.postMessage(event.data, '*');
-worker.onerror = () => parent.postMessage({token:${JSON.stringify(token)},error:'The isolated worker could not start.'}, '*');
-</script>`;
+        frame.src = '/code-sandbox.html';
+        frame.addEventListener('load', () => frame.contentWindow.postMessage({ code: String(code), token }, '*'), { once: true });
         document.body.append(frame);
     });
 }

@@ -1,3 +1,5 @@
+import { bindUiEvent } from './trusted-ui.js';
+import { assistantAction } from './trusted-ui.js';
 /**
  * Comprehensive, modular markdown and code block renderer for JARVIS.
  * Integrates syntax highlighting, LaTeX math, citations, tables, and lists.
@@ -248,7 +250,7 @@ export function renderSourceLogoBadge(source, id) {
     const favicon = escapeHtml(source?.favicon || `/api/favicon?domain=${encodeURIComponent(domain)}`);
     const fallbackSvg = getDomainMonogramSvg(domain);
 
-    return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="citation-source-logo" data-source-id="${id}" title="${title} (${domain})"><img class="citation-logo-icon" src="${favicon}" alt="${domain}" loading="lazy" onerror="this.onerror=null;this.src='${fallbackSvg}';" /></a>`;
+    return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="citation-source-logo" data-source-id="${id}" title="${title} (${domain})"><img class="citation-logo-icon" src="${favicon}" alt="${domain}" loading="lazy" ${bindUiEvent("error", function(event) { this.onerror=null;this.src=(String(fallbackSvg)); })} /></a>`;
 }
 
 function isMathCodeBlock(lang = '', code = '') {
@@ -634,18 +636,18 @@ export function renderMarkdown(rawText = '', options = {}) {
                         <span class="assistant-table-badge">Data Table</span>
                         <div class="assistant-table-actions">
                             <div class="table-pencil-dropdown-wrapper">
-                                <button type="button" class="table-pencil-trigger-btn" data-assistant-action="table-menu" title="Table options (Copy, Download)" aria-label="Table options">
+                                <button type="button" class="table-pencil-trigger-btn" data-assistant-action="table-menu" ${assistantAction("table-menu")} title="Table options (Copy, Download)" aria-label="Table options">
                                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                         <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path>
                                         <path d="m15 5 4 4"></path>
                                     </svg>
                                 </button>
                                 <div class="table-pencil-menu hidden">
-                                    <button type="button" class="table-pencil-menu-item" data-assistant-action="table-copy" title="Copy table for Excel or Sheets">
+                                    <button type="button" class="table-pencil-menu-item" data-assistant-action="table-copy" ${assistantAction("table-copy")} title="Copy table for Excel or Sheets">
                                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
                                         <span>Copy</span>
                                     </button>
-                                    <button type="button" class="table-pencil-menu-item" data-assistant-action="table-download" title="Download as CSV (Excel compatible)">
+                                    <button type="button" class="table-pencil-menu-item" data-assistant-action="table-download" ${assistantAction("table-download")} title="Download as CSV (Excel compatible)">
                                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
                                         <span>Download</span>
                                     </button>
@@ -800,12 +802,12 @@ export function renderMarkdown(rawText = '', options = {}) {
 
         let runBtnHtml = '';
         if (isPython) {
-            runBtnHtml = `<button type="button" class="code-header-btn code-run-btn" data-assistant-action="code-run-python" data-block-id="${blockId}" title="Run code in Python WebAssembly (Pyodide)">
+            runBtnHtml = `<button type="button" class="code-header-btn code-run-btn" data-assistant-action="code-run-python" data-block-id="${blockId}" ${assistantAction("code-run-python", blockId)} title="Run code in Python WebAssembly (Pyodide)">
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
                 <span>Run</span>
             </button>`;
         } else if (isJs) {
-            runBtnHtml = `<button type="button" class="code-header-btn code-run-btn" data-assistant-action="code-run-js" data-block-id="${blockId}" title="Run JavaScript in client sandbox">
+            runBtnHtml = `<button type="button" class="code-header-btn code-run-btn" data-assistant-action="code-run-js" data-block-id="${blockId}" ${assistantAction("code-run-js", blockId)} title="Run JavaScript in client sandbox">
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
                 <span>Run</span>
             </button>`;
@@ -815,18 +817,18 @@ export function renderMarkdown(rawText = '', options = {}) {
         const isCollapsible = lineCount > 28;
         const startCollapsed = isCollapsible && options?.streaming !== true;
 
-        const wrapBtnHtml = `<button type="button" class="code-header-btn code-wrap-btn" data-assistant-action="code-wrap" data-block-id="${blockId}" title="Toggle word wrap" aria-pressed="false">
+        const wrapBtnHtml = `<button type="button" class="code-header-btn code-wrap-btn" data-assistant-action="code-wrap" data-block-id="${blockId}" ${assistantAction("code-wrap", blockId)} title="Toggle word wrap" aria-pressed="false">
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"></line><path d="M3 12h15a3 3 0 1 1 0 6h-4"></path><polyline points="16 16 14 18 16 20"></polyline><line x1="3" y1="18" x2="10" y2="18"></line></svg>
             <span>Wrap</span>
         </button>`;
 
         const collapseBtnHtml = isCollapsible
-            ? `<button type="button" class="code-header-btn code-collapse-btn" data-assistant-action="code-collapse" data-block-id="${blockId}" title="${startCollapsed ? 'Expand full code' : 'Collapse code'}" aria-expanded="${startCollapsed ? 'false' : 'true'}">
+            ? `<button type="button" class="code-header-btn code-collapse-btn" data-assistant-action="code-collapse" data-block-id="${blockId}" ${assistantAction("code-collapse", blockId)} title="${startCollapsed ? 'Expand full code' : 'Collapse code'}" aria-expanded="${startCollapsed ? 'false' : 'true'}">
                 <span>${startCollapsed ? 'Expand' : 'Collapse'}</span>
             </button>`
             : '';
 
-        const copyBtnHtml = `<button type="button" class="code-header-btn" data-assistant-action="code-copy" data-block-id="${blockId}" title="Copy code">
+        const copyBtnHtml = `<button type="button" class="code-header-btn" data-assistant-action="code-copy" data-block-id="${blockId}" ${assistantAction("code-copy", blockId)} title="Copy code">
             <span class="code-copy-icon"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></span>
             <span>Copy</span>
         </button>`;
@@ -847,9 +849,9 @@ export function renderMarkdown(rawText = '', options = {}) {
                             <span>Live Interactive Preview</span>
                         </div>
                         <div class="assistant-code-preview-actions">
-                            <button type="button" class="code-preview-btn" data-assistant-action="preview-toggle" data-block-id="${blockId}" title="Collapse / Expand Preview">Toggle</button>
-                            <button type="button" class="code-preview-btn" data-assistant-action="preview-refresh" data-block-id="${blockId}" title="Reload Preview">Refresh</button>
-                            <button type="button" class="code-preview-btn" data-assistant-action="preview-download" data-block-id="${blockId}" title="Download the HTML file">Download</button>
+                            <button type="button" class="code-preview-btn" data-assistant-action="preview-toggle" data-block-id="${blockId}" ${assistantAction("preview-toggle", blockId)} title="Collapse / Expand Preview">Toggle</button>
+                            <button type="button" class="code-preview-btn" data-assistant-action="preview-refresh" data-block-id="${blockId}" ${assistantAction("preview-refresh", blockId)} title="Reload Preview">Refresh</button>
+                            <button type="button" class="code-preview-btn" data-assistant-action="preview-download" data-block-id="${blockId}" ${assistantAction("preview-download", blockId)} title="Download the HTML file">Download</button>
                         </div>
                     </div>
                     <div class="assistant-code-preview-body" id="preview_body_${blockId}">
@@ -859,7 +861,7 @@ export function renderMarkdown(rawText = '', options = {}) {
         }
 
         const expandOverlayHtml = isCollapsible
-            ? `<div class="code-expand-fade" aria-hidden="${startCollapsed ? 'false' : 'true'}"><button type="button" class="code-expand-overlay-btn" data-assistant-action="code-collapse" data-block-id="${blockId}">Show all ${lineCount} lines</button></div>`
+            ? `<div class="code-expand-fade" aria-hidden="${startCollapsed ? 'false' : 'true'}"><button type="button" class="code-expand-overlay-btn" data-assistant-action="code-collapse" data-block-id="${blockId}" ${assistantAction("code-collapse", blockId)}>Show all ${lineCount} lines</button></div>`
             : '';
 
         return `

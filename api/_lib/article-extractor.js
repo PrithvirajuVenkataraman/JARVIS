@@ -413,7 +413,7 @@ export async function crawlArticleResilient(url, query = '', options = {}) {
         const contentType = response.headers?.get('content-type') || '';
         if (contentType && !/html|text\//i.test(contentType)) { await response.body?.cancel().catch(() => {}); return null; }
         let html = '';
-        let truncated = false;
+        let truncated = page.truncated === true;
         if (response.body?.getReader) {
             const reader = response.body.getReader();
             const decoder = new TextDecoder();

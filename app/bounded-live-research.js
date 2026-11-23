@@ -1,3 +1,4 @@
+import { bindUiEvent } from './trusted-ui.js';
 /**
  * Bounded Live-Web Research Pipeline (Perplexity-Style)
  *
@@ -1044,7 +1045,7 @@ export function parseCitationsInHtml(html = '') {
     result = result.replace(/(?<![\[\w`])\[(\d+(?:\s*,\s*\d+)*)\](?![\]\(])/g, (match, idsStr) => {
         const ids = idsStr.split(',').map(s => s.trim()).filter(Boolean);
         return ids.map(id => {
-            return `<button type="button" class="citation-badge" data-source-id="${id}" onclick="window.JarvisLiveResearch?.highlightSource('${id}')" title="View Source [${id}]"><sup>[${id}]</sup></button>`;
+            return `<button type="button" class="citation-badge" data-source-id="${id}" ${bindUiEvent("click", function(event) { window.JarvisLiveResearch?.highlightSource((String(id))) })} title="View Source [${id}]"><sup>[${id}]</sup></button>`;
         }).join('');
     });
 
@@ -1067,7 +1068,7 @@ export function renderOrUpdateSourcesCarousel(rowElement, sources = []) {
         const url = s.url || '#';
         return `
             <a href="${url}" target="_blank" rel="noopener noreferrer" class="source-card-pill" data-source-id="${s.id}" title="${title}">
-                <img class="source-card-favicon" src="${favicon}" alt="" loading="lazy" onerror="this.style.display='none'" />
+                <img class="source-card-favicon" src="${favicon}" alt="" loading="lazy" ${bindUiEvent("error", function(event) { this.style.display='none' })} />
                 <div class="source-card-info">
                     <span class="source-card-domain">${domain}</span>
                     <span class="source-card-title">${title}</span>
@@ -1165,7 +1166,7 @@ export function renderOrUpdateVisualEntityHeader(rowElement, entity, notableWork
 
     const avatarHtml = imageUrl ? `
         <div class="entity-hero-avatar-wrap">
-            <img class="entity-hero-avatar" src="${escapeHtmlText(imageUrl)}" alt="${safeName}" loading="eager" decoding="async" onerror="this.closest('.entity-hero-avatar-wrap').style.display='none';" />
+            <img class="entity-hero-avatar" src="${escapeHtmlText(imageUrl)}" alt="${safeName}" loading="eager" decoding="async" ${bindUiEvent("error", function(event) { this.closest('.entity-hero-avatar-wrap').style.display='none'; })} />
         </div>
     ` : '';
 
@@ -1177,7 +1178,7 @@ export function renderOrUpdateVisualEntityHeader(rowElement, entity, notableWork
             const wUrl = w.image?.sourceUrl || w.sourceUrl || (pageUrl ? pageUrl : `https://en.wikipedia.org/wiki/${encodeURIComponent((w.title || w.name || '').replace(/\s+/g, '_'))}`);
             const wImg = w.image?.url ? `
                 <div class="notable-work-thumb-wrap">
-                    <img class="notable-work-thumb" src="${escapeHtmlText(w.image.url)}" alt="${wTitle}" loading="eager" decoding="async" onerror="this.closest('.notable-work-thumb-wrap').style.display='none';" />
+                    <img class="notable-work-thumb" src="${escapeHtmlText(w.image.url)}" alt="${wTitle}" loading="eager" decoding="async" ${bindUiEvent("error", function(event) { this.closest('.notable-work-thumb-wrap').style.display='none'; })} />
                 </div>
             ` : '';
             return `

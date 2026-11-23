@@ -1834,7 +1834,7 @@ function openEmailModal(type) {
         <div class="${modalBg} rounded-2xl p-6 max-w-md w-full mx-4 shadow-2xl">
             <div class="flex justify-between items-center mb-4">
                 <h3 class="text-xl font-bold ${textColor}">&#128231; Email Your ${type.charAt(0).toUpperCase() + type.slice(1)}</h3>
-                <button onclick="closeEmailModal()" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
+                <button ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { closeEmailModal() })} class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
             </div>
 
             <p class="text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'} mb-4">
@@ -1852,11 +1852,11 @@ function openEmailModal(type) {
                 </div>
 
                 <div class="flex gap-3">
-                    <button onclick="closeEmailModal()"
+                    <button ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { closeEmailModal() })}
                             class="flex-1 px-4 py-3 rounded-xl border ${darkMode ? 'border-gray-600 text-gray-300 hover:bg-gray-700' : 'border-gray-300 text-gray-600 hover:bg-gray-100'} transition-all">
                         Cancel
                     </button>
-                    <button onclick="sendEmail('${type}')"
+                    <button ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { sendEmail((String(type))) })}
                             class="flex-1 px-4 py-3 rounded-xl bg-purple-600 text-white hover:bg-purple-700 transition-all font-medium">
                         Send Email
                     </button>
@@ -2313,10 +2313,10 @@ function handleNegativeFeedback(buttonElement, reason = '') {
         container.innerHTML = `
             <div class="flex items-center gap-1.5 flex-wrap text-xs py-1">
                 <span class="text-gray-400 mr-1">What went wrong?</span>
-                <button type="button" onclick="handleNegativeFeedback(this, 'Too verbose')" class="px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 text-gray-300">Too verbose</button>
-                <button type="button" onclick="handleNegativeFeedback(this, 'Inaccurate')" class="px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 text-gray-300">Inaccurate</button>
-                <button type="button" onclick="handleNegativeFeedback(this, 'Formatting issue')" class="px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 text-gray-300">Formatting</button>
-                <button type="button" onclick="handleNegativeFeedback(this, 'General issue')" class="px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 text-gray-300">Other</button>
+                <button type="button" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { handleNegativeFeedback(this, 'Too verbose') })} class="px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 text-gray-300">Too verbose</button>
+                <button type="button" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { handleNegativeFeedback(this, 'Inaccurate') })} class="px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 text-gray-300">Inaccurate</button>
+                <button type="button" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { handleNegativeFeedback(this, 'Formatting issue') })} class="px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 text-gray-300">Formatting</button>
+                <button type="button" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { handleNegativeFeedback(this, 'General issue') })} class="px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 text-gray-300">Other</button>
             </div>
         `;
         return;
@@ -2652,7 +2652,7 @@ function showTranslatorModeUI(langInfo) {
         <div class="${bgClass} text-white px-4 py-2 rounded-full shadow-lg flex items-center gap-3">
             <span class="text-lg">[Globe]</span>
             <span class="font-medium">Translator: English - ${langInfo.name}</span>
-            <button onclick="deactivateTranslatorMode()" class="ml-2 bg-white/20 hover:bg-white/30 rounded-full px-2 py-0.5 text-sm transition-all">
+            <button ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { deactivateTranslatorMode() })} class="ml-2 bg-white/20 hover:bg-white/30 rounded-full px-2 py-0.5 text-sm transition-all">
                 Exit
             </button>
         </div>
@@ -9217,7 +9217,7 @@ function showHelpModal(...args) { return globalThis.JarvisLazy.loadClassic('sett
                 const safeTitle = escapeHtml(step.title);
                 const encodedPrompt = encodeURIComponent(step.prompt);
                 return `
-                    <div class="next-step-item" onclick="executeEnterpriseNextStep('${encodedPrompt}', '${safeMsgId}')" role="button" tabindex="0" title="${safeTitle}">
+                    <div class="next-step-item" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { executeEnterpriseNextStep((String(encodedPrompt)), (String(safeMsgId))) })} role="button" tabindex="0" title="${safeTitle}">
                         <div class="next-step-info">
                             <span class="next-step-badge">${safeBadge}</span>
                             <span class="next-step-title">${safeTitle}</span>
@@ -9302,47 +9302,47 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             return `
                 <div class="assistant-action-row" data-message-id="${safeId}">
                     ${badgeHtml}
-                    <button type="button" class="assistant-action-icon" data-assistant-action="copy" onclick="return handleAssistantActionInline(event, '${safeId}', 'copy')" title="Copy" aria-label="Copy">${getActionIconSvg('copy')}</button>
-                    <button type="button" class="assistant-action-icon" data-assistant-action="save_memory" onclick="return handleAssistantActionInline(event, '${safeId}', 'save_memory')" title="Save to memory" aria-label="Save to memory">${getActionIconSvg('memory')}</button>
-                    <button type="button" class="assistant-action-icon" data-assistant-action="tts_speak" onclick="return handleAssistantActionInline(event, '${safeId}', 'tts_speak')" title="Read aloud" aria-label="Read aloud">${getActionIconSvg('speaker')}</button>
-                    <button type="button" class="assistant-action-icon" data-assistant-action="share" onclick="return handleAssistantActionInline(event, '${safeId}', 'share')" title="Share" aria-label="Share">${getActionIconSvg('share')}</button>
-                    <button type="button" class="assistant-action-icon" data-assistant-action="regenerate" onclick="return handleAssistantActionInline(event, '${safeId}', 'regenerate')" title="Regenerate" aria-label="Regenerate" ${regenAttr}>${getActionIconSvg('retry')}</button>
-                    <button type="button" class="assistant-action-icon${upClass}" data-assistant-action="feedback_up" onclick="return handleAssistantActionInline(event, '${safeId}', 'feedback_up')" title="Helpful" aria-label="Helpful" aria-pressed="${savedRating === 1 ? 'true' : 'false'}">${getActionIconSvg('thumb_up')}</button>
-                    <button type="button" class="assistant-action-icon${downClass}" data-assistant-action="feedback_down" onclick="return handleAssistantActionInline(event, '${safeId}', 'feedback_down')" title="Not helpful" aria-label="Not helpful" aria-pressed="${savedRating === -1 ? 'true' : 'false'}">${getActionIconSvg('thumb_down')}</button>
+                    <button type="button" class="assistant-action-icon" data-assistant-action="copy" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'copy') })} title="Copy" aria-label="Copy">${getActionIconSvg('copy')}</button>
+                    <button type="button" class="assistant-action-icon" data-assistant-action="save_memory" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'save_memory') })} title="Save to memory" aria-label="Save to memory">${getActionIconSvg('memory')}</button>
+                    <button type="button" class="assistant-action-icon" data-assistant-action="tts_speak" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'tts_speak') })} title="Read aloud" aria-label="Read aloud">${getActionIconSvg('speaker')}</button>
+                    <button type="button" class="assistant-action-icon" data-assistant-action="share" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'share') })} title="Share" aria-label="Share">${getActionIconSvg('share')}</button>
+                    <button type="button" class="assistant-action-icon" data-assistant-action="regenerate" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'regenerate') })} title="Regenerate" aria-label="Regenerate" ${regenAttr}>${getActionIconSvg('retry')}</button>
+                    <button type="button" class="assistant-action-icon${upClass}" data-assistant-action="feedback_up" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'feedback_up') })} title="Helpful" aria-label="Helpful" aria-pressed="${savedRating === 1 ? 'true' : 'false'}">${getActionIconSvg('thumb_up')}</button>
+                    <button type="button" class="assistant-action-icon${downClass}" data-assistant-action="feedback_down" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'feedback_down') })} title="Not helpful" aria-label="Not helpful" aria-pressed="${savedRating === -1 ? 'true' : 'false'}">${getActionIconSvg('thumb_down')}</button>
                     <div id="assistant-feedback-popover-${safeId}" class="assistant-feedback-popover hidden" data-message-id="${safeId}" role="dialog" aria-label="Answer feedback">
                         <div class="feedback-popover-header">
                             <span class="feedback-popover-title">Why wasn't this helpful?</span>
-                            <button type="button" class="feedback-popover-close-btn" onclick="closeFeedbackPopover('${safeId}')" aria-label="Close feedback">&times;</button>
+                            <button type="button" class="feedback-popover-close-btn" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { closeFeedbackPopover((String(safeId))) })} aria-label="Close feedback">&times;</button>
                         </div>
                         <div class="feedback-tags-grid">
-                            <button type="button" class="feedback-tag-chip" onclick="toggleFeedbackTag(this, 'Inaccurate')">Inaccurate</button>
-                            <button type="button" class="feedback-tag-chip" onclick="toggleFeedbackTag(this, 'Formatting')">Formatting</button>
-                            <button type="button" class="feedback-tag-chip" onclick="toggleFeedbackTag(this, 'Too Long')">Too Long</button>
-                            <button type="button" class="feedback-tag-chip" onclick="toggleFeedbackTag(this, 'Incomplete')">Incomplete</button>
-                            <button type="button" class="feedback-tag-chip" onclick="toggleFeedbackTag(this, 'Tone')">Tone</button>
-                            <button type="button" class="feedback-tag-chip" onclick="toggleFeedbackTag(this, 'Wrong Tool')">Wrong Tool</button>
-                            <button type="button" class="feedback-tag-chip" onclick="toggleFeedbackTag(this, 'Other')">Other</button>
+                            <button type="button" class="feedback-tag-chip" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { toggleFeedbackTag(this, 'Inaccurate') })}>Inaccurate</button>
+                            <button type="button" class="feedback-tag-chip" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { toggleFeedbackTag(this, 'Formatting') })}>Formatting</button>
+                            <button type="button" class="feedback-tag-chip" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { toggleFeedbackTag(this, 'Too Long') })}>Too Long</button>
+                            <button type="button" class="feedback-tag-chip" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { toggleFeedbackTag(this, 'Incomplete') })}>Incomplete</button>
+                            <button type="button" class="feedback-tag-chip" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { toggleFeedbackTag(this, 'Tone') })}>Tone</button>
+                            <button type="button" class="feedback-tag-chip" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { toggleFeedbackTag(this, 'Wrong Tool') })}>Wrong Tool</button>
+                            <button type="button" class="feedback-tag-chip" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { toggleFeedbackTag(this, 'Other') })}>Other</button>
                         </div>
                         <textarea id="feedback-comment-${safeId}" class="feedback-comment-input" maxlength="200" placeholder="Optional details to help JARVIS improve (max 200 chars)..."></textarea>
                         <div class="feedback-popover-actions">
-                            <button type="button" class="feedback-cancel-btn" onclick="closeFeedbackPopover('${safeId}')">Cancel</button>
-                            <button type="button" class="feedback-submit-btn" onclick="submitAssistantNegativeFeedback('${safeId}', false)">Submit</button>
-                            ${canRegenerate ? `<button type="button" class="feedback-regen-btn" onclick="submitAssistantNegativeFeedback('${safeId}', true)">Fix &amp; Regenerate</button>` : ''}
+                            <button type="button" class="feedback-cancel-btn" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { closeFeedbackPopover((String(safeId))) })}>Cancel</button>
+                            <button type="button" class="feedback-submit-btn" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { submitAssistantNegativeFeedback((String(safeId)), false) })}>Submit</button>
+                            ${canRegenerate ? `<button type="button" class="feedback-regen-btn" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { submitAssistantNegativeFeedback((String(safeId)), true) })}>Fix &amp; Regenerate</button>` : ''}
                         </div>
                     </div>
                     <div class="assistant-action-menu-wrap">
-                        <button type="button" class="assistant-action-icon assistant-action-dots" data-assistant-action="menu" onclick="return handleAssistantActionInline(event, '${safeId}', 'menu')" title="More" aria-label="More actions" aria-expanded="false">${getActionIconSvg('dots')}</button>
+                        <button type="button" class="assistant-action-icon assistant-action-dots" data-assistant-action="menu" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'menu') })} title="More" aria-label="More actions" aria-expanded="false">${getActionIconSvg('dots')}</button>
                         <div id="assistant-action-menu-${safeId}" class="assistant-action-menu hidden" role="menu" data-message-id="${safeId}"> 
-                            <button type="button" data-assistant-action="ask" onclick="return handleAssistantActionInline(event, '${safeId}', 'ask')" role="menuitem">${getActionIconSvg('ask')}<span>Ask JARVIS</span></button> 
-                            <button type="button" data-assistant-action="verify" onclick="return handleAssistantActionInline(event, '${safeId}', 'verify')" role="menuitem">${getActionIconSvg('verify')}<span>Verify this</span></button> 
+                            <button type="button" data-assistant-action="ask" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'ask') })} role="menuitem">${getActionIconSvg('ask')}<span>Ask JARVIS</span></button>
+                            <button type="button" data-assistant-action="verify" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'verify') })} role="menuitem">${getActionIconSvg('verify')}<span>Verify this</span></button>
                             <div class="assistant-action-menu-divider"></div>
-                            <button type="button" data-assistant-action="export_pdf" onclick="return handleAssistantActionInline(event, '${safeId}', 'export_pdf')" role="menuitem">${getActionIconSvg('pdf')}<span>Export as PDF</span></button> 
-                            <button type="button" data-assistant-action="export_docx" onclick="return handleAssistantActionInline(event, '${safeId}', 'export_docx')" role="menuitem">${getActionIconSvg('word')}<span>Export as Word (.docx)</span></button> 
-                            <button type="button" data-assistant-action="export_csv" onclick="return handleAssistantActionInline(event, '${safeId}', 'export_csv')" role="menuitem">${getActionIconSvg('csv')}<span>Export as Excel / CSV</span></button> 
-                            <button type="button" data-assistant-action="export_markdown" onclick="return handleAssistantActionInline(event, '${safeId}', 'export_markdown')" role="menuitem">${getActionIconSvg('file')}<span>Export as Markdown</span></button> 
-                            <button type="button" data-assistant-action="export_html" onclick="return handleAssistantActionInline(event, '${safeId}', 'export_html')" role="menuitem">${getActionIconSvg('html')}<span>Export as HTML</span></button> 
-                            <button type="button" data-assistant-action="export_json" onclick="return handleAssistantActionInline(event, '${safeId}', 'export_json')" role="menuitem">${getActionIconSvg('json')}<span>Export as JSON</span></button> 
-                            <button type="button" data-assistant-action="export_txt" onclick="return handleAssistantActionInline(event, '${safeId}', 'export_txt')" role="menuitem">${getActionIconSvg('txt')}<span>Export as Text</span></button> 
+                            <button type="button" data-assistant-action="export_pdf" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'export_pdf') })} role="menuitem">${getActionIconSvg('pdf')}<span>Export as PDF</span></button>
+                            <button type="button" data-assistant-action="export_docx" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'export_docx') })} role="menuitem">${getActionIconSvg('word')}<span>Export as Word (.docx)</span></button>
+                            <button type="button" data-assistant-action="export_csv" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'export_csv') })} role="menuitem">${getActionIconSvg('csv')}<span>Export as Excel / CSV</span></button>
+                            <button type="button" data-assistant-action="export_markdown" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'export_markdown') })} role="menuitem">${getActionIconSvg('file')}<span>Export as Markdown</span></button>
+                            <button type="button" data-assistant-action="export_html" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'export_html') })} role="menuitem">${getActionIconSvg('html')}<span>Export as HTML</span></button>
+                            <button type="button" data-assistant-action="export_json" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'export_json') })} role="menuitem">${getActionIconSvg('json')}<span>Export as JSON</span></button>
+                            <button type="button" data-assistant-action="export_txt" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'export_txt') })} role="menuitem">${getActionIconSvg('txt')}<span>Export as Text</span></button>
                         </div> 
                     </div>
                 </div>
@@ -10673,7 +10673,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 <div class="composer-selection-chip">
                     <span class="composer-selection-icon" aria-hidden="true">💬</span>
                     <span class="composer-selection-label">Quoting: "${escapeHtml(clean.slice(0, 80))}${clean.length > 80 ? '...' : ''}"</span>
-                    <button type="button" class="composer-selection-remove" aria-label="Remove quoted selection" onclick="clearComposerSelectionTray()">×</button>
+                    <button type="button" class="composer-selection-remove" aria-label="Remove quoted selection" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { clearComposerSelectionTray() })}>×</button>
                 </div>
             `;
             tray.classList.remove('hidden');
@@ -10698,7 +10698,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 chip.innerHTML = `
                     <span class="composer-selection-icon" aria-hidden="true">🖼️</span>
                     <span class="composer-selection-label">Create Image <span class="image-chip-ratio-badge" id="image-chip-ratio">${escapeHtml(ratio)}</span></span>
-                    <button type="button" class="composer-selection-remove" aria-label="Cancel image mode" onclick="deactivateComposerImageMode(event)">×</button>
+                    <button type="button" class="composer-selection-remove" aria-label="Cancel image mode" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { deactivateComposerImageMode(event) })}>×</button>
                 `;
                 chip.addEventListener('click', (e) => {
                     if (e.target.closest('.composer-selection-remove')) return;
@@ -11053,7 +11053,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                     <div class="chat-bubble-user text-white relative group">
                         ${displayText.trim() ? `<p class="text-sm font-medium">${formattedText}</p>` : ''}
                         ${attachmentHtml}
-                        <button onclick="editMessage(this)" data-message="${encodeURIComponent(displayText)}" class="hidden group-hover:flex absolute -top-2 -right-2 bg-blue-500 text-white rounded-full w-6 h-6 text-xs hover:bg-blue-600 transition-all shadow-lg items-center justify-center" title="Edit message">&#9998;</button>
+                        <button ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { editMessage(this) })} data-message="${encodeURIComponent(displayText)}" class="hidden group-hover:flex absolute -top-2 -right-2 bg-blue-500 text-white rounded-full w-6 h-6 text-xs hover:bg-blue-600 transition-all shadow-lg items-center justify-center" title="Edit message">&#9998;</button>
                     </div>
                 `;
             } else {
@@ -11074,7 +11074,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                     const imgTag = extractStreamedImageTag(displayText, false);
                     if (imgTag && imgTag.prompt && imgTag.prompt.length >= 3) {
                         setTimeout(() => {
-                            window.handleImageGenerationRequest?.(imgTag.prompt);
+                            requestImageFromAnswer(imgTag.prompt);
                         }, 50);
                     }
                 }
@@ -11167,7 +11167,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 const selfCritiqueHtml = selfCritique?.performed
                     ? `
                     <div class="mt-2 flex flex-col items-start gap-1">
-                        <button type="button" class="self-critique-badge-btn" onclick="document.getElementById('critique-audit-${messageId}')?.classList.toggle('hidden')">
+                        <button type="button" class="self-critique-badge-btn" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { document.getElementById(('critique-audit-' + String(messageId)))?.classList.toggle('hidden') })}>
                             <svg class="w-3 h-3 text-sky-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>
                             <span>${selfCritique.refined ? 'Self-Critiqued & Repaired' : 'Self-Critiqued & Verified'}</span>
                         </button>
@@ -11477,7 +11477,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 const imgTag = extractStreamedImageTag(cleanAnswer || text, true);
                 if (imgTag && imgTag.prompt && imgTag.prompt.length >= 3) {
                     row.__imageActionTriggered = true;
-                    window.handleImageGenerationRequest?.(imgTag.prompt);
+                    requestImageFromAnswer(imgTag.prompt);
                 }
             }
 
@@ -11756,7 +11756,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                     const imgTag = extractStreamedImageTag(cleanText, false);
                     if (imgTag && imgTag.prompt && imgTag.prompt.length >= 3) {
                         row.__imageActionTriggered = true;
-                        window.handleImageGenerationRequest?.(imgTag.prompt);
+                        requestImageFromAnswer(imgTag.prompt);
                     }
                 }
             }
@@ -12903,6 +12903,15 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             return true;
         }
 
+        const executedImageActionTurns = new Set();
+        function requestImageFromAnswer(prompt) {
+            const turn = getConversationTurn(activeResponseRenderContext?.turnId);
+            if (!turn || turn.aborted || turn.status === 'cancelled' || !isImageGenerationIntent(turn.rawPrompt) || executedImageActionTurns.has(turn.id)) return;
+            executedImageActionTurns.add(turn.id);
+            if (executedImageActionTurns.size > 200) executedImageActionTurns.delete(executedImageActionTurns.values().next().value);
+            void window.handleImageGenerationRequest?.(prompt);
+        }
+
         async function handleImageGenerationRequest(promptText, options = {}) {
             const rawPrompt = (typeof extractImagePrompt === 'function' ? extractImagePrompt(promptText) : '') || String(promptText || '').replace(/^\/(?:image|img|draw|art)\s*/i, '').trim();
             if (!rawPrompt) { activateComposerImageMode(); return; }
@@ -13205,14 +13214,14 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 }
 
                 grid.innerHTML = images.map(item => `
-                    <div class="image-gallery-item" onclick="openImageLightbox('${escapeHtml(item.dataUrl || item.url || '')}', '${escapeHtml(item.prompt || '')}')">
+                    <div class="image-gallery-item" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { openImageLightbox((String(item.dataUrl || item.url || '')), (String(item.prompt || ''))) })}>
                         <img class="image-gallery-thumb" src="${escapeHtml(item.dataUrl || item.url || '')}" alt="${escapeHtml(item.prompt || '')}" loading="lazy" />
-                        <div class="image-gallery-overlay" onclick="event.stopPropagation()">
+                        <div class="image-gallery-overlay" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { event.stopPropagation() })}>
                             <div class="image-gallery-item-prompt">${escapeHtml(item.prompt || '')}</div>
                             <div class="image-gallery-item-actions">
-                                <button type="button" class="image-gallery-mini-btn" onclick="openImageLightbox('${escapeHtml(item.dataUrl || item.url || '')}', '${escapeHtml(item.prompt || '')}')" title="Zoom">🔍</button>
-                                <button type="button" class="image-gallery-mini-btn" onclick="downloadUrlAsFile('${escapeHtml(item.dataUrl || item.url || '')}', '${slugifyPrompt(item.prompt)}.png')" title="Download">⬇️</button>
-                                <button type="button" class="image-gallery-mini-btn" onclick="deleteGalleryImage('${escapeHtml(item.id)}', this)" title="Delete">🗑️</button>
+                                <button type="button" class="image-gallery-mini-btn" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { openImageLightbox((String(item.dataUrl || item.url || '')), (String(item.prompt || ''))) })} title="Zoom">🔍</button>
+                                <button type="button" class="image-gallery-mini-btn" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { downloadUrlAsFile((String(item.dataUrl || item.url || '')), (String(slugifyPrompt(item.prompt)) + '.png')) })} title="Download">⬇️</button>
+                                <button type="button" class="image-gallery-mini-btn" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { deleteGalleryImage((String(item.id)), this) })} title="Delete">🗑️</button>
                             </div>
                         </div>
                     </div>
@@ -13395,7 +13404,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                             const fallbackSvg = globalThis.JarvisMarkdownRenderer?.getDomainMonogramSvg ? globalThis.JarvisMarkdownRenderer.getDomainMonogramSvg(domain) : '';
                             return `
                                 <a href="${url}" target="_blank" rel="noopener noreferrer" class="source-card-pill" data-source-id="${Number.isInteger(s.id) ? s.id : i + 1}" title="${fullTitle}">
-                                    <img class="source-card-favicon" src="${favicon}" alt="" loading="lazy" onerror="this.onerror=null;this.src='${fallbackSvg}';" />
+                                    <img class="source-card-favicon" src="${favicon}" alt="" loading="lazy" ${window.JarvisTrustedUI.bindUiEvent("error", function(event) { this.onerror=null;this.src=(String(fallbackSvg)); })} />
                                     <div class="source-card-info">
                                         <span class="source-card-domain">${domainText}</span>
                                         <span class="source-card-title">${title}</span>
@@ -13489,7 +13498,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                         return `
                             <a href="${url}" target="_blank" rel="noopener noreferrer" class="source-card-pill research-source-card${overflowClass}" data-source-id="${sourceId}" title="${title}">
                                 <div class="research-source-card-header">
-                                    <img class="research-source-card-favicon" src="${favicon}" alt="" loading="lazy" onerror="this.onerror=null;this.src='${fallbackSvg}';" />
+                                    <img class="research-source-card-favicon" src="${favicon}" alt="" loading="lazy" ${window.JarvisTrustedUI.bindUiEvent("error", function(event) { this.onerror=null;this.src=(String(fallbackSvg)); })} />
                                     <span class="research-source-card-domain">${domain}</span>
                                     <span class="research-source-card-index">${sourceId}</span>
                                 </div>
@@ -13498,7 +13507,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                         `;
                     }).join('')}
                     ${overflowCount > 0 ? `
-                        <button type="button" class="research-source-card research-source-overflow-btn" aria-label="Show ${overflowCount} more sources" onclick="const c=this.closest('.research-sources-carousel');if(c){c.querySelectorAll('.is-overflow-hidden').forEach(el=>el.classList.remove('is-overflow-hidden'));}this.remove();">
+                        <button type="button" class="research-source-card research-source-overflow-btn" aria-label="Show ${overflowCount} more sources" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { const c=this.closest('.research-sources-carousel');if(c){c.querySelectorAll('.is-overflow-hidden').forEach(el=>el.classList.remove('is-overflow-hidden'));}this.remove(); })}>
                             <span style="font-size:0.78rem;font-weight:700;color:#38bdf8;">+${overflowCount} more</span>
                             <span style="font-size:0.66rem;color:#94a3b8;">sources</span>
                         </button>
@@ -13629,20 +13638,20 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
 
                 interactiveFooter.innerHTML = `
                     <div class="assistant-action-bar">
-                        <button type="button" class="assistant-action-btn" title="Copy answer" onclick="copyAssistantMessageText(this)">
+                        <button type="button" class="assistant-action-btn" title="Copy answer" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { copyAssistantMessageText(this) })}>
                             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"/></svg>
                             <span>Copy</span>
                         </button>
                         ${hasThought ? `
-                        <button type="button" class="assistant-action-btn" title="Copy thought process" onclick="copyAssistantThoughtText(this)">
+                        <button type="button" class="assistant-action-btn" title="Copy thought process" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { copyAssistantThoughtText(this) })}>
                             <svg class="w-3.5 h-3.5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
                             <span>Thought</span>
                         </button>` : ''}
-                        <button type="button" class="assistant-action-btn" title="Bookmark message" onclick="toggleBookmarkAssistantMessage(this)">
+                        <button type="button" class="assistant-action-btn" title="Bookmark message" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { toggleBookmarkAssistantMessage(this) })}>
                             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/></svg>
                             <span>Bookmark</span>
                         </button>
-                        <button type="button" class="assistant-action-btn" title="Read answer aloud" onclick="toggleSpeakAssistantMessage(this)">
+                        <button type="button" class="assistant-action-btn" title="Read answer aloud" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { toggleSpeakAssistantMessage(this) })}>
                             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/></svg>
                             <span>Speak</span>
                         </button>
@@ -14586,8 +14595,8 @@ ${code}
                         </div>
                     </div>
                     <div class="flex items-center gap-2 shrink-0">
-                        <button type="button" class="dlp-banner-cancel-btn px-2.5 py-1 rounded bg-white/10 hover:bg-white/20 text-white font-medium transition-colors" onclick="hideComposerDlpBanner()">Cancel</button>
-                        <button type="button" class="dlp-banner-redact-btn px-2.5 py-1 rounded bg-red-600 hover:bg-red-500 text-white font-medium transition-colors shadow" onclick="redactAndSendComposer()">Redact &amp; Send</button>
+                        <button type="button" class="dlp-banner-cancel-btn px-2.5 py-1 rounded bg-white/10 hover:bg-white/20 text-white font-medium transition-colors" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { hideComposerDlpBanner() })}>Cancel</button>
+                        <button type="button" class="dlp-banner-redact-btn px-2.5 py-1 rounded bg-red-600 hover:bg-red-500 text-white font-medium transition-colors shadow" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { redactAndSendComposer() })}>Redact &amp; Send</button>
                     </div>
                 </div>
             `;
@@ -22921,34 +22930,34 @@ function showChatExportFormatPicker() {
         <div class="export-format-panel">
             <div class="export-format-header">
                 <strong>Export Chat History</strong>
-                <button type="button" onclick="closeChatExportFormatPicker()" aria-label="Close export options">×</button>
+                <button type="button" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { closeChatExportFormatPicker() })} aria-label="Close export options">×</button>
             </div>
             <div class="export-format-actions">
-                <button type="button" onclick="exportChatHistoryPdf(); closeChatExportFormatPicker();">
+                <button type="button" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { exportChatHistoryPdf(); closeChatExportFormatPicker(); })}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><path d="M9 13v4"></path><path d="M9 13h2a1 1 0 0 1 0 2H9"></path><path d="M13 13v4"></path></svg>
                     <span>PDF Document (Print)</span>
                 </button>
-                <button type="button" onclick="exportChatHistoryDocx(); closeChatExportFormatPicker();">
+                <button type="button" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { exportChatHistoryDocx(); closeChatExportFormatPicker(); })}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><path d="M8 13l2 4 2-4 2 4 2-4"></path></svg>
                     <span>Word Document (.docx)</span>
                 </button>
-                <button type="button" onclick="exportChatHistoryCsv(); closeChatExportFormatPicker();">
+                <button type="button" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { exportChatHistoryCsv(); closeChatExportFormatPicker(); })}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M3 9h18M3 15h18M9 3v18M15 3v18"></path></svg>
                     <span>Excel / CSV (.csv)</span>
                 </button>
-                <button type="button" onclick="exportChatHistoryMarkdown(); closeChatExportFormatPicker();">
+                <button type="button" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { exportChatHistoryMarkdown(); closeChatExportFormatPicker(); })}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path><path d="M8 13h8"></path><path d="M8 17h5"></path></svg>
                     <span>Markdown (.md)</span>
                 </button>
-                <button type="button" onclick="exportChatHistoryHtml(); closeChatExportFormatPicker();">
+                <button type="button" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { exportChatHistoryHtml(); closeChatExportFormatPicker(); })}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
                     <span>HTML Document (.html)</span>
                 </button>
-                <button type="button" onclick="exportChatHistoryJson(); closeChatExportFormatPicker();">
+                <button type="button" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { exportChatHistoryJson(); closeChatExportFormatPicker(); })}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H6a2 2 0 0 0-2 2v3a2 2 0 0 1-2 2 2 2 0 0 1 2 2v3a2 2 0 0 0 2 2h2"></path><path d="M16 3h2a2 2 0 0 1 2 2v3a2 2 0 0 0 2 2 2 2 0 0 0-2 2v3a2 2 0 0 1-2 2h-2"></path></svg>
                     <span>JSON Data (.json)</span>
                 </button>
-                <button type="button" onclick="exportChatHistoryText(); closeChatExportFormatPicker();">
+                <button type="button" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { exportChatHistoryText(); closeChatExportFormatPicker(); })}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="6" x2="20" y2="6"></line><line x1="4" y1="12" x2="14" y2="12"></line><line x1="4" y1="18" x2="18" y2="18"></line></svg>
                     <span>Plain Text (.txt)</span>
                 </button>
@@ -27033,7 +27042,7 @@ function showMemoryManager() {
                     <h2 id="memory-manager-title">${isUnified ? 'Saved Memories' : 'Memory & Adaptation Manager'}</h2>
                     ${isUnified ? '<p style="font-size:12px; color:#a1a1aa; margin:4px 0 0 0;">Facts and preferences JARVIS has remembered from your conversations.</p>' : ''}
                 </div>
-                <button type="button" class="memory-manager-close" onclick="closeMemoryManager()" aria-label="Close memory manager">
+                <button type="button" class="memory-manager-close" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { closeMemoryManager() })} aria-label="Close memory manager">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
                         <line x1="18" y1="6" x2="6" y2="18"></line>
                         <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -27042,13 +27051,13 @@ function showMemoryManager() {
             </header>
             ${isUnified ? '' : `
             <div class="memory-manager-tabs">
-                <button id="tab-saved-facts" type="button" class="memory-tab-btn is-active" onclick="switchMemoryManagerTab('facts')">Saved Facts</button>
-                <button id="tab-learned-rules" type="button" class="memory-tab-btn" onclick="switchMemoryManagerTab('learned')">Learned Adaptations</button>
+                <button id="tab-saved-facts" type="button" class="memory-tab-btn is-active" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { switchMemoryManagerTab('facts') })}>Saved Facts</button>
+                <button id="tab-learned-rules" type="button" class="memory-tab-btn" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { switchMemoryManagerTab('learned') })}>Learned Adaptations</button>
             </div>
             `}
             <div class="memory-manager-search">
-                <input id="memory-manager-search-input" type="search" placeholder="${isUnified ? 'Search saved memories...' : 'Search saved memory or rules'}" oninput="renderMemoryManagerList()" aria-label="Search saved memory">
-                <button type="button" onclick="document.getElementById('memory-manager-search-input')?.focus()" aria-label="Search memory">
+                <input id="memory-manager-search-input" type="search" placeholder="${isUnified ? 'Search saved memories...' : 'Search saved memory or rules'}" ${window.JarvisTrustedUI.bindUiEvent("input", function(event) { renderMemoryManagerList() })} aria-label="Search saved memory">
+                <button type="button" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { document.getElementById('memory-manager-search-input')?.focus() })} aria-label="Search memory">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
                         <circle cx="11" cy="11" r="7"></circle>
                         <path d="m20 20-3.5-3.5"></path>
@@ -27056,9 +27065,9 @@ function showMemoryManager() {
                 </button>
             </div>
             <div class="memory-manager-toolbar">
-                <button id="memory-manager-btn-add" type="button" onclick="handleMemoryManagerAddClick()">Add memory</button>
-                ${isUnified ? '<button id="memory-manager-btn-export" type="button" onclick="exportUnifiedMemoriesJson()">Export JSON</button>' : ''}
-                <button id="memory-manager-btn-clear" type="button" onclick="handleMemoryManagerClearClick()">Clear all</button>
+                <button id="memory-manager-btn-add" type="button" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { handleMemoryManagerAddClick() })}>Add memory</button>
+                ${isUnified ? ("<button id=\"memory-manager-btn-export\" type=\"button\" " + (window.JarvisTrustedUI.bindUiEvent("click", function(event) { exportUnifiedMemoriesJson() })) + ">Export JSON</button>") : ''}
+                <button id="memory-manager-btn-clear" type="button" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { handleMemoryManagerClearClick() })}>Clear all</button>
             </div>
             <div id="memory-manager-list" class="memory-manager-list" role="region" aria-label="Saved memory list"></div>
         </div>
@@ -27170,11 +27179,11 @@ function renderMemoryManagerList() {
                 </div>
                 <div class="memory-manager-actions" style="display:flex; align-items:center; gap:8px;">
                     <label class="memory-toggle-switch" title="${item.enabled ? 'Disable memory' : 'Enable memory'}">
-                        <input type="checkbox" ${item.enabled ? 'checked' : ''} onchange="toggleUnifiedMemoryItem('${escapeJsString(item.id)}', this.checked)" aria-label="Toggle memory status">
+                        <input type="checkbox" ${item.enabled ? 'checked' : ''} ${window.JarvisTrustedUI.bindUiEvent("change", function(event) { toggleUnifiedMemoryItem((String(item.id)), this.checked) })} aria-label="Toggle memory status">
                         <span class="toggle-slider"></span>
                     </label>
-                    <button type="button" onclick="editUnifiedMemoryItem('${escapeJsString(item.id)}')">Edit</button>
-                    <button type="button" onclick="deleteUnifiedMemoryItem('${escapeJsString(item.id)}')">Delete</button>
+                    <button type="button" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { editUnifiedMemoryItem((String(item.id))) })}>Edit</button>
+                    <button type="button" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { deleteUnifiedMemoryItem((String(item.id))) })}>Delete</button>
                 </div>
             </article>
         `).join('');
@@ -27191,8 +27200,8 @@ function renderMemoryManagerList() {
             ? `<div class="memory-manager-item" style="margin-bottom:8px;opacity:0.95;font-size:12px;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;">
                 <div><strong>Recursive Self-Improving Loop:</strong> ${stats.activeRules} active rule${stats.activeRules === 1 ? '' : 's'} (${stats.globalRules || 0} global, ${stats.topicRules || 0} topic) &middot; Failure Guardrails: ${stats.failureLedgerCount || 0} &middot; 👍 ${stats.positiveCount || 0} &middot; 👎 ${stats.negativeCount || 0}${stats.satisfactionRate !== null && stats.satisfactionRate !== undefined ? ` (${stats.satisfactionRate}% helpful)` : ''}</div>
                 <div style="display:flex;gap:6px;">
-                    <button type="button" class="settings-chip-btn" onclick="runManualMemoryConsolidation()" style="font-size:11px;padding:3px 8px;">Consolidate</button>
-                    ${stats.snapshotCount > 0 ? '<button type="button" class="settings-chip-btn" onclick="runManualMemoryRollback()" style="font-size:11px;padding:3px 8px;">Rollback</button>' : ''}
+                    <button type="button" class="settings-chip-btn" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { runManualMemoryConsolidation() })} style="font-size:11px;padding:3px 8px;">Consolidate</button>
+                    ${stats.snapshotCount > 0 ? ("<button type=\"button\" class=\"settings-chip-btn\" " + (window.JarvisTrustedUI.bindUiEvent("click", function(event) { runManualMemoryRollback() })) + " style=\"font-size:11px;padding:3px 8px;\">Rollback</button>") : ''}
                 </div>
             </div>`
             : '';
@@ -27217,8 +27226,8 @@ function renderMemoryManagerList() {
                     ${rule.rawPrompt ? `<small>Extracted from: ${escapeHtml(rule.rawPrompt)}</small>` : ''}
                 </div>
                 <div class="memory-manager-actions">
-                    <button type="button" onclick="toggleLearnedRule('${escapeJsString(rule.id)}', ${rule.enabled === false})">${rule.enabled !== false ? 'Disable' : 'Enable'}</button>
-                    <button type="button" onclick="deleteLearnedRule('${escapeJsString(rule.id)}')">Delete</button>
+                    <button type="button" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { toggleLearnedRule((String(rule.id)), (rule.enabled === false)) })}>${rule.enabled !== false ? 'Disable' : 'Enable'}</button>
+                    <button type="button" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { deleteLearnedRule((String(rule.id))) })}>Delete</button>
                 </div>
             </article>
         `;
@@ -27242,9 +27251,9 @@ function renderMemoryManagerList() {
                 ${item.sourcePhrase ? `<small>Saved from: ${escapeHtml(item.sourcePhrase)}</small>` : ''}
             </div>
             <div class="memory-manager-actions">
-                <button type="button" onclick="toggleMemoryManagerPin('${escapeJsString(item.key)}')">${item.pinned ? 'Unpin' : 'Pin'}</button>
-                <button type="button" onclick="editMemoryManagerItem('${escapeJsString(item.key)}')">Edit</button>
-                <button type="button" onclick="deleteMemoryManagerItem('${escapeJsString(item.key)}')">Delete</button>
+                <button type="button" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { toggleMemoryManagerPin((String(item.key))) })}>${item.pinned ? 'Unpin' : 'Pin'}</button>
+                <button type="button" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { editMemoryManagerItem((String(item.key))) })}>Edit</button>
+                <button type="button" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { deleteMemoryManagerItem((String(item.key))) })}>Delete</button>
             </div>
         </article>
     `).join('');
@@ -29669,8 +29678,8 @@ function renderChatSidebarList() {
                            class="chat-session-title-input"
                            value="${escapeHtml(session.title || 'New chat')}"
                            maxlength="80"
-                           onclick="event.stopPropagation()"
-                           onkeydown="handleInlineRenameKeydown(event, '${escapeJsString(session.id)}')"
+                           ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { event.stopPropagation() })}
+                           ${window.JarvisTrustedUI.bindUiEvent("keydown", function(event) { handleInlineRenameKeydown(event, (String(session.id))) })}
                            onblur="commitInlineChatSessionRename('${escapeJsString(session.id)}', this.value)"
                            aria-label="Rename chat title" />
                     <span class="chat-session-meta" style="color:rgba(129, 140, 248, 0.9);">Press Enter to save, Esc to cancel</span>
@@ -29683,7 +29692,7 @@ function renderChatSidebarList() {
         <div class="chat-session-row ${session.id === activeChatSessionId ? 'is-active' : ''} ${session.pinned ? 'is-pinned' : ''}"
              role="listitem"
              data-chat-id="${escapeHtml(session.id)}"
-             onclick="restoreChatSessionFromSidebar('${escapeJsString(session.id)}', '${escapeJsString(bestMsgId)}')"
+             ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { restoreChatSessionFromSidebar((String(session.id)), (String(bestMsgId))) })}
              oncontextmenu="openChatSessionMenu(event, '${escapeJsString(session.id)}')"
              onpointerdown="beginChatSessionLongPress(event, '${escapeJsString(session.id)}')"
              onpointerup="cancelChatSessionLongPress()"
@@ -29695,13 +29704,13 @@ function renderChatSidebarList() {
                 ${snippet ? `<span class="chat-session-snippet">${snippet}</span>` : ''}
             </div>
             <div class="chat-session-actions-group">
-                <button type="button" class="chat-session-rename-btn" onclick="event.stopPropagation(); startInlineChatSessionRename('${escapeJsString(session.id)}')" aria-label="Rename chat" title="Rename chat">
+                <button type="button" class="chat-session-rename-btn" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { event.stopPropagation(); startInlineChatSessionRename((String(session.id))) })} aria-label="Rename chat" title="Rename chat">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
                         <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
                     </svg>
                 </button>
-                <button type="button" class="chat-session-delete-btn" onclick="event.stopPropagation(); deleteChatSessionById('${escapeJsString(session.id)}')" aria-label="Delete chat" title="Delete chat">
+                <button type="button" class="chat-session-delete-btn" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { event.stopPropagation(); deleteChatSessionById((String(session.id))) })} aria-label="Delete chat" title="Delete chat">
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <polyline points="3 6 5 6 21 6"></polyline>
                         <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
@@ -29709,7 +29718,7 @@ function renderChatSidebarList() {
                         <line x1="14" y1="11" x2="14" y2="17"></line>
                     </svg>
                 </button>
-                <button type="button" class="chat-session-more" onclick="event.stopPropagation(); openChatSessionMenu(event, '${escapeJsString(session.id)}')" aria-label="Chat actions" title="More options">
+                <button type="button" class="chat-session-more" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { event.stopPropagation(); openChatSessionMenu(event, (String(session.id))) })} aria-label="Chat actions" title="More options">
                     <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
                         <circle cx="12" cy="5" r="1"></circle>
                         <circle cx="12" cy="12" r="1"></circle>

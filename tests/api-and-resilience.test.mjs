@@ -202,6 +202,7 @@ const ORIGINAL_GOOGLE_API_KEY = process.env.GOOGLE_API_KEY;
 const ORIGINAL_GEMINI_SEARCH_MODEL = process.env.GEMINI_SEARCH_MODEL; 
 const ORIGINAL_SEARXNG_URL = process.env.SEARXNG_URL;
 const ORIGINAL_CRAWL4AI_URL = process.env.CRAWL4AI_URL;
+const ORIGINAL_CRAWL4AI_EGRESS = process.env.CRAWL4AI_PUBLIC_EGRESS_VERIFIED;
 const ORIGINAL_CRAWL4AI_TOKEN = process.env.CRAWL4AI_TOKEN;
 const ORIGINAL_NVIDIA_API_KEY = process.env.NVIDIA_API_KEY;
 const ORIGINAL_REDIS_URL = process.env.REDIS_URL;
@@ -242,6 +243,7 @@ process.env.GEMINI_API_KEY = 'secret-gemini-key';
 process.env.EXA_API_KEY = 'secret-exa-key';
 process.env.NVIDIA_API_KEY = 'secret-nvidia-key';
 process.env.CRAWL4AI_URL = 'https://crawl4ai.example';
+process.env.CRAWL4AI_PUBLIC_EGRESS_VERIFIED = 'true'; // Mock renderer with a public-only egress policy.
 process.env.LIVE_RETRIEVAL_ENABLED = 'true';
 const diagnostics = await callHandler(diagnosticsHandler, request('/api/diagnostics', {}));
 assert.equal(diagnostics.statusCode, 200);
@@ -274,6 +276,7 @@ assert.equal(privateExtract.body.error.code, 'private_url_blocked');
 assert.equal(extractUrlTest.normalizeExtractRequest({ url: 'https://example.com/a#frag' }).value.url, 'https://example.com/a');
 assert.equal(extractUrlTest.buildCrawl4AiEndpoint('https://crawl4ai.example').endsWith('/crawl'), true);
 process.env.CRAWL4AI_URL = 'https://crawl4ai.example';
+process.env.CRAWL4AI_PUBLIC_EGRESS_VERIFIED = 'true'; // Mock renderer with a public-only egress policy.
 process.env.CRAWL4AI_TOKEN = 'test-crawl-token';
 let crawlAuthHeader = '';
 globalThis.fetch = async (url, init) => {
@@ -693,6 +696,7 @@ process.env.GROQ_API_KEY = 'test-groq-key';
 process.env.LIVE_RETRIEVAL_ENABLED = 'true';
 process.env.CHAT_ROUTER_MODE = 'strict_single_pass';
 process.env.CRAWL4AI_URL = 'https://crawl4ai.example';
+process.env.CRAWL4AI_PUBLIC_EGRESS_VERIFIED = 'true'; // Mock renderer with a public-only egress policy.
 delete process.env.GEMINI_API_KEY;
 delete process.env.GOOGLE_API_KEY;
 let uncertainModelCalls = 0;
@@ -2278,6 +2282,7 @@ delete process.env.GROQ_API_KEY;
 process.env.GROQ_API_KEY = 'test-groq-key';
 process.env.LIVE_RETRIEVAL_ENABLED = 'true';
 process.env.CRAWL4AI_URL = 'https://crawl4ai.example';
+process.env.CRAWL4AI_PUBLIC_EGRESS_VERIFIED = 'true'; // Mock renderer with a public-only egress policy.
 let verifyModelCalls = 0;
 let verifyUnexpectedNetworkCalls = 0;
 globalThis.fetch = async (url, init) => {
@@ -2375,6 +2380,7 @@ restoreEnv('GOOGLE_API_KEY', ORIGINAL_GOOGLE_API_KEY);
 restoreEnv('GEMINI_SEARCH_MODEL', ORIGINAL_GEMINI_SEARCH_MODEL); 
 restoreEnv('SEARXNG_URL', ORIGINAL_SEARXNG_URL);
 restoreEnv('CRAWL4AI_URL', ORIGINAL_CRAWL4AI_URL);
+restoreEnv('CRAWL4AI_PUBLIC_EGRESS_VERIFIED', ORIGINAL_CRAWL4AI_EGRESS);
 restoreEnv('CRAWL4AI_TOKEN', ORIGINAL_CRAWL4AI_TOKEN);
 restoreEnv('NVIDIA_API_KEY', ORIGINAL_NVIDIA_API_KEY);
 restoreEnv('REDIS_URL', ORIGINAL_REDIS_URL);
@@ -2405,21 +2411,8 @@ function okJson(payload) {
 } 
 
 function textResponse(payload, status = 200, contentType = 'text/html; charset=utf-8') {
-    return {
-        ok: status >= 200 && status < 300,
-        status,
-        headers: {
-            get(name) {
-                return String(name || '').toLowerCase() === 'content-type' ? contentType : '';
-            }
-        },
-        async json() {
-            return JSON.parse(payload);
-        },
-        async text() {
-            return payload;
-        }
-    };
+    // Exercise real streamed-body semantics at the public-page boundary.
+    return new Response(payload, { status, headers: { 'content-type': contentType } });
 }
 
 function wikidataRolePayload(input) {

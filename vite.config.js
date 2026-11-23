@@ -25,6 +25,14 @@ export default defineConfig({
             for (const name of ['LICENSE', 'NOTICE']) {
                 await copyFile(join('node_modules/@imagemagick/magick-wasm', name), join('dist', `image-decoder-${name}.txt`));
             }
+            for (const name of ['code-sandbox.html', 'code-sandbox.js']) await copyFile(join('app', name), join('dist', name));
+            // Vite finalizes HTML after generateBundle. Add the essential classic
+            // runtime preload here, before computing the offline build hash.
+            const coreRuntime = (await readdir('dist/assets')).find(name => /^legacy-runtime.*\.js$/.test(name));
+            if (coreRuntime) {
+                const shell = await readFile('dist/index.html', 'utf8');
+                await writeFile('dist/index.html', shell.replace('</head>', `<link rel="preload" as="script" href="/assets/${coreRuntime}">\n</head>`));
+            }
             const files = [];
             async function walk(directory) {
                 for (const item of await readdir(directory, { withFileTypes: true })) {
@@ -39,7 +47,7 @@ export default defineConfig({
             for (const file of files.sort()) buildId.update(file).update(await readFile(join('dist', file.slice(1))));
             const version = buildId.digest('hex').slice(0, 16);
             const manifest = JSON.parse(await readFile('dist/.vite/manifest.json', 'utf8'));
-            const core = new Set(['/index.html', '/katex.min.js', '/science-format.js', '/manifest.json', '/404.html']);
+            const core = new Set(['/index.html', '/katex.min.js', '/science-format.js', '/manifest.json', '/404.html', '/code-sandbox.html', '/code-sandbox.js']);
             const visit = key => {
                 const entry = manifest[key]; if (!entry) return;
                 core.add('/' + entry.file);

@@ -69,6 +69,13 @@ export async function extractWithCrawl4Ai(options = {}) {
         });
     }
 
+    // A remote renderer resolves its own DNS. Local URL checks cannot protect
+    // its network; require an operator-confirmed private-network egress block.
+    if (process.env.CRAWL4AI_PUBLIC_EGRESS_VERIFIED !== 'true') {
+        throw createExtractError({ code: 'crawl4ai_egress_unverified', status: 503,
+            publicMessage: 'Remote extraction is unavailable until its public-network-only egress policy is configured.', retryable: false });
+    }
+
     const request = normalized.value;
     const cacheKey = buildCacheKey(baseUrl, request);
     const cached = cacheGet(cacheKey);

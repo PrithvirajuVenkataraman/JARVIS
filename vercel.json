@@ -28,7 +28,16 @@
         },
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net data:; img-src 'self' data: blob: https:; media-src 'self' blob: data:; connect-src 'self' https: wss: data: blob:; worker-src 'self' blob: data:; frame-src 'self' https://maps.google.com https://www.google.com https://openstreetmap.org https://www.openstreetmap.org https://*.openstreetmap.org; object-src 'none'; base-uri 'self'; form-action 'self';"
+          "value": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https:; media-src 'self' blob: data:; connect-src 'self' blob: https://aihorde.net https://cdn.jsdelivr.net https://huggingface.co https://cas-bridge.xethub.hf.co https://cas-server.xethub.hf.co https://cdn-lfs.huggingface.co https://cdn-lfs-us-1.hf.co https://api.open-meteo.com https://air-quality-api.open-meteo.com https://geocoding-api.open-meteo.com https://nominatim.openstreetmap.org https://overpass-api.de https://ipapi.co https://ipwho.is https://freeipapi.com https://api.coingecko.com https://query1.finance.yahoo.com https://api.dictionaryapi.dev https://en.wikipedia.org; worker-src 'self' blob:; frame-src 'self' https://maps.google.com https://www.google.com https://www.openstreetmap.org; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+        }
+      ]
+    },
+    {
+      "source": "/code-sandbox.html",
+      "headers": [
+        {
+          "key": "Content-Security-Policy",
+          "value": "default-src 'none'; script-src 'self' 'unsafe-eval'; worker-src blob:; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'"
         }
       ]
     }

@@ -45,7 +45,7 @@ function showHelpModal() {
                     <div id="settings-view-main" class="settings-view-panel active">
                         <!-- Modal Header -->
                         <div class="help-modal-header">
-                            <button type="button" onclick="closeHelpModal()" class="help-modal-back-btn" aria-label="Close settings">
+                            <button type="button" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { closeHelpModal() })} class="help-modal-back-btn" aria-label="Close settings">
                                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                     <path d="M19 12H5"></path>
                                     <path d="M12 19l-7-7 7-7"></path>
@@ -54,7 +54,7 @@ function showHelpModal() {
                             <div class="help-modal-title-block">
                                 <h2 id="help-modal-title" class="settings-modal-heading">Settings</h2>
                             </div>
-                            <button type="button" onclick="closeHelpModal()" class="help-modal-ok-btn" aria-label="Close settings" style="background:#ffffff!important;color:#000000!important;-webkit-text-fill-color:#000000!important;font-weight:750!important;">
+                            <button type="button" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { closeHelpModal() })} class="help-modal-ok-btn" aria-label="Close settings" style="background:#ffffff!important;color:#000000!important;-webkit-text-fill-color:#000000!important;font-weight:750!important;">
                                 Done
                             </button>
                         </div>
@@ -78,8 +78,8 @@ function showHelpModal() {
                                         </div>
                                     </div>
                                     <div class="settings-row-right">
-                                        <select id="model-selector" class="settings-select" onchange="setSelectedModel(this.value)" aria-labelledby="settings-model-label">
-                                            <option value="auto" ${currentSelectedModel === 'auto' ? 'selected' : ''}>Auto (Best Available)</option>
+                                        <select id="model-selector" class="settings-select" ${window.JarvisTrustedUI.bindUiEvent("change", function(event) { setSelectedModel(this.value) })} aria-labelledby="settings-model-label">
+                                            <option value="auto" ${currentSelectedModel === 'auto' ? 'selected' : ''}>Automatic</option>
                                             <option value="openai/gpt-oss-120b" ${currentSelectedModel === 'openai/gpt-oss-120b' ? 'selected' : ''}>GPT OSS 120B (Reasoning &amp; Multilingual)</option>
                                             <option value="openai/gpt-oss-20b" ${currentSelectedModel === 'openai/gpt-oss-20b' ? 'selected' : ''}>GPT OSS 20B (Fast &amp; Direct)</option>
                                             <option value="qwen/qwen3.8-27b" ${currentSelectedModel === 'qwen/qwen3.8-27b' ? 'selected' : ''}>Qwen 3.8 27B (Vision &amp; Reasoning)</option>
@@ -93,7 +93,7 @@ function showHelpModal() {
                                 </div>
 
                                 <!-- Bring Your Own Key (BYOK) Row -->
-                                <button type="button" class="settings-row settings-row-interactive" id="settings-row-byok" onclick="switchSettingsView('byok')" aria-label="API Keys (BYOK)">
+                                <button type="button" class="settings-row settings-row-interactive" id="settings-row-byok" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { switchSettingsView('byok') })} aria-label="API Keys (BYOK)">
                                     <div class="settings-row-left">
                                         <div class="settings-icon-badge settings-icon-amber" aria-hidden="true">
                                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -120,7 +120,7 @@ function showHelpModal() {
                             <div class="settings-section-label">PERSONALIZATION &amp; BEHAVIOR</div>
                             <div class="settings-group-card">
                                 <!-- Custom Instructions Row -->
-                                <button type="button" class="settings-row settings-row-interactive" id="settings-row-custom-instructions" onclick="switchSettingsView('custom_instructions')" aria-label="Custom Instructions">
+                                <button type="button" class="settings-row settings-row-interactive" id="settings-row-custom-instructions" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { switchSettingsView('custom_instructions') })} aria-label="Custom Instructions">
                                     <div class="settings-row-left">
                                         <div class="settings-icon-badge settings-icon-cyan" aria-hidden="true">
                                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -141,7 +141,7 @@ function showHelpModal() {
                                 </button>
 
                                 <!-- Personalized Experience Row -->
-                                <div class="settings-row settings-row-clickable" id="settings-row-personalization" onclick="if(!event.target.closest('.settings-switch') && !event.target.closest('label')){ document.getElementById('settings-personalization-toggle')?.click(); }">
+                                <div class="settings-row settings-row-clickable" id="settings-row-personalization" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { if(!event.target.closest('.settings-switch') && !event.target.closest('label')){ document.getElementById('settings-personalization-toggle')?.click(); } })}>
                                     <div class="settings-row-left">
                                         <div class="settings-icon-badge settings-icon-purple" aria-hidden="true">
                                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -165,8 +165,8 @@ function showHelpModal() {
                                                 aria-labelledby="settings-personalization-label"
                                                 aria-checked="${isPersonalized ? 'true' : 'false'}"
                                                 ${isPersonalized ? 'checked' : ''}
-                                                onkeydown="if(event.key==='Enter'){event.preventDefault();this.click();}"
-                                                onchange="handlePersonalizationToggleChange(this)">
+                                                ${window.JarvisTrustedUI.bindUiEvent("keydown", function(event) { if(event.key==='Enter'){event.preventDefault();this.click();} })}
+                                                ${window.JarvisTrustedUI.bindUiEvent("change", function(event) { handlePersonalizationToggleChange(this) })}>
                                             <span class="settings-switch-slider" aria-hidden="true"></span>
                                         </label>
                                     </div>
@@ -187,7 +187,7 @@ function showHelpModal() {
                                         </div>
                                     </div>
                                     <div class="settings-row-right">
-                                        <button type="button" class="settings-action-btn" onclick="closeHelpModal(); showMemoryManager();">
+                                        <button type="button" class="settings-action-btn" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { closeHelpModal(); showMemoryManager(); })}>
                                             <span>Manage &rarr;</span>
                                         </button>
                                     </div>
@@ -213,7 +213,7 @@ function showHelpModal() {
                                         </div>
                                     </div>
                                     <div class="settings-row-right">
-                                        <button type="button" class="settings-action-btn" onclick="closeHelpModal(); openImageGalleryModal();">
+                                        <button type="button" class="settings-action-btn" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { closeHelpModal(); openImageGalleryModal(); })}>
                                             <span>Open &rarr;</span>
                                         </button>
                                     </div>
@@ -235,14 +235,14 @@ function showHelpModal() {
                                         </div>
                                     </div>
                                     <div class="settings-row-right settings-export-buttons">
-                                        <button type="button" class="settings-chip-btn" onclick="exportCurrentChat('markdown')">
+                                        <button type="button" class="settings-chip-btn" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { exportCurrentChat('markdown') })}>
                                             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
                                                 <polyline points="14 2 14 8 20 8"/>
                                             </svg>
                                             <span>Markdown</span>
                                         </button>
-                                        <button type="button" class="settings-chip-btn" onclick="exportCurrentChat('json')">
+                                        <button type="button" class="settings-chip-btn" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { exportCurrentChat('json') })}>
                                             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                                 <path d="M4 17l6-6-6-6M12 19h8"/>
                                             </svg>
@@ -256,7 +256,7 @@ function showHelpModal() {
                             <div class="settings-section-label">SAFETY &amp; DATA</div>
                             <div class="settings-group-card">
                                 <!-- Compliance & Observability Row -->
-                                <button type="button" class="settings-row settings-row-interactive" id="settings-row-compliance" onclick="switchSettingsView('compliance')" aria-label="Compliance & Observability">
+                                <button type="button" class="settings-row settings-row-interactive" id="settings-row-compliance" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { switchSettingsView('compliance') })} aria-label="Compliance & Observability">
                                     <div class="settings-row-left">
                                         <div class="settings-icon-badge settings-icon-cyan" aria-hidden="true">
                                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -277,7 +277,7 @@ function showHelpModal() {
                                 </button>
 
                                 <!-- Workspace Backup & Storage Health Row -->
-                                <button type="button" class="settings-row settings-row-interactive" id="settings-row-workspace-durability" onclick="switchSettingsView('workspace_durability')" aria-label="Workspace Backup & Storage Health">
+                                <button type="button" class="settings-row settings-row-interactive" id="settings-row-workspace-durability" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { switchSettingsView('workspace_durability') })} aria-label="Workspace Backup & Storage Health">
                                     <div class="settings-row-left">
                                         <div class="settings-icon-badge settings-icon-emerald" aria-hidden="true">
                                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -316,7 +316,7 @@ function showHelpModal() {
                                         </div>
                                     </div>
                                     <div class="settings-row-right">
-                                        <button type="button" class="settings-danger-btn" onclick="promptClearAllDataConfirmation()">
+                                        <button type="button" class="settings-danger-btn" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { promptClearAllDataConfirmation() })}>
                                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                                 <polyline points="3 6 5 6 21 6"/>
                                                 <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
@@ -331,7 +331,7 @@ function showHelpModal() {
                             <div class="settings-section-label">ABOUT</div>
                             <div class="settings-group-card">
                                 <!-- Important Info & Tradeoffs Row -->
-                                <button type="button" class="settings-row settings-row-interactive" id="settings-row-architecture-info" onclick="switchSettingsView('architecture_info')" aria-label="Important Info &amp; Architecture">
+                                <button type="button" class="settings-row settings-row-interactive" id="settings-row-architecture-info" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { switchSettingsView('architecture_info') })} aria-label="Important Info &amp; Architecture">
                                     <div class="settings-row-left">
                                         <div class="settings-icon-badge settings-icon-cyan" aria-hidden="true">
                                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -360,7 +360,7 @@ function showHelpModal() {
                     <div id="settings-view-custom-instructions" class="settings-view-panel settings-subview-panel">
                         <!-- Sub-view Header -->
                         <div class="help-modal-header">
-                            <button type="button" onclick="switchSettingsView('main')" class="help-modal-back-btn settings-subview-back-btn" aria-label="Back to settings">
+                            <button type="button" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { switchSettingsView('main') })} class="help-modal-back-btn settings-subview-back-btn" aria-label="Back to settings">
                                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                     <path d="M19 12H5"></path>
                                     <path d="M12 19l-7-7 7-7"></path>
@@ -370,7 +370,7 @@ function showHelpModal() {
                             <div class="help-modal-title-block">
                                 <h2 id="custom-instructions-subview-title" class="settings-modal-heading">Custom Instructions</h2>
                             </div>
-                            <button type="button" onclick="saveCustomInstructionsAndReturn()" class="help-modal-ok-btn" aria-label="Save and return" style="background:#ffffff!important;color:#000000!important;-webkit-text-fill-color:#000000!important;font-weight:750!important;">
+                            <button type="button" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { saveCustomInstructionsAndReturn() })} class="help-modal-ok-btn" aria-label="Save and return" style="background:#ffffff!important;color:#000000!important;-webkit-text-fill-color:#000000!important;font-weight:750!important;">
                                 Done
                             </button>
                         </div>
@@ -383,10 +383,10 @@ function showHelpModal() {
                             <div class="settings-presets-container">
                                 <span class="settings-presets-label">Quick Presets:</span>
                                 <div class="settings-presets-pills">
-                                    <button type="button" class="settings-preset-chip" onclick="applyPresetPrompt('concise')">Concise</button>
-                                    <button type="button" class="settings-preset-chip" onclick="applyPresetPrompt('teacher')">Socratic</button>
-                                    <button type="button" class="settings-preset-chip" onclick="applyPresetPrompt('coder')">Senior Dev</button>
-                                    <button type="button" class="settings-preset-chip" onclick="applyPresetPrompt('academic')">Academic</button>
+                                    <button type="button" class="settings-preset-chip" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { applyPresetPrompt('concise') })}>Concise</button>
+                                    <button type="button" class="settings-preset-chip" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { applyPresetPrompt('teacher') })}>Socratic</button>
+                                    <button type="button" class="settings-preset-chip" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { applyPresetPrompt('coder') })}>Senior Dev</button>
+                                    <button type="button" class="settings-preset-chip" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { applyPresetPrompt('academic') })}>Academic</button>
                                 </div>
                             </div>
 
@@ -397,10 +397,10 @@ function showHelpModal() {
                                     class="custom-system-prompt-input"
                                     rows="6"
                                     maxlength="1200"
-                                    oninput="handleCustomPromptInput(this)"
+                                    ${window.JarvisTrustedUI.bindUiEvent("input", function(event) { handleCustomPromptInput(this) })}
                                     placeholder="e.g. Reply like ChatGPT. Be concise, structured, direct, and avoid conversational filler.">${escapeHtml(currentPrompt)}</textarea>
                                 <div class="settings-textarea-footer">
-                                    <button type="button" class="settings-ghost-btn" onclick="clearCustomInstructionsInput()" title="Clear custom instructions">
+                                    <button type="button" class="settings-ghost-btn" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { clearCustomInstructionsInput() })} title="Clear custom instructions">
                                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
                                             <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
                                             <path d="M3 3v5h5"/>
@@ -417,7 +417,7 @@ function showHelpModal() {
                     <div id="settings-view-compliance" class="settings-view-panel settings-subview-panel" style="display:none;">
                         <!-- Sub-view Header -->
                         <div class="help-modal-header">
-                            <button type="button" onclick="switchSettingsView('main')" class="help-modal-back-btn settings-subview-back-btn" aria-label="Back to settings">
+                            <button type="button" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { switchSettingsView('main') })} class="help-modal-back-btn settings-subview-back-btn" aria-label="Back to settings">
                                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                     <path d="M19 12H5"></path>
                                     <path d="M12 19l-7-7 7-7"></path>
@@ -427,7 +427,7 @@ function showHelpModal() {
                             <div class="help-modal-title-block">
                                 <h2 class="settings-modal-heading">Compliance &amp; Observability</h2>
                             </div>
-                            <button type="button" onclick="switchSettingsView('main')" class="help-modal-ok-btn" aria-label="Done" style="background:#ffffff!important;color:#000000!important;-webkit-text-fill-color:#000000!important;font-weight:750!important;">
+                            <button type="button" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { switchSettingsView('main') })} class="help-modal-ok-btn" aria-label="Done" style="background:#ffffff!important;color:#000000!important;-webkit-text-fill-color:#000000!important;font-weight:750!important;">
                                 Done
                             </button>
                         </div>
@@ -462,7 +462,7 @@ function showHelpModal() {
                                     </div>
                                 </div>
 
-                                <div class="settings-row settings-row-clickable" onclick="if(!event.target.closest('.settings-switch') && !event.target.closest('label')){ document.getElementById('compliance-pii-masking-toggle')?.click(); }">
+                                <div class="settings-row settings-row-clickable" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { if(!event.target.closest('.settings-switch') && !event.target.closest('label')){ document.getElementById('compliance-pii-masking-toggle')?.click(); } })}>
                                     <div class="settings-row-left">
                                         <div class="settings-icon-badge settings-icon-cyan" aria-hidden="true">
                                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
@@ -474,7 +474,7 @@ function showHelpModal() {
                                     </div>
                                     <div class="settings-row-right">
                                         <label class="settings-switch">
-                                            <input type="checkbox" id="compliance-pii-masking-toggle" class="settings-switch-input" onchange="handlePiiMaskingToggle(this)">
+                                            <input type="checkbox" id="compliance-pii-masking-toggle" class="settings-switch-input" ${window.JarvisTrustedUI.bindUiEvent("change", function(event) { handlePiiMaskingToggle(this) })}>
                                             <span class="settings-switch-slider"></span>
                                         </label>
                                     </div>
@@ -504,8 +504,8 @@ function showHelpModal() {
                                             <div class="text-[11px] text-neutral-400">Ring buffer of last 100 events (Diagnostics aid, not SOC2-grade evidence)</div>
                                         </div>
                                         <div class="flex items-center gap-2">
-                                            <button id="btn-export-diagnostics" type="button" class="settings-chip-btn" onclick="exportComplianceDiagnostics()">Export JSON</button>
-                                            <button id="btn-clear-diagnostics" type="button" class="settings-danger-btn" onclick="clearComplianceDiagnosticsLog()">Clear</button>
+                                            <button id="btn-export-diagnostics" type="button" class="settings-chip-btn" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { exportComplianceDiagnostics() })}>Export JSON</button>
+                                            <button id="btn-clear-diagnostics" type="button" class="settings-danger-btn" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { clearComplianceDiagnosticsLog() })}>Clear</button>
                                         </div>
                                     </div>
                                     <div id="compliance-audit-list" class="max-h-48 overflow-y-auto space-y-1 pr-1 custom-scrollbar">
@@ -520,7 +520,7 @@ function showHelpModal() {
                     <div id="settings-view-byok" class="settings-view-panel settings-subview-panel" style="display:none;">
                         <!-- Sub-view Header -->
                         <div class="help-modal-header">
-                            <button type="button" onclick="switchSettingsView('main')" class="help-modal-back-btn settings-subview-back-btn" aria-label="Back to settings">
+                            <button type="button" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { switchSettingsView('main') })} class="help-modal-back-btn settings-subview-back-btn" aria-label="Back to settings">
                                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                     <path d="M19 12H5"></path>
                                     <path d="M12 19l-7-7 7-7"></path>
@@ -530,7 +530,7 @@ function showHelpModal() {
                             <div class="help-modal-title-block">
                                 <h2 class="settings-modal-heading">Bring Your Own Key (BYOK)</h2>
                             </div>
-                            <button type="button" onclick="saveByokKeysAndReturn()" class="help-modal-ok-btn" aria-label="Save and return" style="background:#ffffff!important;color:#000000!important;-webkit-text-fill-color:#000000!important;font-weight:750!important;">
+                            <button type="button" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { saveByokKeysAndReturn() })} class="help-modal-ok-btn" aria-label="Save and return" style="background:#ffffff!important;color:#000000!important;-webkit-text-fill-color:#000000!important;font-weight:750!important;">
                                 Save
                             </button>
                         </div>
@@ -631,10 +631,10 @@ function showHelpModal() {
 
                             <!-- Actions Row -->
                             <div class="flex items-center justify-between pt-2">
-                                <button type="button" class="settings-danger-btn" onclick="clearByokKeys()">
+                                <button type="button" class="settings-danger-btn" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { clearByokKeys() })}>
                                     <span>Reset to Platform Keys</span>
                                 </button>
-                                <button type="button" class="settings-action-btn" onclick="saveByokKeysAndReturn()">
+                                <button type="button" class="settings-action-btn" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { saveByokKeysAndReturn() })}>
                                     <span>Save &amp; Seal</span>
                                 </button>
                             </div>
@@ -645,7 +645,7 @@ function showHelpModal() {
                     <div id="settings-view-architecture-info" class="settings-view-panel settings-subview-panel" style="display:none;">
                         <!-- Sub-view Header -->
                         <div class="help-modal-header">
-                            <button type="button" onclick="switchSettingsView('main')" class="help-modal-back-btn settings-subview-back-btn" aria-label="Back to settings">
+                            <button type="button" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { switchSettingsView('main') })} class="help-modal-back-btn settings-subview-back-btn" aria-label="Back to settings">
                                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                     <path d="M19 12H5"></path>
                                     <path d="M12 19l-7-7 7-7"></path>
@@ -655,7 +655,7 @@ function showHelpModal() {
                             <div class="help-modal-title-block">
                                 <h2 class="settings-modal-heading">Important Info &amp; Architecture</h2>
                             </div>
-                            <button type="button" onclick="closeHelpModal()" class="help-modal-ok-btn" aria-label="Close settings" style="background:#ffffff!important;color:#000000!important;-webkit-text-fill-color:#000000!important;font-weight:750!important;">
+                            <button type="button" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { closeHelpModal() })} class="help-modal-ok-btn" aria-label="Close settings" style="background:#ffffff!important;color:#000000!important;-webkit-text-fill-color:#000000!important;font-weight:750!important;">
                                 Done
                             </button>
                         </div>
@@ -787,7 +787,7 @@ function showHelpModal() {
                     <!-- Sub-View 5: Workspace Backup & Storage Health -->
                     <div id="settings-view-workspace-durability" class="settings-view-panel" style="display:none;">
                         <div class="help-modal-header">
-                            <button type="button" onclick="switchSettingsView('main')" class="help-modal-back-btn settings-subview-back-btn" aria-label="Back to Settings">
+                            <button type="button" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { switchSettingsView('main') })} class="help-modal-back-btn settings-subview-back-btn" aria-label="Back to Settings">
                                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                     <path d="M19 12H5"></path>
                                     <path d="M12 19l-7-7 7-7"></path>
@@ -796,7 +796,7 @@ function showHelpModal() {
                             <div class="help-modal-title-block">
                                 <h2 class="settings-modal-heading">Backup &amp; Storage Health</h2>
                             </div>
-                            <button type="button" onclick="switchSettingsView('main')" class="help-modal-ok-btn" aria-label="Done" style="background:#ffffff!important;color:#000000!important;-webkit-text-fill-color:#000000!important;font-weight:750!important;">
+                            <button type="button" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { switchSettingsView('main') })} class="help-modal-ok-btn" aria-label="Done" style="background:#ffffff!important;color:#000000!important;-webkit-text-fill-color:#000000!important;font-weight:750!important;">
                                 Done
                             </button>
                         </div>
@@ -817,8 +817,8 @@ function showHelpModal() {
                                     Checking browser storage health...
                                 </div>
                                 <div class="flex flex-wrap items-center gap-2">
-                                    <button type="button" id="btn-request-persistent-storage" class="settings-chip-btn" onclick="requestWorkspacePersistentStorage()">Protect Storage</button>
-                                    <button type="button" class="settings-chip-btn" onclick="renderWorkspaceDurabilityView()">Refresh Metrics</button>
+                                    <button type="button" id="btn-request-persistent-storage" class="settings-chip-btn" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { requestWorkspacePersistentStorage() })}>Protect Storage</button>
+                                    <button type="button" class="settings-chip-btn" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { renderWorkspaceDurabilityView() })}>Refresh Metrics</button>
                                 </div>
                             </div>
 
@@ -828,13 +828,13 @@ function showHelpModal() {
                                     Export all durable chats, unified memories, self-improving rules, and custom instructions into a portable archive. BYOK API keys are strictly excluded for security.
                                 </p>
                                 <label class="flex items-center gap-2 text-xs text-neutral-200 mb-2 cursor-pointer">
-                                    <input type="checkbox" id="backup-encrypt-toggle" checked onchange="toggleBackupPassphraseField()" class="rounded border-white/20">
+                                    <input type="checkbox" id="backup-encrypt-toggle" checked ${window.JarvisTrustedUI.bindUiEvent("change", function(event) { toggleBackupPassphraseField() })} class="rounded border-white/20">
                                     <span>Encrypt with AES-256-GCM (PBKDF2-SHA256)</span>
                                 </label>
                                 <div id="backup-passphrase-row" class="mb-3">
                                     <input type="password" id="backup-export-passphrase" class="w-full px-3 py-2 rounded-lg text-xs bg-white/5 border border-white/15 text-white placeholder-neutral-400" placeholder="Enter backup passphrase (min 4 chars)..." autocomplete="new-password">
                                 </div>
-                                <button type="button" id="btn-download-workspace-backup" class="settings-chip-btn" onclick="downloadEncryptedWorkspaceBackup()">
+                                <button type="button" id="btn-download-workspace-backup" class="settings-chip-btn" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { downloadEncryptedWorkspaceBackup() })}>
                                     <span>Download Workspace Backup</span>
                                 </button>
                             </div>
@@ -856,7 +856,7 @@ function showHelpModal() {
                                         <span>Replace All</span>
                                     </label>
                                 </div>
-                                <button type="button" id="btn-restore-workspace-backup" class="settings-chip-btn" onclick="restoreWorkspaceBackupFromFile()">
+                                <button type="button" id="btn-restore-workspace-backup" class="settings-chip-btn" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { restoreWorkspaceBackupFromFile() })}>
                                     <span>Restore Workspace</span>
                                 </button>
                                 <div id="backup-restore-status" class="text-[11px] text-neutral-300 mt-2"></div>

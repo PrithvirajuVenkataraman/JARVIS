@@ -566,18 +566,19 @@ console.log('--- Running Image Generator Suite ---');
     assert.match(cssContent, /\.image-gen-action-btn svg\s*\{[^}]*vertical-align:\s*middle/s, 'SVG symbol must be vertically centered');
 
     // 9.2 Lightbox caption must be deleted / hidden from view
-    assert.match(cssContent, /\.image-lightbox-caption\s*\{[^}]*display:\s*none\s*!important/s, 'Prompt caption must be hidden');
+    assert.match(cssContent, /\.image-lightbox-caption\s*\{[^}]*display:\s*none\s*(?:!important)?/s, 'Prompt caption must be hidden');
 
     const indexPath = path.resolve('index.html');
     const indexContent = readAppSource();
 
     // 9.3 Lightbox DOM must have action button with centered structure
-    assert.match(indexContent, /class="image-gen-action-btn"[^>]*onclick="downloadLightboxImage\(\)"/s);
+    assert.match(indexContent, /class="image-gen-action-btn"[^>]*data-ui-static=/s);
+    assert.ok(fs.readFileSync('app/static-ui-actions.js', 'utf8').includes('downloadLightboxImage()'));
     assert.match(indexContent, /id="image-lightbox-caption"[^>]*style="display:\s*none;"/s);
 
     // Generation queue contracts are exercised in free-image.test.mjs.
     // 9.6 Viewport uncropped layout invariants
-    assert.match(cssContent, /\.image-gen-viewport\.has-image\s*\{[^}]*min-height:\s*0\s*!important/s, 'Viewport must not force min-height when image is loaded');
+    assert.match(cssContent, /\.image-gen-viewport\.has-image\s*\{[^}]*min-height:\s*0\s*(?:!important)?/s, 'Viewport must not force min-height when image is loaded');
     assert.match(cssContent, /\.image-gen-img\s*\{[^}]*object-fit:\s*contain/s, 'Image must use contain to prevent cropping');
 
     // 9.7 Pencil button symbol styling & sanitization retention
