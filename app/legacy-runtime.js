@@ -29800,11 +29800,13 @@ function toggleChatSidebar() {
     } else {
         backdrop?.classList.remove('hidden');
     }
+    panel?.querySelector('button')?.focus({ preventScroll: true });
 }
 
 function closeChatSidebar() {
     const panel = document.getElementById('chat-sidebar-panel');
-    if (panel?.contains(document.activeElement) && typeof document.activeElement.blur === 'function') {
+    const restoreFocus = panel?.contains(document.activeElement);
+    if (restoreFocus && typeof document.activeElement.blur === 'function') {
         document.activeElement.blur();
     }
     panel?.classList.remove('is-open');
@@ -29813,6 +29815,7 @@ function closeChatSidebar() {
     document.getElementById('chat-sidebar-backdrop')?.classList.add('hidden');
     document.getElementById('chat-sidebar-toggle')?.setAttribute('aria-expanded', 'false');
     closeChatSessionMenu();
+    if (restoreFocus) document.getElementById('chat-sidebar-toggle')?.focus({ preventScroll: true });
 }
 
 function focusChatSidebarSearch() {
@@ -29825,6 +29828,8 @@ function openSidebarQuickAction(action) {
         window.event.stopPropagation();
     }
     closeChatSidebar();
+    // Safari does not focus pointer-clicked buttons; give dialogs a visible return target.
+    document.getElementById('chat-sidebar-toggle')?.focus({ preventScroll: true });
     if (action === 'vision') {
         handleComposerAction('vision');
         return;
@@ -29833,10 +29838,15 @@ function openSidebarQuickAction(action) {
         showMemoryManager();
         return;
     }
-    showHelpModal();
-    if (action === 'system') {
-        setTimeout(() => document.getElementById('custom-system-prompt-input')?.focus(), 0);
+    if (action === 'images') {
+        return openImageGalleryModal();
     }
+    return Promise.resolve(showHelpModal()).then(() => {
+        if (action === 'system') {
+            switchSettingsView('custom_instructions');
+            document.getElementById('custom-system-prompt-input')?.focus();
+        }
+    });
 }
 
 let isSidebarDraggingActive = false;
@@ -29870,14 +29880,16 @@ function initSidebarOutsideClickClose() {
 
     // Keyboard ESC to close sidebar
     document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') {
+        if (e.key === 'Escape' && !e.target?.closest?.('[role="dialog"], [role="alertdialog"]')) {
             const panel = document.getElementById('chat-sidebar-panel');
             const isDocked = document.body.classList.contains('sidebar-docked');
             if (panel && (panel.classList.contains('is-open') || isDocked)) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
                 closeChatSidebar();
             }
         }
-    });
+    }, true);
 }
 
 function initSidebarDragging() {

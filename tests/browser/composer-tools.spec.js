@@ -21,10 +21,11 @@ test('slash filtering selects on Enter without sending, then sends the completed
     await expect(page.locator('#request-status')).toHaveText('Response finished.'); expect(sends).toBe(1);
 });
 
-test('minimal workspace keeps only JARVIS above the composer and retains tools and settings', async ({ page }) => {
+test('minimal workspace keeps visible sidebar access beside JARVIS and retains tools and settings', async ({ page }) => {
     const header = page.locator('#app-header');
     await expect(header).toHaveText('JARVIS'); await expect(header.locator('button')).toHaveCount(1);
-    await expect(header.locator('svg')).toHaveCount(0);
+    await expect(header.getByRole('button', { name: 'Open sidebar', exact: true })).toBeVisible();
+    await expect(header.locator('svg')).toHaveCount(1);
     await expect(page.locator('.empty-state-capabilities, .empty-state-emblem, .empty-state-headline, .empty-state-sub')).toHaveCount(0);
     await header.getByRole('button').click();
     await expect(page.locator('#chat-sidebar-panel')).toHaveAttribute('aria-hidden', 'false');
@@ -40,6 +41,78 @@ test('minimal workspace keeps only JARVIS above the composer and retains tools a
     await expect(page.locator('#composer-image-btn')).toBeHidden(); await expect(page.locator('#composer-image-chip')).toHaveCount(0);
     await page.reload(); await page.waitForFunction(() => window.__jarvisModernReady);
     await page.locator('#composer-plus-btn').click(); await expect(page.locator('#composer-image-btn')).toBeVisible();
+});
+
+test('sidebar shortcuts remain reachable on all widths and open their working features', async ({ page }, info) => {
+    test.setTimeout(60000);
+    const toggle = page.getByRole('button', { name: 'Open sidebar', exact: true });
+    const sidebar = page.locator('#chat-sidebar-panel');
+    const actions = sidebar.getByRole('navigation', { name: 'Main chat actions' });
+    const labels = ['New chat', 'Search chats', 'Vision analysis', 'Memory', 'Custom instructions', 'Image library', 'Settings'];
+    for (const [width, height] of [[320, 568], [390, 844], [768, 1024], [1024, 768], [1440, 900], [844, 390]]) {
+        await page.setViewportSize({ width, height });
+        await expect(toggle).toBeVisible();
+        await expect.poll(async () => {
+            const title = await page.locator('#app-header .header-brand-title').boundingBox();
+            return Math.abs(title.x + title.width / 2 - width / 2);
+        }).toBeLessThan(1);
+        await toggle.click();
+        await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+        if (width >= 1024) {
+            await expect.poll(async () => {
+                const composer = await page.locator('#input-bar-inner').boundingBox();
+                const title = await page.locator('#app-header .header-brand-title').boundingBox();
+                return Math.abs(composer.x + composer.width / 2 - title.x - title.width / 2);
+            }).toBeLessThan(1);
+            const composer = await page.locator('#input-bar-inner').boundingBox();
+            const panel = await sidebar.boundingBox();
+            expect(composer.x).toBeGreaterThanOrEqual(panel.x + panel.width);
+            expect(composer.x + composer.width).toBeLessThanOrEqual(width);
+        }
+        await expect(actions.getByRole('button')).toHaveText(labels);
+        for (const label of labels) {
+            const action = actions.getByRole('button', { name: label, exact: true });
+            await action.scrollIntoViewIfNeeded();
+            await expect(action).toBeInViewport();
+            expect((await action.boundingBox()).height).toBeGreaterThanOrEqual(44);
+        }
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+        if ([390, 1440].includes(width)) await page.screenshot({ path: info.outputPath(`sidebar-${width}.png`) });
+        await page.keyboard.press('Escape');
+        await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+        await expect(toggle).toBeFocused();
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
+    await toggle.click(); await actions.getByRole('button', { name: 'Search chats', exact: true }).click();
+    await expect(sidebar.getByRole('searchbox')).toBeFocused();
+    await sidebar.getByRole('searchbox').fill('missing conversation');
+    await expect(page.locator('#chat-sidebar-list')).toContainText('No matching chats found.');
+    await page.keyboard.press('Escape');
+    await toggle.click(); await actions.getByRole('button', { name: 'Memory', exact: true }).click();
+    await expect(page.locator('#memory-manager-modal')).toBeVisible();
+    await page.getByRole('button', { name: 'Close memory manager', exact: true }).click();
+    await expect(toggle).toBeFocused();
+    await toggle.click(); await actions.getByRole('button', { name: 'Custom instructions', exact: true }).click();
+    await expect(page.locator('#settings-view-custom-instructions')).toBeVisible();
+    await expect(page.locator('#custom-system-prompt-input')).toBeVisible();
+    await page.keyboard.press('Escape'); await expect(page.locator('#help-modal')).toHaveCount(0);
+    await toggle.click(); await actions.getByRole('button', { name: 'Image library', exact: true }).click();
+    await expect(page.locator('#image-gallery-modal')).toHaveClass(/is-open/);
+    await page.keyboard.press('Escape'); await expect(page.locator('#image-gallery-modal')).not.toHaveClass(/is-open/);
+    await toggle.click();
+    const chooser = page.waitForEvent('filechooser');
+    await actions.getByRole('button', { name: 'Vision analysis', exact: true }).click();
+    expect((await chooser).isMultiple()).toBe(true);
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await toggle.click(); await actions.getByRole('button', { name: 'Settings', exact: true }).click();
+    await expect(page.locator('#settings-view-main')).toBeVisible(); await page.keyboard.press('Escape');
+    await page.locator('#text-input').fill('Explain the sidebar test.'); await page.locator('#text-input').press('Enter');
+    await expect(page.locator('#request-status')).toHaveText('Response finished.');
+    await toggle.click(); await sidebar.getByRole('searchbox').fill('');
+    await expect(page.locator('#chat-sidebar-list .chat-session-row').first()).toBeVisible();
+    await actions.getByRole('button', { name: 'New chat', exact: true }).click();
+    await expect(page.locator('#chat-container .chat-row')).toHaveCount(0);
+    await toggle.click(); await expect(page.locator('#chat-sidebar-list .chat-session-row').first()).toBeVisible();
 });
 
 test('model routing explains the current preference without promotional badges or fixed model claims', async ({ page }, info) => {

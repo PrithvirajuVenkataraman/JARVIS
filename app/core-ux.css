@@ -148,10 +148,23 @@ body #help-modal .settings-row:has(.settings-switch) { flex-wrap:nowrap; }
 .free-image-card [hidden], .free-image-card .hidden { display: none; }
 .free-image-card .image-gen-img { width: 100%; height: auto; object-fit: contain; }
 
-/* A quiet workspace: the title also opens chats and settings. */
-body #app-header { justify-content:center; }
-body #app-header .header-brand-title { display:inline-flex; align-items:center; justify-content:center; min-height:44px; padding:0 14px; border:0; border-radius:8px; background:transparent; color:var(--core-text); font:600 14px/1 system-ui,sans-serif; letter-spacing:.08em; cursor:pointer; }
-body #app-header .header-brand-title:focus-visible { outline:2px solid #eee; outline-offset:2px; }
+/* Keep sidebar access visible while centering the title independently. */
+body #app-header { display:grid; grid-template-columns:44px minmax(0,1fr) 44px; align-items:center; }
+body #app-header .header-brand-title { display:inline-flex; align-items:center; justify-content:center; min-height:44px; padding:0 14px; color:var(--core-text); font:600 14px/1 system-ui,sans-serif; letter-spacing:.08em; }
+body #app-header #chat-sidebar-toggle { width:44px; height:44px; color:var(--core-text); border-radius:8px; }
+body #app-header #chat-sidebar-toggle:hover { background:var(--core-raised); }
+body #app-header #chat-sidebar-toggle:focus-visible { outline:2px solid #eee; outline-offset:2px; }
+body .chat-sidebar-panel { overflow-y:auto; overscroll-behavior:contain; }
+body .chat-sidebar-header, body .chat-sidebar-nav { flex-shrink:0; }
+body .chat-sidebar-list { min-height:88px; }
+body .chat-sidebar-nav-item { min-height:44px; color:var(--core-text); }
+body .chat-sidebar-nav-item[hidden] { display:none; }
+body .chat-sidebar-close { min-width:44px; min-height:44px; }
+body #input-bar-container { width:auto; }
+@media(min-width:1024px) {
+    body.sidebar-docked .chat-sidebar-panel { width:var(--sidebar-docked-width,280px); }
+    body.sidebar-docked #input-bar-container { left:var(--sidebar-docked-width,280px); }
+}
 body #chat-empty-state:empty { display:none; }
 .free-image-card img.image-gen-img { cursor:zoom-in; }
 :is(.free-image-card img.image-gen-img,#image-lightbox-img[data-generated-card-id]) { -webkit-touch-callout:none; user-select:none; touch-action:pan-y pinch-zoom; }

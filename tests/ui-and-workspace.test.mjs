@@ -31,7 +31,7 @@ const indexHtml = readAppSource();
 // Header elements: streamlined without model dropdown, theme toggle, or sandbox buttons
 assert.ok(indexHtml.includes('id="app-header"'), 'App header element must exist');
 assert.ok(indexHtml.includes('id="chat-sidebar-toggle"'), 'Sidebar toggle button must exist');
-assert.ok(!indexHtml.includes('id="header-new-chat-btn"'), 'Only the JARVIS title should remain in the header');
+assert.ok(!indexHtml.includes('id="header-new-chat-btn"'), 'New chat remains directly available in the sidebar');
 assert.ok(!indexHtml.includes('id="header-command-palette-btn"'), 'Header command palette trigger must be removed end-to-end');
 
 // Verified removed from header completely per user directives
