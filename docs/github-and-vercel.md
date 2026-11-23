@@ -76,6 +76,14 @@ Check GitHub's deployed branch, not just the files on your computer. A local fil
 
 The Node engine warning in Vercel's logs is separate from a missing-lockfile error: the package engine selects Node 22.x. Set Node 22.x in project settings too. A deployment is not verified until its build actually succeeds.
 
+## Image formats and free image creation
+
+Commit `app/image-decoder*.js`, `app/horde-client.js`, and both package files together. Vite bundles the pinned ImageMagick WASM dependency locally, including its upstream license and third-party notices as `image-decoder-LICENSE.txt` and `image-decoder-NOTICE.txt`. Its approximately 15 MB decoder is lazy-loaded for uncommon images and excluded from the startup precache; ordinary PNG/JPEG uploads use the native browser path. RAW conversion runs on the device and does not increase Vercel Function upload limits.
+
+Image creation submits and polls the anonymous AI Horde community queue directly from the browser. Individual network operations time out after 15 seconds; a queued job is canceled after at most ten minutes or when Stop is pressed. No Gemini image API, Puter credits, or paid fallback is used, and no Vercel Function stays open while a job queues. `JARVIS_IMAGE_GENERATION_ENABLED=false` disables the entry points; an existing `JARVIS_IMAGE_FREE_TIER_ENABLED=false` setting also disables them until removed or updated. The old `/api/image-proxy` returns an upgrade message for stale clients rather than making billed requests.
+
+`npm run test:multimodal` includes real codec conversions and mocked free-provider success, quota, validation, and cancellation tests. For optional Nikon NEF and HEIC integration samples, run `node tools/fetch-image-test-samples.mjs`, then rerun multimodal and browser tests. Downloads remain in ignored `scratch/image-fixtures/`, with their SHA256 checksums printed; they are not committed or deployed. Without those samples, integration cases explicitly skip while generated raster fixtures still run. `JARVIS_RAW_TEST_FILE` and `JARVIS_HEIC_TEST_FILE` can point to your own samples.
+
 ## When vision reports missing credentials
 
 Check `/api/diagnostics` on the actual deployment (`https://jarvisjr.vercel.app/api/diagnostics` for the current production site). `model.groqConfigured`, `model.geminiConfigured`, and `vision.configured` indicate configuration presence; they do not validate credentials or provider quotas. The former chat fallback incorrectly reported missing keys after upstream failures even when both keys were configured. The corrected version reports the failure category and preserves an attempt for the second configured provider. Deploy the matching API changes as well as the frontend.

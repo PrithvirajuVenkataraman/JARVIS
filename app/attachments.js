@@ -1,3 +1,5 @@
+import { RAW_IMAGE_EXTENSIONS } from './image-decoder-core.js';
+import { decodeImageFile, cancelImageDecoding } from './image-decoder.js';
 import { formatBytes, detectImageMime, imageNameForMime } from './file-format.js';
 import { postJson as postApiJson } from './api-client.js';
 import { jsonByteLength, MAX_JSON_REQUEST_BYTES, payloadSizeError } from './request-payload.js';
@@ -60,8 +62,7 @@ const MAX_EXTRACT_CHARS = 500000;
 const PDF_DIGITAL_PAGE_LIMIT = 100;
 const PDF_VISUAL_PAGE_LIMIT = 100; // expanded to 100 pages for heavy scanned documents (batch-streamed)
 const TEXT_EXTENSIONS = /\.(txt|md|markdown|json|jsonl|csv|tsv|xml|html|htm|css|js|mjs|cjs|ts|tsx|jsx|py|java|cpp|c|h|cs|go|rs|rb|php|sh|yaml|yml|toml|ini|log|sql|rtf|eml|msg)$/i;
-const IMAGE_EXTENSIONS = /\.(jpe?g|pjpeg|png|gif|webp|bmp|dib|tiff?|heic|heif|heics|heifs|avif|avifs|dng|raw|cr[23]|nef|nrw|arw|srf|sr2|raf|rw2|orf|pef|jp2|j2k|jpf|jpx|jpm|pict?|pct|pic|psd|ico|cur|svgz?)$/i;
-const RAW_IMAGE_EXTENSIONS = /\.(dng|raw|cr[23]|nef|nrw|arw|srf|sr2|raf|rw2|orf|pef)$/i;
+const IMAGE_EXTENSIONS = /\.(jpe?g|pjpeg|png|gif|webp|bmp|dib|tiff?|heic|heif|heics|heifs|avif|avifs|dng|raw|cr[23]|nef|nrw|arw|srf|sr2|raf|rw2|orf|pef|jp2|j2k|jpf|jpx|jpm|pict?|pct|pic|psd|psb|jxl|tga|qoi|exr|hdr|dds|pcx|ppm|pgm|pbm|rwl|srw|kdc|dcr|mrw|x3f|ico|cur|svgz?)$/i;
 const VISION_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 const XLSX_EXTENSIONS = /\.(xlsx|xls|ods)$/i;
 const ZIP_EXTENSIONS = /\.(zip|cbz)$/i;
@@ -121,6 +122,7 @@ function scoreAttachmentIntent(query, categoryId) {
 }
 
 const pendingAttachments = [];
+let preparationEpoch = 0;
 
 // Sliding Window Multimodal Memory for multi-turn visual dialogue continuity (ChatGPT/Gemini style)
 const activeSessionImages = [];
@@ -174,6 +176,8 @@ export function hasPendingAttachments() {
 }
 
 export function clearPendingAttachments() {
+    preparationEpoch++; cancelImageDecoding();
+    for (const item of pendingAttachments) if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
     pendingAttachments.splice(0, pendingAttachments.length);
 }
 
@@ -188,10 +192,12 @@ export function removePendingAttachment(id) {
 }
 
 export async function addFilesToComposer(fileList = []) {
+    const epoch = preparationEpoch;
     const files = Array.from(fileList || []).filter(Boolean);
     const added = [];
     const errors = [];
     for (const file of files) {
+        if (epoch !== preparationEpoch) break;
         if (pendingAttachments.length >= MAX_ATTACHMENTS) {
             errors.push(`Only ${MAX_ATTACHMENTS} attachments are allowed per message.`);
             break;
@@ -203,10 +209,11 @@ export async function addFilesToComposer(fileList = []) {
         }
         try {
             const attachment = await createPendingAttachment(file);
+            if (epoch !== preparationEpoch) { if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl); break; }
             pendingAttachments.push(attachment);
             added.push(attachment);
         } catch (error) {
-            errors.push(String(error?.message || 'This file could not be prepared.'));
+            if (error?.name !== 'AbortError') errors.push(String(error?.message || 'This file could not be prepared.'));
         }
     }
     return { added, errors };
@@ -762,16 +769,13 @@ function encodedImageMime(base64) {
     catch { return ''; }
 }
 
-function unsupportedImageError(name, raw = false) {
-    return Object.assign(new Error(raw
-        ? `${name} is a camera RAW file. Export it as JPEG or PNG before attaching it.`
-        : `${name || 'This image'} could not be opened on this device. Export it as JPEG or PNG and try again.`), { code: 'unsupported_media' });
+function unsupportedImageError(name) {
+    return Object.assign(new Error(`${name || 'This image'} could not be opened on this device. It may be damaged or use an unsupported codec.`), { code: 'unsupported_media' });
 }
 
 async function createPendingAttachment(file) {
     const detectedMime = detectImageMime(new Uint8Array(await file.slice(0, 32).arrayBuffer()));
     const isImage = Boolean(detectedMime) || (file.type || '').startsWith('image/') || IMAGE_EXTENSIONS.test(file.name || '');
-    if (RAW_IMAGE_EXTENSIONS.test(file.name || '') && (!detectedMime || detectedMime === 'image/tiff')) throw unsupportedImageError(file.name, true);
     let fileName = String(file.name || '').trim();
     if (!fileName || fileName === 'blob' || fileName === 'image.png') {
         const mimeType = detectedMime || file.type;
@@ -806,8 +810,7 @@ async function createPendingAttachment(file) {
                 attachment.previewUrl = URL.createObjectURL(new Blob([bytes], { type: mimeType }));
                 return clean;
             });
-        try { await attachment.preEncodedPromise; }
-        catch { throw unsupportedImageError(fileName); }
+        await attachment.preEncodedPromise;
     } else {
         attachment.base64 = await fileToBase64(file);
     }
@@ -892,6 +895,16 @@ const LOSSLESS_PASSTHROUGH_MAX_BYTES = 400 * 1024;
 const LOSSLESS_PASSTHROUGH_MIMES = new Set(['image/png', 'image/webp']);
 
 async function compressImageFileToBase64(file, maxDimension = 1600, quality = 0.88) {
+    const detected = detectImageMime(new Uint8Array(await file.slice(0, 32).arrayBuffer()));
+    const raw = RAW_IMAGE_EXTENSIONS.test(file.name || '') && (!detected || detected === 'image/tiff');
+    if (!raw) {
+        try { return await compressNativeImage(file, maxDimension, quality); } catch (_) {}
+    }
+    const decoded = await decodeImageFile(file, { maxDimension });
+    return fileToBase64(decoded);
+}
+
+async function compressNativeImage(file, maxDimension = 1600, quality = 0.88) {
     if (typeof document === 'undefined') {
         return fileToBase64(file);
     }
@@ -1192,7 +1205,6 @@ export async function downsampleImageFileToSafeBase64(file, maxBytes = 3.2 * 102
     const detectedMime = detectImageMime(new Uint8Array(await file.slice(0, 32).arrayBuffer()));
     const isImage = Boolean(detectedMime) || /^image\//i.test(file.type || '') || IMAGE_EXTENSIONS.test(file.name || '');
     if (!isImage) return fileToBase64(file);
-    if (RAW_IMAGE_EXTENSIONS.test(file.name || '') && (!detectedMime || detectedMime === 'image/tiff')) throw unsupportedImageError(file.name, true);
     const source = detectedMime && detectedMime !== file.type ? new File([file], file.name, { type: detectedMime }) : file;
     for (const [dimension, quality] of [[1600, 0.88], [1280, 0.75], [1024, 0.7], [768, 0.6]]) {
         const encoded = await compressImageFileToBase64(source, dimension, quality);

@@ -1,21 +1,21 @@
 /**
  * @file app/image-generation-config.js
- * @description Dynamic, non-hardcoded configuration engine for Gemini AI
+ * @description Dynamic, non-hardcoded configuration engine for free community AI
  * image generation and proxy routing.
  */
 
 export const DEFAULT_IMAGE_CONFIG = Object.freeze({
-    modelId: 'gemini-3.1-flash-lite-image',
-    modelName: 'Gemini Image Diffusion (Gemini 3.1 Flash Lite Image)',
+    modelId: 'ai_horde_free',
+    modelName: 'Free community image generation (AI Horde)',
     quantization: 'int8',
-    defaultSteps: 4,
+    defaultSteps: 25,
     defaultWidth: 512,
     defaultHeight: 512,
     guidanceScale: 1.0,
     maxHistoryItems: 50,
-    timeoutMs: 60000,
+    timeoutMs: 600000,
     minVramBytes: 2 * 1024 * 1024 * 1024,
-    model: 'gemini-3.1-flash-lite-image',
+    model: 'ai_horde_free',
     defaultNegativePrompt: 'text,watermark,words,letters,signature,typography,lowres,blurry',
     fallbackEndpointTemplate: '/api/image-proxy?prompt={prompt}&width={width}&height={height}&model={model}&negative_prompt={negativePrompt}&seed={seed}',
     storageKey: 'jarvis_image_config_v1'
@@ -81,7 +81,7 @@ export function resetImageConfig() {
 }
 
 /**
- * Dynamically builds the Gemini image proxy URL by injecting prompt and dimensions.
+ * Dynamically builds the retired image proxy compatibility URL by injecting prompt and dimensions.
  * @param {string} prompt
  * @param {object} [options]
  * @returns {string}

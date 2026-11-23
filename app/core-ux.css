@@ -175,3 +175,15 @@ body #help-modal .settings-row:has(.settings-switch) { flex-wrap:nowrap!importan
 @media(max-width:480px) and (max-height:650px) {
     body .chat-empty-state:has(.empty-state-capabilities[data-action-count="3"]) .empty-state-emblem-wrap { display:none; }
 }
+.image-gen-card.free-image-card { width: 100%; max-width: 36rem; color: #eee; }
+.free-image-card .image-gen-viewport { background: #111; border: 1px solid #333; border-radius: 16px; overflow: hidden; }
+.free-image-loading { padding: clamp(20px, 5vw, 36px); }
+.free-image-loading .image-gen-status-text { position: static; color: #eee; font-size: 1rem; line-height: 1.5; }
+.free-image-note { color: #aaa; font-size: .875rem; line-height: 1.6; margin: 12px 0 16px; }
+.free-image-card button { min-height: 44px; padding: 8px 16px; background: #222; border: 1px solid #444; border-radius: 10px; color: #eee; font: inherit; cursor: pointer; }
+.free-image-card button:hover { background: #303030; }
+.free-image-card button:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+.free-image-card .free-image-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding: 12px 0; }
+.free-image-card .free-image-actions button { min-width: 0; padding: 8px 6px; font-size: .8125rem; white-space: nowrap; }
+.free-image-card [hidden], .free-image-card .hidden { display: none !important; }
+.free-image-card .image-gen-img { width: 100%; height: auto; object-fit: contain; }

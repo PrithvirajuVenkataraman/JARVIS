@@ -8057,6 +8057,7 @@ function showHelpModal(...args) { return globalThis.JarvisLazy.loadClassic('sett
 
 
         function stopActiveGeneration(reason = 'manual') {
+ window.__jarvisImageTurnController?.abort();
  window.JarvisLocation?.cancel();
  window.JarvisRecall?.cancel();
             const liveResearch = window.JarvisLiveResearch?.activeController;
@@ -12903,219 +12904,47 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
         }
 
         async function handleImageGenerationRequest(promptText, options = {}) {
-            const rawPrompt = (typeof extractImagePrompt === 'function' ? extractImagePrompt(promptText) : '') ||
-                String(promptText || '').replace(/^\/(?:image|img|draw|art)\s*/i, '').replace(/[?!.]+$/, '').trim();
-            if (!rawPrompt) {
-                activateComposerImageMode();
-                return;
+            const rawPrompt = (typeof extractImagePrompt === 'function' ? extractImagePrompt(promptText) : '') || String(promptText || '').replace(/^\/(?:image|img|draw|art)\s*/i, '').trim();
+            if (!rawPrompt) { activateComposerImageMode(); return; }
+            if (window.JarvisCapabilities?.hasLoaded() && !window.JarvisCapabilities.isAvailable('images')) {
+                showTemporaryMessage('Image creation is currently unavailable. Your prompt has been kept.'); return;
             }
-            const cleanPrompt = (typeof enhanceImagePromptForAccuracy === 'function')
-                ? enhanceImagePromptForAccuracy(rawPrompt)
-                : rawPrompt;
-
+            window.__jarvisImageTurnController?.abort();
+            const controller = new AbortController(); window.__jarvisImageTurnController = controller;
             hideThinkingIndicator();
-            const aspectRatio = options.aspectRatio || (typeof detectSmartAspectRatio === 'function' ? detectSmartAspectRatio(rawPrompt) : null) || '1:1';
+            const aspectRatio = options.aspectRatio || detectSmartAspectRatio(rawPrompt) || '1:1';
+            const dimensions = { '1:1': [512, 512], '16:9': [768, 448], '9:16': [448, 768], '4:3': [640, 512], '3:4': [512, 640] };
+            const [width, height] = dimensions[aspectRatio] || dimensions['1:1'];
             const cardId = 'img-card-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
-
-            let width = 512;
-            let height = 512;
-            if (aspectRatio === '16:9') { width = 768; height = 432; }
-            else if (aspectRatio === '9:16') { width = 432; height = 768; }
-            else if (aspectRatio === '4:3') { width = 640; height = 480; }
-            else if (aspectRatio === '3:4') { width = 480; height = 640; }
-
-            const seed = Math.floor(Math.random() * 1000000);
-            const clientApiKey = (typeof localStorage !== 'undefined' && (localStorage.getItem('gemini_api_key') || localStorage.getItem('GEMINI_API_KEY') || localStorage.getItem('apiKey'))) || (typeof window !== 'undefined' && (window.GEMINI_API_KEY || window.geminiApiKey)) || '';
-            let proxyUrl = `/api/image-proxy?prompt=${encodeURIComponent(cleanPrompt)}&width=${width}&height=${height}&aspectRatio=${encodeURIComponent(aspectRatio)}&seed=${seed}`;
-            if (clientApiKey) {
-                proxyUrl += `&apiKey=${encodeURIComponent(clientApiKey)}`;
-            }
-            const initialUrl = proxyUrl;
-
-            const cardHtml = `<div id="${cardId}" class="image-gen-card" data-prompt="${escapeHtml(rawPrompt)}" data-enhanced-prompt="${escapeHtml(cleanPrompt)}" data-aspect-ratio="${escapeHtml(aspectRatio)}"><div id="${cardId}-viewport" class="image-gen-viewport" data-ratio="${escapeHtml(aspectRatio)}"><img id="${cardId}-img" class="image-gen-img hidden" alt="${escapeHtml(cleanPrompt)}" onclick="window.openImageLightboxFromCard('${cardId}')" /><div id="${cardId}-loader" class="image-gen-loader-overlay"><div id="${cardId}-sparkle" class="image-ai-sparkle-container"><div class="image-ai-aura"></div><div class="image-ai-wave wave-1"></div><div class="image-ai-wave wave-2"></div><svg class="image-ai-star" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="${cardId}-starGrad" x1="2" y1="2" x2="30" y2="30" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#818cf8" /><stop offset="50%" stop-color="#c084fc" /><stop offset="100%" stop-color="#38bdf8" /></linearGradient></defs><path d="M16 2C16 9.73 9.73 16 2 16C9.73 16 16 22.27 16 30C16 22.27 22.27 16 30 16C22.27 16 16 9.73 16 2Z" fill="url(#${cardId}-starGrad)" /></svg></div><div id="${cardId}-status" class="image-gen-status-text">Generating... 15%</div><div id="${cardId}-progress-bg" class="image-gen-progress-bar-bg"><div id="${cardId}-progress" class="image-gen-progress-bar-fill" style="width: 15%"></div></div><div id="${cardId}-retry-wrap" class="image-scratch-retry-wrap hidden"><button type="button" class="image-scratch-retry-btn" onclick="window.handleImageCardAction('${cardId}')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg><span id="${cardId}-action-label">Retry</span></button></div></div><div id="${cardId}-actions" class="image-pencil-dropdown-wrapper image-floating-pencil hidden"><button type="button" class="image-pencil-trigger-btn" onclick="window.toggleImagePencilMenu('${cardId}')" title="Options (Download, Copy)" aria-label="Image options"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path><path d="m15 5 4 4"></path></svg></button><div id="${cardId}-menu" class="image-pencil-menu hidden"><button type="button" class="image-pencil-menu-item" onclick="window.downloadImageCard('${cardId}'); window.toggleImagePencilMenu('${cardId}', false)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg><span>Download</span></button><button type="button" class="image-pencil-menu-item" onclick="window.copyImageCard('${cardId}'); window.toggleImagePencilMenu('${cardId}', false)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg><span>Copy</span></button></div></div></div></div>`;
-
-            addChatMessage(cardHtml, false, null, {
-                sourceType: 'tool',
-                allowEmpty: false
-            });
-
-            const cardElem = document.getElementById(cardId);
-            cardElem?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-
-            const statusEl = cardElem?.querySelector('.image-gen-status-text') || document.getElementById(`${cardId}-status`);
-            const progressEl = cardElem?.querySelector('.image-gen-progress-bar-fill') || document.getElementById(`${cardId}-progress`);
-            const progressBgEl = cardElem?.querySelector('.image-gen-progress-bar-bg') || document.getElementById(`${cardId}-progress-bg`);
-            const loaderEl = cardElem?.querySelector('.image-gen-loader-overlay') || document.getElementById(`${cardId}-loader`);
-            const sparkleEl = cardElem?.querySelector('.image-ai-sparkle-container') || document.getElementById(`${cardId}-sparkle`);
-            const retryWrapEl = cardElem?.querySelector('.image-scratch-retry-wrap') || document.getElementById(`${cardId}-retry-wrap`);
-            const imgEl = cardElem?.querySelector('.image-gen-img') || document.getElementById(`${cardId}-img`);
-            const actionsEl = cardElem?.querySelector('.image-floating-pencil') || document.getElementById(`${cardId}-actions`);
-            const viewportEl = cardElem?.querySelector('.image-gen-viewport') || document.getElementById(`${cardId}-viewport`);
-
-            const startTime = Date.now();
-            const progressTimer = setInterval(() => {
-                if (imageRevealed) {
-                    clearInterval(progressTimer);
-                    return;
-                }
-                const elapsedSec = (Date.now() - startTime) / 1000;
-                let percent = Math.min(92, Math.round(15 + (1 - Math.exp(-elapsedSec / 3.0)) * 77));
-
-                if (progressEl) progressEl.style.width = `${percent}%`;
-                if (statusEl) statusEl.textContent = `Generating... ${percent}%`;
-            }, 100);
-
-            const showPausedState = (errorMsg, isKeyError) => {
-                clearInterval(progressTimer);
-                clearTimeout(autoFailoverTimeout);
-                const activeCard = document.getElementById(cardId) || cardElem;
-                const activeSparkle = activeCard?.querySelector('.image-ai-sparkle-container') || sparkleEl;
-                const activeStatus = activeCard?.querySelector('.image-gen-status-text') || statusEl;
-                const activeProgressBg = activeCard?.querySelector('.image-gen-progress-bar-bg') || progressBgEl;
-                const activeRetryWrap = activeCard?.querySelector('.image-scratch-retry-wrap') || retryWrapEl;
-                const activeLabel = activeCard?.querySelector(`#${cardId}-action-label`) || activeRetryWrap?.querySelector('span');
-
-                if (activeSparkle) activeSparkle.classList.add('is-paused');
-                if (activeStatus) activeStatus.textContent = errorMsg || 'Generation paused';
-                if (activeProgressBg) activeProgressBg.style.display = 'none';
-                if (activeRetryWrap) {
-                    activeRetryWrap.classList.remove('hidden');
-                    activeRetryWrap.style.display = 'inline-flex';
-                }
-                if (activeLabel) {
-                    if (isKeyError || errorMsg === 'API Key Required' || errorMsg === 'Invalid API Key') {
-                        activeLabel.textContent = 'Set API Key';
-                    } else if (errorMsg === 'Quota Exceeded') {
-                        activeLabel.textContent = 'Switch Key';
-                    } else {
-                        activeLabel.textContent = 'Retry';
-                    }
-                }
-            };
-
-            let imageRevealed = false;
-            const autoFailoverTimeout = setTimeout(() => {
-                if (!imageRevealed) {
-                    showPausedState('Generation paused');
-                }
-            }, 60000);
-
-            function revealImage(src, id) {
-                if (imageRevealed) return;
-                imageRevealed = true;
-                clearInterval(progressTimer);
-                clearTimeout(autoFailoverTimeout);
-
-                const activeCard = document.getElementById(cardId) || cardElem;
-                const activeViewport = activeCard?.querySelector('.image-gen-viewport') || viewportEl || document.getElementById(`${cardId}-viewport`);
-                const activeImg = activeCard?.querySelector('.image-gen-img') || imgEl;
-                const activeLoader = activeCard?.querySelector('.image-gen-loader-overlay') || loaderEl;
-                const activeActions = activeCard?.querySelector('.image-floating-pencil') || actionsEl;
-                const activeProgress = activeCard?.querySelector('.image-gen-progress-bar-fill') || progressEl;
-                const activeStatus = activeCard?.querySelector('.image-gen-status-text') || statusEl;
-
-                if (activeViewport) {
-                    activeViewport.classList.add('has-image');
-                    activeViewport.style.aspectRatio = 'auto';
-                    activeViewport.style.minHeight = '0';
-                    activeViewport.style.height = 'auto';
-                }
-                if (activeProgress) activeProgress.style.width = '100%';
-                if (activeStatus) activeStatus.textContent = 'Generating... 100%';
-
-                if (activeImg) {
-                    activeImg.src = src;
-                    activeImg.classList.remove('hidden');
-                    activeImg.style.display = 'block';
-                    activeImg.onclick = () => window.openImageLightboxFromCard?.(cardId);
-                }
-                const imageId = id || `img_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-                if (activeCard) {
-                    activeCard.dataset.imageUrl = src;
-                    activeCard.dataset.imageId = imageId;
-                }
-                if (activeLoader) {
-                    activeLoader.style.display = 'none';
-                }
-                if (activeActions) {
-                    activeActions.classList.remove('hidden');
-                    activeActions.style.display = 'inline-flex';
-                }
-                saveToHistory(cleanPrompt, `[Generated Image: "${cleanPrompt}"]`, { recordContext: true });
-
-                // Persist immediately to Image Gallery (IndexedDB + localStorage fallback) so it is preserved even if chat is deleted
-                const galleryRecord = {
-                    id: imageId,
-                    prompt: cleanPrompt,
-                    dataUrl: src,
-                    imageUrl: src,
-                    provider: (typeof id === 'string' && (id.includes('/') || id.includes('gemini') || id.includes('horde'))) ? id : 'remote',
-                    timestamp: Date.now()
-                };
-                if (window.JarvisImageStorage?.saveImage) {
-                    window.JarvisImageStorage.saveImage(galleryRecord).catch(err => {
-                        console.warn('[image-storage] auto-save failed:', err);
-                    });
-                } else if (window.JarvisImageStorage?.saveGeneratedImage) {
-                    window.JarvisImageStorage.saveGeneratedImage(galleryRecord).catch(err => {
-                        console.warn('[image-storage] auto-save failed:', err);
-                    });
-                } else {
-                    try {
-                        const list = JSON.parse(localStorage.getItem('jarvis_recent_images_meta') || '[]');
-                        list.unshift(galleryRecord);
-                        if (list.length > 50) list.length = 50;
-                        localStorage.setItem('jarvis_recent_images_meta', JSON.stringify(list));
-                    } catch (_) {}
-                }
-            }
-
-            if (imgEl) {
-                (async () => {
-                    let fetchUrl = proxyUrl;
-                    if (!fetchUrl.includes('response_format=json')) {
-                        fetchUrl += '&response_format=json';
-                    }
-                    try {
-                        const res = await fetch(fetchUrl);
-                        if (res.ok) {
-                            const data = await res.json().catch(() => null);
-                            const imageSrc = data?.dataUrl || (data?.image ? `data:image/png;base64,${data.image}` : '');
-                            if (imageSrc) {
-                                revealImage(imageSrc, data?.model);
-                                return;
-                            }
-                        }
-
-                        // Failed: parse structured error details from response
-                        let errorMsg = 'Generation paused';
-                        let isKeyError = false;
-                        const errData = await res.json().catch(() => null);
-                        const errCode = errData?.error?.code;
-                        const rawMsg = String(errData?.error?.message || '');
-
-                        if (errCode === 'missing_gemini_key' || rawMsg.includes('missing_gemini_key') || rawMsg.includes('key is required')) {
-                            errorMsg = 'API Key Required';
-                            isKeyError = true;
-                        } else if (errCode === 'invalid_api_key' || rawMsg.includes('API key not valid') || rawMsg.includes('INVALID_ARGUMENT')) {
-                            errorMsg = 'Invalid API Key';
-                            isKeyError = true;
-                        } else if (errCode === 'quota_exceeded' || res.status === 429 || rawMsg.includes('quota') || rawMsg.includes('RESOURCE_EXHAUSTED')) {
-                            errorMsg = 'Quota Exceeded';
-                        } else if (rawMsg.includes('HTTP 404') || rawMsg.includes('is not found')) {
-                            errorMsg = 'Model Unavailable';
-                        } else if (rawMsg.includes('HTTP 500') || rawMsg.includes('HTTP 502') || rawMsg.includes('HTTP 503')) {
-                            errorMsg = 'Service Unavailable';
-                        } else {
-                            errorMsg = 'Generation paused';
-                        }
-
-                        showPausedState(errorMsg, isKeyError);
-                    } catch (err) {
-                        showPausedState('Service Unavailable', false);
-                    }
-                })();
-            }
+            addChatMessage(`<div id="${cardId}" class="image-gen-card free-image-card" data-prompt="${escapeHtml(rawPrompt)}" data-aspect-ratio="${escapeHtml(aspectRatio)}"><div class="image-gen-viewport" data-ratio="${escapeHtml(aspectRatio)}"><img class="image-gen-img hidden" alt="${escapeHtml(rawPrompt)}"><div class="free-image-loading"><p class="image-gen-status-text" role="status">Joining the free community queue…</p><p class="free-image-note">AI Horde · No payment or account required. Prompts are processed by community workers. Queues can take several minutes.</p><button type="button" class="free-image-stop">Stop</button><button type="button" class="free-image-retry hidden">Try again</button></div></div><div class="free-image-actions hidden"><button type="button" data-image-download>Download</button><button type="button" data-image-copy>Copy</button><button type="button" data-image-open>View image</button></div></div>`, false, null, { sourceType: 'tool', allowEmpty: false, skipRecord: true });
+            const card = document.getElementById(cardId); if (!card) return;
+            const status = card.querySelector('.image-gen-status-text');
+            const stop = card.querySelector('.free-image-stop');
+            const retry = card.querySelector('.free-image-retry');
+            stop.addEventListener('click', () => controller.abort());
+            controller.signal.addEventListener('abort', () => { status.textContent = 'Image creation stopped.'; stop.hidden = true; retry.classList.remove('hidden'); }, { once: true });
+            retry.addEventListener('click', () => regenerateImageCard(cardId));
+            card.querySelector('[data-image-download]').addEventListener('click', () => downloadImageCard(cardId));
+            card.querySelector('[data-image-copy]').addEventListener('click', () => copyImageCard(cardId));
+            card.querySelector('[data-image-open]').addEventListener('click', () => openImageLightboxFromCard(cardId));
+            try {
+                const result = await window.JarvisImageGenerator.generateImage(rawPrompt, { width, height, signal: controller.signal, onProgress: event => {
+                    if (!controller.signal.aborted && card.isConnected) status.textContent = event.message;
+                } });
+                if (controller.signal.aborted || !card.isConnected) return;
+                const img = card.querySelector('img'); img.src = result.dataUrl;
+                await img.decode();
+                if (controller.signal.aborted || !card.isConnected) return;
+                img.classList.remove('hidden');
+                img.addEventListener('click', () => openImageLightboxFromCard(cardId));
+                card.dataset.imageUrl = result.dataUrl; card.dataset.imageId = result.id;
+                card.querySelector('.image-gen-viewport').classList.add('has-image');
+                card.querySelector('.free-image-loading').hidden = true;
+                card.querySelector('.free-image-actions').classList.remove('hidden');
+                saveToHistory(rawPrompt, `[Generated Image: "${rawPrompt}"]`, { recordContext: true });
+            } catch (error) {
+                if (!controller.signal.aborted && card.isConnected) { status.textContent = error.message || 'Image creation could not finish.'; stop.hidden = true; retry.classList.remove('hidden'); }
+            } finally { if (window.__jarvisImageTurnController === controller) window.__jarvisImageTurnController = null; }
         }
 
         window.handleImageGenerationRequest = handleImageGenerationRequest;
@@ -13129,30 +12958,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
         function handleImageCardAction(cardId) {
             const card = document.getElementById(cardId);
             if (!card) return;
-            const label = card.querySelector(`#${cardId}-action-label`) || card.querySelector('.image-scratch-retry-btn span');
-            const actionText = label?.textContent?.trim() || '';
 
-            if (actionText === 'Set API Key' || actionText === 'Switch Key') {
-                const promptMsg = actionText === 'Switch Key'
-                    ? 'Gemini quota exceeded for your current key.\nEnter another Google Gemini API key (or link billing at https://aistudio.google.com/):\nLeave blank to retry with the current key.'
-                    : 'Enter your Google Gemini API key to enable image generation:\n(Get one free at https://aistudio.google.com/app/apikey)';
-
-                const enteredKey = window.prompt(promptMsg);
-                if (enteredKey && enteredKey.trim()) {
-                    const cleanKey = enteredKey.trim();
-                    try {
-                        localStorage.setItem('gemini_api_key', cleanKey);
-                        localStorage.setItem('GEMINI_API_KEY', cleanKey);
-                    } catch (_) {}
-                    window.showTemporaryMessage?.('Gemini API key updated! Regenerating image...');
-                    regenerateImageCard(cardId);
-                    return;
-                } else if (actionText === 'Switch Key') {
-                    regenerateImageCard(cardId);
-                    return;
-                }
-                return;
-            }
             regenerateImageCard(cardId);
         }
         window.handleImageCardAction = handleImageCardAction;
@@ -13162,7 +12968,8 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             if (!card) return;
             const prompt = card.dataset.prompt;
             const ratio = card.dataset.aspectRatio || '1:1';
-            card.remove();
+            const row = card.closest('.chat-row[data-role="assistant"]');
+            if (row) row.remove(); else card.remove();
             handleImageGenerationRequest(prompt, { aspectRatio: ratio });
         }
         window.regenerateImageCard = regenerateImageCard;
@@ -13196,7 +13003,8 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             const url = card.dataset.imageUrl;
             const prompt = card.dataset.prompt || 'ai-image';
             if (!url) return;
-            const filename = `${slugifyPrompt(prompt)}.jpg`;
+            const extension = /^data:image\/webp/i.test(url) ? 'webp' : /^data:image\/png/i.test(url) ? 'png' : 'jpg';
+            const filename = `${slugifyPrompt(prompt)}.${extension}`;
             if (url.startsWith('data:')) {
                 downloadUrlAsFile(url, filename);
                 return;

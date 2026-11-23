@@ -22,6 +22,9 @@ export default defineConfig({
             for (const name of ['katex.min.js', 'science-format.js', 'manifest.json', '404.html', 'robots.txt', 'sitemap.xml']) {
                 await copyFile(name, join('dist', name));
             }
+            for (const name of ['LICENSE', 'NOTICE']) {
+                await copyFile(join('node_modules/@imagemagick/magick-wasm', name), join('dist', `image-decoder-${name}.txt`));
+            }
             const files = [];
             async function walk(directory) {
                 for (const item of await readdir(directory, { withFileTypes: true })) {
@@ -40,7 +43,7 @@ export default defineConfig({
             const visit = key => {
                 const entry = manifest[key]; if (!entry) return;
                 core.add('/' + entry.file);
-                for (const file of [...(entry.css || []), ...(entry.assets || [])]) if (!/(?:settings|vision)-runtime|image-generator-worker|recall-worker|ort-wasm|\.wasm$/.test(file)) core.add('/' + file);
+                for (const file of [...(entry.css || []), ...(entry.assets || [])]) if (!/(?:settings|vision)-runtime|image-decoder-worker|recall-worker|ort-wasm|\.wasm$/.test(file)) core.add('/' + file);
                 for (const dependency of entry.imports || []) visit(dependency);
             };
             visit('index.html');

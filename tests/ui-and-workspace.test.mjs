@@ -1009,11 +1009,12 @@ assert.ok(
     'Responsive media queries must maintain comfortable button widths on smaller screens'
 );
 
-// 5.2 Immediate Image Gallery persistence upon image reveal
+// 5.2 The generation module owns gallery persistence; the UI uses that single path.
 assert.ok(
-    indexHtml.includes('window.JarvisImageStorage?.saveImage') &&
-    indexHtml.includes('jarvis_recent_images_meta'),
-    'revealImage must immediately persist generated images to JarvisImageStorage and localStorage fallback'
+    indexHtml.includes('window.JarvisImageGenerator.generateImage') &&
+    fs.readFileSync('app/image-generator.js', 'utf8').includes('await saveGeneratedImage(result)') &&
+    fs.readFileSync('app/image-storage.js', 'utf8').includes('jarvis_recent_images_meta'),
+    'Generated images must use the shared gallery persistence path with its localStorage fallback'
 );
 
 // 5.3 Multimodal media attachment live web search integration

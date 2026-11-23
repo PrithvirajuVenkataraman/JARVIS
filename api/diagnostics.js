@@ -29,14 +29,14 @@ export function buildDiagnosticsStatus() {
   const chat = ['GROQ_API_KEY', 'GROQ_KEY', 'GROQ_API_KEYS', 'GEMINI_API_KEY', 'GOOGLE_API_KEY'].some(hasEnv);
   const byok = isPersistentByokConfigured();
   const liveSearch = isEnabled('LIVE_RETRIEVAL_ENABLED');
-  const images = isEnabled('JARVIS_IMAGE_FREE_TIER_ENABLED') && (hasEnv('GEMINI_API_KEY') || hasEnv('GOOGLE_API_KEY'));
+  const images = !/^(false|0|off)$/i.test(String(process.env.JARVIS_IMAGE_GENERATION_ENABLED || process.env.JARVIS_IMAGE_FREE_TIER_ENABLED || 'true'));
   const capability = (available, reasonCode) => ({ available, reasonCode: available ? 'available' : reasonCode });
     return {
         capabilities: {
             chat: capability(chat, 'provider_not_configured'),
             search: capability(liveSearch, 'retrieval_disabled'),
             vision: capability(chat, 'provider_not_configured'),
-            images: capability(images, 'free_image_backend_unavailable'),
+            images: { ...capability(images, 'image_generation_disabled'), provider: 'ai_horde_free', requiresAccount: false, queueBased: true },
             byok: capability(byok, 'persistent_keypair_required')
         },
         model: {

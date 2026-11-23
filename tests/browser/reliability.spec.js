@@ -160,13 +160,13 @@ test.describe('image format safety', () => {
         await expect.poll(() => page.locator('.composer-attachment-thumb').evaluate(image => image.complete && image.naturalWidth > 0)).toBe(true);
     });
 
-    test('genuine RAW and undecodable images are rejected before upload with a useful message', async ({ page }) => {
+    test('damaged RAW and undecodable images fail locally before upload', async ({ page }) => {
         const calls = []; page.on('request', request => { if (request.method() === 'POST' && /\/api\/(?:chat-groq|vision|ingest-attachment)$/.test(new URL(request.url()).pathname)) calls.push(request.url()); });
         await page.locator('#composer-photo-library-input').setInputFiles({ name: 'DSC_0158.NEF', mimeType: 'image/x-nikon-nef', buffer: Buffer.from([0x49, 0x49, 0x2a, 0, 8, 0, 0, 0]) });
-        await expect(page.locator('.jarvis-toast-pill').last()).toContainText('camera RAW file');
+        await expect(page.locator('.jarvis-toast-pill').last()).toContainText('could not be decoded');
         await expect(page.locator('.composer-attachment-chip')).toHaveCount(0);
         await page.locator('#composer-photo-library-input').setInputFiles({ name: 'broken.png', mimeType: 'image/png', buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]) });
-        await expect(page.locator('.jarvis-toast-pill').last()).toContainText('could not be opened');
+        await expect(page.locator('.jarvis-toast-pill').last()).toContainText('could not be decoded');
         await expect(page.locator('.composer-attachment-chip')).toHaveCount(0);
         expect(calls).toEqual([]);
     });
