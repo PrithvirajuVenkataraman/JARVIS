@@ -77,7 +77,7 @@ const APP_CONFIG = Object.freeze({
         bugReportForm: 'https://forms.gle/bgeSroPoa3dFbP4n6'
     }),
     models: Object.freeze([
-        { id: 'auto', label: 'Auto (Best Available)', displayName: null, icon: '⚡', supportsMedia: true },
+        { id: 'auto', label: 'Automatic', displayName: null, icon: '⚡', supportsMedia: true },
         { id: 'openai/gpt-oss-120b', label: 'GPT OSS 120B (Reasoning & Multilingual)', displayName: 'GPT-OSS 120B', icon: '🧠', supportsMedia: false },
         { id: 'openai/gpt-oss-20b', label: 'GPT OSS 20B (Fast & Direct)', displayName: 'GPT-OSS 20B', icon: '⚡', supportsMedia: false },
         { id: 'qwen/qwen3.8-27b', label: 'Qwen 3.8 27B (Vision & Reasoning)', displayName: 'Qwen 3.8 27B', icon: '🔮', supportsMedia: true },

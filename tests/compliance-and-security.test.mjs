@@ -1581,8 +1581,8 @@ assert.ok(stylesCss.includes('.settings-subview-panel'), '.settings-subview-pane
 assert.ok(stylesCss.includes('settingsSlideIn'), 'settingsSlideIn animation keyframes must exist');
 assert.ok(stylesCss.includes('@media (prefers-reduced-motion: reduce)'), 'prefers-reduced-motion check must disable subview animations');
 assert.ok(stylesCss.includes('.settings-view-panel.active'), '.settings-view-panel.active selector must exist to isolate view panels');
-assert.ok(stylesCss.includes('.settings-group-card') && stylesCss.includes('flex-shrink: 0 !important;'), '.settings-group-card must enforce flex-shrink: 0 to prevent row squishing');
-assert.ok(stylesCss.includes('.settings-export-buttons') && stylesCss.includes('width: auto !important;'), '.settings-export-buttons must use width: auto to prevent row squishing');
+assert.ok(stylesCss.includes('.settings-group-card') && stylesCss.includes('flex-shrink: 0;'), '.settings-group-card must enforce flex-shrink: 0 to prevent row squishing');
+assert.ok(stylesCss.includes('.settings-export-buttons') && stylesCss.includes('width: auto;'), '.settings-export-buttons must use width: auto to prevent row squishing');
 console.log('  [PASS] 6.1 All required CSS classes, animations, view isolation, and flexbox stability rules verified');
 
 
