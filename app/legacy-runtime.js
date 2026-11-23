@@ -2886,6 +2886,8 @@ async function processUserQuery(text, options = {}) {
         return { intent: 'converse_resumption', response: remaining };
     }
 
+    const reference = window.JarvisConversation?.resolveReference?.(t);
+    if (['ambiguous', 'missing'].includes(reference?.status)) return await askGeminiAI(t, { ...options, skipLiveSearch: true, contextReference: reference });
     const activeWebMode = typeof getWebSearchMode === 'function' ? getWebSearchMode() : 'auto';
     const frontendRoute = decideFrontendRoute(t, {
         turnSource: options?.source || options?.turnSource || activeResponseRenderContext?.source || '',
@@ -5431,8 +5433,8 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
                 fastExplainerHint,
                 learnedStyleHint,
                 learnedPreferenceHint,
-                'Image Generation Capability: You have access to an internal high-speed AI image diffusion engine. When the user asks you to create, generate, draw, paint, visualize, illustrate, sketch, or show an image, picture, photo, or artwork of something, emit the visual action tag: :::image[detailed descriptive visual prompt]::: with a vivid, detailed prompt inside the brackets. You may include a brief conversational line before or after the tag. Never emit this tag for educational, diagram code, or non-visual queries.',
-                'Mathematical reasoning: Never use bullet points (•, -, *, +) or bulleted/numbered lists for mathematical explanations or derivation steps. Explain derivations and working strictly in clean, continuous prose paragraphs with display equations ($$...$$) and inline math ($...$).',
+                'Image Generation Capability: Image creation uses a free community queue with variable availability. When the user asks you to create, generate, draw, paint, visualize, illustrate, sketch, or show an image, picture, photo, or artwork of something, emit the visual action tag: :::image[detailed descriptive visual prompt]::: with a vivid, detailed prompt inside the brackets. You may include a brief conversational line before or after the tag. Never emit this tag for educational, diagram code, or non-visual queries.',
+                'Mathematical reasoning: Respect the requested format and detail. Use complete inline or display LaTeX delimiters and balanced braces. Present clear, correct working without mandatory decorative headings.',
                 'Conversational guidelines: Maintain continuity with previous dialogue, resolve pronouns and retrospective references naturally, and avoid repeating information already stated. Never end responses with generic hollow offers like "Would you like to know more?", "Is there anything else I can help with?", "Feel free to ask", or "Hope that helps!" — these are robotic filler and add no value. For substantive answers, one specific contextual follow-up question or concrete next step is acceptable only when it genuinely advances the discussion; for short or factual queries, answer directly and stop.'
             ].filter(Boolean).join('\n\n');
 
@@ -5496,6 +5498,7 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
             retrievedTurns: multiTierContext?.retrievedTurns || [],
             rollingSummary: multiTierContext?.summaryText || '',
             structuredMessages: structuredMessagesToSend,
+            contextReference: requestOptions?.contextReference || multiTierContext?.reference,
             preferences: {
                 userName,
                 responseLength: responseMode,
@@ -5531,11 +5534,11 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
                     }
                     return requestOptions?.selectedModel || (selectedModel !== 'auto' ? selectedModel : undefined);
                 })(),
-                webMode: typeof getWebSearchMode === 'function' ? getWebSearchMode() : _composerWebMode,
-                isWebForced: (typeof getWebSearchMode === 'function' ? getWebSearchMode() : _composerWebMode) === 'force'
+                webMode: requestOptions?.skipLiveSearch ? 'off' : (typeof getWebSearchMode === 'function' ? getWebSearchMode() : _composerWebMode),
+                isWebForced: !requestOptions?.skipLiveSearch && (typeof getWebSearchMode === 'function' ? getWebSearchMode() : _composerWebMode) === 'force'
             },
-            webMode: typeof getWebSearchMode === 'function' ? getWebSearchMode() : _composerWebMode,
-            isWebForced: (typeof getWebSearchMode === 'function' ? getWebSearchMode() : _composerWebMode) === 'force',
+            webMode: requestOptions?.skipLiveSearch ? 'off' : (typeof getWebSearchMode === 'function' ? getWebSearchMode() : _composerWebMode),
+            isWebForced: !requestOptions?.skipLiveSearch && (typeof getWebSearchMode === 'function' ? getWebSearchMode() : _composerWebMode) === 'force',
             intent: requestOptions?.intent || (isDeepReasoningActive ? 'deep_reasoning' : (requestOptions?.fastExplainer === true ? 'fast_explainer' : (isFastSimpleRequest ? 'fast_simple' : 'chat'))),
             tier: effectiveTier,
             forceReasoning: shouldForceReasoning,
@@ -12951,7 +12954,13 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 card.dataset.imageUrl = result.dataUrl; card.dataset.imageId = result.id;
                 card.querySelector('.image-gen-viewport').classList.add('has-image');
                 card.querySelector('.free-image-loading').hidden = true;
-                saveToHistory(rawPrompt, `[Generated Image: "${rawPrompt}"]`, { recordContext: true });
+                if (!result.persisted) {
+                    const notice = document.createElement('p');
+                    notice.className = 'image-storage-notice'; notice.setAttribute('role', 'status');
+                    notice.textContent = 'Image available for this session. Download to keep it.';
+                    card.append(notice);
+                }
+                saveToHistory(rawPrompt, `[Generated Image: "${rawPrompt}"]`, { recordContext: true, attachmentReferences: [{ id: result.id, name: "Generated image" }] });
             } catch (error) {
                 if (!controller.signal.aborted && card.isConnected) {
                     card.dataset.imageState = 'error';
@@ -15212,6 +15221,12 @@ Answer the user directly and conversationally based on the quoted context.`;
                         });
                     } else {
                         sendTrace.routeStartedAt = performance.now();
+                        const reference = window.JarvisConversation?.resolveReference?.(normalizedOutgoingText);
+                        if (['ambiguous', 'missing'].includes(reference?.status)) {
+                            await processCommand(normalizedOutgoingText);
+                            sendTrace.routeEndedAt = performance.now();
+                            return;
+                        }
                         const isWebForced = (typeof getWebSearchMode === 'function' ? getWebSearchMode() === 'force' : _composerWebMode === 'force') || Boolean(submission?.forceWebSearch);
                         if (isWebForced && isFactSearchEnabled()) {
                             const webHandled = await handleBoundedLiveResearchQuery(normalizedOutgoingText, outgoingText, { submission, isWebForced });
@@ -23377,6 +23392,16 @@ function isWakeGreetingText(text) {
                 });
                 return;
             }
+            if (['ambiguous', 'missing'].includes(contextResolution?.reference?.status)) {
+                const result = await askGeminiAI(text, { stream: true, minimalThinking: true, skipLiveSearch: true, contextReference: contextResolution.reference });
+                if (result?.aborted) return;
+                const answer = String(result?.response || result?.text || '').trim();
+                if (answer) {
+                    await publishResolvedModelMessage(text, answer, { label: 'Assistant', routing: result?.routing || null });
+                    window.JarvisConversation?.setPending?.({ type: 'reference_clarification', expected: 'free_text', options: contextResolution.reference.candidates.map(item => item.label) });
+                }
+                return;
+            }
             if (await handleMultimodalFollowup(text)) {
                 return;
             }
@@ -31041,8 +31066,13 @@ function saveToHistory(userMessage, aiResponse, options = {}) {
         conversationHistory = conversationHistory.slice(-200);
     }
 
-    if (cleanUser) conversationContext.push({ role: 'user', text: cleanUser, turnId });
-    if (cleanAi) conversationContext.push({ role: 'assistant', text: cleanAi, turnId });
+    for (const [role, text] of [['user', cleanUser], ['assistant', cleanAi]]) {
+        if (!text) continue;
+        const existing = turnId ? conversationContext.findIndex(item => item.turnId === turnId && item.role === role) : -1;
+        const record = { role, text, turnId };
+        if (existing >= 0) conversationContext[existing] = record;
+        else conversationContext.push(record);
+    }
     if (conversationContext.length > 200) {
         conversationContext = conversationContext.slice(-200);
     }
@@ -31055,7 +31085,7 @@ function saveToHistory(userMessage, aiResponse, options = {}) {
     }
     if (options?.recordContext !== false && engine?.recordTurn) {
         engine.recordTurn({ role: 'user', text: cleanUser || userMessage, threadId, turnId });
-        engine.recordTurn({ role: 'assistant', text: cleanAi || aiResponse, threadId, turnId });
+        engine.recordTurn({ role: 'assistant', text: cleanAi || aiResponse, threadId, turnId, attachments: options.attachmentReferences || [] });
     }
     
     saveConversationHistory();

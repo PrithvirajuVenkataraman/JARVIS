@@ -92,7 +92,7 @@ self.onmessage = async ({ data }) => {
             const documents = [], documentRecords = [];
             if (extractor && payload.sessionId) {
                 const rows = await cacheOperation('sources', 'getAll', IDBKeyRange.bound(payload.sessionId + ':', payload.sessionId + ':\uffff')).catch(() => []) || [];
-                for (const source of rows.slice(-2)) {
+                for (const source of rankChunks(rows.sort((a, b) => b.updatedAt - a.updatedAt).map(row => ({ ...row, text: row.name + '\n' + row.text })), payload.query).slice(0, 4)) {
                     // Larger files retain lightweight retrieval, avoiding excess model memory.
                     if (source.text.length > 2 * 1024 * 1024) continue;
                     const chunks = chunkText(source.text, 2400);

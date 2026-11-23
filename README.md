@@ -82,6 +82,10 @@ Enhanced local recall is optional per device. It uses the pinned quantized `Xeno
 
 Custom Instructions apply when Done is selected. Other dismissal paths warn about unsaved edits. Saved instructions are reply preferences, while current explicit requests, security controls, and evidence requirements retain precedence.
 
+Follow-ups retain the original question and carry reference IDs alongside the relevant dialogue. Clear references continue automatically; unresolved ties ask one short clarification before research. Context retrieval honors the caller's window and budget, and repeated finalization updates an existing turn instead of duplicating it. Optional embeddings assist retrieval; they do not establish that a reference is unambiguous.
+
+Image output is decoded before saving. If browser storage fails, the image remains usable in the current session and JARVIS asks you to download it to keep it. A queue being enabled does not prove a worker is available. Image editing that preserves the original pixels is not currently supported.
+
 Type `/` to filter available commands. Arrow keys choose a result; Enter inserts its editable prompt starter without sending. Web search has one per-chat on/off setting, an inline composer control, and a blue animated outline while enabled. Reduced-motion preferences use a static outline. Other core menus and settings use neutral colors. Browser zoom gestures remain available.
 
 Vision distinguishes missing deployment credentials from provider authentication, quota, timeout, and temporary failures. When both providers are configured, generation reserves an attempt for each provider within the two-attempt request budget. Explicit vision model environment settings are honored; model names are not silently mapped to older models. Hosted provider credentials and model access still need to be valid.

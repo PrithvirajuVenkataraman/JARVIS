@@ -375,6 +375,41 @@ export function resolveOrdinalOrAnaphoricAntecedent(text = '', thread = null) {
     return null;
 }
 
+// Structural references provide evidence, not fabricated rewrites or a claim of
+// semantic certainty. The answer model still reads the original conversation.
+export function resolveConversationReference(message, turns = [], sources = []) {
+    const originalMessage = String(message || '').trim();
+    const usable = turns.filter(turn => !turn.aborted && !turn.error && !turn.control && turn.text);
+    const assistantIndex = usable.findLastIndex(turn => turn.role === 'assistant');
+    const assistant = usable[assistantIndex];
+    const previousUser = usable.slice(0, assistantIndex).findLast(turn => turn.role === 'user');
+    const base = { originalMessage, status: 'resolved', evidenceIds: [], candidates: [] };
+    const references = /\b(?:it|its|this|that|they|them|those|these|above|previous|earlier|former|latter|first|second|third|last one|continue|more)\b/i.test(originalMessage);
+    if (!references) return base;
+    if (!assistant && !sources.length) return { ...base, status: 'missing' };
+    const sourceId = assistant?.id || assistant?.turnId;
+    const documentCandidates = sources.map(source => ({ id: source.id, label: source.name, kind: 'attachment' }));
+    const namedDocuments = documentCandidates.filter(source => source.label && originalMessage.toLowerCase().includes(source.label.toLowerCase()));
+    if (namedDocuments.length === 1) return { ...base, evidenceIds: [namedDocuments[0].id], candidates: namedDocuments };
+    const list = extractAssistantListItems(assistant?.text || '');
+    const pair = String(previousUser?.text || '').match(/(?:compare|between)\s+(.+?)\s+(?:and|versus|vs\.?)\s+(.+?)[.!?]?$/i);
+    const labels = list.length > 1 ? list.map(label => label.split(/:\s/)[0]) : pair ? [pair[1], pair[2]] : [];
+    const candidates = labels.map((label, index) => ({ id: `${sourceId}#item-${index + 1}`, label: label.trim().slice(0, 100), kind: 'subject' }));
+    const ordinal = /\b(?:first|second|third|fourth|fifth|last|former|latter|(?:option|item|number|step)\s*\d)\b/i.test(originalMessage)
+        ? resolveOrdinalOrAnaphoricAntecedent(originalMessage, { assistantListItems: labels }) : null;
+    const named = candidates.filter(candidate => originalMessage.toLowerCase().includes(candidate.label.toLowerCase()));
+    const selected = ordinal ? candidates.filter(candidate => candidate.label === ordinal) : named;
+    if (selected.length === 1) return { ...base, evidenceIds: [sourceId, selected[0].id].filter(Boolean), candidates: selected };
+    const wholeAnswer = /\b(?:shorter|longer|rewrite|rephrase|summarize|summarise|warmer|tone|format|translate|verify|check|correct|above|continue|answer|response|proof|draft)\b/i.test(originalMessage);
+    const plural = /\b(?:both|all|they|them|those|these)\b/i.test(originalMessage);
+    if (wholeAnswer || plural || candidates.length < 2) {
+        const documents = /\b(?:file|document|attachment|pdf)\b/i.test(originalMessage) ? documentCandidates : [];
+        if (documents.length > 1 && !plural) return { ...base, status: 'ambiguous', candidates: documents, evidenceIds: documents.map(source => source.id) };
+        return { ...base, evidenceIds: [sourceId, ...documents.map(source => source.id)].filter(Boolean), candidates: documents };
+    }
+    return { ...base, status: 'ambiguous', evidenceIds: [sourceId].filter(Boolean), candidates };
+}
+
 export function createConversationEngine(options = {}) {
     const maxTurns = clamp(options.maxTurns, 12, 4, 60);
     const maxTurnHistory = clamp(options.maxTurnHistory, 160, 40, 400);
@@ -399,7 +434,8 @@ export function createConversationEngine(options = {}) {
         setPending: pending => setPending(state, pending),
         clearPending: reason => clearPending(state, reason),
         reset: () => resetState(state),
-        resolve: input => resolveInput(state, input, { maxThreads }),
+        resolve: input => ({ ...resolveInput(state, input, { maxThreads }), reference: resolveConversationReference(input?.message ?? input, state.turns) }),
+        resolveReference: (message, sources) => resolveConversationReference(message, state.turns, sources),
         recordTurn: turn => recordTurn(state, turn, { maxTurns, maxTurnHistory }),
         discardTurn: turnId => discardTurn(state, turnId),
         buildContext: options => buildContext(state, { maxTurns, maxContextChars, ...options }),
@@ -624,11 +660,18 @@ function recordTurn(state, turn, limits) {
         role,
         text: text.slice(0, 4000),
         source: cleanText(turn?.source) || 'text',
+        attachments: Array.isArray(turn?.attachments) ? turn.attachments.map(item => ({ id: cleanText(item.id), name: cleanText(item.name) })).filter(item => item.id).slice(0, 20) : [],
         threadId,
         createdAt: Number(turn?.createdAt) || Date.now(),
         embedding
     };
-    state.turns.push(record);
+    const duplicate = state.turns.findIndex(item => item.role === role && (turn?.turnId ? item.turnId === turn.turnId : turn?.id && item.id === turn.id));
+    if (duplicate >= 0) {
+        record.id = state.turns[duplicate].id;
+        record.createdAt = state.turns[duplicate].createdAt;
+        if (!record.attachments.length) record.attachments = state.turns[duplicate].attachments || [];
+        state.turns[duplicate] = record;
+    } else state.turns.push(record);
     const maxHistory = limits?.maxTurnHistory || Math.max(160, (limits?.maxTurns || 12) * 5);
     state.turns = state.turns.slice(-maxHistory);
     thread.updatedAt = record.createdAt;

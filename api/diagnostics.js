@@ -30,13 +30,13 @@ export function buildDiagnosticsStatus() {
   const byok = isPersistentByokConfigured();
   const liveSearch = isEnabled('LIVE_RETRIEVAL_ENABLED');
   const images = !/^(false|0|off)$/i.test(String(process.env.JARVIS_IMAGE_GENERATION_ENABLED || process.env.JARVIS_IMAGE_FREE_TIER_ENABLED || 'true'));
-  const capability = (available, reasonCode) => ({ available, reasonCode: available ? 'available' : reasonCode });
+  const capability = (available, reasonCode) => ({ available, configured: available, state: available ? 'unverified' : 'disabled', reasonCode: available ? 'available' : reasonCode });
     return {
         capabilities: {
             chat: capability(chat, 'provider_not_configured'),
             search: capability(liveSearch, 'retrieval_disabled'),
             vision: capability(chat, 'provider_not_configured'),
-            images: { ...capability(images, 'image_generation_disabled'), provider: 'ai_horde_free', requiresAccount: false, queueBased: true },
+            images: { ...capability(images, 'image_generation_disabled'), provider: 'ai_horde_free', requiresAccount: false, queueBased: true, freeOnly: true, supportsEditing: false },
             byok: capability(byok, 'persistent_keypair_required')
         },
         model: {
@@ -61,6 +61,7 @@ export function buildDiagnosticsStatus() {
             exaConfigured: hasEnv('EXA_API_KEY') || hasEnv('EXA_KEY'),
             nvidiaConfigured: hasEnv('NVIDIA_API_KEY') || hasEnv('NVIDIA_NIM_API_KEY'),
             crawl4aiConfigured: hasEnv('CRAWL4AI_URL') || hasEnv('CRAWL4AI_ENDPOINT')
+            ,crawl4aiEgressVerified: process.env.CRAWL4AI_PUBLIC_EGRESS_VERIFIED === 'true'
         },
         compliance: {
             dlpEnabled: process.env.DLP_ENABLED !== 'false',

@@ -1,20 +1,18 @@
 /**
  * @file app/image-generation-config.js
  * @description Dynamic, non-hardcoded configuration engine for free community AI
- * image generation and proxy routing.
+ * image generation. The proxy URL helper is retained only for old integrations.
  */
 
 export const DEFAULT_IMAGE_CONFIG = Object.freeze({
     modelId: 'ai_horde_free',
     modelName: 'Free community image generation (AI Horde)',
-    quantization: 'int8',
     defaultSteps: 25,
     defaultWidth: 512,
     defaultHeight: 512,
     guidanceScale: 1.0,
     maxHistoryItems: 50,
     timeoutMs: 600000,
-    minVramBytes: 2 * 1024 * 1024 * 1024,
     model: 'ai_horde_free',
     defaultNegativePrompt: 'text,watermark,words,letters,signature,typography,lowres,blurry',
     fallbackEndpointTemplate: '/api/image-proxy?prompt={prompt}&width={width}&height={height}&model={model}&negative_prompt={negativePrompt}&seed={seed}',
@@ -91,7 +89,7 @@ export function buildFallbackImageUrl(prompt, options = {}) {
     const template = String(options.template || config.fallbackEndpointTemplate);
     const width = Number(options.width || config.defaultWidth);
     const height = Number(options.height || config.defaultHeight);
-    const model = String(options.model || config.model || 'gemini-2.5-flash-image');
+    const model = String(options.model || config.model || 'ai_horde_free');
     const negativePrompt = encodeURIComponent(String(options.negativePrompt || config.defaultNegativePrompt || 'text,watermark,words,letters,signature,typography,lowres,blurry'));
     const seed = Number(options.seed || Math.floor(Math.random() * 1000000));
     const encodedPrompt = encodeURIComponent(String(prompt || '').trim());

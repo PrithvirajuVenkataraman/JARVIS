@@ -1,5 +1,6 @@
 let capabilities = null;
 let retryTimer;
+let lastRefreshAt = 0;
 const selectors = {
     search: '#web-search-toggle-btn, [data-capability="live_search"], [data-capability="live-search"]',
     vision: '#sidebar-vision-btn, #composer-camera-btn, [data-capability="vision"], [data-capability="document_ocr"]',
@@ -9,6 +10,12 @@ const selectors = {
 
 export function isAvailable(name) { return capabilities?.[name]?.available === true; }
 export function hasLoaded() { return capabilities !== null; }
+export function setRuntimeStatus(name, state, reasonCode = state) {
+    if (!capabilities?.[name]) return;
+    // Busy services remain selectable: availability is configuration, health is
+    // temporary. Hiding the entry point made recovery needlessly confusing.
+    applyCapabilities({ ...capabilities, [name]: { ...capabilities[name], state, reasonCode } });
+}
 
 export function applyCapabilities(value) {
     if (!value || typeof value !== 'object') return;
@@ -30,24 +37,29 @@ export function applyCapabilities(value) {
 }
 
 export async function refreshCapabilities() {
+    lastRefreshAt = Date.now();
     try {
         const response = await fetch('/api/diagnostics', { signal: AbortSignal.timeout(8000) });
         if (!response.ok) throw new Error('Diagnostics unavailable');
         const data = await response.json();
         applyCapabilities(data.diagnostics?.capabilities);
     } catch {
-        applyCapabilities(Object.fromEntries(['chat', 'search', 'vision', 'images', 'byok'].map(name => [name, { available: false, reasonCode: 'status_unavailable' }])));
+        if (!capabilities) applyCapabilities(Object.fromEntries(['chat', 'search', 'vision', 'images', 'byok'].map(name => [name, { available: false, state: 'unknown', reasonCode: 'status_unavailable' }])));
+        clearTimeout(retryTimer);
+        if (navigator.onLine && !document.hidden) retryTimer = setTimeout(refreshCapabilities, 60000);
     }
 }
 
 export function installCapabilityVisibility() {
+    window.addEventListener('online', refreshCapabilities);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden && Date.now() - lastRefreshAt > 60000) void refreshCapabilities(); });
     const originalFetch = window.fetch;
     window.fetch = async function (input, init) {
         const response = await originalFetch.call(this, input, init);
         const url = String(typeof input === 'string' ? input : input?.url || '');
         const feature = url.includes('/api/image-proxy') ? 'images' : url.includes('/api/vision') ? 'vision' : url.includes('/api/search') ? 'search' : null;
         if (feature && capabilities && [429, 503].includes(response.status)) {
-            applyCapabilities({ ...capabilities, [feature]: { available: false, reasonCode: response.status === 429 ? 'quota_exhausted' : 'temporarily_unavailable' } });
+            setRuntimeStatus(feature, response.status === 429 ? 'busy' : 'unavailable', response.status === 429 ? 'quota_exhausted' : 'temporarily_unavailable');
             clearTimeout(retryTimer);
             retryTimer = setTimeout(refreshCapabilities, Math.max(30000, Math.min(300000, (Number(response.headers.get('Retry-After')) || 60) * 1000)));
         }

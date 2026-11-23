@@ -25,12 +25,17 @@ function openDatabase() {
                 store.createIndex('timestamp', 'timestamp', { unique: false });
             }
         };
-        request.onsuccess = event => resolve(event.target.result);
-        request.onerror = event => {
-            console.warn('[image-storage] IndexedDB open error:', event.target.error);
-            resolve(null);
+        let settled = false;
+        request.onsuccess = event => {
+            const db = event.target.result;
+            if (settled) { db.close(); return; }
+            settled = true;
+            db.onversionchange = () => { db.close(); dbPromise = null; };
+            resolve(db);
         };
-    });
+        request.onerror = () => { settled = true; reject(request.error); };
+        request.onblocked = () => { settled = true; reject(new Error('Image storage is blocked by another tab.')); };
+    }).catch(() => { dbPromise = null; return null; });
     return dbPromise;
 }
 
@@ -39,7 +44,7 @@ function openDatabase() {
  * @param {object} record
  * @returns {Promise<object>}
  */
-export async function saveGeneratedImage(record) {
+export async function saveGeneratedImage(record, { signal } = {}) {
     if (!record || !record.id) return null;
     const db = await openDatabase();
     const config = getImageConfig();
@@ -47,33 +52,27 @@ export async function saveGeneratedImage(record) {
         id: String(record.id),
         prompt: String(record.prompt || ''),
         dataUrl: String(record.dataUrl || record.imageUrl || ''),
-        provider: String(record.provider || 'webgpu'),
+        provider: String(record.provider || 'ai_horde_free'),
         durationMs: Number(record.durationMs || 0),
         width: Number(record.width || config.defaultWidth),
         height: Number(record.height || config.defaultHeight),
         timestamp: Number(record.timestamp || Date.now())
     };
 
-    if (!db) {
-        // Fallback to simple localStorage metadata if IndexedDB is disabled
-        try {
-            const list = JSON.parse(localStorage.getItem('jarvis_recent_images_meta') || '[]');
-            list.unshift({ id: item.id, prompt: item.prompt, timestamp: item.timestamp, provider: item.provider });
-            if (list.length > config.maxHistoryItems) list.length = config.maxHistoryItems;
-            localStorage.setItem('jarvis_recent_images_meta', JSON.stringify(list));
-        } catch (_) {}
-        return item;
-    }
+    if (!db || signal?.aborted) return { ...item, persisted: false };
 
     return new Promise(resolve => {
         const tx = db.transaction(STORE_NAME, 'readwrite');
         const store = tx.objectStore(STORE_NAME);
-        store.put(item);
+        const abort = () => { try { tx.abort(); } catch { /* Transaction already finished. */ } };
+        signal?.addEventListener('abort', abort, { once: true });
+        const finish = persisted => { signal?.removeEventListener('abort', abort); resolve({ ...item, persisted }); };
+        try { store.put(item); } catch { finish(false); return; }
         tx.oncomplete = async () => {
             await enforceStorageQuota(db, config.maxHistoryItems);
-            resolve(item);
+            finish(true);
         };
-        tx.onerror = () => resolve(item);
+        tx.onerror = tx.onabort = () => finish(false);
     });
 }
 
@@ -86,7 +85,7 @@ export async function getRecentGeneratedImages(limit = 50) {
     const db = await openDatabase();
     if (!db) {
         try {
-            return JSON.parse(localStorage.getItem('jarvis_recent_images_meta') || '[]');
+            return JSON.parse(localStorage.getItem('jarvis_recent_images_meta') || '[]').filter(item => item.dataUrl || item.url);
         } catch (_) {
             return [];
         }
