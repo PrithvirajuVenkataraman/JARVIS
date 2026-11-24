@@ -29833,10 +29833,6 @@ function openSidebarQuickAction(action) {
     closeChatSidebar();
     // Safari does not focus pointer-clicked buttons; give dialogs a visible return target.
     document.getElementById('chat-sidebar-toggle')?.focus({ preventScroll: true });
-    if (action === 'vision') {
-        handleComposerAction('vision');
-        return;
-    }
     if (action === 'memory') {
         showMemoryManager();
         return;

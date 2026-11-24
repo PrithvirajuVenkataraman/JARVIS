@@ -3,7 +3,7 @@ let retryTimer;
 let lastRefreshAt = 0;
 const selectors = {
     search: '#web-search-toggle-btn, [data-capability="live_search"], [data-capability="live-search"]',
-    vision: '#sidebar-vision-btn, #composer-camera-btn, [data-capability="vision"], [data-capability="document_ocr"]',
+    vision: '#composer-camera-btn, [data-capability="vision"], [data-capability="document_ocr"]',
     images: '#composer-image-btn, [data-capability="image_generation"], [data-capability="image"], [data-action="generate-image"], [data-creation-id="image"]',
     byok: '#settings-row-byok'
 };

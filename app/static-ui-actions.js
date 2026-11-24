@@ -40,7 +40,6 @@ export const staticActions = {
     "shell-37": [["click", function(event) { toggleVoiceToText(event) }]],
     "shell-38": [["click", function(event) { handlePrimaryActionButtonClick() }]],
     "shell-39": [["click", function(event) { openImportantInfoModal() }]],
-    "shell-40": [["click", function(event) { openSidebarQuickAction('vision') }]],
     "shell-41": [["click", function(event) { openSidebarQuickAction('memory') }]],
     "shell-42": [["click", function(event) { openSidebarQuickAction('system') }]],
     "shell-43": [["click", function(event) { openSidebarQuickAction('images') }]]

@@ -48,7 +48,8 @@ test('sidebar shortcuts remain reachable on all widths and open their working fe
     const toggle = page.getByRole('button', { name: 'Open sidebar', exact: true });
     const sidebar = page.locator('#chat-sidebar-panel');
     const actions = sidebar.getByRole('navigation', { name: 'Main chat actions' });
-    const labels = ['New chat', 'Search chats', 'Vision analysis', 'Memory', 'Custom instructions', 'Image library', 'Settings'];
+    const labels = ['New chat', 'Search chats', 'Memory', 'Custom instructions', 'Image library', 'Settings'];
+    await expect(page.locator('#sidebar-vision-btn')).toHaveCount(0);
     for (const [width, height] of [[320, 568], [390, 844], [768, 1024], [1024, 768], [1440, 900], [844, 390]]) {
         await page.setViewportSize({ width, height });
         await expect(toggle).toBeVisible();
@@ -101,11 +102,7 @@ test('sidebar shortcuts remain reachable on all widths and open their working fe
     await expect(page.locator('#image-gallery-modal')).toHaveClass(/is-open/);
     await page.keyboard.press('Escape'); await expect(page.locator('#image-gallery-modal')).not.toHaveClass(/is-open/);
     await toggle.click();
-    const chooser = page.waitForEvent('filechooser');
-    await actions.getByRole('button', { name: 'Vision analysis', exact: true }).click();
-    expect((await chooser).isMultiple()).toBe(true);
-    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    await toggle.click(); await actions.getByRole('button', { name: 'Settings', exact: true }).click();
+    await actions.getByRole('button', { name: 'Settings', exact: true }).click();
     await expect(page.locator('#settings-view-main')).toBeVisible(); await page.keyboard.press('Escape');
     await page.locator('#text-input').fill('Explain the sidebar test.'); await page.locator('#text-input').press('Enter');
     await expect(page.locator('#request-status')).toHaveText('Response finished.');
