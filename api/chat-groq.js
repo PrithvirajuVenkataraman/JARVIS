@@ -1,4 +1,4 @@
-import { visionFailurePayload, normalizeGeminiGenerationConfig } from './_lib/model-failure.js';
+import { visionFailurePayload, normalizeGeminiGenerationConfig, describeUpstreamFailure, upstreamAttemptSummary } from './_lib/model-failure.js';
 import { publicAnswer, createAnswerFilter } from './_lib/answer-visibility.js';
 import { normalizeUserInstructions, userPreferenceDirective, contextReferenceDirective, bindServerConversation } from './_lib/answer-preferences.js';
 import { withRequestLifecycle, fetchWithLifecycle as fetch, runWithSignal } from './_lib/request-lifecycle.js';
@@ -589,7 +589,7 @@ async function getInstantFactHelper() {
                 safeConfigured
             ];
         }
-        return [...new Set(orderedList.filter(Boolean).filter(m => !m.toLowerCase().includes('llama')))];
+        return [...new Set(orderedList.filter(Boolean).filter(m => !m.startsWith('gemini-') && !m.toLowerCase().includes('llama')))];
     }
 
     const KNOWN_GROQ_VISION_MODELS = new Set([
@@ -1439,6 +1439,7 @@ async function handler(req, res) {
                 requestId,
                 modelUsed: selectedPass.modelUsed,
                 provider: selectedPass.provider,
+                upstreamAttempts: selectedPass.upstreamAttempts,
                 routing: {
                     mode: CHAT_ROUTER_MODE,
                     strategy: routeDecision.strategy,
@@ -2013,6 +2014,7 @@ async function handler(req, res) {
                 action: null,
                 provider: streamResult.provider,
                 modelUsed: streamResult.modelUsed,
+                upstreamAttempts: streamResult.upstreamAttempts,
                 routing: {
                     mode: CHAT_ROUTER_MODE,
                     strategy: routeDecision.strategy,
@@ -2631,7 +2633,10 @@ async function handler(req, res) {
             attemptsRemaining--; providerCalls[provider]++;
             try {
                 const result = await fetchWithTimeoutRetry(url, init, { ...settings, retries: 0 });
-                if (!result.ok) failures.push({ status: result.status });
+                if (!result.ok) {
+                    const model = provider === 'gemini' ? /\/models\/([^:]+):/.exec(url)?.[1] : JSON.parse(init.body).model;
+                    failures.push({ status: result.status, upstream: await describeUpstreamFailure(result, provider, model) });
+                }
                 return result;
             } catch (error) { failures.push({ name: error?.name }); throw error; }
         };
@@ -2853,6 +2858,7 @@ async function handler(req, res) {
         for (const fn of providerFns) {
             const result = await fn();
             if (result && result.ok && result.parsedResponse?.response && result.parsedResponse.response !== 'I could not generate a response this time. Please try again.') {
+                result.upstreamAttempts = upstreamAttemptSummary(failures);
                 if (attemptIndex > 0) {
                     result.selfHealing = {
                         recovered: true,
@@ -2891,6 +2897,7 @@ async function handler(req, res) {
                 intent: 'service_unavailable',
                 response: 'The AI service is temporarily unavailable right now. Please try again shortly.',
                 action: null,
+                upstreamAttempts: upstreamAttemptSummary(failures),
                 provider: 'none'
             }
         };
@@ -3010,7 +3017,7 @@ async function handler(req, res) {
 
         for (const fn of streamFns) {
             const result = await fn();
-            if (result) return result;
+            if (result) { result.upstreamAttempts = upstreamAttemptSummary(failures); return result; }
         }
 
         if (hasImages) return { ok: false, payload: visionFailurePayload(hasGroq || hasGemini, failures) };
@@ -3036,7 +3043,8 @@ async function handler(req, res) {
                 code: 'service_unavailable',
                 intent: 'service_unavailable',
                 response: 'The AI service is temporarily unavailable right now. Please try again shortly.',
-                action: null
+                action: null,
+                upstreamAttempts: upstreamAttemptSummary(failures)
             }
         };
     }
@@ -3112,7 +3120,7 @@ async function handler(req, res) {
                 if (status === 401 || status === 429 || (status >= 500 && status < 600)) {
                     recordKeyFailure(apiKey, status === 429 || status >= 500);
                 }
-                return { ok: false, status: response.status };
+                return { ok: false, status: response.status, upstream: await describeUpstreamFailure(response, 'groq', model) };
             }
             let text = '';
             let inReasoning = false;
@@ -3303,9 +3311,9 @@ async function handler(req, res) {
             }
             if (response.status === 404 || response.status === 410) {
                 markModelTemporarilyUnavailable('gemini', model, response.status);
-                return { ok: false };
+                return { ok: false, status: response.status, upstream: await describeUpstreamFailure(response, 'gemini', model) };
             }
-            if (!response.ok || !response.body) return { ok: false, status: response.status };
+            if (!response.ok || !response.body) return { ok: false, status: response.status, upstream: await describeUpstreamFailure(response, 'gemini', model) };
             let text = '';
             let inReasoning = false;
             let groundingSources = [];

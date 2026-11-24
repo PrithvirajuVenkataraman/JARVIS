@@ -12,7 +12,7 @@ import { WorkspaceIndexedDB } from '../app/workspace-durability.js';
 import { schedule, flush, writeHotCache } from '../app/persistence-controller.js';
 import { buildDiagnosticsStatus } from '../api/diagnostics.js';
 import { __test as chat } from '../api/chat-groq.js';
-import { visionFailurePayload } from '../api/_lib/model-failure.js';
+import { visionFailurePayload, describeUpstreamFailure } from '../api/_lib/model-failure.js';
 import { lazyModule } from '../app/lazy-features.js';
 import { formatBytes, detectImageMime, imageNameForMime } from '../app/file-format.js';
 import { prepareRequestPayload, serializeRequestPayload, jsonByteLength, MAX_JSON_REQUEST_BYTES, isPayloadTooLarge } from '../app/request-payload.js';
@@ -279,15 +279,27 @@ test('Automatic chat starts with Hydrogen for JSON and streams, reserves Groq fa
             const calls = [];
             globalThis.fetch = async (input, init) => { calls.push({ url: String(input), body: JSON.parse(init.body) }); return Response.json({}, { status: 503 }); };
             const run = selected => streaming ? chat.streamModelWithFallback('Actor Example Person', {}, () => {}, selected, undefined, keys) : chat.runModelWithFallback('Actor Example Person', {}, selected, undefined, keys);
-            await run(null);
+            const automatic = await run(null);
             assert.equal(calls.length, 2); assert.match(calls[0].url, /models\/gemini-4-hydrogen:/); assert.match(calls[1].url, /groq\.com/);
+            assert.equal(automatic.payload.upstreamAttempts[0].provider, 'gemini');
+            assert.equal(automatic.payload.upstreamAttempts[0].status, 503);
             assert.equal(calls[0].body.tools, undefined, 'Automatic chat does not enable billed Google Search tools');
             calls.length = 0; await run('openai/gpt-oss-120b');
             assert.equal(calls.length, 2); assert.match(calls[0].url, /groq\.com/);
         }
         for (const tier of ['instant', 'standard', 'deep']) assert.equal(chat.getPreferredGeminiCandidates('gemini-2.5-flash', null, { tier, preferSpeed: true })[0], 'gemini-4-hydrogen');
         assert.equal(chat.getPreferredGeminiCandidates('', 'gemini-2.5-flash')[0], 'gemini-2.5-flash');
+        const groqFallback = chat.getPreferredGroqCandidates('gemini-4-hydrogen', { userSelectedModel: 'gemini-4-hydrogen' });
+        assert.equal(groqFallback[0], 'openai/gpt-oss-120b'); assert.ok(groqFallback.every(model => !model.startsWith('gemini-')));
     } finally { globalThis.fetch = original; if (oldModel === undefined) delete process.env.GEMINI_MODEL; else process.env.GEMINI_MODEL = oldModel; }
+});
+
+test('upstream diagnostics expose safe categories and parameter names without error text or credentials', async () => {
+    const diagnostic = await describeUpstreamFailure(Response.json({ error: { message: 'API key not valid: SECRET-TEST-CREDENTIAL. Unknown parameter includeThoughts' } }, { status: 400 }), 'gemini', 'gemini-4-hydrogen');
+    assert.equal(diagnostic.reasonCode, 'invalid_api_key'); assert.deepEqual(diagnostic.parameters, ['includeThoughts']);
+    assert.doesNotMatch(JSON.stringify(diagnostic), /SECRET-TEST|Unknown parameter|API key not valid/);
+    const rateLimit = await describeUpstreamFailure(Response.json({ private: 'Do not expose this body' }, { status: 429 }), 'gemini', 'gemini-4-hydrogen');
+    assert.equal(rateLimit.reasonCode, 'rate_limited'); assert.doesNotMatch(JSON.stringify(rateLimit), /private|expose/);
 });
 
 test('an incomplete offline installation cannot replace the working cache', async () => {
