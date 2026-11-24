@@ -1948,7 +1948,7 @@ console.log('--- Device 6: Tablets & iPads (Portrait & Landscape Breakpoints) --
     console.log('  [PASS] 6.1 Tablets & iPads: Fixed composer bar, rotation append, paragraph breaks & hyphen formatting verified');
 }
 
-console.log('\n=== All Multi-Device VTT Tests PASSED (100% Mobile, Tablet & Desktop Verified) ===\n');
+console.log('\n=== Simulated multi-device VTT control-flow checks passed; real hardware and speech services are tested separately ===\n');
 
 });
 

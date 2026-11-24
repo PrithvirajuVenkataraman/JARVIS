@@ -9275,7 +9275,8 @@ body:not(.dark) .assistant-followup-chip:hover {
     color: #ef4444 !important;
     background: rgba(239, 68, 68, 0.14) !important;
     border-color: rgba(239, 68, 68, 0.45) !important;
-    animation: enterprise-vtt-pulse 1.4s infinite ease-in-out !important;
+    /* Keep the Stop hit area stationary; the inner spinner shows activity. */
+    animation: none !important;
 }
 
 @keyframes enterprise-vtt-pulse {

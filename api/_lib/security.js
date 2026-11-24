@@ -49,10 +49,14 @@ function setDefaultSecurityHeaders(res) {
     res.setHeader('Content-Security-Policy', csp);
 }
 
-function looksLikeAbusivePayload(body) {
+function looksLikeAbusivePayload(body, base64Fields = []) {
     let sanitized = body;
     if (body && typeof body === 'object') {
         const copy = { ...body };
+        for (const field of base64Fields) {
+            const encoded = typeof copy[field] === 'string' ? copy[field].replace(/^data:audio\/[a-z0-9.+-]+;base64,/i, '').trim() : '';
+            if (encoded && encoded.length % 4 === 0 && /^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) copy[field] = '';
+        }
         if (Array.isArray(copy.images)) {
             copy.images = copy.images.map(img => ({ ...img, base64: '', data: '', inlineData: undefined }));
         }
@@ -193,7 +197,7 @@ export function applyApiSecurity(req, res, options = {}) {
     }
 
     const skipAbusiveCheck = Boolean(options.skipAbusiveCheck);
-    if (!skipAbusiveCheck && looksLikeAbusivePayload(req?.body)) {
+    if (!skipAbusiveCheck && looksLikeAbusivePayload(req?.body, options.base64Fields || [])) {
         sendSecurityError(res, 400, 'abusive_payload', 'Request payload was rejected.');
         return { handled: true };
     }

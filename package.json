@@ -10,7 +10,7 @@
     "test:inline": "node tests/check-inline-script.mjs",
     "test:deterministic": "node tests/deterministic-checks.mjs",
     "test:context": "node --test tests/context-and-routing.test.mjs",
-    "test:speech": "node --test tests/speech-and-vtt.test.mjs",
+    "test:speech": "node --test tests/speech-and-vtt.test.mjs tests/vtt-reliability.test.mjs tests/stt-reliability.test.mjs",
     "test:ui": "node --test tests/ui-and-workspace.test.mjs",
     "test:math": "node --test tests/math-rendering.test.mjs",
     "test:math:browser": "node tests/browser-math-rendering.mjs",

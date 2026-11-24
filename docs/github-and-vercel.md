@@ -107,6 +107,14 @@ Public article requests validate DNS addresses at the connection boundary, reval
 
 Diagnostics distinguish configured capabilities from runtime health. An enabled capability is not a successful provider health check. Temporary quota or service errors preserve feature entry points and drafts; retries remain manual for image generation. No prompts, source text, answers, or credentials should be sent to monitoring services by default.
 
+## Voice typing checks
+
+The browser speech controller uses native recognition first and recorded audio through `/api/stt` as its fallback. Recognition is currently configured for English, while transcript cleanup preserves Unicode, meaningful brackets, typed prefixes and terms such as `ill` and `ID`. A denied microphone permission ends the attempt; a failed fallback does not loop back into the failed recognition service. Cancellation invalidates pending microphone grants and requests, and obsolete results cannot overwrite an edited draft. Genuine native final results after Stop remain usable.
+
+The STT route validates base64, MIME type and the 4 MB JSON transport limit. Valid audio bytes are excluded from the text-abuse heuristic while prompts and metadata remain checked. Supported Groq key aliases are trimmed, provider errors are summarized without raw messages, and client disconnects cancel upstream work. The client transcription deadline is 20 seconds; the provider request deadline is 10 seconds.
+
+`npm run test:speech` includes recorder races, permissions, fallback lifecycle and API security regressions. `tests/browser/vtt.spec.js` exercises the real composer with simulated recognizers and recorders in Chromium, Firefox and WebKit. Label those checks as simulations. Actual transcription can be checked separately with a public audio fixture; actual microphone, accent, background-noise and mobile-keyboard testing still requires the relevant devices.
+
 ## Vision credential troubleshooting
 
 Automatic text chat and research now start with Gemini Hydrogen (`gemini-4-hydrogen`), then use a configured Groq fallback when necessary. Select Automatic in Settings to use this policy; an explicit saved model selection remains a manual preference. Older `GEMINI_MODEL` values are retained as fallback candidates rather than replacing the Automatic primary. Provider labels identify the model that actually answered. [Google's model documentation](https://aistudio.google.com/docs/models/gemini-4-hydrogen) lists a free tier; account quotas still apply. Google Search grounding remains opt-in because it is separate from free text inference.
