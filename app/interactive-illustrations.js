@@ -762,7 +762,7 @@ export function mountInteractiveVisualCard(card) {
     card.dataset.visualMounted = 'true';
 
     const ctrl = {
-        playing: !prefersReducedMotion(),
+        playing: false,
         speed: 1,
         visible: true,
         rafId: null

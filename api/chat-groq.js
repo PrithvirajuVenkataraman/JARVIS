@@ -1,8 +1,9 @@
 import { visionFailurePayload, normalizeGeminiGenerationConfig, describeUpstreamFailure, upstreamAttemptSummary } from './_lib/model-failure.js';
 import { personProfileReply } from './_lib/person-profile.js';
 import { publicAnswer, createAnswerFilter } from './_lib/answer-visibility.js';
-import { normalizeUserInstructions, userPreferenceDirective, conversationalVoiceDirective, contextReferenceDirective, bindServerConversation } from './_lib/answer-preferences.js';
-import { withRequestLifecycle, fetchWithLifecycle as fetch, runWithSignal } from './_lib/request-lifecycle.js';
+import { normalizeUserInstructions, userPreferenceDirective, conversationalVoiceDirective, contextReferenceDirective, bindServerConversation, bindAnswerConversation } from './_lib/answer-preferences.js';
+import { answerEvidencePolicy, factualAnswer } from './_lib/factual-answer.js';
+import { withRequestLifecycle, fetchWithLifecycle as fetch, runWithSignal, currentRequestSignal } from './_lib/request-lifecycle.js';
 export const config = { maxDuration: 60 };
 import { applyApiSecurity, unsealSecret } from './_lib/security.js';
 import { validateAndRepairCodeAndMath, StreamingSpeculativeGuard } from './_lib/code-math-validator.js';
@@ -1070,7 +1071,7 @@ async function handler(req, res) {
             preferences.isWebForced = Boolean(preferences.isWebForced || req.body?.isWebForced || req.body?.webMode === 'force' || preferences.webMode === 'force');
             const profileReply = await personProfileReply(sanitizedMessage, { intent, grounding, images });
             if (profileReply) {
-                if (req.aborted || req.signal?.aborted || res.destroyed || res.writableEnded) return;
+                if (req.aborted || req.signal?.aborted || currentRequestSignal()?.aborted || res.destroyed || res.writableEnded) return;
                 const payload = { ...profileReply, requestId };
                 if (req.body?.stream === true) {
                     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
@@ -1132,6 +1133,34 @@ async function handler(req, res) {
                 routeDecision.webEligible = false;
                 routeDecision.strategy = 'direct';
                 routeDecision.reason = 'offline_forced_by_user';
+            }
+            const evidencePolicy = answerEvidencePolicy({ message: routingMessage, intent, route: routeDecision, webMode: preferences.webMode, grounded: isAttachmentGrounding || Boolean(images?.length), internal: isInternalSummary, referenceStatus: reference?.status });
+            if (evidencePolicy.required) {
+                const streaming = req.body?.stream === true;
+                if (streaming) {
+                    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+                    res.setHeader('Cache-Control', 'no-cache, no-transform');
+                    res.setHeader('Connection', 'keep-alive');
+                    writeSse(res, 'meta', { requestId });
+                }
+                const result = await factualAnswer(sanitizedMessage, {
+                    context, preferences, customGroqKey, customGeminiKey,
+                    unavailable: evidencePolicy.mode === 'evidence_unavailable',
+                    onEvent: streaming ? (event, data) => {
+                        if (event === 'status') writeSse(res, 'status', { state: 'SEARCHING', label: data.message });
+                        if (event === 'entity') writeSse(res, 'entity', data);
+                        // Drafts and unvalidated source lists never become answer text.
+                    } : undefined
+                });
+                if (req.aborted || req.signal?.aborted || currentRequestSignal()?.aborted || res.destroyed || res.writableEnded) return;
+                const payload = { ...result, requestId, routing: { strategy: 'evidence_first', reason: 'factual_evidence_required' } };
+                if (streaming) {
+                    writeSse(res, 'sources', { sources: payload.sources || [] });
+                    writeSse(res, 'delta', { text: payload.response });
+                    writeSse(res, 'done', payload);
+                    return res.end();
+                }
+                return res.status(200).json(payload);
             }
             const lengthPolicy = applyCostCapToLengthPolicy(
                 buildLengthPolicy(routingMessage, '', {
@@ -1226,14 +1255,13 @@ async function handler(req, res) {
             const hasAssistantInStructured = Array.isArray(request.value.structuredMessages) && request.value.structuredMessages.some(m => m.role === 'assistant');
             const hasAssistantInContext = Array.isArray(context) && context.some(m => m.role === 'assistant');
             const hasStructuredContext = Array.isArray(request.value.structuredMessages) && request.value.structuredMessages.length > 0 && (hasAssistantInStructured || !hasAssistantInContext);
-            const firstStructured = hasStructuredContext
-                ? request.value.structuredMessages
-                : composeStructuredChatMessages({
+            const firstStructured = composeProviderConversation({
                     systemPrompt,
-                    ragBlock: preloadedLiveRag.ragText,
+                    messages: hasStructuredContext ? request.value.structuredMessages : null,
+                    ragText: preloadedLiveRag.ragText,
                     context,
                     retrievedTurns: request.value.retrievedTurns || [],
-                    rollingSummary: request.value.rollingSummary || '',
+                    summary: request.value.rollingSummary || '',
                     message: effectiveMessage,
                     lengthGuidance: lengthPolicy.instruction,
                     intent,
@@ -1324,14 +1352,13 @@ async function handler(req, res) {
                         lengthPolicy.instruction,
                         intent
                     );
-                    const secondStructured = hasStructuredContext
-                        ? request.value.structuredMessages
-                        : composeStructuredChatMessages({
+                    const secondStructured = composeProviderConversation({
                             systemPrompt,
-                            ragBlock: liveRag.ragText,
+                            messages: hasStructuredContext ? request.value.structuredMessages : null,
+                            ragText: liveRag.ragText,
                             context,
                             retrievedTurns: request.value.retrievedTurns || [],
-                            rollingSummary: request.value.rollingSummary || '',
+                            summary: request.value.rollingSummary || '',
                             message: effectiveMessage,
                             lengthGuidance: lengthPolicy.instruction,
                             intent,
@@ -1453,6 +1480,9 @@ async function handler(req, res) {
                 requestId,
                 modelUsed: selectedPass.modelUsed,
                 provider: selectedPass.provider,
+                verified: false,
+                verificationScope: 'none',
+                provenance: isAttachmentGrounding ? 'supplied_material' : 'model_knowledge',
                 upstreamAttempts: selectedPass.upstreamAttempts,
                 routing: {
                     mode: CHAT_ROUTER_MODE,
@@ -1680,6 +1710,10 @@ async function handler(req, res) {
         ].filter(Boolean).join('\n\n');
     }
 
+    function composeProviderConversation(options) {
+        return bindAnswerConversation({ ...options, systemPrompt: [options.systemPrompt, buildIntentPromptHint(options.intent), buildReasoningInstruction(options.intent, options.model, options.userSelectedModel, options.message)].filter(Boolean).join('\n\n') });
+    }
+
     function composeStructuredChatMessages({ systemPrompt, ragBlock = '', contextBlock = '', context = [], retrievedTurns = [], rollingSummary = '', message = '', lengthGuidance = '', intent = 'chat', model = '', userSelectedModel = null }) {
         const messages = [];
 
@@ -1824,14 +1858,13 @@ async function handler(req, res) {
             const hasAssistantInStructured = Array.isArray(structuredMessages) && structuredMessages.some(m => m.role === 'assistant');
             const hasAssistantInContext = Array.isArray(context) && context.some(m => m.role === 'assistant');
             const hasStructuredContext = Array.isArray(structuredMessages) && structuredMessages.length > 0 && (hasAssistantInStructured || !hasAssistantInContext);
-            const structuredChat = hasStructuredContext
-                ? structuredMessages
-                : composeStructuredChatMessages({
+            const structuredChat = composeProviderConversation({
                     systemPrompt,
-                    ragBlock: liveRag.ragText,
+                    messages: hasStructuredContext ? structuredMessages : null,
+                    ragText: liveRag.ragText,
                     context,
                     retrievedTurns,
-                    rollingSummary: options?.rollingSummary || '',
+                    summary: options?.rollingSummary || '',
                     message: effectiveMessage,
                     lengthGuidance: lengthPolicy?.instruction || '',
                     intent,
@@ -2027,6 +2060,9 @@ async function handler(req, res) {
                     : (Array.isArray(streamResult.sources) && streamResult.sources.length > 0 ? streamResult.sources : undefined),
                 action: null,
                 provider: streamResult.provider,
+                verified: false,
+                verificationScope: 'none',
+                provenance: streamImages?.length ? 'supplied_material' : 'model_knowledge',
                 modelUsed: streamResult.modelUsed,
                 upstreamAttempts: streamResult.upstreamAttempts,
                 routing: {
@@ -4902,7 +4938,7 @@ async function handler(req, res) {
 
     function shouldSkipStreamQualityReview(message, answer, intent) {
         // Stream responses are delivered chunk-by-chunk to the user in real time.
-        // Post-stream critics cause 3-4s latency stalls and abrupt answer mutations.
+        // Source-dependent facts pass the evidence gate before publication; direct streams report model knowledge.
         return true;
     }
 

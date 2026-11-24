@@ -22,6 +22,7 @@ export const cleanAnswerText = value => {
 };
 const normalizedText = value => cleanText(value).normalize('NFKC').toLowerCase();
 const countValue = value => Number(value) || NUMBER_WORDS[String(value).toLowerCase()] || 0;
+const literalEvidenceText = text => String(text).replace(/[\\[\]`*_<>:{}~]/g, character => `\\${character}`);
 
 // Expand known aliases before lexical matching; punctuation still identifies software.
 export function normalizeResearchAliases(value = '') {
@@ -232,21 +233,6 @@ function sourceQuote(source, quote) {
     // Headlines and title echoes are discovery clues, not evidence of an answer.
     if (text.length <= cleanText(source.title).length + 12 && normText.includes(normTitle)) return '';
     if (normText.includes(normValue)) return value;
-    const stripPunct = s => s.replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
-    const cleanPunctValue = stripPunct(normValue);
-    const cleanPunctText = stripPunct(normText);
-    if (cleanPunctValue && cleanPunctText.includes(cleanPunctValue)) {
-        if (cleanPunctValue === stripPunct(normTitle)) return '';
-        return value;
-    }
-    const words = cleanPunctValue.split(' ').filter(w => w.length > 2);
-    if (words.length >= 4) {
-        const needle = words.slice(0, Math.min(8, words.length)).join(' ');
-        if (needle && cleanPunctText.includes(needle)) {
-            if (cleanPunctValue === stripPunct(normTitle)) return '';
-            return value;
-        }
-    }
     return '';
 }
 
@@ -368,15 +354,11 @@ export function validateResearchAnswer(data, requirements, sources) {
     }
     const correction = countContradiction(data?.premise, requested, available);
     if (correction) facts.push(correction);
-    const rawAnswer = typeof data?.answer === 'string' ? cleanAnswerText(data.answer) : '';
     const missing = requested.filter(requirement => {
         if ((Array.isArray(data?.gaps) ? data.gaps : []).some(g => g?.requirementId === requirement.id && cleanText(g.detail))) return true;
         const matches = facts.filter(f => f.requirementId === requirement.id);
         const corrected = matches.find(f => f.premiseCorrection);
         if (corrected) return corrected.correctedCount === undefined || matches.filter(f => !f.premiseCorrection).length < corrected.correctedCount;
-        if (requirement.type === 'explanation' && rawAnswer && rawAnswer.length >= 30) {
-            return false;
-        }
         return matches.length < Math.max(1, requirement.expectedCount || 1) || !hasExclusiveCountSupport(requirement, matches);
     });
     // Gaps come from unsatisfied requirements, not an untrusted model success flag.
@@ -385,61 +367,28 @@ export function validateResearchAnswer(data, requirements, sources) {
         const countOnly = requirement.exclusiveCount && facts.filter(f => f.requirementId === requirement.id).length >= requirement.expectedCount && !hasExclusiveCountSupport(requirement, facts.filter(f => f.requirementId === requirement.id));
         return { requirementId: requirement.id, detail: cleanText(proposed?.detail) || (countOnly ? `Verify that only ${requirement.expectedCount} entities satisfy the condition; the identified examples do not establish exclusivity` : requirement.description), query: missingQuery(requirement, proposed?.query) };
     });
-    // Render validated text. If an explicit conversational answer citing validated sources was provided,
-    // use it for fluent Grounded RAG synthesis. Otherwise render the verified spans.
+    // Publish only complete, validated spans. Free-form `answer` and segment prose
+    // are drafts, not evidence: attaching a real citation cannot validate new claims.
     const lines = [];
     for (const fact of facts) {
         const requirement = requested.find(r => r.id === fact.requirementId);
         const label = requirement?.entities?.length && requirement.attribute ? `${requirement.entities.join(', ')} (${requirement.attribute}): ` : '';
         const lineKey = `${label}${normalizedText(fact.value)}`;
         if (lines.some(line => line.key === lineKey)) continue;
-        lines.push({ key: lineKey, value: normalizedText(fact.value), text: `${label}${fact.value} [${fact.sourceId}]` });
+        lines.push({ key: lineKey, value: normalizedText(fact.value), text: `${label}${literalEvidenceText(fact.value)} [${fact.sourceId}]` });
     }
     let content = '';
-    if (rawAnswer && (facts.length > 0 || available.length > 0 || requested.some(r => r.type === 'explanation'))) {
-        const validSourceIds = new Set(available.map(s => s.id));
-        let sanitizedAnswer = cleanBulletEndCitations(rawAnswer);
-        sanitizedAnswer = sanitizedAnswer.replace(/\[(\d+)\]/g, (match, num) => {
-            const id = Number(num);
-            return validSourceIds.has(id) ? match : '';
-        }).replace(/[ \t]+([.,;!?])/g, '$1').replace(/[ \t]{2,}/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
-        sanitizedAnswer = cleanBulletEndCitations(sanitizedAnswer);
-        if (sanitizedAnswer.length >= 30) {
-            content = sanitizedAnswer;
-            if (!facts.length && available.length > 0) {
-                const usedCitations = [...content.matchAll(/\[(\d+)\]/g)].map(m => Number(m[1]));
-                const citeIds = usedCitations.length ? [...new Set(usedCitations)].filter(id => validSourceIds.has(id)) : [available[0].id];
-                for (const cid of citeIds.slice(0, 4)) {
-                    const s = available.find(item => item.id === cid);
-                    if (s) {
-                        facts.push({
-                            id: `f${facts.length + 1}`,
-                            requirementId: requested[0]?.id || 'r1',
-                            value: s.title,
-                            sourceId: s.id,
-                            sourceUrl: s.url,
-                            quote: selectResearchExcerpt(evidenceText(s), content, 150) || s.title
-                        });
-                    }
-                }
-            }
-        }
-    }
-    if (!content) content = lines.map(line => line.text).join('\n\n');
+    content = lines.map(line => line.text).join('\n\n');
     const hasUnmetCountClaim = requested.some(r => r.countIsClaim && missing.some(m => m.id === r.id));
     if (gaps.length) {
-        const details = gaps.map(g => g.detail).join('; ');
+        const details = gaps.map(g => literalEvidenceText(g.detail)).join('; ');
         if (!content) {
-            const hasOnlyExplanationReqs = requested.length > 0 && requested.every(r => r.type === 'explanation');
-            if (!hasOnlyExplanationReqs) {
-                content = `I couldn't verify the requested facts from the retrieved passages. Missing: ${details}.`;
-            }
-        } else if (hasUnmetCountClaim || (!rawAnswer && !requested.some(r => r.type === 'explanation'))) {
+            content = `I couldn't verify the requested facts from the retrieved passages. Missing: ${details}.`;
+        } else if (hasUnmetCountClaim || gaps.length) {
             content = `${content}\n\nStill unverified: ${details}.`;
         }
     }
-    const hasGroundedAnswer = Boolean(rawAnswer && rawAnswer.length >= 30 && (facts.length > 0 || available.length > 0));
-    const answerStatus = (facts.length > 0 || hasGroundedAnswer)
+    const answerStatus = facts.length > 0
         ? (gaps.length ? 'partial' : 'complete')
         : 'unavailable';
     return { content, facts, claims: facts, gaps, missingRequirementIds: missing.map(r => r.id), nextQueries: [...new Set(gaps.map(g => g.query))].slice(0, 2), answerStatus, verified: answerStatus === 'complete', rejectedFacts, coverage: { sufficient: answerStatus === 'complete', gaps: gaps.map(g => g.detail), usefulCount: new Set(facts.map(f => f.sourceId)).size, satisfiedRequirementIds: requested.filter(r => !missing.includes(r)).map(r => r.id), missingRequirementIds: missing.map(r => r.id) } };

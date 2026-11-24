@@ -1088,7 +1088,7 @@ export function renderOrUpdateSourcesCarousel(rowElement, sources = []) {
                 </svg>
                 Sources
             </span>
-            <span class="source-carousel-count">${sources.length} verified</span>
+            <span class="source-carousel-count">${sources.length} sources</span>
         </div>
         <div class="source-carousel-track">
             ${cardsHtml}

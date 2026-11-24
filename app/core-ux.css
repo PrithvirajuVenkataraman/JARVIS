@@ -269,3 +269,17 @@ body .composer-disclaimer { font-size:12px; line-height:1.5; color:var(--core-mu
     body #help-modal .settings-modal-heading { font-size:16px; }
     body #help-modal .settings-presets-pills { grid-template-columns:repeat(2,minmax(0,1fr)); }
 }
+
+/* Static interface: status is communicated through text and state, not motion. */
+html { scroll-behavior:auto !important; }
+@layer static-interface {
+body *, body *::before, body *::after {
+    animation:none !important;
+    transition:none !important;
+    scroll-behavior:auto !important;
+}
+}
+body .has-web-search .composer-web-outline {
+    display:none;
+}
+body #input-bar-inner.has-web-search { border-color:var(--core-border, #555); }

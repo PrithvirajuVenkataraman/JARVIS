@@ -491,7 +491,7 @@ export async function searchResearchSources(query, options = {}) {
         // Broad web indexes lead. News indexes cannot substitute a flood of headlines
         // for answer-bearing general results, especially on conceptual software questions.
         const generalProviders = [];
-        if (process.env.SEARCH_GEMINI_GROUNDING_FREE_ALLOWANCE === 'true' && hasGeminiKey(options.customGeminiKey)) {
+        if (!options.retrievalOnly && process.env.SEARCH_GEMINI_GROUNDING_FREE_ALLOWANCE === 'true' && hasGeminiKey(options.customGeminiKey)) {
             generalProviders.push(['gemini_grounding', async (q, cfg) => {
                 const res = await searchGeminiGrounding(q, { ...cfg, customGeminiKey: options.customGeminiKey });
                 return res?.results || [];
@@ -529,8 +529,8 @@ export async function searchResearchSources(query, options = {}) {
 }
 
 export async function runWebResearch(query, options = {}) {
-    return runResearch(query, options, {
-        search: (candidate, config) => cachedResearchSearch(candidate, config, searchResearchSources),
+    return runResearch(query, { ...options, maxModelCalls: 2, finalOnly: true }, {
+        search: (candidate, config) => cachedResearchSearch(candidate, { ...config, retrievalOnly: true }, searchResearchSources),
         extract: crawlArticleBody
     });
 }

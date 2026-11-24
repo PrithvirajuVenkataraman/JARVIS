@@ -8498,7 +8498,7 @@ function showHelpModal(...args) { return globalThis.JarvisLazy.loadClassic('sett
             autoScrollLocked = false;
             chatUnreadWhileScrolledUp = false;
             if (chatMain) {
-                chatMain.scrollTo({ top: chatMain.scrollHeight, behavior: 'smooth' });
+                chatMain.scrollTo({ top: chatMain.scrollHeight, behavior: 'auto' });
             }
             if (chatContainer && chatContainer !== chatMain) {
                 chatContainer.scrollTop = chatContainer.scrollHeight;
@@ -11272,9 +11272,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 }
                 
                 
-                const shouldTypewriter = typewriter === null
-                    ? false
-                    : (!!typewriter && !hasHtmlContent);
+                const shouldTypewriter = false; // Render complete replies immediately; live streams remain incremental.
 
                 const startAssistantRender = () => {
                     if (shouldTypewriter) {
@@ -13551,7 +13549,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 }
                 card.classList.add('is-highlighted');
                 try {
-                    card.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+                    card.scrollIntoView({ behavior: 'auto', block: 'nearest', inline: 'center' });
                 } catch (_) {}
                 setTimeout(() => {
                     card.classList.remove('is-highlighted');
@@ -21283,132 +21281,18 @@ function requiresStrictLiveVerification(userText, liveIntent = null, entityInten
     return shouldRequireVerifiedSources(String(userText || ''), liveIntent, entityIntent);
 }
 
-async function publishUniversalModelFallback(pipeline, label = 'Model fallback') {
-    const ai = await askGeminiAI(pipeline.userText);
-    const answer = String(ai?.response || ai?.text || '').trim();
-    if (!answer || ai?.aborted || ai?.intent === 'soft_fallback') return false;
-    return await publishResolvedModelMessage(pipeline.userText, answer, {
-        label: label || 'Model fallback',
-        isFallback: true,
-        routing: ai?.routing || null
-    });
-}
-
-async function fetchHybridCitationSources(userText, intent, controller) {
-    if (!isFactSearchEnabled()) return [];
-
-    const query = String(userText || '').trim();
-    if (!query) return [];
-
-    const searchQueries = buildLiveSearchQueries(query, intent || extractLiveQueryIntent(query));
-    const resultSets = await Promise.all(
-        searchQueries.slice(0, 3).map(async (q) => {
-            try {
-                const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.search, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    signal: controller?.signal,
-                    body: JSON.stringify({ query: q, maxResults: 5 })
-                });
-                if (!response.ok) return [];
-                const data = await response.json();
-                return Array.isArray(data?.results) ? data.results.filter(Boolean) : [];
-            } catch (error) {
-                return [];
-            }
-        })
-    );
-
-    const ranked = rankSourcesByPolicy(resultSets.flat(), intent?.domain || 'general', query);
-    const deduped = [];
-    const seen = new Set();
-    for (const item of ranked) {
-        const url = String(item?.url || '').trim();
-        if (!url || seen.has(url)) continue;
-        seen.add(url);
-        deduped.push(item);
-        if (deduped.length >= 4) break;
-    }
-    return deduped;
-}
-
-function buildHybridAnswerWithSources(answer, sources) {
-    const cleanAnswer = String(answer || '').trim();
-    if (!cleanAnswer) return '';
-    const sourceLines = (Array.isArray(sources) ? sources : [])
-        .slice(0, 4)
-        .map((item, index) => `${index + 1}. [${item.title}](${item.url})`)
-        .join('\n');
-    if (!sourceLines) return cleanAnswer;
-    return `${cleanAnswer}\n\nSources:\n${sourceLines}`;
-}
-
-async function handleAnswerThenCiteQuery(userText, classification) {
-    const query = String(userText || '').trim();
-    if (!query) return false;
-
-    const ai = await askGeminiAI(query);
-    if (ai?.aborted) return true;
-
-    const answer = String(ai?.response || ai?.text || '').trim();
-    if (!answer || ai?.intent === 'soft_fallback') {
-        return false;
-    }
-
-    if (!isFactSearchEnabled()) {
-        await publishResolvedModelMessage(query, answer, { label: 'Model answer', routing: ai?.routing || null });
-        return true;
-    }
-
-    const controller = beginAbortableRequest();
-    try {
-        const sources = await fetchHybridCitationSources(query, classification?.liveIntent, controller);
-        const finalMsg = buildHybridAnswerWithSources(answer, sources);
-        if (sources.length) {
-            addVerifiedAssistantMessage(finalMsg, 'Answer with sources');
-            saveToHistory(query, finalMsg || answer);
-        } else {
-            await publishResolvedModelMessage(query, answer, {
-                label: 'Model answer',
-                historyText: finalMsg || answer,
-                routing: ai?.routing || null
-            });
-        }
-        return true;
-    } catch (error) {
-        if (isAbortError(error)) return true;
-        await publishResolvedModelMessage(query, answer, { label: 'Model answer', routing: ai?.routing || null });
-        return true;
-    } finally {
-        clearActiveRequest(controller);
-    }
+async function handleAnswerThenCiteQuery(userText) {
+    return handleBoundedLiveResearchQuery(userText, userText);
 }
 
 async function handleChatFirstCurrentQuery(userText, classification) {
     const query = String(userText || '').trim();
     if (!query) return false;
-
-    const ai = await askGeminiAI(query);
-    if (ai?.aborted) return true;
-
-    const answer = String(ai?.response || ai?.text || '').trim();
-    if (answer && ai?.intent !== 'soft_fallback') {
-        await publishResolvedModelMessage(query, answer, { label: 'Model answer', routing: ai?.routing || null });
-        return true;
-    }
-
-    if (!isFactSearchEnabled()) {
-        return publishLiveDisabledMessage(query);
-    }
-
+    if (!isFactSearchEnabled()) return publishLiveDisabledMessage(query);
     const flags = classification?.flags || {};
-    if (flags.exchangeRate) return await handleExchangeRateLookup(query);
-    if (flags.marketPrice) return await handleMarketLookup(query);
-    if (flags.news || shouldUseNewsEndpointForCurrentQuery(query)) {
-        await fetchAndDisplayNews(query);
-        return true;
-    }
-    return await handleLiveRetrievalQuery(query);
+    if (flags.exchangeRate) return handleExchangeRateLookup(query);
+    if (flags.marketPrice) return handleMarketLookup(query);
+    return handleBoundedLiveResearchQuery(query, userText);
 }
 
 function extractRequestedDish(text) {
@@ -22211,7 +22095,9 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
     const ControllerClass = window.JarvisLiveResearch?.BoundedLiveResearchController ||
         globalThis.JarvisLiveResearch?.BoundedLiveResearchController;
     if (!ControllerClass) {
-        return handleLiveRetrievalQuery(userDisplayQuery, options);
+        addChatMessage('Web search could not start. Reload and try again; no answer has been verified.', false, false);
+        hideThinkingIndicator();
+        return true;
     }
 
     // In production, the client preserves userDisplayQuery verbatim without client-side regex manipulation.
@@ -22460,262 +22346,7 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
 }
 
 async function handleLiveRetrievalQuery(userText, options = {}) {
-    const rawInput = String(userText || '').trim();
-    const contextResolution = window.JarvisConversation?.resolve?.({ message: rawInput });
-    const resolvedQuery = contextResolution?.resolvedMessage && contextResolution.resolvedMessage !== rawInput
-        ? contextResolution.resolvedMessage
-        : rawInput;
-    const initialQuery = resolvedQuery;
-    const initialIntent = extractLiveQueryIntent(initialQuery);
-    const initialEntityIntent = extractUniversalEntityIntent(initialQuery, initialIntent);
-    const publicSourceAllowed = isPublicSourceSearchAllowedWhenLiveDisabled(initialQuery, initialIntent, initialEntityIntent);
-    if (!isFactSearchEnabled() && !publicSourceAllowed) {
-        return publishLiveDisabledMessage(userText);
-    }
-
-    logRoutingDebug('handler enter: live_retrieval', userText, {
-        selectedHandler: 'handleLiveRetrievalQuery',
-        options
-    });
-
-    window.JarvisInteractionState?.transition?.('ANALYZING', { metadata: { userText } });
-    showThinkingIndicator('Thinking...');
-    const controller = beginAbortableRequest();
-    const verificationBudgetMs = 15000;
-    let didBudgetTimeout = false;
-    const budgetTimer = setTimeout(() => {
-        didBudgetTimeout = true;
-        try { controller.abort(); } catch (_) {}
-    }, verificationBudgetMs);
-
-    try {
-        const query = initialQuery;
-        const intent = initialIntent;
-        const entityIntent = initialEntityIntent;
-        const conciseFactQuery = isConciseDirectFactQuery(query);
-        const roleHolderQuery = isCurrentRoleHolderLiveQuery(query, intent, entityIntent);
-        const failClosed = roleHolderQuery || shouldRequireVerifiedSources(query, intent, entityIntent);
-
-        const searchEngineQuery = query
-            .replace(/^(?:please\s+)?(?:can you|could you|would you)?\s*(?:search|find|look ?up|browse|check|tell me|what are|what is)\s+(?:the\s+)?(?:latest|recent|current)?\s*/i, '')
-            .replace(/\b(?:from|using|on)\s+(?:the\s+)?(?:web|internet|online)\b/gi, ' ')
-            .replace(/[?!]+$/g, '')
-            .replace(/\s+/g, ' ')
-            .trim() || query;
-
-        let answerData = null;
-        try {
-            answerData = await fetchLiveSearchJson(searchEngineQuery, {
-                signal: controller.signal,
-                maxResults: 8,
-                answer: true,
-                mode: 'rag',
-                domain: intent.domain || '',
-                factType: intent.factType || '',
-                mustContain: getLiveSearchMustContainHints(intent, query),
-                timeoutMs: 14000
-            });
-            clearTimeout(budgetTimer);
-        } catch (searchErr) {
-            clearTimeout(budgetTimer);
-            if (isAbortError(searchErr)) {
-                logRoutingDebug('handler fallback: search_timeout_reached', query, {
-                    error: String(searchErr?.message || searchErr)
-                });
-                answerData = null;
-            } else {
-                logRoutingDebug('handler fallback: live_search_error', query, {
-                    error: String(searchErr?.message || searchErr)
-                });
-                answerData = null;
-            }
-        }
-
-        const directAnswer = cleanLiveAnswerText(String(answerData?.answer || '').trim());
-        const answerResults = Array.isArray(answerData?.results) ? answerData.results.filter(Boolean) : [];
-        const answerEvidenceCount = Number(answerData?.answerEvidenceCount || 0);
-        const distinctDomains = Array.from(new Set(
-            answerResults.map(r => {
-                try {
-                    const host = r.domain || (r.url ? new URL(r.url).hostname.replace(/^www\./, '') : '');
-                    return host.toLowerCase().trim();
-                } catch (_) {
-                    return '';
-                }
-            }).filter(Boolean)
-        ));
-        const isTitleOnlyAnswer = answerResults.some(r => r.title && cleanLiveAnswerText(r.title).toLowerCase() === directAnswer.toLowerCase());
-
-        // If direct answer is already verified from high-confidence RAG with verified flag and multi-source consensus
-        if (answerData?.verified === true && directAnswer && !isTitleOnlyAnswer && !isRefusalAnswer && answerEvidenceCount > 0 && answerResults.length) {
-            showThinkingIndicator('Verifying sources...');
-            const sourceLines = answerResults
-                .slice(0, 5)
-                .map((r, i) => `${i + 1}. [${r.title}](${r.url})`)
-                .join('\n');
-            const conciseAnswer = conciseFactQuery
-                ? directAnswer.split(/\n\s*Key points:\s*/i)[0].split(/\n\s*Confidence:\s*/i)[0].trim()
-                : directAnswer;
-            const finalMsg = `${conciseAnswer}\n\n${buildSourceMetaBlock(answerResults)}\n\nSources:\n${sourceLines}`;
-            addVerifiedAssistantMessage(finalMsg, 'Verified live sources');
-            await prepareApiReply('live_summary_ready', {}, 'I checked current sources and verified the answer.');
-            saveToHistory(userText, finalMsg);
-            hideThinkingIndicator();
-            return true;
-        }
-
-        // Single-source early exit if confident, or multi-domain consensus requirement: require at least 2 distinct trusted domains agreeing
-        const hasConfidentSingleSource = answerResults.length >= 1 && (
-            answerData?.verified === true ||
-            Boolean(answerResults[0].qualitySignals?.includes('google_search_grounding')) ||
-            Boolean(answerResults[0].qualitySignals?.includes('wikipedia_summary')) ||
-            answerResults[0].evidenceLevel === 'structured_claim' ||
-            (answerResults[0].description && answerResults[0].description.length >= 40)
-        );
-        if (answerResults.length > 0 && (hasConfidentSingleSource || distinctDomains.length >= 2)) {
-            window.JarvisInteractionState?.transition?.('ANALYZING', { metadata: { userText: query, phase: 'synthesizing' } });
-            showThinkingIndicator('Thinking...');
-            const snippets = answerResults
-                .slice(0, 6)
-                .map((r, i) => `${i + 1}. ${r.title}\nSource: ${r.sourceLabel || r.domain || r.url}\nDate: ${r.date || 'Recent 2026'}\nContent: ${r.fullArticleContent || r.fullArticleText || r.description}\nURL: ${r.url}`)
-                .join('\n\n');
-
-            const isAttribution = options?.entityAttribution || options?.mediaAttribution || isEntityAttributionQuery(query);
-            const attributionFormatPrompt = isAttribution
-                ? `Direct answer: <accurately state the exact entity association, creator, origin, release/publication year, and primary figures in natural, cohesive paragraphs>`
-                : `Direct answer: <answer the question directly, comprehensively, and fluently in natural, well-structured paragraphs. Use Markdown headings (## or ###) to organize distinct sections in longer answers when appropriate. Reserve bullet points only for genuine itemized lists or steps.>`;
-
-            const synthesisPrompt = `Answer the user's question directly, comprehensively, and factually using ONLY the verified web content below.
-
-User question: "${query}"
-
-Required format:
-${attributionFormatPrompt}
-Confidence: ${distinctDomains.length >= 2 ? `High (verified across multiple independent domains: ${distinctDomains.slice(0, 3).join(', ')})` : `Verified from ${distinctDomains[0] || 'primary source'}`}
-
-Rules:
-- Focus on what is current or verified in the snippets.
-- Do not make up numbers, dates, actors, or causes.
-- Strictly verify entity attribution: When asked about relationships, creations, or source containers, ground the exact association strictly in the snippets. Never attribute an entity to the wrong work, creator, or origin.
-- Only state a fact confidently if it appears in multiple snippets or from a clearly reputable source.
-- If evidence is weak or contradictory, say so instead of guessing.
-- Provide a comprehensive, detailed answer with full context unless the user explicitly requested a brief one-liner.
-
-Snippets:
-${snippets}`;
-
-            const sourceLines = answerResults.slice(0, 5).map((r, i) => `${i + 1}. [${r.title}](${r.url})`).join('\n');
-            const metaBlock = buildSourceMetaBlock(answerResults);
-            const sourceAppendix = `\n\n${metaBlock}\n\nSources:\n${sourceLines}`;
-
-            let streamedResponse = null;
-            try {
-                streamedResponse = await askGeminiAI(synthesisPrompt, {
-                    stream: true,
-                    displayUserMessage: userText,
-                    routingMessage: userText,
-                    timeoutMs: 18000
-                });
-            } catch (synthErr) {
-                logRoutingDebug('handler fallback: live_synthesis_stream_error', query, {
-                    error: String(synthErr?.message || synthErr)
-                });
-            }
-
-            const rawAnswer = cleanLiveAnswerText(String(streamedResponse?.response || streamedResponse?.text || '').trim());
-            if (rawAnswer && !/could not verify|cannot verify/i.test(rawAnswer)) {
-                const conciseAnswer = conciseFactQuery
-                    ? rawAnswer.split(/\n\s*Key points:\s*/i)[0].split(/\n\s*Key context & details:\s*/i)[0].split(/\n\s*Confidence:\s*/i)[0].trim()
-                    : rawAnswer;
-                const finalMsg = `${conciseAnswer}${sourceAppendix}`;
-
-                if (streamedResponse?.assistantMessageId) {
-                    updateStreamingAssistantMessage(streamedResponse.assistantMessageId, finalMsg, {
-                        userMessage: userText,
-                        streaming: false,
-                        sourceType: 'verified'
-                    });
-                } else {
-                    addVerifiedAssistantMessage(finalMsg, 'Verified live sources');
-                }
-                await prepareApiReply('live_summary_ready', {}, 'I checked current sources and verified the answer.');
-                saveToHistory(userText, finalMsg);
-                hideThinkingIndicator();
-                return true;
-            }
-        }
-
-        // If search providers returned nothing (e.g. scrapers blocked by Vercel IPs,
-        // Gemini grounding unavailable), fall back to the model regardless of failClosed.
-        // "Could not verify" should only fire when we found results but confidence is low.
-        if (answerResults.length === 0) {
-            showThinkingIndicator('SEARCHING');
-            const fallbackPublished = await publishUniversalModelFallback({ userText: query, intent, entityIntent }, 'Model answer');
-            if (fallbackPublished) {
-                hideThinkingIndicator();
-                return true;
-            }
-        }
-
-        if (!failClosed && !requiresStrictLiveVerification(query, intent, entityIntent)) {
-            showThinkingIndicator('SEARCHING');
-            const fallbackPublished = await publishUniversalModelFallback({ userText: query, intent, entityIntent }, 'Model answer');
-            if (fallbackPublished) {
-                hideThinkingIndicator();
-                return true;
-            }
-        }
-
-        // Strict refusal with checked sources when independent consensus is not reached
-        const sourcesCheckedLines = answerResults.length > 0
-            ? '\n\nSources checked:\n' + answerResults.slice(0, 5).map((r, i) => `${i + 1}. [${r.title}](${r.url})`).join('\n')
-            : '';
-        const defaultReply = `I searched live sources for "${query}", but could not verify this with high confidence across multiple independent sources.${sourcesCheckedLines}`;
-        addVerifiedAssistantMessage(defaultReply, 'Verification unavailable');
-        saveToHistory(userText, defaultReply);
-        hideThinkingIndicator();
-        return true;
-    } catch (error) {
-        const queryStr = String(userText || '').trim();
-        const fallbackIntent = extractLiveQueryIntent(queryStr);
-        const fallbackEntityIntent = extractUniversalEntityIntent(queryStr, fallbackIntent);
-        if (!isAbortError(error) && !failClosed && !requiresStrictLiveVerification(queryStr, fallbackIntent, fallbackEntityIntent)) {
-            logRoutingDebug('handler exit: live_retrieval error -> fallback to model', queryStr, {
-                error: String(error?.message || error || '')
-            });
-            const fallbackPublished = await publishUniversalModelFallback({ userText: queryStr, intent: fallbackIntent, entityIntent: fallbackEntityIntent }, 'Model answer');
-            if (fallbackPublished) return true;
-            return false;
-        }
-        if (isAbortError(error)) {
-            if (!failClosed && !requiresStrictLiveVerification(queryStr, fallbackIntent, fallbackEntityIntent)) {
-                const fallbackPublished = await publishUniversalModelFallback({ userText: queryStr, intent: fallbackIntent, entityIntent: fallbackEntityIntent }, 'Model answer');
-                if (fallbackPublished) return true;
-            }
-            return publishStrictVerificationClarification({
-                userText: queryStr,
-                intent: fallbackIntent,
-                entityIntent: fallbackEntityIntent
-            }, {
-                sources: [],
-                summaryText: 'Verification search took longer than expected on this network. Please retry or ask a shorter question.',
-                badge: 'Verification unavailable'
-            });
-        }
-        return publishStrictVerificationClarification({
-            userText: queryStr,
-            intent: fallbackIntent,
-            entityIntent: fallbackEntityIntent
-        }, {
-            sources: [],
-            summaryText: 'I hit a verification issue. Please narrow the query and I will retry.',
-            badge: 'Verification unavailable'
-        });
-    } finally {
-        clearTimeout(budgetTimer);
-        clearActiveRequest(controller);
-        hideThinkingIndicator();
-    }
+    return handleBoundedLiveResearchQuery(userText, userText, options);
 }
 
 function isWordMeaningRequest(text) {
@@ -29565,7 +29196,7 @@ function scrollToRestoredChatMatch(query, targetMessageId = '') {
     }
 
     if (matchRow) {
-        matchRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        matchRow.scrollIntoView({ behavior: 'auto', block: 'center' });
         matchRow.classList.add('chat-row-search-hit');
         setTimeout(() => matchRow.classList.remove('chat-row-search-hit'), 2000);
 
@@ -31333,7 +30964,7 @@ function buildNotebookAnalyzingPanel() {
         </div>`;
 
     chatContainer.appendChild(row);
-    row.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    row.scrollIntoView({ behavior: 'auto', block: 'end' });
 
     const tqdmEl = row.querySelector('#nb-tqdm');
     const progress = new NotebookProgress(tqdmEl);
@@ -31397,7 +31028,7 @@ function transitionToNotebookButton(row, code, output, progress) {
         const isOpen = btn.dataset.nbOpen === 'true';
         btn.dataset.nbOpen = isOpen ? 'false' : 'true';
         fullPanel.style.display = isOpen ? 'none' : 'block';
-        if (!isOpen) fullPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        if (!isOpen) fullPanel.scrollIntoView({ behavior: 'auto', block: 'nearest' });
     });
 }
 

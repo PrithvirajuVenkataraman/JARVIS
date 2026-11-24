@@ -587,13 +587,17 @@ console.log('--- Section 13: Response Formatting, Markdown Hierarchy & Paragraph
 
     // Test 3: validateResearchAnswer preserves paragraph narrative without flattening into bullets
     const sampleReqs = buildResearchRequirements('music composer deva');
-    const sampleSources = [{ id: 1, title: 'Deva Biography', url: 'https://deva.test', bodyText: 'Deva composed over 400 films.' }];
+    const sampleSources = [{ id: 1, title: 'Deva Biography', url: 'https://deva.test', fullArticleText: 'Deva is an Indian music composer. Deva composed over 400 films.' }];
     const validated = validateResearchAnswer({
         answer: 'Devanesan Chokkalingam, popularly known as Deva, is an Indian music composer [1].\n\nOver a career spanning four decades, he composed music for over 400 films [1].',
-        facts: [{ id: 'f1', requirementId: sampleReqs[0].id, value: 'Deva composed over 400 films', sourceId: 1, quote: 'Deva composed over 400 films.' }]
+        facts: [
+            { id: 'f1', requirementId: sampleReqs[0].id, value: 'Deva is an Indian music composer.', sourceId: 1, quote: 'Deva is an Indian music composer.' },
+            { id: 'f2', requirementId: sampleReqs[1].id, value: 'Deva composed over 400 films.', sourceId: 1, quote: 'Deva composed over 400 films.' }
+        ]
     }, sampleReqs, sampleSources);
     assert.equal(validated.content.includes('\n\n'), true, 'Validated content must retain paragraph separation');
     assert.equal(/^\s*-\s+/m.test(validated.content), false, 'Validated explanatory narrative must NOT be converted to bullet points');
+    assert.doesNotMatch(validated.content, /four decades/, 'Unquoted draft details cannot be laundered into a supported answer');
 
     // Test 4: renderMarkdown renders headings, paragraphs, and genuine lists with proper HTML semantics
     const markdownInput = `## Biography\n\nDevanesan Chokkalingam was born on Nov. 20, 1950. He studied under J. B. Krishna.\n\n### Notable Films\n\n- Baasha (1995)\n- Annamalai (1992)\n- Panchathanthiram (2002)`;

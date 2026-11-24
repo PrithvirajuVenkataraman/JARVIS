@@ -31,7 +31,7 @@
     "test:reliability": "node --test tests/reliability.test.mjs",
     "test:browser": "node tools/run-browser-tests.mjs",
     "test:core": "node --test tests/core-experience.test.mjs",
-    "test:boundaries": "node --test tests/security-boundaries.test.mjs tests/reference-reliability.test.mjs tests/image-persistence.test.mjs tests/person-photos.test.mjs tests/person-profiles.test.mjs tests/conversational-voice.test.mjs tests/chat-request-budget.test.mjs tests/vision-reliability.test.mjs"
+    "test:boundaries": "node --test tests/security-boundaries.test.mjs tests/reference-reliability.test.mjs tests/image-persistence.test.mjs tests/person-photos.test.mjs tests/person-profiles.test.mjs tests/conversational-voice.test.mjs tests/chat-request-budget.test.mjs tests/vision-reliability.test.mjs tests/factual-answers.test.mjs"
   },
   "dependencies": {
     "@fontsource-variable/inter": "5.3.0",

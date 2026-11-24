@@ -64,6 +64,10 @@ Generated answer replay is disabled. Public retrieval caches and deterministic l
 
 ## Features and availability
 
+Factual chat and Web search share a passage-supported answer pipeline: source-dependent claims are checked before publication, empty retrieval cannot fall back to invented facts, and partial answers retain missing details. General model knowledge and attachments are labelled separately from external verification. Conversation recall helps resolve references; it does not certify earlier answers. See [the evidence contract](docs/evidence-research.md).
+
+The interface uses stationary controls and immediate rendering, without decorative animation or simulated typing. Interactive illustrations start paused.
+
 Chat, writing, translation, document/image questions, and research depend on configured providers and their quotas. There is no promise of unlimited inference. Deterministic context routing and local persistence do not require paid infrastructure.
 
 Automatic text chat and research prefer `gemini-4-hydrogen`, with Groq retained as a bounded fallback. Explicit supported model selections are respected. Older `GEMINI_MODEL` settings do not displace Hydrogen in Automatic text chat. Provider labels report the model that actually answered, including fallback responses. Google Search grounding requires the explicit `SEARCH_GEMINI_GROUNDING_FREE_ALLOWANCE=true` opt-in; public retrieval remains separate. A model upgrade does not by itself verify every factual claim.

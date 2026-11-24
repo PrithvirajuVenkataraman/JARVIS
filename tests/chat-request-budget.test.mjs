@@ -31,6 +31,13 @@ test('chat reserves both model attempts for the answer instead of consuming them
             const req = Object.assign(new EventEmitter(), { method: 'POST', headers: { host: 'localhost', 'content-type': 'application/json' }, socket: { remoteAddress: '127.0.0.1' }, body: { message: 'Reply with the single word ready.', intent: 'fast_simple', stream, webMode, preferences: { selectedModel: 'auto' } } });
             const res = response(); await handler(req, res);
             assert.equal(res.statusCode, 200);
+            if (webMode === 'force') {
+                assert.equal(generations.length, 0, 'Empty retrieval cannot consume generation quota or fall back to unsupported knowledge');
+                assert.equal(res.data.answerStatus, 'unavailable');
+                assert.equal(res.data.verified, false);
+                assert.ok(lookups.length > 0, 'Forced search still retrieves public evidence');
+                continue;
+            }
             assert.equal(generations.length, 2, `Exactly two answer attempts for ${webMode}/${stream}`);
             assert.match(generations[0].path, /gemini-4-hydrogen/);
             assert.equal(generations[1].host, 'api.groq.com');

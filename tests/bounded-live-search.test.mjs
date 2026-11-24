@@ -1448,7 +1448,7 @@ test('Regression 9: Answer-First Streaming & Carousel Placement Below Text', () 
         renderOrUpdateSourcesCarousel(row, updatedSources);
         assert.equal(bubble.children[0], textEl, 'Answer text remains FIRST child');
         assert.equal(bubble.children[1].className, 'chat-source-carousel', 'Carousel remains AFTER text element');
-        assert.ok(bubble.children[1].innerHTML.includes('2 verified'));
+        assert.ok(bubble.children[1].innerHTML.includes('2 sources'));
 
         // 3. Misplaced carousel is corrected to be strictly AFTER textEl
         const misplacedCarousel = bubble.children[1];

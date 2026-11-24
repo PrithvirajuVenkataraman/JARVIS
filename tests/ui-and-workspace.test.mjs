@@ -129,14 +129,14 @@ assert.ok(indexHtml.includes('forceWebSearch: true'), 'live_search action sets f
 assert.ok(indexHtml.includes('needsLiveVerification'), 'sendTextInput supports multimodal attachment live verification');
 assert.ok(indexHtml.includes('const inputSource = String(submission?.source'), 'sendTextInput declares inputSource to prevent ReferenceError on send');
 assert.ok(indexHtml.includes('pure_coding_fast_path'), 'processCommand fast-paths coding prompts directly to streaming model');
-assert.ok(indexHtml.includes('verificationBudgetMs = 8000') || indexHtml.includes('verificationBudgetMs: 8000'), 'handleLiveRetrievalQuery allows 8000ms budget for structured infobox lookup (Wikipedia/Wikidata)');
+assert.ok(indexHtml.includes('return handleBoundedLiveResearchQuery(userText, userText, options);'), 'Legacy search uses the bounded server evidence deadline');
 console.log('  [PASS] 8. Starter shortcuts removed for zero-latency, multimodal synergy and streaming latency invariants verified');
 
 // 5. Verify Robust Live Web Search & Multi-Domain Consensus Verification
 assert.ok(indexHtml.includes('if (submission?.forceWebSearch) {'), 'sendTextInput routes forceWebSearch directly to handleLiveRetrievalQuery');
-assert.ok(indexHtml.includes('distinctDomains.length >= 2'), 'handleLiveRetrievalQuery requires consensus across >= 2 distinct domains');
-assert.ok(indexHtml.includes('Sources checked:'), 'Strict refusal lists checked sources so user can review them');
-assert.ok(indexHtml.includes('const searchEngineQuery = query'), 'handleLiveRetrievalQuery optimizes query before calling search engines');
+assert.ok(!indexHtml.includes('hasConfidentSingleSource'), 'A long snippet must not be treated as proof of the answer');
+assert.ok(!indexHtml.includes('buildHybridAnswerWithSources'), 'Related links must not be attached to an unchecked model answer');
+assert.ok(indexHtml.includes('return handleBoundedLiveResearchQuery(userText, userText);'), 'Answer-then-cite now retrieves evidence before answering');
 assert.ok(indexHtml.includes('live search|web research'), 'isExplicitWebSearchRequest recognizes live search and web research intents');
 console.log('  [PASS] 9. Multi-domain consensus verification, query optimization, and refusal-with-sources verified');
  
@@ -819,7 +819,7 @@ test('Settings preserve semantic controls while component styles own their appea
     assert.ok(source.includes('class="settings-back-label">Settings</span>'));
     assert.ok(css.includes('--core-hit-area'));
     assert.ok(css.includes('--core-text'));
-    assert.ok(!css.includes('!important'));
+    assert.ok(css.includes('@layer static-interface'), 'Application motion has one explicit owner rather than feature-specific animations');
     assert.ok(fs.readFileSync('styles.css', 'utf8').includes('@layer legacy'));
     assert.ok(fs.readFileSync('app/image-generator.js', 'utf8').includes('await saveGeneratedImage(result, { signal: controller.signal })'));
     assert.ok(source.includes('if (!result.persisted)'));

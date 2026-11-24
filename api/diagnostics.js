@@ -53,6 +53,9 @@ export function buildDiagnosticsStatus() {
         },
         retrieval: {
             researchPipeline: 'evidence-driven-v2',
+            answerPolicy: 'passage-supported-v3',
+            maxAnswerProviderAttempts: 2,
+            emptyEvidenceModelFallback: false,
             researchDeadlineMs: 45000,
             answerStatuses: ['complete', 'partial', 'unavailable', 'clarification'],
             freeSearchProvidersOnly: true,

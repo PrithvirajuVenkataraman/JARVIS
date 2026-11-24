@@ -171,15 +171,13 @@ test('picker navigation preserves drafts, composition, payloads, and changing ca
     await input.fill('/pro'); await page.locator('[data-command=professional]').click(); await expect(input).toHaveValue('make this professional: ');
 });
 
-test('web search has one saved state for its inline label, menu, and animated outline', async ({ page }) => {
+test('web search has one saved state for its inline label, menu, and stationary outline', async ({ page }) => {
     const shell = page.locator('#input-bar-inner'), active = page.locator('#composer-web-search-active');
     await page.locator('#text-input').fill('Keep this draft');
     await page.locator('#composer-plus-btn').click(); await page.locator('#web-search-toggle-btn').click();
     await expect(active).toBeVisible(); await expect(shell).toHaveClass(/has-web-search/);
     await expect(active).toHaveAttribute('aria-pressed', 'true'); await expect(page.locator('#composer-actions-menu')).toBeHidden();
-    expect(await page.locator('.composer-web-outline').evaluate(element => getComputedStyle(element).animationName)).toBe('web-outline-travel');
-    const angle = await page.locator('.composer-web-outline').evaluate(element => getComputedStyle(element).getPropertyValue('--web-outline-angle'));
-    await expect.poll(() => page.locator('.composer-web-outline').evaluate(element => getComputedStyle(element).getPropertyValue('--web-outline-angle'))).not.toBe(angle);
+    expect(await page.locator('.composer-web-outline').evaluate(element => getComputedStyle(element).animationName)).toBe('none');
     await page.reload(); await page.waitForFunction(() => window.__jarvisModernReady); await expect(active).toBeVisible();
     await expect(page.locator('#text-input')).toHaveValue('Keep this draft');
     await page.emulateMedia({ reducedMotion: 'reduce' });
