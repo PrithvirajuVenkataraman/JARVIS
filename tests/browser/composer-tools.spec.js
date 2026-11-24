@@ -59,15 +59,16 @@ test('sidebar shortcuts remain reachable on all widths and open their working fe
         await toggle.click();
         await expect(toggle).toHaveAttribute('aria-expanded', 'true');
         if (width >= 1024) {
-            await expect.poll(async () => {
+            // The header and composer can share a center while both are still
+            // transitioning. Verify all final layout bounds together.
+            await expect(async () => {
                 const composer = await page.locator('#input-bar-inner').boundingBox();
                 const title = await page.locator('#app-header .header-brand-title').boundingBox();
-                return Math.abs(composer.x + composer.width / 2 - title.x - title.width / 2);
-            }).toBeLessThan(1);
-            const composer = await page.locator('#input-bar-inner').boundingBox();
-            const panel = await sidebar.boundingBox();
-            expect(composer.x).toBeGreaterThanOrEqual(panel.x + panel.width);
-            expect(composer.x + composer.width).toBeLessThanOrEqual(width);
+                const panel = await sidebar.boundingBox();
+                expect(Math.abs(composer.x + composer.width / 2 - title.x - title.width / 2)).toBeLessThan(1);
+                expect(composer.x).toBeGreaterThanOrEqual(panel.x + panel.width);
+                expect(composer.x + composer.width).toBeLessThanOrEqual(width);
+            }).toPass();
         }
         await expect(actions.getByRole('button')).toHaveText(labels);
         for (const label of labels) {
