@@ -1848,7 +1848,7 @@ function openEmailModal(type) {
                            placeholder="your.email@example.com"
                            value="${escapeHtml(savedEmail)}"
                            class="w-full px-4 py-3 rounded-xl border ${inputBg} focus:outline-none focus:ring-2 focus:ring-purple-500"
-                           onkeypress="if(event.key === 'Enter') sendEmail('${type}')">
+                           ${window.JarvisTrustedUI.bindUiEvent("keydown", function(event) { if (event.key === 'Enter') sendEmail(type) })}>
                 </div>
 
                 <div class="flex gap-3">
@@ -8620,8 +8620,8 @@ function showHelpModal(...args) { return globalThis.JarvisLazy.loadClassic('sett
             popover.innerHTML = `
                 <div class="selection-helper-actions">
                     <button type="button" class="selection-helper-btn selection-ask-jarvis-btn" data-selection-action="custom">
-                        <span aria-hidden="true">✨</span>
-                        <span>Ask JARVIS</span>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8v.5Z"/></svg>
+                        <span>Ask about selection</span>
                     </button>
                 </div>
             `;
@@ -8637,7 +8637,10 @@ function showHelpModal(...args) { return globalThis.JarvisLazy.loadClassic('sett
                 setTimeout(handleSelectionHelperTrigger, 60);
             }, true);
             document.addEventListener('pointerup', handleSelectionHelperTrigger, true);
-            document.addEventListener('keyup', handleSelectionHelperTrigger, true);
+            document.addEventListener('keyup', (event) => {
+                if (event.key === 'Escape') { hideSelectionHelperPopover(); return; }
+                handleSelectionHelperTrigger();
+            }, true);
             document.addEventListener('scroll', hideSelectionHelperPopover, true);
             document.addEventListener('selectionchange', handleSelectionHelperSelectionChange, true);
             document.addEventListener('mousedown', (event) => {
@@ -8663,7 +8666,10 @@ function showHelpModal(...args) { return globalThis.JarvisLazy.loadClassic('sett
                 }
             }, true);
             document.addEventListener('keydown', (event) => {
-                if (event.key === 'Escape') closeAssistantActionMenus();
+                if (event.key === 'Escape') {
+                    hideSelectionHelperPopover();
+                    closeAssistantActionMenus();
+                }
             }, true);
             document.addEventListener('scroll', closeAssistantActionMenus, true);
             window.addEventListener('resize', closeAssistantActionMenus);
@@ -28066,6 +28072,7 @@ let activeChatSessionId = '';
 let activeChatSessionMenuId = '';
 let pendingChatDeleteSessionId = '';
 let chatSessionLongPressTimer = null;
+let chatSessionLongPressTriggered = null;
 let isRestoringChatSession = false;
 let pendingChatRestoreSearchQuery = '';
 let chatTitleGenerationSequence = 0;
@@ -29624,7 +29631,7 @@ function commitInlineChatSessionRename(sessionId, nextTitle) {
         session.updatedAt = new Date().toISOString();
         saveChatSessions();
     }
-    renderChatSidebarList();
+    renderChatSidebarList(sessionId);
 }
 
 function handleInlineRenameKeydown(event, sessionId) {
@@ -29656,7 +29663,7 @@ function setSidebarViewTab(tab) {
     renderChatSidebarList();
 }
 
-function renderChatSidebarList() {
+function renderChatSidebarList(onlySessionId = '') {
     const list = document.getElementById('chat-sidebar-list');
     if (!list) return;
     const query = String(document.getElementById('chat-sidebar-search-input')?.value || '').trim();
@@ -29710,7 +29717,7 @@ function renderChatSidebarList() {
                            maxlength="80"
                            ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { event.stopPropagation() })}
                            ${window.JarvisTrustedUI.bindUiEvent("keydown", function(event) { handleInlineRenameKeydown(event, (String(session.id))) })}
-                           onblur="commitInlineChatSessionRename('${escapeJsString(session.id)}', this.value)"
+                           ${window.JarvisTrustedUI.bindUiEvent("focusout", function(event) { commitInlineChatSessionRename(String(session.id), this.value) })}
                            aria-label="Rename chat title" />
                     <span class="chat-session-meta" style="color:rgba(129, 140, 248, 0.9);">Press Enter to save, Esc to cancel</span>
                 </div>
@@ -29721,13 +29728,16 @@ function renderChatSidebarList() {
         return `
         <div class="chat-session-row ${session.id === activeChatSessionId ? 'is-active' : ''} ${session.pinned ? 'is-pinned' : ''}"
              role="listitem"
+             tabindex="0"
+             aria-label="Open chat: ${escapeHtml(session.title || 'New chat')}"
              data-chat-id="${escapeHtml(session.id)}"
-             ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { restoreChatSessionFromSidebar((String(session.id)), (String(bestMsgId))) })}
-             oncontextmenu="openChatSessionMenu(event, '${escapeJsString(session.id)}')"
-             onpointerdown="beginChatSessionLongPress(event, '${escapeJsString(session.id)}')"
-             onpointerup="cancelChatSessionLongPress()"
-             onpointerleave="cancelChatSessionLongPress()"
-             onpointercancel="cancelChatSessionLongPress()">
+             ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { openChatSessionFromRow(event, String(session.id), String(bestMsgId)) })}
+             ${window.JarvisTrustedUI.bindUiEvent("keydown", function(event) { if (event.target === this && ['Enter', ' '].includes(event.key)) { event.preventDefault(); restoreChatSessionFromSidebar(String(session.id), String(bestMsgId)); } })}
+             ${window.JarvisTrustedUI.bindUiEvent("contextmenu", function(event) { openChatSessionMenu(event, String(session.id)) })}
+             ${window.JarvisTrustedUI.bindUiEvent("pointerdown", function(event) { beginChatSessionLongPress(event, String(session.id)) })}
+             ${window.JarvisTrustedUI.bindUiEvent("pointerup", function(event) { cancelChatSessionLongPress() })}
+             ${window.JarvisTrustedUI.bindUiEvent("pointerout", function(event) { if (!this.contains(event.relatedTarget)) cancelChatSessionLongPress() })}
+             ${window.JarvisTrustedUI.bindUiEvent("pointercancel", function(event) { cancelChatSessionLongPress() })}>
             <div class="chat-session-main">
                 <span class="chat-session-title">${escapeHtml(session.title || 'New chat')}</span>
                 <span class="chat-session-meta">${session.pinned ? 'Pinned' : formatChatSessionDate(session.updatedAt)}</span>
@@ -29760,6 +29770,21 @@ function renderChatSidebarList() {
     `;
     };
 
+    if (typeof onlySessionId === 'string' && onlySessionId) {
+        const selector = id => `.chat-session-row[data-chat-id="${CSS.escape(id)}"]`;
+        const current = list.querySelector(selector(onlySessionId));
+        const index = searchHits.findIndex(hit => hit.session.id === onlySessionId);
+        if (current && index < 0) { current.remove(); return; }
+        if (current && index >= 0) {
+            const hit = searchHits[index], template = document.createElement('template');
+            template.innerHTML = renderRow(hit);
+            const replacement = template.content.firstElementChild;
+            current.replaceWith(replacement);
+            // Preserve other rows and their positions while focus moves to an
+            // action. The next full render reapplies chronological sorting.
+            return;
+        }
+    }
     let html = '';
     if (pinnedHits.length && !query) {
         html += pinnedHits.map(renderRow).join('');
@@ -29771,6 +29796,13 @@ function renderChatSidebarList() {
         html += searchHits.map(renderRow).join('');
     }
     list.innerHTML = html;
+}
+
+function openChatSessionFromRow(event, sessionId, targetMessageId = '') {
+    const suppress = chatSessionLongPressTriggered?.id === sessionId && chatSessionLongPressTriggered.until >= Date.now();
+    chatSessionLongPressTriggered = null;
+    if (suppress) { event.preventDefault(); event.stopPropagation(); return; }
+    restoreChatSessionFromSidebar(sessionId, targetMessageId);
 }
 
 function restoreChatSessionFromSidebar(sessionId, targetMessageId = '') {
@@ -30151,9 +30183,11 @@ function initModelSelector() {
 }
 
 function beginChatSessionLongPress(event, sessionId) {
-    if (event?.pointerType === 'mouse') return;
+    if (event?.pointerType === 'mouse' || event?.target?.closest?.('button, input')) return;
     cancelChatSessionLongPress();
+    chatSessionLongPressTriggered = null;
     chatSessionLongPressTimer = setTimeout(() => {
+        chatSessionLongPressTriggered = { id: String(sessionId), until: Date.now() + 1200 };
         openChatSessionMenu(event, sessionId);
     }, 520);
 }

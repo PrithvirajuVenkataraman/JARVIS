@@ -3376,7 +3376,6 @@ body.dark .footer-action-btn-primary:hover {
 
 /* Panels and modals */
 .help-modal-enhanced,
-.selection-helper-popover,
 .suggestions-container,
 .suggestion-chip {
     background: var(--ui-surface);
@@ -3622,85 +3621,6 @@ body.dark .footer-action-btn-primary:hover {
     color: #000000 !important;
 }
 
-/* Selection helper */
-.selection-helper-popover {
-    position: fixed;
-    z-index: var(--z-selection-helper);
-    display: none !important;
-    visibility: hidden !important;
-    pointer-events: none !important;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 10px;
-    border-radius: 12px;
-    border: 1px solid var(--ui-border);
-    background: var(--ui-surface);
-    box-shadow: 0 12px 28px rgba(15, 23, 42, 0.18);
-    max-width: min(680px, calc(100vw - 16px));
-}
-
-.selection-helper-popover.visible {
-    display: flex !important;
-    visibility: visible !important;
-    pointer-events: auto !important;
-}
-
-.selection-helper-chip {
-    font-size: 11px;
-    font-weight: 700;
-    color: var(--ui-text-muted);
-    background: var(--ui-surface-muted);
-    border-radius: 999px;
-    padding: 4px 8px;
-    max-width: 150px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.selection-helper-actions {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex-wrap: wrap;
-}
-
-.selection-helper-btn {
-    border: none;
-    border-radius: 999px;
-    padding: 7px 12px;
-    font-size: 12px;
-    font-weight: 700;
-    color: #ffffff;
-    background: var(--ui-primary);
-    cursor: pointer;
-}
-
-.selection-helper-btn:hover {
-    background: var(--ui-primary-hover);
-}
-
-.selection-ask-jarvis-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    border: none;
-    border-radius: 999px;
-    padding: 7px 14px;
-    font-size: 13px;
-    font-weight: 600;
-    color: #ffffff;
-    background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
-    box-shadow: 0 2px 8px rgba(99, 102, 241, 0.35);
-    cursor: pointer;
-    transition: transform 0.15s ease, filter 0.15s ease;
-}
-
-.selection-ask-jarvis-btn:hover {
-    filter: brightness(1.12);
-    transform: translateY(-1px);
-}
-
 .help-settings-card {
     padding: 14px;
     border: 1px solid var(--ui-border);
@@ -3875,15 +3795,6 @@ body.dark .footer-action-btn-primary:hover {
 @media (max-width: 640px) {
     .chat-scroll-jump {
         right: 10px;
-    }
-
-    .selection-helper-popover {
-        align-items: flex-start;
-        flex-direction: column;
-    }
-
-    .selection-helper-chip {
-        max-width: min(280px, 80vw);
     }
 
     .help-response-grid {
@@ -4333,8 +4244,7 @@ select,
 .chat-bubble-user,
 .assistant-message-text,
 .assistant-action-menu,
-.help-modal-enhanced,
-.selection-helper-popover {
+.help-modal-enhanced {
     font-family: var(--app-font-family);
 }
 
@@ -4442,63 +4352,10 @@ a,
 .message-action-btn:hover,
 .composer-action-item:hover,
 .composer-plus-btn:hover,
-.selection-helper-btn:hover,
 button:hover {
     background: #000000;
     color: #ffffff;
     border-color: rgba(255, 255, 255, 0.72);
-}
-
-/* Selection helper readability after the global monochrome override. */
-.selection-helper-popover {
-    max-width: min(620px, calc(100vw - 18px)) !important;
-    padding: 7px 9px !important;
-    gap: 7px !important;
-    border: 1px solid rgba(255, 255, 255, 0.42) !important;
-    border-radius: 12px !important;
-    background: #000000 !important;
-    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5) !important;
-}
-
-.selection-helper-chip {
-    max-width: min(180px, 32vw) !important;
-    border: 1px solid rgba(255, 255, 255, 0.32) !important;
-    background: #000000 !important;
-    color: rgba(255, 255, 255, 0.86) !important;
-}
-
-.selection-helper-actions {
-    min-width: 0 !important;
-    flex-wrap: wrap !important;
-}
-
-.selection-helper-btn,
-.selection-helper-btn:hover,
-.selection-helper-btn:focus,
-.selection-helper-btn:focus-visible {
-    min-height: 30px !important;
-    border: 1px solid rgba(255, 255, 255, 0.36) !important;
-    border-radius: 999px !important;
-    background: #000000 !important;
-    color: #ffffff !important;
-    box-shadow: none !important;
-    white-space: nowrap !important;
-}
-
-.selection-helper-btn:hover,
-.selection-helper-btn:focus-visible {
-    border-color: rgba(255, 255, 255, 0.82) !important;
-    background: rgba(255, 255, 255, 0.12) !important;
-}
-
-@media (max-width: 640px) {
-    .selection-helper-popover {
-        max-width: calc(100vw - 16px) !important;
-    }
-
-    .selection-helper-chip {
-        max-width: min(260px, 78vw) !important;
-    }
 }
 
 .assistant-message-text .science-value,

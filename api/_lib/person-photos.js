@@ -1,10 +1,16 @@
-import { fetchWithLifecycle as fetch } from './request-lifecycle.js';
+import { fetchWithLifecycle as fetch, currentRequestSignal } from './request-lifecycle.js';
 import { resolveEntityVisuals, isValidImageUrl } from './visual-answer-engine.js';
 import { personPhotoQuery, personPhotoSubject } from '../../app/person-photo-query.js';
 
 const COMMONS = 'https://commons.wikimedia.org/w/api.php';
 const HEADERS = { Accept: 'application/json', 'User-Agent': 'JARVIS/1.0 (+https://github.com/PrithvirajuVenkataraman/JARVIS)' };
 const cache = new Map();
+const profileCache = new Map();
+
+function inheritedSignal(signal) {
+    const parent = currentRequestSignal();
+    return parent && signal ? AbortSignal.any([parent, signal]) : parent || signal;
+}
 
 export function metadataText(value, max = 180) {
     return String(value || '').replace(/<[^>]*>/g, ' ').replace(/&(?:amp|quot|apos|lt|gt|nbsp);/g, token => ({ '&amp;': '&', '&quot;': '"', '&apos;': "'", '&lt;': '<', '&gt;': '>', '&nbsp;': ' ' })[token])
@@ -90,24 +96,45 @@ export async function resolveRolePerson(subject, signal) {
     return { id: `entity_${page.pageid}`, name: page.title.replace(/\s*\([^)]*\)$/, ''), fullName: page.title, wikidataId: page.pageprops.wikibase_item, type: subject.role, extract: page.extract || '', source: { name: 'Wikipedia', url: page.fullurl }, image: page.thumbnail ? { url: page.thumbnail.source, width: page.thumbnail.width, height: page.thumbnail.height } : null };
 }
 
-export async function resolvePersonPhoto(query, options = {}) {
+export async function resolvePersonProfile(query, options = {}) {
     const subject = personPhotoQuery(query, options.reference);
-    if (!subject || options.signal?.aborted) return null;
+    const parent = inheritedSignal(options.signal);
+    if (!subject || parent?.aborted) return null;
     const key = subject.toLocaleLowerCase();
-    const cached = cache.get(key);
+    const cached = profileCache.get(key);
     if (cached && cached.expires > Date.now()) return cached.value;
-    const signal = options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(7500)]) : AbortSignal.timeout(7500);
-    let result = null;
+    const signal = parent ? AbortSignal.any([parent, AbortSignal.timeout(4500)]) : AbortSignal.timeout(4500);
+    let entity = null;
     try {
         const qualified = personPhotoSubject(subject);
-        const entity = qualified.role
-            ? await resolveRolePerson(qualified, signal)
-            : (await resolveEntityVisuals(subject, { signal, timeoutMs: 4500, includeNotableWorks: false, personPhoto: true }))?.entity;
-        if (!/^Q\d+$/.test(entity?.wikidataId || '')) return null;
+        entity = qualified.role ? await resolveRolePerson(qualified, signal) : (await resolveEntityVisuals(subject, { signal, timeoutMs: 3500, includeNotableWorks: false, personPhoto: true }))?.entity;
+        if (!/^Q\d+$/.test(entity?.wikidataId || '')) { entity = null; return null; }
         const claims = new URL('https://www.wikidata.org/w/api.php');
         for (const [k, v] of Object.entries({ action: 'wbgetclaims', entity: entity.wikidataId, property: 'P31', format: 'json' })) claims.searchParams.set(k, v);
         const identity = await json(claims, signal);
-        if (!identity?.claims?.P31?.some(claim => claim.mainsnak?.datavalue?.value?.id === 'Q5')) return null;
+        if (!identity?.claims?.P31?.some(claim => claim.mainsnak?.datavalue?.value?.id === 'Q5')) { entity = null; return null; }
+        return entity;
+    } catch { entity = null; return null; }
+    finally {
+        if (!signal.aborted) {
+            if (profileCache.size >= 200) profileCache.delete(profileCache.keys().next().value);
+            profileCache.set(key, { value: entity, expires: Date.now() + (entity ? 900000 : 60000) });
+        }
+    }
+}
+
+export async function resolvePersonPhoto(query, options = {}) {
+    const subject = personPhotoQuery(query, options.reference);
+    const parent = inheritedSignal(options.signal);
+    if (!subject || parent?.aborted) return null;
+    const key = subject.toLocaleLowerCase();
+    const cached = cache.get(key);
+    if (cached && cached.expires > Date.now()) return cached.value;
+    const signal = parent ? AbortSignal.any([parent, AbortSignal.timeout(7500)]) : AbortSignal.timeout(7500);
+    let result = null;
+    try {
+        const entity = await resolvePersonProfile(subject, { signal });
+        if (!entity) return null;
         const title = sourceFile(entity.image?.url);
         const search = { generator: 'search', gsrnamespace: 6, gsrsort: 'create_timestamp_desc' };
         const [typed, depicted, referenceImages] = await Promise.all([

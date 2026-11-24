@@ -3,6 +3,8 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 export const REQUEST_DEADLINE_MS = 52000;
 const requestScope = new AsyncLocalStorage();
 
+export function currentRequestSignal() { return requestScope.getStore()?.signal; }
+
 export function withRequestLifecycle(handler) {
     return async (req, res) => {
         const lifecycle = createRequestLifecycle(req, res);

@@ -1,4 +1,5 @@
 import { visionFailurePayload, normalizeGeminiGenerationConfig, describeUpstreamFailure, upstreamAttemptSummary } from './_lib/model-failure.js';
+import { personProfileReply } from './_lib/person-profile.js';
 import { publicAnswer, createAnswerFilter } from './_lib/answer-visibility.js';
 import { normalizeUserInstructions, userPreferenceDirective, contextReferenceDirective, bindServerConversation } from './_lib/answer-preferences.js';
 import { withRequestLifecycle, fetchWithLifecycle as fetch, runWithSignal } from './_lib/request-lifecycle.js';
@@ -1067,6 +1068,21 @@ async function handler(req, res) {
 
             preferences.webMode = preferences.webMode || String(req.body?.webMode || '').trim().toLowerCase();
             preferences.isWebForced = Boolean(preferences.isWebForced || req.body?.isWebForced || req.body?.webMode === 'force' || preferences.webMode === 'force');
+            const profileReply = await personProfileReply(sanitizedMessage, { intent, grounding, images });
+            if (profileReply) {
+                if (req.aborted || req.signal?.aborted || res.destroyed || res.writableEnded) return;
+                const payload = { ...profileReply, requestId };
+                if (req.body?.stream === true) {
+                    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+                    res.setHeader('Cache-Control', 'no-cache, no-transform');
+                    res.setHeader('Connection', 'keep-alive');
+                    writeSse(res, 'meta', { requestId });
+                    writeSse(res, 'delta', { text: profileReply.response });
+                    writeSse(res, 'done', payload);
+                    return res.end();
+                }
+                return res.status(200).json(payload);
+            }
             const referenceMetadata = req.body?.contextReference;
             const reference = referenceMetadata?.status === 'missing' && (images?.length || grounding?.selectedText || grounding?.sourceAnswer) ? { status: 'resolved' } : referenceMetadata;
             const systemPrompt = buildServerSystemPrompt(preferences, intent) + contextReferenceDirective(reference);

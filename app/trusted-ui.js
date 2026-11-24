@@ -3,7 +3,7 @@
 const pending = new Map();
 const listeners = new WeakMap();
 const handledEvents = new WeakMap();
-const events = ['click', 'change', 'input', 'keydown', 'submit', 'error', 'load'];
+const events = ['click', 'change', 'input', 'keydown', 'submit', 'error', 'load', 'contextmenu', 'focusout', 'pointerdown', 'pointerup', 'pointerout', 'pointercancel'];
 let installed = false;
 
 export function bindUiEvent(type, handler) {
