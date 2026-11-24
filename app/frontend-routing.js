@@ -6,6 +6,7 @@
  */
 
 import { callLLM } from './api-client.js';
+import { isCurrentPersonPhotoLookup } from './person-photo-query.js';
 
 // Language-agnostic IR stop-words set (kept as empty Set for API backwards compatibility)
 export const DEFAULT_SYNTAX_STOP_WORDS = new Set();
@@ -495,6 +496,7 @@ const IMAGE_POSITIVE_PATTERNS = [
 export function isImageGenerationIntent(text) {
     const raw = String(text || '').trim();
     if (!raw) return false;
+    if (isCurrentPersonPhotoLookup(raw)) return false;
     if (/^\/(?:image|img|draw|art)\b/i.test(raw)) return true;
     if (IMAGE_NEGATIVE_REGEX.test(raw)) return false;
     return IMAGE_POSITIVE_PATTERNS.some(pat => pat.test(raw));

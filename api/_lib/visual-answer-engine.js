@@ -194,7 +194,7 @@ async function fetchWikiSummary(title, signal) {
     if (!title) return null;
     const cleanTitle = String(title).trim();
     const restUrl = `${WIKIPEDIA_SUMMARY_URL}/${encodeURIComponent(cleanTitle.replace(/\s+/g, '_'))}`;
-    const userAgent = 'JarvisMultimodalAnswerEngine/2.3 (https://github.com/drkan/unify-assistant; support@jarvis.ai)';
+    const userAgent = 'JARVIS/1.0 (+https://github.com/PrithvirajuVenkataraman/JARVIS)';
 
     try {
         const res = await fetch(restUrl, {
@@ -218,7 +218,8 @@ async function fetchWikiSummary(title, signal) {
     try {
         const actionUrl = new URL(WIKIPEDIA_SEARCH_URL);
         actionUrl.searchParams.set('action', 'query');
-        actionUrl.searchParams.set('prop', 'pageimages|extracts|info');
+        actionUrl.searchParams.set('prop', 'pageimages|extracts|info|pageprops');
+        actionUrl.searchParams.set('ppprop', 'wikibase_item');
         actionUrl.searchParams.set('inprop', 'url');
         actionUrl.searchParams.set('pithumbsize', '600');
         actionUrl.searchParams.set('exintro', '1');
@@ -241,6 +242,7 @@ async function fetchWikiSummary(title, signal) {
                 const fullUrl = page.fullurl || `https://en.wikipedia.org/wiki/${encodeURIComponent(page.title.replace(/\s+/g, '_'))}`;
                 return {
                     title: page.title,
+                    wikibase_item: page.pageprops?.wikibase_item,
                     displaytitle: page.title,
                     description: page.extract ? page.extract.slice(0, 160).replace(/\n/g, ' ').trim() : '',
                     extract: page.extract || '',
@@ -553,7 +555,7 @@ export async function resolveEntityVisuals(query = '', options = {}) {
     const candidate = cleanSubject || rawCandidate;
     if (!candidate) return null;
 
-    const cacheKey = `${candidate.toLowerCase()}__${targetDomain || 'any'}`;
+    const cacheKey = `${candidate.toLowerCase()}__${targetDomain || 'any'}__${options.includeNotableWorks !== false}__${Boolean(options.personPhoto)}`;
     const cached = entityVisualCache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < ENTITY_CACHE_TTL_MS) {
         return cached.data;
@@ -561,9 +563,9 @@ export async function resolveEntityVisuals(query = '', options = {}) {
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), options.timeoutMs || MEDIA_TIMEOUT_MS);
-    if (options.signal) {
-        options.signal.addEventListener('abort', () => controller.abort(), { once: true });
-    }
+    const abort = () => controller.abort();
+    if (options.signal?.aborted) { clearTimeout(timeout); return null; }
+    options.signal?.addEventListener('abort', abort, { once: true });
 
     try {
         let summary = null;
@@ -587,6 +589,8 @@ export async function resolveEntityVisuals(query = '', options = {}) {
 
         for (const titleTry of directCandidates) {
             const s = await fetchWikiSummary(titleTry, controller.signal);
+            // A photo must not pick one person arbitrarily from a shared-name page.
+            if (options.personPhoto && s?.type === 'disambiguation') return null;
             if (s && s.extract && s.type !== 'disambiguation') {
                 const sim = computeTitleTokenOverlap(candidate, s.title);
                 if (sim >= 0.75) {
@@ -690,7 +694,7 @@ export async function resolveEntityVisuals(query = '', options = {}) {
             'musician', 'actor', 'director', 'author', 'scientist', 'company',
             'movie', 'tv_series', 'book', 'album', 'landmark', 'political_figure'
         ]);
-        if (!ALLOWED_HERO_TYPES.has(entityType)) {
+        if (!ALLOWED_HERO_TYPES.has(entityType) && options.personPhoto !== true) {
             entityVisualCache.set(cacheKey, { data: null, timestamp: Date.now() });
             return null;
         }
@@ -701,6 +705,7 @@ export async function resolveEntityVisuals(query = '', options = {}) {
             id: `entity_${summary.pageid || encodeURIComponent(summary.title)}`,
             name: summary.title.replace(/\s*\([^)]*\)$/, ''), // Clean disambiguation tag
             fullName: summary.title,
+            wikidataId: /^Q\d+$/.test(summary.wikibase_item || '') ? summary.wikibase_item : null,
             type: entityType,
             description: summary.description || '',
             extract: summary.extract || '',
@@ -717,7 +722,7 @@ export async function resolveEntityVisuals(query = '', options = {}) {
         // Step 3: Concurrently discover notable works if applicable
         let notableWorks = [];
         try {
-            notableWorks = await discoverNotableWorks(summary.title, entityType, summary, controller.signal, options.textContext || '');
+            if (options.includeNotableWorks !== false) notableWorks = await discoverNotableWorks(summary.title, entityType, summary, controller.signal, options.textContext || '');
         } catch {
             notableWorks = [];
         }
@@ -733,5 +738,6 @@ export async function resolveEntityVisuals(query = '', options = {}) {
         return null;
     } finally {
         clearTimeout(timeout);
+        options.signal?.removeEventListener('abort', abort);
     }
 }

@@ -32,6 +32,7 @@ import { matchesProtectedEntities, assessSourceRelevance } from './_lib/research
 import { RESEARCH_LIMITS, researchTimeoutSignal } from '../app/search/research-contract.mjs';
 import { isPublicWebUrl } from './_lib/public-web-url.js';
 import { resolveEntityVisuals } from './_lib/visual-answer-engine.js';
+import { resolvePersonPhoto } from './_lib/person-photos.js';
 import { isConceptualSoftwareQuery, buildOfficialDocumentationQuery, isGoogleNewsWrapper, preserveDiscoveryMetadata, buildPublisherRecoveryQuery, isMatchingPublisherArticle, isUnrelatedSoftwareIncident, buildComparisonSearchQueries, matchesComparisonAttribute } from './_lib/research-retrieval.js';
 export { classifySearchIntent, expandQueryDeterministically, rewriteSearchPrompt, crawlArticleResilient, extractArticleFromHtml, isDomainTemporarilyBlocked, recordDomainFailure, decodeGoogleNewsUrl, searchYahooNewsRss, searchWorldWireRss, resolveEntityVisuals };
 
@@ -553,7 +554,7 @@ export async function handleStreamingWebRag(req, res, { rawQuery, limit = 8, cus
     const heartbeat = setInterval(() => { if (!controller.signal.aborted) res.write(': heartbeat\n\n'); }, 10000);
 
     let resolvedVisuals = null;
-    const visualsPromise = resolveEntityVisuals(rawQuery, { signal: controller.signal })
+    void resolveEntityVisuals(rawQuery, { signal: controller.signal })
         .then(visuals => {
             if (visuals?.entity && !controller.signal.aborted) {
                 resolvedVisuals = visuals;
@@ -585,7 +586,7 @@ export async function handleStreamingWebRag(req, res, { rawQuery, limit = 8, cus
                     resolvedVisuals = data;
                 }
                 if (event === 'done') {
-                    const visuals = resolvedVisuals || await Promise.race([visualsPromise, new Promise(r => setTimeout(r, 600))]);
+                    const visuals = resolvedVisuals;
                     if (visuals?.entity) {
                         data.entity = visuals.entity;
                         data.notableWorks = visuals.notableWorks || [];
@@ -655,6 +656,17 @@ async function handler(req, res) {
         rateLimit: { max: 60, windowMs: 60 * 1000 }
     });
     if (guard.handled) return;
+
+    if (req.body?.action === 'person_photo') {
+        const query = String(req.body?.query || '').trim();
+        if (!query || query.length > 180) return res.status(400).json({ success: false, error: { code: 'invalid_query', message: 'A short person lookup is required.' } });
+        const safety = inspectInputSafety(query, { channel: 'search' });
+        if (!safety.safe) return res.status(200).json({ success: true, entity: null });
+        const dlp = applySearchDlpGuard(res, query);
+        if (dlp.blocked) return;
+        const result = await resolvePersonPhoto(dlp.text, { reference: req.body?.reference });
+        return res.status(200).json({ success: true, entity: result?.entity || null, notableWorks: [] });
+    }
 
     const rawGemini = String(
         req?.headers?.['x-gemini-api-key'] ||
@@ -845,8 +857,10 @@ async function handler(req, res) {
         const limit = clampInt(req.body?.limit || req.body?.maxResults, 8, 1, 20);
         const mode = requestedMode;
         if (mode === 'rag') {
-            const [search, visuals] = await Promise.all([
-                runWebResearch(query, {
+            const visualController = new AbortController();
+            let visuals = null;
+            void resolveEntityVisuals(query, { signal: visualController.signal }).then(value => { visuals = value; }).catch(() => {});
+            const search = await runWebResearch(query, {
                     answer: req.body?.answer !== false,
                     context: contextTurns,
                     timeZone: req.body?.timeZone,
@@ -857,9 +871,8 @@ async function handler(req, res) {
                     customGroqKey: customGroq,
                     deepResearch: req.body?.deepResearch === true,
                     skipAutoDeepCrawl: req.body?.skipAutoDeepCrawl === true || req.body?.deepResearch !== true
-                }),
-                resolveEntityVisuals(query).catch(() => null)
-            ]);
+                });
+            visualController.abort();
             return res.status(200).json({
                 ...search,
                 entity: visuals?.entity || null,

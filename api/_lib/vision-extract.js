@@ -1,3 +1,5 @@
+import { fetchWithLifecycle as fetch } from './request-lifecycle.js';
+import { normalizeGeminiGenerationConfig, visionFailurePayload } from './model-failure.js';
 const PROVIDER_TIMEOUT_MS = 20_000;
 const GEMINI_API_VERSIONS = ['v1beta', 'v1'];
 const GEMINI_MODEL_FALLBACKS = [
@@ -74,7 +76,8 @@ export async function extractTextFromImage({ mimeType = 'image/jpeg', imageBase6
         String(prompt || 'Extract all readable text, tables, and data from this image.').trim()
     ].join('\n');
 
-    const rawText = await callVisionText({ providers, systemPrompt, mimeType: normalizeMimeForProvider(mimeType, imageBase64), imageBase64 });
+    const result = await callVisionText({ providers, systemPrompt, mimeType: normalizeMimeForProvider(mimeType, imageBase64), imageBase64 });
+    const rawText = result?.text;
     if (!rawText) return { ok: false, text: '', method: 'vision_ocr', provider: 'vision' };
 
     const parsed = safeParseJson(rawText) || extractJsonFromText(rawText) || null;
@@ -94,7 +97,7 @@ export async function extractTextFromImage({ mimeType = 'image/jpeg', imageBase6
         text,
         summary: String(parsed?.summary || '').trim(),
         method: 'vision_ocr',
-        provider: providers.geminiApiKey ? 'gemini' : 'groq'
+        provider: result.provider
     };
 }
 
@@ -105,7 +108,8 @@ function getVisionProviders(customKeys = null) {
         groqApiKey: customGroq || process.env.GROQ_API_KEY || process.env.GROQ_KEY || '',
         groqModel: process.env.GROQ_VISION_MODEL || process.env.GROQ_MODEL || '',
         geminiApiKey: customGemini || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '',
-        geminiModel: process.env.GEMINI_VISION_MODEL || process.env.GEMINI_MODEL || ''
+        geminiModel: process.env.GEMINI_VISION_MODEL || process.env.GEMINI_MODEL || '',
+        failures: []
     };
 }
 
@@ -116,9 +120,11 @@ async function callVisionText({ providers, systemPrompt, mimeType, imageBase64 }
             configuredModel: providers.geminiModel,
             systemPrompt,
             mimeType,
-            imageBase64
+            imageBase64,
+            allowCompatibilityRetry: !providers.groqApiKey,
+            failures: providers.failures
         });
-        if (text) return text;
+        if (text) return { text, provider: 'gemini' };
     }
     if (providers.groqApiKey) {
         const text = await callGroqVisionText({
@@ -126,17 +132,19 @@ async function callVisionText({ providers, systemPrompt, mimeType, imageBase64 }
             configuredModel: providers.groqModel,
             systemPrompt,
             mimeType,
-            imageBase64
+            imageBase64,
+            failures: providers.failures
         });
-        if (text) return text;
+        if (text) return { text, provider: 'groq' };
     }
-    return '';
+    const failure = visionFailurePayload(true, providers.failures);
+    throw Object.assign(new Error(failure.response), { code: failure.code });
 }
 
-async function callGroqVisionText({ apiKey, configuredModel, systemPrompt, mimeType, imageBase64 }) {
+async function callGroqVisionText({ apiKey, configuredModel, systemPrompt, mimeType, imageBase64, failures }) {
     const candidates = filterAvailableExtractModels('groq', [String(configuredModel || '').trim(), ...GROQ_VISION_MODEL_FALLBACKS]);
     const dataUrl = `data:${mimeType || 'image/jpeg'};base64,${imageBase64}`;
-    for (const model of candidates) {
+    for (const model of candidates.slice(0, 1)) {
         try {
             const response = await fetchWithTimeout('https://api.groq.com/openai/v1/chat/completions', {
                 method: 'POST',
@@ -158,22 +166,23 @@ async function callGroqVisionText({ apiKey, configuredModel, systemPrompt, mimeT
                 })
             });
             if (response.status === 404 || response.status === 410) {
+                failures.push({ status: response.status });
                 markExtractModelUnavailable('groq', model, response.status);
                 continue;
             }
-            if (!response.ok) continue;
+            if (!response.ok) { failures.push({ status: response.status }); continue; }
             const data = await response.json();
             const text = extractGroqText(data);
             if (text) return text;
-        } catch (_) {}
+        } catch (error) { failures.push({ status: error.status, name: error.name }); }
     }
     return '';
 }
 
-async function callGeminiVision({ apiKey, configuredModel = '', systemPrompt, mimeType, imageBase64 }) {
+async function callGeminiVision({ apiKey, configuredModel = '', systemPrompt, mimeType, imageBase64, allowCompatibilityRetry, failures }) {
     const modelFallbacks = filterAvailableExtractModels('gemini', [String(configuredModel || '').trim(), ...GEMINI_MODEL_FALLBACKS]);
-    for (const apiVersion of GEMINI_API_VERSIONS) {
-        for (const model of modelFallbacks) {
+    for (const apiVersion of GEMINI_API_VERSIONS.slice(0, 1)) {
+        for (const model of modelFallbacks.slice(0, 1)) {
             if (apiVersion === 'v1' && /^gemini-(?:4|3\.|2\.5)/i.test(model)) continue;
             try {
                 const genConfig = {
@@ -198,26 +207,27 @@ async function callGeminiVision({ apiKey, configuredModel = '', systemPrompt, mi
                                     { inlineData: { mimeType, data: imageBase64 } }
                                 ]
                             }],
-                            generationConfig: gc
+                            generationConfig: normalizeGeminiGenerationConfig(model, { ...gc })
                         })
                     }
                 );
                 let response = await makeReq(genConfig);
-                if (response.status === 400 && (genConfig.mediaResolution || genConfig.thinkingConfig)) {
+                if (allowCompatibilityRetry && response.status === 400 && (genConfig.mediaResolution || genConfig.thinkingConfig)) {
                     const fallbackGc = { ...genConfig };
                     delete fallbackGc.mediaResolution;
                     delete fallbackGc.thinkingConfig;
                     response = await makeReq(fallbackGc);
                 }
                 if (response.status === 404 || response.status === 410) {
+                    failures.push({ status: response.status });
                     markExtractModelUnavailable('gemini', model, response.status);
                     continue;
                 }
-                if (!response.ok) continue;
+                if (!response.ok) { failures.push({ status: response.status }); continue; }
                 const data = await response.json();
                 const text = extractGeminiText(data);
                 if (text) return text;
-            } catch (_) {}
+            } catch (error) { failures.push({ status: error.status, name: error.name }); }
         }
     }
     return '';
@@ -227,7 +237,8 @@ async function fetchWithTimeout(url, init = {}) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS);
     try {
-        return await fetch(url, { ...init, signal: controller.signal });
+        const signal = init.signal ? AbortSignal.any([init.signal, controller.signal]) : controller.signal;
+        return await fetch(url, { ...init, signal });
     } finally {
         clearTimeout(timeout);
     }

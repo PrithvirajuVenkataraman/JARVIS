@@ -4,6 +4,7 @@ export const config = { maxDuration: 60 };
 import { applyApiSecurity, unsealSecret } from './_lib/security.js';
 import { classifyImageLocally } from './_lib/local-vision-classifier.js';
 import { inspectInputSafety } from './_lib/safety-guard.js';
+import { normalizeGeminiGenerationConfig, visionFailurePayload } from './_lib/model-failure.js';
 
 const ALLOWED_IMAGE_TYPES = new Set([
     'image/jpeg', 'image/jpg', 'image/pjpeg', 'image/png', 'image/x-png', 'image/x-apple-ios-png',
@@ -133,6 +134,10 @@ async function handler(req, res) {
         return sendVisionError(res, 415, 'unsupported_media_type', 'Only image files are supported.');
     }
     const normalizedMimeType = normalizeVisionMimeType(rawMimeType, imageBase64);
+    const detectedMime = detectImageMimeFromBase64(imageBase64);
+    if (detectedMime && !['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(detectedMime)) {
+        return sendVisionError(res, 415, 'image_conversion_required', 'This image needs browser conversion before analysis. Reattach it so the image decoder can prepare it.');
+    }
     if (imageBase64.length > MAX_IMAGE_BASE64_CHARS || !/^[A-Za-z0-9+/]+={0,2}$/.test(imageBase64)) {
         return sendVisionError(res, 413, 'invalid_image', 'Image data is malformed or too large.');
     }
@@ -149,13 +154,15 @@ async function handler(req, res) {
 
     try {
         const providers = getVisionProviders(req);
+        if (providers.credentialError) return sendVisionError(res, 400, 'byok_reconfiguration_required', 'Saved credentials could not be decrypted. Please save your API key again.');
         if (!providers.groqApiKey && !providers.geminiApiKey) {
             return sendVisionError(res, 503, 'vision_provider_unavailable', 'Image recognition requires a Gemini (GEMINI_API_KEY) or Groq Vision (GROQ_API_KEY) API key configured in the environment.');
         }
 
         const trimmedPrompt = String(prompt || '').trim();
         const isMathOrProblemQuery = Boolean(trimmedPrompt) && (
-            /\b(?:solve|calculate|compute|radius|diameter|area|perimeter|volume|equation|quadratic|integral|derivative|geometry|triangle|circle|hypotenuse|algebra|math|proof|simplify|factor)\b/i.test(trimmedPrompt) ||
+            /\b(?:solve|calculate|compute|evaluate|equation|quadratic|integral|derivative|hypotenuse|algebra|math|proof|simplify|factor)\b/i.test(trimmedPrompt) ||
+            /\b(?:what\s+is|what's|determine)\s+(?:the\s+)?(?:radius|diameter|area|perimeter|volume|length|angle|slope)\b/i.test(trimmedPrompt) ||
             /\bfind\s+(?:the\s+)?(?:value|x|y|z|area|length|radius|angle|perimeter|volume|root|solution|distance|slope)\b/i.test(trimmedPrompt)
         );
         const activeTask = (task === 'general_vision' && isMathOrProblemQuery) ? 'math_ocr_solve' : task;
@@ -250,6 +257,7 @@ async function handler(req, res) {
             details: parsed
         });
     } catch (error) {
+        if (/^vision_/.test(error?.code || '')) return sendVisionError(res, error.code === 'vision_rate_limited' ? 429 : 502, error.code, error.message);
         const detail = String(error?.message || '').trim();
         return sendVisionError(
             res,
@@ -271,7 +279,8 @@ async function fetchWithTimeout(url, init = {}) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS);
     try {
-        return await fetch(url, { ...init, signal: controller.signal });
+        const signal = init.signal ? AbortSignal.any([init.signal, controller.signal]) : controller.signal;
+        return await fetch(url, { ...init, signal });
     } finally {
         clearTimeout(timeout);
     }
@@ -351,7 +360,8 @@ function getVisionProviders(req = null) {
         geminiApiKey: customGemini || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '',
         groqVisionModel: String(process.env.GROQ_VISION_MODEL || '').trim(),
         groqModel: String(process.env.GROQ_MODEL || '').trim(),
-        geminiModel: String(process.env.GEMINI_MODEL || '').trim(),
+        geminiModel: String(process.env.GEMINI_VISION_MODEL || process.env.GEMINI_MODEL || '').trim(),
+        failures: [],
         isByok: Boolean(customGroq || customGemini)
     };
 }
@@ -364,11 +374,12 @@ async function callVisionText({ providers, systemPrompt, mimeType, imageBase64 }
                 configuredModel: providers.geminiModel,
                 systemPrompt,
                 mimeType,
-                imageBase64
+                imageBase64,
+                allowCompatibilityRetry: !providers.groqApiKey
             });
             const text = extractGeminiText(payload);
             if (text) return text;
-        } catch (_) {}
+        } catch (error) { providers.failures.push({ status: error.status, name: error.name }); }
     }
 
     if (providers?.groqApiKey) {
@@ -378,15 +389,17 @@ async function callVisionText({ providers, systemPrompt, mimeType, imageBase64 }
                 configuredModel: providers.groqVisionModel,
                 systemPrompt,
                 mimeType,
-                imageBase64
+                imageBase64,
+                failures: providers.failures
             });
             if (text) return text;
-        } catch (_) {}
+        } catch (error) { providers.failures.push({ status: error.status, name: error.name }); }
     }
-    return '';
+    const failure = visionFailurePayload(true, providers.failures);
+    throw Object.assign(new Error(failure.response), { code: failure.code });
 }
 
-async function callGroqVisionText({ apiKey, configuredModel, systemPrompt, mimeType, imageBase64 }) {
+async function callGroqVisionText({ apiKey, configuredModel, systemPrompt, mimeType, imageBase64, failures = [] }) {
     const candidates = filterVisionCandidates('groq-vision', [
         String(configuredModel || '').trim(),
         ...GROQ_VISION_MODEL_FALLBACKS
@@ -417,19 +430,20 @@ async function callGroqVisionText({ apiKey, configuredModel, systemPrompt, mimeT
                 })
             });
             if (response.status === 404 || response.status === 410) {
+                failures.push({ status: response.status });
                 markVisionModelUnavailable(`groq-vision:${model}`, response.status);
                 continue;
             }
-            if (!response.ok) continue;
+            if (!response.ok) { failures.push({ status: response.status }); continue; }
             const data = await response.json();
             const text = extractGroqText(data);
             if (text) return text;
-        } catch (_) {}
+        } catch (error) { failures.push({ name: error.name, status: error.status }); }
     }
     return '';
 }
 
-async function callGeminiVision({ apiKey, configuredModel = '', systemPrompt, mimeType, imageBase64 }) {
+async function callGeminiVision({ apiKey, configuredModel = '', systemPrompt, mimeType, imageBase64, allowCompatibilityRetry = false }) {
     let lastError = null;
     const modelFallbacks = filterVisionCandidates('gemini-vision', [
         String(configuredModel || '').trim(),
@@ -470,12 +484,12 @@ async function callGeminiVision({ apiKey, configuredModel = '', systemPrompt, mi
                                     ]
                                 }
                             ],
-                            generationConfig: genConfig
+                            generationConfig: normalizeGeminiGenerationConfig(model, { ...genConfig })
                         })
                     }
                 );
                 let response = await makeReq(baseGenConfig);
-                if (response.status === 400 && (baseGenConfig.mediaResolution || baseGenConfig.thinkingConfig)) {
+                if (allowCompatibilityRetry && response.status === 400 && (baseGenConfig.mediaResolution || baseGenConfig.thinkingConfig)) {
                     const fallbackGenConfig = { ...baseGenConfig };
                     delete fallbackGenConfig.mediaResolution;
                     delete fallbackGenConfig.thinkingConfig;
@@ -499,7 +513,7 @@ async function callGeminiVision({ apiKey, configuredModel = '', systemPrompt, mi
                         }
                     } catch (_) {}
                     const suffix = errorDetail ? `: ${errorDetail}` : '';
-                    lastError = new Error(`Model ${model} (${apiVersion}) failed with status ${response.status}${suffix}`);
+                    lastError = Object.assign(new Error(`Model ${model} (${apiVersion}) failed with status ${response.status}${suffix}`), { status: response.status });
                     continue;
                 }
 

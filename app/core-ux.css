@@ -130,7 +130,7 @@ body #help-modal .settings-switch-input:checked + .settings-switch-slider { back
 body #help-modal .settings-switch-input:focus-visible + .settings-switch-slider { box-shadow:0 0 0 3px #d4d4d855; }
 body #help-modal .settings-section-label { margin:12px 0 0; font-size:12px; line-height:1.5; letter-spacing:.06em; font-weight:500; color:var(--core-muted); }
 body #help-modal .help-modal-body > .settings-section-label:first-child { margin-top:0; }
-body #help-modal .settings-select { width:220px; max-width:100%; min-height:44px; padding:10px 34px 10px 12px; font-size:14px; line-height:1.5; }
+body #help-modal .settings-select { width:220px; max-width:100%; min-height:44px; padding:10px 34px; font-size:14px; line-height:1.5; text-align:center; text-align-last:center; }
 body #help-modal .recall-cache-actions { display:flex; justify-content:flex-start; padding-top:0; padding-inline-start:46px; }
 body #help-modal .settings-row:has(.settings-switch) { flex-wrap:nowrap; }
 @media(max-width:640px) {
@@ -236,6 +236,11 @@ body #help-modal .help-modal-ok-btn { min-height:var(--core-hit-area); border-ra
 body #help-modal .settings-action-danger { color:#efb1b1; border-color:#593333; background:transparent; }
 body :where(button, a, input, textarea, select):focus-visible { outline:2px solid #d8d8d8; outline-offset:3px; }
 .image-storage-notice { color:var(--core-muted); font-size:13px; line-height:1.5; margin:12px 0 0; }
+.person-photo { width:fit-content; max-width:min(100%,360px); margin:0 0 20px; }
+.person-photo-image { display:block; width:auto; height:auto; max-width:100%; max-height:320px; object-fit:contain; border-radius:10px; }
+.person-photo figcaption { max-width:360px; margin-top:8px; color:var(--core-muted); font-size:12px; line-height:1.5; overflow-wrap:anywhere; }
+.person-photo figcaption a { text-decoration:underline; text-underline-offset:2px; }
+.person-photo-credit { display:block; margin-top:3px; }
 body .assistant-model-badge { grid-column:1/-1; margin:0 0 4px; margin-inline-start:13px; padding:0; background:transparent; border:0; border-radius:0; color:var(--core-muted); font-size:12px; line-height:1.5; font-weight:400; white-space:normal; overflow-wrap:anywhere; }
 body .assistant-action-row { display:grid; grid-template-columns:repeat(8,44px); gap:0; width:max-content; max-width:100%; margin-inline-start:-13px; padding:4px 0 0; }
 body .assistant-action-icon { width:44px; height:44px; min-width:44px; min-height:44px; padding:0; }

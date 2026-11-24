@@ -11036,6 +11036,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             const messageDiv = document.createElement('div');
             messageDiv.className = `chat-row flex ${isUser ? 'justify-end' : 'justify-start'} items-start gap-3`;
             messageDiv.dataset.role = isUser ? 'user' : 'assistant';
+            if (!isUser && !meta?.restored) window.JarvisPersonPhotos?.track(messageDiv);
             if (allowEmptyAssistant) {
                 messageDiv.style.display = 'none';
             }
@@ -11349,6 +11350,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                     chatHistory.push({ text: displayText, isUser });
                     recordActiveChatMessage('assistant', displayText, messageTurnId);
                 }
+                if (!allowEmptyAssistant && !meta?.restored && !isRestoringChatSession) void window.JarvisPersonPhotos?.enrich(messageDiv, priorUserPrompt, { reference: meta?.contextReference, failureCode: meta?.failureCode });
                 return messageId;
             }
             
@@ -11729,6 +11731,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 const userPromptForHistory = String(priorUserPrompt || meta?.userMessage || activeResponseRenderContext?.userPrompt || '').trim();
                 if (userPromptForHistory) {
                     saveToHistory(userPromptForHistory, cleanText, { turnId, recordSession: false });
+                    void window.JarvisPersonPhotos?.enrich(row, userPromptForHistory, { reference: meta?.contextReference, failureCode: meta?.failureCode || existing.failureCode });
                 }
             }
             maybeAutoScroll(document.getElementById('chat-container'));

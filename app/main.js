@@ -21,6 +21,7 @@ import { installRequestPreferences } from './request-preferences.js';
 import * as JarvisSlashCommands from './slash-command-controller.js';
 import * as JarvisComposerTools from './composer-tools-controller.js';
 import * as JarvisImageActions from './image-actions-menu.js';
+import * as JarvisPersonPhotos from './person-photos.js';
 import './core-ux.css';
 
 Object.assign(window, { JarvisStreamRenderer, JarvisPersistence, JarvisPerformance, JarvisCodeRunner, JarvisCapabilities, JarvisPermissions, JarvisLocation, JarvisPaste, JarvisSettings, JarvisRecall, JarvisAnswerChecks, JarvisSlashCommands, JarvisComposerTools });
@@ -51,6 +52,8 @@ installDialogController();
 installComposerAccessibility();
 JarvisComposerTools.install();
 JarvisImageActions.install();
+window.JarvisPersonPhotos = JarvisPersonPhotos;
+JarvisPersonPhotos.install();
 JarvisSlashCommands.install();
 JarvisCapabilities.installCapabilityVisibility();
 installRequestPreferences();

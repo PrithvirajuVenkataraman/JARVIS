@@ -1152,6 +1152,7 @@ export function renderOrUpdateVisualEntityHeader(rowElement, entity, notableWork
     if (!rowElement || !entity || typeof entity !== 'object') return;
     const bubble = rowElement.querySelector('.chat-bubble-assistant') || rowElement.querySelector('.min-w-0');
     if (!bubble) return;
+    if (bubble.querySelector('.person-photo') && !entity.isPerson) return;
 
     const safeName = escapeHtmlText(entity.name || entity.fullName || 'Entity');
     const rawType = String(entity.type || '').trim();
