@@ -3380,12 +3380,12 @@ function stripInlineCitationMarkers(text) {
     cleaned = cleaned.replace(/\b(?:according\s+to|based\s+on)\s*\[\d+(?:\s*,\s*\d+)*\](?:\s*,?\s*\[\d+(?:\s*,\s*\d+)*\])*(?:,\s*)?/gi, '');
     cleaned = cleaned.replace(/\b(?:sources?|references?)\s*\[\d+(?:\s*,\s*\d+)*\](?:\s*,?\s*\[\d+(?:\s*,\s*\d+)*\])*/gi, '');
 
-    // 3. Remove standalone or comma-separated brackets: [1], [2], [1, 2], 【1】, (1), 【f1】, [f1]
+    // 3. Remove explicit citation brackets. Parenthesized numbers can be years,
+    // measurements or equation labels, so they must remain part of the answer.
     cleaned = cleaned
         .replace(/\s*【[^】]*】/g, '')
         .replace(/\s*\[f\d+(?:\s*,\s*f?\d+)*\]/g, '')
-        .replace(/\s*\[\d+(?:\s*,\s*\d+)*\](?=\s|[.,;:!?)]|$)/g, '')
-        .replace(/\s+\(\d+(?:\s*,\s*\d+)*\)(?=\s|[.,;:!?]|$)/g, '');
+        .replace(/\s*\[\d+(?:\s*,\s*\d+)*\](?=\s|[.,;:!?)]|$)/g, '');
 
     // 4. Clean up any remaining dangling bracket numbers
     cleaned = cleaned.replace(/\[\d+(?:\s*,\s*\d+)*\]/g, '');

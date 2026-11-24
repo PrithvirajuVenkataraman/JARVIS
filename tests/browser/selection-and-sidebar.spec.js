@@ -6,7 +6,7 @@ test.beforeEach(async ({ page }) => {
     await page.route('https://**/*', route => route.abort());
     await page.route('**/api/chat-groq', route => {
         const body = route.request().postDataJSON();
-        const response = 'A source-supported statement is safer than an invented production-house claim.';
+        const response = 'A source-supported statement is safer than an invented production-house claim. The film (1992) uses equation (42).';
         return body.stream
             ? route.fulfill({ contentType: 'text/event-stream', body: `event: delta\ndata: ${JSON.stringify({ text: response })}\n\nevent: done\ndata: ${JSON.stringify({ success: true, response, provider: 'public_sources', sourceBased: true })}\n\n` })
             : route.fulfill({ json: { success: true, response: 'Source profile' } });
@@ -67,6 +67,7 @@ test('a touch long press opens the chat menu without the following click restori
 
 test('selection actions stay readable and preserve the selected context at phone, tablet, and desktop widths', async ({ page }) => {
     await ask(page, 'Explain source evidence.');
+    await expect(page.locator('.assistant-message-text').last()).toContainText('The film (1992) uses equation (42).');
     await expect(page.locator('.assistant-model-badge')).toHaveCount(0);
     for (const width of [320, 390, 768, 1024, 1440]) {
         await page.setViewportSize({ width, height: 900 });
