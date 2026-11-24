@@ -3411,12 +3411,12 @@ assert.ok(groqInstant.includes('openai/gpt-oss-120b'), 'Instant tier must includ
 assert.ok(!groqInstant.some(m => m.toLowerCase().includes('llama')), 'Groq candidates must not include any Llama models');
 console.log('  [PASS] 1.1 Groq instant candidates prioritize openai/gpt-oss-20b with openai/gpt-oss-120b fallback');
 
-// 1.2 Gemini instant tier candidates: gemini-2.5-flash-lite first
+// 1.2 Automatic Gemini requests use Hydrogen, including the instant tier.
 const geminiInstant = chatTest.getPreferredGeminiCandidates('', null, { tier: 'instant', preferSpeed: true });
-assert.equal(geminiInstant[0], 'gemini-2.5-flash-lite', 'Instant tier must prioritize gemini-2.5-flash-lite first on Gemini');
+assert.equal(geminiInstant[0], 'gemini-4-hydrogen', 'Automatic mode must prioritize Gemini Hydrogen across tiers');
 assert.ok(geminiInstant.includes('gemini-2.5-flash'), 'Gemini candidates must include gemini-2.5-flash fallback');
 assert.ok(geminiInstant.includes('gemini-3.7-flash'), 'Gemini candidates must include gemini-3.7-flash fallback');
-console.log('  [PASS] 1.2 Gemini instant candidates prioritize gemini-2.5-flash-lite first');
+console.log('  [PASS] 1.2 Automatic Gemini instant candidates prioritize Hydrogen');
 
 // 1.3 Deep tier candidates preserved
 const groqDeep = chatTest.getPreferredGroqCandidates('', { tier: 'deep' });

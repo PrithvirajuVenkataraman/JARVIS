@@ -1,4 +1,5 @@
 import { fetchWithLifecycle as fetch } from './request-lifecycle.js';
+import { normalizeGeminiGenerationConfig } from './model-failure.js';
 import { createHash } from 'node:crypto';
 import { researchTimeoutSignal, RESEARCH_LIMITS } from '../../app/search/research-contract.mjs';
 
@@ -14,8 +15,8 @@ export function researchModelProviders(options = {}) {
     const selected = String(options.selectedModel || '');
     const providers = [];
     if (groq) providers.push({ name: 'groq', key: groq, model: ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b'].includes(selected) ? selected : 'openai/gpt-oss-120b' });
-    if (gemini) providers.push({ name: 'gemini', key: gemini, model: ['gemini-4-hydrogen', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'].includes(selected) ? selected : 'gemini-2.5-flash' });
-    if (selected.startsWith('gemini-')) providers.reverse();
+    if (gemini) providers.push({ name: 'gemini', key: gemini, model: ['gemini-4-hydrogen', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'].includes(selected) ? selected : 'gemini-4-hydrogen' });
+    if (!selected || selected === 'auto' || selected.startsWith('gemini-')) providers.reverse();
     return providers.filter(provider => {
         const key = healthKey(provider);
         const until = cooldowns.get(key) || 0;
@@ -92,7 +93,7 @@ export async function callResearchModel({ system, prompt, json = false, onToken,
                 const tokens = maxOutputTokens || (json ? 2400 : 3000);
                 const body = provider.name === 'groq'
                     ? { model: provider.model, messages: [{ role: 'system', content: system }, { role: 'user', content: prompt }], temperature: 0.1, max_tokens: tokens, stream: streaming, ...(provider.model.startsWith('openai/gpt-oss') ? { reasoning_effort: 'low' } : {}), ...(json ? { response_format: { type: 'json_object' } } : {}) }
-                    : { system_instruction: { parts: [{ text: system }] }, contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.1, maxOutputTokens: tokens, ...(json ? { responseMimeType: 'application/json' } : {}) } };
+                    : { system_instruction: { parts: [{ text: system }] }, contents: [{ parts: [{ text: prompt }] }], generationConfig: normalizeGeminiGenerationConfig(provider.model, { temperature: 0.1, maxOutputTokens: tokens, thinkingConfig: { thinkingBudget: 0 }, ...(json ? { responseMimeType: 'application/json' } : {}) }) };
                 const response = await fetch(endpoint, { method: 'POST', signal: scope.signal, headers: { 'Content-Type': 'application/json', ...(provider.name === 'groq' ? { Authorization: `Bearer ${provider.key}` } : {}) }, body: JSON.stringify(body) });
                 attempt.httpStatus = response.status;
                 if (!response.ok) {

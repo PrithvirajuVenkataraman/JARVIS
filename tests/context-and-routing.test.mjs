@@ -3439,22 +3439,22 @@ console.log('intent-separator-tests-ok');
 
 });
 
-test('Groq First Routing & Candidate Fallback Hierarchy', async () => {
+test('Groq fallback candidates and explicit model selection', async () => {
 
-console.log('=== Testing Groq-First Model Routing & Fallback Cascade Suite ===');
+console.log('=== Testing Groq Fallback Candidate Hierarchy ===');
 
 const { getPreferredGroqCandidates, getPreferredGroqVisionCandidates } = __test;
 
 // ============================================================================
-// Section 1: Auto Mode Groq Model Priority Hierarchy
+// Section 1: Candidate order within the Groq fallback provider
 // ============================================================================
-console.log('--- Section 1: Auto Mode Groq Model Priority Hierarchy ---');
+console.log('--- Section 1: Groq Fallback Candidate Hierarchy ---');
 
 const autoCandidates = getPreferredGroqCandidates('', { userSelectedModel: null });
-assert.equal(autoCandidates[0], 'openai/gpt-oss-120b', 'Auto mode must prioritize verified active GPT OSS 120B on Groq first');
-assert.equal(autoCandidates[1], 'openai/gpt-oss-20b', 'Auto mode must prioritize GPT OSS 20B second');
+assert.equal(autoCandidates[0], 'openai/gpt-oss-120b', 'Groq fallback candidates must prioritize GPT OSS 120B');
+assert.equal(autoCandidates[1], 'openai/gpt-oss-20b', 'Groq fallback candidates must include GPT OSS 20B second');
 assert.ok(autoCandidates.every(m => !m.toLowerCase().includes('llama')), 'Must not contain any Llama models');
-console.log('  [PASS] 1.1 Auto mode accurately orders GPT OSS 120B -> GPT OSS 20B (zero Llama models)');
+console.log('  [PASS] 1.1 Groq fallback candidate order verified');
 
 // ============================================================================
 // Section 2: Specific Sidebar User Selection
@@ -3473,27 +3473,10 @@ assert.equal(qwenSelected[0], 'qwen/qwen3.8-27b', 'User selected Qwen model must
 console.log('  [PASS] 2.2 User-chosen Qwen model is placed first');
 
 // ============================================================================
-// Section 3: Provider Cascade & Vision Fallback Order (Groq -> Gemini only)
+// Section 3: Groq vision fallback candidates
 // ============================================================================
-function determineProviderOrder({ hasImages = false, userSelectedModel = null } = {}) {
-    const prioritizeGemini = Boolean(userSelectedModel && String(userSelectedModel).toLowerCase().startsWith('gemini-')) || hasImages;
-    return prioritizeGemini ? ['gemini', 'groq'] : ['groq', 'gemini'];
-}
-
-// 3.1 Standard text query in Auto mode
-const autoProviderOrder = determineProviderOrder();
-assert.deepEqual(autoProviderOrder, ['groq', 'gemini'], 'Provider order must route directly Groq -> Gemini fallback (0 OpenAI key dependency)');
-console.log('  [PASS] 3.1 Text queries always route to Groq API with Gemini fallback (no OpenAI API key required)');
-
-// 3.2 Vision / Image query routes to Gemini first with Groq fallback
-const visionProviderOrder = determineProviderOrder({ hasImages: true });
-assert.deepEqual(visionProviderOrder, ['gemini', 'groq'], 'Vision queries route to Gemini first with Groq fallback');
-console.log('  [PASS] 3.2 Vision queries route to Gemini first with Groq fallback');
-
-// 3.3 Explicit selection of Gemini 2.5 Pro or Gemini 3.7 Flash routes to Gemini first
-const geminiSelectedOrder = determineProviderOrder({ userSelectedModel: 'gemini-2.5-pro' });
-assert.deepEqual(geminiSelectedOrder, ['gemini', 'groq'], 'Explicit Gemini selection routes to Gemini first');
-console.log('  [PASS] 3.3 Explicit Gemini selection routes to Gemini API first');
+// Actual JSON/stream provider order and attempt limits are exercised through
+// production functions in reliability.test.mjs, not a copied routing function.
 
 // 3.4 Groq Vision candidate hierarchy
 const groqVisionCandidates = getPreferredGroqVisionCandidates('', null);

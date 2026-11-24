@@ -174,11 +174,19 @@ body #app-header #chat-sidebar-toggle:focus-visible { outline:2px solid #eee; ou
 body .chat-sidebar-panel { overflow-y:auto; overscroll-behavior:contain; }
 body .chat-sidebar-header, body .chat-sidebar-nav { flex-shrink:0; }
 body .chat-sidebar-list { min-height:88px; }
-body .chat-sidebar-nav-item { min-height:44px; color:var(--core-text); }
+body .chat-sidebar-nav-item { min-height:44px; padding:8px 12px; grid-template-columns:24px minmax(0,1fr); gap:12px; color:var(--core-text); }
 body .chat-sidebar-nav-item[hidden] { display:none; }
+body .chat-sidebar-nav-item:focus-visible { outline:2px solid #ddd; outline-offset:-2px; }
 body .chat-sidebar-nav-item span, body .chat-session-title { font-size:14px; line-height:1.5; font-weight:500; letter-spacing:normal; }
-body .chat-sidebar-section-title { font-size:12px; line-height:1.5; font-weight:500; letter-spacing:.04em; color:var(--core-muted); }
+body .chat-sidebar-section-title { font-size:12px; line-height:1.5; font-weight:500; letter-spacing:normal; text-transform:none; color:var(--core-muted); }
 body .chat-sidebar-close { min-width:44px; min-height:44px; }
+body .chat-sidebar-search-field { display:none; position:relative; margin-inline:4px; padding:4px 0 6px; }
+body .chat-sidebar-panel.search-open .chat-sidebar-search-field { display:block; }
+body .chat-sidebar-search-field > svg { position:absolute; left:12px; top:26px; transform:translateY(-50%); width:18px; height:18px; color:var(--core-muted); pointer-events:none; }
+body .chat-sidebar-search-field input { box-sizing:border-box; width:100%; height:44px; padding:10px 36px 10px 48px; border:1px solid var(--core-border); border-radius:8px; background:var(--core-raised); color:var(--core-text); font-size:14px; line-height:1.5; appearance:none; outline:none; }
+body .chat-sidebar-search-field input:focus { border-color:#a3a3a3; }
+body .chat-sidebar-search-field input:focus-visible { outline:1px solid #bdbdbd; outline-offset:0; }
+body .chat-sidebar-search-field input::-webkit-search-decoration { -webkit-appearance:none; }
 body #input-bar-container { width:auto; }
 @media(min-width:1024px) {
     body.sidebar-docked .chat-sidebar-panel { width:var(--sidebar-docked-width,280px); }

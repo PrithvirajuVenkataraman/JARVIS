@@ -270,6 +270,26 @@ test('provider fallback uses at most two total attempts and honors explicit prov
     } finally { globalThis.fetch = original; if (gemini === undefined) delete process.env.GEMINI_API_KEY; else process.env.GEMINI_API_KEY = gemini; }
 });
 
+test('Automatic chat starts with Hydrogen for JSON and streams, reserves Groq fallback, and honors manual Groq selection', async () => {
+    const original = globalThis.fetch; const oldModel = process.env.GEMINI_MODEL;
+    process.env.GEMINI_MODEL = 'gemini-2.5-flash';
+    const keys = { customGeminiKey: 'synthetic-hydrogen', customGroqKey: 'synthetic-groq' };
+    try {
+        for (const streaming of [false, true]) {
+            const calls = [];
+            globalThis.fetch = async (input, init) => { calls.push({ url: String(input), body: JSON.parse(init.body) }); return Response.json({}, { status: 503 }); };
+            const run = selected => streaming ? chat.streamModelWithFallback('Actor Example Person', {}, () => {}, selected, undefined, keys) : chat.runModelWithFallback('Actor Example Person', {}, selected, undefined, keys);
+            await run(null);
+            assert.equal(calls.length, 2); assert.match(calls[0].url, /models\/gemini-4-hydrogen:/); assert.match(calls[1].url, /groq\.com/);
+            assert.equal(calls[0].body.tools, undefined, 'Automatic chat does not enable billed Google Search tools');
+            calls.length = 0; await run('openai/gpt-oss-120b');
+            assert.equal(calls.length, 2); assert.match(calls[0].url, /groq\.com/);
+        }
+        for (const tier of ['instant', 'standard', 'deep']) assert.equal(chat.getPreferredGeminiCandidates('gemini-2.5-flash', null, { tier, preferSpeed: true })[0], 'gemini-4-hydrogen');
+        assert.equal(chat.getPreferredGeminiCandidates('', 'gemini-2.5-flash')[0], 'gemini-2.5-flash');
+    } finally { globalThis.fetch = original; if (oldModel === undefined) delete process.env.GEMINI_MODEL; else process.env.GEMINI_MODEL = oldModel; }
+});
+
 test('an incomplete offline installation cannot replace the working cache', async () => {
     const listeners = {};
     const cacheNames = new Set(['jarvis-cache-working']);

@@ -622,14 +622,15 @@ async function getInstantFactHelper() {
         } else if (['qwen/qwen3.8-27b', 'qwen-3.8-27b'].includes(userSelected)) {
             mappedGemini = 'gemini-3.7-flash';
         }
+        const primaryGemini = !userSelected || userSelected === 'auto' ? 'gemini-4-hydrogen' : mappedGemini;
 
         let geminiList = [];
         if (tier === 'deep') {
-            geminiList = [mappedGemini, configured, 'gemini-4-hydrogen', 'gemini-3.8-flash', 'gemini-2.5-pro', 'gemini-3.7-flash', 'gemini-2.5-flash'];
+            geminiList = [primaryGemini, configured, 'gemini-4-hydrogen', 'gemini-3.8-flash', 'gemini-2.5-pro', 'gemini-3.7-flash', 'gemini-2.5-flash'];
         } else if (preferSpeed || tier === 'instant') {
-            geminiList = [mappedGemini, configured, 'gemini-2.5-flash-lite', 'gemini-4-hydrogen', 'gemini-2.5-flash', 'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-2.5-pro'];
+            geminiList = [primaryGemini, configured, 'gemini-2.5-flash-lite', 'gemini-4-hydrogen', 'gemini-2.5-flash', 'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-2.5-pro'];
         } else {
-            geminiList = [mappedGemini, configured, 'gemini-4-hydrogen', 'gemini-2.5-flash', 'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-2.5-pro', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-2.5-flash-lite'];
+            geminiList = [primaryGemini, configured, 'gemini-4-hydrogen', 'gemini-2.5-flash', 'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-2.5-pro', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-2.5-flash-lite'];
         }
         return [...new Set(geminiList.filter(Boolean))];
     }
@@ -3281,7 +3282,7 @@ async function handler(req, res) {
                 reqBody.system_instruction = systemInstruction;
             }
             const isExplicitSearchQuery = isTimeSensitiveInfoRequest(prompt) || isMutableEntityFactQuery(prompt) || Boolean(options?.needsWebSearch || options?.forceLiveSearch || options?.webMode === 'force');
-            if (isExplicitSearchQuery && !options?.minimalThinking && !generationConfig.thinkingConfig?.thinkingBudget) {
+            if (process.env.SEARCH_GEMINI_GROUNDING_FREE_ALLOWANCE === 'true' && isExplicitSearchQuery && !options?.minimalThinking && !generationConfig.thinkingConfig?.thinkingBudget) {
                 reqBody.tools = [{ googleSearch: {} }];
             }
             const apiModel = resolveGeminiApiModel(model);

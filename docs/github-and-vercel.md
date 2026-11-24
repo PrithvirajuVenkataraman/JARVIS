@@ -109,6 +109,10 @@ Diagnostics distinguish configured capabilities from runtime health. An enabled 
 
 ## Vision credential troubleshooting
 
+Automatic text chat and research now start with Gemini Hydrogen (`gemini-4-hydrogen`), then use a configured Groq fallback when necessary. Select Automatic in Settings to use this policy; an explicit saved model selection remains a manual preference. Older `GEMINI_MODEL` values are retained as fallback candidates rather than replacing the Automatic primary. Provider labels identify the model that actually answered. [Google's model documentation](https://aistudio.google.com/docs/models/gemini-4-hydrogen) lists a free tier; account quotas still apply. Google Search grounding remains opt-in because it is separate from free text inference.
+
+Role-qualified photo queries match Wikipedia's canonical titles and redirect aliases, then verify human identity through Wikidata. This supports renamed biography pages without per-person overrides. Ambiguous identities remain unresolved, and image source dates remain distinct from upload dates.
+
 Check `/api/diagnostics` on the actual deployment (`https://jarvisjr.vercel.app/api/diagnostics` for the current production site). `model.groqConfigured`, `model.geminiConfigured`, and `vision.configured` indicate configuration presence; they do not validate credentials or provider quotas. The former chat fallback incorrectly reported missing keys after upstream failures even when both keys were configured. The corrected version reports the failure category and preserves an attempt for the second configured provider. Deploy the matching API changes as well as the frontend.
 
 Refreshing or reopening now shows a fresh chat. Previous failed replies remain only inside their saved conversations, which can be opened from the sidebar; refreshing does not regenerate them. Once the corrected commit is deployed, reattach and retry the image in a new turn. No provider key should be copied into the browser, GitHub, or support messages.

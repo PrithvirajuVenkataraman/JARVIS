@@ -765,7 +765,24 @@ const body = { facts: [{ id: 'f1', requirementId: 'r1', value: 'Fixture fact', s
 const response = (provider, data = body) => Response.json(provider === 'groq'
     ? { choices: [{ message: { content: JSON.stringify(data) }, finish_reason: 'stop' }] }
     : { candidates: [{ content: { parts: [{ text: JSON.stringify(data) }] }, finishReason: 'STOP' }] });
-const invoke = extra => callResearchModel({ ...keys, system: 'Return supported facts.', prompt: 'A question and evidence.', json: true, timeoutMs: 1000, ...extra });
+// Groq-specific failure contracts explicitly select Groq; Automatic is tested below.
+const invoke = extra => callResearchModel({ ...keys, selectedModel: 'openai/gpt-oss-120b', system: 'Return supported facts.', prompt: 'A question and evidence.', json: true, timeoutMs: 1000, ...extra });
+
+test('Automatic research uses Hydrogen first and recovers through Groq within its attempt budget', async () => {
+    clearResearchModelHealth(); const original = globalThis.fetch; const calls = [];
+    globalThis.fetch = async (url, init) => {
+        calls.push({ url: String(url), body: JSON.parse(init.body) });
+        return String(url).includes('googleapis.com') ? Response.json({}, { status: 503 }) : response('groq');
+    };
+    try {
+        const providers = researchModelProviders({ ...keys, selectedModel: 'auto' });
+        assert.equal(providers[0].name, 'gemini'); assert.equal(providers[0].model, 'gemini-4-hydrogen');
+        assert.equal(researchModelProviders({ ...keys, selectedModel: 'openai/gpt-oss-120b' })[0].name, 'groq');
+        assert.deepEqual(await invoke({ selectedModel: 'auto', budget: { calls: 0, maxCalls: 2 } }), body);
+        assert.equal(calls.length, 2); assert.match(calls[0].url, /gemini-4-hydrogen/); assert.match(calls[1].url, /groq\.com/);
+        assert.equal(calls[0].body.generationConfig.thinkingConfig.thinkingLevel, 'LOW'); assert.equal(calls[0].body.tools, undefined);
+    } finally { globalThis.fetch = original; clearResearchModelHealth(); }
+});
 
 test('actual HTTP response parsing falls back after Groq 400 and records each attempt', async () => {
     clearResearchModelHealth();
@@ -788,37 +805,45 @@ test('actual HTTP response parsing falls back after Groq 400 and records each at
     } finally { globalThis.fetch = original; clearResearchModelHealth(); }
 });
 
-test('a slow primary gets a bounded attempt while fallback still gets its own time', async () => {
+test('a slow primary gets a bounded attempt while fallback still gets its own time', async t => {
     clearResearchModelHealth();
+    t.mock.timers.enable({ apis: ['Date', 'setTimeout'] });
     const original = globalThis.fetch;
     const attempted = [];
     let aborted = false;
+    let started; const primaryStarted = new Promise(resolve => { started = resolve; });
     globalThis.fetch = async (url, { signal } = {}) => {
         const urlStr = String(url);
         if (!urlStr.includes('groq') && !urlStr.includes('googleapis')) {
             return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
         }
         attempted.push(urlStr.includes('groq') ? 'groq' : 'gemini');
-        if (urlStr.includes('groq')) return new Promise(() => signal?.addEventListener('abort', () => { aborted = true; }, { once: true }));
+        if (urlStr.includes('groq')) { started(); return new Promise(() => signal?.addEventListener('abort', () => { aborted = true; }, { once: true })); }
         return response('gemini');
     };
     const budget = { calls: 0, maxCalls: 4 };
     try {
-        assert.deepEqual(await invoke({ timeoutMs: 120, budget }), body);
+        const pending = invoke({ timeoutMs: 120, budget });
+        await primaryStarted; t.mock.timers.tick(80);
+        assert.deepEqual(await pending, body);
         assert.deepEqual(attempted, ['groq', 'gemini']);
         assert.equal(aborted, true);
         assert.deepEqual(budget.attempts.map(a => a.outcome), ['timeout', 'success']);
     } finally { globalThis.fetch = original; clearResearchModelHealth(); }
 });
 
-test('body-read timeout also permits fallback instead of hanging after headers', async () => {
+test('body-read timeout also permits fallback instead of hanging after headers', async t => {
+    t.mock.timers.enable({ apis: ['Date', 'setTimeout'] });
     const original = globalThis.fetch;
+    let started; const bodyStarted = new Promise(resolve => { started = resolve; });
     globalThis.fetch = async url => String(url).includes('groq')
-        ? { ok: true, status: 200, json: () => new Promise(() => {}) }
+        ? { ok: true, status: 200, json: () => { started(); return new Promise(() => {}); } }
         : response('gemini');
     const budget = { calls: 0, maxCalls: 4 };
     try {
-        assert.deepEqual(await invoke({ timeoutMs: 120, budget }), body);
+        const pending = invoke({ timeoutMs: 120, budget });
+        await bodyStarted; t.mock.timers.tick(80);
+        assert.deepEqual(await pending, body);
         assert.deepEqual(budget.attempts.map(a => a.outcome), ['timeout', 'success']);
     } finally { globalThis.fetch = original; clearResearchModelHealth(); }
 });
@@ -877,7 +902,7 @@ test('already-cancelled request starts no provider work', async () => {
 
 test('paid/unknown selected models never replace the allowed existing text models', () => {
     const providers = researchModelProviders({ ...keys, selectedModel: 'gemini-unrecognized-pro' });
-    assert.equal(providers[0].model, 'gemini-2.5-flash');
+    assert.equal(providers[0].model, 'gemini-4-hydrogen');
     assert.ok(providers.every(provider => !provider.model.includes('unrecognized')));
 });
 
@@ -1342,13 +1367,13 @@ test('two real provider generations parse JSON, search a precise gap, and stop a
     globalThis.fetch = async (url, init) => {
         const request = JSON.parse(init.body);
         requests.push(request);
-        if (String(url).includes('api.groq.com')) return new Response('invalid request', { status: 400 });
-        const input = JSON.parse(request.contents[0].parts[0].text);
+        if (String(url).includes('googleapis.com')) return new Response('invalid request', { status: 400 });
+        const input = JSON.parse(request.messages.at(-1).content);
         const usId = Number(input.sourceExcerpts.match(/\[(\d+)\] United States/)?.[1]);
         const caId = Number(input.sourceExcerpts.match(/\[(\d+)\] Canada/)?.[1]);
         const data = { facts: [fact('r1', us, usId, us)], gaps: [{ requirementId: 'r2', detail: 'Canada population census value', query: 'Canada population census' }] };
         if (caId) { data.facts.push(fact('r2', canada, caId, canada)); data.gaps = []; }
-        return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify(data) }] }, finishReason: 'STOP' }] });
+        return Response.json({ choices: [{ message: { content: JSON.stringify(data) }, finish_reason: 'stop' }] });
     };
     try {
         const result = await runResearch(question, { ...keys, timeoutMs: 45000 }, {

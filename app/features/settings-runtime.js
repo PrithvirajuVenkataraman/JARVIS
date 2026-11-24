@@ -759,7 +759,7 @@ function showHelpModal() {
 
                             <section class="settings-group-card settings-routing-card" aria-labelledby="settings-routing-title">
                                 <h4 id="settings-routing-title">Model routing</h4>
-                                <p>Your model preference is used when supported. A configured fallback may handle a request when a provider is unavailable.</p>
+                                <p>Automatic starts with Gemini Hydrogen. Your selected model is used when supported. A configured fallback may handle a request when a provider is unavailable.</p>
                                 <dl class="settings-routing-details">
                                     <div><dt>Model preference</dt><dd>${escapeHtml(currentSelectedModel === 'auto' ? 'Automatic' : currentSelectedModel)}</dd></div>
                                     <div><dt>Availability</dt><dd>Depends on provider configuration and quotas</dd></div>

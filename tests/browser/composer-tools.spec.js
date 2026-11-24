@@ -48,7 +48,7 @@ test('sidebar shortcuts remain reachable on all widths and open their working fe
     const toggle = page.getByRole('button', { name: 'Open sidebar', exact: true });
     const sidebar = page.locator('#chat-sidebar-panel');
     const actions = sidebar.getByRole('navigation', { name: 'Main chat actions' });
-    const labels = ['New chat', 'Search chats', 'Memory', 'Custom instructions', 'Image library', 'Settings'];
+    const labels = ['New chat', 'Search', 'Memory', 'Custom instructions', 'Image library', 'Settings'];
     await expect(page.locator('#sidebar-vision-btn')).toHaveCount(0);
     for (const [width, height] of [[320, 568], [390, 844], [768, 1024], [1024, 768], [1440, 900], [844, 390]]) {
         await page.setViewportSize({ width, height });
@@ -85,7 +85,7 @@ test('sidebar shortcuts remain reachable on all widths and open their working fe
         await expect(toggle).toBeFocused();
     }
     await page.setViewportSize({ width: 390, height: 844 });
-    await toggle.click(); await actions.getByRole('button', { name: 'Search chats', exact: true }).click();
+    await toggle.click(); await actions.getByRole('button', { name: 'Search', exact: true }).click();
     await expect(sidebar.getByRole('searchbox')).toBeFocused();
     await sidebar.getByRole('searchbox').fill('missing conversation');
     await expect(page.locator('#chat-sidebar-list')).toContainText('No matching chats found.');
@@ -111,6 +111,30 @@ test('sidebar shortcuts remain reachable on all widths and open their working fe
     await actions.getByRole('button', { name: 'New chat', exact: true }).click();
     await expect(page.locator('#chat-container .chat-row')).toHaveCount(0);
     await toggle.click(); await expect(page.locator('#chat-sidebar-list .chat-session-row').first()).toBeVisible();
+});
+
+test('sidebar Search text aligns with navigation and New chat has no decorative side line', async ({ page }, info) => {
+    for (const width of [320, 390, 768, 1024, 1440]) {
+        await page.setViewportSize({ width, height: 844 });
+        await page.getByRole('button', { name: 'Open sidebar', exact: true }).click();
+        const nav = page.getByRole('navigation', { name: 'Main chat actions' });
+        const newChat = nav.getByRole('button', { name: 'New chat', exact: true });
+        expect(await newChat.evaluate(element => getComputedStyle(element, '::before').content)).toMatch(/^(none|normal)$/);
+        expect(await page.locator('#sidebar-drag-handle').evaluate(element => getComputedStyle(element, '::after').content)).toMatch(/^(none|normal)$/);
+        const search = nav.getByRole('button', { name: 'Search', exact: true }); await search.click();
+        const input = page.getByRole('searchbox', { name: 'Search', exact: true });
+        await expect(input).toBeFocused(); await expect(input).toHaveAttribute('placeholder', 'Search');
+        const alignment = await input.evaluate(element => {
+            const style = getComputedStyle(element), label = document.querySelector('.chat-sidebar-nav-item:nth-child(2) span');
+            return Math.abs(element.getBoundingClientRect().left + parseFloat(style.paddingLeft) + parseFloat(style.borderLeftWidth) - label.getBoundingClientRect().left);
+        });
+        expect(alignment).toBeLessThanOrEqual(2);
+        expect((await input.boundingBox()).height).toBeGreaterThanOrEqual(44);
+        await expect(page.locator('#chat-sidebar-section-title')).toHaveText('Recent chats');
+        await expect(page.locator('.chat-sidebar-empty')).toHaveText('Your chats will appear here.');
+        if ([390, 1440].includes(width)) await page.screenshot({ path: info.outputPath(`search-${width}.png`), animations: 'disabled' });
+        await page.keyboard.press('Escape');
+    }
 });
 
 test('model routing explains the current preference without promotional badges or fixed model claims', async ({ page }, info) => {

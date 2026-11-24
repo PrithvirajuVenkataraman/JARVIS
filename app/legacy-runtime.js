@@ -5530,7 +5530,7 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
                     const textLen = String(requestOptions?.grounding?.selectedText || requestOptions?.grounding?.sourceAnswer || '').length;
                     const isHeavyDocument = textLen > 30000 && (selectedModel === 'auto' || !selectedModel);
                     if (isUnsupportedMedia || isHeavyDocument) {
-                        return 'gemini-2.5-flash';
+                        return 'gemini-4-hydrogen';
                     }
                     return requestOptions?.selectedModel || (selectedModel !== 'auto' ? selectedModel : undefined);
                 })(),
@@ -29651,7 +29651,7 @@ function setSidebarViewTab(tab) {
         bookmarksTab.setAttribute('aria-selected', currentSidebarViewTab === 'bookmarks' ? 'true' : 'false');
     }
     if (sectionTitle) {
-        sectionTitle.textContent = currentSidebarViewTab === 'bookmarks' ? 'Saved Insights' : 'Recents';
+        sectionTitle.textContent = currentSidebarViewTab === 'bookmarks' ? 'Saved insights' : 'Recent chats';
     }
     renderChatSidebarList();
 }
@@ -29682,8 +29682,10 @@ function renderChatSidebarList() {
         searchHits = sorted.map(session => ({ session, score: 0, snippetHtml: '', bestMessage: null }));
     }
 
+    const sectionTitle = document.getElementById('chat-sidebar-section-title');
+    if (sectionTitle) sectionTitle.textContent = query ? 'Search results' : currentSidebarViewTab === 'bookmarks' ? 'Saved insights' : searchHits.some(hit => hit.session.pinned) ? 'Pinned' : 'Recent chats';
     if (!searchHits.length) {
-        list.innerHTML = `<p class="chat-sidebar-empty">${query ? 'No matching chats found.' : 'No saved chats yet.'}</p>`;
+        list.innerHTML = `<p class="chat-sidebar-empty">${query ? 'No matching chats found.' : 'Your chats will appear here.'}</p>`;
         return;
     }
 
@@ -29760,10 +29762,9 @@ function renderChatSidebarList() {
 
     let html = '';
     if (pinnedHits.length && !query) {
-        html += '<div class="chat-sidebar-section-title" style="margin-top:4px;">Pinned</div>';
         html += pinnedHits.map(renderRow).join('');
         if (recentHits.length) {
-            html += '<div class="chat-sidebar-section-title" style="margin-top:12px;">Recents</div>';
+            html += '<div class="chat-sidebar-section-title" style="margin-top:12px;">Recent chats</div>';
             html += recentHits.map(renderRow).join('');
         }
     } else {

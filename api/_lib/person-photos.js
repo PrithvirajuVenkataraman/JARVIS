@@ -1,6 +1,6 @@
 import { fetchWithLifecycle as fetch } from './request-lifecycle.js';
 import { resolveEntityVisuals, isValidImageUrl } from './visual-answer-engine.js';
-import { personPhotoQuery } from '../../app/person-photo-query.js';
+import { personPhotoQuery, personPhotoSubject } from '../../app/person-photo-query.js';
 
 const COMMONS = 'https://commons.wikimedia.org/w/api.php';
 const HEADERS = { Accept: 'application/json', 'User-Agent': 'JARVIS/1.0 (+https://github.com/PrithvirajuVenkataraman/JARVIS)' };
@@ -67,6 +67,29 @@ async function commons(params, signal) {
     return (data?.query?.pages || []).map(page => commonsImage(page)).filter(Boolean);
 }
 
+// Role-qualified aliases remain useful when an article's canonical name changes.
+// Match Wikipedia's own titles/redirects and then verify human identity in Wikidata.
+export async function resolveRolePerson(subject, signal) {
+    const url = new URL('https://en.wikipedia.org/w/api.php');
+    const params = { action: 'query', generator: 'search', gsrsearch: `${subject.name} ${subject.role}`, gsrlimit: 5, gsrnamespace: 0, prop: 'pageprops|pageimages|extracts|info|redirects', ppprop: 'wikibase_item|disambiguation', pithumbsize: 720, exintro: 1, explaintext: 1, exchars: 700, inprop: 'url', rdlimit: 50, format: 'json', formatversion: 2 };
+    for (const [key, value] of Object.entries(params)) url.searchParams.set(key, String(value));
+    const data = await json(url, signal);
+    const normalize = value => String(value || '').normalize('NFKC').replace(/_/g, ' ').replace(/\s+/g, ' ').trim().toLocaleLowerCase();
+    const expected = normalize(subject.name);
+    const matches = (data?.query?.pages || []).filter(page => {
+        if (!/^Q\d+$/.test(page.pageprops?.wikibase_item || '') || Object.hasOwn(page.pageprops || {}, 'disambiguation')) return false;
+        const aliases = [page.title, ...(page.redirects || []).map(redirect => redirect.title)];
+        if (aliases.some(title => { const alias = personPhotoSubject(title); return normalize(alias.name) === expected && alias.role === subject.role; })) return true;
+        const canonical = String(page.title || '').replace(/\s*\([^)]*\)$/, '');
+        const roleWords = subject.role === 'actor' ? 'actor|actress' : subject.role === 'author' ? 'author|writer' : subject.role;
+        return normalize(canonical) === expected && new RegExp(`\\b(?:${roleWords})\\b`, 'i').test(String(page.extract || '').split(/\n/)[0]);
+    });
+    const identities = [...new Map(matches.map(page => [page.pageprops.wikibase_item, page])).values()];
+    if (identities.length !== 1) return null;
+    const page = identities[0];
+    return { id: `entity_${page.pageid}`, name: page.title.replace(/\s*\([^)]*\)$/, ''), fullName: page.title, wikidataId: page.pageprops.wikibase_item, type: subject.role, extract: page.extract || '', source: { name: 'Wikipedia', url: page.fullurl }, image: page.thumbnail ? { url: page.thumbnail.source, width: page.thumbnail.width, height: page.thumbnail.height } : null };
+}
+
 export async function resolvePersonPhoto(query, options = {}) {
     const subject = personPhotoQuery(query, options.reference);
     if (!subject || options.signal?.aborted) return null;
@@ -76,8 +99,10 @@ export async function resolvePersonPhoto(query, options = {}) {
     const signal = options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(7500)]) : AbortSignal.timeout(7500);
     let result = null;
     try {
-        const visuals = await resolveEntityVisuals(subject, { signal, timeoutMs: 4500, includeNotableWorks: false, personPhoto: true });
-        const entity = visuals?.entity;
+        const qualified = personPhotoSubject(subject);
+        const entity = qualified.role
+            ? await resolveRolePerson(qualified, signal)
+            : (await resolveEntityVisuals(subject, { signal, timeoutMs: 4500, includeNotableWorks: false, personPhoto: true }))?.entity;
         if (!/^Q\d+$/.test(entity?.wikidataId || '')) return null;
         const claims = new URL('https://www.wikidata.org/w/api.php');
         for (const [k, v] of Object.entries({ action: 'wbgetclaims', entity: entity.wikidataId, property: 'P31', format: 'json' })) claims.searchParams.set(k, v);

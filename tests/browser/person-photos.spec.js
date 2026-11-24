@@ -68,6 +68,21 @@ test('reference portraits are labelled honestly and vague follow-ups do not requ
     expect(requests).toBe(1); await expect(page.locator('.person-photo')).toHaveCount(1);
 });
 
+test('a fresh role-qualified query renders media even when there is no prior conversation reference', async ({ page }) => {
+    let query;
+    await page.route('**/api/search', route => {
+        const body = route.request().postDataJSON();
+        if (body?.action !== 'person_photo') return route.continue();
+        query = body.query; return route.fulfill({ json: { success: true, entity } });
+    });
+    await page.evaluate(() => {
+        const userMessage = 'Actor Example Person';
+        const id = window.createStreamingAssistantMessage({ userMessage });
+        window.finalizeStreamingAssistantMessage(id, 'A short sourced profile.', { userMessage, contextReference: { status: 'missing', evidenceIds: [] } });
+    });
+    await expect(page.locator('.person-photo-image')).toBeVisible(); expect(query).toBe('Actor Example Person');
+});
+
 for (const width of [768, 1024, 1440]) {
     test(`Automatic is centered within its dropdown on a ${width}px laptop/tablet viewport`, async ({ page }, info) => {
         await page.setViewportSize({ width, height: 900 });

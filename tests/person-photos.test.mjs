@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { personPhotoQuery } from '../app/person-photo-query.js';
+import { personPhotoQuery, personPhotoSubject } from '../app/person-photo-query.js';
 import { isImageGenerationIntent } from '../app/frontend-routing.js';
 import { imageDate, commonsImage, resolvePersonPhoto } from '../api/_lib/person-photos.js';
 
@@ -17,6 +17,9 @@ test('person queries accept explicit names and photo requests without treating v
     assert.equal(personPhotoQuery('Example Person', { evidenceIds: ['earlier-turn'] }), '');
     assert.equal(isImageGenerationIntent('Show me the latest photo of Example Person'), false);
     assert.equal(isImageGenerationIntent('Create a portrait of Example Person'), true);
+    assert.equal(personPhotoQuery('Actor Example Person', { status: 'missing' }), 'Actor Example Person');
+    assert.deepEqual(personPhotoSubject('Who is actress Example Person?'), { query: 'actress Example Person', name: 'Example Person', role: 'actor' });
+    assert.equal(personPhotoSubject('Example Person (actor)').role, 'actor');
 });
 
 test('photo dates use source image metadata, reject impossible/future dates, and never use upload dates', () => {
@@ -71,5 +74,32 @@ test('shared-name disambiguation pages never choose a person arbitrarily', async
         return Response.json({ title: 'Example Shared Name', type: 'disambiguation', extract: 'This name refers to several people.' });
     };
     try { assert.equal(await resolvePersonPhoto('Example Shared Name'), null); assert.equal(calls, 1); }
+    finally { globalThis.fetch = original; }
+});
+
+test('role-qualified person photos follow verified aliases after a canonical article rename', async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = async input => {
+        const url = new URL(input);
+        if (url.hostname === 'en.wikipedia.org') {
+            assert.equal(url.searchParams.get('gsrsearch'), 'Example Alias actor');
+            return Response.json({ query: { pages: [
+                { title: 'Current Public Name', pageid: 1, pageprops: { wikibase_item: 'Q987654' }, redirects: [{ title: 'Example Alias (Actor)' }], thumbnail: { source: 'https://upload.wikimedia.org/wikipedia/commons/a/ab/Reference.jpg' } },
+                { title: 'Different Example Alias', pageprops: { wikibase_item: 'Q9999' }, extract: 'Another actor.' }
+            ] } });
+        }
+        if (url.hostname === 'www.wikidata.org') { assert.equal(url.searchParams.get('entity'), 'Q987654'); return Response.json({ claims: { P31: [{ mainsnak: { datavalue: { value: { id: 'Q5' } } } }] } }); }
+        return Response.json({ query: { pages: [file('Alias_Photograph', '2025-02-03')] } });
+    };
+    try {
+        const result = await resolvePersonPhoto('Actor Example Alias');
+        assert.equal(result.entity.name, 'Current Public Name'); assert.equal(result.entity.wikidataId, 'Q987654'); assert.equal(result.entity.image.imageDate, '2025-02-03');
+    } finally { globalThis.fetch = original; }
+});
+
+test('role-qualified aliases shared by multiple people stay unresolved', async () => {
+    const original = globalThis.fetch; let calls = 0;
+    globalThis.fetch = async () => { calls++; return Response.json({ query: { pages: ['Q1111', 'Q2222'].map(id => ({ title: id, pageprops: { wikibase_item: id }, redirects: [{ title: 'Ambiguous Alias (actor)' }] })) } }); };
+    try { assert.equal(await resolvePersonPhoto('Actor Ambiguous Alias'), null); assert.equal(calls, 1); }
     finally { globalThis.fetch = original; }
 });
