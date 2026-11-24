@@ -74,6 +74,8 @@ The idle workspace has a centered JARVIS title, a visible sidebar button at the 
 
 Interface text uses locally bundled Inter Variable with system fallbacks. Equations and code retain their own fonts. Font assets and their license are included in the production build; no external font service is required.
 
+Generated conversational replies can use brief, context-aware humour and reasoned opinions. The same voice policy applies to fast and normal replies; it uses recent dialogue for references, respects formal/no-jokes custom instructions, and stays serious for sensitive or high-stakes topics. It adds no separate personality-classification request or fixed joke bank. Source excerpts and OCR retain their factual wording.
+
 Busy image requests keep the prompt and temporarily disable Retry. Server-exposed retry delays are honored, with a one-minute fallback for rate limits. Retrying is always explicit; the app does not resubmit automatically or switch to paid image generation.
 
 Document parsing is bundled locally and loaded when needed. Image OCR/understanding still requires a configured vision provider. A dismissible first-visit permission introduction has one Enable permissions action; the browser controls the individual microphone, camera, and location approval prompts. Features remain usable independently when only some permissions are granted.

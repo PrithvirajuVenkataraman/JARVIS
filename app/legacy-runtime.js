@@ -14822,9 +14822,9 @@ async function sendTextInput(submission = {}) {
                     ? `Attached ${attachmentMeta.length} file${attachmentMeta.length === 1 ? '' : 's'}`
                     : '');
                 learnAnswerStyleFromUserMessage(outgoingTextToSend);
-                const normalizedOutgoingText = outgoingTextToSend && isLikelyCodeInput(outgoingTextToSend)
-                    ? outgoingTextToSend
-                    : (outgoingTextToSend ? normalizeIntentTypos(outgoingTextToSend) : displayOutgoingText);
+                // Fuzzy typo correction is a routing aid, not a rewrite of the
+                // user's words: valid references such as "that" must stay intact.
+                const normalizedOutgoingText = outgoingTextToSend || displayOutgoingText;
                 const turn = createConversationTurn(displayOutgoingText, normalizedOutgoingText, inputSource, {
                     sourceContext: {
                         transcriptId: String(submission?.transcriptId || ''),

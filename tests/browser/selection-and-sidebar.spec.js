@@ -21,6 +21,24 @@ async function ask(page, message) {
     await expect(page.locator('#request-status')).toHaveText('Response finished.');
 }
 
+test('saved chats restored at startup never create executable HTML event attributes', async ({ page }) => {
+    const violations = [];
+    page.on('console', message => { if (/inline event handler/i.test(message.text())) violations.push(message.text()); });
+    await page.addInitScript(() => {
+        const now = new Date().toISOString();
+        const sessions = Array.from({ length: 7 }, (_, index) => ({ id: `startup-${index}`, title: index ? `Saved conversation ${index}` : 'Review <img src=x onerror=window.__sidebarXss=1>', titleEdited: true, autoTitle: false, createdAt: now, updatedAt: now, pinned: false, messages: [{ role: 'user', text: `Saved question ${index}`, timestamp: now }, { role: 'assistant', text: 'Saved answer.', timestamp: now }] }));
+        localStorage.setItem('jarvis_chat_sessions_v1', JSON.stringify(sessions));
+    });
+    await page.reload(); await page.waitForFunction(() => window.__jarvisModernReady);
+    await page.getByRole('button', { name: 'Open sidebar', exact: true }).click();
+    await expect(page.locator('.chat-session-row')).toHaveCount(7);
+    expect(await page.locator('#chat-sidebar-panel').evaluate(panel => [...panel.querySelectorAll('*')].flatMap(node => [...node.attributes].filter(attribute => /^on/i.test(attribute.name)).map(attribute => attribute.name)))).toEqual([]);
+    await page.locator('.chat-session-row').first().click({ button: 'right' });
+    await expect(page.locator('#chat-session-menu')).toBeVisible();
+    expect(await page.evaluate(() => window.__sidebarXss)).toBeUndefined();
+    expect(violations).toEqual([]);
+});
+
 test('chat menus, rename on blur, and keyboard restore work under the strict CSP', async ({ page }) => {
     const violations = [];
     page.on('console', message => { if (/inline event handler/i.test(message.text())) violations.push(message.text()); });

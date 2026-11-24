@@ -9,6 +9,30 @@ test.beforeEach(async ({ page }) => {
     await page.goto('/'); await page.waitForFunction(() => window.__jarvisModernReady);
 });
 
+test('opinion follow-ups retain the discussed place and custom tone without rewriting the user question', async ({ page }) => {
+    const requests = [];
+    await page.route('**/api/chat-groq', route => {
+        const body = route.request().postDataJSON();
+        if (!body.stream) return route.fulfill({ json: { success: true, response: 'Fictional town setting' } });
+        requests.push(body);
+        const text = requests.length === 1 ? 'Seabrook is your fictional town, with quiet cafes and walkable streets but no nightlife.' : 'Given your setting, its strength is a calm pace; its limitation is the lack of nightlife.';
+        return route.fulfill({ contentType: 'text/event-stream', body: `event: delta\ndata: ${JSON.stringify({ text })}\n\nevent: done\ndata: ${JSON.stringify({ success: true, response: text, provider: 'groq', modelUsed: 'openai/gpt-oss-20b' })}\n\n` });
+    });
+    await page.evaluate(() => { window.setCustomSystemPrompt('Use a formal tone. No jokes.', false); window.setWebSearchMode('off'); });
+    const input = page.locator('#text-input');
+    await input.fill('My fictional town Seabrook has quiet cafes, walkable streets, and no nightlife. Summarize this setting.'); await input.press('Enter');
+    await expect(page.locator('#request-status')).toHaveText('Response finished.');
+    const question = 'What do you think of that place, bro?';
+    await input.fill(question); await input.press('Enter');
+    await expect(page.locator('#request-status')).toHaveText('Response finished.');
+    expect(requests).toHaveLength(2);
+    expect(requests[1].message).toBe(question);
+    expect(JSON.stringify(requests[1].context)).toContain('Seabrook');
+    expect(requests[1].preferences.customSystemPrompt).toBe('Use a formal tone. No jokes.');
+    expect(requests[1].webMode).toBe('off');
+    expect(requests[1].contextReference?.status).not.toBe('missing');
+});
+
 test('vague references travel from the composer to a clarification with original context and preferences', async ({ page }) => {
     const requests = [];
     await page.route('**/api/chat-groq', route => {
