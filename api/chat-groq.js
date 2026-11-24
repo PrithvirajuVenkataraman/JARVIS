@@ -1130,10 +1130,8 @@ async function handler(req, res) {
                 routeDecision.reason = 'forced_by_user';
             } else if (req.body?.webMode === 'off') {
                 routeDecision.webEligible = false;
-                if (routeDecision.strategy === 'search') {
-                    routeDecision.strategy = 'direct';
-                    routeDecision.reason = 'offline_forced_by_user';
-                }
+                routeDecision.strategy = 'direct';
+                routeDecision.reason = 'offline_forced_by_user';
             }
             const lengthPolicy = applyCostCapToLengthPolicy(
                 buildLengthPolicy(routingMessage, '', {
@@ -1210,7 +1208,7 @@ async function handler(req, res) {
                     sources: grounding.sources,
                     ragText: grounding.sources.map((s, idx) => `[${s.id || idx + 1}] ${s.title || ''}: ${s.fullArticleText || s.extract || s.snippet || s.text || s.description || ''} (${s.url || ''})`).join('\n\n')
                 };
-            } else if (routeDecision.strategy === 'live_first' && !isAttachmentGrounding) {
+            } else if (['search', 'live_first'].includes(routeDecision.strategy) && !isAttachmentGrounding) {
                 const searchStart = Date.now();
                 preloadedLiveRag = await buildLiveRagContext(effectiveMessage, req, context);
                 timing.searchMs = Date.now() - searchStart;
@@ -2654,7 +2652,7 @@ async function handler(req, res) {
                     failures.push({ status: result.status, upstream: await describeUpstreamFailure(result, provider, model) });
                 }
                 return result;
-            } catch (error) { failures.push({ name: error?.name }); throw error; }
+            } catch (error) { failures.push({ name: error?.name, code: error?.code }); throw error; }
         };
 
         const tryRunGroq = async () => {
@@ -3944,7 +3942,7 @@ async function handler(req, res) {
 
         const { runVerifiedWebSearch } = await getSearchHelpers();
         const searchPromises = queries.slice(0, 3).map(candidateQuery =>
-            runVerifiedWebSearch(candidateQuery, { limit: 6 }).catch(() => null)
+            runVerifiedWebSearch(candidateQuery, { limit: 6, retrievalOnly: true }).catch(() => null)
         );
         const searchSettled = await Promise.allSettled(searchPromises);
         for (let i = 0; i < searchSettled.length; i++) {
@@ -4042,7 +4040,7 @@ async function handler(req, res) {
         let discovered = [];
         try {
             const { runVerifiedWebSearch } = await getSearchHelpers();
-            const search = await runVerifiedWebSearch(query, { limit: 6 });
+            const search = await runVerifiedWebSearch(query, { limit: 6, retrievalOnly: true });
             discovered = Array.isArray(search?.results) ? search.results : [];
         } catch (_) {
             return { ragText: '', sources: [], extractor: 'crawl4ai' };

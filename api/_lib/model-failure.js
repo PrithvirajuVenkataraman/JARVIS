@@ -41,5 +41,5 @@ export async function describeUpstreamFailure(response, provider, model) {
 }
 
 export function upstreamAttemptSummary(failures) {
-    return failures.slice(0, 2).map(failure => failure.upstream || { status: Number(failure.status) || 0, reasonCode: ['AbortError', 'TimeoutError'].includes(failure.name) ? 'timeout' : 'network_error' });
+    return failures.slice(0, 2).map(failure => failure.upstream || { status: Number(failure.status) || 0, reasonCode: failure.code === 'attempt_budget_exhausted' ? 'attempt_budget_exhausted' : ['AbortError', 'TimeoutError'].includes(failure.name) ? 'timeout' : 'network_error' });
 }

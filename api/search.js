@@ -1530,7 +1530,7 @@ export async function searchPublicSources(query, options = {}) {
     }
     if (tracker) tracker.startProvider('gemini_grounding');
     const effectiveGeminiKey = options.customGeminiKey || '';
-    const taskGemini = (hasGeminiKey(effectiveGeminiKey) && !hasSeedGrounding)
+    const taskGemini = (options.retrievalOnly !== true && hasGeminiKey(effectiveGeminiKey) && !hasSeedGrounding)
         ? Promise.allSettled([searchGeminiGrounding(targetQueries[0] || normalizedQuery, { limit, timeoutMs: geminiTimeoutMs, customGeminiKey: effectiveGeminiKey }).then(r => r.results || [])])
             .then(s => {
                 geminiGroundingResults = (Array.isArray(s) ? s : []).flatMap(r => r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : []);
@@ -2327,7 +2327,7 @@ export async function searchExa(query, options = {}) {
 }
 
 export async function runVerifiedWebSearch(query, options = {}) {
-    const cacheKey = buildSearchCacheKey(query, { ...options, mode: 'verified' });
+    const cacheKey = buildSearchCacheKey(query, { ...options, mode: options.retrievalOnly === true ? 'verified-retrieval' : 'verified' });
     const cached = getSearchResponseCache(cacheKey, query, options);
     if (cached) {
         return {
@@ -2348,7 +2348,7 @@ export async function runVerifiedWebSearch(query, options = {}) {
     const planningQueries = [];
     let initialGroundedResults = [];
 
-    if (hasGeminiKey()) {
+    if (options.retrievalOnly !== true && hasGeminiKey()) {
         const [planRes, groundRes] = await Promise.allSettled([
             buildGeminiSearchPlan(normalizedQuery).catch(error => ({
                 queries: [],
@@ -2385,6 +2385,7 @@ export async function runVerifiedWebSearch(query, options = {}) {
         limit,
         plannedQueries: searchQueries,
         seedResults: initialGroundedResults,
+        retrievalOnly: options.retrievalOnly === true,
         skipAutoDeepCrawl: false,
         allowDeepCrawl: true
     }).catch(() => []);
@@ -2401,7 +2402,7 @@ export async function runVerifiedWebSearch(query, options = {}) {
     
     let enhancedResults = publicResults;
     let geminiEnhanced = false;
-    if (hasGeminiKey()) {
+    if (options.retrievalOnly !== true && hasGeminiKey()) {
         const enhanced = await enhanceResultsWithGemini(normalizedQuery, publicResults, { limit }).catch(error => ({
             results: publicResults,
             enhanced: false,
