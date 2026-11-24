@@ -22,8 +22,11 @@ test('normal and fast replies share one grounded voice policy without canned jok
 
 test('witty style is optional and formal custom instructions remain explicit in both reply paths', () => {
     assert.match(conversationalVoiceDirective({ responseStyle: 'witty' }), /user selected a witty style/);
+    assert.match(conversationalVoiceDirective({ responseStyle: 'witty' }), /playful, low-stakes opinions/);
+    assert.match(conversationalVoiceDirective({ responseStyle: 'witty' }, { compact: true }), /one contextual joke/);
     assert.match(conversationalVoiceDirective({ responseStyle: 'supportive' }), /selected supportive or analytical style/);
     for (const intent of ['chat', 'fast_simple']) {
+        assert.ok(chat.buildServerSystemPrompt({ responseStyle: 'witty' }, intent).length < (intent === 'fast_simple' ? 800 : 4600));
         const prompt = chat.buildServerSystemPrompt({ responseStyle: 'witty', customSystemPrompt: 'Reply in formal Tamil. No jokes or slang.' }, intent);
         assert.match(prompt, /Honour requests for formality or no jokes|tone\/no-jokes instructions win/);
         assert.ok(prompt.indexOf('Reply in formal Tamil. No jokes or slang.') > prompt.indexOf('CONVERSATIONAL VOICE:'));
