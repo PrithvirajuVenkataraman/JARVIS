@@ -745,7 +745,7 @@ console.log('5. Verifying preferred vision model candidates selection...');
     const geminiVision = getPreferredGeminiVisionCandidates();
     assert.ok(Array.isArray(geminiVision) && geminiVision.length > 0);
     assert.ok(geminiVision.includes('gemini-4-hydrogen'));
-    assert.ok(geminiVision.includes('gemini-3.8-flash'));
+    assert.ok(geminiVision.includes('gemini-2.5-flash'));
     assert.ok(geminiVision.includes('gemini-3.7-flash'));
     assert.ok(geminiVision.includes('gemini-2.0-flash'));
     assert.ok(geminiVision.includes('gemini-2.5-pro'));
@@ -753,7 +753,8 @@ console.log('5. Verifying preferred vision model candidates selection...');
     // When configured model is text-only, must fallback to valid vision candidates
     const fromTextOnly = getPreferredGeminiVisionCandidates('text-only-model');
     assert.ok(fromTextOnly.length >= 3);
-    assert.equal(fromTextOnly[0], 'gemini-4-hydrogen', 'Default vision candidate must be prioritized to gemini-4-hydrogen');
+    assert.equal(fromTextOnly[0], 'gemini-2.5-flash', 'Default vision candidate must prioritize gemini-2.5-flash');
+    assert.equal(getPreferredGeminiVisionCandidates('text-only-model', null, { visionLane: 'math_diagram' })[0], 'gemini-4-hydrogen', 'Deep math_diagram vision lane must prioritize gemini-4-hydrogen');
 
     // Groq Vision Candidates (must have zero Llama models)
     const groqVision = getPreferredGroqVisionCandidates();
@@ -3413,7 +3414,8 @@ console.log('  [PASS] 1.1 Groq instant candidates prioritize openai/gpt-oss-20b 
 
 // 1.2 Automatic Gemini requests use Hydrogen, including the instant tier.
 const geminiInstant = chatTest.getPreferredGeminiCandidates('', null, { tier: 'instant', preferSpeed: true });
-assert.equal(geminiInstant[0], 'gemini-4-hydrogen', 'Automatic mode must prioritize Gemini Hydrogen across tiers');
+assert.equal(geminiInstant[0], 'gemini-2.5-flash', 'Automatic instant tier must prioritize gemini-2.5-flash');
+assert.equal(chatTest.getPreferredGeminiCandidates('', null, { tier: 'deep' })[0], 'gemini-4-hydrogen', 'Deep thinking tier must prioritize Gemini 4 Hydrogen');
 assert.ok(geminiInstant.includes('gemini-2.5-flash'), 'Gemini candidates must include gemini-2.5-flash fallback');
 assert.ok(geminiInstant.includes('gemini-3.7-flash'), 'Gemini candidates must include gemini-3.7-flash fallback');
 console.log('  [PASS] 1.2 Automatic Gemini instant candidates prioritize Hydrogen');

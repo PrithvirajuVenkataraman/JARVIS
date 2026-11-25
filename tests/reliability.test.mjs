@@ -280,14 +280,15 @@ test('Automatic chat starts with Hydrogen for JSON and streams, reserves Groq fa
             globalThis.fetch = async (input, init) => { calls.push({ url: String(input), body: JSON.parse(init.body) }); return Response.json({}, { status: 503 }); };
             const run = selected => streaming ? chat.streamModelWithFallback('Actor Example Person', {}, () => {}, selected, undefined, keys) : chat.runModelWithFallback('Actor Example Person', {}, selected, undefined, keys);
             const automatic = await run(null);
-            assert.equal(calls.length, 3); assert.match(calls[0].url, /models\/gemini-4-hydrogen:/); assert.match(calls[1].url, /models\/gemini-3\.8-flash:/); assert.match(calls[2].url, /groq\.com/);
+            assert.equal(calls.length, 3); assert.match(calls[0].url, /models\/gemini-2\.5-flash:/); assert.match(calls[1].url, /models\/gemini-2\.5-pro:/); assert.match(calls[2].url, /groq\.com/);
             assert.equal(automatic.payload.upstreamAttempts[0].provider, 'gemini');
             assert.equal(automatic.payload.upstreamAttempts[0].status, 503);
             assert.equal(calls[0].body.tools, undefined, 'Automatic chat does not enable billed Google Search tools');
             calls.length = 0; await run('openai/gpt-oss-120b');
             assert.equal(calls.length, 2); assert.match(calls[0].url, /groq\.com/);
         }
-        for (const tier of ['instant', 'standard', 'deep']) assert.equal(chat.getPreferredGeminiCandidates('gemini-2.5-flash', null, { tier, preferSpeed: true })[0], 'gemini-4-hydrogen');
+        assert.equal(chat.getPreferredGeminiCandidates('', null, { tier: 'deep' })[0], 'gemini-4-hydrogen');
+        for (const tier of ['instant', 'standard']) assert.equal(chat.getPreferredGeminiCandidates('', null, { tier, preferSpeed: true })[0], 'gemini-2.5-flash');
         assert.equal(chat.getPreferredGeminiCandidates('', 'gemini-2.5-flash')[0], 'gemini-2.5-flash');
         const groqFallback = chat.getPreferredGroqCandidates('gemini-4-hydrogen', { userSelectedModel: 'gemini-4-hydrogen' });
         assert.equal(groqFallback[0], 'openai/gpt-oss-120b'); assert.ok(groqFallback.every(model => !model.startsWith('gemini-')));

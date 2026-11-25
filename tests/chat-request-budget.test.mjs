@@ -40,8 +40,8 @@ test('chat reserves both model attempts for the answer instead of consuming them
                 continue;
             }
             assert.equal(generations.length, 3, `Two Gemini attempts plus one Groq failover for ${webMode}/${stream}`);
-            assert.match(generations[0].path, /gemini-4-hydrogen/);
-            assert.match(generations[1].path, /gemini-3\.8-flash/);
+            assert.match(generations[0].path, /gemini-2\.5-flash/);
+            assert.match(generations[1].path, /gemini-2\.5-pro/);
             assert.equal(generations[2].host, 'api.groq.com');
             assert.equal(generations[0].body.tools, undefined, 'Chat retrieval must not spend quota on Google Search grounding');
             if (webMode === 'off') assert.ok(!lookups.some(host => /news\.|duckduckgo|searx|gdelt/.test(host)), 'Web off must disable live-first as well as search routes');

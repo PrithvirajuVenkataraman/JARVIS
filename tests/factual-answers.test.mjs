@@ -175,12 +175,12 @@ test('streaming fallback from Gemini to Groq marks failover accurately', async (
         const payload = res.chunks.flatMap(chunk => String(chunk).split('\n').filter(line => line.startsWith('data:')).map(line => JSON.parse(line.slice(5)))).find(row => row.success === true);
         assert.equal(payload.provider, 'groq');
         assert.equal(payload.failover, true);
-        assert.equal(payload.upstreamAttempts[0].model, 'gemini-4-hydrogen');
-        assert.equal(payload.upstreamAttempts[1].model, 'gemini-3.8-flash');
+        assert.equal(payload.upstreamAttempts[0].model, 'gemini-2.5-flash');
+        assert.equal(payload.upstreamAttempts[1].model, 'gemini-2.5-pro');
     } finally { globalThis.fetch = original; for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } }
 });
 
-test('429 rate limit or 503 error on gemini-4-hydrogen retries gemini-3.8-flash before Groq failover, while 401/403 fails over immediately', async () => {
+test('429 rate limit or 503 error on gemini-2.5-flash retries gemini-2.5-pro before Groq failover, while 401/403 fails over immediately', async () => {
     const original = globalThis.fetch, saved = { GROQ_API_KEY: process.env.GROQ_API_KEY, GEMINI_API_KEY: process.env.GEMINI_API_KEY };
     process.env.GROQ_API_KEY = 'test-groq'; process.env.GEMINI_API_KEY = 'test-gemini';
     try {
@@ -190,16 +190,16 @@ test('429 rate limit or 503 error on gemini-4-hydrogen retries gemini-3.8-flash 
                 const url = String(input);
                 if (!/generativelanguage\.googleapis\.com|api\.groq\.com/.test(url)) return Response.json({});
                 calls.push(url);
-                if (url.includes('gemini-4-hydrogen')) return Response.json({ error: { message: 'busy' } }, { status });
+                if (url.includes('gemini-2.5-flash')) return Response.json({ error: { message: 'busy' } }, { status });
                 if (url.includes('generativelanguage.googleapis.com')) return new Response('data: {"candidates":[{"content":{"parts":[{"text":"Jordan Mercer is the CEO of Northbridge."}]},"finishReason":"STOP"}]}\n\n', { headers: { 'content-type': 'text/event-stream' } });
-                assert.fail('Should succeed on gemini-3.8-flash without dropping to Groq');
+                assert.fail('Should succeed on gemini-2.5-pro without dropping to Groq');
             };
             const req = Object.assign(new EventEmitter(), { method: 'POST', headers: { host: 'localhost', 'content-type': 'application/json' }, socket: { remoteAddress: '127.0.0.1' }, body: { message: 'Explain orbital resonance', stream: true, webMode: 'off', preferences: { selectedModel: 'auto' } } });
             const res = response(); await handler(req, res);
             assert.equal(res.statusCode, 200);
             assert.equal(calls.length, 2);
-            assert.match(calls[0], /gemini-4-hydrogen/);
-            assert.match(calls[1], /gemini-3\.8-flash/);
+            assert.match(calls[0], /gemini-2\.5-flash/);
+            assert.match(calls[1], /gemini-2\.5-pro/);
         }
         const authCalls = [];
         globalThis.fetch = async (input) => {
@@ -213,7 +213,7 @@ test('429 rate limit or 503 error on gemini-4-hydrogen retries gemini-3.8-flash 
         const res = response(); await handler(req, res);
         assert.equal(res.statusCode, 200);
         assert.equal(authCalls.length, 2);
-        assert.match(authCalls[0], /gemini-4-hydrogen/);
+        assert.match(authCalls[0], /gemini-2\.5-flash/);
         assert.match(authCalls[1], /api\.groq\.com/);
     } finally { globalThis.fetch = original; for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } }
 });
@@ -251,7 +251,7 @@ test('bare entity lookups silently enrich Groq 120B (both on failover and explic
     } finally { globalThis.fetch = original; for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } }
 });
 
-test('a 404 or 400 miss on gemini-4-hydrogen falls back within Gemini to gemini-3.8-flash instead of dropping to Groq', async () => {
+test('a 404 or 400 miss on gemini-2.5-flash falls back within Gemini to gemini-2.5-pro instead of dropping to Groq, while deep thinking prioritizes gemini-4-hydrogen', async () => {
     const original = globalThis.fetch, saved = { GROQ_API_KEY: process.env.GROQ_API_KEY, GEMINI_API_KEY: process.env.GEMINI_API_KEY };
     process.env.GROQ_API_KEY = 'test-groq'; process.env.GEMINI_API_KEY = 'test-gemini';
     try {
@@ -260,19 +260,29 @@ test('a 404 or 400 miss on gemini-4-hydrogen falls back within Gemini to gemini-
             globalThis.fetch = async (input) => {
                 const url = String(input);
                 calls.push(url);
-                if (url.includes('gemini-4-hydrogen')) return Response.json({ error: { message: 'Model or parameter unsupported' } }, { status });
+                if (url.includes('gemini-2.5-flash')) return Response.json({ error: { message: 'Model or parameter unsupported' } }, { status });
                 if (url.includes('generativelanguage.googleapis.com')) return stream ? new Response('data: {"candidates":[{"content":{"parts":[{"text":"Jordan Mercer is the CEO of Northbridge."}]},"finishReason":"STOP"}]}\n\n', { headers: { 'content-type': 'text/event-stream' } }) : Response.json({ candidates: [{ content: { parts: [{ text: 'Jordan Mercer is the CEO of Northbridge.' }] } }] });
                 assert.fail('Should not drop to Groq when a fallback Gemini model is available');
             };
             const req = Object.assign(new EventEmitter(), { method: 'POST', headers: { host: 'localhost', 'content-type': 'application/json' }, socket: { remoteAddress: '127.0.0.1' }, body: { message: 'Jordan mercer', stream, webMode: 'off', preferences: { selectedModel: 'auto' } } });
             const res = response(); await handler(req, res);
             assert.equal(res.statusCode, 200);
-            if (status === 400) assert.ok(calls[0].includes('gemini-4-hydrogen'));
-            assert.ok(calls.some(u => u.includes('gemini-3.8-flash')));
+            if (status === 400) assert.ok(calls[0].includes('gemini-2.5-flash'));
+            assert.ok(calls.some(u => u.includes('gemini-2.5-pro')));
             assert.ok(calls.every(u => u.includes('generativelanguage.googleapis.com')));
             const payload = stream ? res.chunks.flatMap(chunk => String(chunk).split('\n').filter(line => line.startsWith('data:')).map(line => JSON.parse(line.slice(5)))).find(row => row.success === true) : res.data;
             assert.equal(payload.provider, 'gemini');
         }
+        const deepCalls = [];
+        globalThis.fetch = async (input) => {
+            const url = String(input);
+            deepCalls.push(url);
+            return Response.json({ candidates: [{ content: { parts: [{ text: 'Proof complete.' }] } }] });
+        };
+        const deepReq = Object.assign(new EventEmitter(), { method: 'POST', headers: { host: 'localhost', 'content-type': 'application/json' }, socket: { remoteAddress: '127.0.0.1' }, body: { message: 'Prove why root 2 is irrational', tier: 'deep', forceReasoning: true, stream: false, webMode: 'off', preferences: { selectedModel: 'auto' } } });
+        const deepRes = response(); await handler(deepReq, deepRes);
+        assert.equal(deepRes.statusCode, 200);
+        assert.match(deepCalls[0], /models\/gemini-4-hydrogen:/);
     } finally { globalThis.fetch = original; for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } }
 });
 
@@ -507,7 +517,7 @@ test('simple casual chat routes directly to Groq gpt-oss-20b while normal chat s
     }
 });
 
-test('repeated 503 or timeouts cool down degraded Gemini models and promote gemini-2.5-flash', async () => {
+test('repeated 503 or timeouts cool down degraded deep Gemini models and promote gemini-2.5-pro', async () => {
     const { __test: chatApi } = await import('../api/chat-groq.js');
     chatApi.resetModelAvailabilityCache();
     const original = globalThis.fetch;
@@ -515,16 +525,16 @@ test('repeated 503 or timeouts cool down degraded Gemini models and promote gemi
     process.env.GROQ_API_KEY = 'test-groq';
     process.env.GEMINI_API_KEY = 'test-gemini';
     try {
-        // 3 consecutive 503s on gemini-4-hydrogen and gemini-3.8-flash put both into transient cooldown
+        // 3 consecutive 503s on gemini-4-hydrogen put it into transient cooldown for deep queries
         for (let i = 0; i < 3; i++) {
             globalThis.fetch = async (input) => {
                 const url = String(input);
-                if (url.includes('gemini-4-hydrogen') || url.includes('gemini-3.8-flash')) {
+                if (url.includes('gemini-4-hydrogen') || url.includes('gemini-2.5-pro')) {
                     return Response.json({ error: { message: 'unavailable' } }, { status: 503 });
                 }
                 return new Response('data: {"choices":[{"delta":{"content":"Fallback ok."},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n', { headers: { 'content-type': 'text/event-stream' } });
             };
-            await chatApi.streamModelWithFallback('Compare TCP and UDP', {}, () => {}, 'auto');
+            await chatApi.streamModelWithFallback('Compare TCP and UDP', {}, () => {}, 'auto', undefined, { tier: 'deep', forceReasoning: true });
         }
         const nextCalls = [];
         globalThis.fetch = async (input) => {
@@ -532,7 +542,7 @@ test('repeated 503 or timeouts cool down degraded Gemini models and promote gemi
             nextCalls.push(url);
             return new Response('data: {"candidates":[{"content":{"parts":[{"text":"TCP is connection-oriented."}]},"finishReason":"STOP"}]}\n\n', { headers: { 'content-type': 'text/event-stream' } });
         };
-        const res = await chatApi.streamModelWithFallback('Compare TCP and UDP', {}, () => {}, 'auto');
+        const res = await chatApi.streamModelWithFallback('Compare TCP and UDP', {}, () => {}, 'auto', undefined, { tier: 'deep', forceReasoning: true });
         assert.equal(res.ok, true);
         assert.equal(res.modelUsed, 'gemini-2.5-flash');
         assert.match(nextCalls[0], /models\/gemini-2\.5-flash:/);

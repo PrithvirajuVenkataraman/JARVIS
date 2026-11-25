@@ -657,17 +657,19 @@ async function getInstantFactHelper() {
         } else if (['openai/gpt-oss-20b', 'gpt-oss-20b', 'gemma2-9b-it'].includes(userSelected)) {
             mappedGemini = 'gemini-2.5-flash-lite';
         } else if (['qwen/qwen3.8-27b', 'qwen-3.8-27b'].includes(userSelected)) {
-            mappedGemini = 'gemini-3.8-flash';
+            mappedGemini = 'gemini-2.5-flash';
         }
-        const primaryGemini = !userSelected || userSelected === 'auto' ? 'gemini-4-hydrogen' : mappedGemini;
+        const primaryGemini = !userSelected || userSelected === 'auto'
+            ? (tier === 'deep' ? 'gemini-4-hydrogen' : 'gemini-2.5-flash')
+            : mappedGemini;
 
         const tierFallbacks = tier === 'deep'
-            ? ['gemini-4-hydrogen', 'gemini-3.8-flash', 'gemini-2.5-pro', 'gemini-3.7-flash', 'gemini-2.5-flash']
+            ? ['gemini-4-hydrogen', 'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-3.7-flash']
             : (preferSpeed || tier === 'instant')
-                ? ['gemini-4-hydrogen', 'gemini-3.8-flash', 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-3.7-flash', 'gemini-2.5-pro']
-                : ['gemini-4-hydrogen', 'gemini-3.8-flash', 'gemini-2.5-flash', 'gemini-3.7-flash', 'gemini-2.5-pro', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-2.5-flash-lite'];
+                ? ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.5-flash-lite', 'gemini-4-hydrogen', 'gemini-3.7-flash']
+                : ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-4-hydrogen', 'gemini-3.7-flash', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-2.5-flash-lite'];
         const geminiList = !userSelected || userSelected === 'auto'
-            ? ['gemini-4-hydrogen', 'gemini-3.8-flash', configured, ...tierFallbacks]
+            ? [primaryGemini, ...tierFallbacks, configured]
             : [primaryGemini, configured, ...tierFallbacks];
         return [...new Set(geminiList.filter(Boolean))];
     }
@@ -693,21 +695,19 @@ async function getInstantFactHelper() {
         const visionModels = visionLane === 'math_diagram'
             ? [
                 'gemini-4-hydrogen',
-                'gemini-3.8-flash',
                 'gemini-2.5-pro',
-                'gemini-3.7-flash',
                 'gemini-2.5-flash',
+                'gemini-3.7-flash',
                 'gemini-2.0-flash',
                 'gemini-1.5-flash',
                 'gemini-2.5-flash-lite'
             ]
             : [
-                'gemini-4-hydrogen',
-                'gemini-3.8-flash',
                 'gemini-2.5-flash',
+                'gemini-2.5-pro',
+                'gemini-4-hydrogen',
                 'gemini-3.7-flash',
                 'gemini-2.0-flash',
-                'gemini-2.5-pro',
                 'gemini-1.5-flash',
                 'gemini-2.5-flash-lite'
             ];
