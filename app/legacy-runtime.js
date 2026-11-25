@@ -11354,7 +11354,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                     chatHistory.push({ text: displayText, isUser });
                     recordActiveChatMessage('assistant', displayText, messageTurnId);
                 }
-                if (!allowEmptyAssistant && !meta?.restored && !isRestoringChatSession) void window.JarvisPersonPhotos?.enrich(messageDiv, priorUserPrompt, { reference: meta?.contextReference, failureCode: meta?.failureCode });
+                if (!allowEmptyAssistant && !meta?.restored && !isRestoringChatSession) void window.JarvisPersonPhotos?.enrich(messageDiv, priorUserPrompt, { reference: meta?.contextReference, failureCode: meta?.failureCode, answerText: plainMessageText });
                 return messageId;
             }
             
@@ -11735,7 +11735,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 const userPromptForHistory = String(priorUserPrompt || meta?.userMessage || activeResponseRenderContext?.userPrompt || '').trim();
                 if (userPromptForHistory) {
                     saveToHistory(userPromptForHistory, cleanText, { turnId, recordSession: false });
-                    void window.JarvisPersonPhotos?.enrich(row, userPromptForHistory, { reference: meta?.contextReference, failureCode: meta?.failureCode || existing.failureCode });
+                    void window.JarvisPersonPhotos?.enrich(row, userPromptForHistory, { reference: meta?.contextReference, failureCode: meta?.failureCode || existing.failureCode, answerText: cleanText });
                 }
             }
             maybeAutoScroll(document.getElementById('chat-container'));

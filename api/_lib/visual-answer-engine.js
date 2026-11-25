@@ -590,7 +590,7 @@ export async function resolveEntityVisuals(query = '', options = {}) {
         for (const titleTry of directCandidates) {
             const s = await fetchWikiSummary(titleTry, controller.signal);
             // A photo must not pick one person arbitrarily from a shared-name page.
-            if (options.personPhoto && s?.type === 'disambiguation') return null;
+            if (options.personPhoto && s?.type === 'disambiguation') { options.onDisambiguation?.(s); return null; }
             if (s && s.extract && s.type !== 'disambiguation') {
                 const sim = computeTitleTokenOverlap(candidate, s.title);
                 if (sim >= 0.75) {

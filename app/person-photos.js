@@ -1,4 +1,4 @@
-import { personPhotoQuery } from './person-photo-query.js';
+import { resolvePersonPhotoRequest } from './person-photo-query.js';
 
 let epoch = 0;
 const stamps = new WeakMap();
@@ -9,11 +9,19 @@ export function track(row) { if (row && !stamps.has(row)) stamps.set(row, epoch)
 export function cancelAll() { epoch++; for (const controller of pending.values()) controller.abort(); pending.clear(); }
 
 function publicImage(value) {
-    try { const url = new URL(value); return url.protocol === 'https:' && !url.username && !url.password && ['wikimedia.org', 'wikipedia.org'].some(host => url.hostname === host || url.hostname.endsWith(`.${host}`)); } catch { return false; }
+    try {
+        const url = new URL(value);
+        if (url.protocol !== 'https:' || url.username || url.password || url.port) return false;
+        const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+        if (!host || !host.includes('.')) return false;
+        if (/^(?:localhost|127\.|10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.|0\.|169\.254\.|::1$|fc|fd|fe80)|(?:^|\.)(?:localhost|local|internal|invalid)$/i.test(host)) return false;
+        return true;
+    } catch { return false; }
 }
 
 export async function enrich(row, input, options = {}) {
-    const query = personPhotoQuery(input, options.reference);
+    const reqSpec = resolvePersonPhotoRequest(input, options);
+    const query = reqSpec?.query || '';
     if (!row?.isConnected || !query || attempted.has(row) || options.failureCode) return;
     track(row);
     const stamp = stamps.get(row);
@@ -26,7 +34,10 @@ export async function enrich(row, input, options = {}) {
     const abortImage = () => { image.removeAttribute('src'); };
     controller.signal.addEventListener('abort', abortImage, { once: true });
     try {
-        const response = await fetch('/api/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'person_photo', query }), signal: controller.signal });
+        const payload = { action: 'person_photo', query };
+        if (reqSpec.resolvedName) payload.resolvedName = reqSpec.resolvedName;
+        if (reqSpec.contextHint) payload.contextHint = reqSpec.contextHint;
+        const response = await fetch('/api/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: controller.signal });
         if (!response.ok) return;
         const data = await response.json();
         const entity = data?.entity;

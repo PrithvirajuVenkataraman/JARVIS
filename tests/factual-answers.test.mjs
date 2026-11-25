@@ -124,10 +124,35 @@ test('both providers receive new evidence in JSON and SSE requests with existing
             };
             const req = Object.assign(new EventEmitter(), { method: 'POST', headers: { host: 'localhost', 'content-type': 'application/json' }, socket: { remoteAddress: '127.0.0.1' }, body: { message: 'Reply with the single word ready.', stream, intent: 'fast_simple', webMode: 'off', preferences: { selectedModel }, context: [{ role: 'assistant', text: 'Earlier unsupported assertion' }], structuredMessages: [{ role: 'user', content: 'Earlier question' }, { role: 'assistant', content: 'Earlier unsupported assertion' }, { role: 'user', content: 'old request' }], sources: [{ title: source.title, url: source.url, extract: passage }] } });
             const res = response(); await handler(req, res);
-            assert.equal(res.statusCode, 200); assert.equal(bodies.length, 1);
+            assert.equal(res.statusCode, 200); assert.ok(bodies.length >= 1);
             const system = bodies[0].messages?.find(m => m.role === 'system')?.content || bodies[0].system_instruction?.parts[0].text;
             assert.match(system, /reference light/); assert.match(system, /Earlier user and assistant messages/);
             assert.match(stream ? res.chunks.join('') : res.data.response, /ready/i);
+        }
+    } finally { globalThis.fetch = original; for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } }
+});
+
+test('bare and vague person queries receive direct lookup guidance and append the web-search tip on both Gemini 4 Hydrogen and GPT-OSS 120B', async () => {
+    const original = globalThis.fetch, saved = { GROQ_API_KEY: process.env.GROQ_API_KEY, GEMINI_API_KEY: process.env.GEMINI_API_KEY };
+    process.env.GROQ_API_KEY = 'test-groq'; process.env.GEMINI_API_KEY = 'test-gemini';
+    const bio = 'Bryce Maddock is an American entrepreneur and the co-founder and CEO of TaskUs, a global digital outsourcing company founded in 2008.';
+    try {
+        for (const stream of [false, true]) for (const selectedModel of ['openai/gpt-oss-120b', 'gemini-4-hydrogen']) {
+            const bodies = [];
+            globalThis.fetch = async (input, init = {}) => {
+                if (!/generativelanguage\.googleapis\.com|api\.groq\.com/.test(String(input))) return Response.json({});
+                const body = JSON.parse(init.body); bodies.push(body);
+                if (String(input).includes('generativelanguage')) return stream ? new Response(`data: {"candidates":[{"content":{"parts":[{"text":${JSON.stringify(bio)}}]},"finishReason":"STOP"}]}\n\n`, { headers: { 'content-type': 'text/event-stream' } }) : Response.json({ candidates: [{ content: { parts: [{ text: bio }] } }] });
+                return stream ? new Response(`data: {"choices":[{"delta":{"content":${JSON.stringify(bio)}},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } }) : Response.json({ choices: [{ message: { content: bio } }] });
+            };
+            const req = Object.assign(new EventEmitter(), { method: 'POST', headers: { host: 'localhost', 'content-type': 'application/json' }, socket: { remoteAddress: '127.0.0.1' }, body: { message: 'Bryce maddock', stream, webMode: 'auto', preferences: { selectedModel } } });
+            const res = response(); await handler(req, res);
+            assert.equal(res.statusCode, 200); assert.ok(bodies.length >= 1);
+            const system = bodies[0].messages?.find(m => m.role === 'system')?.content || bodies[0].system_instruction?.parts[0].text;
+            assert.match(system, /PERSON & ENTITY LOOKUP POLICY/);
+            const payload = stream ? res.chunks.flatMap(chunk => String(chunk).split('\n').filter(line => line.startsWith('data:')).map(line => JSON.parse(line.slice(5)))).find(row => row.success === true) : res.data;
+            assert.match(payload.response, /Bryce Maddock is an American entrepreneur/);
+            assert.match(payload.response, /turn on Web Search and ask a follow-up query/i);
         }
     } finally { globalThis.fetch = original; for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } }
 });

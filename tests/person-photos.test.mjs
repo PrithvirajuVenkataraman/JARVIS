@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { personPhotoQuery, personPhotoSubject } from '../app/person-photo-query.js';
+import { personPhotoQuery, personPhotoSubject, extractPersonFromAnswer, resolvePersonPhotoRequest } from '../app/person-photo-query.js';
 import { isImageGenerationIntent } from '../app/frontend-routing.js';
-import { imageDate, commonsImage, resolvePersonPhoto } from '../api/_lib/person-photos.js';
+import { imageDate, commonsImage, resolvePersonPhoto, resolveWebPersonPhoto } from '../api/_lib/person-photos.js';
 
 function file(title, date, extra = {}) {
     return { title: `File:${title}.jpg`, imageinfo: [{ mime: 'image/jpeg', url: `https://upload.wikimedia.org/wikipedia/commons/a/ab/${title}.jpg`, descriptionurl: `https://commons.wikimedia.org/wiki/File:${title}.jpg`, width: 600, height: 800, timestamp: '2026-10-01T12:00:00Z', extmetadata: { DateTimeOriginal: { value: date }, Artist: { value: '<b>Example photographer</b>' }, ImageDescription: { value: 'Photograph of the subject' }, LicenseShortName: { value: 'CC BY 4.0' }, ...extra } }] };
@@ -102,4 +102,54 @@ test('role-qualified aliases shared by multiple people stay unresolved', async (
     globalThis.fetch = async () => { calls++; return Response.json({ query: { pages: ['Q1111', 'Q2222'].map(id => ({ title: id, pageprops: { wikibase_item: id }, redirects: [{ title: 'Ambiguous Alias (actor)' }] })) } }); };
     try { assert.equal(await resolvePersonPhoto('Actor Ambiguous Alias'), null); assert.equal(calls, 1); }
     finally { globalThis.fetch = original; }
+});
+
+test('vague person queries extract resolved names from answers without triggering on anaphoric follow-ups', () => {
+    assert.deepEqual(extractPersonFromAnswer('Bryce Maddock is the co-founder and CEO of TaskUs.'), { name: 'Bryce Maddock', contextHint: 'TaskUs' });
+    assert.deepEqual(extractPersonFromAnswer('The co-founder and CEO of TaskUs is Bryce Maddock.'), { name: 'Bryce Maddock', contextHint: 'TaskUs' });
+    assert.equal(extractPersonFromAnswer('Could you let me know which Bryce Maddock you mean?'), null);
+
+    assert.deepEqual(
+        resolvePersonPhotoRequest('TaskUs CEO', { answerText: 'Bryce Maddock is the co-founder and CEO of TaskUs.' }),
+        { query: 'TaskUs CEO', resolvedName: 'Bryce Maddock', contextHint: 'TaskUs' }
+    );
+    assert.deepEqual(
+        resolvePersonPhotoRequest('Who is the co-founder and CEO of TaskUs?', { answerText: 'The co-founder and CEO of TaskUs is Bryce Maddock.' }),
+        { query: 'the co-founder and CEO of TaskUs', resolvedName: 'Bryce Maddock', contextHint: 'TaskUs' }
+    );
+    assert.deepEqual(
+        resolvePersonPhotoRequest('Who founded the global outsourcing company TaskUs?', { answerText: 'Bryce Maddock is the co-founder and CEO of TaskUs.' }),
+        { query: 'Bryce Maddock', resolvedName: 'Bryce Maddock', contextHint: 'TaskUs' }
+    );
+    for (const anaphora of ['What was it?', 'his latest photo', 'Explain the above']) {
+        assert.equal(resolvePersonPhotoRequest(anaphora, { answerText: 'Ada Lovelace was a mathematician.' }), null);
+    }
+});
+
+test('non-Wikipedia people fall back to verified public web page portrait metadata', async () => {
+    const html = `<html><head><title>Home Page - Bryce Maddock</title>
+        <meta property="og:image" content="https://www.brycemaddock.com/uploads/portrait.jpg" />
+        <meta property="og:image:width" content="1200" />
+        <meta property="og:image:height" content="800" />
+        <meta property="og:image:type" content="image/jpeg" />
+    </head><body><h1>Bryce Maddock</h1></body></html>`;
+    const result = await resolveWebPersonPhoto('Bryce Maddock', {}, {
+        search: async () => [
+            { title: 'Bryce Maddock - LinkedIn', url: 'https://www.linkedin.com/in/brycemaddock' },
+            { title: 'Home Page - Bryce Maddock', url: 'https://www.brycemaddock.com/' }
+        ],
+        fetchPage: async url => ({ url, response: new Response(html, { status: 200, headers: { 'content-type': 'text/html' } }) })
+    });
+    assert.equal(result.entity.isPerson, true);
+    assert.equal(result.entity.name, 'Bryce Maddock');
+    assert.equal(result.entity.image.url, 'https://www.brycemaddock.com/uploads/portrait.jpg');
+    assert.equal(result.entity.image.sourceUrl, 'https://www.brycemaddock.com/');
+    assert.equal(result.entity.image.sourceName, 'brycemaddock.com');
+    assert.equal(result.entity.image.selection, 'reference_portrait');
+
+    const badLogoOnly = await resolveWebPersonPhoto('Logo Only Person', {}, {
+        search: async () => [{ title: 'Logo Only Person', url: 'https://example.com/person' }],
+        fetchPage: async url => ({ url, response: new Response('<html><head><title>Logo Only Person</title><meta property="og:image" content="https://example.com/assets/logo.png"></head></html>', { status: 200 }) })
+    });
+    assert.equal(badLogoOnly, null);
 });

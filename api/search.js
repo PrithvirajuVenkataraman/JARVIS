@@ -664,7 +664,11 @@ async function handler(req, res) {
         if (!safety.safe) return res.status(200).json({ success: true, entity: null });
         const dlp = applySearchDlpGuard(res, query);
         if (dlp.blocked) return;
-        const result = await resolvePersonPhoto(dlp.text, { reference: req.body?.reference });
+        const rawResolved = String(req.body?.resolvedName || '').trim().slice(0, 120);
+        const rawContext = String(req.body?.contextHint || '').trim().slice(0, 80);
+        const safeResolved = rawResolved && inspectInputSafety(rawResolved, { channel: 'search' }).safe ? scanDlp(rawResolved, { maskPii: false, redactCredentials: true }).sanitizedText : '';
+        const safeContext = rawContext && inspectInputSafety(rawContext, { channel: 'search' }).safe ? scanDlp(rawContext, { maskPii: false, redactCredentials: true }).sanitizedText : '';
+        const result = await resolvePersonPhoto(dlp.text, { reference: req.body?.reference, resolvedName: safeResolved, contextHint: safeContext });
         return res.status(200).json({ success: true, entity: result?.entity || null, notableWorks: [] });
     }
 

@@ -1,5 +1,6 @@
 import { visionFailurePayload, normalizeGeminiGenerationConfig, describeUpstreamFailure, upstreamAttemptSummary } from './_lib/model-failure.js';
 import { personProfileReply } from './_lib/person-profile.js';
+import { personPhotoQuery } from '../app/person-photo-query.js';
 import { publicAnswer, createAnswerFilter } from './_lib/answer-visibility.js';
 import { normalizeUserInstructions, userPreferenceDirective, conversationalVoiceDirective, contextReferenceDirective, bindServerConversation, bindAnswerConversation } from './_lib/answer-preferences.js';
 import { answerEvidencePolicy, factualAnswer } from './_lib/factual-answer.js';
@@ -1183,11 +1184,15 @@ async function handler(req, res) {
                     retrievedTurns: request.value.retrievedTurns || [],
                     structuredMessages: request.value.structuredMessages || null,
                     effectiveMessage,
+                    routingMessage,
                     intent,
                     grounding,
                     images,
                     routeDecision,
                     lengthPolicy,
+                    webMode: preferences?.webMode || '',
+                    isWebForced: Boolean(preferences?.isWebForced),
+                    needsContextClarification,
                     tier: req.body?.tier || preferences?.tier,
                     forceReasoning: req.body?.forceReasoning === true || preferences?.forceReasoning === true,
                     selectedModel: preferences?.selectedModel || null,
@@ -1263,9 +1268,15 @@ async function handler(req, res) {
                     retrievedTurns: request.value.retrievedTurns || [],
                     summary: request.value.rollingSummary || '',
                     message: effectiveMessage,
+                    routingMessage,
                     lengthGuidance: lengthPolicy.instruction,
                     intent,
-                    model: preferences?.selectedModel || ''
+                    model: preferences?.selectedModel || '',
+                    isWebForced: Boolean(preferences?.isWebForced),
+                    needsContextClarification,
+                    hasImages: Boolean(images?.length),
+                    isInternalSummary,
+                    isAttachmentGrounding
                 });
             const modelStartedAt = Date.now();
             const imagesToPass = Array.isArray(images)
@@ -1423,6 +1434,19 @@ async function handler(req, res) {
                 contextBlock
             });
             finalParsed = normalizeAssistantResponseStyle(finalParsed);
+            const nonStreamTip = ensureEntityWebSearchTip(finalParsed?.response || '', routingMessage, {
+                intent,
+                needsContextClarification,
+                hasImages: Boolean(images?.length),
+                isInternalSummary,
+                isAttachmentGrounding,
+                isWebForced: Boolean(preferences?.isWebForced),
+                webMode: preferences?.webMode || '',
+                hasSources: Boolean(liveRag.ragText || liveRag.sources?.length)
+            });
+            if (nonStreamTip && finalParsed) {
+                finalParsed.response = `${String(finalParsed.response || '').trim()}${nonStreamTip}`;
+            }
 
             // Recursive In-Flight Self-Critique & Refinement Loop
             let selfCritiqueMetadata = null;
@@ -1544,9 +1568,45 @@ async function handler(req, res) {
     }
 
 
-    function buildIntentPromptHint(intent) {
+    const ENTITY_WEB_UPDATE_TIP = '\n\nIf you need any latest updates, turn on Web Search and ask a follow-up query.';
+    const BARE_ENTITY_EXCLUDED_START_RE = /^(?:hi|hello|hey|yo|thanks|thank\s+you|ok|okay|bye|goodbye|yes|no|reply|write|draft|compose|create|generate|draw|paint|sketch|solve|calculate|compute|explain|summarize|translate|compare|review|analy[sz]e|read|extract|check|verify)\b/i;
+    const BARE_ENTITY_PRONOUN_RE = /\b(?:it|its|this|that|he|him|his|she|her|they|them|their|above|earlier|previous)\b/i;
+
+    function isBareOrVagueEntityLookup(message = '', options = {}) {
+        if (options.needsContextClarification || options.hasImages || options.isInternalSummary || options.isAttachmentGrounding) return false;
+        if (['fast_simple', 'chat_title', 'verify_answer', 'deep_reasoning', 'casual_conversation', 'translation'].includes(String(options.intent || ''))) return false;
+        const q = String(message || '').replace(/[?!.,;:]+$/g, '').trim();
+        if (!q || q.length > 140 || /[\n`<>{}=]/.test(q)) return false;
+        if (BARE_ENTITY_EXCLUDED_START_RE.test(q) || BARE_ENTITY_PRONOUN_RE.test(q)) return false;
+        if (scoreChatIntent(q, 'trivial_greeting') >= 0.28 || scoreChatIntent(q, 'risk_code') >= 0.30 || isMathematicalOrQuantitativeQuery(q)) return false;
+        if (personPhotoQuery(q)) return true;
+        const words = q.split(/\s+/).filter(Boolean);
+        return words.length <= 8 && /^(?:who\s+(?:is|was|founded|co-founded|created|leads|runs|heads)|tell\s+me\s+(?:who|about))\b/i.test(q);
+    }
+
+    function ensureEntityWebSearchTip(text = '', query = '', options = {}) {
+        if (options.isWebForced || options.webMode === 'force' || options.hasSources) return '';
+        if (!isBareOrVagueEntityLookup(query, options)) return '';
+        const clean = String(text || '').trim();
+        if (clean.length < 40 || /\bweb\s*search\b/i.test(clean)) return '';
+        if (/^(?:i(?:'m| am)\s+(?:not\s+sure|unable|sorry)|i\s+(?:could(?:n't| not)|can(?:n't| not))|could\s+you\s+(?:let\s+me\s+know|clarify|specify)|which\s+\w+\s+are\s+you|sorry\b)/i.test(clean)) return '';
+        return ENTITY_WEB_UPDATE_TIP;
+    }
+
+    function buildIntentPromptHint(intent, message = '', options = {}) {
+        const parts = [];
+        if (!options?.ragText && !options?.isWebForced && isBareOrVagueEntityLookup(message, { ...options, intent })) {
+            parts.push([
+                'PERSON & ENTITY LOOKUP POLICY:',
+                '- The user entered a bare name, brief title/role, or direct entity lookup.',
+                '- Identify and explain who the primary notable person or entity is directly (their role, organization or field, and key background) using established knowledge.',
+                '- Do NOT reply by asking "which [Name] are you referring to?" or "what would you like to know about them?" unless you have zero knowledge of anyone by that name; even when multiple notable people share the name, briefly introduce the best-known match(es) first instead of refusing.',
+                '- Never invent unverified dates, recent news, or private details.',
+                '- At the end, add one brief sentence telling the user that if they need any latest updates, they can turn on Web Search and ask a follow-up query.'
+            ].join('\n'));
+        }
         if (String(intent || '') === 'chat_title') {
-            return [
+            parts.push([
                 'Chat title generation intent:',
                 '- Return only one concise conversation title (3 to 6 words) summarizing the user\'s substantive topic or question.',
                 '- Use Title Case and preferably 40 characters or fewer.',
@@ -1557,19 +1617,20 @@ async function handler(req, res) {
                 '- Prefer the most significant or final user goal over greetings or small talk.',
                 '- Prefer concrete nouns such as place names, products, topics, or tasks.',
                 '- For weather about a place, include the place (example: Weather In Ooty).'
-            ].join('\n');
+            ].join('\n'));
+        } else if (String(intent || '') === 'pop_culture_reference') {
+            parts.push([
+                'Pop-culture reference intent:',
+                '- Answer directly when the character, show, creative work, or reference is commonly known.',
+                '- Explain references, characters, and cultural context clearly with rich background, roles, and significance.',
+                '- Default to a comprehensive, well-structured response detailing key context (title, creators, background) unless the user explicitly requests brevity.',
+                '- Strict entity and soundtrack attribution: When asked which work an entity is from, or which creator authored or scored it, verify the exact association. Never guess or attribute an entity to the wrong source, work, or creator. If the exact association cannot be verified with certainty, state clearly that the entity is known but the specific attribution requires verification, rather than naming an incorrect source.',
+                '- Song lyrics & music credits: Never fabricate song lyrics, verses, or lines. Never conflate composers or songs across different movies/albums. For song or lyrics inquiries, provide verified metadata (film, composer, singer, lyricist) and brief theme, and embed [View Full Lyrics](url) (using verified search results or web search) rather than generating full transliterated verses.',
+                '- Do not invent exact quotes, episode details, scenes, or obscure character facts.',
+                '- Say uncertainty clearly when unsure.'
+            ].join('\n'));
         }
-        if (String(intent || '') !== 'pop_culture_reference') return '';
-        return [
-            'Pop-culture reference intent:',
-            '- Answer directly when the character, show, creative work, or reference is commonly known.',
-            '- Explain references, characters, and cultural context clearly with rich background, roles, and significance.',
-            '- Default to a comprehensive, well-structured response detailing key context (title, creators, background) unless the user explicitly requests brevity.',
-            '- Strict entity and soundtrack attribution: When asked which work an entity is from, or which creator authored or scored it, verify the exact association. Never guess or attribute an entity to the wrong source, work, or creator. If the exact association cannot be verified with certainty, state clearly that the entity is known but the specific attribution requires verification, rather than naming an incorrect source.',
-            '- Song lyrics & music credits: Never fabricate song lyrics, verses, or lines. Never conflate composers or songs across different movies/albums. For song or lyrics inquiries, provide verified metadata (film, composer, singer, lyricist) and brief theme, and embed [View Full Lyrics](url) (using verified search results or web search) rather than generating full transliterated verses.',
-            '- Do not invent exact quotes, episode details, scenes, or obscure character facts.',
-            '- Say uncertainty clearly when unsure.'
-        ].join('\n');
+        return parts.join('\n\n');
     }
 
     function composeFinalPrompt(systemPrompt, ragBlock, contextBlock, message, lengthGuidance = '', intent = 'chat', model = '', userSelectedModel = null) {
@@ -1697,11 +1758,11 @@ async function handler(req, res) {
         return 'Accuracy & formatting rules: Deliver the polished final answer directly with clarity and precision. Do not output artificial <think> tags, synthetic reasoning checklists, or meta-commentary.';
     }
 
-    function composeStreamingPrompt(systemPrompt, contextBlock, message, lengthGuidance = '', intent = 'chat', model = '', userSelectedModel = null) {
+    function composeStreamingPrompt(systemPrompt, contextBlock, message, lengthGuidance = '', intent = 'chat', model = '', userSelectedModel = null, options = {}) {
         return [
             systemPrompt,
             contextBlock ? `Recent turns:\n${contextBlock}` : '',
-            buildIntentPromptHint(intent),
+            buildIntentPromptHint(intent, options.routingMessage || message, options),
             `User message: ${message}`,
             lengthGuidance ? `Length guidance:\n${lengthGuidance}` : '',
             buildReasoningInstruction(intent, model, userSelectedModel, message),
@@ -1711,7 +1772,7 @@ async function handler(req, res) {
     }
 
     function composeProviderConversation(options) {
-        return bindAnswerConversation({ ...options, systemPrompt: [options.systemPrompt, buildIntentPromptHint(options.intent), buildReasoningInstruction(options.intent, options.model, options.userSelectedModel, options.message)].filter(Boolean).join('\n\n') });
+        return bindAnswerConversation({ ...options, systemPrompt: [options.systemPrompt, buildIntentPromptHint(options.intent, options.routingMessage || options.message, options), buildReasoningInstruction(options.intent, options.model, options.userSelectedModel, options.message)].filter(Boolean).join('\n\n') });
     }
 
     function composeStructuredChatMessages({ systemPrompt, ragBlock = '', contextBlock = '', context = [], retrievedTurns = [], rollingSummary = '', message = '', lengthGuidance = '', intent = 'chat', model = '', userSelectedModel = null }) {
@@ -1854,7 +1915,12 @@ async function handler(req, res) {
         try {
             const prompt = liveRag.ragText
                 ? composeFinalPrompt(systemPrompt, liveRag.ragText, contextBlock, effectiveMessage, lengthPolicy?.instruction || '', intent, selectedModel, selectedModel)
-                : composeStreamingPrompt(systemPrompt, contextBlock, effectiveMessage, lengthPolicy?.instruction || '', intent, selectedModel, selectedModel);
+                : composeStreamingPrompt(systemPrompt, contextBlock, effectiveMessage, lengthPolicy?.instruction || '', intent, selectedModel, selectedModel, {
+                    routingMessage: options?.routingMessage,
+                    isWebForced: Boolean(options?.isWebForced),
+                    needsContextClarification: Boolean(options?.needsContextClarification),
+                    hasImages: Boolean(images?.length)
+                });
             const hasAssistantInStructured = Array.isArray(structuredMessages) && structuredMessages.some(m => m.role === 'assistant');
             const hasAssistantInContext = Array.isArray(context) && context.some(m => m.role === 'assistant');
             const hasStructuredContext = Array.isArray(structuredMessages) && structuredMessages.length > 0 && (hasAssistantInStructured || !hasAssistantInContext);
@@ -1866,10 +1932,14 @@ async function handler(req, res) {
                     retrievedTurns,
                     summary: options?.rollingSummary || '',
                     message: effectiveMessage,
+                    routingMessage: options?.routingMessage,
                     lengthGuidance: lengthPolicy?.instruction || '',
                     intent,
                     model: selectedModel,
-                    userSelectedModel: selectedModel
+                    userSelectedModel: selectedModel,
+                    isWebForced: Boolean(options?.isWebForced),
+                    needsContextClarification: Boolean(options?.needsContextClarification),
+                    hasImages: Boolean(images?.length)
                 });
             if (isContinuation && continuationPreviousText) {
                 const resumeGuidance = 'CONTINUATION DIRECTIVE: Seamlessly resume and continue generating your response from exactly where you left off. Do not repeat previous sentences or restart. Pick up immediately with the next word or line:';
@@ -2037,6 +2107,18 @@ async function handler(req, res) {
                 if (outGuard.modified) {
                     finalText = outGuard.text;
                 }
+            }
+            const streamTip = ensureEntityWebSearchTip(finalText, options?.routingMessage || effectiveMessage, {
+                intent,
+                needsContextClarification: Boolean(options?.needsContextClarification),
+                hasImages: Boolean(streamImages?.length),
+                isWebForced: Boolean(options?.isWebForced),
+                webMode: options?.webMode || '',
+                hasSources: Boolean(liveRag.ragText || liveRag.sources?.length)
+            });
+            if (streamTip) {
+                finalText = `${String(finalText || '').trim()}${streamTip}`;
+                writeSse(res, 'delta', { text: streamTip });
             }
             timing.totalMs = Date.now() - timing.startedAt;
             const visualData = resolvedVisualData;
@@ -5445,7 +5527,7 @@ ${userPreferenceDirective(preferences)}`;
         if (String(intent || '') === 'verify_answer') return 0.2;
         if (String(intent || '') === 'fast_explainer') return 0.4;
         if (isCreativeAnswerRequest(message)) return 0.92;
-        if (isFactualAnswerRequest(message, intent)) return 0.35;
+        if (isFactualAnswerRequest(message, intent) || isBareOrVagueEntityLookup(message, { intent })) return 0.35;
 
         const style = String(responseStyle || 'balanced').toLowerCase();
         const styleTemp = {
