@@ -100,7 +100,7 @@ export async function consumeResearchSse(body, onEvent, signal) {
 function retryDelay(response) {
     const raw = response.headers?.get('retry-after') || '';
     const seconds = Number(raw);
-    return Math.min(3600000, Math.max(1000, Number.isFinite(seconds) && raw ? seconds * 1000 : (Date.parse(raw) - Date.now()) || 60000));
+    return Math.min(3600000, Math.max(1000, Number.isFinite(seconds) && raw ? seconds * 1000 : (Date.parse(raw) - Date.now()) || 15000));
 }
 
 // Text generation only; no billed search tools or quota-evasion key rotation.

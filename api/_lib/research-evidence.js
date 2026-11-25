@@ -7,7 +7,16 @@ const STOP = new Set(('a an the and or to of in on at for from by with without a
 
 const NUMBER_WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 };
 const SPACE = /\s+/g;
-const cleanText = value => String(value || '').replace(/[\u0000-\u001f]/g, ' ').replace(SPACE, ' ').trim();
+const ENTITY_MAP = { nbsp: ' ', amp: '&', quot: '"', apos: "'", '#39': "'", lsquo: "'", rsquo: "'", ldquo: '"', rdquo: '"', ndash: '-', mdash: '-', hellip: '...' };
+const decodeEntities = value => String(value || '')
+    .replace(/&(#\d+|nbsp|amp|quot|apos|lsquo|rsquo|ldquo|rdquo|ndash|mdash|hellip);/gi, (m, code) => {
+        if (code.startsWith('#')) {
+            const n = Number(code.slice(1));
+            return Number.isFinite(n) && n >= 32 && n < 65535 ? String.fromCharCode(n) : m;
+        }
+        return ENTITY_MAP[code.toLowerCase()] ?? m;
+    });
+const cleanText = value => decodeEntities(value).replace(/[\u0000-\u001f]/g, ' ').replace(SPACE, ' ').trim();
 export const cleanAnswerText = value => {
     if (!value || typeof value !== 'string') return '';
     return value
@@ -241,11 +250,31 @@ function sourceQuote(source, quote) {
     return '';
 }
 
+const CONNECTIVE_GLUE = new Set('during while where into onto upon after before about over under around between since within across along through following including until also both such each more most other its their this that these those using via per'.split(' '));
+
+function valueFitsExplanationEvidence(val, quote, source = {}) {
+    const quoteNorm = normalizedText(quote);
+    if (quoteNorm.includes(normalizedText(val))) return true;
+    const quoteAndTitle = `${source.title || ''} ${quote}`;
+    const quoteTerms = new Set(researchTerms(quoteAndTitle));
+    const valTerms = researchTerms(val).filter(t => !CONNECTIVE_GLUE.has(t));
+    if (!valTerms.length || valTerms.some(t => !quoteTerms.has(t))) return false;
+    const sourceNums = new Set(cleanText(quoteAndTitle).match(/\d+/g) || []);
+    const valNums = val.match(/\d+/g) || [];
+    if (valNums.some(n => !sourceNums.has(n))) return false;
+    return true;
+}
+
 function valueFitsRequirement(value, quote, requirement, source = {}) {
     const val = cleanText(value);
-    if (!val || val.length > 1800 || !normalizedText(quote).includes(normalizedText(val))) return false;
+    const quoteContiguous = normalizedText(quote).includes(normalizedText(val));
+    const quoteSupported = quoteContiguous || (requirement.type === 'explanation' && valueFitsExplanationEvidence(val, quote, source));
+    if (!val || val.length > 1800 || !quoteSupported) return false;
     if (normalizedText(val) === normalizedText(requirement.query) || /^[\s\W]*$/.test(val)) return false;
-    if (!assessSourceRelevance(requirement.type === 'qualification' ? requirement.description : requirement.query, { title: source.title, snippet: quote, url: source.url, domain: source.domain }).relevant) return false;
+    const relevanceTarget = requirement.type === 'qualification' ? requirement.description : requirement.query;
+    const quoteRelevant = assessSourceRelevance(relevanceTarget, { title: source.title, snippet: quote, url: source.url, domain: source.domain }).relevant;
+    const fullSourceRelevant = assessSourceRelevance(relevanceTarget, source).relevant;
+    if (!quoteRelevant && !(requirement.type === 'explanation' && fullSourceRelevant && researchTerms(relevanceTarget).some(t => researchTerms(`${source.title || ''} ${quote}`).includes(t)))) return false;
     if (requirement.entities?.some(entity => !normalizedText(normalizeResearchAliases(quote)).includes(normalizedText(normalizeResearchAliases(entity))))) return false;
     if (requirement.type === 'names') {
         // Entity values are explicitly extracted spans, never counts of capitalized phrases.
@@ -387,10 +416,11 @@ export function validateResearchAnswer(data, requirements, sources) {
     const hasUnmetCountClaim = requested.some(r => r.countIsClaim && missing.some(m => m.id === r.id));
     if (gaps.length) {
         const details = gaps.map(g => literalEvidenceText(g.detail).replace(/\.+$/, '').trim()).filter(Boolean).join('; ');
+        const suffix = /[.?!]$/.test(details) ? '' : '.';
         if (!content) {
-            content = `I couldn't verify the requested facts from the retrieved passages. Missing: ${details}.`;
+            content = `I couldn't verify the requested facts from the retrieved passages. Missing: ${details}${suffix}`;
         } else if (hasUnmetCountClaim || gaps.length) {
-            content = `${content}\n\nStill unverified: ${details}.`;
+            content = `${content}\n\nStill unverified: ${details}${suffix}`;
         }
     }
     const answerStatus = facts.length > 0

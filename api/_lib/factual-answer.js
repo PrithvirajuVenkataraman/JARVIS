@@ -22,6 +22,6 @@ export function answerEvidencePolicy({ message = '', intent = 'chat', route = {}
 export async function factualAnswer(message, { context = [], preferences = {}, signal = currentRequestSignal(), customGroqKey, customGeminiKey, unavailable = false, onEvent } = {}, research) {
     if (unavailable) return { success: true, response: 'I can’t verify that with Web search turned off. Enable Web search or attach a reliable source.', sources: [], facts: [], verified: false, sourceBased: false, answerStatus: 'unavailable', provenance: 'no_sources', verificationScope: 'none', provider: 'evidence_policy' };
     const run = research || (await import('../search.js')).runWebResearch;
-    const result = await run(message, { context, preferences, selectedModel: preferences.selectedModel, customGroqKey, customGeminiKey, signal, onEvent, maxModelCalls: 2, finalOnly: true });
+    const result = await run(message, { context, preferences, selectedModel: preferences.selectedModel, customGroqKey, customGeminiKey, signal, onEvent, maxModelCalls: 4 });
     return { ...result, response: result.content, intent: 'factual_answer', provider: 'public_sources', sourceBased: Boolean(result.facts?.length), verificationScope: 'retrieved_passages', modelUsed: result.research?.modelAttempts?.findLast(attempt => attempt.outcome === 'success')?.model };
 }

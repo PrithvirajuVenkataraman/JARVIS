@@ -529,7 +529,7 @@ export async function searchResearchSources(query, options = {}) {
 }
 
 export async function runWebResearch(query, options = {}) {
-    return runResearch(query, { ...options, maxModelCalls: 2, finalOnly: true }, {
+    return runResearch(query, { maxModelCalls: 4, ...options }, {
         search: (candidate, config) => cachedResearchSearch(candidate, { ...config, retrievalOnly: true }, searchResearchSources),
         extract: crawlArticleBody
     });

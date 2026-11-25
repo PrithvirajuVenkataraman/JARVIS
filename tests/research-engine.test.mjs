@@ -979,6 +979,39 @@ test('validateResearchAnswer normalizes typographic dashes and quotes, leaves co
     assert.doesNotMatch(validated.content, /\.\./);
 });
 
+test('validateResearchAnswer decodes HTML entities and accepts passage-grounded explanation values while still rejecting unquoted numbers or claims', () => {
+    const src = [{
+        id: 1,
+        title: "See NASA's Artemis II mission - Scientific American",
+        url: 'https://science.example/artemis-ii',
+        pageFetched: true,
+        fullArticleText: 'The Artemis II mission&rsquo;s 10-day odyssey around the moon tested life-support and navigation systems safely.'
+    }];
+    const reqs = buildResearchRequirements('Latest NASA Artemis mission status — Why was it delayed earlier?');
+    const validated = validateResearchAnswer({
+        facts: [
+            {
+                id: 'f1',
+                requirementId: reqs[0].id,
+                sourceId: 1,
+                quote: "The Artemis II mission's 10-day odyssey around the moon tested life-support and navigation systems safely.",
+                value: 'Artemis II tested navigation and life-support systems safely during the 10-day odyssey.'
+            },
+            {
+                id: 'f2',
+                requirementId: reqs[0].id,
+                sourceId: 1,
+                quote: "The Artemis II mission's 10-day odyssey around the moon tested life-support and navigation systems safely.",
+                value: 'Artemis II lasted 900 days.'
+            }
+        ],
+        gaps: [{ requirementId: reqs[0].id, detail: 'Why was it delayed earlier?' }]
+    }, reqs, src);
+    assert.equal(validated.facts.length, 1);
+    assert.equal(validated.rejectedFacts.length, 1);
+    assert.doesNotMatch(validated.content, /\?\./);
+});
+
 });
 
 describe('Research Lifecycle & Streaming', () => {
