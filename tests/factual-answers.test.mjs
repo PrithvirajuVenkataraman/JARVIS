@@ -135,7 +135,7 @@ test('both providers receive new evidence in JSON and SSE requests with existing
 test('bare and vague person queries receive direct lookup guidance and append the web-search tip on both Gemini 4 Hydrogen and GPT-OSS 120B', async () => {
     const original = globalThis.fetch, saved = { GROQ_API_KEY: process.env.GROQ_API_KEY, GEMINI_API_KEY: process.env.GEMINI_API_KEY };
     process.env.GROQ_API_KEY = 'test-groq'; process.env.GEMINI_API_KEY = 'test-gemini';
-    const bio = 'Bryce Maddock is an American entrepreneur and the co-founder and CEO of TaskUs, a global digital outsourcing company founded in 2008.';
+    const bio = 'Jordan Mercer is an entrepreneur and the co-founder and CEO of Northbridge, a global digital services company founded in 2008.';
     try {
         for (const stream of [false, true]) for (const selectedModel of ['openai/gpt-oss-120b', 'gemini-4-hydrogen']) {
             const bodies = [];
@@ -145,14 +145,38 @@ test('bare and vague person queries receive direct lookup guidance and append th
                 if (String(input).includes('generativelanguage')) return stream ? new Response(`data: {"candidates":[{"content":{"parts":[{"text":${JSON.stringify(bio)}}]},"finishReason":"STOP"}]}\n\n`, { headers: { 'content-type': 'text/event-stream' } }) : Response.json({ candidates: [{ content: { parts: [{ text: bio }] } }] });
                 return stream ? new Response(`data: {"choices":[{"delta":{"content":${JSON.stringify(bio)}},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } }) : Response.json({ choices: [{ message: { content: bio } }] });
             };
-            const req = Object.assign(new EventEmitter(), { method: 'POST', headers: { host: 'localhost', 'content-type': 'application/json' }, socket: { remoteAddress: '127.0.0.1' }, body: { message: 'Bryce maddock', stream, webMode: 'auto', preferences: { selectedModel } } });
+            const req = Object.assign(new EventEmitter(), { method: 'POST', headers: { host: 'localhost', 'content-type': 'application/json' }, socket: { remoteAddress: '127.0.0.1' }, body: { message: 'Jordan mercer', stream, webMode: 'auto', preferences: { selectedModel } } });
             const res = response(); await handler(req, res);
             assert.equal(res.statusCode, 200); assert.ok(bodies.length >= 1);
             const system = bodies[0].messages?.find(m => m.role === 'system')?.content || bodies[0].system_instruction?.parts[0].text;
             assert.match(system, /PERSON & ENTITY LOOKUP POLICY/);
             const payload = stream ? res.chunks.flatMap(chunk => String(chunk).split('\n').filter(line => line.startsWith('data:')).map(line => JSON.parse(line.slice(5)))).find(row => row.success === true) : res.data;
-            assert.match(payload.response, /Bryce Maddock is an American entrepreneur/);
+            assert.match(payload.response, /Jordan Mercer is an entrepreneur/);
             assert.match(payload.response, /turn on Web Search and ask a follow-up query/i);
+        }
+    } finally { globalThis.fetch = original; for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } }
+});
+
+test('a 404 model miss on gemini-4-hydrogen falls back within Gemini to gemini-2.5-flash instead of dropping to Groq', async () => {
+    const original = globalThis.fetch, saved = { GROQ_API_KEY: process.env.GROQ_API_KEY, GEMINI_API_KEY: process.env.GEMINI_API_KEY };
+    process.env.GROQ_API_KEY = 'test-groq'; process.env.GEMINI_API_KEY = 'test-gemini';
+    try {
+        for (const stream of [false, true]) {
+            const calls = [];
+            globalThis.fetch = async (input) => {
+                const url = String(input);
+                calls.push(url);
+                if (url.includes('gemini-4-hydrogen')) return Response.json({ error: { message: 'Model not found' } }, { status: 404 });
+                if (url.includes('generativelanguage.googleapis.com')) return stream ? new Response('data: {"candidates":[{"content":{"parts":[{"text":"Jordan Mercer is the CEO of Northbridge."}]},"finishReason":"STOP"}]}\n\n', { headers: { 'content-type': 'text/event-stream' } }) : Response.json({ candidates: [{ content: { parts: [{ text: 'Jordan Mercer is the CEO of Northbridge.' }] } }] });
+                assert.fail('Should not drop to Groq when a fallback Gemini model is available');
+            };
+            const req = Object.assign(new EventEmitter(), { method: 'POST', headers: { host: 'localhost', 'content-type': 'application/json' }, socket: { remoteAddress: '127.0.0.1' }, body: { message: 'Jordan mercer', stream, webMode: 'off', preferences: { selectedModel: 'auto' } } });
+            const res = response(); await handler(req, res);
+            assert.equal(res.statusCode, 200);
+            assert.ok(calls.some(u => u.includes('gemini-2.5-flash')));
+            assert.ok(calls.every(u => u.includes('generativelanguage.googleapis.com')));
+            const payload = stream ? res.chunks.flatMap(chunk => String(chunk).split('\n').filter(line => line.startsWith('data:')).map(line => JSON.parse(line.slice(5)))).find(row => row.success === true) : res.data;
+            assert.equal(payload.provider, 'gemini');
         }
     } finally { globalThis.fetch = original; for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } }
 });

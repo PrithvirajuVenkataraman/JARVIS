@@ -287,9 +287,19 @@ export async function resolveWebPersonPhoto(targetName, options = {}, dependenci
     const signal = options.signal;
     const searchQuery = contextHint && !cleanName.toLowerCase().includes(contextHint.toLowerCase()) ? `${cleanName} ${contextHint}` : cleanName;
     const searchFn = dependencies.search || (async q => {
-        const ddg = await searchDuckDuckGoHtml(q, { limit: 6, timeoutMs: 2500, signal }).catch(() => []);
-        if (ddg.length) return ddg;
-        return searchSearXNGRacer(q, { limit: 6, timeoutMs: 2500, signal }).catch(() => []);
+        const [ddgRes, searxRes] = await Promise.allSettled([
+            searchDuckDuckGoHtml(q, { limit: 6, timeoutMs: 2500, signal }),
+            searchSearXNGRacer(q, { limit: 6, timeoutMs: 3200, signal })
+        ]);
+        const ddg = ddgRes.status === 'fulfilled' && Array.isArray(ddgRes.value) ? ddgRes.value : [];
+        const searx = searxRes.status === 'fulfilled' && Array.isArray(searxRes.value) ? searxRes.value : [];
+        const seen = new Set();
+        return [...ddg, ...searx].filter(item => {
+            const url = String(item?.url || '').trim();
+            if (!url || seen.has(url)) return false;
+            seen.add(url);
+            return true;
+        });
     });
     const fetchPageFn = dependencies.fetchPage || (url => fetchPublicPage(url, { timeoutMs: 3200, maxBytes: 400_000, headers: WEB_PAGE_HEADERS, signal }));
 
@@ -337,7 +347,7 @@ export async function resolvePersonPhoto(query, options = {}) {
     const key = `${subject.toLocaleLowerCase()}::${resolvedName.toLocaleLowerCase()}::${contextHint.toLocaleLowerCase()}`;
     const cached = cache.get(key);
     if (cached && cached.expires > Date.now()) return cached.value;
-    const signal = parent ? AbortSignal.any([parent, AbortSignal.timeout(7500)]) : AbortSignal.timeout(7500);
+    const signal = parent ? AbortSignal.any([parent, AbortSignal.timeout(11500)]) : AbortSignal.timeout(11500);
     let result = null;
     try {
         const lookupName = resolvedName || subject;

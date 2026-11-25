@@ -11354,7 +11354,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                     chatHistory.push({ text: displayText, isUser });
                     recordActiveChatMessage('assistant', displayText, messageTurnId);
                 }
-                if (!allowEmptyAssistant && !meta?.restored && !isRestoringChatSession) void window.JarvisPersonPhotos?.enrich(messageDiv, priorUserPrompt, { reference: meta?.contextReference, failureCode: meta?.failureCode, answerText: plainMessageText });
+                if (!allowEmptyAssistant && !meta?.restored && !isRestoringChatSession) void window.JarvisPersonPhotos?.enrich(messageDiv, priorUserPrompt, { reference: meta?.contextReference, failureCode: meta?.failureCode, answerText: plainMessageText, answerVerified: Boolean(meta?.verified || meta?.sourceType === 'verified' || meta?.sourceType === 'retrieved') });
                 return messageId;
             }
             
@@ -11735,7 +11735,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 const userPromptForHistory = String(priorUserPrompt || meta?.userMessage || activeResponseRenderContext?.userPrompt || '').trim();
                 if (userPromptForHistory) {
                     saveToHistory(userPromptForHistory, cleanText, { turnId, recordSession: false });
-                    void window.JarvisPersonPhotos?.enrich(row, userPromptForHistory, { reference: meta?.contextReference, failureCode: meta?.failureCode || existing.failureCode, answerText: cleanText });
+                    void window.JarvisPersonPhotos?.enrich(row, userPromptForHistory, { reference: meta?.contextReference, failureCode: meta?.failureCode || existing.failureCode, answerText: cleanText, answerVerified: Boolean(meta?.verified || existing.verified || meta?.sourceType === 'verified' || existing.sourceType === 'verified' || meta?.sourceType === 'retrieved' || existing.sourceType === 'retrieved') });
                 }
             }
             maybeAutoScroll(document.getElementById('chat-container'));

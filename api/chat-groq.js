@@ -1599,10 +1599,8 @@ async function handler(req, res) {
             parts.push([
                 'PERSON & ENTITY LOOKUP POLICY:',
                 '- The user entered a bare name, brief title/role, or direct entity lookup.',
-                '- Identify and explain who the primary notable person or entity is directly (their role, organization or field, and key background) using established knowledge.',
-                '- Do NOT reply by asking "which [Name] are you referring to?" or "what would you like to know about them?" unless you have zero knowledge of anyone by that name; even when multiple notable people share the name, briefly introduce the best-known match(es) first instead of refusing.',
-                '- Never invent unverified dates, recent news, or private details.',
-                '- At the end, add one brief sentence telling the user that if they need any latest updates, they can turn on Web Search and ask a follow-up query.'
+                '- Only if you are genuinely certain from reliable knowledge who this person or entity is (their actual role, organization or field, and verified background), give a direct, accurate overview without inventing details, and end with: "If you need any latest updates, turn on Web Search and ask a follow-up query."',
+                '- CRITICAL ANTI-HALLUCINATION RULE: If you are uncertain, do not reliably recognize the person, or multiple unrelated people could match without enough context, NEVER guess or invent a profession, team, sport, company, or biography. State honestly that you cannot verify who they mean without Web Search, and ask the user to either turn on Web Search or add a brief detail (such as company, role, or field).'
             ].join('\n'));
         }
         if (String(intent || '') === 'chat_title') {
@@ -2759,6 +2757,7 @@ async function handler(req, res) {
 
         let attemptsRemaining = 2;
         const providerCalls = { groq: 0, gemini: 0 };
+        let geminiModelMisses = 0;
         const generationFetch = async (url, init, settings) => {
             const provider = url.includes('api.groq.com') ? 'groq' : 'gemini';
             if (attemptsRemaining <= 0 || providerCalls[provider] >= perProviderLimit) throw Object.assign(new Error('Model attempt budget exhausted'), { code: 'attempt_budget_exhausted' });
@@ -2768,6 +2767,11 @@ async function handler(req, res) {
                 if (!result.ok) {
                     const model = provider === 'gemini' ? /\/models\/([^:]+):/.exec(url)?.[1] : JSON.parse(init.body).model;
                     failures.push({ status: result.status, upstream: await describeUpstreamFailure(result, provider, model) });
+                    if (provider === 'gemini' && (result.status === 404 || result.status === 410) && geminiModelMisses === 0) {
+                        geminiModelMisses++;
+                        attemptsRemaining++;
+                        providerCalls.gemini = Math.max(0, providerCalls.gemini - 1);
+                    }
                 }
                 return result;
             } catch (error) { failures.push({ name: error?.name, code: error?.code }); throw error; }
@@ -3113,15 +3117,16 @@ async function handler(req, res) {
                 : getPreferredGeminiCandidates(geminiConfiguredModel, userSelectedModel, { preferSpeed: speedPreferred, tier: routingTier });
             const geminiCandidates = filterAvailableModelCandidates('gemini', rawGeminiCandidates);
             let geminiAttempts = 0;
+            let geminiModelMisses = 0;
             for (const model of geminiCandidates) {
-                if (geminiAttempts++ >= perProviderLimit) return null;
+                if (geminiAttempts >= perProviderLimit || attemptsRemaining <= 0) return null;
+                geminiAttempts++;
+                attemptsRemaining--;
                 let currentModelDeltasEmitted = false;
                 const perModelDelta = (delta) => {
                     currentModelDeltasEmitted = true;
                     onDelta(delta);
                 };
-                if (attemptsRemaining <= 0) return null;
-                attemptsRemaining--;
                 const result = await streamGeminiModel({
                     apiKey: geminiApiKey,
                     model,
@@ -3135,6 +3140,11 @@ async function handler(req, res) {
                 });
                 if (result.ok) return result;
                 failures.push(result);
+                if ((result.status === 404 || result.status === 410) && geminiModelMisses === 0) {
+                    geminiModelMisses++;
+                    geminiAttempts = Math.max(0, geminiAttempts - 1);
+                    attemptsRemaining++;
+                }
                 if (currentModelDeltasEmitted && typeof options?.onReset === 'function') {
                     options.onReset();
                 }

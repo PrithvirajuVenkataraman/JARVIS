@@ -75,10 +75,12 @@ export function resolvePersonPhotoRequest(input, options = {}) {
     const directQuery = personPhotoQuery(raw, reference);
     const fromAnswer = options.answerText ? extractPersonFromAnswer(options.answerText) : null;
     if (directQuery) {
+        const isRoleOnlyPrompt = VAGUE_PERSON_SEEKING_RE.test(directQuery);
+        const allowAnswerHints = isRoleOnlyPrompt || options.answerVerified === true;
         return {
             query: directQuery,
-            resolvedName: fromAnswer?.name || '',
-            contextHint: fromAnswer?.contextHint || ''
+            resolvedName: allowAnswerHints ? (fromAnswer?.name || '') : '',
+            contextHint: allowAnswerHints ? (fromAnswer?.contextHint || '') : ''
         };
     }
 

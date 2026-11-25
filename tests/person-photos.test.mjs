@@ -105,46 +105,50 @@ test('role-qualified aliases shared by multiple people stay unresolved', async (
 });
 
 test('vague person queries extract resolved names from answers without triggering on anaphoric follow-ups', () => {
-    assert.deepEqual(extractPersonFromAnswer('Bryce Maddock is the co-founder and CEO of TaskUs.'), { name: 'Bryce Maddock', contextHint: 'TaskUs' });
-    assert.deepEqual(extractPersonFromAnswer('The co-founder and CEO of TaskUs is Bryce Maddock.'), { name: 'Bryce Maddock', contextHint: 'TaskUs' });
-    assert.equal(extractPersonFromAnswer('Could you let me know which Bryce Maddock you mean?'), null);
+    assert.deepEqual(extractPersonFromAnswer('Jordan Mercer is the co-founder and CEO of Northbridge.'), { name: 'Jordan Mercer', contextHint: 'Northbridge' });
+    assert.deepEqual(extractPersonFromAnswer('The co-founder and CEO of Northbridge is Jordan Mercer.'), { name: 'Jordan Mercer', contextHint: 'Northbridge' });
+    assert.equal(extractPersonFromAnswer('Could you let me know which Jordan Mercer you mean?'), null);
 
     assert.deepEqual(
-        resolvePersonPhotoRequest('TaskUs CEO', { answerText: 'Bryce Maddock is the co-founder and CEO of TaskUs.' }),
-        { query: 'TaskUs CEO', resolvedName: 'Bryce Maddock', contextHint: 'TaskUs' }
+        resolvePersonPhotoRequest('Northbridge CEO', { answerText: 'Jordan Mercer is the co-founder and CEO of Northbridge.' }),
+        { query: 'Northbridge CEO', resolvedName: 'Jordan Mercer', contextHint: 'Northbridge' }
     );
     assert.deepEqual(
-        resolvePersonPhotoRequest('Who is the co-founder and CEO of TaskUs?', { answerText: 'The co-founder and CEO of TaskUs is Bryce Maddock.' }),
-        { query: 'the co-founder and CEO of TaskUs', resolvedName: 'Bryce Maddock', contextHint: 'TaskUs' }
+        resolvePersonPhotoRequest('Who is the co-founder and CEO of Northbridge?', { answerText: 'The co-founder and CEO of Northbridge is Jordan Mercer.' }),
+        { query: 'the co-founder and CEO of Northbridge', resolvedName: 'Jordan Mercer', contextHint: 'Northbridge' }
     );
     assert.deepEqual(
-        resolvePersonPhotoRequest('Who founded the global outsourcing company TaskUs?', { answerText: 'Bryce Maddock is the co-founder and CEO of TaskUs.' }),
-        { query: 'Bryce Maddock', resolvedName: 'Bryce Maddock', contextHint: 'TaskUs' }
+        resolvePersonPhotoRequest('Who founded the global outsourcing company Northbridge?', { answerText: 'Jordan Mercer is the co-founder and CEO of Northbridge.' }),
+        { query: 'Jordan Mercer', resolvedName: 'Jordan Mercer', contextHint: 'Northbridge' }
+    );
+    assert.deepEqual(
+        resolvePersonPhotoRequest('Jordan mercer', { answerText: 'Jordan Mercer played for the Northside Club.', answerVerified: false }),
+        { query: 'Jordan mercer', resolvedName: '', contextHint: '' }
     );
     for (const anaphora of ['What was it?', 'his latest photo', 'Explain the above']) {
-        assert.equal(resolvePersonPhotoRequest(anaphora, { answerText: 'Ada Lovelace was a mathematician.' }), null);
+        assert.equal(resolvePersonPhotoRequest(anaphora, { answerText: 'Example Person Alpha was a scientist.' }), null);
     }
 });
 
 test('non-Wikipedia people fall back to verified public web page portrait metadata', async () => {
-    const html = `<html><head><title>Home Page - Bryce Maddock</title>
-        <meta property="og:image" content="https://www.brycemaddock.com/uploads/portrait.jpg" />
+    const html = `<html><head><title>Home Page - Jordan Mercer</title>
+        <meta property="og:image" content="https://www.jordanmercer.example.com/uploads/portrait.jpg" />
         <meta property="og:image:width" content="1200" />
         <meta property="og:image:height" content="800" />
         <meta property="og:image:type" content="image/jpeg" />
-    </head><body><h1>Bryce Maddock</h1></body></html>`;
-    const result = await resolveWebPersonPhoto('Bryce Maddock', {}, {
+    </head><body><h1>Jordan Mercer</h1></body></html>`;
+    const result = await resolveWebPersonPhoto('Jordan Mercer', {}, {
         search: async () => [
-            { title: 'Bryce Maddock - LinkedIn', url: 'https://www.linkedin.com/in/brycemaddock' },
-            { title: 'Home Page - Bryce Maddock', url: 'https://www.brycemaddock.com/' }
+            { title: 'Jordan Mercer - LinkedIn', url: 'https://www.linkedin.com/in/jordanmercer' },
+            { title: 'Home Page - Jordan Mercer', url: 'https://www.jordanmercer.example.com/' }
         ],
         fetchPage: async url => ({ url, response: new Response(html, { status: 200, headers: { 'content-type': 'text/html' } }) })
     });
     assert.equal(result.entity.isPerson, true);
-    assert.equal(result.entity.name, 'Bryce Maddock');
-    assert.equal(result.entity.image.url, 'https://www.brycemaddock.com/uploads/portrait.jpg');
-    assert.equal(result.entity.image.sourceUrl, 'https://www.brycemaddock.com/');
-    assert.equal(result.entity.image.sourceName, 'brycemaddock.com');
+    assert.equal(result.entity.name, 'Jordan Mercer');
+    assert.equal(result.entity.image.url, 'https://www.jordanmercer.example.com/uploads/portrait.jpg');
+    assert.equal(result.entity.image.sourceUrl, 'https://www.jordanmercer.example.com/');
+    assert.equal(result.entity.image.sourceName, 'jordanmercer.example.com');
     assert.equal(result.entity.image.selection, 'reference_portrait');
 
     const badLogoOnly = await resolveWebPersonPhoto('Logo Only Person', {}, {
