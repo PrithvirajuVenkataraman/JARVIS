@@ -150,6 +150,9 @@ test('bare and vague person queries receive direct lookup guidance and append th
             assert.equal(res.statusCode, 200); assert.ok(bodies.length >= 1);
             const system = bodies[0].messages?.find(m => m.role === 'system')?.content || bodies[0].system_instruction?.parts[0].text;
             assert.match(system, /PERSON & ENTITY LOOKUP POLICY/);
+            assert.match(system, /without asking clarifying questions/i);
+            assert.doesNotMatch(system, /State honestly that you cannot verify who they mean/i);
+            assert.doesNotMatch(system, /State uncertainty rather than inventing precise details/i);
             const payload = stream ? res.chunks.flatMap(chunk => String(chunk).split('\n').filter(line => line.startsWith('data:')).map(line => JSON.parse(line.slice(5)))).find(row => row.success === true) : res.data;
             assert.match(payload.response, /Jordan Mercer is an entrepreneur/);
             assert.match(payload.response, /turn on Web Search and ask a follow-up query/i);
@@ -157,23 +160,43 @@ test('bare and vague person queries receive direct lookup guidance and append th
     } finally { globalThis.fetch = original; for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } }
 });
 
-test('a 404 model miss on gemini-4-hydrogen falls back within Gemini to gemini-2.5-flash instead of dropping to Groq', async () => {
+test('streaming fallback from Gemini to Groq marks failover accurately', async () => {
     const original = globalThis.fetch, saved = { GROQ_API_KEY: process.env.GROQ_API_KEY, GEMINI_API_KEY: process.env.GEMINI_API_KEY };
     process.env.GROQ_API_KEY = 'test-groq'; process.env.GEMINI_API_KEY = 'test-gemini';
     try {
-        for (const stream of [false, true]) {
+        globalThis.fetch = async (input) => {
+            const url = String(input);
+            if (url.includes('generativelanguage.googleapis.com')) return Response.json({ error: { message: 'temporarily unavailable' } }, { status: 503 });
+            return new Response('data: {"choices":[{"delta":{"content":"Jordan Mercer is the CEO of Northbridge."},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n', { headers: { 'content-type': 'text/event-stream' } });
+        };
+        const req = Object.assign(new EventEmitter(), { method: 'POST', headers: { host: 'localhost', 'content-type': 'application/json' }, socket: { remoteAddress: '127.0.0.1' }, body: { message: 'Jordan mercer', stream: true, webMode: 'off', preferences: { selectedModel: 'auto' } } });
+        const res = response(); await handler(req, res);
+        assert.equal(res.statusCode, 200);
+        const payload = res.chunks.flatMap(chunk => String(chunk).split('\n').filter(line => line.startsWith('data:')).map(line => JSON.parse(line.slice(5)))).find(row => row.success === true);
+        assert.equal(payload.provider, 'groq');
+        assert.equal(payload.failover, true);
+        assert.equal(payload.upstreamAttempts[0].model, 'gemini-4-hydrogen');
+    } finally { globalThis.fetch = original; for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } }
+});
+
+test('a 404 or 400 miss on gemini-4-hydrogen falls back within Gemini to gemini-3.8-flash instead of dropping to Groq', async () => {
+    const original = globalThis.fetch, saved = { GROQ_API_KEY: process.env.GROQ_API_KEY, GEMINI_API_KEY: process.env.GEMINI_API_KEY };
+    process.env.GROQ_API_KEY = 'test-groq'; process.env.GEMINI_API_KEY = 'test-gemini';
+    try {
+        for (const status of [400, 404]) for (const stream of [false, true]) {
             const calls = [];
             globalThis.fetch = async (input) => {
                 const url = String(input);
                 calls.push(url);
-                if (url.includes('gemini-4-hydrogen')) return Response.json({ error: { message: 'Model not found' } }, { status: 404 });
+                if (url.includes('gemini-4-hydrogen')) return Response.json({ error: { message: 'Model or parameter unsupported' } }, { status });
                 if (url.includes('generativelanguage.googleapis.com')) return stream ? new Response('data: {"candidates":[{"content":{"parts":[{"text":"Jordan Mercer is the CEO of Northbridge."}]},"finishReason":"STOP"}]}\n\n', { headers: { 'content-type': 'text/event-stream' } }) : Response.json({ candidates: [{ content: { parts: [{ text: 'Jordan Mercer is the CEO of Northbridge.' }] } }] });
                 assert.fail('Should not drop to Groq when a fallback Gemini model is available');
             };
             const req = Object.assign(new EventEmitter(), { method: 'POST', headers: { host: 'localhost', 'content-type': 'application/json' }, socket: { remoteAddress: '127.0.0.1' }, body: { message: 'Jordan mercer', stream, webMode: 'off', preferences: { selectedModel: 'auto' } } });
             const res = response(); await handler(req, res);
             assert.equal(res.statusCode, 200);
-            assert.ok(calls.some(u => u.includes('gemini-2.5-flash')));
+            if (status === 400) assert.ok(calls[0].includes('gemini-4-hydrogen'));
+            assert.ok(calls.some(u => u.includes('gemini-3.8-flash')));
             assert.ok(calls.every(u => u.includes('generativelanguage.googleapis.com')));
             const payload = stream ? res.chunks.flatMap(chunk => String(chunk).split('\n').filter(line => line.startsWith('data:')).map(line => JSON.parse(line.slice(5)))).find(row => row.success === true) : res.data;
             assert.equal(payload.provider, 'gemini');

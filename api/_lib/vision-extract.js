@@ -4,8 +4,8 @@ const PROVIDER_TIMEOUT_MS = 20_000;
 const GEMINI_API_VERSIONS = ['v1beta', 'v1'];
 const GEMINI_MODEL_FALLBACKS = [
     'gemini-4-hydrogen',
-    'gemini-2.5-flash',
     'gemini-3.8-flash',
+    'gemini-2.5-flash',
     'gemini-3.7-flash',
     'gemini-2.0-flash',
     'gemini-2.5-pro',

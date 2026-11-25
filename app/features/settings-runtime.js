@@ -74,7 +74,7 @@ function showHelpModal() {
                                         </div>
                                         <div class="settings-row-text">
                                             <label id="settings-model-label" for="model-selector" class="settings-row-title cursor-pointer">Default AI Model</label>
-                                            <p class="settings-row-desc">Auto dynamically routes between Groq, Gemini &amp; deep reasoning</p>
+                                            <p class="settings-row-desc">Automatic starts with Gemini 4 Hydrogen, with Groq fallback</p>
                                         </div>
                                     </div>
                                     <div class="settings-row-right">
@@ -84,10 +84,11 @@ function showHelpModal() {
                                             <option value="openai/gpt-oss-20b" ${currentSelectedModel === 'openai/gpt-oss-20b' ? 'selected' : ''}>GPT OSS 20B (Fast &amp; Direct)</option>
                                             <option value="qwen/qwen3.8-27b" ${currentSelectedModel === 'qwen/qwen3.8-27b' ? 'selected' : ''}>Qwen 3.8 27B (Vision &amp; Reasoning)</option>
                                             <option value="openai/safety-gpt-oss-20b" ${currentSelectedModel === 'openai/safety-gpt-oss-20b' ? 'selected' : ''}>Safety GPT OSS 20B (Content Moderation)</option>
-                                            <option value="gemini-4-hydrogen" ${currentSelectedModel === 'gemini-4-hydrogen' ? 'selected' : ''}>Gemini 4 Hydrogen (Flagship Fallback, Thinking &amp; Vision)</option>
-                                            <option value="gemini-3.7-flash" ${currentSelectedModel === 'gemini-3.7-flash' ? 'selected' : ''}>Gemini 3.7 Flash (Fallback &amp; Vision)</option>
-                                            <option value="gemini-2.5-pro" ${currentSelectedModel === 'gemini-2.5-pro' ? 'selected' : ''}>Gemini 2.5 Pro (Fallback &amp; Deep Reasoning)</option>
-                                            <option value="gemini-2.5-flash" ${currentSelectedModel === 'gemini-2.5-flash' ? 'selected' : ''}>Gemini 2.5 Flash (Fallback &amp; Fast Multimodal)</option>
+                                            <option value="gemini-4-hydrogen" ${currentSelectedModel === 'gemini-4-hydrogen' ? 'selected' : ''}>Gemini 4 Hydrogen (Primary Flagship, Thinking &amp; Vision)</option>
+                                            <option value="gemini-3.8-flash" ${currentSelectedModel === 'gemini-3.8-flash' ? 'selected' : ''}>Gemini 3.8 Flash (Fast Reasoning &amp; Vision)</option>
+                                            <option value="gemini-3.7-flash" ${currentSelectedModel === 'gemini-3.7-flash' ? 'selected' : ''}>Gemini 3.7 Flash (Legacy Fallback &amp; Vision)</option>
+                                            <option value="gemini-2.5-pro" ${currentSelectedModel === 'gemini-2.5-pro' ? 'selected' : ''}>Gemini 2.5 Pro (Legacy Deep Reasoning)</option>
+                                            <option value="gemini-2.5-flash" ${currentSelectedModel === 'gemini-2.5-flash' ? 'selected' : ''}>Gemini 2.5 Flash (Legacy Multimodal Fallback)</option>
                                         </select>
                                     </div>
                                 </div>

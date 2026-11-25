@@ -11,7 +11,7 @@ export function normalizeGeminiGenerationConfig(model, config) {
     if (/^gemini-[34](?:[.-]|$)/i.test(model)) {
         delete config.topK;
         const budget = config.thinkingConfig?.thinkingBudget;
-        config.thinkingConfig = { thinkingLevel: budget > 0 ? 'HIGH' : 'LOW', includeThoughts: false };
+        config.thinkingConfig = { thinkingLevel: budget > 0 ? 'HIGH' : 'LOW' };
     }
     return config;
 }

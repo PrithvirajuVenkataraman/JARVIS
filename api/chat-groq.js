@@ -623,7 +623,7 @@ async function getInstantFactHelper() {
         } else if (['openai/gpt-oss-20b', 'gpt-oss-20b', 'gemma2-9b-it'].includes(userSelected)) {
             mappedGemini = 'gemini-2.5-flash-lite';
         } else if (['qwen/qwen3.8-27b', 'qwen-3.8-27b'].includes(userSelected)) {
-            mappedGemini = 'gemini-3.7-flash';
+            mappedGemini = 'gemini-3.8-flash';
         }
         const primaryGemini = !userSelected || userSelected === 'auto' ? 'gemini-4-hydrogen' : mappedGemini;
 
@@ -631,9 +631,9 @@ async function getInstantFactHelper() {
         if (tier === 'deep') {
             geminiList = [primaryGemini, configured, 'gemini-4-hydrogen', 'gemini-3.8-flash', 'gemini-2.5-pro', 'gemini-3.7-flash', 'gemini-2.5-flash'];
         } else if (preferSpeed || tier === 'instant') {
-            geminiList = [primaryGemini, configured, 'gemini-2.5-flash-lite', 'gemini-4-hydrogen', 'gemini-2.5-flash', 'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-2.5-pro'];
+            geminiList = [primaryGemini, configured, 'gemini-4-hydrogen', 'gemini-3.8-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-3.7-flash', 'gemini-2.5-pro'];
         } else {
-            geminiList = [primaryGemini, configured, 'gemini-4-hydrogen', 'gemini-2.5-flash', 'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-2.5-pro', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-2.5-flash-lite'];
+            geminiList = [primaryGemini, configured, 'gemini-4-hydrogen', 'gemini-3.8-flash', 'gemini-2.5-flash', 'gemini-3.7-flash', 'gemini-2.5-pro', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-2.5-flash-lite'];
         }
         return [...new Set(geminiList.filter(Boolean))];
     }
@@ -669,8 +669,8 @@ async function getInstantFactHelper() {
             ]
             : [
                 'gemini-4-hydrogen',
-                'gemini-2.5-flash',
                 'gemini-3.8-flash',
+                'gemini-2.5-flash',
                 'gemini-3.7-flash',
                 'gemini-2.0-flash',
                 'gemini-2.5-pro',
@@ -1255,7 +1255,17 @@ async function handler(req, res) {
                 contextBlock,
                 effectiveMessage,
                 lengthPolicy.instruction,
-                intent
+                intent,
+                preferences?.selectedModel || '',
+                preferences?.selectedModel || null,
+                {
+                    routingMessage,
+                    isWebForced: Boolean(preferences?.isWebForced),
+                    needsContextClarification,
+                    hasImages: Boolean(images?.length),
+                    isInternalSummary,
+                    isAttachmentGrounding
+                }
             );
             const hasAssistantInStructured = Array.isArray(request.value.structuredMessages) && request.value.structuredMessages.some(m => m.role === 'assistant');
             const hasAssistantInContext = Array.isArray(context) && context.some(m => m.role === 'assistant');
@@ -1361,7 +1371,17 @@ async function handler(req, res) {
                         contextBlock,
                         effectiveMessage,
                         lengthPolicy.instruction,
-                        intent
+                        intent,
+                        preferences?.selectedModel || '',
+                        preferences?.selectedModel || null,
+                        {
+                            routingMessage,
+                            isWebForced: Boolean(preferences?.isWebForced),
+                            needsContextClarification,
+                            hasImages: Boolean(images?.length),
+                            isInternalSummary,
+                            isAttachmentGrounding
+                        }
                     );
                     const secondStructured = composeProviderConversation({
                             systemPrompt,
@@ -1504,6 +1524,7 @@ async function handler(req, res) {
                 requestId,
                 modelUsed: selectedPass.modelUsed,
                 provider: selectedPass.provider,
+                failover: Boolean(selectedPass.selfHealing?.recovered),
                 verified: false,
                 verificationScope: 'none',
                 provenance: isAttachmentGrounding ? 'supplied_material' : 'model_knowledge',
@@ -1599,8 +1620,10 @@ async function handler(req, res) {
             parts.push([
                 'PERSON & ENTITY LOOKUP POLICY:',
                 '- The user entered a bare name, brief title/role, or direct entity lookup.',
-                '- Only if you are genuinely certain from reliable knowledge who this person or entity is (their actual role, organization or field, and verified background), give a direct, accurate overview without inventing details, and end with: "If you need any latest updates, turn on Web Search and ask a follow-up query."',
-                '- CRITICAL ANTI-HALLUCINATION RULE: If you are uncertain, do not reliably recognize the person, or multiple unrelated people could match without enough context, NEVER guess or invent a profession, team, sport, company, or biography. State honestly that you cannot verify who they mean without Web Search, and ask the user to either turn on Web Search or add a brief detail (such as company, role, or field).'
+                '- Answer directly from established knowledge by identifying and explaining who the primary notable person or entity is (their role, organization or field, and key background) without asking clarifying questions.',
+                '- Do NOT ask "which [Name] are you referring to?", ask for their field, role, or company, or tell the user to turn on Web Search just to identify the person or entity.',
+                '- Never invent unverified dates, recent news, or private details.',
+                '- At the end, add one brief sentence telling the user that if they need any latest updates, they can turn on Web Search and ask a follow-up query.'
             ].join('\n'));
         }
         if (String(intent || '') === 'chat_title') {
@@ -1631,12 +1654,12 @@ async function handler(req, res) {
         return parts.join('\n\n');
     }
 
-    function composeFinalPrompt(systemPrompt, ragBlock, contextBlock, message, lengthGuidance = '', intent = 'chat', model = '', userSelectedModel = null) {
+    function composeFinalPrompt(systemPrompt, ragBlock, contextBlock, message, lengthGuidance = '', intent = 'chat', model = '', userSelectedModel = null, options = {}) {
         return [
             systemPrompt,
             ragBlock ? `Retrieved context (RAG):\n${ragBlock}` : '',
             contextBlock ? `Recent turns:\n${contextBlock}` : '',
-            buildIntentPromptHint(intent),
+            buildIntentPromptHint(intent, options.routingMessage || message, { ...options, ragText: ragBlock }),
             `User message: ${message}`,
             lengthGuidance ? `Length guidance:\n${lengthGuidance}` : '',
             buildReasoningInstruction(intent, model, userSelectedModel, message)
@@ -2140,6 +2163,7 @@ async function handler(req, res) {
                     : (Array.isArray(streamResult.sources) && streamResult.sources.length > 0 ? streamResult.sources : undefined),
                 action: null,
                 provider: streamResult.provider,
+                failover: Boolean(streamResult.failover),
                 verified: false,
                 verificationScope: 'none',
                 provenance: streamImages?.length ? 'supplied_material' : 'model_knowledge',
@@ -2767,7 +2791,12 @@ async function handler(req, res) {
                 if (!result.ok) {
                     const model = provider === 'gemini' ? /\/models\/([^:]+):/.exec(url)?.[1] : JSON.parse(init.body).model;
                     failures.push({ status: result.status, upstream: await describeUpstreamFailure(result, provider, model) });
-                    if (provider === 'gemini' && (result.status === 404 || result.status === 410) && geminiModelMisses === 0) {
+                    const canRetryGeminiModel = provider === 'gemini' && geminiModelMisses === 0 && (
+                        result.status === 404 ||
+                        result.status === 410 ||
+                        (!hasImages && result.status === 400 && String(model || '').toLowerCase() === 'gemini-4-hydrogen')
+                    );
+                    if (canRetryGeminiModel) {
                         geminiModelMisses++;
                         attemptsRemaining++;
                         providerCalls.gemini = Math.max(0, providerCalls.gemini - 1);
@@ -3127,6 +3156,9 @@ async function handler(req, res) {
                     currentModelDeltasEmitted = true;
                     onDelta(delta);
                 };
+                const geminiStreamTimeoutMs = supportsGeminiThinking(model)
+                    ? clampInt(lengthPolicy?.timeoutMs, 15_000, STREAM_MODEL_FETCH_TIMEOUT_MS, 18_000)
+                    : clampInt(lengthPolicy?.timeoutMs, STREAM_MODEL_FETCH_TIMEOUT_MS, 1000, STREAM_MODEL_FETCH_TIMEOUT_MS);
                 const result = await streamGeminiModel({
                     apiKey: geminiApiKey,
                     model,
@@ -3134,13 +3166,18 @@ async function handler(req, res) {
                     images,
                     temperature: temp,
                     maxTokens,
-                    timeoutMs: clampInt(lengthPolicy?.timeoutMs, STREAM_MODEL_FETCH_TIMEOUT_MS, 1000, STREAM_MODEL_FETCH_TIMEOUT_MS),
+                    timeoutMs: geminiStreamTimeoutMs,
                     onDelta: perModelDelta,
                     options: { ...options, visionLane, allowCompatibilityRetry: false }
                 });
                 if (result.ok) return result;
                 failures.push(result);
-                if ((result.status === 404 || result.status === 410) && geminiModelMisses === 0) {
+                const canRetryGeminiModel = geminiModelMisses === 0 && (
+                    result.status === 404 ||
+                    result.status === 410 ||
+                    (!hasImages && result.status === 400 && String(model || '').toLowerCase() === 'gemini-4-hydrogen')
+                );
+                if (canRetryGeminiModel) {
                     geminiModelMisses++;
                     geminiAttempts = Math.max(0, geminiAttempts - 1);
                     attemptsRemaining++;
@@ -3157,9 +3194,15 @@ async function handler(req, res) {
         const prioritizeGemini = hasImages || (hasGeminiKeyStream && !isExplicitGroqStream);
         const streamFns = prioritizeGemini ? [tryStreamGemini, tryStreamGroq] : [tryStreamGroq, tryStreamGemini];
 
+        let streamAttemptIndex = 0;
         for (const fn of streamFns) {
             const result = await fn();
-            if (result) { result.upstreamAttempts = upstreamAttemptSummary(failures); return result; }
+            if (result) {
+                result.upstreamAttempts = upstreamAttemptSummary(failures);
+                if (streamAttemptIndex > 0) result.failover = true;
+                return result;
+            }
+            streamAttemptIndex++;
         }
 
         if (hasImages) return { ok: false, payload: visionFailurePayload(hasGroq || hasGemini, failures) };

@@ -82,10 +82,11 @@ const APP_CONFIG = Object.freeze({
         { id: 'openai/gpt-oss-20b', label: 'GPT OSS 20B (Fast & Direct)', displayName: 'GPT-OSS 20B', icon: '⚡', supportsMedia: false },
         { id: 'qwen/qwen3.8-27b', label: 'Qwen 3.8 27B (Vision & Reasoning)', displayName: 'Qwen 3.8 27B', icon: '🔮', supportsMedia: true },
         { id: 'openai/safety-gpt-oss-20b', label: 'Safety GPT OSS 20B (Content Moderation)', displayName: 'Safety GPT-OSS 20B', icon: '🛡️', supportsMedia: false },
-        { id: 'gemini-4-hydrogen', label: 'Gemini 4 Hydrogen (Flagship Fallback, Thinking & Vision)', displayName: 'Gemini 4 Hydrogen', icon: '✦', supportsMedia: true },
-        { id: 'gemini-3.7-flash', label: 'Gemini 3.7 Flash (Resilient Fallback & Vision)', displayName: 'Gemini 3.7 Flash', icon: '✦', supportsMedia: true },
-        { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro (Resilient Fallback & Deep Reasoning)', displayName: 'Gemini 2.5 Pro', icon: '✦', supportsMedia: true },
-        { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (Resilient Fallback & Fast Multimodal)', displayName: 'Gemini 2.5 Flash', icon: '✦', supportsMedia: true }
+        { id: 'gemini-4-hydrogen', label: 'Gemini 4 Hydrogen (Primary Flagship, Thinking & Vision)', displayName: 'Gemini 4 Hydrogen', icon: '✦', supportsMedia: true },
+        { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash (Fast Reasoning & Vision)', displayName: 'Gemini 3.8 Flash', icon: '✦', supportsMedia: true },
+        { id: 'gemini-3.7-flash', label: 'Gemini 3.7 Flash (Legacy Fallback & Vision)', displayName: 'Gemini 3.7 Flash', icon: '✦', supportsMedia: true },
+        { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro (Legacy Deep Reasoning)', displayName: 'Gemini 2.5 Pro', icon: '✦', supportsMedia: true },
+        { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (Legacy Multimodal Fallback)', displayName: 'Gemini 2.5 Flash', icon: '✦', supportsMedia: true }
     ]),
     timeouts: Object.freeze({
         diagnosticsMs: 8000,

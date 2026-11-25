@@ -15,7 +15,7 @@ export function researchModelProviders(options = {}) {
     const selected = String(options.selectedModel || '');
     const providers = [];
     if (groq) providers.push({ name: 'groq', key: groq, model: ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b'].includes(selected) ? selected : 'openai/gpt-oss-120b' });
-    if (gemini) providers.push({ name: 'gemini', key: gemini, model: ['gemini-4-hydrogen', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'].includes(selected) ? selected : 'gemini-4-hydrogen' });
+    if (gemini) providers.push({ name: 'gemini', key: gemini, model: ['gemini-4-hydrogen', 'gemini-3.8-flash', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'].includes(selected) ? selected : 'gemini-4-hydrogen' });
     if (!selected || selected === 'auto' || selected.startsWith('gemini-')) providers.reverse();
     return providers.filter(provider => {
         const key = healthKey(provider);

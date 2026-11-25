@@ -4862,6 +4862,7 @@ async function callGeminiJson(prompt, options = {}) {
         const candidateModels = Array.from(new Set([
             configuredModel,
             'gemini-4-hydrogen',
+            'gemini-3.8-flash',
             'gemini-2.5-flash',
             'gemini-flash-latest',
             'gemini-2.5-flash-lite',
@@ -5033,6 +5034,7 @@ export async function searchGeminiGrounding(query, options = {}) {
     const candidateModels = Array.from(new Set([
         configuredModel,
         'gemini-4-hydrogen',
+        'gemini-3.8-flash',
         'gemini-2.5-flash',
         'gemini-flash-latest',
         'gemini-2.5-flash-lite',
