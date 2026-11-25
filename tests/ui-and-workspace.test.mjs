@@ -937,6 +937,19 @@ console.log('\n--- Test 5: Groq Model Candidate Realness & Non-Llama Assurance -
     console.log('  [PASS] 5.1 Only genuine production models from dashboard are queried, eliminating candidate cascade delay');
 }
 
+// ============================================================================
+// Test 6: Mobile Keyboard Offset, Slash Command Scrollbar, Study Fallback, and Sidebar Dedup
+// ============================================================================
+{
+    const stylesCssText = fs.readFileSync(path.resolve('styles.css'), 'utf8');
+    const coreUxCss = fs.readFileSync(path.resolve('app/core-ux.css'), 'utf8');
+    const slashCtrl = fs.readFileSync(path.resolve('app/slash-command-controller.js'), 'utf8');
+    assert.ok(stylesCssText.includes('var(--keyboard-offset, 0px)'), 'Input bar must track visualViewport keyboard offset');
+    assert.ok(coreUxCss.includes('--app-viewport-height') && coreUxCss.includes('#chat-container:empty'), 'Empty chat collapses bottom padding and bounds app-root to visualViewport');
+    assert.ok(indexHtml.includes('function deduplicateChatSessions('), 'Sidebar session deduplicator must prevent duplicated recent chats');
+    assert.ok(!slashCtrl.includes('scrollIntoView'), 'Slash picker must scroll internally instead of calling scrollIntoView on the viewport');
+}
+
 console.log('================================================================');
 console.log('=== All Stream DOM Memory Protection & OOM Prevention Tests PASSED ===');
 console.log('================================================================');

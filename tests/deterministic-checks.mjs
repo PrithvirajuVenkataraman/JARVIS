@@ -334,6 +334,9 @@ console.log('--- Section 8: Failure Policy & Grounding (app/failure-policy.js, a
     assert.equal(getFallbackFailureReason(timeoutErr), 'transient_failure');
     assert.equal(shouldShowFailureFallbackCard('transient_failure', 'museum near me'), true);
     assert.equal(shouldShowFailureFallbackCard('transient_failure', 'how are you'), false);
+    assert.equal(shouldShowFailureFallbackCard('transient_failure', '/study linear algebra study plan'), false);
+    assert.equal(shouldShowFailureFallbackCard('transient_failure', 'teach me this topic: travel photography'), false);
+    assert.notEqual(classifyFailure(timeoutErr).message, 'Transient failure.');
 
     const placeEvidence = scorePlaceEvidence('museum in Paris', {
         title: 'Louvre Museum',

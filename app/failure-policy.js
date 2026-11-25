@@ -81,7 +81,7 @@ export function classifyFailure(failureOrReason, context = {}) {
             code: 'network_timeout',
             recoverable: true,
             userActions: ['retry', 'web_search'],
-            message: 'Transient failure.'
+            message: 'Temporary connection issue. Please try again.'
         };
     }
 
@@ -109,7 +109,8 @@ export function shouldShowFailureFallbackCard(failureOrReason, userText, context
     if (!failure.recoverable || !failure.userActions.length) return false;
     const text = compactText(userText).toLowerCase();
     if (!text) return false;
-    if (context.fastSimple === true || context.casual === true) return false;
+    if (context.fastSimple === true || context.casual === true || context.studyMode === true) return false;
+    if (/^\/study\b|^(?:teach\s+me\s+this\s+topic|study\s+this)\s*:|\bstudy\s+plan\b/i.test(text)) return false;
     if (/\b(how are you|what'?s up|hello|hi|thanks|thank you|are you there)\b/.test(text)) return false;
     if (/\b(what do you mean|clarify|did you mean|not sure|could you provide more context)\b/.test(text)) return false;
     return ['network_timeout', 'model_empty', 'retrieval_empty', 'permission_blocked'].includes(failure.code);

@@ -7,11 +7,15 @@ export function positionPopover(menu) {
     const left = viewport?.offsetLeft || 0, top = viewport?.offsetTop || 0;
     const width = viewport?.width || innerWidth, height = viewport?.height || innerHeight;
     const rect = anchor.getBoundingClientRect(), margin = 10;
+    const spaceAbove = Math.max(44, rect.top - top - margin - 8);
+    const maxH = Math.max(44, Math.min(280, height - margin * 2, spaceAbove));
     menu.style.width = `${Math.min(440, width - margin * 2)}px`;
-    menu.style.maxHeight = `${Math.max(44, Math.min(height - margin * 2, rect.top - top - margin - 8))}px`;
+    menu.style.maxHeight = `${maxH}px`;
     menu.style.left = `${Math.max(left + margin, Math.min(rect.left, left + width - menu.getBoundingClientRect().width - margin))}px`;
     menu.style.bottom = 'auto';
-    menu.style.top = `${Math.max(top + margin, rect.top - menu.getBoundingClientRect().height - 8)}px`;
+    const menuH = Math.min(maxH, menu.offsetHeight || menu.getBoundingClientRect().height || maxH);
+    const clampedTop = Math.max(top + margin, Math.min(rect.top - menuH - 8, top + height - margin - menuH));
+    menu.style.top = `${clampedTop}px`;
 }
 
 export function syncSearchState() {

@@ -1757,13 +1757,14 @@ function shouldShowFailureFallbackCard(reason, userText) {
     if (globalThis.JarvisFailurePolicy?.shouldShowFailureFallbackCard) {
         return globalThis.JarvisFailurePolicy.shouldShowFailureFallbackCard(reason, userText, {
             fastSimple: isFastSimpleQuery(userText),
-            casual: isCasualConversationQuery(userText)
+            casual: isCasualConversationQuery(userText),
+            studyMode: isStudyCommand(userText) || /\bstudy\s+plan\b/i.test(String(userText || ''))
         });
     }
     const r = String(reason || '').trim();
     if (!['transient_failure', 'empty_answer'].includes(r)) return false;
     const text = String(userText || '').toLowerCase();
-    if (isCasualConversationQuery(text) || isFastSimpleQuery(text)) return false;
+    if (isCasualConversationQuery(text) || isFastSimpleQuery(text) || isStudyCommand(text) || /\bstudy\s+plan\b/i.test(text)) return false;
     if (/\b(what do you mean|clarify|did you mean|not sure|could you provide more context)\b/.test(text)) return false;
     return true;
 }
@@ -1787,7 +1788,7 @@ function showFailureFallbackCard(userMessage, options = {}) {
     const fallbackMsg = globalThis.JarvisFailurePolicy?.buildUserFacingErrorMessage
         ? globalThis.JarvisFailurePolicy.buildUserFacingErrorMessage(failure)
         : 'I encountered an issue processing that. Please try again.';
-    const safeMessage = String(options?.message || failure?.message || fallbackMsg || '')
+    const safeMessage = String(options?.message || fallbackMsg || failure?.message || '')
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
@@ -5995,7 +5996,7 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
         }
 
         const softFallback = await buildUniversalSoftFallback(normalizedUserMessage || userMessage);
-        if (isLikelyLocationOrTravelQuery(normalizedUserMessage || userMessage)) { 
+        if (!isStudyCommand(normalizedUserMessage || userMessage) && !/\bstudy\s+plan\b/i.test(String(normalizedUserMessage || userMessage || '')) && isLikelyLocationOrTravelQuery(normalizedUserMessage || userMessage)) { 
             showFailureFallbackCard(normalizedUserMessage || userMessage, { reason: fallbackReason }); 
         } 
         if (targetMessageId) {
@@ -14452,9 +14453,11 @@ ${code}
             }
             input.style.height = 'auto';
             const maxHeight = 180;
-            const next = Math.min(maxHeight, Math.max(40, input.scrollHeight));
+            const vpHeight = window.visualViewport?.height || window.innerHeight || 720;
+            const effectiveMaxHeight = vpHeight < 520 ? Math.min(maxHeight, Math.max(72, Math.floor(vpHeight * 0.25))) : maxHeight;
+            const next = Math.min(effectiveMaxHeight, Math.max(40, input.scrollHeight));
             input.style.height = `${next}px`;
-            input.style.overflowY = input.scrollHeight > maxHeight ? 'auto' : 'hidden';
+            input.style.overflowY = input.scrollHeight > effectiveMaxHeight ? 'auto' : 'hidden';
         }
 
         let _prewarmDebounceTimer = null;
@@ -27935,8 +27938,48 @@ function hydrateSessionMessagesFromHistory(session, legacyHistory = []) {
     return modified;
 }
 
+function deduplicateChatSessions(list) {
+    if (!Array.isArray(list) || list.length <= 1) return Array.isArray(list) ? list : [];
+    const byId = new Map();
+    const bySignature = new Map();
+    const pickBest = (a, b) => {
+        if (!a) return b;
+        if (!b) return a;
+        if (b.id === activeChatSessionId && a.id !== activeChatSessionId) return b;
+        if (a.id === activeChatSessionId && b.id !== activeChatSessionId) return a;
+        if (Boolean(b.pinned) !== Boolean(a.pinned)) return b.pinned ? b : a;
+        const aLen = Array.isArray(a.messages) ? a.messages.length : 0;
+        const bLen = Array.isArray(b.messages) ? b.messages.length : 0;
+        if (bLen !== aLen) return bLen > aLen ? b : a;
+        return Date.parse(String(b.updatedAt || 0)) >= Date.parse(String(a.updatedAt || 0)) ? b : a;
+    };
+    for (const s of list) {
+        if (!s || !s.id) continue;
+        byId.set(s.id, pickBest(byId.get(s.id), s));
+    }
+    const result = [];
+    for (const s of byId.values()) {
+        const msgs = Array.isArray(s.messages) ? s.messages : [];
+        if (!msgs.length) {
+            result.push(s);
+            continue;
+        }
+        const firstUser = String(msgs.find(m => m?.role === 'user')?.text || '').trim().toLowerCase();
+        const lastText = String(msgs[msgs.length - 1]?.text || '').trim().toLowerCase();
+        const sig = `${String(s.title || '').trim().toLowerCase()}::${msgs.length}::${firstUser.slice(0, 120)}::${lastText.slice(0, 120)}`;
+        if (firstUser && bySignature.has(sig)) {
+            const idx = bySignature.get(sig);
+            result[idx] = pickBest(result[idx], s);
+        } else {
+            if (firstUser) bySignature.set(sig, result.length);
+            result.push(s);
+        }
+    }
+    return result;
+}
+
 function getVisibleChatSessions() {
-    return chatSessions.filter(session => session && !isDeletedChatSession(session) && chatSessionHasUserMessage(session));
+    return deduplicateChatSessions(chatSessions).filter(session => session && !isDeletedChatSession(session) && chatSessionHasUserMessage(session));
 }
 
 function getDeletedChatSessionIds() {
@@ -28012,7 +28055,7 @@ async function hydrateDurableSessionsFromIndexedDb() {
             activeStreamingSessionId: activeStreamingId
         });
         const nonUserDrafts = chatSessions.filter(s => s && !isDeletedChatSession(s) && !chatSessionHasUserMessage(s));
-        chatSessions = merged.concat(nonUserDrafts);
+        chatSessions = deduplicateChatSessions(merged.concat(nonUserDrafts));
         if (typeof renderChatHistorySidebar === 'function') {
             renderChatHistorySidebar();
         }
@@ -28135,7 +28178,7 @@ function saveChatSessions(options = {}) {
 
 function persistChatSessionsNow(options = {}) {
     try {
-        const allValidSessions = chatSessions
+        const allValidSessions = deduplicateChatSessions(chatSessions)
             .filter(session => session && !isDeletedChatSession(session) && chatSessionHasUserMessage(session));
         const durableMax = window.JarvisWorkspaceDurability?.MAX_DURABLE_SESSIONS || 500;
         const durableSessions = allValidSessions.slice(-durableMax);
@@ -32652,8 +32695,15 @@ function initDynamicComposerHeightObserver() {
 const setVH = () => {
     const vv = window.visualViewport;
     const height = vv ? vv.height : window.innerHeight;
+    const offsetTop = vv ? vv.offsetTop : 0;
+    const kbOffset = vv ? Math.max(0, Math.round(window.innerHeight - (height + offsetTop))) : 0;
     const vh = height * 0.01;
     document.documentElement.style.setProperty('--vh', `${vh}px`);
+    document.documentElement.style.setProperty('--app-viewport-height', `${Math.round(height)}px`);
+    document.documentElement.style.setProperty('--app-viewport-top', `${Math.round(offsetTop)}px`);
+    document.documentElement.style.setProperty('--keyboard-offset', `${kbOffset}px`);
+    const kbOpen = kbOffset > 90;
+    document.body.classList.toggle('is-keyboard-open', kbOpen);
     const headerEl = document.querySelector('.header') || document.querySelector('.app-header');
     const inputEl = document.querySelector('.chat-input') || document.querySelector('.floating-input-bar');
     const headerH = headerEl ? headerEl.offsetHeight : 54;
@@ -32664,6 +32714,17 @@ const setVH = () => {
     if (barEl) {
         const measuredSafeH = Math.max(90, Math.ceil(barEl.offsetHeight || barEl.getBoundingClientRect().height || 120));
         document.documentElement.style.setProperty('--input-bar-safe-height', `${measuredSafeH}px`);
+    }
+    if (kbOpen || window.scrollY > 0) {
+        try { window.scrollTo(0, 0); } catch (_) {}
+        const chatMain = document.getElementById('chat-main');
+        const chatContainer = document.getElementById('chat-container');
+        if (chatMain && chatContainer && chatContainer.children.length > 0) {
+            const nearBottom = chatMain.scrollHeight - chatMain.scrollTop - chatMain.clientHeight < 140;
+            if (nearBottom || kbOpen) {
+                chatMain.scrollTop = chatMain.scrollHeight;
+            }
+        }
     }
     // Undock sidebar if viewport drops below 1024px (e.g. tablet rotated to portrait)
     if (window.innerWidth < 1024 && document.body.classList.contains('sidebar-docked')) {

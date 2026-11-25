@@ -39,7 +39,13 @@ function highlight() {
     for (const row of list.children) {
         const selected = row.dataset.command === activeId;
         row.classList.toggle('is-active', selected); row.setAttribute('aria-selected', String(selected));
-        if (selected) { input.setAttribute('aria-activedescendant', row.id); row.scrollIntoView({ block: 'nearest' }); }
+        if (selected) {
+            input.setAttribute('aria-activedescendant', row.id);
+            const rTop = row.offsetTop;
+            const rBot = rTop + row.offsetHeight;
+            if (rTop < list.scrollTop) list.scrollTop = rTop;
+            else if (rBot > list.scrollTop + list.clientHeight) list.scrollTop = rBot - list.clientHeight;
+        }
     }
     if (!activeId) input.removeAttribute('aria-activedescendant');
 }
