@@ -1187,6 +1187,513 @@ export async function searchGdeltNews(query, options = {}) {
     }
 }
 
+export function mergeResultsRRF(lists = [], limit = 8) {
+    const k = 60;
+    const byUrl = new Map();
+    for (const items of lists) {
+        if (!Array.isArray(items)) continue;
+        items.forEach((item, rank) => {
+            const url = String(item?.url || '').trim();
+            if (!url) return;
+            const key = url.toLowerCase();
+            const rrf = 1 / (k + rank + 1);
+            const freshnessBoost = item?.publishedMs && (Date.now() - item.publishedMs) < 30 * 86400000 ? 0.004 : 0;
+            const existing = byUrl.get(key);
+            if (existing) {
+                existing.__rrf += rrf + freshnessBoost;
+                if ((item.description || '').length > (existing.item.description || '').length) {
+                    existing.item = { ...existing.item, description: item.description, snippet: item.snippet || item.description };
+                }
+            } else {
+                byUrl.set(key, { __rrf: rrf + freshnessBoost + (item.trusted ? 0.002 : 0), item });
+            }
+        });
+    }
+    return [...byUrl.values()]
+        .sort((a, b) => b.__rrf - a.__rrf)
+        .slice(0, clampInt(limit, 8, 1, 20))
+        .map(entry => entry.item);
+}
+
+export async function searchHackerNewsAlgolia(query, options = {}) {
+    const rawQ = String(query || '').trim();
+    if (!rawQ) return [];
+    const limit = clampInt(options.limit, 5, 1, 15);
+    const timeoutMs = Math.min(Number(options.timeoutMs) || 2400, 3500);
+    try {
+        const url = `https://hn.algolia.com/api/v1/search_by_date?query=${encodeURIComponent(rawQ)}&tags=story&hitsPerPage=${limit}`;
+        const response = await fetchWithTimeout(url, { headers: { Accept: 'application/json' }, signal: options.signal }, timeoutMs);
+        if (!response?.ok) return [];
+        const data = await response.json().catch(() => null);
+        const hits = Array.isArray(data?.hits) ? data.hits : [];
+        return hits.filter(h => (h.url || h.objectID) && (h.title || h.story_text)).slice(0, limit).map((hit, idx) => {
+            const link = hit.url || `https://news.ycombinator.com/item?id=${hit.objectID}`;
+            const title = cleanSnippetText(hit.title || '');
+            const summaryText = cleanSnippetText(hit.story_text || `Hacker News discussion (${hit.points || 0} points, ${hit.num_comments || 0} comments) on ${title}`);
+            const dateStr = hit.created_at ? formatDocumentDate(Date.parse(hit.created_at)) : '';
+            return {
+                title,
+                description: summaryText.slice(0, 320),
+                snippet: summaryText.slice(0, 320),
+                url: link,
+                domain: getDomainFromUrl(link) || 'news.ycombinator.com',
+                publisher: 'Hacker News',
+                source: 'Hacker News',
+                sourceType: 'news',
+                trusted: true,
+                date: dateStr || hit.created_at || '',
+                publishedDate: dateStr || hit.created_at || '',
+                publishedMs: hit.created_at ? Date.parse(hit.created_at) || 0 : 0,
+                freshness: dateStr || 'recent_tech',
+                qualitySignals: ['hacker_news_algolia', 'free_public_api'],
+                position: idx + 1,
+                query: rawQ
+            };
+        });
+    } catch (_) {
+        return [];
+    }
+}
+
+export async function searchGitHubRepos(query, options = {}) {
+    const rawQ = String(query || '').trim();
+    if (!rawQ) return [];
+    const limit = clampInt(options.limit, 4, 1, 10);
+    const timeoutMs = Math.min(Number(options.timeoutMs) || 2400, 3500);
+    try {
+        const url = `https://api.github.com/search/repositories?q=${encodeURIComponent(rawQ)}&sort=updated&order=desc&per_page=${limit}`;
+        const response = await fetchWithTimeout(url, {
+            headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'UnifyAssistantFreeLive/1.0' },
+            signal: options.signal
+        }, timeoutMs);
+        if (!response?.ok) return [];
+        const data = await response.json().catch(() => null);
+        const items = Array.isArray(data?.items) ? data.items : [];
+        return items.filter(r => r.html_url && r.full_name).slice(0, limit).map((repo, idx) => {
+            const updatedMs = repo.pushed_at ? Date.parse(repo.pushed_at) || 0 : 0;
+            const dateStr = updatedMs ? formatDocumentDate(updatedMs) : '';
+            const desc = cleanSnippetText(`${repo.description || ''} Language: ${repo.language || 'N/A'} | Stars: ${repo.stargazers_count || 0}${repo.license?.spdx_id ? ` | License: ${repo.license.spdx_id}` : ''}${dateStr ? ` | Updated: ${dateStr}` : ''}`);
+            return {
+                title: `${repo.full_name} (GitHub)`,
+                description: desc.slice(0, 320),
+                snippet: desc.slice(0, 320),
+                url: repo.html_url,
+                domain: 'github.com',
+                publisher: 'GitHub',
+                source: 'GitHub Repositories',
+                sourceType: 'live_web',
+                trusted: true,
+                date: dateStr,
+                publishedDate: dateStr,
+                publishedMs: updatedMs,
+                freshness: dateStr || 'live_code_index',
+                qualitySignals: ['github_api', 'free_public_api'],
+                position: idx + 1,
+                query: rawQ
+            };
+        });
+    } catch (_) {
+        return [];
+    }
+}
+
+export async function searchArxivPapers(query, options = {}) {
+    const rawQ = String(query || '').trim();
+    if (!rawQ) return [];
+    const limit = clampInt(options.limit, 4, 1, 10);
+    const timeoutMs = Math.min(Number(options.timeoutMs) || 2600, 4000);
+    try {
+        const url = `https://export.arxiv.org/api/query?search_query=all:${encodeURIComponent(rawQ)}&start=0&max_results=${limit}&sortBy=submittedDate&sortOrder=descending`;
+        const response = await fetchWithTimeout(url, {
+            headers: { Accept: 'application/atom+xml, application/xml, text/xml', 'User-Agent': 'UnifyAssistantFreeLive/1.0' },
+            signal: options.signal
+        }, timeoutMs);
+        if (!response?.ok) return [];
+        const xml = await response.text();
+        const entries = [...xml.matchAll(/<entry>([\s\S]*?)<\/entry>/gi)];
+        return entries.slice(0, limit).map((m, idx) => {
+            const block = m[1];
+            const title = cleanSnippetText((/<title>([\s\S]*?)<\/title>/i.exec(block)?.[1]) || '');
+            const summaryText = cleanSnippetText((/<summary>([\s\S]*?)<\/summary>/i.exec(block)?.[1]) || '');
+            const idUrl = decodeHtmlEntities((/<id>([\s\S]*?)<\/id>/i.exec(block)?.[1]) || '').trim();
+            const pub = cleanSnippetText((/<published>([\s\S]*?)<\/published>/i.exec(block)?.[1]) || '');
+            const pubMs = pub ? Date.parse(pub) || 0 : 0;
+            const dateStr = pubMs ? formatDocumentDate(pubMs) : pub;
+            if (!title || !idUrl) return null;
+            return {
+                title,
+                description: summaryText.slice(0, 340),
+                snippet: summaryText.slice(0, 340),
+                url: idUrl,
+                domain: 'arxiv.org',
+                publisher: 'arXiv',
+                source: 'arXiv Preprints',
+                sourceType: 'live_web',
+                trusted: true,
+                date: dateStr,
+                publishedDate: dateStr,
+                publishedMs: pubMs,
+                freshness: dateStr || 'arxiv_latest',
+                qualitySignals: ['arxiv_api', 'free_public_api'],
+                position: idx + 1,
+                query: rawQ
+            };
+        }).filter(Boolean);
+    } catch (_) {
+        return [];
+    }
+}
+
+export async function searchTechRss(query, options = {}) {
+    const rawQ = String(query || '').trim();
+    const limit = clampInt(options.limit, 5, 1, 15);
+    const timeoutMs = Math.min(Number(options.timeoutMs) || 2200, 3000);
+    const feeds = [
+        ['Ars Technica', 'arstechnica.com', 'https://feeds.arstechnica.com/arstechnica/technology-lab'],
+        ['The Verge', 'theverge.com', 'https://www.theverge.com/rss/index.xml']
+    ];
+    const settled = await Promise.allSettled(feeds.map(async ([name, dom, feedUrl]) => {
+        const res = await fetchWithTimeout(feedUrl, { headers: { Accept: 'application/rss+xml, application/xml, text/xml, */*' }, signal: options.signal }, timeoutMs);
+        if (!res?.ok) return [];
+        const xml = await res.text();
+        return parseWorldWireRssXml(xml, rawQ, limit, name, dom);
+    }));
+    const tokens = tokenize(rawQ);
+    return settled
+        .flatMap(s => s.status === 'fulfilled' ? s.value : [])
+        .filter(item => !tokens.length || matchesTerms(`${item.title} ${item.description}`, tokens))
+        .slice(0, limit);
+}
+
+export async function searchTechSources(query, options = {}) {
+    const limit = clampInt(options.limit, 8, 1, 20);
+    const settled = await Promise.allSettled([
+        searchHackerNewsAlgolia(query, { limit: 4, timeoutMs: options.timeoutMs, signal: options.signal }),
+        searchGitHubRepos(query, { limit: 3, timeoutMs: options.timeoutMs, signal: options.signal }),
+        searchArxivPapers(query, { limit: 3, timeoutMs: options.timeoutMs, signal: options.signal }),
+        searchTechRss(query, { limit: 4, timeoutMs: options.timeoutMs, signal: options.signal }),
+        searchBingNewsRss(query, { limit: 4, timeoutMs: options.timeoutMs, signal: options.signal }),
+        searchDuckDuckGoHtml(query, { limit: 4, timeoutMs: options.timeoutMs, signal: options.signal })
+    ]);
+    return mergeResultsRRF(settled.map(s => s.status === 'fulfilled' ? s.value : []), limit);
+}
+
+export async function searchNhtsaVehicles(query, options = {}) {
+    const rawQ = String(query || '').trim();
+    if (!rawQ) return [];
+    const timeoutMs = Math.min(Number(options.timeoutMs) || 2500, 3800);
+    const yearMatch = rawQ.match(/\b(199\d|20[0-2]\d)\b/);
+    const year = yearMatch?.[1] || String(new Date().getUTCFullYear());
+    let cleanWords = rawQ.replace(/\b(?:199\d|20[0-2]\d|recall|recalls|safety|rating|ratings|reviews?|specs?|mpg|horsepower|vs|versus|compare|car|vehicle)\b/gi, ' ').trim().split(/\s+/).filter(Boolean);
+    if (cleanWords.length >= 3) cleanWords = cleanWords.filter(w => !/^(?:suv|sedan|truck|ev)$/i.test(w));
+    if (cleanWords.length < 2) return [];
+    const make = cleanWords[0];
+    const model = cleanWords[1];
+    try {
+        const recallUrl = `https://api.nhtsa.gov/recalls/recallsByVehicle?make=${encodeURIComponent(make)}&model=${encodeURIComponent(model)}&modelYear=${encodeURIComponent(year)}`;
+        const ratingUrl = `https://api.nhtsa.gov/SafetyRatings/modelyear/${encodeURIComponent(year)}/make/${encodeURIComponent(make)}/model/${encodeURIComponent(model)}?format=json`;
+        const [recallsRes, ratingsRes] = await Promise.allSettled([
+            fetchWithTimeout(recallUrl, { headers: { Accept: 'application/json' }, signal: options.signal }, timeoutMs),
+            fetchWithTimeout(ratingUrl, { headers: { Accept: 'application/json' }, signal: options.signal }, timeoutMs)
+        ]);
+        const items = [];
+        if (recallsRes.status === 'fulfilled' && recallsRes.value?.ok) {
+            const data = await recallsRes.value.json().catch(() => null);
+            const recs = Array.isArray(data?.results) ? data.results : [];
+            if (recs.length) {
+                const topSummary = recs.slice(0, 3).map(r => `${r.Component || 'Recall'}: ${cleanSnippetText(r.Summary || r.Consequence || '')}`).join(' | ');
+                items.push({
+                    title: `NHTSA Recalls for ${year} ${make} ${model} (${recs.length} found)`,
+                    description: topSummary.slice(0, 360),
+                    snippet: topSummary.slice(0, 360),
+                    url: `https://www.nhtsa.gov/recalls?nhtsaId=${encodeURIComponent(recs[0].NHTSACampaignNumber || '')}`,
+                    domain: 'nhtsa.gov',
+                    publisher: 'U.S. NHTSA',
+                    source: 'NHTSA Recalls API',
+                    sourceType: 'live_web',
+                    trusted: true,
+                    date: recs[0].ReportReceivedDate || year,
+                    freshness: 'official_safety_data',
+                    qualitySignals: ['nhtsa_api', 'free_public_api'],
+                    query: rawQ
+                });
+            }
+        }
+        if (ratingsRes.status === 'fulfilled' && ratingsRes.value?.ok) {
+            const rData = await ratingsRes.value.json().catch(() => null);
+            const models = Array.isArray(rData?.Results) ? rData.Results : [];
+            if (models.length) {
+                items.push({
+                    title: `NHTSA Safety Ratings: ${year} ${make} ${model}`,
+                    description: `Official NHTSA safety records available for trims: ${models.slice(0, 3).map(m => m.VehicleDescription).join('; ')}.`,
+                    snippet: `Official NHTSA safety records for ${models.slice(0, 3).map(m => m.VehicleDescription).join('; ')}.`,
+                    url: `https://www.nhtsa.gov/ratings`,
+                    domain: 'nhtsa.gov',
+                    publisher: 'U.S. NHTSA',
+                    source: 'NHTSA Safety Ratings API',
+                    sourceType: 'live_web',
+                    trusted: true,
+                    date: year,
+                    freshness: 'official_safety_data',
+                    qualitySignals: ['nhtsa_api', 'free_public_api'],
+                    query: rawQ
+                });
+            }
+        }
+        return items;
+    } catch (_) {
+        return [];
+    }
+}
+
+export async function searchVehicleSources(query, options = {}) {
+    const limit = clampInt(options.limit, 8, 1, 20);
+    const settled = await Promise.allSettled([
+        searchNhtsaVehicles(query, { timeoutMs: options.timeoutMs, signal: options.signal }),
+        searchBingNewsRss(query, { limit: 4, timeoutMs: options.timeoutMs, signal: options.signal }),
+        searchDuckDuckGoHtml(query, { limit: 5, timeoutMs: options.timeoutMs, signal: options.signal }),
+        searchWikipediaApi(query, { limit: 2, timeoutMs: options.timeoutMs, signal: options.signal })
+    ]);
+    return mergeResultsRRF(settled.map(s => s.status === 'fulfilled' ? s.value : []), limit);
+}
+
+export async function searchReliefWebReports(query, options = {}) {
+    const rawQ = String(query || '').trim();
+    if (!rawQ) return [];
+    const limit = clampInt(options.limit, 4, 1, 10);
+    const timeoutMs = Math.min(Number(options.timeoutMs) || 2400, 3500);
+    try {
+        const url = `https://api.reliefweb.int/v1/reports?appname=unify-assistant&query[value]=${encodeURIComponent(rawQ)}&limit=${limit}&preset=latest&fields[include][]=title&fields[include][]=url&fields[include][]=date.created&fields[include][]=source.shortname`;
+        const response = await fetchWithTimeout(url, { headers: { Accept: 'application/json' }, signal: options.signal }, timeoutMs);
+        if (!response?.ok) return [];
+        const data = await response.json().catch(() => null);
+        const rows = Array.isArray(data?.data) ? data.data : [];
+        return rows.map((row, idx) => {
+            const f = row?.fields || {};
+            const created = f?.date?.created || '';
+            const pubMs = created ? Date.parse(created) || 0 : 0;
+            const dateStr = pubMs ? formatDocumentDate(pubMs) : created;
+            const org = Array.isArray(f.source) ? f.source.map(s => s.shortname).filter(Boolean).join(', ') : 'UN ReliefWeb';
+            return {
+                title: cleanSnippetText(f.title || ''),
+                description: `${org || 'ReliefWeb'} geopolitical/humanitarian report${dateStr ? ` published ${dateStr}` : ''}: ${cleanSnippetText(f.title || '')}`,
+                snippet: `${org || 'ReliefWeb'} report${dateStr ? ` (${dateStr})` : ''}: ${cleanSnippetText(f.title || '')}`,
+                url: f.url || 'https://reliefweb.int/',
+                domain: 'reliefweb.int',
+                publisher: org || 'UN ReliefWeb',
+                source: 'UN ReliefWeb',
+                sourceType: 'trusted_news',
+                trusted: true,
+                date: dateStr,
+                publishedDate: dateStr,
+                publishedMs: pubMs,
+                freshness: dateStr || 'recent_affairs',
+                qualitySignals: ['reliefweb_api', 'free_public_api'],
+                position: idx + 1,
+                query: rawQ
+            };
+        }).filter(r => r.title && r.url);
+    } catch (_) {
+        return [];
+    }
+}
+
+export async function searchFederalRegisterDocs(query, options = {}) {
+    const rawQ = String(query || '').trim();
+    if (!rawQ) return [];
+    const limit = clampInt(options.limit, 4, 1, 10);
+    const timeoutMs = Math.min(Number(options.timeoutMs) || 2400, 3500);
+    try {
+        const url = `https://www.federalregister.gov/api/v1/documents.json?conditions[term]=${encodeURIComponent(rawQ)}&per_page=${limit}&order=newest`;
+        const response = await fetchWithTimeout(url, { headers: { Accept: 'application/json' }, signal: options.signal }, timeoutMs);
+        if (!response?.ok) return [];
+        const data = await response.json().catch(() => null);
+        const docs = Array.isArray(data?.results) ? data.results : [];
+        return docs.filter(d => d.title && d.html_url).map((doc, idx) => {
+            const pubMs = doc.publication_date ? Date.parse(doc.publication_date) || 0 : 0;
+            const dateStr = pubMs ? formatDocumentDate(pubMs) : (doc.publication_date || '');
+            const desc = cleanSnippetText(doc.abstract || `${doc.type || 'Official document'} (${dateStr || 'recent'})`);
+            return {
+                title: cleanSnippetText(doc.title),
+                description: desc.slice(0, 340),
+                snippet: desc.slice(0, 340),
+                url: doc.html_url,
+                domain: 'federalregister.gov',
+                publisher: 'U.S. Federal Register',
+                source: 'Federal Register',
+                sourceType: 'trusted_news',
+                trusted: true,
+                date: dateStr,
+                publishedDate: dateStr,
+                publishedMs: pubMs,
+                freshness: dateStr || 'official_policy',
+                qualitySignals: ['federal_register_api', 'free_public_api'],
+                position: idx + 1,
+                query: rawQ
+            };
+        });
+    } catch (_) {
+        return [];
+    }
+}
+
+export async function searchGeopoliticsAndAffairs(query, options = {}) {
+    const limit = clampInt(options.limit, 8, 1, 20);
+    const timeoutMs = Math.min(Number(options.timeoutMs) || 2200, 3000);
+    const fetchAffairsFeed = async (name, dom, feedUrl) => {
+        try {
+            const res = await fetchWithTimeout(feedUrl, { headers: { Accept: 'application/rss+xml, application/xml, text/xml, */*' }, signal: options.signal }, timeoutMs);
+            if (!res?.ok) return [];
+            return parseWorldWireRssXml(await res.text(), query, 4, name, dom);
+        } catch (_) { return []; }
+    };
+    const settled = await Promise.allSettled([
+        searchReliefWebReports(query, { limit: 4, timeoutMs: options.timeoutMs, signal: options.signal }),
+        searchFederalRegisterDocs(query, { limit: 3, timeoutMs: options.timeoutMs, signal: options.signal }),
+        searchWorldWireRss(query, { limit: 4, timeoutMs: options.timeoutMs, signal: options.signal }),
+        fetchAffairsFeed('UN News', 'news.un.org', 'https://news.un.org/feed/subscribe/en/news/all/rss.xml'),
+        searchBingNewsRss(query, { limit: 4, timeoutMs: options.timeoutMs, signal: options.signal }),
+        searchGdeltNews(query, { limit: 4, timeoutMs: options.timeoutMs, signal: options.signal })
+    ]);
+    return mergeResultsRRF(settled.map(s => s.status === 'fulfilled' ? s.value : []), limit);
+}
+
+export async function searchLibraryOfCongress(query, options = {}) {
+    const rawQ = String(query || '').trim();
+    if (!rawQ) return [];
+    const limit = clampInt(options.limit, 4, 1, 10);
+    const timeoutMs = Math.min(Number(options.timeoutMs) || 2500, 3500);
+    try {
+        const url = `https://www.loc.gov/search/?q=${encodeURIComponent(rawQ)}&fo=json&c=${limit}`;
+        const response = await fetchWithTimeout(url, { headers: { Accept: 'application/json' }, signal: options.signal }, timeoutMs);
+        if (!response?.ok) return [];
+        const data = await response.json().catch(() => null);
+        const rows = Array.isArray(data?.results) ? data.results : [];
+        return rows.filter(r => r.title && r.url).slice(0, limit).map((row, idx) => {
+            const desc = Array.isArray(row.description) ? row.description.join(' ') : String(row.description || '');
+            return {
+                title: cleanSnippetText(row.title),
+                description: cleanSnippetText(desc || `Historical archival record from Library of Congress (${row.date || 'undated'})`).slice(0, 340),
+                snippet: cleanSnippetText(desc || row.title).slice(0, 340),
+                url: row.url,
+                domain: 'loc.gov',
+                publisher: 'Library of Congress',
+                source: 'Library of Congress',
+                sourceType: 'free_reference',
+                trusted: true,
+                date: String(row.date || ''),
+                freshness: 'archival_reference',
+                qualitySignals: ['loc_api', 'free_public_api'],
+                position: idx + 1,
+                query: rawQ
+            };
+        });
+    } catch (_) {
+        return [];
+    }
+}
+
+export async function searchHistoryAndReference(query, options = {}) {
+    const limit = clampInt(options.limit, 8, 1, 20);
+    const settled = await Promise.allSettled([
+        searchWikipediaApi(query, { limit: 4, timeoutMs: options.timeoutMs, signal: options.signal }),
+        searchLibraryOfCongress(query, { limit: 4, timeoutMs: options.timeoutMs, signal: options.signal }),
+        searchDuckDuckGoHtml(query, { limit: 5, timeoutMs: options.timeoutMs, signal: options.signal })
+    ]);
+    return mergeResultsRRF(settled.map(s => s.status === 'fulfilled' ? s.value : []), limit);
+}
+
+export async function searchWikivoyageGuide(topic, query, options = {}) {
+    const cleanTopic = String(topic || query || '').trim();
+    if (!cleanTopic) return [];
+    const timeoutMs = Math.min(Number(options.timeoutMs) || 2400, 3500);
+    try {
+        const url = `https://en.wikivoyage.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(cleanTopic)}&srlimit=3&format=json&origin=*`;
+        const res = await fetchWithTimeout(url, { headers: { Accept: 'application/json' }, signal: options.signal }, timeoutMs);
+        if (!res?.ok) return [];
+        const data = await res.json().catch(() => null);
+        const hits = Array.isArray(data?.query?.search) ? data.query.search : [];
+        return hits.map((hit, idx) => {
+            const title = String(hit.title || '').trim();
+            const slug = encodeURIComponent(title.replace(/\s+/g, '_'));
+            const snip = cleanSnippetText(hit.snippet || '');
+            return {
+                title: `${title} — Wikivoyage Travel & Transit Guide`,
+                description: snip.slice(0, 320),
+                snippet: snip.slice(0, 320),
+                url: `https://en.wikivoyage.org/wiki/${slug}`,
+                domain: 'en.wikivoyage.org',
+                publisher: 'Wikivoyage',
+                source: 'Wikivoyage',
+                sourceType: 'free_reference',
+                trusted: true,
+                freshness: 'travel_guide',
+                qualitySignals: ['wikivoyage_api', 'free_public_api'],
+                position: idx + 1,
+                query
+            };
+        }).filter(r => r.title);
+    } catch (_) {
+        return [];
+    }
+}
+
+export async function searchTransportAndItineraries(query, options = {}) {
+    const rawQ = String(query || '').trim();
+    const limit = clampInt(options.limit, 8, 1, 20);
+    const timeoutMs = Math.min(Number(options.timeoutMs) || 2600, 4000);
+    const topic = extractPlaceTopic(rawQ) || cleanQueryTarget(rawQ);
+    const routeMatch = rawQ.match(/\bfrom\s+([a-zA-Z][a-zA-Z\s.'-]{1,40})\s+to\s+([a-zA-Z][a-zA-Z\s.'-]{1,40})(?:[?.,]|$|\s+(?:by|on|in|for))/i);
+
+    const routeTask = routeMatch ? (async () => {
+        try {
+            const geocode = async (place) => {
+                const u = `${NOMINATIM_SEARCH_URL}?q=${encodeURIComponent(place.trim())}&format=jsonv2&limit=1`;
+                const r = await fetchWithTimeout(u, { headers: { Accept: 'application/json', 'User-Agent': 'UnifyAssistantFreeLive/1.0' }, signal: options.signal }, timeoutMs);
+                if (!r?.ok) return null;
+                const d = await r.json().catch(() => null);
+                return Array.isArray(d) && d[0] ? d[0] : null;
+            };
+            const [orig, dest] = await Promise.all([geocode(routeMatch[1]), geocode(routeMatch[2])]);
+            if (!orig || !dest) return [];
+            const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${orig.lon},${orig.lat};${dest.lon},${dest.lat}?overview=false`;
+            const osrmRes = await fetchWithTimeout(osrmUrl, { headers: { Accept: 'application/json' }, signal: options.signal }, timeoutMs);
+            if (!osrmRes?.ok) return [];
+            const osrmData = await osrmRes.json().catch(() => null);
+            const route = osrmData?.routes?.[0];
+            if (!route) return [];
+            const km = (Number(route.distance) / 1000).toFixed(1);
+            const mins = Math.round(Number(route.duration) / 60);
+            const hours = (mins / 60).toFixed(1);
+            return [{
+                title: `Route Estimate: ${routeMatch[1].trim()} to ${routeMatch[2].trim()}`,
+                description: `Estimated road distance: ${km} km | Estimated driving duration: ${mins} minutes (~${hours} hours) via OSRM public routing.`,
+                snippet: `Estimated distance: ${km} km (~${mins} min driving) from ${routeMatch[1].trim()} to ${routeMatch[2].trim()}.`,
+                url: `https://www.openstreetmap.org/directions?engine=fossgis_osrm_car&route=${orig.lat}%2C${orig.lon}%3B${dest.lat}%2C${dest.lon}`,
+                domain: 'openstreetmap.org',
+                publisher: 'OSRM / OpenStreetMap',
+                source: 'OSRM Routing',
+                sourceType: 'free_place_data',
+                trusted: true,
+                freshness: 'estimated_route',
+                qualitySignals: ['osrm_api', 'free_public_api'],
+                query: rawQ
+            }];
+        } catch (_) {
+            return [];
+        }
+    })() : Promise.resolve([]);
+
+    const settled = await Promise.allSettled([
+        routeTask,
+        searchWikivoyageGuide(topic, rawQ, { timeoutMs, signal: options.signal }),
+        topic ? searchOsmPlace(topic, rawQ, { limit: 3, timeoutMs, signal: options.signal }) : Promise.resolve([]),
+        searchBingNewsRss(rawQ, { limit: 4, timeoutMs, signal: options.signal }),
+        searchDuckDuckGoHtml(rawQ, { limit: 4, timeoutMs, signal: options.signal })
+    ]);
+    return mergeResultsRRF(settled.map(s => s.status === 'fulfilled' ? s.value : []), limit);
+}
+
 export async function runFreeLiveSearch(query, route = {}, options = {}) {
     const category = String(route?.category || '').trim() || inferCategory(query);
     const limit = clampInt(options.limit, 8, 1, 20);
@@ -1194,6 +1701,12 @@ export async function runFreeLiveSearch(query, route = {}, options = {}) {
     if (category === 'crypto') return searchCrypto(query, { limit });
     if (category === 'disasters') return searchDisasters(query, { limit });
     if (category === 'sports') return searchSports(query, { limit });
+    if (category === 'transportation_itineraries') {
+        const transportResults = await searchTransportAndItineraries(query, { limit, timeoutMs: options.timeoutMs, signal: options.signal });
+        if (transportResults.length > 0) {
+            return { results: transportResults, provider: 'free_transport_itinerary', publicSourceCount: transportResults.length, category };
+        }
+    }
     if (category === 'tourism_food_places') {
         const placeRes = await searchTourismFoodPlaces(query, { limit });
         if (Array.isArray(placeRes?.results) && placeRes.results.length > 0) {
@@ -1201,10 +1714,26 @@ export async function runFreeLiveSearch(query, route = {}, options = {}) {
         }
     }
 
-    // Universal Zero-Key Multi-Engine Parallel Fast-Race
-    // Parallel race across resilient search engines: Google News RSS, Yahoo News RSS, BBC World Wire, DuckDuckGo Lite, Wikipedia, and GDELT.
     const raceTimeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : undefined;
-    const [googleNewsResults, bingNewsResults, yahooResults, worldWireResults, ddgResults, wikiResults, gdeltResults] = await Promise.allSettled([
+    if (category === 'technology') {
+        const techResults = await searchTechSources(query, { limit, timeoutMs: raceTimeoutMs, signal: options.signal });
+        if (techResults.length > 0) return { results: techResults, provider: 'free_tech_vertical', publicSourceCount: techResults.length, category };
+    }
+    if (category === 'vehicles') {
+        const vehicleResults = await searchVehicleSources(query, { limit, timeoutMs: raceTimeoutMs, signal: options.signal });
+        if (vehicleResults.length > 0) return { results: vehicleResults, provider: 'free_vehicles_vertical', publicSourceCount: vehicleResults.length, category };
+    }
+    if (category === 'conflicts_geopolitics' || category === 'government') {
+        const affairsResults = await searchGeopoliticsAndAffairs(query, { limit, timeoutMs: raceTimeoutMs, signal: options.signal });
+        if (affairsResults.length > 0) return { results: affairsResults, provider: 'free_affairs_vertical', publicSourceCount: affairsResults.length, category };
+    }
+    if (category === 'history') {
+        const historyResults = await searchHistoryAndReference(query, { limit, timeoutMs: raceTimeoutMs, signal: options.signal });
+        if (historyResults.length > 0) return { results: historyResults, provider: 'free_history_vertical', publicSourceCount: historyResults.length, category };
+    }
+
+    // Universal Zero-Key Multi-Engine Parallel Fast-Race with Reciprocal Rank Fusion
+    const settled = await Promise.allSettled([
         searchGoogleNewsRss(query, { limit: 5, timeoutMs: raceTimeoutMs, signal: options.signal }),
         searchBingNewsRss(query, { limit: 5, timeoutMs: raceTimeoutMs, signal: options.signal }),
         searchYahooNewsRss(query, { limit: 4, timeoutMs: raceTimeoutMs, signal: options.signal }),
@@ -1214,24 +1743,7 @@ export async function runFreeLiveSearch(query, route = {}, options = {}) {
         searchGdeltNews(query, { limit: 3, timeoutMs: raceTimeoutMs, signal: options.signal })
     ]);
 
-    const results = [];
-    const seenUrls = new Set();
-    const addUnique = (items) => {
-        if (!Array.isArray(items)) return;
-        for (const item of items) {
-            const u = String(item?.url || '').trim().toLowerCase();
-            if (!u || seenUrls.has(u)) continue;
-            seenUrls.add(u);
-            results.push(item);
-        }
-    };
-    if (googleNewsResults.status === 'fulfilled') addUnique(googleNewsResults.value);
-    if (bingNewsResults.status === 'fulfilled') addUnique(bingNewsResults.value);
-    if (yahooResults.status === 'fulfilled') addUnique(yahooResults.value);
-    if (worldWireResults.status === 'fulfilled') addUnique(worldWireResults.value);
-    if (ddgResults.status === 'fulfilled') addUnique(ddgResults.value);
-    if (wikiResults.status === 'fulfilled') addUnique(wikiResults.value);
-    if (gdeltResults.status === 'fulfilled') addUnique(gdeltResults.value);
+    const results = mergeResultsRRF(settled.map(s => s.status === 'fulfilled' ? s.value : []), limit);
 
     if (results.length > 0) {
         return {
@@ -1278,11 +1790,18 @@ export async function searchWeather(query, options = {}) {
         forecastUrl.searchParams.set('current', 'temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m');
         forecastUrl.searchParams.set('daily', 'temperature_2m_max,temperature_2m_min,precipitation_probability_max');
         forecastUrl.searchParams.set('timezone', 'auto');
-        const forecastResponse = await fetchWithTimeout(forecastUrl.toString(), {
-            headers: { Accept: 'application/json' }
-        }, source.timeoutMs);
+        const isUsPoint = Number(place.latitude) >= 24 && Number(place.latitude) <= 50 && Number(place.longitude) >= -125 && Number(place.longitude) <= -66;
+        const aqiUrl = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${encodeURIComponent(String(place.latitude))}&longitude=${encodeURIComponent(String(place.longitude))}&current=us_aqi,pm2_5`;
+        const [forecastResponse, aqiRes, nwsRes] = await Promise.all([
+            fetchWithTimeout(forecastUrl.toString(), { headers: { Accept: 'application/json' } }, source.timeoutMs),
+            fetchWithTimeout(aqiUrl, { headers: { Accept: 'application/json' } }, Math.min(source.timeoutMs, 2200)).catch(() => null),
+            isUsPoint ? fetchWithTimeout(`https://api.weather.gov/alerts/active?point=${Number(place.latitude).toFixed(4)},${Number(place.longitude).toFixed(4)}`, { headers: { Accept: 'application/geo+json', 'User-Agent': 'UnifyAssistantFreeLive/1.0' } }, Math.min(source.timeoutMs, 2200)).catch(() => null) : Promise.resolve(null)
+        ]);
         if (!forecastResponse.ok) return emptyProvider('open-meteo', 'Weather forecast lookup failed.');
         const forecast = await forecastResponse.json();
+        const aqiData = aqiRes?.ok ? await aqiRes.json().catch(() => null) : null;
+        const nwsData = nwsRes?.ok ? await nwsRes.json().catch(() => null) : null;
+        const activeAlert = Array.isArray(nwsData?.features) && nwsData.features[0]?.properties?.headline ? nwsData.features[0].properties.headline : '';
         const current = forecast?.current || {};
         const units = forecast?.current_units || {};
         const titleLocation = [place.name, place.admin1, place.country].filter(Boolean).join(', ');
@@ -1290,7 +1809,9 @@ export async function searchWeather(query, options = {}) {
             Number.isFinite(Number(current.temperature_2m)) ? `Temperature: ${current.temperature_2m}${units.temperature_2m || 'C'}` : '',
             Number.isFinite(Number(current.apparent_temperature)) ? `Feels like: ${current.apparent_temperature}${units.apparent_temperature || 'C'}` : '',
             Number.isFinite(Number(current.relative_humidity_2m)) ? `Humidity: ${current.relative_humidity_2m}${units.relative_humidity_2m || '%'}` : '',
-            Number.isFinite(Number(current.wind_speed_10m)) ? `Wind: ${current.wind_speed_10m} ${units.wind_speed_10m || 'km/h'}` : ''
+            Number.isFinite(Number(current.wind_speed_10m)) ? `Wind: ${current.wind_speed_10m} ${units.wind_speed_10m || 'km/h'}` : '',
+            Number.isFinite(Number(aqiData?.current?.us_aqi)) ? `US AQI: ${aqiData.current.us_aqi}` : '',
+            activeAlert ? `Alert: ${cleanSnippetText(activeAlert)}` : ''
         ].filter(Boolean).join(' | ');
         return oneResult({
             title: `Current weather for ${titleLocation}`,
@@ -1656,13 +2177,18 @@ function normalizePlaceTopic(value) {
         .trim();
 }
 
-function inferCategory(query) {
+export function inferCategory(query) {
     const t = String(query || '').toLowerCase();
-    if (/\bweather|forecast|temperature\b/.test(t)) return 'weather';
+    if (/\bweather|forecast|temperature|aqi|air quality\b/.test(t)) return 'weather';
     if (/\bbitcoin|btc|ethereum|eth|crypto\b/.test(t)) return 'crypto';
     if (/\bsports?|score|fixture|standings|ipl|nba|nfl|epl\b/.test(t)) return 'sports';
     if (/\bearthquake|wildfire|flood|cyclone|hurricane|tsunami|volcano\b/.test(t)) return 'disasters';
+    if (/\b(?:itinerary|itineraries|day trip|days in|plan a?\s*trip|route from|how to get (?:from|to)|public transit|metro|subway|train route|airport transfer|transportation)\b/i.test(t)) return 'transportation_itineraries';
     if (/\b(?:places to visit|tourist attractions?|sightseeing|things to do in|hotels? in|museums? in|temples? in)\b/i.test(t)) return 'tourism_food_places';
+    if (/\b(?:car|cars|vehicle|vehicles|suv|sedan|truck|motorcycle|ev|electric vehicle|mpg|horsepower|recall|safety rating|automotive)\b/i.test(t)) return 'vehicles';
+    if (/\b(?:history of|historical|ancient|medieval|dynasty|empire|revolution|treaty of|world war|century|archaeolog)\b/i.test(t)) return 'history';
+    if (/\b(?:war|conflict|ceasefire|invasion|sanctions|treaty|geopolitics|parliament|election|cabinet|foreign policy|global affairs|diploma)\b/i.test(t)) return 'conflicts_geopolitics';
+    if (/\b(?:hardware|software|processor|semiconductor|chip|gpu|cpu|ai model|llm|technology|tech news|open source|github)\b/i.test(t)) return 'technology';
     return 'general_live_web';
 }
 

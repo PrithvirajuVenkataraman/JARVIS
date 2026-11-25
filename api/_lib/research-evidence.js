@@ -45,28 +45,48 @@ export function normalizeResearchAliases(value = '') {
         .replace(/\bUnited Kingdom\b/gi, 'United Kingdom').replace(/\bU\.?K\.?(?=\W|$)/g, 'United Kingdom');
 }
 
-const isComparison = value => /\b(?:compare|comparison|versus|vs\.?|difference(?:s)? between)\b/i.test(String(value));
-const COMPARISON_ATTRIBUTE = /\b(?:population|land area|area|price|cost|performance|speed|latency|memory management|memory|features|benefits|risks|advantages|disadvantages|release dates?|estimate dates?|dates?|GDP|life expectancy|literacy|climate|tax(?:es)?|fees|security|licen[cs](?:e|ing))\b/gi;
+const isComparison = value => /\b(?:compare|comparison|versus|vs\.?|difference(?:s)? between)\b/i.test(String(value))
+    || /\bwhich\s+(?:is|are|one\s+is)\s+(?:better|faster|cheaper|safer|more\s+\w+|best)\b.*\b(?:or|vs\.?|versus)\b/i.test(String(value));
+const COMPARISON_ATTRIBUTE = /\b(?:population|land area|area|price|pricing|cost|performance|benchmarks?|speed|latency|memory management|memory|features|specs|specifications|benefits|risks|advantages|disadvantages|pros(?:\s+and\s+cons)?|release dates?|estimate dates?|dates?|GDP|life expectancy|literacy|climate|tax(?:es)?|fees|security|licen[cs](?:e|ing)|battery(?:\s+life)?|camera|range|horsepower|mileage|mpg|safety|engine|architecture|ecosystem|compatibility|support|use cases?|history|timeline)\b/gi;
 
 export function comparisonParts(query) {
     if (!isComparison(query)) return { entities: [], attributes: [] };
-    const attributes = [...new Set((String(query).match(COMPARISON_ATTRIBUTE) || []).map(s => s.toLowerCase()))];
-    let subject = normalizeResearchAliases(query).replace(/^.*?\b(?:between|compare)\s+/i, '').replace(/^.*?\bof\s+(?=.+\b(?:vs\.?|versus)\b)/i, '');
-    subject = subject.split(/\s+(?:for|on|in terms of|with respect to|with|including)\s+|,\s*(?:with|including)\s+/i)[0];
+    const raw = normalizeResearchAliases(query);
+    const attributes = [...new Set((raw.match(COMPARISON_ATTRIBUTE) || []).map(s => s.toLowerCase()))];
+    let subject = raw
+        .replace(/^.*?\b(?:between|compare|comparing|pros\s+and\s+cons\s+of|comparison\s+of|which\s+is\s+(?:better|faster|cheaper|safer|best)(?:\s+between|\s+among)?)\s*:?\s*/i, '')
+        .replace(/^.*?\bof\s+(?=.+\b(?:vs\.?|versus)\b)/i, '');
+    subject = subject.split(/\s+(?:for|on|in terms of|with respect to|based on|regarding)\s+|,\s*(?:with|including)\s+/i)[0];
     const prefix = subject.match(/^(.*?)\bof\s+/i);
-    if (prefix && !/\b(?:and|versus|vs\.?)\b/i.test(prefix[1]) && (prefix[1].match(COMPARISON_ATTRIBUTE) || []).length) {
+    if (prefix && !/\b(?:and|versus|vs\.?|or)\b/i.test(prefix[1]) && (prefix[1].match(COMPARISON_ATTRIBUTE) || []).length) {
         subject = subject.slice(prefix[0].length);
     }
-    const parts = subject.split(/\s+(?:versus|vs\.?)\s+|\s+and\s+/i).slice(0, 2);
-    const entities = parts.map(p => cleanText(p.replace(COMPARISON_ATTRIBUTE, '').replace(/^(?:the\s+)?(?:difference(?:s)?|comparison)\s+(?:of|between)\s*/i, '').replace(/^(?:(?:the|of)\s+)+/i, '').replace(/^[\s,:]+|[\s,?.:]+$/g, ''))).filter(Boolean);
-    return { entities: entities.length === 2 ? entities : [], attributes };
+    const parts = subject
+        .split(/\s*,\s*(?:and|or)\s+|\s+(?:versus|vs\.?)\s+|\s*,\s*|\s+(?:and|or)\s+/i)
+        .slice(0, 5);
+    const entities = [];
+    for (const p of parts) {
+        const cleaned = cleanText(
+            p.replace(COMPARISON_ATTRIBUTE, '')
+                .replace(/^(?:the\s+)?(?:difference(?:s)?|comparison)\s+(?:of|between|among)\s*/i, '')
+                .replace(/^(?:(?:the|of|among|between)\s+)+/i, '')
+                .replace(/^[\s,:;?.]+|[\s,:;?.]+$/g, '')
+        );
+        if (cleaned && cleaned.length >= 2 && !/^(?:which|what|who|it|they|them|this|that)$/i.test(cleaned) && !entities.some(e => normalizedText(e) === normalizedText(cleaned))) {
+            entities.push(cleaned);
+        }
+    }
+    return { entities: entities.length >= 2 ? entities : [], attributes };
 }
 
 const TWO_LETTER_STOP = new Set('of in to on at by as is or an we he it so no my up me if am be do re vs'.split(' '));
 
 export function researchTerms(text = '') {
-    return [...new Set((normalizeResearchAliases(text).toLowerCase().match(/[\p{L}\p{N}]+/gu) || [])
-        .filter(t => (t.length > 2 || (t.length === 2 && !TWO_LETTER_STOP.has(t))) && !STOP.has(t)))];
+    const normalized = normalizeResearchAliases(text).toLowerCase();
+    const baseTokens = normalized.match(/[\p{L}\p{N}]+/gu) || [];
+    const compoundTokens = normalized.match(/[\p{L}\p{N}]+(?:[._-][\p{L}\p{N}]+)+|[\p{L}][\p{L}\p{N}]*(?:\+\+|#)/gu) || [];
+    return [...new Set([...baseTokens, ...compoundTokens]
+        .filter(t => (t.length > 2 || (t.length === 2 && !TWO_LETTER_STOP.has(t)) || /[._+#-]/.test(t)) && !STOP.has(t)))];
 }
 
 export function protectedEntities(query = '') {
@@ -155,14 +175,18 @@ export function evidenceText(source) {
 export function rankResearchEvidence(plan, sources, limit = 8) {
     const lexical = computeBM25Scores(plan.query, sources.map(s => ({ text: `${s.title} ${evidenceText(s)}` })));
     const max = Math.max(1, ...lexical);
-    const dated = extractQueryDateIntent(plan.query).type !== 'neutral';
+    const dateIntent = extractQueryDateIntent(plan.query);
+    const dated = dateIntent.type !== 'neutral';
+    const isPastQuery = dateIntent.type === 'historical' || /\b(1[0-8]\d{2}|19\d{2}|20(?:0\d|1\d|2[0-3]))\b/.test(plan.query);
+    const comparisonEntities = comparisonParts(plan.query).entities;
     const ranked = sources.map((s, i) => {
         const trust = classifyDomainTrustTier(s.domain, s.url);
         const published = parseDocumentDate(s);
-        const freshness = dated && published ? Math.exp(-Math.max(0, Date.now() - published) / (30 * 86400000)) : 0;
+        const recencyDecay = published ? Math.exp(-Math.max(0, Date.now() - published) / (45 * 86400000)) : 0;
+        const freshness = dated ? recencyDecay * 0.2 : (!isPastQuery ? recencyDecay * 0.12 : 0);
         const primary = s.qualitySignals?.includes('direct_primary_source') ? 0.9 : 0;
         const isRef = s.infobox || s.sourceType === 'encyclopedia' || /wikipedia\.org|britannica\.com|\.gov(?:\.|$)/i.test(s.url) ? 0.35 : 0;
-        return { ...s, retrievalScore: (lexical[i] || 0) / max + s.relevance + (s.pageFetched ? 0.4 : 0) + primary + isRef + trust.delta / 200 + freshness * 0.15 };
+        return { ...s, __publishedMs: published || 0, retrievalScore: (lexical[i] || 0) / max + s.relevance + (s.pageFetched ? 0.4 : 0) + primary + isRef + trust.delta / 200 + freshness };
     }).sort((a, b) => b.retrievalScore - a.retrievalScore);
     const selected = [];
     const domains = new Map();
@@ -170,11 +194,29 @@ export function rankResearchEvidence(plan, sources, limit = 8) {
         if (!source || selected.some(s => s.url === source.url) || selected.length >= limit) return;
         selected.push(source); domains.set(source.publisherDomain, (domains.get(source.publisherDomain) || 0) + 1);
     };
+    // For 2..N entity comparisons, guarantee balanced per-entity coverage before filling spare slots.
+    if (comparisonEntities.length >= 2) {
+        const perEntityQuota = Math.max(1, Math.floor(limit / comparisonEntities.length));
+        for (let roundIdx = 0; roundIdx < perEntityQuota; roundIdx++) {
+            for (const entity of comparisonEntities) {
+                const entityNorm = normalizedText(entity);
+                const match = ranked.find(s => !selected.some(sel => sel.url === s.url)
+                    && normalizedText(`${s.title} ${evidenceText(s)}`).includes(entityNorm));
+                if (match) add(match);
+            }
+        }
+    }
     // Preserve coverage of separate subjects/facets before filling the remaining positions.
-    for (const facet of plan.facets || []) add(ranked.find(s => assessSourceRelevance(facet, s).relevant));
+    for (const facet of plan.facets || []) add(ranked.find(s => !selected.some(sel => sel.url === s.url) && assessSourceRelevance(facet, s).relevant));
+    // Ensure non-historical queries retain recent dated developments alongside static overviews.
+    if (!isPastQuery && selected.length < limit) {
+        const recentCutoff = Date.now() - 120 * 86400000;
+        const recentPick = ranked.find(s => !selected.some(sel => sel.url === s.url) && (s.__publishedMs >= recentCutoff || s.sourceType === 'news' || s.sourceType === 'trusted_news'));
+        if (recentPick) add(recentPick);
+    }
     for (const source of ranked) if ((domains.get(source.publisherDomain) || 0) < 2) add(source);
     for (const source of ranked) add(source);
-    return selected.map((s, i) => ({ ...s, id: i + 1 }));
+    return selected.map(({ __publishedMs: _, ...s }, i) => ({ ...s, id: i + 1 }));
 }
 
 /** Requirements describe the user's requested facts, independently of retrieved headlines. */
@@ -189,10 +231,10 @@ export function buildResearchRequirements(query, _context = []) {
     const entityKind = count?.[2]?.toLowerCase() || (/\b(?:who|people|persons?|individuals?)\b/i.test(focusQ) || isRole ? 'person' : /\bcountries|nations\b/i.test(focusQ) ? 'country' : isEntityLookup ? (/\bcapital|headquarters|hq|birthplace\b/i.test(focusQ) ? 'place' : /\bcurrency\b/i.test(focusQ) ? 'currency' : 'entity') : 'entity');
     const expectedCount = count ? countValue(count[1]) : undefined;
     const focusComparison = comparisonParts(focusQ);
-    const comparison = focusComparison.entities.length === 2 ? focusComparison : comparisonParts(q);
+    const comparison = focusComparison.entities.length >= 2 ? focusComparison : comparisonParts(q);
     const requirements = [];
     const add = (type, description, extra = {}) => requirements.push({ id: `r${requirements.length + 1}`, type, description, query: q, ...extra });
-    if (comparison.entities.length === 2) {
+    if (comparison.entities.length >= 2) {
         for (const entity of comparison.entities) {
             for (const attribute of comparison.attributes.length ? comparison.attributes : ['relevant characteristics']) {
                 add(/\bdate/.test(attribute) ? 'date' : 'comparison', `${attribute} of ${entity}`, { entities: [entity], attribute, searchQuery: `${entity} ${/\bdate/.test(attribute) ? `${comparison.attributes.filter(a => !/\bdate/.test(a)).join(' ')} estimate ` : ''}${attribute}` });

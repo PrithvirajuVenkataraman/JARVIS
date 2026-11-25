@@ -102,8 +102,29 @@ const CATEGORY_PATTERNS = Object.freeze([
         category: 'technology',
         route: 'live_required',
         reason: 'tech_updates_require_live_source',
-        pattern: /\b(?:hardware|software|processor|semiconductor|chip|ai\s+model|llm|technology)\b/i,
-        vector: textToEmbeddingVector('computing technology hardware software architecture processors semiconductor devices breakthrough releases')
+        pattern: /\b(?:hardware|software|processor|semiconductor|chip|gpu|cpu|ai\s+model|llm|technology|tech\s+news|open\s+source|github|startup)\b/i,
+        vector: textToEmbeddingVector('computing technology hardware software architecture processors semiconductor devices breakthrough releases ai startups')
+    },
+    {
+        category: 'vehicles',
+        route: 'live_required',
+        reason: 'vehicle_specs_recalls_and_news_require_live_source',
+        pattern: /\b(?:car|cars|vehicle|vehicles|suv|sedan|truck|motorcycle|ev|electric\s+vehicle|hybrid|mpg|horsepower|recall|safety\s+rating|automotive|motorsport)\b/i,
+        vector: textToEmbeddingVector('automobile car vehicle suv truck sedan motorcycle electric vehicle fuel economy horsepower safety rating recall automotive')
+    },
+    {
+        category: 'transportation_itineraries',
+        route: 'live_required',
+        reason: 'transportation_or_itinerary_requires_live_routing_and_guides',
+        pattern: /\b(?:itinerary|itineraries|day\s+trip|days\s+in|plan\s+a?\s*trip|travel\s+plan|route\s+from|how\s+to\s+get\s+(?:from|to)|public\s+transit|metro|subway|train|railway|bus\s+route|airport\s+transfer|flight\s+route|transportation)\b/i,
+        vector: textToEmbeddingVector('travel itinerary multi day trip route transport transit metro train bus airport flight navigation schedule')
+    },
+    {
+        category: 'history',
+        route: 'live_required',
+        reason: 'historical_lookup_uses_archival_sources',
+        pattern: /\b(?:history\s+of|historical|ancient|medieval|dynasty|empire|revolution|treaty\s+of|world\s+war|century|colonial|archaeolog)\b/i,
+        vector: textToEmbeddingVector('historical archive treaty dynasty civilization empire ancient medieval revolution chronology primary source')
     },
     {
         category: 'government',

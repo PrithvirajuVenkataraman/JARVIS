@@ -27,9 +27,12 @@ export const DEFAULT_SYNTAX_STOP_WORDS = new Set();
  */
 export function tokenizeText(text = '', options = {}) {
     const minLen = typeof options.minTokenLength === 'number' ? options.minTokenLength : 2;
-    const raw = String(text || '').toLowerCase().normalize('NFKC').replace(/[^\p{L}\p{N}\s]/gu, ' ');
-    const matches = raw.match(/[\p{L}\p{N}]+/gu) || [];
-    
+    const normalized = String(text || '').toLowerCase().normalize('NFKC');
+    const compoundTokens = normalized.match(/[\p{L}\p{N}]+(?:[._-][\p{L}\p{N}]+)+|[\p{L}][\p{L}\p{N}]*(?:\+\+|#)/gu) || [];
+    const raw = normalized.replace(/[^\p{L}\p{N}\s]/gu, ' ');
+    const baseTokens = raw.match(/[\p{L}\p{N}]+/gu) || [];
+    const matches = [...baseTokens, ...compoundTokens];
+
     if (options.stopWords instanceof Set && options.stopWords.size > 0) {
         return matches.filter(match => match.length >= minLen && !options.stopWords.has(match));
     }

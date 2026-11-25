@@ -3662,6 +3662,73 @@ test('Audit regression guards for answer filter, router, search ordinals, News d
         );
         assert.equal(bingItems[0].url, 'https://news.example.com/orbital-launch');
         assert.equal(bingItems[0].description, 'Detailed launch coverage for Orbital Optics.');
+
+        // 9. Free vertical providers & RRF fusion cover tech, vehicles, politics/affairs, history, and transport itineraries
+        const {
+            inferCategory,
+            mergeResultsRRF,
+            searchHackerNewsAlgolia,
+            searchArxivPapers,
+            searchNhtsaVehicles,
+            searchReliefWebReports,
+            searchLibraryOfCongress,
+            searchTransportAndItineraries
+        } = await import('../api/_lib/free-live/providers.js');
+
+        assert.equal(inferCategory('latest semiconductor gpu tech news'), 'technology');
+        assert.equal(inferCategory('2025 electric vehicle suv recall safety rating'), 'vehicles');
+        assert.equal(inferCategory('latest UN ceasefire treaty geopolitics update'), 'conflicts_geopolitics');
+        assert.equal(inferCategory('history of ancient industrial revolution'), 'history');
+        assert.equal(inferCategory('3 day travel itinerary and route from Kyoto to Osaka'), 'transportation_itineraries');
+
+        globalThis.fetch = async (url) => {
+            const u = String(url);
+            if (u.includes('hn.algolia.com')) {
+                return Response.json({ hits: [{ objectID: '99', title: 'Open Inference Engine Release', url: 'https://tech.example.com/inference', points: 120, num_comments: 30, created_at: '2026-11-25T10:00:00Z' }] });
+            }
+            if (u.includes('export.arxiv.org')) {
+                return new Response('<feed><entry><id>http://arxiv.org/abs/2611.00001</id><title>Sparse Attention Scaling</title><summary>We evaluate sparse routing across long contexts.</summary><published>2026-11-24T00:00:00Z</published></entry></feed>');
+            }
+            if (u.includes('api.nhtsa.gov/recalls')) {
+                return Response.json({ results: [{ Component: 'BRAKES', Summary: 'Software update resolves brake warning indicator.', NHTSACampaignNumber: '26V001000', ReportReceivedDate: '2026-11-01' }] });
+            }
+            if (u.includes('api.nhtsa.gov/SafetyRatings')) {
+                return Response.json({ Results: [{ VehicleDescription: '2026 Aurora Sedan FWD' }] });
+            }
+            if (u.includes('api.reliefweb.int')) {
+                return Response.json({ data: [{ fields: { title: 'UN Diplomatic Envoy Situation Report', url: 'https://reliefweb.int/report/test', date: { created: '2026-11-25T08:00:00+00:00' }, source: [{ shortname: 'OCHA' }] } }] });
+            }
+            if (u.includes('loc.gov')) {
+                return Response.json({ results: [{ title: 'Maritime Trade Treaty Charter', url: 'https://www.loc.gov/item/test1/', description: ['Archival treaty manuscript from 1842.'], date: '1842' }] });
+            }
+            if (u.includes('nominatim.openstreetmap.org')) {
+                return Response.json([{ lat: '35.01', lon: '135.76', name: 'Origin City', display_name: 'Origin City' }]);
+            }
+            if (u.includes('router.project-osrm.org')) {
+                return Response.json({ routes: [{ distance: 56000, duration: 3600 }] });
+            }
+            if (u.includes('en.wikivoyage.org')) {
+                return Response.json({ query: { search: [{ title: 'Kyoto', snippet: 'Ancient temples and rail transit hub.' }] } });
+            }
+            return new Response('', { status: 404 });
+        };
+
+        const hnRes = await searchHackerNewsAlgolia('inference engine');
+        assert.equal(hnRes[0].source, 'Hacker News');
+        const arxivRes = await searchArxivPapers('sparse attention');
+        assert.equal(arxivRes[0].domain, 'arxiv.org');
+        const nhtsaRes = await searchNhtsaVehicles('2026 Aurora Sedan safety recall');
+        assert.equal(nhtsaRes.length, 2);
+        const reliefRes = await searchReliefWebReports('diplomatic ceasefire');
+        assert.equal(reliefRes[0].domain, 'reliefweb.int');
+        const locRes = await searchLibraryOfCongress('maritime treaty');
+        assert.equal(locRes[0].domain, 'loc.gov');
+        const tripRes = await searchTransportAndItineraries('route from Kyoto to Osaka itinerary');
+        assert.ok(tripRes.some(r => r.source === 'OSRM Routing' && r.description.includes('56.0 km')));
+        assert.ok(tripRes.some(r => r.source === 'Wikivoyage'));
+
+        const rrfMerged = mergeResultsRRF([[hnRes[0], arxivRes[0]], [arxivRes[0]]], 5);
+        assert.equal(rrfMerged[0].url, arxivRes[0].url);
     } finally {
         globalThis.fetch = origFetch;
         if (origGroqKeys === undefined) delete process.env.GROQ_API_KEYS; else process.env.GROQ_API_KEYS = origGroqKeys;

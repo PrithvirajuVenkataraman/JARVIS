@@ -8,7 +8,7 @@ const COMPARISON_ATTRIBUTE_ALIASES = {
     'land area': ['land area', 'surface area', 'square kilomet', 'square mile'],
     area: ['area', 'square kilomet', 'square mile'],
     gdp: ['gdp', 'gross domestic product'],
-    price: ['price', 'cost', 'pricing'], cost: ['price', 'cost', 'pricing'],
+    price: ['price', 'cost', 'pricing', 'msrp'], cost: ['price', 'cost', 'pricing', 'msrp'], pricing: ['price', 'cost', 'pricing', 'tier'], specs: ['specs', 'specifications', 'hardware', 'features'], specifications: ['specs', 'specifications', 'hardware', 'features'], features: ['features', 'capabilities', 'specs', 'advantages'], security: ['security', 'encryption', 'privacy', 'auth'], safety: ['safety', 'rating', 'crash', 'recall', 'nhtsa'], range: ['range', 'miles', 'kilometers', 'battery', 'epa'], battery: ['battery', 'mah', 'kwh', 'charging'], horsepower: ['horsepower', 'hp', 'torque'], mileage: ['mileage', 'mpg', 'fuel economy'], mpg: ['mpg', 'fuel economy', 'mileage'], architecture: ['architecture', 'design', 'model'], ecosystem: ['ecosystem', 'community', 'packages', 'libraries'],
     'life expectancy': ['life expectancy', 'lifespan'],
     performance: ['performance', 'benchmark', 'throughput', 'latency'],
     speed: ['speed', 'benchmark', 'throughput', 'latency'],
@@ -18,8 +18,8 @@ const COMPARISON_ATTRIBUTE_ALIASES = {
 
 export function buildComparisonSearchQueries(query) {
     const { entities, attributes } = comparisonParts(query);
-    if (entities.length !== 2 || !attributes.length) return [];
-    return entities.map(entity => `${entity} ${attributes.join(' ')}`.trim());
+    if (entities.length < 2) return [];
+    return entities.slice(0, 5).map(entity => `${entity} ${attributes.length ? attributes.join(' ') : 'overview features specs'}`.trim());
 }
 
 export function matchesComparisonAttribute(query, source) {

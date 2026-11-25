@@ -1576,5 +1576,42 @@ test('extractor preserves nested banner containers, JSON-LD articleBody, mobile 
     assert.ok(followUpReqs.some(r => r.type === 'explanation'));
 });
 
+test('N-way comparisons, compound tokenizer, contextual substitution, and recent entity updates work end-to-end', async () => {
+    const { researchTerms } = await import('../api/_lib/research-evidence.js');
+    const tokens = researchTerms('Compare Vertex-1.0, Orbit-2.5, and Pulse-3.0 on pricing and benchmarks');
+    assert.ok(tokens.includes('vertex-1.0'));
+    assert.ok(tokens.includes('orbit-2.5'));
+    assert.ok(tokens.includes('pulse-3.0'));
+
+    const subQueries = buildComparisonSearchQueries('Compare Vertex-1.0, Orbit-2.5, and Pulse-3.0');
+    assert.equal(subQueries.length, 3);
+    assert.match(subQueries[0], /Vertex-1\.0/);
+    assert.match(subQueries[2], /Pulse-3\.0/);
+
+    const reqs = buildResearchRequirements('Compare Vertex-1.0, Orbit-2.5, and Pulse-3.0 on pricing');
+    assert.equal(reqs.length, 3);
+
+    const balanced = rankResearchEvidence(
+        { query: 'Compare Vertex-1.0, Orbit-2.5, and Pulse-3.0', facets: ['Vertex-1.0', 'Orbit-2.5', 'Pulse-3.0'] },
+        [
+            { url: 'https://v1.example/a', title: 'Vertex-1.0 Overview', snippet: 'Vertex-1.0 specs and benchmarks for cloud workloads.', domain: 'v1.example', publisherDomain: 'v1.example', relevance: 0.9 },
+            { url: 'https://v2.example/b', title: 'Vertex-1.0 Deep Dive', snippet: 'Vertex-1.0 pricing and performance analysis.', domain: 'v2.example', publisherDomain: 'v2.example', relevance: 0.9 },
+            { url: 'https://o1.example/c', title: 'Orbit-2.5 Architecture', snippet: 'Orbit-2.5 benchmarks and runtime specs.', domain: 'o1.example', publisherDomain: 'o1.example', relevance: 0.8 },
+            { url: 'https://p1.example/d', title: 'Pulse-3.0 Release', snippet: 'Pulse-3.0 features and pricing tiers.', domain: 'p1.example', publisherDomain: 'p1.example', relevance: 0.7 }
+        ],
+        3
+    );
+    assert.ok(balanced.some(s => s.title.includes('Vertex-1.0')));
+    assert.ok(balanced.some(s => s.title.includes('Orbit-2.5')));
+    assert.ok(balanced.some(s => s.title.includes('Pulse-3.0')));
+
+    const entityPlan = deterministicResearchPlan('Who is Jordan Mercer?', []);
+    assert.ok(entityPlan.queries.some(q => /latest news recent updates/i.test(q)));
+
+    const followUpCompPlan = deterministicResearchPlan('Compare it with Orbit-2.5 and Pulse-3.0', [{ role: 'user', text: 'Tell me about Vertex-1.0' }]);
+    assert.match(followUpCompPlan.query, /vertex-1\.0/i);
+    assert.equal(followUpCompPlan.facets.length >= 3, true);
+});
+
 });
 

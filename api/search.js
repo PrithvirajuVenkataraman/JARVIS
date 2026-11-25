@@ -6,7 +6,7 @@ import { applyApiSecurity, unsealSecret } from './_lib/security.js';
 import { classifyFreeLiveIntent, routeMessage } from './_lib/latest/router.js';
 import { searchItems } from './_lib/latest/latest-cache.js';
 import { ingestLatestSources } from './_lib/latest/latest-ingest.js';
-import { runFreeLiveSearch, searchDuckDuckGoHtml, searchSearXNGJson, searchSearXNGRacer, searchYahooFinanceQuotes, fetchWikipediaInfobox, decodeGoogleNewsUrl, searchYahooNewsRss, searchBingNewsRss, searchWorldWireRss } from './_lib/free-live/providers.js';
+import { runFreeLiveSearch, inferCategory, searchDuckDuckGoHtml, searchSearXNGJson, searchSearXNGRacer, searchYahooFinanceQuotes, fetchWikipediaInfobox, decodeGoogleNewsUrl, searchYahooNewsRss, searchBingNewsRss, searchWorldWireRss, searchTechSources, searchVehicleSources, searchGeopoliticsAndAffairs, searchHistoryAndReference, searchTransportAndItineraries, searchWeather } from './_lib/free-live/providers.js';
 import { extractWithCrawl4Ai } from './_lib/crawl4ai-client.js';
 import { rankTextsByEmbedding, chunkTextForEmbedding, hasNvidiaEmbeddingKey, rerankTexts, getNvidiaRerankModel } from './_lib/embeddings.js';
 import { cleanQueryTarget, extractQueryTargetMetadata } from './_lib/query-target-cleanup.js';
@@ -509,8 +509,15 @@ export async function searchResearchSources(query, options = {}) {
             ['wikipedia', searchWikipedia, { limit: 2 }]
         );
         for (const [index, candidate] of buildComparisonSearchQueries(query).entries()) {
-            generalProviders.push([`duckduckgo_subject_${index + 1}`, (_, config) => searchDuckDuckGoHtml(candidate, config)]);
+            generalProviders.push([`duckduckgo_subject_${index + 1}`, (_, config) => searchDuckDuckGoHtml(candidate, config)], [`searxng_subject_${index + 1}`, (_, config) => searchSearXNGRacer(candidate, config)]);
         }
+        const verticalCategory = isTechnicalDocumentationQuery(options.originalQuery || query) ? 'general_live_web' : inferCategory(options.originalQuery || query);
+        if (verticalCategory === 'technology') generalProviders.push(['tech_vertical', searchTechSources]);
+        else if (verticalCategory === 'vehicles') generalProviders.push(['vehicles_vertical', searchVehicleSources]);
+        else if (verticalCategory === 'conflicts_geopolitics') generalProviders.push(['affairs_vertical', searchGeopoliticsAndAffairs]);
+        else if (verticalCategory === 'history') generalProviders.push(['history_vertical', searchHistoryAndReference]);
+        else if (verticalCategory === 'transportation_itineraries') generalProviders.push(['itinerary_vertical', searchTransportAndItineraries]);
+        else if (verticalCategory === 'weather') generalProviders.push(['weather_vertical', async (q, cfg) => (await searchWeather(q, cfg))?.results || []]);
         await stage(generalProviders, query, Math.max(100, Math.floor(timeoutMs * 0.65)), 'general_search');
         const direct = relevant().filter(item => !isGoogleNewsWrapper(item.url) && !/wikipedia\.org|wikidata\.org/i.test(item.url));
         const docs = isTechnicalDocumentationQuery(options.originalQuery || query);

@@ -1,11 +1,16 @@
 export const FREE_LIVE_CATEGORIES = Object.freeze([
     'news',
+    'technology',
+    'vehicles',
+    'conflicts_geopolitics',
     'government',
+    'history',
     'weather',
     'disasters',
     'sports',
     'crypto',
     'tourism_food_places',
+    'transportation_itineraries',
     'unsupported_free_live'
 ]);
 
@@ -72,6 +77,60 @@ export const FREE_LIVE_SOURCES = Object.freeze({
         timeoutMs: 5000,
         cacheTtlMs: 24 * 60 * 60 * 1000,
         limitations: 'Use lightly, cache results, and do not treat as review/ranking data.'
+    },
+    hackerNews: {
+        id: 'hacker-news',
+        name: 'Hacker News Algolia API',
+        category: 'technology',
+        attribution: 'Hacker News / Algolia',
+        timeoutMs: 3500,
+        cacheTtlMs: 5 * 60 * 1000,
+        limitations: 'Community tech stories and discussions.'
+    },
+    arxiv: {
+        id: 'arxiv',
+        name: 'arXiv Open Archive API',
+        category: 'technology',
+        attribution: 'arXiv.org',
+        timeoutMs: 4000,
+        cacheTtlMs: 60 * 60 * 1000,
+        limitations: 'Preprint research papers across CS, AI, physics, and engineering.'
+    },
+    nhtsa: {
+        id: 'nhtsa',
+        name: 'NHTSA Vehicle API',
+        category: 'vehicles',
+        attribution: 'U.S. NHTSA',
+        timeoutMs: 4000,
+        cacheTtlMs: 60 * 60 * 1000,
+        limitations: 'Official recalls and safety ratings for US-market vehicles.'
+    },
+    reliefWeb: {
+        id: 'reliefweb',
+        name: 'UN ReliefWeb API',
+        category: 'conflicts_geopolitics',
+        attribution: 'UN OCHA ReliefWeb',
+        timeoutMs: 4000,
+        cacheTtlMs: 15 * 60 * 1000,
+        limitations: 'Humanitarian and geopolitical situation reports.'
+    },
+    loc: {
+        id: 'library-of-congress',
+        name: 'Library of Congress JSON API',
+        category: 'history',
+        attribution: 'Library of Congress',
+        timeoutMs: 4000,
+        cacheTtlMs: 24 * 60 * 60 * 1000,
+        limitations: 'Archival and historical reference collections.'
+    },
+    wikivoyage: {
+        id: 'wikivoyage',
+        name: 'Wikivoyage + OSRM Public APIs',
+        category: 'transportation_itineraries',
+        attribution: 'Wikivoyage / OpenStreetMap / OSRM',
+        timeoutMs: 4500,
+        cacheTtlMs: 24 * 60 * 60 * 1000,
+        limitations: 'Community travel guides, POIs, and estimated road/walking routing.'
     }
 });
 
