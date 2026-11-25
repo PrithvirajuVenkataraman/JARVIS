@@ -280,7 +280,7 @@ test('Automatic chat starts with Hydrogen for JSON and streams, reserves Groq fa
             globalThis.fetch = async (input, init) => { calls.push({ url: String(input), body: JSON.parse(init.body) }); return Response.json({}, { status: 503 }); };
             const run = selected => streaming ? chat.streamModelWithFallback('Actor Example Person', {}, () => {}, selected, undefined, keys) : chat.runModelWithFallback('Actor Example Person', {}, selected, undefined, keys);
             const automatic = await run(null);
-            assert.equal(calls.length, 3); assert.match(calls[0].url, /models\/gemini-2\.5-flash:/); assert.match(calls[1].url, /models\/gemini-2\.5-pro:/); assert.match(calls[2].url, /groq\.com/);
+            assert.equal(calls.length, 3); assert.match(calls[0].url, /models\/gemini-4-hydrogen:/); assert.match(calls[1].url, /models\/gemini-2\.5-pro:/); assert.match(calls[2].url, /groq\.com/);
             assert.equal(automatic.payload.upstreamAttempts[0].provider, 'gemini');
             assert.equal(automatic.payload.upstreamAttempts[0].status, 503);
             assert.equal(calls[0].body.tools, undefined, 'Automatic chat does not enable billed Google Search tools');

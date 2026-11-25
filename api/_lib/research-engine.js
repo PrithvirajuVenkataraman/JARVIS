@@ -313,7 +313,8 @@ export async function runResearch(query, options = {}, dependencies = {}) {
     const generate = async (final, isRecovery = false) => {
         const selected = rankedSources();
         if (options.answer === false || scope.signal.aborted || generations >= RESEARCH_LIMITS.MAX_GENERATIONS) return false;
-        const hasSufficientEvidence = selected.some(source => evidenceText(source).length >= 100 && evidenceText(source) !== source.title);
+        const hasSufficientEvidence = selected.some(source => evidenceText(source).length >= 100 && evidenceText(source) !== source.title)
+            || selected.filter(source => evidenceText(source).length >= 50 && evidenceText(source) !== source.title).length >= 2;
         if (!hasSufficientEvidence || (!final && options.finalOnly)) return false;
         if (!final && timeLeft() < RESEARCH_LIMITS.INITIAL_GENERATION_MIN_REMAINING_MS) return false;
         if (ledger.calls >= ledger.maxCalls - (final ? 0 : 2)) return false;

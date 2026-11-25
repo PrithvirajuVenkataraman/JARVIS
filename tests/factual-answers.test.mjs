@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import handler from '../api/chat-groq.js';
+import handler, { __test as chatApi } from '../api/chat-groq.js';
 import { answerEvidencePolicy, factualAnswer } from '../api/_lib/factual-answer.js';
 import { bindAnswerConversation } from '../api/_lib/answer-preferences.js';
 import { buildResearchRequirements, validateResearchAnswer } from '../api/_lib/research-evidence.js';
@@ -176,16 +176,17 @@ test('streaming fallback from Gemini to Groq marks failover accurately', async (
         const payload = res.chunks.flatMap(chunk => String(chunk).split('\n').filter(line => line.startsWith('data:')).map(line => JSON.parse(line.slice(5)))).find(row => row.success === true);
         assert.equal(payload.provider, 'groq');
         assert.equal(payload.failover, true);
-        assert.equal(payload.upstreamAttempts[0].model, 'gemini-2.5-flash');
+        assert.equal(payload.upstreamAttempts[0].model, 'gemini-4-hydrogen');
         assert.equal(payload.upstreamAttempts[1].model, 'gemini-2.5-pro');
     } finally { globalThis.fetch = original; for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } }
 });
 
-test('429 rate limit or 503 error on gemini-2.5-flash retries gemini-2.5-pro before Groq failover, while 401/403 fails over immediately', async () => {
+test('429 rate limit or 503 error on fast-path gemini-2.5-flash retries gemini-2.5-pro before Groq failover, while 401/403 fails over immediately', async () => {
     const original = globalThis.fetch, saved = { GROQ_API_KEY: process.env.GROQ_API_KEY, GEMINI_API_KEY: process.env.GEMINI_API_KEY };
     process.env.GROQ_API_KEY = 'test-groq'; process.env.GEMINI_API_KEY = 'test-gemini';
     try {
         for (const status of [429, 503]) {
+            chatApi.resetModelAvailabilityCache();
             const calls = [];
             globalThis.fetch = async (input) => {
                 const url = String(input);
@@ -252,28 +253,30 @@ test('bare entity lookups silently enrich Groq 120B (both on failover and explic
     } finally { globalThis.fetch = original; for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } }
 });
 
-test('a 404 or 400 miss on gemini-2.5-flash falls back within Gemini to gemini-2.5-pro instead of dropping to Groq, while deep thinking prioritizes gemini-4-hydrogen', async () => {
+test('a 404 or 400 miss on gemini-4-hydrogen falls back within Gemini to gemini-2.5-pro instead of dropping to Groq, while deep thinking also prioritizes gemini-4-hydrogen', async () => {
     const original = globalThis.fetch, saved = { GROQ_API_KEY: process.env.GROQ_API_KEY, GEMINI_API_KEY: process.env.GEMINI_API_KEY };
     process.env.GROQ_API_KEY = 'test-groq'; process.env.GEMINI_API_KEY = 'test-gemini';
     try {
         for (const status of [400, 404]) for (const stream of [false, true]) {
+            chatApi.resetModelAvailabilityCache();
             const calls = [];
             globalThis.fetch = async (input) => {
                 const url = String(input);
                 calls.push(url);
-                if (url.includes('gemini-2.5-flash')) return Response.json({ error: { message: 'Model or parameter unsupported' } }, { status });
+                if (url.includes('gemini-4-hydrogen')) return Response.json({ error: { message: 'Model or parameter unsupported' } }, { status });
                 if (url.includes('generativelanguage.googleapis.com')) return stream ? new Response('data: {"candidates":[{"content":{"parts":[{"text":"Jordan Mercer is the CEO of Northbridge."}]},"finishReason":"STOP"}]}\n\n', { headers: { 'content-type': 'text/event-stream' } }) : Response.json({ candidates: [{ content: { parts: [{ text: 'Jordan Mercer is the CEO of Northbridge.' }] } }] });
                 assert.fail('Should not drop to Groq when a fallback Gemini model is available');
             };
             const req = Object.assign(new EventEmitter(), { method: 'POST', headers: { host: 'localhost', 'content-type': 'application/json' }, socket: { remoteAddress: '127.0.0.1' }, body: { message: 'Jordan mercer', stream, webMode: 'off', preferences: { selectedModel: 'auto' } } });
             const res = response(); await handler(req, res);
             assert.equal(res.statusCode, 200);
-            if (status === 400) assert.ok(calls[0].includes('gemini-2.5-flash'));
+            if (status === 400) assert.ok(calls[0].includes('gemini-4-hydrogen'));
             assert.ok(calls.some(u => u.includes('gemini-2.5-pro')));
             assert.ok(calls.every(u => u.includes('generativelanguage.googleapis.com')));
             const payload = stream ? res.chunks.flatMap(chunk => String(chunk).split('\n').filter(line => line.startsWith('data:')).map(line => JSON.parse(line.slice(5)))).find(row => row.success === true) : res.data;
             assert.equal(payload.provider, 'gemini');
         }
+        chatApi.resetModelAvailabilityCache();
         const deepCalls = [];
         globalThis.fetch = async (input) => {
             const url = String(input);

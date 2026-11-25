@@ -180,14 +180,16 @@ export function rankResearchEvidence(plan, sources, limit = 8) {
 /** Requirements describe the user's requested facts, independently of retrieved headlines. */
 export function buildResearchRequirements(query, _context = []) {
     const q = cleanText(query).slice(0, 1000);
-    const count = q.match(/\b(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+(people|persons?|individuals?|countries|nations|animals?|species|names|items|reasons|ways|steps|things)\b/i);
-    const isExplanationIntent = /\b(?:how|why|explain|describe)\b|\b(?:history|evolution|timeline|overview|summary|mechanism|process|guide|tutorial|causes?|reasons?)\b/i.test(q)
-        || (/^what\s+(?:is|are)\s+(?:an?\s+)?(?:[a-z\s]+)$/i.test(q) && !/\b(?:price|cost|population|rate|score|temperature|height|weight|depth|distance|revenue|market\s*cap|valuation|number|amount|percentage|figure|date|year)\b/i.test(q));
-    const isRole = !isExplanationIntent && /\b(?:c[efot]o|chief\s+(?:executive|financial|operating|technology|information)\s+officer|managing\s+director|chair(?:person|man|woman)?|(?:prime|chief)\s+minister|[cp]m|president|vice\s+president|vp|governor|mayor|chancellor|premier|minister|director|head\s+of\s+(?:state|government)|leader|civic\s+leader|captain|coach|commander|founder|co-founder|secretary[\s-]+general|monarch|king|queen|emperor|empress|pope|author|writer|novelist|actor|actress|inventor|creator|discoverer|discoverers|winner|champion)\b/i.test(q);
-    const isEntityLookup = !isExplanationIntent && /\b(?:capital|headquarters|hq|birthplace|currency|symbol|mascot|national\s+(?:animal|bird|flower|anthem|tree|fruit|sport|flag)|official\s+language)\b/i.test(q);
-    const entityKind = count?.[2]?.toLowerCase() || (/\b(?:who|people|persons?|individuals?)\b/i.test(q) || isRole ? 'person' : /\bcountries|nations\b/i.test(q) ? 'country' : isEntityLookup ? (/\bcapital|headquarters|hq|birthplace\b/i.test(q) ? 'place' : /\bcurrency\b/i.test(q) ? 'currency' : 'entity') : 'entity');
+    const focusQ = q.includes('—') ? (q.split('—').pop()?.trim() || q) : q;
+    const count = focusQ.match(/\b(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+(people|persons?|individuals?|countries|nations|animals?|species|names|items|reasons|ways|steps|things)\b/i);
+    const isExplanationIntent = /\b(?:how|why|explain|describe)\b|\b(?:history|evolution|timeline|overview|summary|mechanism|process|guide|tutorial|causes?|reasons?|future|upcoming|plans?|activities|projects?|careers?|background|achievements?|developments?|updates?)\b|\b(?:tell\s+me\s+about|will\s+\w+(?:\s+\w+)?\s+do|what\s+(?:happened|does|did|will|are\s+(?:the\s+)?(?:latest|recent|upcoming|future)))\b/i.test(focusQ)
+        || (/^what\s+(?:is|are)\s+(?:an?\s+)?(?:[a-z\s'-]+[?.,!]*)$/i.test(focusQ) && !/\b(?:price|cost|population|rate|score|temperature|height|weight|depth|distance|revenue|market\s*cap|valuation|number|amount|percentage|figure|date|year)\b/i.test(focusQ));
+    const isRole = !isExplanationIntent && /\b(?:c[efot]o|chief\s+(?:executive|financial|operating|technology|information)\s+officer|managing\s+director|chair(?:person|man|woman)?|(?:prime|chief)\s+minister|[cp]m|president|vice\s+president|vp|governor|mayor|chancellor|premier|minister|director|head\s+of\s+(?:state|government)|leader|civic\s+leader|captain|coach|commander|founder|co-founder|secretary[\s-]+general|monarch|king|queen|emperor|empress|pope|author|writer|novelist|actor|actress|inventor|creator|discoverer|discoverers|winner|champion)\b/i.test(focusQ);
+    const isEntityLookup = !isExplanationIntent && /\b(?:capital|headquarters|hq|birthplace|currency|symbol|mascot|national\s+(?:animal|bird|flower|anthem|tree|fruit|sport|flag)|official\s+language)\b/i.test(focusQ);
+    const entityKind = count?.[2]?.toLowerCase() || (/\b(?:who|people|persons?|individuals?)\b/i.test(focusQ) || isRole ? 'person' : /\bcountries|nations\b/i.test(focusQ) ? 'country' : isEntityLookup ? (/\bcapital|headquarters|hq|birthplace\b/i.test(focusQ) ? 'place' : /\bcurrency\b/i.test(focusQ) ? 'currency' : 'entity') : 'entity');
     const expectedCount = count ? countValue(count[1]) : undefined;
-    const comparison = comparisonParts(q);
+    const focusComparison = comparisonParts(focusQ);
+    const comparison = focusComparison.entities.length === 2 ? focusComparison : comparisonParts(q);
     const requirements = [];
     const add = (type, description, extra = {}) => requirements.push({ id: `r${requirements.length + 1}`, type, description, query: q, ...extra });
     if (comparison.entities.length === 2) {
@@ -197,14 +199,16 @@ export function buildResearchRequirements(query, _context = []) {
             }
         }
     } else {
-        const names = /\b(?:who|name(?:s)?|which (?:people|persons?|individuals?|countries|nations|animals?|teams?|cities|companies|brands?))\b/i.test(q)
+        const explicitNamesAsk = /\b(?:who|name(?:s)?|which (?:people|persons?|individuals?|countries|nations|animals?|teams?|cities|companies|brands?))\b/i.test(focusQ);
+        const names = (explicitNamesAsk
             || isRole
             || isEntityLookup
-            || (count && !/^(?:reasons|ways|steps)$/i.test(count[2]));
-        const date = /\bwhen\b|\b(?:what|which)\s+(?:is\s+the\s+)?(?:date|year)|\b(?:release|birth|publication|election|founding|launch|start|end)?\s*dates?\b/i.test(q);
-        const value = !isExplanationIntent && (/\bhow (?:many|much|old|long|far|fast|large|big|tall|deep|wide)\b/i.test(q)
-            || /\b(?:what(?:'s| is)?|current|latest)?\s*(?:the\s+)?(?:price|cost|population|rate|score|temperature|gdp|net\s*worth|height|weight|depth|distance|revenue|market\s*cap|valuation|inflation)\b/i.test(q)
-            || /\b(?:what(?:'s| is)?|current|latest)\s+(?:the\s+)?value\b/i.test(q));
+            || (count && !/^(?:reasons|ways|steps)$/i.test(count[2])))
+            && !(isExplanationIntent && !count && !isRole && !isEntityLookup && /\b(?:future|upcoming|plans?|activities|projects?|careers?|tell\s+me|what\s+(?:does|did|will))\b/i.test(focusQ));
+        const date = /\bwhen\b|\b(?:what|which)\s+(?:is\s+the\s+)?(?:date|year)|\b(?:release|birth|publication|election|founding|launch|start|end)?\s*dates?\b/i.test(focusQ);
+        const value = !isExplanationIntent && (/\bhow (?:many|much|old|long|far|fast|large|big|tall|deep|wide)\b/i.test(focusQ)
+            || /\b(?:what(?:'s| is)?|current|latest)?\s*(?:the\s+)?(?:price|cost|population|rate|score|temperature|gdp|net\s*worth|height|weight|depth|distance|revenue|market\s*cap|valuation|inflation)\b/i.test(focusQ)
+            || /\b(?:what(?:'s| is)?|current|latest)\s+(?:the\s+)?value\b/i.test(focusQ));
         if (names) {
             const description = isRole
                 ? `Identify the specific ${/person|people|individual/.test(entityKind) ? 'individuals' : entityKind} satisfying the stated role or condition; verify the official office holder`

@@ -1,4 +1,4 @@
-﻿/* Legacy feature styling is layered below the owned core components. */
+/* Legacy feature styling is layered below the owned core components. */
 @layer legacy {
 :root {
     --app-font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -2623,6 +2623,20 @@ button[aria-label^="Back"],
 .speech-input-btn.is-listening:not(:has(.vtt-loader-spinner))::after {
     display: none !important;
     content: none !important;
+}
+
+.speech-input-btn.is-processing:not(.is-listening) .vtt-mic-icon {
+    display: none !important;
+}
+
+.speech-input-btn.is-processing:not(.is-listening) .vtt-loader-spinner {
+    display: inline-block !important;
+    width: 16px;
+    height: 16px;
+    border: 2px solid currentColor;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: vtt-loader-spin 0.7s linear infinite;
 }
 
 @keyframes vtt-loader-spin {

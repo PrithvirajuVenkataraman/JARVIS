@@ -191,6 +191,55 @@ export function cleanSpeechFillers(text = '') {
     return s;
 }
 
+function normalizeVttWord(word) {
+    return String(word || '').toLowerCase().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
+}
+
+export function mergeTranscriptSegment(base = '', incoming = '') {
+    const b = String(base || '').replace(/[ \t]+$/g, '');
+    const rawInc = String(incoming || '').replace(/[ \t]+$/g, '');
+    if (rawInc.startsWith('\n')) return `${b}${rawInc}`;
+    const inc = rawInc.trim();
+    if (!inc) return b;
+    if (!b) return inc;
+
+    const bWords = b.trim().split(/\s+/);
+    const incWords = inc.split(/\s+/);
+    const bNorm = bWords.map(normalizeVttWord);
+    const incNorm = incWords.map(normalizeVttWord);
+
+    if (bNorm.length > 0 && incNorm.length >= bNorm.length && bNorm.every((w, idx) => w && w === incNorm[idx])) {
+        const tail = incWords.slice(bWords.length).join(' ');
+        return tail ? `${b} ${tail}` : b;
+    }
+
+    const maxOverlap = Math.min(bNorm.length, incNorm.length, 12);
+    for (let k = maxOverlap; k >= 1; k--) {
+        let matched = true;
+        for (let j = 0; j < k; j++) {
+            const left = bNorm[bNorm.length - k + j];
+            const right = incNorm[j];
+            if (!left || left !== right) {
+                matched = false;
+                break;
+            }
+        }
+        if (matched) {
+            const tail = incWords.slice(k).join(' ');
+            return tail ? `${b} ${tail}` : b;
+        }
+    }
+
+    return `${b} ${inc}`.replace(/^[ \t]+|[ \t]+$/g, '');
+}
+
+export function cleanPostStopTranscript(text = '') {
+    let s = cleanSpeechFillers(text);
+    if (!s) return '';
+    s = s.replace(/\b([\p{L}\p{N}']+(?:\s+[\p{L}\p{N}']+){1,5})\b(?:\s*[,.;]?\s+)\1\b/giu, '$1');
+    return cleanSpeechFillers(s);
+}
+
 export function isGenuineSpeech(text = '') {
     if (!text || typeof text !== 'string') return false;
     const cleaned = cleanSpeechFillers(text);
@@ -531,12 +580,45 @@ export function createSpeechInputController(options = {}) {
     let dictationInactivityTimer = null;
     const dictationSilenceMs = options.dictationSilenceTimeoutMs || 3000;
     const dictationInactivityMs = options.dictationInactivityTimeoutMs || 8000;
+    const postStopCleanupMs = Number.isFinite(Number(options.postStopCleanupMs))
+        ? Math.max(0, Number(options.postStopCleanupMs))
+        : ((typeof process !== 'undefined' && process.versions?.node) ? 0 : 1200);
     let accumulatedTranscript = '';
     let lastLiveCandidate = '';
     let lastEmittedFinal = '';
     let explicitlyStopped = false;
     let recognitionVersion = 0;
     let transcribing = false;
+    let postStopTimer = null;
+
+    function finalizePostStopCleanup() {
+        if (postStopTimer) {
+            clearTimeout(postStopTimer);
+            postStopTimer = null;
+        }
+        if (finishingRecognition) {
+            finishingRecognition.onresult = null;
+            finishingRecognition.onend = null;
+            finishingRecognition = null;
+        }
+        const rawPending = accumulatedTranscript || lastLiveCandidate;
+        accumulatedTranscript = '';
+        lastLiveCandidate = '';
+        transcribing = false;
+        const cleanedFinal = cleanPostStopTranscript(rawPending);
+        if (cleanedFinal) {
+            lastEmittedFinal = cleanedFinal;
+            callbacks.onFinal(cleanedFinal, {
+                autoSubmit: false,
+                source: 'vtt',
+                transcriptFinal: true,
+                interrupt: false
+            });
+        } else {
+            lastEmittedFinal = '';
+        }
+        emitState();
+    }
 
     const whisperRecorder = createWhisperRecorder({
         onSpeechDetected() {
@@ -547,7 +629,7 @@ export function createSpeechInputController(options = {}) {
             return Boolean(converseEnabled);
         },
         onTranscribed(text) {
-            const clean = cleanSpeechFillers(text);
+            const clean = cleanPostStopTranscript(text);
             if (!clean || clean === lastEmittedFinal) return;
             lastEmittedFinal = clean;
             callbacks.onFinal(clean, {
@@ -634,38 +716,22 @@ export function createSpeechInputController(options = {}) {
                     }
                 }
 
+                const isFinishing = finishingRecognition === r;
+
                 if (currentFinal) {
                     const cleanChunk = cleanSpeechFillers(currentFinal);
                     if (cleanChunk) {
-                        if (!accumulatedTranscript) {
-                            accumulatedTranscript = cleanChunk;
-                        } else {
-                            const accLower = accumulatedTranscript.toLowerCase().trim();
-                            const chunkLower = cleanChunk.toLowerCase().trim();
-                            if (!accLower.endsWith(chunkLower)) {
-                                const sep = cleanChunk.startsWith('\n') ? '' : ' ';
-                                accumulatedTranscript = `${accumulatedTranscript.replace(/[ \t]+$/, '')}${sep}${cleanChunk}`.replace(/^[ \t]+|[ \t]+$/g, '');
-                            }
-                        }
+                        accumulatedTranscript = mergeTranscriptSegment(accumulatedTranscript, cleanChunk);
                     }
                 }
 
-                let liveCandidate = accumulatedTranscript;
-                if (currentInterim) {
-                    const interimTrimmed = currentInterim.trim();
-                    const accLower = accumulatedTranscript.toLowerCase().trim();
-                    const interimLower = interimTrimmed.toLowerCase();
-                    if (!accumulatedTranscript) {
-                        liveCandidate = interimTrimmed;
-                    } else if (!accLower.endsWith(interimLower) && !interimLower.startsWith(accLower)) {
-                        const sep = interimTrimmed.startsWith('\n') ? '' : ' ';
-                        liveCandidate = `${accumulatedTranscript.replace(/[ \t]+$/, '')}${sep}${interimTrimmed}`;
-                    }
-                }
+                const liveCandidate = currentInterim
+                    ? mergeTranscriptSegment(accumulatedTranscript, currentInterim.trim())
+                    : accumulatedTranscript;
                 lastLiveCandidate = liveCandidate;
                 const cleanedInterim = cleanSpeechFillers(liveCandidate);
 
-                if (cleanedInterim) {
+                if (cleanedInterim && !isFinishing) {
                     callbacks.onInterim(cleanedInterim, getState());
                 }
 
@@ -855,13 +921,14 @@ export function createSpeechInputController(options = {}) {
         return language;
     }
 
-    async function toggleDictation() {
+    async function toggleDictation(options = {}) {
         if (typeof window !== 'undefined' && window.isSecureContext === false && window.location?.hostname !== 'localhost' && window.location?.hostname !== '127.0.0.1') {
             callbacks.onError('Microphone access requires HTTPS or localhost.');
             return false;
         }
+        if (postStopTimer) finalizePostStopCleanup();
         if (mode === 'dictation') {
-            stop();
+            stop(options);
             return false;
         }
         stop();
@@ -902,6 +969,7 @@ export function createSpeechInputController(options = {}) {
             callbacks.onError('Microphone access requires HTTPS or localhost.');
             return false;
         }
+        if (postStopTimer) finalizePostStopCleanup();
         explicitlyStopped = false;
         accumulatedTranscript = '';
         lastLiveCandidate = '';
@@ -1027,7 +1095,15 @@ export function createSpeechInputController(options = {}) {
     function stop(options = {}) {
         const cancelled = Boolean(options.cancelled || options.disableConverse || options.releaseStream);
         const finishNative = !cancelled && mode === 'dictation' && Boolean(browserRecognition);
+        const rawCleanupDelay = Number(options.postStopCleanupMs);
+        const cleanupDelayMs = Number.isFinite(rawCleanupDelay) ? Math.max(0, rawCleanupDelay) : postStopCleanupMs;
+        const hasPendingSpeech = Boolean((accumulatedTranscript || lastLiveCandidate || '').trim());
+        const shouldDelayCleanup = !cancelled && !options.immediate && !fallbackMode && mode === 'dictation' && cleanupDelayMs > 0 && (hasPendingSpeech || finishNative);
         if (cancelled) recognitionVersion++;
+        if (postStopTimer) {
+            clearTimeout(postStopTimer);
+            postStopTimer = null;
+        }
         if (cancelled && finishingRecognition) {
             finishingRecognition.onresult = null;
             finishingRecognition.onend = null;
@@ -1047,8 +1123,8 @@ export function createSpeechInputController(options = {}) {
             clearTimeout(dictationInactivityTimer);
             dictationInactivityTimer = null;
         }
-        if (!cancelled && mode === 'dictation' && (accumulatedTranscript || lastLiveCandidate)) {
-            const pendingText = cleanSpeechFillers(accumulatedTranscript || lastLiveCandidate);
+        if (!cancelled && !shouldDelayCleanup && mode === 'dictation' && (accumulatedTranscript || lastLiveCandidate)) {
+            const pendingText = cleanPostStopTranscript(accumulatedTranscript || lastLiveCandidate);
             if (pendingText && pendingText !== lastEmittedFinal) {
                 lastEmittedFinal = pendingText;
                 callbacks.onFinal(pendingText, {
@@ -1059,7 +1135,7 @@ export function createSpeechInputController(options = {}) {
                 });
             }
         }
-        if (!finishNative) {
+        if (!finishNative && !shouldDelayCleanup) {
             accumulatedTranscript = '';
             lastLiveCandidate = '';
             lastEmittedFinal = '';
@@ -1078,6 +1154,9 @@ export function createSpeechInputController(options = {}) {
                 document.body.classList.toggle('is-processing', false);
             }
         }
+        if (cancelled) {
+            transcribing = false;
+        }
         if (options.disableConverse) {
             converseEnabled = false;
             mode = 'idle';
@@ -1088,7 +1167,7 @@ export function createSpeechInputController(options = {}) {
         if (globalThis.JarvisInteractionState) {
             const current = globalThis.JarvisInteractionState.getState?.();
             if (current === 'LISTENING' || current === 'TRANSCRIBING') {
-                globalThis.JarvisInteractionState.transition?.(options.cancelled ? 'CANCELLED' : 'IDLE');
+                globalThis.JarvisInteractionState.transition?.(options.cancelled ? 'CANCELLED' : (shouldDelayCleanup ? 'TRANSCRIBING' : 'IDLE'));
             }
         }
 
@@ -1101,6 +1180,14 @@ export function createSpeechInputController(options = {}) {
             browserRecognition = null;
             if (finishNative) finishingRecognition = rec;
             try { if (cancelled && rec.abort) rec.abort(); else rec.stop(); } catch { finishingRecognition = null; }
+        }
+        if (shouldDelayCleanup) {
+            transcribing = true;
+            emitState();
+            postStopTimer = setTimeout(() => {
+                finalizePostStopCleanup();
+            }, cleanupDelayMs);
+            return;
         }
         emitState();
     }
@@ -1404,7 +1491,7 @@ export function installSpeechInputUI(options = {}) {
             visualizer?.pulse?.(0.9);
         },
         async onFinal(text, event) {
-            const cleaned = cleanSpeechFillers(text);
+            const cleaned = cleanPostStopTranscript(text);
             const isConverse = Boolean(event?.converseEnabled || event?.source === 'converse');
 
             // Strictly clear any live speech rows on the chat window
@@ -1480,18 +1567,21 @@ export function installSpeechInputUI(options = {}) {
             }
             const isListening = Boolean(state.listening);
             const isProcessing = Boolean(state.processing);
+            const isCleaningUp = Boolean(state.transcribing) && !isListening;
             const isDictation = state.mode === 'dictation' && isListening;
             const isConverse = Boolean(state.converseEnabled);
 
             vttButton.classList.toggle('is-listening', isDictation);
+            vttButton.classList.toggle('is-processing', isCleaningUp);
             vttButton.setAttribute('aria-pressed', isDictation ? 'true' : 'false');
+            vttButton.setAttribute('aria-busy', isCleaningUp ? 'true' : 'false');
 
             if (sendBtn) { sendBtn.classList.remove('is-converse-active', 'is-converse-ready'); }
 
             if (composerShell) {
                 // Voice active styling strictly applies ONLY when actively listening to voice
                 composerShell.classList.toggle('is-voice-active', isListening);
-                composerShell.classList.toggle('is-processing', isListening && isProcessing);
+                composerShell.classList.toggle('is-processing', isCleaningUp || (isListening && isProcessing));
             }
 
             if (vttWaveform) {
@@ -1504,7 +1594,7 @@ export function installSpeechInputUI(options = {}) {
                 if (!state.supported) {
                     setStatusText('Voice input unavailable in this browser.');
                 } else {
-                    setStatusText(state.transcribing ? 'Transcribing voice...' : '');
+                    setStatusText(state.transcribing ? (isCleaningUp ? 'Cleaning up transcript...' : 'Transcribing voice...') : '');
                 }
             }
 
@@ -1544,7 +1634,7 @@ export function installSpeechInputUI(options = {}) {
         if (isCurrentlyDictating) {
             // Second press: user stops dictation (ChatGPT style)
             const res = await controller.toggleDictation();
-            if (input) {
+            if (input && !controller.getState().transcribing) {
                 sessionSpokenText = '';
                 try {
                     input.focus();

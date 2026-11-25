@@ -99,53 +99,17 @@ export async function searchDuckDuckGoHtml(query, options = {}) {
         reportSearchResponse(options, 'duckduckgo', response);
         if (!response.ok || response.status === 202) return [];
         const html = await response.text();
-        const linkRegex = /<a\s+[^>]*class=['"]result-link['"][^>]*>([\s\S]*?)<\/a>/gi;
-        const snippetRegex = /<td\s+[^>]*class=['"]result-snippet['"][^>]*>([\s\S]*?)<\/td>/gi;
-        const links = [];
-        let match;
-        while ((match = linkRegex.exec(html)) !== null) {
-            const hrefMatch = /href=['"]([^'"]+)['"]/i.exec(match[0]);
-            let rawUrl = hrefMatch ? hrefMatch[1] : '';
-            if (rawUrl.includes('uddg=')) {
-                try {
-                    const u = /uddg=([^&]+)/.exec(rawUrl);
-                    if (u) rawUrl = decodeURIComponent(u[1]);
-                } catch (_) {}
-            }
-            if (rawUrl.startsWith('//')) rawUrl = `https:${rawUrl}`;
-            links.push({ title: cleanSnippetText(match[1]), url: rawUrl });
-        }
-        const snippets = [];
-        let sMatch;
-        while ((sMatch = snippetRegex.exec(html)) !== null) {
-            snippets.push(cleanSnippetText(sMatch[1]));
-        }
-        const results = [];
-        for (let i = 0; i < links.length && results.length < limit; i++) {
-            const l = links[i];
-            if (l.title && l.url && l.url.startsWith('http')) {
-                const snip = snippets[i] || '';
-                const docDateMs = parseDocumentDate({ url: l.url, title: l.title, snippet: snip, description: snip });
-                const dateStr = docDateMs ? formatDocumentDate(docDateMs) : '';
-                results.push({
-                    title: l.title,
-                    description: snip,
-                    snippet: snip,
-                    url: l.url,
-                    domain: getDomainFromUrl(l.url),
-                    source: 'DuckDuckGo Web',
-                    sourceType: 'live_web',
-                    trusted: true,
-                    date: dateStr,
-                    publishedDate: dateStr,
-                    publishedMs: docDateMs || 0,
-                    freshness: dateStr || 'live_web_index',
-                    qualitySignals: ['live_search_index', 'ddg_html'],
-                    query
-                });
-            }
-        }
-        return results;
+        return extractDdgMatchedPairs(
+            html,
+            /<a\s+[^>]*class=['"]result-link['"][^>]*>([\s\S]*?)<\/a>/gi,
+            /<td\s+[^>]*class=['"]result-snippet['"][^>]*>([\s\S]*?)<\/td>/gi,
+            (match) => {
+                const hrefMatch = /href=['"]([^'"]+)['"]/i.exec(match[0]);
+                return { rawUrl: hrefMatch ? hrefMatch[1] : '', rawTitle: match[1] };
+            },
+            limit,
+            query
+        );
     };
 
     const tryDdgHtml = async (dfParam = dateFilter?.ddg) => {
@@ -165,44 +129,60 @@ export async function searchDuckDuckGoHtml(query, options = {}) {
         reportSearchResponse(options, 'duckduckgo', response);
         if (!response.ok || response.status === 202) return [];
         const html = await response.text();
+        return extractDdgMatchedPairs(
+            html,
+            /<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi,
+            /<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>/gi,
+            (match) => ({ rawUrl: match[1], rawTitle: match[2] }),
+            limit,
+            query
+        );
+    };
+
+    function unwrapDdgUrl(rawUrl) {
+        let url = String(rawUrl || '');
+        if (url.includes('uddg=')) {
+            try {
+                const u = /uddg=([^&]+)/.exec(url);
+                if (u) url = decodeURIComponent(u[1]);
+            } catch (_) {}
+        }
+        if (url.startsWith('//')) url = `https:${url}`;
+        return url;
+    }
+
+    function extractDdgMatchedPairs(html, linkRegex, snippetRegex, parseLink, maxResults, targetQuery) {
+        const linkMatches = [...String(html || '').matchAll(linkRegex)];
+        const snippetMatches = [...String(html || '').matchAll(snippetRegex)];
         const results = [];
-        
-        const linkRegex = /<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
-        const snippetRegex = /<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>/gi;
+        let sIdx = 0;
 
-        const links = [];
-        let match;
-        while ((match = linkRegex.exec(html)) !== null) {
-            let rawUrl = match[1];
-            if (rawUrl.includes('uddg=')) {
-                try {
-                    const u = /uddg=([^&]+)/.exec(rawUrl);
-                    if (u) rawUrl = decodeURIComponent(u[1]);
-                } catch (_) {}
+        for (let i = 0; i < linkMatches.length && results.length < maxResults; i++) {
+            const match = linkMatches[i];
+            const { rawUrl, rawTitle } = parseLink(match);
+            const url = unwrapDdgUrl(rawUrl);
+            const title = cleanSnippetText(rawTitle || '');
+            const startPos = match.index + match[0].length;
+            const endPos = i + 1 < linkMatches.length ? linkMatches[i + 1].index : html.length;
+
+            while (sIdx < snippetMatches.length && snippetMatches[sIdx].index < startPos) {
+                sIdx++;
             }
-            if (rawUrl.startsWith('//')) rawUrl = `https:${rawUrl}`;
-            const title = cleanSnippetText(match[2]);
-            links.push({ title, url: rawUrl });
-        }
+            let snip = '';
+            if (sIdx < snippetMatches.length && snippetMatches[sIdx].index < endPos) {
+                snip = cleanSnippetText(snippetMatches[sIdx][1]);
+                sIdx++;
+            }
 
-        const snippets = [];
-        let sMatch;
-        while ((sMatch = snippetRegex.exec(html)) !== null) {
-            snippets.push(cleanSnippetText(sMatch[1]));
-        }
-
-        for (let i = 0; i < links.length && results.length < limit; i++) {
-            const l = links[i];
-            if (l.title && l.url && l.url.startsWith('http')) {
-                const snip = snippets[i] || '';
-                const docDateMs = parseDocumentDate({ url: l.url, title: l.title, snippet: snip, description: snip });
+            if (title && url && url.startsWith('http')) {
+                const docDateMs = parseDocumentDate({ url, title, snippet: snip, description: snip });
                 const dateStr = docDateMs ? formatDocumentDate(docDateMs) : '';
                 results.push({
-                    title: l.title,
+                    title,
                     description: snip,
                     snippet: snip,
-                    url: l.url,
-                    domain: getDomainFromUrl(l.url),
+                    url,
+                    domain: getDomainFromUrl(url),
                     source: 'DuckDuckGo Web',
                     sourceType: 'live_web',
                     trusted: true,
@@ -211,12 +191,12 @@ export async function searchDuckDuckGoHtml(query, options = {}) {
                     publishedMs: docDateMs || 0,
                     freshness: dateStr || 'live_web_index',
                     qualitySignals: ['live_search_index', 'ddg_html'],
-                    query
+                    query: targetQuery
                 });
             }
         }
         return results;
-    };
+    }
 
     const tryDdgApi = async () => {
         const cleaned = query.replace(/\b(?:latest findings|latest updates|news|today|2024|2025|2026)\b/gi, '').trim();
@@ -819,6 +799,81 @@ export async function searchYahooNewsRss(query, options = {}) {
     }
 }
 
+export function parseBingNewsRssXml(xml, query, limit = 6) {
+    const items = [];
+    const itemRegex = /<item>([\s\S]*?)<\/item>/gi;
+    let match;
+
+    while ((match = itemRegex.exec(xml)) !== null && items.length < limit) {
+        const block = match[1];
+        const titleMatch = /<title>([\s\S]*?)<\/title>/i.exec(block);
+        const linkMatch = /<link>([\s\S]*?)<\/link>/i.exec(block);
+        const pubDateMatch = /<pubDate>([\s\S]*?)<\/pubDate>/i.exec(block);
+        const descMatch = /<description>([\s\S]*?)<\/description>/i.exec(block);
+        const sourceMatch = /<(?:News:Source|source)[^>]*>([\s\S]*?)<\/(?:News:Source|source)>/i.exec(block);
+
+        const title = cleanSnippetText(titleMatch?.[1] || '');
+        let link = decodeHtmlEntities(linkMatch?.[1] || '').trim();
+        if (link.includes('url=')) {
+            try {
+                const parsed = new URL(link);
+                const unwrapped = parsed.searchParams.get('url');
+                if (unwrapped && unwrapped.startsWith('http')) link = unwrapped;
+            } catch (_) {}
+        }
+        const pubDate = cleanSnippetText(pubDateMatch?.[1] || '');
+        const desc = cleanSnippetText(descMatch?.[1] || '');
+        const publisher = cleanSnippetText(sourceMatch?.[1] || '') || 'Bing News';
+
+        if (!title || !link || !link.startsWith('http')) continue;
+        const domain = getDomainFromUrl(link) || 'bing.com';
+        const docDateMs = parseDocumentDate({ url: link, title, snippet: desc, description: desc, pubDate, publishedDate: pubDate });
+        const dateStr = docDateMs ? formatDocumentDate(docDateMs) : pubDate;
+
+        items.push({
+            title,
+            description: desc || title,
+            snippet: desc || title,
+            url: link,
+            domain,
+            publisher,
+            source: publisher,
+            sourceType: 'news',
+            trusted: true,
+            date: dateStr,
+            publishedDate: dateStr,
+            publishedMs: docDateMs || 0,
+            freshness: dateStr || 'live_news',
+            qualitySignals: ['bing_news_rss', 'live_news'],
+            query
+        });
+    }
+    return items;
+}
+
+export async function searchBingNewsRss(query, options = {}) {
+    const rawQ = String(query || '').trim();
+    if (!rawQ) return [];
+    const limit = clampInt(options.limit, 6, 1, 15);
+    const timeoutMs = Math.min(Number(options.timeoutMs) || 2400, 3500);
+    try {
+        const url = `https://www.bing.com/news/search?q=${encodeURIComponent(rawQ)}&format=rss&mkt=en-US`;
+        const response = await fetchWithTimeout(url, {
+            headers: {
+                'Accept': 'application/rss+xml, application/xml, text/xml, */*',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
+            },
+            signal: options.signal
+        }, timeoutMs);
+        if (!response || !response.ok) return [];
+        const xml = await response.text();
+        if (!xml || !xml.includes('<item>')) return [];
+        return parseBingNewsRssXml(xml, rawQ, limit);
+    } catch (_) {
+        return [];
+    }
+}
+
 export function parseWorldWireRssXml(xml, query, limit = 6, providerName = 'BBC News', defaultDomain = 'bbc.co.uk') {
     const items = [];
     const itemRegex = /<item>([\s\S]*?)<\/item>/gi;
@@ -1149,8 +1204,9 @@ export async function runFreeLiveSearch(query, route = {}, options = {}) {
     // Universal Zero-Key Multi-Engine Parallel Fast-Race
     // Parallel race across resilient search engines: Google News RSS, Yahoo News RSS, BBC World Wire, DuckDuckGo Lite, Wikipedia, and GDELT.
     const raceTimeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : undefined;
-    const [googleNewsResults, yahooResults, worldWireResults, ddgResults, wikiResults, gdeltResults] = await Promise.allSettled([
+    const [googleNewsResults, bingNewsResults, yahooResults, worldWireResults, ddgResults, wikiResults, gdeltResults] = await Promise.allSettled([
         searchGoogleNewsRss(query, { limit: 5, timeoutMs: raceTimeoutMs, signal: options.signal }),
+        searchBingNewsRss(query, { limit: 5, timeoutMs: raceTimeoutMs, signal: options.signal }),
         searchYahooNewsRss(query, { limit: 4, timeoutMs: raceTimeoutMs, signal: options.signal }),
         searchWorldWireRss(query, { limit: 4, timeoutMs: raceTimeoutMs, signal: options.signal }),
         searchDuckDuckGoHtml(query, { limit: 6, timeoutMs: raceTimeoutMs, signal: options.signal }),
@@ -1170,6 +1226,7 @@ export async function runFreeLiveSearch(query, route = {}, options = {}) {
         }
     };
     if (googleNewsResults.status === 'fulfilled') addUnique(googleNewsResults.value);
+    if (bingNewsResults.status === 'fulfilled') addUnique(bingNewsResults.value);
     if (yahooResults.status === 'fulfilled') addUnique(yahooResults.value);
     if (worldWireResults.status === 'fulfilled') addUnique(worldWireResults.value);
     if (ddgResults.status === 'fulfilled') addUnique(ddgResults.value);

@@ -113,7 +113,7 @@ export const BROWSER_PROFILES = Object.freeze({
 
 const SCRIPT_STYLE_REGEX = /<(?:script|style|noscript|svg|form|iframe|nav|footer|header|aside)\b[^<]*(?:(?!<\/(?:script|style|noscript|svg|form|iframe|nav|footer|header|aside)>)<[^<]*)*<\/(?:script|style|noscript|svg|form|iframe|nav|footer|header|aside)>/gi;
 
-const WIDGET_CLASS_REGEX = /<(?:div|section|aside|ul|p)\b[^>]*(?:class|id)=["'][^"']*\b(?:sidebar|widget|trending|popular|related|recommended|comments|advert|ad-|banner|newsletter|social-share|cookie-consent|modal)\b[^"']*["'][^>]*>[\s\S]*?<\/(?:div|section|aside|ul|p)>/gi;
+const WIDGET_CLASS_REGEX = /<(?:aside|ul|p)\b[^>]*(?:class|id)=["'][^"']*\b(?:sidebar|widget|trending|popular|related|recommended|comments|advert|ad-|banner|newsletter|social-share|cookie-consent|modal)\b[^"']*["'][^>]*>[\s\S]*?<\/(?:aside|ul|p)>/gi;
 
 const BOT_CHALLENGE_TITLE_REGEX = /<title[^>]*>\s*(?:Just a moment\.\.\.|Attention Required!|Cloudflare|Security Check|Access Denied|Robot or Human\?|DDOS-GUARD|Security Verification)\s*<\/title>/i;
 
@@ -248,6 +248,64 @@ function stripHtmlTags(str) {
     );
 }
 
+function pickLongestContainerMatch(html, regex) {
+    let bestInner = '';
+    let bestScore = 0;
+    for (const m of String(html || '').matchAll(regex)) {
+        const inner = m[1] || '';
+        const textLen = inner.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().length;
+        if (textLen > bestScore) {
+            bestScore = textLen;
+            bestInner = inner;
+        }
+    }
+    return bestInner;
+}
+
+function collectJsonLdStrings(node, out = { bodies: [], titles: [], dates: [] }) {
+    if (!node || typeof node !== 'object') return out;
+    if (Array.isArray(node)) {
+        for (const item of node) collectJsonLdStrings(item, out);
+        return out;
+    }
+    if (typeof node.articleBody === 'string' && node.articleBody.trim()) out.bodies.push(node.articleBody.trim());
+    if (typeof node.description === 'string' && node.description.trim()) out.bodies.push(node.description.trim());
+    if (typeof node.headline === 'string' && node.headline.trim()) out.titles.push(node.headline.trim());
+    if (typeof node.datePublished === 'string' && node.datePublished.trim()) out.dates.push(node.datePublished.trim());
+    if (node['@graph']) collectJsonLdStrings(node['@graph'], out);
+    return out;
+}
+
+function extractJsonLdAndMetaFallback(html) {
+    const out = { bodies: [], titles: [], dates: [] };
+    for (const m of String(html || '').matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
+        try {
+            const parsed = JSON.parse(m[1].trim());
+            collectJsonLdStrings(parsed, out);
+        } catch { /* Ignore malformed JSON-LD blocks */ }
+    }
+    const metaDesc = String(html || '').match(/<meta\s+(?:property|name)=["'](?:description|og:description|twitter:description)["']\s+content=["']([^"']+)["']/i)
+        || String(html || '').match(/<meta\s+content=["']([^"']+)["']\s+(?:property|name)=["'](?:description|og:description|twitter:description)["']/i);
+    if (metaDesc?.[1]) out.metaDescription = stripHtmlTags(metaDesc[1]);
+    return out;
+}
+
+function extractParagraphCandidates(scopedHtml) {
+    const rawParagraphMatches = String(scopedHtml || '').match(/<(?:p|li|blockquote|h[2-4])\b[^>]*>([\s\S]*?)<\/(?:p|li|blockquote|h[2-4])>/gi) || [];
+    const candidateParagraphs = [];
+    const candidateTags = [];
+    for (const p of rawParagraphMatches) {
+        const cleanedP = stripHtmlTags(p);
+        const tag = /^<([a-z0-9]+)/i.exec(p)?.[1]?.toLowerCase() || 'p';
+        const minLength = /^(?:li|h[2-4])$/.test(tag) ? 5 : 40;
+        if (cleanedP.length >= minLength && !/\b(?:all rights reserved|terms of service|privacy policy|cookie settings|subscribe to our newsletter|sign up for free)\b/i.test(cleanedP)) {
+            candidateParagraphs.push(cleanedP);
+            candidateTags.push(tag);
+        }
+    }
+    return { candidateParagraphs, candidateTags };
+}
+
 /**
  * Extracts article text from raw HTML using scoped selectors and relevance gating.
  *
@@ -263,12 +321,16 @@ export function extractArticleFromHtml(html, url = '', query = '') {
         return null;
     }
 
+    const structured = extractJsonLdAndMetaFallback(html);
+
     // 1. Extract metadata (title & pubDate)
     let pubDate = '';
     const dateMatch = html.match(/<meta\s+(?:property|name)=["'](?:article:published_time|pubdate|date|og:published_time|dc\.date)["']\s+content=["']([^"']+)["']/i)
         || html.match(/<meta\s+content=["']([^"']+)["']\s+(?:property|name)=["'](?:article:published_time|pubdate|date|og:published_time|dc\.date)["']/i);
     if (dateMatch?.[1]) {
         pubDate = dateMatch[1].trim();
+    } else if (structured.dates[0]) {
+        pubDate = structured.dates[0];
     }
 
     let pageTitle = '';
@@ -279,45 +341,62 @@ export function extractArticleFromHtml(html, url = '', query = '') {
         const titleTagMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
         if (titleTagMatch?.[1]) {
             pageTitle = stripHtmlTags(titleTagMatch[1]);
+        } else if (structured.titles[0]) {
+            pageTitle = stripHtmlTags(structured.titles[0]);
         }
     }
 
     // 2. Strip scripts, styles, widgets, and sidebars
-    let cleaned = html
+    const cleaned = html
         .replace(SCRIPT_STYLE_REGEX, ' ')
         .replace(WIDGET_CLASS_REGEX, ' ');
 
-    // 3. Extract scoped content container (<article>, [role="article"], <main>, or .article-body)
-    const articleMatch = cleaned.match(/<article\b[^>]*>([\s\S]*?)<\/article>/i)
-        || cleaned.match(/<[^>]+role=["']article["'][^>]*>([\s\S]*?)<\/[^>]+>/i)
-        || cleaned.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i);
+    // 3. Extract longest scoped content container (<article>, [role="article"], or <main>)
+    const containerHtml = pickLongestContainerMatch(cleaned, /<article\b[^>]*>([\s\S]*?)<\/article>/gi)
+        || pickLongestContainerMatch(cleaned, /<[^>]+role=["']article["'][^>]*>([\s\S]*?)<\/[^>]+>/gi)
+        || pickLongestContainerMatch(cleaned, /<main\b[^>]*>([\s\S]*?)<\/main>/gi);
 
     // A bounded read may end before </main>; keep the substantive prefix instead
     // of falling back to navigation before the main container.
-    const openContainer = articleMatch ? null : /<(?:article|main)\b[^>]*>/i.exec(cleaned);
-    const scopedHtml = articleMatch ? articleMatch[1] : openContainer ? cleaned.slice(openContainer.index + openContainer[0].length) : cleaned;
+    const openContainer = containerHtml ? null : /<(?:article|main)\b[^>]*>/i.exec(cleaned);
+    let scopedHtml = containerHtml || (openContainer ? cleaned.slice(openContainer.index + openContainer[0].length) : cleaned);
 
-    // 4. Extract paragraphs and list items
-    const rawParagraphMatches = scopedHtml.match(/<(?:p|li|blockquote|h[2-4])\b[^>]*>([\s\S]*?)<\/(?:p|li|blockquote|h[2-4])>/gi) || [];
-
-    const candidateParagraphs = [];
-    const candidateTags = [];
-    for (const p of rawParagraphMatches) {
-        const cleanedP = stripHtmlTags(p);
-        const tag = /^<([a-z0-9]+)/i.exec(p)?.[1]?.toLowerCase() || 'p';
-        const minLength = /^(?:li|h[2-4])$/.test(tag) ? 5 : 40;
-        if (cleanedP.length >= minLength && !/\b(?:all rights reserved|terms of service|privacy policy|cookie settings|subscribe to our newsletter|sign up for free)\b/i.test(cleanedP)) {
-            candidateParagraphs.push(cleanedP);
-            candidateTags.push(tag);
+    // 4. Extract paragraphs and list items, falling back to full cleaned HTML / JSON-LD if container was a teaser card
+    let { candidateParagraphs, candidateTags } = extractParagraphCandidates(scopedHtml);
+    if (candidateParagraphs.length < 2 && scopedHtml !== cleaned) {
+        const fullCandidates = extractParagraphCandidates(cleaned);
+        if (fullCandidates.candidateParagraphs.length > candidateParagraphs.length) {
+            scopedHtml = cleaned;
+            ({ candidateParagraphs, candidateTags } = fullCandidates);
         }
     }
+    if (candidateParagraphs.length < 2 && structured.bodies.length) {
+        for (const body of structured.bodies) {
+            const cleanBody = stripHtmlTags(body);
+            if (cleanBody.length >= 40 && !candidateParagraphs.includes(cleanBody)) {
+                candidateParagraphs.push(cleanBody);
+                candidateTags.push('p');
+            }
+        }
+    }
+    if (candidateParagraphs.length === 0 && structured.metaDescription && structured.metaDescription.length >= 40) {
+        candidateParagraphs.push(structured.metaDescription);
+        candidateTags.push('p');
+    }
 
-    if (query && !assessSourceRelevance(query, { title: pageTitle, url, text: candidateParagraphs.join('\n\n') }).relevant) return null;
+    const relevanceCheck = query
+        ? assessSourceRelevance(query, { title: pageTitle, url, text: candidateParagraphs.join('\n\n') })
+        : { relevant: true };
 
     // 5. Apply Relevance Gating
-    const qualifiedParagraphs = query
+    let qualifiedParagraphs = query
         ? filterRelevantParagraphs(candidateParagraphs, query)
         : candidateParagraphs.slice(0, 10);
+
+    if (query && !relevanceCheck.relevant && qualifiedParagraphs.length === 0) return null;
+    if (!qualifiedParagraphs.length && relevanceCheck.relevant && candidateParagraphs.length) {
+        qualifiedParagraphs = candidateParagraphs.filter((p) => p.length >= 50).slice(0, 8);
+    }
 
     if (!qualifiedParagraphs.length) {
         // Extraction failed relevance gating -> fall back to snippet
@@ -392,66 +471,83 @@ export async function crawlArticleResilient(url, query = '', options = {}) {
     const timeoutMs = Math.min(Number(options.timeoutMs) || 2500, 5000);
     const scope = researchTimeoutSignal(timeoutMs, options.signal);
 
-    const profile = options.profile === 'mobile' ? BROWSER_PROFILES.mobile : BROWSER_PROFILES.desktop;
+    const initialProfile = options.profile === 'mobile' ? BROWSER_PROFILES.mobile : BROWSER_PROFILES.desktop;
+    const profilesToTry = options.profile ? [initialProfile] : [BROWSER_PROFILES.desktop, BROWSER_PROFILES.mobile];
 
     try {
-        const page = await fetchPublicPage(targetUrl, {
-            headers: profile,
-            signal: scope.signal
-        });
-        if (!page) return null;
-        const { response } = page;
+        let lastBlockReason = '';
+        for (let attempt = 0; attempt < profilesToTry.length; attempt++) {
+            if (scope.signal.aborted) return null;
+            const page = await fetchPublicPage(targetUrl, {
+                headers: profilesToTry[attempt],
+                signal: scope.signal
+            });
+            if (!page) return null;
+            const { response } = page;
 
-        if (!response.ok) {
-            options.onDiagnostic?.({ stage: 'page_reading', provider: 'html', reason: `http_${response.status}` });
-            if (response.status === 403 || response.status === 429) {
-                recordDomainFailure(host, `http_${response.status}`);
-            }
-            return null;
-        }
-
-        const contentType = response.headers?.get('content-type') || '';
-        if (contentType && !/html|text\//i.test(contentType)) { await response.body?.cancel().catch(() => {}); return null; }
-        let html = '';
-        let truncated = page.truncated === true;
-        if (response.body?.getReader) {
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-            const cancel = () => { reader.cancel().catch(() => {}); };
-            scope.signal.addEventListener('abort', cancel, { once: true });
-            let bytes = 0;
-            try {
-                while (!scope.signal.aborted) {
-                    const { value, done } = await reader.read();
-                    if (done) break;
-                    const available = Math.max(0, 2_000_000 - bytes);
-                    const chunk = value.length > available ? value.subarray(0, available) : value;
-                    bytes += chunk.length;
-                    html += decoder.decode(chunk, { stream: true });
-                    if (value.length > available || bytes >= 2_000_000) { truncated = true; await reader.cancel(); break; }
+            if (!response.ok) {
+                const retryableBlock = (response.status === 403 || response.status === 406 || response.status === 429);
+                await response.body?.cancel().catch(() => {});
+                if (retryableBlock && attempt + 1 < profilesToTry.length) {
+                    lastBlockReason = `http_${response.status}`;
+                    continue;
                 }
-                html += decoder.decode();
-            } finally { scope.signal.removeEventListener('abort', cancel); reader.releaseLock(); }
-        } else { html = await response.text(); truncated = html.length > 2_000_000; html = html.slice(0, 2_000_000); }
-        if (scope.signal.aborted) return null;
-        if (!html || typeof html !== 'string') return null;
+                options.onDiagnostic?.({ stage: 'page_reading', provider: 'html', reason: `http_${response.status}` });
+                if (response.status === 403 || response.status === 429) {
+                    recordDomainFailure(host, `http_${response.status}`);
+                }
+                return null;
+            }
 
-        if (isBotChallengeHtml(html)) {
-            recordDomainFailure(host, 'bot_challenge_detected');
+            const contentType = response.headers?.get('content-type') || '';
+            if (contentType && !/html|text\//i.test(contentType)) { await response.body?.cancel().catch(() => {}); return null; }
+            let html = '';
+            let truncated = page.truncated === true;
+            if (response.body?.getReader) {
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                const cancel = () => { reader.cancel().catch(() => {}); };
+                scope.signal.addEventListener('abort', cancel, { once: true });
+                let bytes = 0;
+                try {
+                    while (!scope.signal.aborted) {
+                        const { value, done } = await reader.read();
+                        if (done) break;
+                        const available = Math.max(0, 2_000_000 - bytes);
+                        const chunk = value.length > available ? value.subarray(0, available) : value;
+                        bytes += chunk.length;
+                        html += decoder.decode(chunk, { stream: true });
+                        if (value.length > available || bytes >= 2_000_000) { truncated = true; await reader.cancel(); break; }
+                    }
+                    html += decoder.decode();
+                } finally { scope.signal.removeEventListener('abort', cancel); reader.releaseLock(); }
+            } else { html = await response.text(); truncated = html.length > 2_000_000; html = html.slice(0, 2_000_000); }
+            if (scope.signal.aborted) return null;
+            if (!html || typeof html !== 'string') return null;
+
+            if (isBotChallengeHtml(html)) {
+                if (attempt + 1 < profilesToTry.length) {
+                    lastBlockReason = 'bot_challenge_detected';
+                    continue;
+                }
+                recordDomainFailure(host, 'bot_challenge_detected');
+                return null;
+            }
+
+            const extracted = extractArticleFromHtml(html, page.url, query);
+            if (extracted) {
+                if (truncated) extracted.truncated = true;
+                if (ARTICLE_CONTENT_CACHE.size >= MAX_CACHE_ENTRIES) {
+                    const oldest = ARTICLE_CONTENT_CACHE.keys().next().value;
+                    ARTICLE_CONTENT_CACHE.delete(oldest);
+                }
+                ARTICLE_CONTENT_CACHE.set(cacheKey, { cachedAt: Date.now(), data: extracted });
+                return extracted;
+            }
+
+            if (lastBlockReason) recordDomainFailure(host, lastBlockReason);
             return null;
         }
-
-        const extracted = extractArticleFromHtml(html, page.url, query);
-        if (extracted) {
-            if (truncated) extracted.truncated = true;
-            if (ARTICLE_CONTENT_CACHE.size >= MAX_CACHE_ENTRIES) {
-                const oldest = ARTICLE_CONTENT_CACHE.keys().next().value;
-                ARTICLE_CONTENT_CACHE.delete(oldest);
-            }
-            ARTICLE_CONTENT_CACHE.set(cacheKey, { cachedAt: Date.now(), data: extracted });
-            return extracted;
-        }
-
         return null;
     } catch (err) {
         if (err?.name === 'AbortError' && !options.signal?.aborted) {

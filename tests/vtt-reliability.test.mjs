@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cleanSpeechFillers, createWhisperRecorder, createSpeechInputController } from '../app/speech-input.js';
+import { cleanSpeechFillers, cleanPostStopTranscript, mergeTranscriptSegment, createWhisperRecorder, createSpeechInputController } from '../app/speech-input.js';
 
 const tick = () => new Promise(resolve => setTimeout(resolve, 10));
 function deferred() { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; }
@@ -118,3 +118,46 @@ test('a failed fallback terminates cleanly instead of cycling back to failed bro
         assert.equal(Recognition.instances.length, instances); assert.equal(controller.getState().mode, 'idle'); assert.equal(controller.getState().listening, false); assert.match(errors[0], /temporarily unavailable/);
     } finally { controller.stop({ disableConverse: true, cancelled: true }); }
 }));
+
+test('word-by-word VTT deduplicates punctuation drift and runs post-stop cleanup before committing final text', async () => {
+    assert.equal(mergeTranscriptSegment('Hello world.', 'hello world today'), 'Hello world. today');
+    assert.equal(cleanPostStopTranscript('um i want to i want to deploy this'), 'I want to deploy this');
+
+    const interims = [];
+    const finals = [];
+    const states = [];
+    class StreamingRecognition {
+        static instances = [];
+        constructor() { StreamingRecognition.instances.push(this); }
+        start() { this.onstart?.(); }
+        stop() {}
+        emit(text, isFinal) {
+            this.onresult?.({ resultIndex: 0, results: [{ isFinal, 0: { transcript: text } }] });
+        }
+    }
+    const controller = createSpeechInputController({
+        Recognition: StreamingRecognition,
+        postStopCleanupMs: 40,
+        onInterim: text => interims.push(text),
+        onFinal: text => finals.push(text),
+        onState: state => states.push({ listening: state.listening, transcribing: state.transcribing })
+    });
+    try {
+        await controller.toggleDictation();
+        const rec = StreamingRecognition.instances.at(-1);
+        rec.emit('hello', false);
+        rec.emit('hello world.', true);
+        rec.emit('hello world today', false);
+        assert.deepEqual(interims, ['Hello', 'Hello world.', 'Hello world. Today']);
+
+        controller.stop();
+        assert.equal(controller.getState().listening, false);
+        assert.equal(controller.getState().transcribing, true);
+        rec.emit('um uh hello world today period', true);
+        await new Promise(resolve => setTimeout(resolve, 65));
+        assert.equal(controller.getState().transcribing, false);
+        assert.equal(finals.at(-1), 'Hello world. Today.');
+    } finally {
+        controller.stop({ cancelled: true });
+    }
+});

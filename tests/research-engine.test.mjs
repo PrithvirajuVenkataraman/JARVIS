@@ -1537,5 +1537,44 @@ test('an HTTP-successful but invented quote cannot become a verified answer', as
     } finally { globalThis.fetch = original; clearResearchModelHealth(); }
 });
 
+test('extractor preserves nested banner containers, JSON-LD articleBody, mobile fallback, and explanatory follow-ups', async () => {
+    const nestedHtml = '<html><head><title>Orbital Optics Update</title></head><body>'
+        + '<div class="article-banner"><div><article><p>Teaser summary.</p></article><article><p>Orbital Optics announced a new calibration mirror for its deep space observatory program in 2026.</p><p>Engineers completed thermal vacuum testing across forty optical assemblies before integration.</p></article></div></div>'
+        + '</body></html>';
+    const nested = extractArticleFromHtml(nestedHtml, 'https://science.example.com/optics', 'Orbital Optics calibration mirror');
+    assert.ok(nested);
+    assert.match(nested.bodyText, /calibration mirror/i);
+
+    const jsonLdHtml = '<html><head><title>Quantum Sensor Note</title><script type="application/ld+json">{"@type":"NewsArticle","headline":"Quantum Sensor Note","articleBody":"Quantum Sensor Labs deployed a diamond magnetometer array for subterranean mapping across 2026 trials."}</script></head><body><main></main></body></html>';
+    const jsonLd = extractArticleFromHtml(jsonLdHtml, 'https://science.example.com/sensor', 'Quantum Sensor diamond magnetometer');
+    assert.ok(jsonLd);
+    assert.match(jsonLd.bodyText, /diamond magnetometer array/i);
+
+    clearExtractorCaches();
+    const origFetch = globalThis.fetch;
+    const uaSeen = [];
+    globalThis.fetch = async (input, init = {}) => {
+        const hdrs = input instanceof Request ? input.headers : init?.headers;
+        const ua = typeof hdrs?.get === 'function' ? (hdrs.get('user-agent') || hdrs.get('User-Agent') || '') : (hdrs?.['User-Agent'] || hdrs?.['user-agent'] || '');
+        uaSeen.push(ua);
+        if (uaSeen.length === 1) return new Response('Forbidden', { status: 403 });
+        return new Response('<html><head><title>Mobile Story</title></head><body><article><p>Jordan Mercer announced future robotics research initiatives and community workshops starting next quarter.</p><p>The roadmap covers autonomous sensing, open hardware benchmarks, and regional developer grants.</p></article></body></html>', { status: 200, headers: { 'content-type': 'text/html' } });
+    };
+    try {
+        const retried = await crawlArticleResilient('https://mobile.example.com/roadmap', 'Jordan Mercer future robotics', { timeoutMs: 2000 });
+        assert.equal(uaSeen.length, 2);
+        assert.match(uaSeen[0], /Windows NT/);
+        assert.match(uaSeen[1], /iPhone/);
+        assert.match(retried.bodyText, /future robotics research/i);
+    } finally {
+        globalThis.fetch = origFetch;
+        clearExtractorCaches();
+    }
+
+    const followUpReqs = buildResearchRequirements('Who is Jordan Mercer? — Will he do any future activities?');
+    assert.ok(followUpReqs.every(r => r.type !== 'names'), 'Follow-up asking about future activities must not inherit Turn 1 names constraint');
+    assert.ok(followUpReqs.some(r => r.type === 'explanation'));
+});
+
 });
 

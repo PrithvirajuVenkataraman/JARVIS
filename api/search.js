@@ -6,7 +6,7 @@ import { applyApiSecurity, unsealSecret } from './_lib/security.js';
 import { classifyFreeLiveIntent, routeMessage } from './_lib/latest/router.js';
 import { searchItems } from './_lib/latest/latest-cache.js';
 import { ingestLatestSources } from './_lib/latest/latest-ingest.js';
-import { runFreeLiveSearch, searchDuckDuckGoHtml, searchSearXNGJson, searchSearXNGRacer, searchYahooFinanceQuotes, fetchWikipediaInfobox, decodeGoogleNewsUrl, searchYahooNewsRss, searchWorldWireRss } from './_lib/free-live/providers.js';
+import { runFreeLiveSearch, searchDuckDuckGoHtml, searchSearXNGJson, searchSearXNGRacer, searchYahooFinanceQuotes, fetchWikipediaInfobox, decodeGoogleNewsUrl, searchYahooNewsRss, searchBingNewsRss, searchWorldWireRss } from './_lib/free-live/providers.js';
 import { extractWithCrawl4Ai } from './_lib/crawl4ai-client.js';
 import { rankTextsByEmbedding, chunkTextForEmbedding, hasNvidiaEmbeddingKey, rerankTexts, getNvidiaRerankModel } from './_lib/embeddings.js';
 import { cleanQueryTarget, extractQueryTargetMetadata } from './_lib/query-target-cleanup.js';
@@ -34,7 +34,7 @@ import { isPublicWebUrl } from './_lib/public-web-url.js';
 import { resolveEntityVisuals } from './_lib/visual-answer-engine.js';
 import { resolvePersonPhoto } from './_lib/person-photos.js';
 import { isConceptualSoftwareQuery, buildOfficialDocumentationQuery, isGoogleNewsWrapper, preserveDiscoveryMetadata, buildPublisherRecoveryQuery, isMatchingPublisherArticle, isUnrelatedSoftwareIncident, buildComparisonSearchQueries, matchesComparisonAttribute } from './_lib/research-retrieval.js';
-export { classifySearchIntent, expandQueryDeterministically, rewriteSearchPrompt, crawlArticleResilient, extractArticleFromHtml, isDomainTemporarilyBlocked, recordDomainFailure, decodeGoogleNewsUrl, searchYahooNewsRss, searchWorldWireRss, resolveEntityVisuals };
+export { classifySearchIntent, expandQueryDeterministically, rewriteSearchPrompt, crawlArticleResilient, extractArticleFromHtml, isDomainTemporarilyBlocked, recordDomainFailure, decodeGoogleNewsUrl, searchYahooNewsRss, searchBingNewsRss, searchWorldWireRss, resolveEntityVisuals };
 
 const SERPER_SEARCH_URL = 'https://google.serper.dev/search';
 const WIKIPEDIA_SEARCH_URL = 'https://en.wikipedia.org/w/api.php';
@@ -522,7 +522,7 @@ export async function searchResearchSources(query, options = {}) {
             } else {
                 await stage([
                     ['google_news', searchGoogleNewsRss, { decodeUrls: true }],
-                    ['yahoo_news', searchYahooNewsRss], ['gdelt', searchGdeltNews]
+                    ['yahoo_news', searchYahooNewsRss], ['bing_news', searchBingNewsRss], ['gdelt', searchGdeltNews]
                 ], query, remaining, 'supplementary_news');
             }
         }
@@ -1945,7 +1945,7 @@ export async function crawlArticleBody(url, options = {}) {
     });
     try {
         if (isGoogleNewsWrapper(url)) {
-            const decoded = await decodeGoogleNewsUrl(url, { signal: scope.signal, timeoutMs: Math.min(700, Math.max(100, timeoutMs * 0.2)) });
+            const decoded = await decodeGoogleNewsUrl(url, { signal: scope.signal, timeoutMs: Math.min(1800, Math.max(400, timeoutMs * 0.45)) });
             if (decoded && !isGoogleNewsWrapper(decoded) && isPublicWebUrl(decoded)) url = decoded;
             else {
                 url = await recoverPublisherArticleUrl(source, { signal: scope.signal, timeoutMs: Math.min(1600, Math.max(1, remaining() - 800)) });
@@ -2018,7 +2018,7 @@ export async function enrichSearchResultsWithDeepCrawl(results, limit = 3, optio
         if (res.status === 'fulfilled' && res.value?.bodyText && res.value.bodyText.length >= 80) {
             const cleanBody = res.value.bodyText.trim();
             const hasSentences = cleanBody.split(/[.!?]\s+/).length >= 2;
-            const isBoilerplate = /\b(?:contact us|advertise|call us|jobs|subscribe|telegram channel|\+\d{2,4}\s*\(\d+\))\b/i.test(cleanBody.slice(0, 200));
+            const isBoilerplate = /\b(?:contact us|advertise with us|call us|jobs at|subscribe (?:now|today|to our|for free)|telegram channel|\+\d{2,4}\s*\(\d+\))\b/i.test(cleanBody.slice(0, 200));
             if (!isBoilerplate && hasSentences) {
                 item.fullArticleText = cleanBody;
                 item.extract = cleanBody;

@@ -659,15 +659,16 @@ async function getInstantFactHelper() {
         } else if (['qwen/qwen3.8-27b', 'qwen-3.8-27b'].includes(userSelected)) {
             mappedGemini = 'gemini-2.5-flash';
         }
+        const useFastGemini = preferSpeed || tier === 'instant';
         const primaryGemini = !userSelected || userSelected === 'auto'
-            ? (tier === 'deep' ? 'gemini-4-hydrogen' : 'gemini-2.5-flash')
+            ? (useFastGemini ? 'gemini-2.5-flash' : 'gemini-4-hydrogen')
             : mappedGemini;
 
         const tierFallbacks = tier === 'deep'
             ? ['gemini-4-hydrogen', 'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-3.5-flash', 'gemini-3.7-flash']
-            : (preferSpeed || tier === 'instant')
+            : useFastGemini
                 ? ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.5-flash-lite', 'gemini-3.5-flash', 'gemini-4-hydrogen', 'gemini-3.7-flash']
-                : ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.5-flash-lite', 'gemini-3.5-flash', 'gemini-4-hydrogen', 'gemini-3.7-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+                : ['gemini-4-hydrogen', 'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-3.5-flash', 'gemini-3.7-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash', 'gemini-1.5-flash'];
         const geminiList = !userSelected || userSelected === 'auto'
             ? [primaryGemini, ...tierFallbacks, configured]
             : [primaryGemini, configured, ...tierFallbacks];

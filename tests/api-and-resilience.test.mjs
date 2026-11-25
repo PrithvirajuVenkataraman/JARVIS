@@ -3637,6 +3637,31 @@ test('Audit regression guards for answer filter, router, search ordinals, News d
         await sttHandler(sttReq, sttRes);
         assert.equal(sttRes.statusCode, 200);
         assert.deepEqual(sttAuths, ['Bearer gsk_alpha', 'Bearer gsk_beta']);
+
+        // 8. DuckDuckGo Lite/HTML keeps link-to-snippet alignment when a result lacks a snippet & Bing News RSS parses unwrapped publisher links
+        const { searchDuckDuckGoHtml, parseBingNewsRssXml } = await import('../api/_lib/free-live/providers.js');
+        globalThis.fetch = async (url) => {
+            if (String(url).includes('lite.duckduckgo.com')) {
+                return new Response(
+                    '<table><tr><td><a class="result-link" href="https://first.example.com/ad">Ad Link Without Snippet</a></td></tr>'
+                    + '<tr><td><a class="result-link" href="https://second.example.com/news">Second Story</a></td></tr>'
+                    + '<tr><td class="result-snippet">Actual summary for the second story.</td></tr></table>',
+                    { status: 200 }
+                );
+            }
+            return new Response('', { status: 404 });
+        };
+        const ddgAligned = await searchDuckDuckGoHtml('second story test', { limit: 5 });
+        assert.equal(ddgAligned[0].description, '');
+        assert.equal(ddgAligned[1].description, 'Actual summary for the second story.');
+
+        const bingItems = parseBingNewsRssXml(
+            '<rss><channel><item><title>Orbital Optics Launches</title><link>https://www.bing.com/news/apiclick.aspx?url=https%3a%2f%2fnews.example.com%2forbital-launch</link><description>Detailed launch coverage for Orbital Optics.</description><pubDate>Wed, 25 Nov 2026 10:00:00 GMT</pubDate><News:Source>Example Wire</News:Source></item></channel></rss>',
+            'orbital optics',
+            5
+        );
+        assert.equal(bingItems[0].url, 'https://news.example.com/orbital-launch');
+        assert.equal(bingItems[0].description, 'Detailed launch coverage for Orbital Optics.');
     } finally {
         globalThis.fetch = origFetch;
         if (origGroqKeys === undefined) delete process.env.GROQ_API_KEYS; else process.env.GROQ_API_KEYS = origGroqKeys;
