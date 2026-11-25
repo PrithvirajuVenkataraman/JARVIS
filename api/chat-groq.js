@@ -1157,8 +1157,9 @@ async function handler(req, res) {
                     isStreamPreferredGenerationRequest(clientRoutingProbe) ||
                     isStreamPreferredGenerationRequest(effectiveMessage)
                 );
-            const routeDecision = prefersStreamGeneration
-                ? { strategy: 'direct', reason: 'stream_preferred_generation', webEligible: false }
+            const hasRequestImages = Array.isArray(images) && images.length > 0;
+            const routeDecision = (prefersStreamGeneration || (hasRequestImages && req.body?.webMode !== 'force' && req.body?.isWebForced !== true && !/^\/(?:search|live|web)\b/i.test(routingMessage)))
+                ? { strategy: 'direct', reason: hasRequestImages ? 'multimodal_vision_direct' : 'stream_preferred_generation', webEligible: false }
                 : classifyRoutingDecision(routingMessage, '', {
                     intent,
                     isInternalSummary,
@@ -1966,7 +1967,8 @@ async function handler(req, res) {
 
 
         let liveRag = { ragText: '', sources: [] };
-        const requiresLiveRetrievalBeforeStream = !isAttachmentGroundingPayload(grounding, intent) && (
+        const hasStreamImagesInput = Array.isArray(images) && images.length > 0;
+        const requiresLiveRetrievalBeforeStream = !isAttachmentGroundingPayload(grounding, intent) && !(hasStreamImagesInput && options?.webMode !== 'force') && (
             routeDecision.strategy === 'search' ||
             routeDecision.strategy === 'live_first' ||
             Boolean(options?.forceLiveSearch) ||
@@ -3006,17 +3008,20 @@ async function handler(req, res) {
             return null;
         };
 
+        const triedGeminiRunModels = new Set();
         const tryRunGemini = async () => {
             const geminiApiKey = String(options?.customGeminiKey || '').trim() || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
             if (!geminiApiKey) return null;
-            const geminiConfiguredModel = String((hasImages && process.env.GEMINI_VISION_MODEL) || process.env.GEMINI_MODEL || '').trim();
+            const geminiConfiguredModel = String((hasImages ? process.env.GEMINI_VISION_MODEL : process.env.GEMINI_MODEL) || '').trim();
             const visionLane = hasImages ? (options?.visionLane || classifyVisionLane(finalPrompt, true)) : 'none';
             const rawGeminiCandidates = hasImages
                 ? getPreferredGeminiVisionCandidates(geminiConfiguredModel, userSelectedModel, { visionLane })
                 : getPreferredGeminiCandidates(geminiConfiguredModel, userSelectedModel, { preferSpeed: speedPreferred, tier: routingTier });
             const geminiCandidates = filterAvailableModelCandidates('gemini', rawGeminiCandidates);
             for (const model of geminiCandidates) {
+                if (triedGeminiRunModels.has(model)) continue;
                 if (attemptsRemaining <= 0 || providerCalls.gemini >= providerLimits.gemini) return null;
+                triedGeminiRunModels.add(model);
                 const parts = [{ text: finalPrompt }];
                 if (hasImages) {
                     for (const img of images) {
@@ -3159,6 +3164,18 @@ async function handler(req, res) {
             attemptIndex++;
         }
 
+        if (hasImages && hasGemini && !isExplicitGroq && !failures.some(f => [429, 401, 403].includes(f?.status || f?.upstream?.status))) {
+            providerLimits.gemini += 1;
+            attemptsRemaining += 1;
+            allowGenerationAttempts(providerCalls.gemini + providerCalls.groq + 1);
+            const recovered = await tryRunGemini();
+            if (recovered && recovered.ok && recovered.parsedResponse?.response && recovered.parsedResponse.response !== 'I could not generate a response this time. Please try again.') {
+                recovered.upstreamAttempts = upstreamAttemptSummary(failures);
+                recovered.failover = true;
+                return recovered;
+            }
+        }
+
         if (hasImages) return { ok: false, payload: visionFailurePayload(hasGroq || hasGemini, failures) };
 
         const effectiveGroq = String(options?.customGroqKey || '').trim();
@@ -3289,10 +3306,11 @@ async function handler(req, res) {
             return null;
         };
 
+        const triedGeminiStreamModels = new Set();
         const tryStreamGemini = async () => {
             const geminiApiKey = String(options?.customGeminiKey || '').trim() || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
             if (!geminiApiKey) return null;
-            const geminiConfiguredModel = String((hasImages && process.env.GEMINI_VISION_MODEL) || process.env.GEMINI_MODEL || '').trim();
+            const geminiConfiguredModel = String((hasImages ? process.env.GEMINI_VISION_MODEL : process.env.GEMINI_MODEL) || '').trim();
             const visionLane = hasImages ? (options?.visionLane || classifyVisionLane(finalPrompt, true)) : 'none';
             const rawGeminiCandidates = hasImages
                 ? getPreferredGeminiVisionCandidates(geminiConfiguredModel, userSelectedModel, { visionLane })
@@ -3301,7 +3319,9 @@ async function handler(req, res) {
             let geminiAttempts = 0;
             let geminiModelMisses = 0;
             for (const model of geminiCandidates) {
+                if (triedGeminiStreamModels.has(model)) continue;
                 if (geminiAttempts >= streamProviderLimits.gemini || attemptsRemaining <= 0) return null;
+                triedGeminiStreamModels.add(model);
                 geminiAttempts++;
                 attemptsRemaining--;
                 let currentModelDeltasEmitted = false;
@@ -3310,7 +3330,7 @@ async function handler(req, res) {
                     onDelta(delta);
                 };
                 const isDeepOrReasoning = routingTier === 'deep' || isReasoningQuery || options?.forceReasoning === true;
-                const geminiStreamTimeoutMs = (isDeepOrReasoning && supportsGeminiThinking(model))
+                const geminiStreamTimeoutMs = (hasImages || (isDeepOrReasoning && supportsGeminiThinking(model)))
                     ? clampInt(lengthPolicy?.timeoutMs, 10_000, STREAM_MODEL_FETCH_TIMEOUT_MS, 12_000)
                     : (supportsGeminiThinking(model)
                         ? clampInt(lengthPolicy?.timeoutMs, 8_000, STREAM_MODEL_FETCH_TIMEOUT_MS, 9_000)
@@ -3362,6 +3382,18 @@ async function handler(req, res) {
                 return result;
             }
             streamAttemptIndex++;
+        }
+
+        if (hasImages && hasGemini && !isExplicitGroqStream && !failures.some(f => [429, 401, 403].includes(f?.status || f?.upstream?.status))) {
+            streamProviderLimits.gemini += 1;
+            attemptsRemaining += 1;
+            allowGenerationAttempts(triedGeminiStreamModels.size + 2);
+            const recovered = await tryStreamGemini();
+            if (recovered) {
+                recovered.upstreamAttempts = upstreamAttemptSummary(failures);
+                recovered.failover = true;
+                return recovered;
+            }
         }
 
         if (hasImages) return { ok: false, payload: visionFailurePayload(hasGroq || hasGemini, failures) };
@@ -3641,7 +3673,7 @@ async function handler(req, res) {
                 reqBody.system_instruction = systemInstruction;
             }
             const userQueryForSearch = String(options?.effectiveMessage || prompt || '');
-            const isExplicitSearchQuery = options?.webMode !== 'off' && (
+            const isExplicitSearchQuery = options?.webMode !== 'off' && (!hasStreamImages || options?.webMode === 'force') && (
                 isTimeSensitiveInfoRequest(userQueryForSearch) ||
                 isMutableEntityFactQuery(userQueryForSearch) ||
                 Boolean(options?.needsWebSearch || options?.forceLiveSearch || options?.webMode === 'force')

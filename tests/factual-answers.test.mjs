@@ -579,6 +579,22 @@ test('trivial greetings suppress Chain-of-Thought deltas while explanatory promp
         const fastVision = chatTest.getPreferredGeminiVisionCandidates('gemini-3.5-flash', null, { visionLane: 'fast_ocr_scene' });
         assert.ok(fastVision.includes('gemini-3.5-flash'));
         assert.ok(fastVision.indexOf('gemini-3.5-flash') < fastVision.indexOf('gemini-4-hydrogen'));
+
+        chatTest.resetModelAvailabilityCache();
+        const visionCalls = [];
+        globalThis.fetch = async (url) => {
+            const u = String(url);
+            visionCalls.push(u);
+            if (u.includes('gemini-2.5-flash:')) return Response.json({ error: { message: 'busy' } }, { status: 503 });
+            if (u.includes('groq.com')) return Response.json({ error: { message: 'groq vision fail' } }, { status: 400 });
+            return new Response('data: {"candidates":[{"content":{"parts":[{"text":"A black square image."}]},"finishReason":"STOP"}]}\n\n', { headers: { 'content-type': 'text/event-stream' } });
+        };
+        process.env.GEMINI_API_KEY = 'test-gemini';
+        const img = [{ mimeType: 'image/png', base64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=' }];
+        const visionRes = await chatTest.streamModelWithFallback('What is in this image?', {}, () => {}, 'auto', img, { effectiveMessage: 'What is in this image?' });
+        assert.equal(visionRes.ok, true);
+        assert.equal(visionRes.provider, 'gemini');
+        assert.equal(visionCalls.length, 3);
     } finally {
         globalThis.fetch = original;
         if (savedGroq === undefined) delete process.env.GROQ_API_KEY;

@@ -954,6 +954,31 @@ test('deterministicResearchPlan preserves root subject across unlimited follow-u
     assert.equal(followUp.ambiguous, false);
 });
 
+test('validateResearchAnswer normalizes typographic dashes and quotes, leaves colons unescaped, and avoids double periods on gaps', () => {
+    const src = [{
+        id: 1,
+        title: 'Artemis mission update',
+        url: 'https://science.example/artemis',
+        pageFetched: true,
+        fullArticleText: "NASA's Artemis mission launched at 6:35 p.m. EDT after resolving post-launch inspection checks."
+    }];
+    const reqs = buildResearchRequirements('Artemis mission launch status');
+    const validated = validateResearchAnswer({
+        facts: [{
+            id: 'f1',
+            requirementId: reqs[0].id,
+            sourceId: 1,
+            quote: 'NASA’s Artemis mission launched at 6:35 p.m. EDT after resolving post‑launch inspection checks.',
+            value: 'NASA’s Artemis mission launched at 6:35 p.m. EDT after resolving post‑launch inspection checks.'
+        }],
+        gaps: [{ requirementId: reqs[0].id, detail: 'Recovery timeline was not reported.' }]
+    }, reqs, src);
+    assert.equal(validated.facts.length, 1);
+    assert.match(validated.content, /6:35 p\.m\./);
+    assert.doesNotMatch(validated.content, /6\\:35/);
+    assert.doesNotMatch(validated.content, /\.\./);
+});
+
 });
 
 describe('Research Lifecycle & Streaming', () => {

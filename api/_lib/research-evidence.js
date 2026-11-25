@@ -20,9 +20,14 @@ export const cleanAnswerText = value => {
         .replace(/\n{3,}/g, '\n\n')
         .trim();
 };
-const normalizedText = value => cleanText(value).normalize('NFKC').toLowerCase();
+const normalizedText = value => cleanText(value)
+    .normalize('NFKC')
+    .replace(/[\u2010-\u2015\u2212]/g, '-')
+    .replace(/[\u2018\u2019\u201B]/g, "'")
+    .replace(/[\u201C\u201D\u201F]/g, '"')
+    .toLowerCase();
 const countValue = value => Number(value) || NUMBER_WORDS[String(value).toLowerCase()] || 0;
-const literalEvidenceText = text => String(text).replace(/[\\[\]`*_<>:{}~]/g, character => `\\${character}`);
+const literalEvidenceText = text => String(text).replace(/[\\[\]`*_<>~{}]/g, character => `\\${character}`);
 
 // Expand known aliases before lexical matching; punctuation still identifies software.
 export function normalizeResearchAliases(value = '') {
@@ -381,7 +386,7 @@ export function validateResearchAnswer(data, requirements, sources) {
     content = lines.map(line => line.text).join('\n\n');
     const hasUnmetCountClaim = requested.some(r => r.countIsClaim && missing.some(m => m.id === r.id));
     if (gaps.length) {
-        const details = gaps.map(g => literalEvidenceText(g.detail)).join('; ');
+        const details = gaps.map(g => literalEvidenceText(g.detail).replace(/\.+$/, '').trim()).filter(Boolean).join('; ');
         if (!content) {
             content = `I couldn't verify the requested facts from the retrieved passages. Missing: ${details}.`;
         } else if (hasUnmetCountClaim || gaps.length) {

@@ -38,9 +38,9 @@ export function researchModelProviders(options = {}) {
     const geminiModels = gemini
         ? [...new Set([
             allowedGemini.includes(selected) ? selected : '',
-            configuredGemini.startsWith('gemini-') && allowedGemini.includes(configuredGemini) ? configuredGemini : '',
             'gemini-2.5-flash',
             'gemini-2.5-flash-lite',
+            configuredGemini.startsWith('gemini-') && allowedGemini.includes(configuredGemini) ? configuredGemini : '',
             'gemini-3.5-flash',
             'gemini-4-hydrogen'
         ].filter(Boolean))]
