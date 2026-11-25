@@ -725,18 +725,21 @@ async function getInstantFactHelper() {
         return Math.min(Math.max(Number(requested) || 65536, 16384), 65536);
     }
 
-    function getMaxOutputTokensForGroq(model = '', requested = 32768) {
+    function getMaxOutputTokensForGroq(model = '', requested = 65536) {
         const raw = String(model || '').toLowerCase();
+        if (raw.includes('gpt-oss-120b') || raw.includes('gpt-oss-20b')) {
+            return Math.min(Number(requested) || 65536, 65536);
+        }
         if (raw.includes('70b') || raw.includes('llama-3.3')) {
             return Math.min(Number(requested) || 32768, 32768);
         }
         if (raw.includes('32b') || raw.includes('27b') || raw.includes('qwen')) {
             return Math.min(Number(requested) || 16384, 16384);
         }
-        if (raw.includes('8b') || raw.includes('gpt-oss-120b') || raw.includes('gpt-oss-20b')) {
+        if (raw.includes('8b')) {
             return Math.min(Number(requested) || 8192, 8192);
         }
-        return Math.min(Number(requested) || 16384, 16384);
+        return Math.min(Number(requested) || 65536, 65536);
     }
 
     const SQL_QUERY_GENERATION_SCHEMA = {
@@ -1844,7 +1847,7 @@ async function handler(req, res) {
             lengthGuidance ? `Length guidance:\n${lengthGuidance}` : '',
             buildReasoningInstruction(intent, model, userSelectedModel, message),
             'Do not wrap the answer in JSON.',
-            'Accuracy rules: Prefer being brief and correct. Keep internal reasoning concise and focused without producing lengthy speculative guesswork. If unsure about a fact, say so in one short clause instead of inventing names, dates, numbers, or sources. Never invent person names, locations, affiliations, URLs, or citations. When asked for a specific count of people or entities, extract the exact individuals named in the sources without replacing, substituting, or omitting them with unmentioned figures from memory. Resolve pronouns and follow-up references only from the recent turns above. If an identity or location is not explicitly stated in retrieved evidence, state that it is unconfirmed or unreleased. EXCEPTION FOR ASTROLOGY, HOROSCOPES, FICTION & SPECULATIVE/CREATIVE TOPICS: When the user asks for astrology, horoscopes, zodiac readings, mythology, hypothetical scenarios, creative writing, science fiction, or speculative concepts, do NOT refuse or claim lack of sources. Answer freely, engagingly, and conversationally in the appropriate creative/astrological tradition without requiring empirical verification.'
+            'Accuracy rules: Be clear, thorough, well-structured, and accurate. Keep internal reasoning concise and focused without producing lengthy speculative guesswork. If unsure about a fact, say so directly instead of inventing names, dates, numbers, or sources. Never invent person names, locations, affiliations, URLs, or citations. When asked for a specific count of people or entities, extract the exact individuals named in the sources without replacing, substituting, or omitting them with unmentioned figures from memory. Resolve pronouns and follow-up references only from the recent turns above. If an identity or location is not explicitly stated in retrieved evidence, state that it is unconfirmed or unreleased. EXCEPTION FOR ASTROLOGY, HOROSCOPES, FICTION & SPECULATIVE/CREATIVE TOPICS: When the user asks for astrology, horoscopes, zodiac readings, mythology, hypothetical scenarios, creative writing, science fiction, or speculative concepts, do NOT refuse or claim lack of sources. Answer freely, engagingly, and conversationally in the appropriate creative/astrological tradition without requiring empirical verification.'
         ].filter(Boolean).join('\n\n');
     }
 
@@ -1860,7 +1863,7 @@ async function handler(req, res) {
             buildIntentPromptHint(intent),
             lengthGuidance ? `Length guidance:\n${lengthGuidance}` : '',
             buildReasoningInstruction(intent, model, userSelectedModel, message),
-            'Accuracy rules: Prefer being brief and correct. If unsure about a fact, say so directly. Never invent person names, locations, affiliations, URLs, or citations. When asked for a specific count of people or entities, extract the exact individuals named in the sources without replacing, substituting, or omitting them with unmentioned figures from memory. Resolve pronouns and follow-up references strictly from the conversation context and retrieved sources. If a person\'s name or place is not explicitly confirmed in the sources, state that it is unreleased or unconfirmed rather than guessing. Maintain conversational continuity across turns without repeating previous statements unnecessarily. EXCEPTION FOR ASTROLOGY, HOROSCOPES, FICTION & SPECULATIVE/CREATIVE TOPICS: When the user asks for astrology, horoscopes, zodiac readings, mythology, hypothetical scenarios, creative writing, science fiction, or speculative concepts, do NOT refuse or claim lack of sources. Answer freely, engagingly, and conversationally in the appropriate creative/astrological tradition without requiring empirical verification.'
+            'Accuracy rules: Be clear, thorough, well-structured, and accurate. If unsure about a fact, say so directly. Never invent person names, locations, affiliations, URLs, or citations. When asked for a specific count of people or entities, extract the exact individuals named in the sources without replacing, substituting, or omitting them with unmentioned figures from memory. Resolve pronouns and follow-up references strictly from the conversation context and retrieved sources. If a person\'s name or place is not explicitly confirmed in the sources, state that it is unreleased or unconfirmed rather than guessing. Maintain conversational continuity across turns without repeating previous statements unnecessarily. EXCEPTION FOR ASTROLOGY, HOROSCOPES, FICTION & SPECULATIVE/CREATIVE TOPICS: When the user asks for astrology, horoscopes, zodiac readings, mythology, hypothetical scenarios, creative writing, science fiction, or speculative concepts, do NOT refuse or claim lack of sources. Answer freely, engagingly, and conversationally in the appropriate creative/astrological tradition without requiring empirical verification.'
         ];
 
         if (rollingSummary && typeof rollingSummary === 'string' && rollingSummary.trim()) {
@@ -2853,10 +2856,8 @@ async function handler(req, res) {
         const isReasoningQuery = isExplicitReasoningIntent(options?.intent, effectiveMsg);
         const isFastSimple = (options?.intent === 'fast_simple' && routingTier !== 'deep') || (routingTier === 'instant' && routingTier !== 'deep');
         const reasoningAllowance = isFastSimple ? 0 : REASONING_TOKEN_ALLOWANCE;
-        const targetMaxTokens = isFastSimple
-            ? Math.min(512, clampInt(lengthPolicy?.maxTokens, 512, 64, 1024))
-            : clampInt(lengthPolicy?.maxTokens, 65536, 256, 65536);
-        const maxTokens = targetMaxTokens + reasoningAllowance;
+        const targetMaxTokens = clampInt(lengthPolicy?.maxTokens, 65536, 256, 65536);
+        const maxTokens = Math.min(65536, targetMaxTokens + reasoningAllowance);
         const hasImages = Array.isArray(images) && images.length > 0;
         const failures = [];
         const isExplicitGroq = Boolean(userSelectedModel && !String(userSelectedModel).toLowerCase().startsWith('gemini-') && userSelectedModel !== 'auto');
@@ -3194,10 +3195,8 @@ async function handler(req, res) {
         const isReasoningQuery = isExplicitReasoningIntent(options?.intent, effectiveMsg);
         const isFastSimple = options?.intent === 'fast_simple' || routingTier === 'instant';
         const reasoningAllowance = isFastSimple ? 0 : REASONING_TOKEN_ALLOWANCE;
-        const targetMaxTokens = isFastSimple
-            ? Math.min(512, clampInt(lengthPolicy?.maxTokens, 512, 64, 1024))
-            : Math.max(16000, clampInt(lengthPolicy?.maxTokens, 32768, 256, 65536));
-        const maxTokens = targetMaxTokens + reasoningAllowance;
+        const targetMaxTokens = clampInt(lengthPolicy?.maxTokens, 65536, 256, 65536);
+        const maxTokens = Math.min(65536, targetMaxTokens + reasoningAllowance);
         const hasImages = Array.isArray(images) && images.length > 0;
 
 
@@ -5547,7 +5546,7 @@ async function handler(req, res) {
         if (String(intent || '') === 'fast_simple' && !isWebForced) {
             return `You are JARVIS, a helpful text-first assistant.${userName ? ` The user's name is ${userName}.` : ''}
 
-Be direct and concise; no filler.
+Explain clearly and thoroughly in clean Markdown without fluff or filler.
 ZERO-HALLUCINATION & BOUNDARIES: Never invent people, dates, prices, statistics, quotes, URLs or facts; admit uncertainty. Creative/astrology answers may be speculative.
 Use :::image[prompt]::: only when asked.
 For sexual advances, deflect: "No, no, no don't do that! I thought we were having a good time."
@@ -5566,7 +5565,7 @@ ${userPreferenceDirective(preferences)}`;
             ? preferences.responseStyle
             : 'balanced';
         const styleInstructions = {
-            balanced: 'Be clear, practical, natural, and concise.',
+            balanced: 'Be clear, thorough, practical, and natural—explain ideas cleanly with structure and helpful examples like Gemini or ChatGPT.',
             witty: 'Use occasional light, intelligent wit when appropriate. Never force jokes or sacrifice clarity.',
             chatty: 'Be warm and conversational, with useful context, but avoid rambling.',
             supportive: 'Be empathetic and encouraging while remaining concrete and direct.',
@@ -5939,8 +5938,8 @@ ${userPreferenceDirective(preferences)}`;
         }
         if (intent === 'fast_simple') {
             return {
-                instruction: 'Answer directly, accurately, and concisely without filler or preamble.',
-                maxTokens: 512,
+                instruction: 'Answer directly and thoroughly in clear Markdown (like ChatGPT or Gemini)—give a direct answer first, then helpful explanation and examples without empty filler.',
+                maxTokens: 65536,
                 temperature: 0.35,
                 wordSpec: null,
                 timeoutMs: 6000,
@@ -5984,9 +5983,9 @@ ${userPreferenceDirective(preferences)}`;
 
         if (intent === 'fast_explainer') {
             return {
-                instruction: 'Fast explainer mode: answer directly in 3-6 concise sentences. Avoid filler, source requests, and generic next steps.',
-                maxTokens: 4000,
-                temperature: resolveResponseTemperature({ message, intent, responseStyle, detail: 'short' }),
+                instruction: 'Explain clearly and thoroughly like ChatGPT or Gemini: give a clear overview, key concepts, how it works, and practical examples in clean Markdown.',
+                maxTokens: 65536,
+                temperature: resolveResponseTemperature({ message, intent, responseStyle, detail: 'detailed' }),
                 wordSpec: null,
                 timeoutMs: 15000,
                 retries: 0
@@ -6016,8 +6015,8 @@ ${userPreferenceDirective(preferences)}`;
         }
         if (detail === 'detailed') {
             return {
-                instruction: 'User asked for detail. Provide a structured, in-depth explanation with enough depth to fully answer.',
-                maxTokens: 32768,
+                instruction: 'User asked for detail. Provide a thorough, well-structured explanation (like ChatGPT or Gemini) with clear sections, examples, and full depth.',
+                maxTokens: 65536,
                 temperature,
                 wordSpec: null
             };
@@ -6031,8 +6030,8 @@ ${userPreferenceDirective(preferences)}`;
             };
         }
         return {
-            instruction: 'Provide a complete, well-structured answer with enough depth to fully satisfy the question. Finish all sections, lists, and steps cleanly - do not stop mid-thought or mid-list.',
-            maxTokens: 32768,
+            instruction: 'Provide a complete, well-structured explanation (like ChatGPT or Gemini) with enough depth, clear sections, examples, and key takeaways to fully satisfy the question. Finish all sections, lists, and steps cleanly - do not stop mid-thought or mid-list.',
+            maxTokens: 65536,
             temperature,
             wordSpec: null
         };

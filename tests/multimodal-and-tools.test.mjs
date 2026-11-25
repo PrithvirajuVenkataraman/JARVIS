@@ -3432,7 +3432,7 @@ console.log('\n--- Section 2: Token Policy & Reasoning Allowance for fast_simple
 
 // 2.1 Length policy for fast_simple
 const fastPolicy = chatTest.buildLengthPolicy('What is 5 * 12?', '', { intent: 'fast_simple' });
-assert.equal(fastPolicy.maxTokens, 512, 'fast_simple length policy must cap maxTokens at 512');
+assert.equal(fastPolicy.maxTokens, 65536, 'fast_simple length policy must allow maximum output tokens (65536)');
 assert.equal(fastPolicy.temperature, 0.35, 'fast_simple temperature must be low (0.35) for deterministic factual accuracy');
 assert.equal(fastPolicy.timeoutMs, 6000, 'fast_simple timeoutMs must be aggressive (6000ms)');
 assert.equal(fastPolicy.retries, 1, 'fast_simple retries must be limited to 1');

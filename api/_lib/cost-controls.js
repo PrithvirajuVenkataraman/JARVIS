@@ -14,9 +14,9 @@ export function getCostControls() {
     return {
         qualityCriticEnabled: readBool('JARVIS_QUALITY_CRITIC_ENABLED', true),
         streamQualityReviewEnabled: readBool('JARVIS_STREAM_QUALITY_REVIEW', false),
-        defaultMaxTokens: clampInt(process.env.JARVIS_DEFAULT_MAX_TOKENS, 32768, 256, 65536),
-        fastMaxTokens: clampInt(process.env.JARVIS_FAST_MAX_TOKENS, 8000, 256, 16000),
-        streamMaxTokens: clampInt(process.env.JARVIS_STREAM_MAX_TOKENS, 32768, 256, 65536)
+        defaultMaxTokens: clampInt(process.env.JARVIS_DEFAULT_MAX_TOKENS, 65536, 256, 65536),
+        fastMaxTokens: clampInt(process.env.JARVIS_FAST_MAX_TOKENS, 65536, 256, 65536),
+        streamMaxTokens: clampInt(process.env.JARVIS_STREAM_MAX_TOKENS, 65536, 256, 65536)
     };
 }
 
