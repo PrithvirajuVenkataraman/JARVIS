@@ -41,6 +41,7 @@ import {
     synthesizeSelfCritiqueMetadata
 } from './_lib/self-critique-loop.js';
 import { resolveEntityVisuals, discoverNotableWorks } from './_lib/visual-answer-engine.js';
+import { extractTextFromImage } from './_lib/vision-extract.js';
 
 /* ── Image MIME normalizer ────────────────────────────────── */
 // Gemini and Groq only accept jpeg/png/webp/gif.
@@ -609,7 +610,7 @@ async function getInstantFactHelper() {
         const userSelected = KNOWN_GROQ_VISION_MODELS.has(String(userSelectedModel || '').trim())
             ? String(userSelectedModel || '').trim()
             : '';
-        return [...new Set([userSelected, configured, 'qwen/qwen3.8-27b', 'qwen-3.8-27b'].filter(Boolean))];
+        return [...new Set([userSelected, configured, 'qwen/qwen3.8-27b'].filter(Boolean))];
     }
 
     function getPreferredGeminiCandidates(configuredModel = '', userSelectedModel = null, { preferSpeed = false, tier = 'standard' } = {}) {
@@ -1322,7 +1323,9 @@ async function handler(req, res) {
                     structuredMessages: request.value.structuredMessages,
                     context,
                     retrievedTurns: request.value.retrievedTurns || [],
-                    rollingSummary: request.value.rollingSummary || ''
+                    rollingSummary: request.value.rollingSummary || '',
+                    customGroqKey,
+                    customGeminiKey
                 })
             });
             timing.modelMs += Date.now() - modelStartedAt;
@@ -2055,7 +2058,9 @@ async function handler(req, res) {
                     structuredMessages,
                     context,
                     retrievedTurns,
-                    rollingSummary: options?.rollingSummary || ''
+                    rollingSummary: options?.rollingSummary || '',
+                    customGroqKey,
+                    customGeminiKey
                 }),
                 onReset: () => {
                     streamedText = '';
@@ -2854,15 +2859,27 @@ async function handler(req, res) {
             if (!keys.length || attemptsRemaining <= 0 || providerCalls.groq >= providerLimits.groq) return null;
             let groqPrompt = finalPrompt;
             let groqStructured = options?.structuredMessages;
+            let groqTemp = temp;
+            let hasExtractedImageText = false;
             if (typeof options?.prepareGroqContext === 'function') {
                 const prepared = await options.prepareGroqContext({ finalPrompt, structuredMessages: options?.structuredMessages }).catch(() => null);
                 if (prepared?.finalPrompt) groqPrompt = prepared.finalPrompt;
                 if (Array.isArray(prepared?.structuredMessages) && prepared.structuredMessages.length > 0) groqStructured = prepared.structuredMessages;
+                if (Number.isFinite(prepared?.temperature)) groqTemp = prepared.temperature;
+                if (prepared?.hasExtractedImageText) hasExtractedImageText = true;
             }
             const groqConfiguredModel = (hasImages ? String(process.env.GROQ_VISION_MODEL || '').trim() : '') || userSelectedModel || String(process.env.GROQ_MODEL || '').trim();
-            const groqCandidates = hasImages
+            const groqVisionCandidates = hasImages
                 ? getPreferredGroqVisionCandidates(groqConfiguredModel, userSelectedModel)
-                : getPreferredGroqCandidates(groqConfiguredModel, { preferSpeed: speedPreferred, tier: routingTier, userSelectedModel, isReasoningQuery });
+                : [];
+            const groqTextCandidates = getPreferredGroqCandidates(groqConfiguredModel, { preferSpeed: speedPreferred, tier: routingTier, userSelectedModel, isReasoningQuery });
+            const groqCandidates = hasImages
+                ? (hasExtractedImageText ? [...new Set([...groqVisionCandidates, ...groqTextCandidates])] : groqVisionCandidates)
+                : groqTextCandidates;
+            if (hasImages && hasExtractedImageText) {
+                providerLimits.groq = Math.max(providerLimits.groq, 2);
+                attemptsRemaining = Math.max(attemptsRemaining, 2);
+            }
 
             for (const key of keys) {
                 for (const model of groqCandidates) {
@@ -2870,7 +2887,7 @@ async function handler(req, res) {
                     let messages = Array.isArray(groqStructured) && groqStructured.length > 0
                         ? groqStructured.map(m => ({ ...m }))
                         : [{ role: 'user', content: groqPrompt }];
-                    if (hasImages) {
+                    if (hasImages && KNOWN_GROQ_VISION_MODELS.has(model)) {
                         const lastUserIdx = [...messages].reverse().findIndex(m => m.role === 'user');
                         const targetIdx = lastUserIdx >= 0 ? messages.length - 1 - lastUserIdx : messages.length - 1;
                         const targetMsg = messages[targetIdx] || { role: 'user', content: groqPrompt };
@@ -2884,7 +2901,7 @@ async function handler(req, res) {
                     }
                     const requestBody = {
                         model,
-                        temperature: temp,
+                        temperature: groqTemp,
                         max_tokens: getMaxOutputTokensForGroq(model, maxTokens),
                         messages
                     };
@@ -3151,20 +3168,33 @@ async function handler(req, res) {
             if (!keys.length || attemptsRemaining <= 0 || streamProviderLimits.groq <= 0) return null;
             let groqPrompt = finalPrompt;
             let groqOptions = options;
+            let groqTemp = temp;
+            let hasExtractedImageText = false;
             if (typeof options?.prepareGroqContext === 'function') {
                 const prepared = await options.prepareGroqContext({ finalPrompt, structuredMessages: options?.structuredMessages }).catch(() => null);
                 if (prepared?.finalPrompt) groqPrompt = prepared.finalPrompt;
                 if (Array.isArray(prepared?.structuredMessages) && prepared.structuredMessages.length > 0) {
                     groqOptions = { ...options, structuredMessages: prepared.structuredMessages };
                 }
+                if (Number.isFinite(prepared?.temperature)) groqTemp = prepared.temperature;
+                if (prepared?.hasExtractedImageText) hasExtractedImageText = true;
             }
             const groqConfiguredModel = (hasImages ? String(process.env.GROQ_VISION_MODEL || '').trim() : '') || userSelectedModel || String(process.env.GROQ_MODEL || '').trim();
-            const groqCandidates = hasImages
+            const groqVisionCandidates = hasImages
                 ? getPreferredGroqVisionCandidates(groqConfiguredModel, userSelectedModel)
-                : getPreferredGroqCandidates(groqConfiguredModel, { preferSpeed: speedPreferred, tier: routingTier, userSelectedModel, isReasoningQuery });
+                : [];
+            const groqTextCandidates = getPreferredGroqCandidates(groqConfiguredModel, { preferSpeed: speedPreferred, tier: routingTier, userSelectedModel, isReasoningQuery });
+            const groqCandidates = hasImages
+                ? (hasExtractedImageText ? [...new Set([...groqVisionCandidates, ...groqTextCandidates])] : groqVisionCandidates)
+                : groqTextCandidates;
+            if (hasImages && hasExtractedImageText) {
+                attemptsRemaining = Math.max(attemptsRemaining, 2);
+            }
 
             let groqAttempts = 0;
-            const maxGroqAttempts = streamProviderLimits.groq;
+            const maxGroqAttempts = (hasImages && hasExtractedImageText)
+                ? Math.max(streamProviderLimits.groq, 2)
+                : streamProviderLimits.groq;
             for (const key of keys) {
                 for (const model of groqCandidates) {
                     if (groqAttempts >= maxGroqAttempts) break;
@@ -3181,7 +3211,7 @@ async function handler(req, res) {
                         model,
                         prompt: groqPrompt,
                         images,
-                        temperature: temp,
+                        temperature: groqTemp,
                         maxTokens,
                         timeoutMs: clampInt(lengthPolicy?.timeoutMs, STREAM_MODEL_FETCH_TIMEOUT_MS, 1000, STREAM_MODEL_FETCH_TIMEOUT_MS),
                         onDelta: perModelDelta,
@@ -3322,7 +3352,7 @@ async function handler(req, res) {
             let messages = Array.isArray(options?.structuredMessages) && options.structuredMessages.length > 0
                 ? options.structuredMessages.map(m => ({ ...m }))
                 : [{ role: 'user', content: prompt }];
-            if (Array.isArray(images) && images.length) {
+            if (Array.isArray(images) && images.length && KNOWN_GROQ_VISION_MODELS.has(model)) {
                 const lastUserIdx = [...messages].reverse().findIndex(m => m.role === 'user');
                 const targetIdx = lastUserIdx >= 0 ? messages.length - 1 - lastUserIdx : messages.length - 1;
                 const targetMsg = messages[targetIdx] || { role: 'user', content: prompt };
@@ -4172,12 +4202,15 @@ async function handler(req, res) {
         try {
             const { runVerifiedWebSearch } = await getSearchHelpers();
             const [visualRes, webRes] = await Promise.allSettled([
-                runWithSignal(signal, () => resolveEntityVisuals(query, { timeoutMs: 2200, personPhoto: true, includeNotableWorks: false })),
+                runWithSignal(signal, () => resolveEntityVisuals(query, { timeoutMs: 2200, personPhoto: true, includeNotableWorks: true })),
                 runWithSignal(signal, () => runVerifiedWebSearch(query, { limit: 4, retrievalOnly: true }))
             ]);
             const passages = [];
             const seenUrls = new Set();
             const entity = visualRes.status === 'fulfilled' ? visualRes.value?.entity : null;
+            const notableWorks = visualRes.status === 'fulfilled' && Array.isArray(visualRes.value?.notableWorks)
+                ? visualRes.value.notableWorks.map(w => String(w?.title || w?.name || (typeof w === 'string' ? w : '')).trim()).filter(Boolean).slice(0, 8)
+                : [];
             if (entity && (entity.description || entity.extract || entity.summary)) {
                 const url = String(entity.url || entity.wikipediaUrl || '').trim();
                 if (url) seenUrls.add(url.toLowerCase());
@@ -4185,7 +4218,8 @@ async function handler(req, res) {
                     `[1] Title: ${entity.title || entity.name || query}`,
                     url ? `URL: ${url}` : '',
                     entity.description ? `Role/Summary: ${entity.description}` : '',
-                    entity.extract || entity.summary ? `Details: ${String(entity.extract || entity.summary).slice(0, 1200)}` : ''
+                    entity.extract || entity.summary ? `Details: ${String(entity.extract || entity.summary).slice(0, 1200)}` : '',
+                    notableWorks.length > 0 ? `Verified Notable Works: ${notableWorks.join(', ')}` : ''
                 ].filter(Boolean).join('\n'));
             }
             const results = webRes.status === 'fulfilled' && Array.isArray(webRes.value?.results) ? webRes.value.results : [];
@@ -4206,7 +4240,41 @@ async function handler(req, res) {
             return [
                 '=== REFERENCE CONTEXT FOR DIRECT ENTITY ANSWER ===',
                 ...passages,
-                'Answer directly and accurately from these reference details and established knowledge without mentioning a web search.'
+                'Answer directly and accurately using ONLY facts supported by these reference details. Do NOT invent, guess, or add unverified works, filmography, awards, dates, or credits from memory if they are not in the reference details. If a detail is not covered, omit it. Do not mention a web search.'
+            ].join('\n\n');
+        } catch (_) {
+            return '';
+        }
+    }
+
+    async function buildImageOcrGroqContext(images = [], options = {}) {
+        const validImages = (Array.isArray(images) ? images : []).filter(img => img?.base64).slice(0, 2);
+        if (!validImages.length) return '';
+        allowGenerationAttempts(5);
+        const signal = AbortSignal.timeout(4500);
+        try {
+            const extractions = await Promise.allSettled(
+                validImages.map(img => runWithSignal(signal, () => extractTextFromImage({
+                    mimeType: normalizeImageMimeType(img.mimeType, img.base64),
+                    imageBase64: img.base64,
+                    customKeys: { groqKey: options.customGroqKey, geminiKey: options.customGeminiKey }
+                })))
+            );
+            const blocks = [];
+            extractions.forEach((res, idx) => {
+                if (res.status !== 'fulfilled' || !res.value?.ok || !res.value?.text) return;
+                const rawText = String(res.value.text).trim();
+                if (!rawText) return;
+                const guard = inspectPromptSecurity(rawText);
+                if (!guard.safe) return;
+                const summaryLine = res.value.summary ? `Summary: ${String(res.value.summary).trim()}\n` : '';
+                blocks.push(`[Image ${idx + 1} Extracted Text]\n${summaryLine}${rawText.slice(0, 4000)}`);
+            });
+            if (!blocks.length) return '';
+            return [
+                '=== EXTRACTED IMAGE TEXT ===',
+                ...blocks,
+                'Use this extracted text as an exact reference alongside any visible details. Do not guess unreadable characters or fabricate text not present in the image.'
             ].join('\n\n');
         } catch (_) {
             return '';
@@ -4214,8 +4282,55 @@ async function handler(req, res) {
     }
 
     function buildGroqEntityContextPreparer(cfg = {}) {
+        const buildPreparedPayload = (ragText, extra = {}) => ({
+            finalPrompt: composeFinalPrompt(
+                cfg.systemPrompt,
+                ragText,
+                cfg.contextBlock,
+                cfg.effectiveMessage,
+                cfg.lengthGuidance,
+                cfg.intent,
+                cfg.selectedModel,
+                cfg.selectedModel,
+                {
+                    routingMessage: cfg.routingMessage,
+                    isWebForced: cfg.isWebForced,
+                    needsContextClarification: cfg.needsContextClarification,
+                    hasImages: Boolean(cfg.images?.length)
+                }
+            ),
+            structuredMessages: composeProviderConversation({
+                systemPrompt: cfg.systemPrompt,
+                messages: cfg.hasStructuredContext ? cfg.structuredMessages : null,
+                ragText,
+                context: cfg.context,
+                retrievedTurns: cfg.retrievedTurns || [],
+                summary: cfg.rollingSummary || '',
+                message: cfg.effectiveMessage,
+                routingMessage: cfg.routingMessage,
+                lengthGuidance: cfg.lengthGuidance,
+                intent: cfg.intent,
+                model: cfg.selectedModel,
+                userSelectedModel: cfg.selectedModel,
+                isWebForced: cfg.isWebForced,
+                needsContextClarification: cfg.needsContextClarification,
+                hasImages: Boolean(cfg.images?.length),
+                isInternalSummary: cfg.isInternalSummary,
+                isAttachmentGrounding: cfg.isAttachmentGrounding
+            }),
+            ...extra
+        });
+
         return async () => {
-            if (cfg.hasRagText || cfg.isAttachmentGrounding || cfg.isInternalSummary || cfg.needsContextClarification || (Array.isArray(cfg.images) && cfg.images.length > 0)) {
+            if (cfg.isInternalSummary || cfg.isAttachmentGrounding) {
+                return null;
+            }
+            if (Array.isArray(cfg.images) && cfg.images.length > 0) {
+                const ocrRagText = await buildImageOcrGroqContext(cfg.images, cfg);
+                if (!ocrRagText) return null;
+                return buildPreparedPayload(ocrRagText, { temperature: 0.2, hasExtractedImageText: true });
+            }
+            if (cfg.hasRagText || cfg.needsContextClarification) {
                 return null;
             }
             if (!isBareOrVagueEntityLookup(cfg.routingMessage, {
@@ -4229,43 +4344,7 @@ async function handler(req, res) {
             }
             const silentRagText = await buildSilentEntityGroqContext(cfg.routingMessage, cfg);
             if (!silentRagText) return null;
-            return {
-                finalPrompt: composeFinalPrompt(
-                    cfg.systemPrompt,
-                    silentRagText,
-                    cfg.contextBlock,
-                    cfg.effectiveMessage,
-                    cfg.lengthGuidance,
-                    cfg.intent,
-                    cfg.selectedModel,
-                    cfg.selectedModel,
-                    {
-                        routingMessage: cfg.routingMessage,
-                        isWebForced: cfg.isWebForced,
-                        needsContextClarification: cfg.needsContextClarification,
-                        hasImages: Boolean(cfg.images?.length)
-                    }
-                ),
-                structuredMessages: composeProviderConversation({
-                    systemPrompt: cfg.systemPrompt,
-                    messages: cfg.hasStructuredContext ? cfg.structuredMessages : null,
-                    ragText: silentRagText,
-                    context: cfg.context,
-                    retrievedTurns: cfg.retrievedTurns || [],
-                    summary: cfg.rollingSummary || '',
-                    message: cfg.effectiveMessage,
-                    routingMessage: cfg.routingMessage,
-                    lengthGuidance: cfg.lengthGuidance,
-                    intent: cfg.intent,
-                    model: cfg.selectedModel,
-                    userSelectedModel: cfg.selectedModel,
-                    isWebForced: cfg.isWebForced,
-                    needsContextClarification: cfg.needsContextClarification,
-                    hasImages: Boolean(cfg.images?.length),
-                    isInternalSummary: cfg.isInternalSummary,
-                    isAttachmentGrounding: cfg.isAttachmentGrounding
-                })
-            };
+            return buildPreparedPayload(silentRagText, { temperature: 0.2 });
         };
     }
 

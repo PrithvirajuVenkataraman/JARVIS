@@ -296,3 +296,141 @@ test('failover model badge surfaces safe upstreamAttempt reasons in its hover to
     assert.equal(info.title, 'GPT-OSS 120B (Failover) — after gemini-4-hydrogen (429 rate_limited), gemini-3.8-flash (503 provider_error)');
     assert.ok(runtime.includes('badge.title = safeModelInfo.title || safeModelInfo.label'));
 });
+
+test('silent entity Groq failover uses low temperature and strictly forbids inventing unverified works', async () => {
+    const original = globalThis.fetch;
+    const saved = {
+        GROQ_API_KEY: process.env.GROQ_API_KEY,
+        GEMINI_API_KEY: process.env.GEMINI_API_KEY,
+        TAVILY_API_KEY: process.env.TAVILY_API_KEY
+    };
+    process.env.GROQ_API_KEY = 'test-groq';
+    process.env.GEMINI_API_KEY = 'test-gemini';
+    process.env.TAVILY_API_KEY = 'test-tavily';
+    try {
+        let groqBody = null;
+        globalThis.fetch = async (input, init = {}) => {
+            const url = String(input);
+            if (url.includes('generativelanguage.googleapis.com')) {
+                return Response.json({ error: { message: 'Quota exceeded' } }, { status: 429 });
+            }
+            if (url.includes('en.wikipedia.org/api/rest_v1/page/summary/')) {
+                return Response.json({
+                    title: 'Harris Jayaraj',
+                    description: 'Indian film composer',
+                    extract: 'Harris Jayaraj is an Indian composer from Chennai who debuted with Minnale (2001).',
+                    content_urls: { desktop: { page: 'https://en.wikipedia.org/wiki/Harris_Jayaraj' } }
+                });
+            }
+            if (url.includes('api.tavily.com')) {
+                return Response.json({
+                    results: [
+                        { title: 'Harris Jayaraj - Wikipedia', url: 'https://en.wikipedia.org/wiki/Harris_Jayaraj', content: 'Notable scores include Minnale, Kaakha Kaakha, Ghajini, and Vaaranam Aayiram.' }
+                    ]
+                });
+            }
+            if (url.includes('api.groq.com/openai/v1/chat/completions')) {
+                groqBody = JSON.parse(init.body);
+                return Response.json({
+                    choices: [{ message: { content: 'Harris Jayaraj is an Indian composer from Chennai who debuted with Minnale (2001).' } }]
+                });
+            }
+            return Response.json({}, { status: 404 });
+        };
+        const req = Object.assign(new EventEmitter(), {
+            method: 'POST',
+            headers: { host: 'localhost', 'content-type': 'application/json' },
+            socket: { remoteAddress: '127.0.0.1' },
+            body: { message: 'Harris Jayaraj', stream: false, webMode: 'off', preferences: { selectedModel: 'auto' } }
+        });
+        const res = response();
+        await handler(req, res);
+        assert.equal(res.statusCode, 200);
+        assert.ok(groqBody, 'Expected failover to Groq');
+        assert.equal(groqBody.temperature, 0.2);
+        const promptText = groqBody.messages.map(m => typeof m.content === 'string' ? m.content : JSON.stringify(m.content)).join('\n');
+        assert.match(promptText, /REFERENCE CONTEXT FOR DIRECT ENTITY ANSWER/);
+        assert.match(promptText, /Do NOT invent, guess, or add unverified works/);
+    } finally {
+        globalThis.fetch = original;
+        for (const [key, value] of Object.entries(saved)) {
+            if (value === undefined) delete process.env[key];
+            else process.env[key] = value;
+        }
+    }
+});
+
+test('image chat failover extracts OCR text and falls back to text-only Groq model without image_url', async () => {
+    const original = globalThis.fetch;
+    const saved = {
+        GROQ_API_KEY: process.env.GROQ_API_KEY,
+        GEMINI_API_KEY: process.env.GEMINI_API_KEY
+    };
+    process.env.GROQ_API_KEY = 'test-groq';
+    process.env.GEMINI_API_KEY = 'test-gemini';
+    try {
+        const groqRequests = [];
+        globalThis.fetch = async (input, init = {}) => {
+            const url = String(input);
+            if (url.includes('generativelanguage.googleapis.com')) {
+                const body = JSON.parse(init.body || '{}');
+                const sysText = JSON.stringify(body);
+                if (sysText.includes('document OCR engine')) {
+                    return Response.json({
+                        candidates: [{
+                            content: {
+                                parts: [{
+                                    text: JSON.stringify({
+                                        fullText: 'Invoice #402\nTotal: $128.50',
+                                        textDetected: ['Invoice #402', 'Total: $128.50'],
+                                        summary: 'Invoice showing total $128.50'
+                                    })
+                                }]
+                            }
+                        }]
+                    });
+                }
+                return Response.json({ error: { message: 'Rate limit' } }, { status: 429 });
+            }
+            if (url.includes('api.groq.com/openai/v1/chat/completions')) {
+                const body = JSON.parse(init.body || '{}');
+                groqRequests.push(body);
+                if (String(body.model || '').includes('qwen')) {
+                    return Response.json({ error: { message: 'Vision model unavailable' } }, { status: 404 });
+                }
+                return Response.json({
+                    choices: [{ message: { content: 'The invoice total is $128.50.' } }]
+                });
+            }
+            return Response.json({}, { status: 404 });
+        };
+        const req = Object.assign(new EventEmitter(), {
+            method: 'POST',
+            headers: { host: 'localhost', 'content-type': 'application/json' },
+            socket: { remoteAddress: '127.0.0.1' },
+            body: {
+                message: 'What is the total?',
+                stream: false,
+                webMode: 'off',
+                images: [{ mimeType: 'image/png', base64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=' }],
+                preferences: { selectedModel: 'auto' }
+            }
+        });
+        const res = response();
+        await handler(req, res);
+        assert.equal(res.statusCode, 200);
+        assert.equal(res.data.provider, 'groq');
+        assert.match(res.data.response, /\$128\.50/);
+        const textFallbackReq = groqRequests.find(r => r.model === 'openai/gpt-oss-120b');
+        assert.ok(textFallbackReq, 'Expected fallback to text-only openai/gpt-oss-120b');
+        const serialized = JSON.stringify(textFallbackReq.messages);
+        assert.ok(!serialized.includes('image_url'), 'Text-only Groq model must not receive image_url parts');
+        assert.ok(serialized.includes('Invoice #402'), 'Extracted OCR text must be passed to text-only Groq model');
+    } finally {
+        globalThis.fetch = original;
+        for (const [key, value] of Object.entries(saved)) {
+            if (value === undefined) delete process.env[key];
+            else process.env[key] = value;
+        }
+    }
+});
