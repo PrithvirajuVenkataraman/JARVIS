@@ -94,7 +94,7 @@ export function resolveRequestPath(req) {
             const pathname = value.startsWith('http://') || value.startsWith('https://')
                 ? new URL(value).pathname
                 : value.split('?')[0];
-            if (!pathname) continue;
+            if (!pathname || /\[[^\]]+\]/.test(pathname)) continue;
             return `/${pathname}`.replace(/\/+/g, '/').replace(/\/$/, '') || '/';
         } catch (_) {}
     }

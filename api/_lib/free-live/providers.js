@@ -457,7 +457,9 @@ export async function searchSearXNGRacer(query, options = {}) {
 
                     const rawText = await response.text();
                     const hasCfHeader = Boolean(response.headers?.['cf-mitigated'] || response.headers?.get?.('cf-mitigated'));
-                    const isChallenge = hasCfHeader || rawText.includes('cf-browser-verification') || rawText.includes('challenge-running') || rawText.includes('turnstile');
+                    const trimmedRaw = rawText.trimStart();
+                    const isHtmlChallenge = trimmedRaw && !trimmedRaw.startsWith('{') && /<(?:html|!doctype|head|title)/i.test(trimmedRaw);
+                    const isChallenge = hasCfHeader || isHtmlChallenge || rawText.includes('cf-browser-verification') || rawText.includes('challenge-running') || /cf-turnstile|challenges\.cloudflare\.com\/turnstile/i.test(rawText);
                     if (isChallenge) {
                         failureRecorded = true;
                         breaker.recordFailure(ep, { type: FAILURE_TYPES.HARD_FAILURE, reason: 'bot_challenge', latencyMs }, now, rng);
@@ -594,9 +596,15 @@ export async function decodeGoogleNewsUrl(googleNewsUrl, options = {}) {
 
         if (!rpcResp || !rpcResp.ok) return rawUrl;
         const text = await rpcResp.text();
-        const splitParts = text.split("\n\n");
-        if (splitParts.length >= 2) {
-            const parsedData = JSON.parse(splitParts[1]);
+        const splitParts = text.split(/\r?\n\r?\n/);
+        const payloadBlock = splitParts.length >= 2 ? splitParts.slice(1).join('\n\n') : text;
+        const jsonCandidate = payloadBlock
+            .split(/\r?\n/)
+            .map(line => line.trim())
+            .find(line => line.startsWith('[['))
+            || payloadBlock.replace(/^\s*\d+\s*\r?\n/, '').trim();
+        if (jsonCandidate.startsWith('[')) {
+            const parsedData = JSON.parse(jsonCandidate);
             const batchResponses = parsedData.filter(d => (d[0] === "wrb.fr" || d[0] === "w779db") && d[1] === "Fbv4je");
             if (batchResponses.length > 0) {
                 const inner = JSON.parse(batchResponses[0][2]);
@@ -1140,13 +1148,14 @@ export async function runFreeLiveSearch(query, route = {}, options = {}) {
 
     // Universal Zero-Key Multi-Engine Parallel Fast-Race
     // Parallel race across resilient search engines: Google News RSS, Yahoo News RSS, BBC World Wire, DuckDuckGo Lite, Wikipedia, and GDELT.
+    const raceTimeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : undefined;
     const [googleNewsResults, yahooResults, worldWireResults, ddgResults, wikiResults, gdeltResults] = await Promise.allSettled([
-        searchGoogleNewsRss(query, { limit: 5 }),
-        searchYahooNewsRss(query, { limit: 4 }),
-        searchWorldWireRss(query, { limit: 4 }),
-        searchDuckDuckGoHtml(query, { limit: 6 }),
-        searchWikipediaApi(query, { limit: 3 }),
-        searchGdeltNews(query, { limit: 3 })
+        searchGoogleNewsRss(query, { limit: 5, timeoutMs: raceTimeoutMs, signal: options.signal }),
+        searchYahooNewsRss(query, { limit: 4, timeoutMs: raceTimeoutMs, signal: options.signal }),
+        searchWorldWireRss(query, { limit: 4, timeoutMs: raceTimeoutMs, signal: options.signal }),
+        searchDuckDuckGoHtml(query, { limit: 6, timeoutMs: raceTimeoutMs, signal: options.signal }),
+        searchWikipediaApi(query, { limit: 3, timeoutMs: raceTimeoutMs, signal: options.signal }),
+        searchGdeltNews(query, { limit: 3, timeoutMs: raceTimeoutMs, signal: options.signal })
     ]);
 
     const results = [];

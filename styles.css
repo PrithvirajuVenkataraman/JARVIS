@@ -1,4 +1,4 @@
-/* Legacy feature styling is layered below the owned core components. */
+﻿/* Legacy feature styling is layered below the owned core components. */
 @layer legacy {
 :root {
     --app-font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -6092,25 +6092,7 @@ body:not(.dark) .permissions-btn-secondary:hover {
     transition: transform 0.05s ease-out;
 }
 
-/* Microphone button active pulse styling */
-.speech-input-btn.is-listening {
-    color: #ef4444 !important;
-    background: rgba(239, 68, 68, 0.15) !important;
-    border-color: rgba(239, 68, 68, 0.4) !important;
-    animation: voiceMicPulse 1.8s infinite;
-}
-
-@keyframes voiceMicPulse {
-    0% {
-        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.45);
-    }
-    70% {
-        box-shadow: 0 0 0 8px rgba(239, 68, 68, 0);
-    }
-    100% {
-        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
-    }
-}
+/* voiceMicPulse removed — using canonical .speech-input-btn.is-listening rule */
 
 /* ==========================================================================
    Multi-Agent DAG Workflow In-Chat Progress Pills
@@ -9182,20 +9164,7 @@ body:not(.dark) .assistant-followup-chip:hover {
 }
 
 
-.speech-input-btn.is-listening {
-    color: #ef4444 !important;
-    border-color: rgba(239, 68, 68, 0.6) !important;
-    animation: vtt-listening-pulse 1.5s infinite ease-in-out;
-}
-
-@keyframes vtt-listening-pulse {
-    0%, 100% {
-        box-shadow: 0 0 6px rgba(239, 68, 68, 0.3);
-    }
-    50% {
-        box-shadow: 0 0 14px rgba(239, 68, 68, 0.6);
-    }
-}
+/* vtt-listening-pulse removed — using canonical .speech-input-btn.is-listening rule */
 
 .error-toast {
     position: fixed;
@@ -9225,27 +9194,7 @@ body:not(.dark) .assistant-followup-chip:hover {
 }
 
 
-/* ==========================================================================
-   Enterprise Voice-to-Text (Dictation) State Styles
-   ========================================================================== */
-.speech-input-btn.is-listening {
-    color: #ef4444 !important;
-    background: rgba(239, 68, 68, 0.14) !important;
-    border-color: rgba(239, 68, 68, 0.45) !important;
-    /* Keep the Stop hit area stationary; the inner spinner shows activity. */
-    animation: none !important;
-}
-
-@keyframes enterprise-vtt-pulse {
-    0%, 100% {
-        transform: scale(1);
-        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
-    }
-    50% {
-        transform: scale(1.06);
-        box-shadow: 0 0 0 6px rgba(239, 68, 68, 0);
-    }
-}
+/* Enterprise VTT state — using canonical .speech-input-btn.is-listening rule */
 
 /* ==========================================================================
    Zero-Cost Local & Fallback AI Image Generation Styles
@@ -12105,3 +12054,4 @@ body:not(.dark) .jarvis-visual-step-detail {
 @media (prefers-reduced-motion:reduce) { .floating-input-bar, .chat-input-shell { backdrop-filter:none !important; } }
 
 }
+

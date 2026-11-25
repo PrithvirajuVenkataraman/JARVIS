@@ -1091,14 +1091,10 @@ async function handler(req, res) {
                     for (let i = 0; i < context.length; i++) {
                         const turn = context[i];
                         if (turn && typeof turn === 'object') {
-                            if (typeof turn.user === 'string' && turn.user) {
-                                const resTurn = scanDlp(turn.user, { maskPii, redactCredentials: true });
-                                turn.user = resTurn.sanitizedText;
-                            }
-                            if (typeof turn.assistant === 'string' && turn.assistant) {
-                                const resTurn = scanDlp(turn.assistant, { maskPii, redactCredentials: true });
-                                turn.assistant = resTurn.sanitizedText;
-                            }
+                            if (typeof turn.user === 'string' && turn.user) turn.user = scanDlp(turn.user, { maskPii, redactCredentials: true }).sanitizedText;
+                            if (typeof turn.assistant === 'string' && turn.assistant) turn.assistant = scanDlp(turn.assistant, { maskPii, redactCredentials: true }).sanitizedText;
+                            if (typeof turn.text === 'string' && turn.text) turn.text = scanDlp(turn.text, { maskPii, redactCredentials: true }).sanitizedText;
+                            if (typeof turn.content === 'string' && turn.content) turn.content = scanDlp(turn.content, { maskPii, redactCredentials: true }).sanitizedText;
                         }
                     }
                 }
@@ -1460,6 +1456,7 @@ async function handler(req, res) {
                             model: preferences?.selectedModel || ''
                         });
                     const secondStartedAt = Date.now();
+                    allowGenerationAttempts(6);
                     const secondPass = await runModelWithFallback(secondPrompt, lengthPolicy, preferences?.selectedModel || null, undefined, {
                         systemPrompt,
                         userMessage: effectiveMessage,
@@ -1542,6 +1539,7 @@ async function handler(req, res) {
                     let refined = false;
                     if (needsRefinement(critiqueResult)) {
                         const refinementSystemPrompt = buildRefinementPrompt(effectiveMessage, finalParsed?.response, critiqueResult, systemPrompt);
+                        allowGenerationAttempts(7);
                         const refinePass = await runModelWithFallback(refinementSystemPrompt + '\n\n' + effectiveMessage, lengthPolicy, preferences?.selectedModel || null, undefined, {
                             systemPrompt: refinementSystemPrompt,
                             userMessage: effectiveMessage,
@@ -3516,6 +3514,7 @@ async function handler(req, res) {
             let text = '';
             let inReasoning = false;
             let finishReason = null;
+            let sseError = null;
 
             await readSseStream(response.body, payload => {
                 if (initialTimer) {
@@ -3523,6 +3522,11 @@ async function handler(req, res) {
                     initialTimer = null;
                 }
                 resetIdleTimer();
+                if (payload?.error) {
+                    sseError = payload.error;
+                    controller.abort();
+                    return;
+                }
 
                 const choice = payload?.choices?.[0];
                 if (choice?.finish_reason) {
@@ -3563,6 +3567,13 @@ async function handler(req, res) {
             if (inReasoning) {
                 text += '\n</think>\n';
                 if (!shouldSuppressReasoning) onDelta('\n</think>\n');
+            }
+            const remainingGroqTail = answerFilter.flush();
+            if (remainingGroqTail) emitAnswer(remainingGroqTail);
+            if (sseError) {
+                const errStatus = Number(sseError?.code || sseError?.status) || 502;
+                recordKeyFailure(apiKey, errStatus === 429 || errStatus >= 500);
+                return { ok: false, status: errStatus };
             }
             let cleanContent = text
                 .replace(/<think>[\s\S]*?<\/think>/gi, '')
@@ -3719,12 +3730,18 @@ async function handler(req, res) {
             let inReasoning = false;
             let groundingSources = [];
             let finishReason = null;
+            let sseError = null;
             await readSseStream(response.body, payload => {
                 if (initialTimer) {
                     clearTimeout(initialTimer);
                     initialTimer = null;
                 }
                 resetIdleTimer();
+                if (payload?.error) {
+                    sseError = payload.error;
+                    controller.abort();
+                    return;
+                }
 
                 const candidate = payload?.candidates?.[0];
                 if (candidate?.finishReason) {
@@ -3781,6 +3798,12 @@ async function handler(req, res) {
             if (inReasoning) {
                 text += '\n</think>\n';
                 if (!shouldSuppressReasoning) onDelta('\n</think>\n');
+            }
+            const remainingGeminiTail = answerFilter.flush();
+            if (remainingGeminiTail) emitAnswer(remainingGeminiTail);
+            if (sseError) {
+                const errStatus = Number(sseError?.code || sseError?.status) || 502;
+                return { ok: false, status: errStatus };
             }
             let cleanContent = text
                 .replace(/<think>[\s\S]*?<\/think>/gi, '')
@@ -5526,6 +5549,7 @@ async function handler(req, res) {
             'Use "revise" only for a meaningful error. Use "uncertain" when correctness cannot be established from the supplied information.'
         ].filter(Boolean).join('\n\n');
         try {
+            allowGenerationAttempts(6);
             const raw = await runSingleQualityModel(
                 criticPrompt,
                 requestCorrection ? 1800 : 500,

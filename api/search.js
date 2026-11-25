@@ -379,7 +379,8 @@ export const MCP_TOOL_DEFINITIONS = Object.freeze([
 ]);
 
 export function getGroqApiKey() {
-    return String(process.env.GROQ_API_KEYS || process.env.GROQ_API_KEY || process.env.GROQ_KEY || '').trim();
+    const raw = String(process.env.GROQ_API_KEYS || process.env.GROQ_API_KEY || process.env.GROQ_KEY || '').trim();
+    return raw.split(/[\s,]+/).map(k => k.trim()).find(Boolean) || '';
 }
 
 async function readSseStream(body, onPayload) {
@@ -417,6 +418,9 @@ async function readSseStream(body, onPayload) {
             processText(typeof chunk === 'string' ? chunk : decoder.decode(chunk, { stream: true }));
         }
     }
+    const finalText = decoder.decode();
+    if (finalText) buffer += finalText;
+    if (buffer.trim()) processText('\n\n');
 }
 
 export async function planDynamicSearchQueries(rawQuery) {
@@ -1687,7 +1691,7 @@ export async function searchPublicSources(query, options = {}) {
 
     if (deduped.length < 2 && !options.signal?.aborted) {
         try {
-            const fallbackRes = await runFreeLiveSearch(normalizedQuery, { limit: Math.max(limit, 4), timeoutMs: 2500 });
+            const fallbackRes = await runFreeLiveSearch(normalizedQuery, {}, { limit: Math.max(limit, 4), timeoutMs: 2500 });
             if (Array.isArray(fallbackRes?.results)) {
                 for (const item of fallbackRes.results) {
                     if (item.url && !seenUrls.has(item.url)) {
@@ -5993,7 +5997,7 @@ export function needsContextualReformulation(query, contextTurns = []) {
     const hasElliptical = /^(?:(?:and|what|how)\s+about|and\s+in|what\s+if|why|how\s+so)\b/i.test(raw);
     const hasComparative = /\b(?:compare\s+(?:the\s+two|them|both)|difference\s+between|which\s+one\s+is\s+(?:better|faster|cheaper|larger|recommended)|who\s+won|head\s+to\s+head)\b/i.test(raw);
     const isFragment = raw.split(/\s+/).length <= 4 && /^(?:why|how\s+much|how\s+many|when|where|who|salary|net\s+worth|age|height|founder|price|status|cost|results?)\??$/i.test(raw);
-    const hasOrdinal = /\b(?:(?:back\s+to\s+(?:the\s+)?)|(?:in\s+the\s+)|(?:about\s+the\s+)|(?:going\s+back\s+to\s+(?:the\s+)?))?(?:first|1st|initial|original|earliest|beginning|start|second|2nd|third|3rd|fourth|4th|fifth|5th|last|previous)\s+(?:question|query|topic|subject|company|person|artist|thing|one|entity|firm|place)?\b|\b(?:back\s+to\s+(?:the\s+)?(?:first|initial|beginning|original))\b/i.test(raw);
+    const hasOrdinal = /\b(?:(?:back\s+to\s+(?:the\s+)?)|(?:in\s+the\s+)|(?:about\s+the\s+)|(?:going\s+back\s+to\s+(?:the\s+)?))?(?:first|1st|initial|original|earliest|beginning|start|second|2nd|third|3rd|fourth|4th|fifth|5th|last|previous)\s+(?:question|query|topic|subject|company|person|artist|thing|one|entity|firm|place|turn)\b|\b(?:back\s+to\s+(?:the\s+)?(?:first|initial|beginning|original))\b/i.test(raw);
 
     // Follow-up inquiries on active entities/events (e.g. suspect, arrest, motive, casualties, updates, legal schedule, charges)
     const hasDefiniteFollowUp = /\b(?:who\s+(?:was|is|got)\s+(?:the\s+)?(?:arrested|charged|responsible|suspect|perpetrator|shooter|attacker)|what\s+(?:is|was)\s+(?:his|her|their|(?:the\s+)?(?:suspect|shooter|perpetrator|attacker|person|individual)(?:'s)?)\s+name|name\s+of\s+(?:the\s+)?(?:suspect|shooter)|who\s+(?:is|was)\s+(?:he|they|the\s+suspect|the\s+shooter))\b/i.test(raw) ||
@@ -6398,16 +6402,16 @@ export function resolveContextualFollowUpQuery(query, contextTurns = [], incomin
         }
 
         // 2b. Ordinal turn fallback across entire conversation thread (e.g. "first question", "original topic", "3rd question", "5th query")
-        const ORDINAL_FIRST = /\b(?:(?:back\s+to\s+(?:the\s+)?)|(?:in\s+the\s+)|(?:about\s+the\s+)|(?:going\s+back\s+to\s+(?:the\s+)?))?(?:first|1st|initial|original|earliest|beginning|start)\s+(?:question|query|topic|subject|company|person|artist|thing|one|entity|firm|place)?\b|\b(?:back\s+to\s+(?:the\s+)?(?:first|initial|beginning|original))\b/i;
-        const ORDINAL_SECOND = /\b(?:second|2nd)\s+(?:question|query|topic|subject|company|person|artist|thing|one|entity|firm|place)?\b/i;
-        const ORDINAL_THIRD = /\b(?:third|3rd)\s+(?:question|query|topic|subject|company|person|artist|thing|one|entity|firm|place)?\b/i;
-        const ORDINAL_FOURTH = /\b(?:fourth|4th)\s+(?:question|query|topic|subject|company|person|artist|thing|one|entity|firm|place)?\b/i;
-        const ORDINAL_FIFTH = /\b(?:fifth|5th)\s+(?:question|query|topic|subject|company|person|artist|thing|one|entity|firm|place)?\b/i;
-        const ORDINAL_PREV = /\b(?:previous|last|prior)\s+(?:question|query|topic|subject|company|person|artist|thing|one|entity|firm|place)?\b/i;
+        const ORDINAL_FIRST = /\b(?:(?:back\s+to\s+(?:the\s+)?)|(?:in\s+the\s+)|(?:about\s+the\s+)|(?:going\s+back\s+to\s+(?:the\s+)?))?(?:first|1st|initial|original|earliest|beginning|start)\s+(?:question|query|topic|subject|company|person|artist|thing|one|entity|firm|place)\b|\b(?:back\s+to\s+(?:the\s+)?(?:first|initial|beginning|original))\b/i;
+        const ORDINAL_SECOND = /\b(?:second|2nd)\s+(?:question|query|topic|subject|company|person|artist|thing|one|entity|firm|place)\b/i;
+        const ORDINAL_THIRD = /\b(?:third|3rd)\s+(?:question|query|topic|subject|company|person|artist|thing|one|entity|firm|place)\b/i;
+        const ORDINAL_FOURTH = /\b(?:fourth|4th)\s+(?:question|query|topic|subject|company|person|artist|thing|one|entity|firm|place)\b/i;
+        const ORDINAL_FIFTH = /\b(?:fifth|5th)\s+(?:question|query|topic|subject|company|person|artist|thing|one|entity|firm|place)\b/i;
+        const ORDINAL_PREV = /\b(?:previous|last|prior)\s+(?:question|query|topic|subject|company|person|artist|thing|one|entity|firm|place)\b/i;
         const userTurns = contextTurns.filter(t => !t.role || t.role === 'user' || t.user).map(t => String(t.text || t.content || t.user || '').trim()).filter(Boolean);
 
         // Check arbitrary N-th ordinal (e.g. "4th question", "10th query", "question 3", "turn 2")
-        const genericOrdinalMatch = cleanQ.match(/\b(\d+)(?:st|nd|rd|th)\s+(?:question|query|topic|subject|company|person|artist|thing|one|entity|firm|place|turn)?\b|\b(?:turn|question|query|prompt|item)\s*#?\s*(\d+)\b/i);
+        const genericOrdinalMatch = cleanQ.match(/\b(\d+)(?:st|nd|rd|th)\s+(?:question|query|topic|subject|company|person|artist|thing|one|entity|firm|place|turn)\b|\b(?:turn|question|query|prompt|item)\s*#?\s*(\d+)\b/i);
         if (genericOrdinalMatch && userTurns.length > 0) {
             const turnIdx = parseInt(genericOrdinalMatch[1] || genericOrdinalMatch[2], 10);
             if (!isNaN(turnIdx) && turnIdx >= 1 && turnIdx <= userTurns.length) {

@@ -76,7 +76,7 @@ const BLOCKED_SAFETY_DOMAIN_PATTERNS = [
     /(?:^|\.)(?:pornhub|xvideos|xnxx|xhamster|redtube|youporn|tube8|spankbang|brazzers|onlyfans|chaturbate|stripchat|livejasmin|cam4|bongacams|rule34|nhentai|hanime|e-hentai|gelbooru|danbooru|literotica|erome|fapello)\.[a-z]{2,}$/i,
     /(?:^|\.)(?:bestgore|liveleak|kaotic|crazyshit|theync|goregrish|heavy-r|efukt)\.[a-z]{2,}$/i,
     /(?:^|\.)(?:stormfront|dailystormer|kiwifarms)\.[a-z]{2,}$/i,
-    /(?:^|\.)(?:xxx|porn|hentai|nsfw|sex|camgirl|escort)[a-z0-9-]*\.[a-z]{2,}$/i
+    /(?:^|\.)(?:xxx|porn|hentai|nsfw|sex(?:cam|chat|hub|pic|site|tube|vid|tape|story|-)|camgirl|escort)[a-z0-9-]*\.[a-z]{2,}$/i
 ];
 
 // Indirect prompt injection embedded inside fetched web snippets

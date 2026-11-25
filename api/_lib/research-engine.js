@@ -78,18 +78,19 @@ export function deterministicResearchPlan(query, context = []) {
     }
 
     // Ordinal turn matching across conversation ledger (e.g. "first question", "1st query", "initial topic", "original question", "second question", "5th query", etc.)
-    const ORDINAL_FIRST = /\b(?:(?:back\s+to\s+(?:the\s+)?)|(?:in\s+the\s+)|(?:about\s+the\s+)|(?:going\s+back\s+to\s+(?:the\s+)?))?(?:first|1st|initial|original|earliest|beginning|start)\s+(?:question|query|topic|subject|company|person|artist|thing|one|entity|firm|place)?\b|\b(?:back\s+to\s+(?:the\s+)?(?:first|initial|beginning|original))\b/i;
-    const ORDINAL_SECOND = /\b(?:second|2nd)\s+(?:question|query|topic|subject|company|person|artist|thing|one|entity|firm|place)?\b/i;
-    const ORDINAL_THIRD = /\b(?:third|3rd)\s+(?:question|query|topic|subject|company|person|artist|thing|one|entity|firm|place)?\b/i;
-    const ORDINAL_FOURTH = /\b(?:fourth|4th)\s+(?:question|query|topic|subject|company|person|artist|thing|one|entity|firm|place)?\b/i;
-    const ORDINAL_FIFTH = /\b(?:fifth|5th)\s+(?:question|query|topic|subject|company|person|artist|thing|one|entity|firm|place)?\b/i;
-    const ORDINAL_PREV = /\b(?:previous|last|prior)\s+(?:question|query|topic|subject|company|person|artist|thing|one|entity|firm|place)?\b/i;
+    // NOTE: noun group is NOT optional — bare words like "first", "original", "last" must NOT trigger ordinal rewriting for normal queries.
+    const ORDINAL_FIRST = /\b(?:(?:back\s+to\s+(?:the\s+)?)|(?:in\s+the\s+)|(?:about\s+the\s+)|(?:going\s+back\s+to\s+(?:the\s+)?))?(?:first|1st|initial|original|earliest|beginning|start)\s+(?:question|query|topic|subject|company|person|artist|thing|one|entity|firm|place)\b|\b(?:back\s+to\s+(?:the\s+)?(?:first|initial|beginning|original))\b/i;
+    const ORDINAL_SECOND = /\b(?:second|2nd)\s+(?:question|query|topic|subject|company|person|artist|thing|one|entity|firm|place)\b/i;
+    const ORDINAL_THIRD = /\b(?:third|3rd)\s+(?:question|query|topic|subject|company|person|artist|thing|one|entity|firm|place)\b/i;
+    const ORDINAL_FOURTH = /\b(?:fourth|4th)\s+(?:question|query|topic|subject|company|person|artist|thing|one|entity|firm|place)\b/i;
+    const ORDINAL_FIFTH = /\b(?:fifth|5th)\s+(?:question|query|topic|subject|company|person|artist|thing|one|entity|firm|place)\b/i;
+    const ORDINAL_PREV = /\b(?:previous|last|prior)\s+(?:question|query|topic|subject|company|person|artist|thing|one|entity|firm|place)\b/i;
 
     let targetTurn = '';
     let isOrdinal = false;
 
     // Check generic N-th ordinal (e.g. "5th question", "10th query", "question 2", "turn 3")
-    const genericOrdinalMatch = q.match(/\b(\d+)(?:st|nd|rd|th)\s+(?:question|query|topic|subject|company|person|artist|thing|one|entity|firm|place|turn)?\b|\b(?:turn|question|query|prompt|item)\s*#?\s*(\d+)\b/i);
+    const genericOrdinalMatch = q.match(/\b(\d+)(?:st|nd|rd|th)\s+(?:question|query|topic|subject|company|person|artist|thing|one|entity|firm|place|turn)\b|\b(?:turn|question|query|prompt|item)\s*#?\s*(\d+)\b/i);
     if (genericOrdinalMatch) {
         const turnIdx = parseInt(genericOrdinalMatch[1] || genericOrdinalMatch[2], 10);
         if (!isNaN(turnIdx) && turnIdx >= 1 && turnIdx <= userTurns.length) {
@@ -262,11 +263,13 @@ export async function runResearch(query, options = {}, dependencies = {}) {
     const rankedSources = () => {
         const ranked = rankResearchEvidence(plan, [...sources.values()], RESEARCH_LIMITS.MAX_SOURCES);
         const selected = ranked.map(source => ({ ...source, id: sourceIds.get(source.url) }));
+        // Ensure every cited fact's source is included even if it was ranked outside MAX_SOURCES
         for (const fact of validation?.facts || []) {
             const cited = [...sources.values()].find(source => source.id === fact.sourceId);
             if (cited && !selected.some(source => source.id === cited.id)) selected.unshift(cited);
         }
-        return selected.slice(0, RESEARCH_LIMITS.MAX_SOURCES);
+        // Apply cap AFTER adding cited sources so they are never dropped
+        return selected.slice(0, RESEARCH_LIMITS.MAX_SOURCES + (validation?.facts?.length || 0));
     };
     const queryForRequirement = requirement => {
         if (requirement.searchQuery) return clean(requirement.searchQuery);

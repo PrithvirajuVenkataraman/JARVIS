@@ -6,10 +6,18 @@ import { MAX_JSON_REQUEST_BYTES } from '../app/request-payload.js';
 
 const GROQ_AUDIO_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
 const DEFAULT_WHISPER_MODEL = 'whisper-large-v3-turbo';
-const FETCH_TIMEOUT_MS = 10000;
+const FETCH_TIMEOUT_MS = 18000;
 
-function getGroqApiKey() {
-    return [process.env.GROQ_API_KEY, process.env.GROQ_KEY, process.env.GROQ_API_KEY_SECONDARY, process.env.GROQ_API_KEY_FALLBACK].map(key => String(key || '').trim()).find(Boolean) || '';
+function getGroqApiKeys() {
+    const raw = [process.env.GROQ_API_KEYS, process.env.GROQ_API_KEY, process.env.GROQ_KEY, process.env.GROQ_API_KEY_SECONDARY, process.env.GROQ_API_KEY_FALLBACK];
+    const keys = [];
+    for (const entry of raw) {
+        for (const k of String(entry || '').split(/[\s,]+/)) {
+            const cleaned = k.trim();
+            if (cleaned && !keys.includes(cleaned)) keys.push(cleaned);
+        }
+    }
+    return keys;
 }
 
 /**
@@ -29,7 +37,13 @@ async function handler(req, res) {
     const start = performance.now();
     const body = req.body || {};
     const rawAudio = String(body.audioBase64 || body.audio || '').trim();
-    const audioBase64 = rawAudio.includes(',') ? rawAudio.split(',')[1].trim() : rawAudio;
+    let audioBase64 = (rawAudio.includes(',') ? rawAudio.split(',')[1] : rawAudio)
+        .replace(/\s+/g, '')
+        .replace(/-/g, '+')
+        .replace(/_/g, '/');
+    if (audioBase64 && !audioBase64.endsWith('=')) {
+        while (audioBase64.length % 4 !== 0) audioBase64 += '=';
+    }
     const mimeType = String(body.mimeType || 'audio/webm').trim();
     const language = String(body.language || '').trim();
     const prompt = String(body.prompt || '').trim();
@@ -47,8 +61,8 @@ async function handler(req, res) {
     const extension = audioTypes[mimeType.toLowerCase().split(';')[0].trim()];
     if (!extension) return res.status(415).json({ success: false, error: { code: 'unsupported_audio', message: 'This audio format is not supported.' } });
 
-    const apiKey = getGroqApiKey();
-    if (!apiKey) {
+    const apiKeys = getGroqApiKeys();
+    if (!apiKeys.length) {
         return res.status(503).json({
             success: false,
             fallbackToBrowser: true,
@@ -65,35 +79,42 @@ async function handler(req, res) {
             });
         }
 
-        const form = new FormData();
-        const audioBlob = new Blob([audioBuffer], { type: mimeType });
-        form.append('file', audioBlob, `audio.${extension}`);
         const requestedModel = String(body.model || '').trim().toLowerCase();
         const whisperModel = (requestedModel === 'whisper-large-v3' || requestedModel === 'whisper-large-v3-turbo')
             ? requestedModel
             : DEFAULT_WHISPER_MODEL;
-        form.append('model', whisperModel);
-        form.append('response_format', 'verbose_json');
-        if (language) form.append('language', language.split('-')[0].toLowerCase());
-        if (prompt) form.append('prompt', prompt.slice(0, 200));
 
-        const response = await fetch(GROQ_AUDIO_URL, {
-            method: 'POST',
-            signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-            headers: {
-                Authorization: `Bearer ${apiKey}`
-            },
-            body: form
-        });
-        if (!response.ok) {
+        let response = null;
+        for (const apiKey of apiKeys) {
+            const form = new FormData();
+            const audioBlob = new Blob([audioBuffer], { type: mimeType });
+            form.append('file', audioBlob, `audio.${extension}`);
+            form.append('model', whisperModel);
+            form.append('response_format', 'verbose_json');
+            if (language) form.append('language', language.split('-')[0].toLowerCase());
+            if (prompt) form.append('prompt', prompt.slice(0, 200));
+
+            response = await fetch(GROQ_AUDIO_URL, {
+                method: 'POST',
+                signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+                headers: {
+                    Authorization: `Bearer ${apiKey}`
+                },
+                body: form
+            });
+            if (response.ok) break;
             await response.body?.cancel().catch(() => {});
-            return res.status(response.status >= 500 ? 502 : response.status).json({
+            if (![401, 403, 429].includes(response.status) && response.status < 500) break;
+        }
+        if (!response || !response.ok) {
+            const status = response?.status || 502;
+            return res.status(status >= 500 ? 502 : status).json({
                 success: false,
                 fallbackToBrowser: true,
                 error: {
                     code: 'transcription_failed',
-                    status: response.status,
-                    message: response.status === 429 ? 'Voice transcription has reached its provider limit. Please try again later.' : [401, 403].includes(response.status) ? 'The transcription provider rejected this deployment\'s credentials.' : 'The transcription provider is temporarily unavailable.'
+                    status,
+                    message: status === 429 ? 'Voice transcription has reached its provider limit. Please try again later.' : [401, 403].includes(status) ? 'The transcription provider rejected this deployment\'s credentials.' : 'The transcription provider is temporarily unavailable.'
                 }
             });
         }

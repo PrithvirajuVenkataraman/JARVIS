@@ -3559,3 +3559,87 @@ console.log('================================================================\n'
 
 });
 
+test('Audit regression guards for answer filter, router, search ordinals, News decoder, and STT rotation', async () => {
+    const { createAnswerFilter, publicAnswer } = await import('../api/_lib/answer-visibility.js');
+    const { decodeGoogleNewsUrl, searchSearXNGRacer } = await import('../api/_lib/free-live/providers.js');
+    const { deterministicResearchPlan } = await import('../api/_lib/research-engine.js');
+    const { isBlockedSafetyDomain } = await import('../api/_lib/safety-guard.js');
+    const { default: sttHandler } = await import('../api/stt.js');
+    const { getGroqApiKey } = await import('../api/search.js');
+
+    // 1. Answer filter flush + publicAnswer stripping on result.text
+    const filter = createAnswerFilter();
+    const first = filter.push('<think>internal</think>Visible<');
+    assert.equal(first, 'Visible');
+    assert.equal(filter.flush(), '<');
+    const sanitized = publicAnswer({ response: '<think>secret</think>Done', text: '<think>secret2</think>Clean' });
+    assert.equal(sanitized.response, 'Done');
+    assert.equal(sanitized.text, 'Clean');
+
+    // 2. Router skips catch-all bracketed template x-matched-path headers
+    assert.equal(resolveRequestPath({ headers: { 'x-matched-path': '/api/[...path]' }, url: '/api/stt' }), '/api/stt');
+    assert.equal(resolveRequestPath({ headers: { 'x-matched-path': '/api/feedback' }, url: '/ignored' }), '/api/feedback');
+
+    // 3. Safety domain filter blocks adult domains without blocking ordinary words like sextant/sexton
+    assert.equal(isBlockedSafetyDomain('https://pornhub.com/watch'), true);
+    assert.equal(isBlockedSafetyDomain('https://sextant.example.com/nav'), false);
+    assert.equal(isBlockedSafetyDomain('https://sexton.org/history'), false);
+
+    // 4. Ordinal turn matching requires turn/query nouns (does not hijack "first iPhone" or "2nd Amendment")
+    const turns = [
+        { role: 'user', content: 'Tell me about Jupiter.' },
+        { role: 'user', content: 'What is photosynthesis?' }
+    ];
+    assert.equal(deterministicResearchPlan('What was the first iPhone?', turns).query, 'What was the first iPhone?');
+    assert.equal(deterministicResearchPlan('Explain the 2nd Amendment', turns).query, 'Explain the 2nd Amendment');
+    assert.match(deterministicResearchPlan('Go back to the first question', turns).query, /Jupiter/i);
+
+    // 5. Google News batchexecute decoder handles length-prefixed framing & SearXNG allows "turnstile" snippets
+    const origFetch = globalThis.fetch;
+    const origGroqKeys = process.env.GROQ_API_KEYS;
+    try {
+        globalThis.fetch = async (url) => {
+            const u = String(url);
+            if (u.includes('news.google.com/rss/articles/')) {
+                return new Response('<div data-n-a-sg="sig1" data-n-a-ts="1700000000"></div>', { status: 200 });
+            }
+            if (u.includes('batchexecute')) {
+                const rpcInner = JSON.stringify(['garturlres', 'https://publisher.example.com/story']);
+                const rpcOuter = JSON.stringify([['wrb.fr', 'Fbv4je', rpcInner]]);
+                return new Response(`)]}'\n\n${rpcOuter.length}\n${rpcOuter}`, { status: 200 });
+            }
+            throw new Error(`Unexpected fetch: ${u}`);
+        };
+        const decodedNews = await decodeGoogleNewsUrl('https://news.google.com/rss/articles/CBMiTestToken1234');
+        assert.equal(decodedNews, 'https://publisher.example.com/story');
+
+        const searxRes = await searchSearXNGRacer('cloudflare turnstile docs', {
+            endpoints: ['https://searx.example/search'],
+            fetchFn: async () => new Response(JSON.stringify({
+                results: [{ title: 'Cloudflare Turnstile Docs', url: 'https://developers.cloudflare.com/turnstile', content: 'How Turnstile works without captchas.' }]
+            }), { status: 200 })
+        });
+        assert.equal(searxRes.length, 1);
+
+        // 6. getGroqApiKey extracts first key from comma-separated GROQ_API_KEYS
+        process.env.GROQ_API_KEYS = 'gsk_alpha, gsk_beta';
+        assert.equal(getGroqApiKey(), 'gsk_alpha');
+
+        // 7. STT rotates keys on 429 and accepts URL-safe base64
+        const sttAuths = [];
+        globalThis.fetch = async (_url, init) => {
+            sttAuths.push(init.headers.Authorization);
+            if (sttAuths.length === 1) return new Response('rate limited', { status: 429 });
+            return Response.json({ text: 'Rotated success', language: 'en', duration: 1 });
+        };
+        const sttReq = { method: 'POST', headers: { host: 'localhost', 'content-type': 'application/json' }, socket: { remoteAddress: '127.0.0.1' }, body: { audioBase64: 'dGVzdC1hdWRpby0_', mimeType: 'audio/webm' }, on() {}, removeListener() {} };
+        const sttRes = { headers: {}, statusCode: 200, setHeader(k, v) { this.headers[k] = v; }, status(c) { this.statusCode = c; return this; }, json(d) { this.body = d; this.writableEnded = true; return this; }, on() {}, removeListener() {} };
+        await sttHandler(sttReq, sttRes);
+        assert.equal(sttRes.statusCode, 200);
+        assert.deepEqual(sttAuths, ['Bearer gsk_alpha', 'Bearer gsk_beta']);
+    } finally {
+        globalThis.fetch = origFetch;
+        if (origGroqKeys === undefined) delete process.env.GROQ_API_KEYS; else process.env.GROQ_API_KEYS = origGroqKeys;
+    }
+});
+

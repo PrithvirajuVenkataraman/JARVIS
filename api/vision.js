@@ -1,5 +1,5 @@
 import { userPreferenceDirective } from './_lib/answer-preferences.js';
-import { withRequestLifecycle, fetchWithLifecycle as fetch } from './_lib/request-lifecycle.js';
+import { withRequestLifecycle, fetchWithLifecycle as fetch, allowGenerationAttempts } from './_lib/request-lifecycle.js';
 export const config = { maxDuration: 60 };
 import { applyApiSecurity, unsealSecret } from './_lib/security.js';
 import { classifyImageLocally } from './_lib/local-vision-classifier.js';
@@ -135,7 +135,9 @@ async function handler(req, res) {
     }
     const normalizedMimeType = normalizeVisionMimeType(rawMimeType, imageBase64);
     const detectedMime = detectImageMimeFromBase64(imageBase64);
-    if (detectedMime && !['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(detectedMime)) {
+    const LLM_DIRECT_MIMES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+    const CONVERSION_REQUIRED_MIMES = new Set(['image/heic', 'image/heif', 'image/heic-sequence', 'image/heif-sequence', 'image/x-heic', 'image/x-heif', 'image/avif', 'image/x-avif', 'image/avif-sequence', 'image/bmp', 'image/x-bmp', 'image/x-ms-bmp', 'image/tiff', 'image/tiff-fx', 'image/x-tiff', 'image/dng', 'image/x-adobe-dng', 'image/x-raw', 'image/raw', 'image/jp2', 'image/jpx', 'image/jpm', 'image/jpeg2000', 'image/x-jpeg2000-image', 'image/pict', 'image/x-pict', 'image/vnd.adobe.photoshop', 'image/x-icon', 'image/vnd.microsoft.icon', 'image/svg+xml']);
+    if ((detectedMime && !LLM_DIRECT_MIMES.has(detectedMime)) || (!detectedMime && CONVERSION_REQUIRED_MIMES.has(rawMimeType))) {
         return sendVisionError(res, 415, 'image_conversion_required', 'This image needs browser conversion before analysis. Reattach it so the image decoder can prepare it.');
     }
     if (imageBase64.length > MAX_IMAGE_BASE64_CHARS || !/^[A-Za-z0-9+/]+={0,2}$/.test(imageBase64)) {
@@ -167,7 +169,7 @@ async function handler(req, res) {
         );
         const activeTask = (task === 'general_vision' && isMathOrProblemQuery) ? 'math_ocr_solve' : task;
 
-        if (activeTask === 'math_ocr_solve') { 
+        if (activeTask === 'math_ocr_solve') { allowGenerationAttempts(6);
             let fastResult = null;
             try {
                 fastResult = await runFastMathOcrSolvePipeline({ 
@@ -199,7 +201,7 @@ async function handler(req, res) {
                 });
             }
         }
-        if (task === 'translate_to_english') {
+        if (task === 'translate_to_english') { allowGenerationAttempts(4);
             const result = await runTranslateToEnglishPipeline({
                 providers,
                 mimeType: normalizedMimeType,
@@ -213,7 +215,7 @@ async function handler(req, res) {
                 details: result.details
             });
         }
-        if (task === 'paper_answer_overlay') {
+        if (task === 'paper_answer_overlay') { allowGenerationAttempts(4);
             const result = await runPaperAnswerOverlayPipeline({
                 providers,
                 mimeType: normalizedMimeType,
@@ -406,7 +408,7 @@ async function callGroqVisionText({ apiKey, configuredModel, systemPrompt, mimeT
     ]);
     const dataUrl = `data:${mimeType || 'image/jpeg'};base64,${imageBase64}`;
 
-    for (const model of candidates.slice(0, 1)) {
+    for (const model of candidates.slice(0, 3)) {
         try {
             const response = await fetchWithTimeout('https://api.groq.com/openai/v1/chat/completions', {
                 method: 'POST',
@@ -434,7 +436,8 @@ async function callGroqVisionText({ apiKey, configuredModel, systemPrompt, mimeT
                 markVisionModelUnavailable(`groq-vision:${model}`, response.status);
                 continue;
             }
-            if (!response.ok) { failures.push({ status: response.status }); continue; }
+            if ([401, 403, 429].includes(response.status)) { failures.push({ status: response.status }); break; }
+            if (!response.ok) { failures.push({ status: response.status }); break; }
             const data = await response.json();
             const text = extractGroqText(data);
             if (text) return text;
@@ -450,8 +453,8 @@ async function callGeminiVision({ apiKey, configuredModel = '', systemPrompt, mi
         ...GEMINI_MODEL_FALLBACKS
     ]);
 
-    for (const apiVersion of GEMINI_API_VERSIONS.slice(0, 1)) {
-        for (const model of modelFallbacks.slice(0, 1)) {
+    for (const apiVersion of GEMINI_API_VERSIONS.slice(0, 2)) {
+        for (const model of modelFallbacks.slice(0, 3)) {
             if (apiVersion === 'v1' && /^gemini-(?:4|3\.|2\.5)/i.test(model)) continue;
             try {
                 const baseGenConfig = {
@@ -514,14 +517,20 @@ async function callGeminiVision({ apiKey, configuredModel = '', systemPrompt, mi
                     } catch (_) {}
                     const suffix = errorDetail ? `: ${errorDetail}` : '';
                     lastError = Object.assign(new Error(`Model ${model} (${apiVersion}) failed with status ${response.status}${suffix}`), { status: response.status });
-                    continue;
+                    if (response.status === 404 || response.status === 410) {
+                        allowGenerationAttempts(4);
+                        continue;
+                    }
+                    break;
                 }
 
                 return await response.json();
             } catch (err) {
                 lastError = err;
+                break;
             }
         }
+        if (lastError && ![404, 410].includes(lastError.status)) break;
     }
 
     throw lastError || new Error('No vision model available');
@@ -558,7 +567,7 @@ async function callGroqText({ apiKey, configuredModel, systemPrompt, userPrompt,
         ...GROQ_TEXT_MODEL_FALLBACKS
     ].filter(Boolean);
 
-    for (const model of candidates.slice(0, 1)) {
+    for (const model of candidates.slice(0, 3)) {
         try {
             const response = await fetchWithTimeout('https://api.groq.com/openai/v1/chat/completions', {
                 method: 'POST',
@@ -576,7 +585,8 @@ async function callGroqText({ apiKey, configuredModel, systemPrompt, userPrompt,
                     ]
                 })
             });
-            if (!response.ok) continue;
+            if (response.status === 404 || response.status === 410) { allowGenerationAttempts(4); continue; }
+            if (!response.ok) break;
             const payload = await response.json();
             const text = extractGroqText(payload);
             if (text) return text;
@@ -592,8 +602,9 @@ async function callGeminiText({ apiKey, configuredModel = '', systemPrompt, user
         ...GEMINI_MODEL_FALLBACKS
     ].filter(Boolean);
 
-    for (const apiVersion of GEMINI_API_VERSIONS.slice(0, 1)) {
-        for (const model of modelFallbacks.slice(0, 1)) {
+    for (const apiVersion of GEMINI_API_VERSIONS.slice(0, 2)) {
+        for (const model of modelFallbacks.slice(0, 3)) {
+            if (apiVersion === 'v1' && /^gemini-(?:4|3\.|2\.5)/i.test(model)) continue;
             try {
                 const response = await fetchWithTimeout(
                     `https://generativelanguage.googleapis.com/${apiVersion}/models/${model}:generateContent?key=${apiKey}`,
@@ -621,8 +632,12 @@ async function callGeminiText({ apiKey, configuredModel = '', systemPrompt, user
                 if (!response.ok) {
                     const raw = await response.text().catch(() => '');
                     const detail = String(raw || '').trim();
-                    lastError = new Error(`Model ${model} (${apiVersion}) failed with status ${response.status}${detail ? `: ${detail}` : ''}`);
-                    continue;
+                    lastError = Object.assign(new Error(`Model ${model} (${apiVersion}) failed with status ${response.status}${detail ? `: ${detail}` : ''}`), { status: response.status });
+                    if (response.status === 404 || response.status === 410) {
+                        allowGenerationAttempts(4);
+                        continue;
+                    }
+                    break;
                 }
 
                 const payload = await response.json();
@@ -634,8 +649,10 @@ async function callGeminiText({ apiKey, configuredModel = '', systemPrompt, user
                 return text;
             } catch (error) {
                 lastError = error;
+                break;
             }
         }
+        if (lastError && ![404, 410].includes(lastError.status)) break;
     }
 
     throw lastError || new Error('No text model available');
@@ -1387,11 +1404,11 @@ function normalizeVisionConfidence(score, uncertainty = '') {
 }
 
 function cleanVisionDisplayText(text) {
-    let out = String(text || '').trim();
-    if (!out) return '';
-    out = out
-        .replace(/^```(?:json)?\s*/i, '')
-        .replace(/\s*```$/i, '')
+    const trimmed = String(text || '').trim().replace(/^```(?:json|markdown|md)?\s*/i, '').replace(/\s*```$/i, '').trim();
+    if (!trimmed) return '';
+    const looksLikeJson = /^\{[\s\S]*\}$/.test(trimmed) || /"(?:mainSubject|fullText|textDetected|answer|summary|conditionOrState)"\s*:/i.test(trimmed);
+    if (!looksLikeJson) return trimmed.slice(0, 12000);
+    const out = trimmed
         .replace(/\b"?(?:objects|people|animals|textDetected|modelEvidence|distinctiveFeatures|confidence)"?\s*:\s*(?:\[[\s\S]*?\]|\{[\s\S]*?\}|[0-9.]+|"[^"]*")\s*,?/gi, ' ')
         .replace(/"(?:answer|summary|mainSubject|subjectType|conditionOrState|likelyReason|careOrSafetyNote|brand|model|uncertainty|fullText|label|count)"\s*:\s*"?/gi, ' ')
         .replace(/\bConfidence:\s*[^\n.]+\.?/gi, ' ')
@@ -1402,7 +1419,7 @@ function cleanVisionDisplayText(text) {
         .replace(/"(?=[\s,.]|$)/g, '')
         .replace(/\s+/g, ' ')
         .trim();
-    return out.slice(0, 1200);
+    return out.slice(0, 12000);
 }
 
 function withArticle(label) {

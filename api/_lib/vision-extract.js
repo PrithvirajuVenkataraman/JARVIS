@@ -145,7 +145,7 @@ async function callVisionText({ providers, systemPrompt, mimeType, imageBase64 }
 async function callGroqVisionText({ apiKey, configuredModel, systemPrompt, mimeType, imageBase64, failures }) {
     const candidates = filterAvailableExtractModels('groq', [String(configuredModel || '').trim(), ...GROQ_VISION_MODEL_FALLBACKS]);
     const dataUrl = `data:${mimeType || 'image/jpeg'};base64,${imageBase64}`;
-    for (const model of candidates.slice(0, 1)) {
+    for (const model of candidates.slice(0, 3)) {
         try {
             const response = await fetchWithTimeout('https://api.groq.com/openai/v1/chat/completions', {
                 method: 'POST',
@@ -171,7 +171,7 @@ async function callGroqVisionText({ apiKey, configuredModel, systemPrompt, mimeT
                 markExtractModelUnavailable('groq', model, response.status);
                 continue;
             }
-            if (!response.ok) { failures.push({ status: response.status }); continue; }
+            if (!response.ok) { failures.push({ status: response.status }); break; }
             const data = await response.json();
             const text = extractGroqText(data);
             if (text) return text;
@@ -182,8 +182,8 @@ async function callGroqVisionText({ apiKey, configuredModel, systemPrompt, mimeT
 
 async function callGeminiVision({ apiKey, configuredModel = '', systemPrompt, mimeType, imageBase64, allowCompatibilityRetry, failures }) {
     const modelFallbacks = filterAvailableExtractModels('gemini', [String(configuredModel || '').trim(), ...GEMINI_MODEL_FALLBACKS]);
-    for (const apiVersion of GEMINI_API_VERSIONS.slice(0, 1)) {
-        for (const model of modelFallbacks.slice(0, 1)) {
+    for (const apiVersion of GEMINI_API_VERSIONS.slice(0, 2)) {
+        for (const model of modelFallbacks.slice(0, 3)) {
             if (apiVersion === 'v1' && /^gemini-(?:4|3\.|2\.5)/i.test(model)) continue;
             try {
                 const genConfig = {
@@ -224,7 +224,10 @@ async function callGeminiVision({ apiKey, configuredModel = '', systemPrompt, mi
                     markExtractModelUnavailable('gemini', model, response.status);
                     continue;
                 }
-                if (!response.ok) { failures.push({ status: response.status }); continue; }
+                if (!response.ok) {
+                    failures.push({ status: response.status });
+                    return '';
+                }
                 const data = await response.json();
                 const text = extractGeminiText(data);
                 if (text) return text;

@@ -21,6 +21,21 @@ export function createAnswerFilter(onThought = null) {
             }
             if (thoughtOut && emitThought) emitThought(thoughtOut);
             return output;
+        },
+        // Flush any remaining buffered content at stream end.
+        // Buffered partial <think> tags that never closed are discarded (they're CoT);
+        // non-hidden buffered content is emitted as output.
+        flush() {
+            if (!buffer) return '';
+            const remaining = buffer;
+            buffer = '';
+            if (hidden) {
+                // We were inside a <think> block that never closed — discard as CoT
+                if (emitThought) emitThought(remaining);
+                return '';
+            }
+            // We were in visible output — emit it
+            return remaining;
         }
     };
 }
@@ -28,9 +43,14 @@ export function publicAnswer(payload) {
     if (!payload || typeof payload !== 'object') return payload;
     const result = { ...payload };
     for (const key of ['thought', 'reasoning', 'reasoning_content']) delete result[key];
+    const stripThink = s => s.replace(/<think>[\s\S]*?(?:<\/think>|$)/gi, '').trim();
     if (typeof result.response === 'string') {
-        result.response = result.response.replace(/<think>[\s\S]*?(?:<\/think>|$)/gi, '').trim();
+        result.response = stripThink(result.response);
         result.verification = verifyArithmeticClaims(result.response);
+    }
+    // Also strip CoT from result.text to prevent <think> blocks leaking via SSE text field
+    if (typeof result.text === 'string') {
+        result.text = stripThink(result.text);
     }
     if (result.selfHealing?.thought) { result.selfHealing = { ...result.selfHealing }; delete result.selfHealing.thought; }
     return result;

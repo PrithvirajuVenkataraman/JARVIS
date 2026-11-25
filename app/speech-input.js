@@ -850,10 +850,9 @@ export function createSpeechInputController(options = {}) {
 
     function setLanguage(lang) {
         language = normalizeVoiceInputLanguage(lang);
-        if (browserRecognition) {
-            browserRecognition.lang = language;
-        }
+        if (browserRecognition) browserRecognition.lang = language;
         emitState();
+        return language;
     }
 
     async function toggleDictation() {
@@ -1106,12 +1105,6 @@ export function createSpeechInputController(options = {}) {
         emitState();
     }
 
-    function setLanguage(lang) {
-        language = normalizeVoiceInputLanguage(lang);
-        if (browserRecognition) browserRecognition.lang = language;
-        return language;
-    }
-
     return {
         getState,
         setLanguage,
@@ -1125,7 +1118,6 @@ export function createSpeechInputController(options = {}) {
     };
 }
 
-/**
 /**
  * Creates a real-time Web Audio API amplitude visualizer attached to the active mic stream.
  */
@@ -1334,7 +1326,7 @@ function showErrorToast(message) {
         toast.textContent = message;
         document.body.appendChild(toast);
         // Auto-remove after configured duration (falls back to 2400 ms)
-        const duration = (typeof config !== 'undefined' && config?.toastDurationMs) || 2400;
+        const duration = globalThis?.config?.toastDurationMs || 2400;
         setTimeout(() => {
             try { toast.remove(); } catch (_) {}
         }, duration);
