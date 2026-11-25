@@ -2605,45 +2605,24 @@ button[aria-label^="Back"],
 }
 
 .speech-input-btn.is-listening {
-    color: #ef4444 !important;
-    background: rgba(239, 68, 68, 0.14) !important;
-    border-color: rgba(239, 68, 68, 0.38) !important;
-    box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.22), 0 0 16px rgba(239, 68, 68, 0.28) !important;
-    animation: jarvis-input-pulse 1.35s ease-in-out infinite;
+    color: #ffffff !important;
+    background: #ef4444 !important;
+    border-color: #ef4444 !important;
+    box-shadow: none !important;
+    animation: none !important;
 }
 
 .speech-input-btn.is-listening svg,
 .speech-input-btn.is-listening .vtt-mic-icon {
-    display: none !important;
+    display: block !important;
+    color: #ffffff !important;
 }
 
-.vtt-loader-spinner {
-    display: none;
-    width: 14px;
-    height: 14px;
-    border: 2px solid rgba(239, 68, 68, 0.28);
-    border-top-color: #ef4444;
-    border-radius: 50%;
-    animation: vtt-loader-spin 0.75s linear infinite;
-    box-sizing: border-box;
-    flex-shrink: 0;
-}
-
-.speech-input-btn.is-listening .vtt-loader-spinner {
-    display: inline-block !important;
-}
-
+.vtt-loader-spinner,
+.speech-input-btn.is-listening .vtt-loader-spinner,
 .speech-input-btn.is-listening:not(:has(.vtt-loader-spinner))::after {
-    content: '';
-    display: inline-block;
-    width: 14px;
-    height: 14px;
-    border: 2px solid rgba(239, 68, 68, 0.28);
-    border-top-color: #ef4444;
-    border-radius: 50%;
-    animation: vtt-loader-spin 0.75s linear infinite;
-    box-sizing: border-box;
-    flex-shrink: 0;
+    display: none !important;
+    content: none !important;
 }
 
 @keyframes vtt-loader-spin {
@@ -6031,34 +6010,12 @@ body:not(.dark) .permissions-btn-secondary:hover {
    Modern Voice Waveform & Visualizer (ChatGPT / VTT-style)
    ========================================================================== */
 .composer-shell.is-voice-active {
-    background: #111827;
-    border-color: rgba(56, 189, 248, 0.5);
-    box-shadow: 0 0 24px rgba(56, 189, 248, 0.16), 0 0 0 1px rgba(56, 189, 248, 0.28);
-    transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: border-color 0.18s ease;
 }
 
-.composer-shell.is-voice-active #text-input {
-    display: none;
-}
-
-.composer-shell.is-voice-active .composer-leading {
-    opacity: 0.35;
-    pointer-events: none;
-}
-
-.composer-voice-visualizer {
-    flex: 1 1 auto;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    height: 40px;
-    min-width: 0;
-    padding: 0 12px;
-    animation: voiceVisualizerFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
+.composer-voice-visualizer,
 .composer-voice-visualizer.hidden {
-    display: none;
+    display: none !important;
 }
 
 .composer-voice-waveform {

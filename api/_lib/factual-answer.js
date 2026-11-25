@@ -14,6 +14,7 @@ export function answerEvidencePolicy({ message = '', intent = 'chat', route = {}
     const explicitCheck = /\b(?:fact[- ]?check|verify|is (?:that|this|it) true|are you sure|made (?:that|it) up|hallucinat\w*|sources?|citations?)\b/i.test(message);
     const temporal = /\b(?:current|currently|latest|today|recent|incumbent|right now|as of)\b/i.test(message);
     if (!forced && !specificFacts && !explicitCheck && !temporal && ['fast_simple', 'casual_chat'].includes(intent)) return { mode: 'model_knowledge', required: false };
+    if (webMode === 'off' && !forced && !specificFacts && !explicitCheck && !temporal) return { mode: 'model_knowledge', required: false };
     const required = forced || (!creative && !opinion && (specificFacts || explicitCheck || classification.requiresLiveGrounding || ['search', 'live_first', 'direct_then_live_if_needed'].includes(route.strategy)));
     return { mode: required ? (webMode === 'off' ? 'evidence_unavailable' : 'retrieved_passages') : 'model_knowledge', required };
 }

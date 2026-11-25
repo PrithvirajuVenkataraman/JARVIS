@@ -59,6 +59,7 @@ test('specific facts and challenged follow-ups use evidence while opinions, code
     for (const message of ['Write a fictional biography', 'What do you think of that person?', 'Write a sorting function']) assert.equal(answerEvidencePolicy({ message }).required, false, message);
     assert.equal(answerEvidencePolicy({ message: 'What is above?', grounded: true }).mode, 'supplied_material');
     assert.equal(answerEvidencePolicy({ message: 'What awards did she win?', referenceStatus: 'ambiguous' }).required, false);
+    assert.equal(answerEvidencePolicy({ message: 'Are they going to do any future activities?', webMode: 'off' }).required, false);
 });
 
 test('web-off factual requests do not spend model quota or manufacture a verification', async () => {

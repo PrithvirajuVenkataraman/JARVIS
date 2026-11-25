@@ -1503,17 +1503,10 @@ export function installSpeechInputUI(options = {}) {
             }
 
             if (vttWaveform) {
-                // Waveform visualizer is strictly hidden unless microphone dictation is actively listening
-                vttWaveform.classList.toggle('hidden', !isListening);
-                vttWaveform.classList.toggle('is-active', isListening);
-                vttWaveform.classList.toggle('is-processing', isListening && isProcessing);
+                vttWaveform.classList.add('hidden');
+                vttWaveform.classList.remove('is-active', 'is-processing');
             }
-
-            if (isListening) {
-                visualizer?.start();
-            } else {
-                visualizer?.stop();
-            }
+            visualizer?.stop();
 
             if (status) {
                 if (!state.supported) {
@@ -1529,6 +1522,8 @@ export function installSpeechInputUI(options = {}) {
         },
         onError(message) {
             globalThis.clearLiveSpeechTranscriptionOnScreen?.();
+            vttButton.classList.remove('is-listening');
+            vttButton.setAttribute('aria-pressed', 'false');
             if (vttWaveform) {
                 vttWaveform.classList.add('hidden');
                 vttWaveform.classList.remove('is-active', 'is-processing');

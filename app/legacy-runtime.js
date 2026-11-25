@@ -23488,8 +23488,8 @@ function isWakeGreetingText(text) {
                 if (handled) return;
             }
 
-            // Authoritative bounded live research dispatch — when user toggled Live Web Search ON or route requires live sources
-            if ((_activeWebMode === 'force' || frontendRoute?.route === 'live_required' || frontendRoute?.requiresSources || frontendRoute?.explicitWeb) && isFactSearchEnabled(cleanText)) {
+            // Authoritative bounded live research dispatch — only when live Web Search is not OFF
+            if (_activeWebMode !== 'off' && (_activeWebMode === 'force' || frontendRoute?.route === 'live_required' || frontendRoute?.requiresSources || frontendRoute?.explicitWeb) && isFactSearchEnabled(cleanText)) {
                 logRoutingDebug('processCommand -> bounded live research', cleanText, {
                     selectedHandler: 'handleBoundedLiveResearchQuery',
                     frontendRoute
@@ -26618,7 +26618,7 @@ function buildFrontendRouteContext(text, options = {}) {
     const isExplicit = isExplicitWebSearchRequest(value);
     const isStrictLatest = isStrictLatestQuery(value);
     const isExplicitWeb = webMode === 'force' || isExplicit;
-    const isWebOff = webMode === 'off' && !isExplicit && !isStrictLatest;
+    const isWebOff = webMode === 'off' && !isExplicit;
     const liveIntent = (isWebOff || (isMcq && !isExplicitWeb)) ? { requiresLive: false } : extractLiveQueryIntent(value);
     const entityIntent = (isWebOff || (isMcq && !isExplicitWeb)) ? { isLiveRequired: false } : extractUniversalEntityIntent(value, liveIntent);
     const risk = getRiskTierForQuery(value, liveIntent, entityIntent);
@@ -26629,10 +26629,10 @@ function buildFrontendRouteContext(text, options = {}) {
         entityIntent,
         risk,
         explicitWeb: isExplicitWeb,
-        strictLatest: !isMcq && (isStrictLatest || (!isWebOff && isStrictLatestQuery(value))),
+        strictLatest: !isMcq && !isWebOff && isStrictLatest,
         currentInfo: !isWebOff && !isMcq && isCurrentInfoQuery(value),
         liveRetrieval: (isExplicit || !isWebOff) && !isMcq && isLiveRetrievalQuery(value),
-        requiresSources: isExplicitWeb || (!isMcq && (isStrictLatest || isExplicit || (!isWebOff && (isCurrentInfoQuery(value) || isEntityAttributionQuery(value) || requiresLiveSourceAnswer(value, liveIntent, entityIntent))))),
+        requiresSources: isExplicitWeb || (!isMcq && !isWebOff && (isStrictLatest || isExplicit || isCurrentInfoQuery(value) || isEntityAttributionQuery(value) || requiresLiveSourceAnswer(value, liveIntent, entityIntent))),
         safetySensitive: isMedicalAdviceIntent(value) || isMedicalEmergencyIntent(value),
         placeGrounded: !isWebOff && !isMcq && (isLikelyLocationOrTravelQuery(value) || /\b(museum|museums|landmark|attraction|restaurant|hotel|nearby|near me|open now|places to visit)\b/i.test(value)),
         toolAction: !!options?.toolAction,

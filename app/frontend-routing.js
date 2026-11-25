@@ -1477,7 +1477,7 @@ export function decideFrontendRoute(text, context = {}) {
         return res;
     }
 
-    if (isVerifyCommand(raw)) {
+    if (!isWebOff && isVerifyCommand(raw)) {
         const res = {
             ...base,
             route: 'live_required',
@@ -1491,7 +1491,7 @@ export function decideFrontendRoute(text, context = {}) {
     }
 
     const isPlace = context.placeGrounded || /\b(?:museum\s+near|hotels?\s+near|restaurants?\s+near|places\s+to\s+visit\s+in|directions\s+to|places\s+near\s+me|near\s+me|places\s+near)\b/i.test(raw);
-    if (isPlace) {
+    if (!isWebOff && isPlace) {
         const res = {
             ...base,
             route: 'place_grounded',
