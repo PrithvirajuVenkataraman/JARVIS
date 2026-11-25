@@ -272,13 +272,6 @@ body .composer-disclaimer { font-size:12px; line-height:1.5; color:var(--core-mu
 
 /* Static interface: status is communicated through text and state, not motion. */
 html { scroll-behavior:auto !important; }
-@layer static-interface {
-body *, body *::before, body *::after {
-    animation:none !important;
-    transition:none !important;
-    scroll-behavior:auto !important;
-}
-}
 body .has-web-search .composer-web-outline {
     display:none;
 }
