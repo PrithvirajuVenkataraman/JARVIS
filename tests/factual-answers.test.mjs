@@ -591,9 +591,11 @@ test('trivial greetings suppress Chain-of-Thought deltas while explanatory promp
         };
         process.env.GEMINI_API_KEY = 'test-gemini';
         const img = [{ mimeType: 'image/png', base64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=' }];
-        const visionRes = await chatTest.streamModelWithFallback('What is in this image?', {}, () => {}, 'auto', img, { effectiveMessage: 'What is in this image?' });
+        const longImageInstructionPrompt = `${'Analyze this image carefully and solve any integral or triangle equation if present. '.repeat(25)} User request: What do you see in this image?`;
+        const visionRes = await chatTest.streamModelWithFallback(longImageInstructionPrompt, {}, () => {}, 'auto', img, { effectiveMessage: longImageInstructionPrompt, routingMessage: 'What do you see in this image?' });
         assert.equal(visionRes.ok, true);
         assert.equal(visionRes.provider, 'gemini');
+        assert.match(visionCalls[0], /gemini-2\.5-flash:/, 'Non-math image with long wrapper must still route to fast_ocr_scene gemini-2.5-flash, not deep gemini-4-hydrogen');
         assert.equal(visionCalls.length, 3);
     } finally {
         globalThis.fetch = original;

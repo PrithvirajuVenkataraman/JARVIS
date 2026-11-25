@@ -1335,7 +1335,8 @@ async function handler(req, res) {
                 : (Array.isArray(grounding?.images) ? grounding.images : undefined);
             const firstPass = await runModelWithFallback(firstPrompt, lengthPolicy, preferences?.selectedModel || null, imagesToPass, {
                 systemPrompt,
-                userMessage: effectiveMessage,
+                userMessage: routingMessage || effectiveMessage,
+                routingMessage,
                 effectiveMessage,
                 intent,
                 tier: req.body?.tier || preferences?.tier,
@@ -2042,10 +2043,11 @@ async function handler(req, res) {
             const streamImages = Array.isArray(images)
                 ? images
                 : (Array.isArray(grounding?.images) ? grounding.images : undefined);
+            const streamUserQuery = options?.routingMessage || options?.userMessage || effectiveMessage;
             const isMathOrReasoningQuery = intent === 'deep_reasoning' ||
                 options?.tier === 'deep' ||
                 Boolean(options?.forceReasoning) ||
-                isMathematicalOrQuantitativeQuery(effectiveMessage, { hasImages: Boolean(streamImages?.length) });
+                isMathematicalOrQuantitativeQuery(streamUserQuery, { hasImages: Boolean(streamImages?.length) });
 
             let mathGuard = isMathOrReasoningQuery ? new StreamingSpeculativeGuard() : null;
             let lastSseWriteAt = Date.now();
@@ -2075,11 +2077,13 @@ async function handler(req, res) {
                 systemPrompt,
                 intent,
                 effectiveMessage,
+                routingMessage: options?.routingMessage || options?.userMessage || '',
+                userMessage: streamUserQuery,
                 webMode: options?.webMode,
                 tier: options?.tier,
                 forceReasoning: options?.forceReasoning,
                 userSelectedModel: selectedModel,
-                minimalThinking: options?.minimalThinking === true || isMultipleChoiceQuestion(effectiveMessage) || ['fast_simple', 'casual_chat', 'chat_title'].includes(String(intent || '')) || scoreChatIntent(String(effectiveMessage || '').toLowerCase(), 'trivial_greeting') >= 0.28,
+                minimalThinking: options?.minimalThinking === true || isMultipleChoiceQuestion(streamUserQuery) || ['fast_simple', 'casual_chat', 'chat_title'].includes(String(intent || '')) || scoreChatIntent(String(streamUserQuery || '').toLowerCase(), 'trivial_greeting') >= 0.28,
                 onThought: thoughtDelta => {
                     if (!thoughtDelta) return;
                     lastSseWriteAt = Date.now();
@@ -2854,16 +2858,19 @@ async function handler(req, res) {
 
     async function runModelWithFallback(finalPrompt, lengthPolicy = {}, userSelectedModel = null, images = undefined, options = {}) {
         const temp = Number.isFinite(Number(lengthPolicy?.temperature)) ? Number(lengthPolicy.temperature) : 0.7;
+        const hasImages = Array.isArray(images) && images.length > 0;
         const effectiveMsg = options?.effectiveMessage || options?.message || finalPrompt;
-        const queryComplexity = classifyQueryComplexity(effectiveMsg, { intent: options?.intent, tier: options?.tier, forceReasoning: options?.forceReasoning });
+        const routingQuery = (hasImages && (options?.routingMessage || options?.userMessage))
+            ? String(options.routingMessage || options.userMessage)
+            : effectiveMsg;
+        const queryComplexity = classifyQueryComplexity(routingQuery, { intent: options?.intent, tier: options?.tier, forceReasoning: options?.forceReasoning, hasImages });
         const routingTier = options?.tier || queryComplexity.tier;
         const speedPreferred = options?.preferSpeed !== undefined ? options.preferSpeed : queryComplexity.preferSpeed;
-        const isReasoningQuery = isExplicitReasoningIntent(options?.intent, effectiveMsg);
+        const isReasoningQuery = isExplicitReasoningIntent(options?.intent, routingQuery);
         const isFastSimple = (options?.intent === 'fast_simple' && routingTier !== 'deep') || (routingTier === 'instant' && routingTier !== 'deep');
         const reasoningAllowance = isFastSimple ? 0 : REASONING_TOKEN_ALLOWANCE;
         const targetMaxTokens = clampInt(lengthPolicy?.maxTokens, 65536, 256, 65536);
         const maxTokens = Math.min(65536, targetMaxTokens + reasoningAllowance);
-        const hasImages = Array.isArray(images) && images.length > 0;
         const failures = [];
         const isExplicitGroq = Boolean(userSelectedModel && !String(userSelectedModel).toLowerCase().startsWith('gemini-') && userSelectedModel !== 'auto');
         const isExplicitGemini = Boolean(userSelectedModel && String(userSelectedModel).toLowerCase().startsWith('gemini-'));
@@ -3013,7 +3020,7 @@ async function handler(req, res) {
             const geminiApiKey = String(options?.customGeminiKey || '').trim() || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
             if (!geminiApiKey) return null;
             const geminiConfiguredModel = String((hasImages ? process.env.GEMINI_VISION_MODEL : process.env.GEMINI_MODEL) || '').trim();
-            const visionLane = hasImages ? (options?.visionLane || classifyVisionLane(finalPrompt, true)) : 'none';
+            const visionLane = hasImages ? (options?.visionLane || queryComplexity.visionLane || classifyVisionLane(routingQuery, true)) : 'none';
             const rawGeminiCandidates = hasImages
                 ? getPreferredGeminiVisionCandidates(geminiConfiguredModel, userSelectedModel, { visionLane })
                 : getPreferredGeminiCandidates(geminiConfiguredModel, userSelectedModel, { preferSpeed: speedPreferred, tier: routingTier });
@@ -3209,16 +3216,19 @@ async function handler(req, res) {
 
     async function streamModelWithFallback(finalPrompt, lengthPolicy = {}, onDelta = () => {}, userSelectedModel = null, images = undefined, options = {}) {
         const temp = Number.isFinite(Number(lengthPolicy?.temperature)) ? Number(lengthPolicy.temperature) : 0.7;
+        const hasImages = Array.isArray(images) && images.length > 0;
         const effectiveMsg = options?.effectiveMessage || options?.message || finalPrompt;
-        const queryComplexity = classifyQueryComplexity(effectiveMsg, { intent: options?.intent, tier: options?.tier, forceReasoning: options?.forceReasoning });
+        const routingQuery = (hasImages && (options?.routingMessage || options?.userMessage))
+            ? String(options.routingMessage || options.userMessage)
+            : effectiveMsg;
+        const queryComplexity = classifyQueryComplexity(routingQuery, { intent: options?.intent, tier: options?.tier, forceReasoning: options?.forceReasoning, hasImages });
         const routingTier = options?.tier || queryComplexity.tier;
         const speedPreferred = options?.preferSpeed !== undefined ? options.preferSpeed : (routingTier === 'instant' || queryComplexity.preferSpeed);
-        const isReasoningQuery = isExplicitReasoningIntent(options?.intent, effectiveMsg);
+        const isReasoningQuery = isExplicitReasoningIntent(options?.intent, routingQuery);
         const isFastSimple = options?.intent === 'fast_simple' || routingTier === 'instant';
         const reasoningAllowance = isFastSimple ? 0 : REASONING_TOKEN_ALLOWANCE;
         const targetMaxTokens = clampInt(lengthPolicy?.maxTokens, 65536, 256, 65536);
         const maxTokens = Math.min(65536, targetMaxTokens + reasoningAllowance);
-        const hasImages = Array.isArray(images) && images.length > 0;
 
 
         const failures = [];
@@ -3311,7 +3321,7 @@ async function handler(req, res) {
             const geminiApiKey = String(options?.customGeminiKey || '').trim() || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
             if (!geminiApiKey) return null;
             const geminiConfiguredModel = String((hasImages ? process.env.GEMINI_VISION_MODEL : process.env.GEMINI_MODEL) || '').trim();
-            const visionLane = hasImages ? (options?.visionLane || classifyVisionLane(finalPrompt, true)) : 'none';
+            const visionLane = hasImages ? (options?.visionLane || queryComplexity.visionLane || classifyVisionLane(routingQuery, true)) : 'none';
             const rawGeminiCandidates = hasImages
                 ? getPreferredGeminiVisionCandidates(geminiConfiguredModel, userSelectedModel, { visionLane })
                 : getPreferredGeminiCandidates(geminiConfiguredModel, userSelectedModel, { preferSpeed: speedPreferred, tier: routingTier });
@@ -3359,7 +3369,7 @@ async function handler(req, res) {
                 if (result.status === 401 || result.status === 403) {
                     break;
                 }
-                if (streamProviderLimits.gemini === 1 && geminiModelMisses === 0 && (result.status === 404 || result.status === 410)) {
+                if (geminiModelMisses < 2 && (result.status === 404 || result.status === 410)) {
                     geminiModelMisses++;
                     geminiAttempts = Math.max(0, geminiAttempts - 1);
                     attemptsRemaining++;
@@ -3637,12 +3647,15 @@ async function handler(req, res) {
                 }
             }
             const hasStreamImages = Array.isArray(images) && images.length > 0;
-            const visionLane = hasStreamImages ? (options?.visionLane || classifyVisionLane(prompt, true)) : 'none';
+            const streamVisionQuery = (hasStreamImages && (options?.routingMessage || options?.userMessage))
+                ? String(options.routingMessage || options.userMessage)
+                : prompt;
+            const visionLane = hasStreamImages ? (options?.visionLane || classifyVisionLane(streamVisionQuery, true)) : 'none';
             const isUserChosenR1 = String(options?.userSelectedModel || '').toLowerCase().includes('r1');
-            const isMathStream = isMathematicalOrQuantitativeQuery(prompt, { hasImages: hasStreamImages });
+            const isMathStream = isMathematicalOrQuantitativeQuery(streamVisionQuery, { hasImages: hasStreamImages });
             const isFineGrainedVision = hasStreamImages && visionLane === 'fine_grained_id';
-            const isTrivialGreetingStream = scoreChatIntent(String(options?.effectiveMessage || prompt || '').toLowerCase(), 'trivial_greeting') >= 0.28;
-            const isReasoning = isMathStream || isFineGrainedVision || isExplicitReasoningIntent(options?.intent, prompt) || isUserChosenR1 || options?.tier === 'deep' || options?.forceReasoning === true;
+            const isTrivialGreetingStream = scoreChatIntent(String(options?.effectiveMessage || streamVisionQuery || '').toLowerCase(), 'trivial_greeting') >= 0.28;
+            const isReasoning = isMathStream || isFineGrainedVision || isExplicitReasoningIntent(options?.intent, streamVisionQuery) || isUserChosenR1 || options?.tier === 'deep' || options?.forceReasoning === true;
             const isSuppressedIntent = ['fast_simple', 'casual_chat', 'chat_title', 'internal_summary'].includes(String(options?.intent || '')) || isTrivialGreetingStream;
             const shouldSuppressReasoning = options?.minimalThinking === true || (isSuppressedIntent && !isReasoning);
             const effectiveTemp = hasStreamImages

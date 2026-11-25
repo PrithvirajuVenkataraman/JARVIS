@@ -307,7 +307,7 @@ export async function runResearch(query, options = {}, dependencies = {}) {
             }
         });
     };
-    const generate = async final => {
+    const generate = async (final, isRecovery = false) => {
         const selected = rankedSources();
         if (options.answer === false || scope.signal.aborted || generations >= RESEARCH_LIMITS.MAX_GENERATIONS) return false;
         const hasSufficientEvidence = selected.some(source => evidenceText(source).length >= 100 && evidenceText(source) !== source.title);
@@ -329,6 +329,7 @@ export async function runResearch(query, options = {}, dependencies = {}) {
             requirements,
             previouslySupportedFacts: validation?.facts || [],
             unresolved: validation?.gaps || [],
+            recoveryNote: isRecovery ? 'Prior extraction yielded 0 accepted verbatim facts despite retrieved excerpts. Copy 3 to 10 complete factual sentences verbatim (each value strictly inside its quote from sourceExcerpts) to answer as much of the question as the excerpts support, and list only truly absent sub-details in gaps.' : undefined,
             sourceExcerpts: formatResearchEvidence(selected, `${plan.query} ${requirements.map(r => r.description).join(' ')}`)
         });
         const modelOptions = { system: ANSWER_SYSTEM + userPreferenceDirective(options.preferences), prompt, json: true, signal: scope.signal, timeoutMs: Math.max(1, Math.min(RESEARCH_LIMITS.SYNTHESIS_MS, timeLeft() - 100)), budget: ledger, stage: final ? 'final_answer' : 'initial_answer', reserveAttempts: final ? 0 : 2, maxAttempts: 4, maxOutputTokens: 8192, customGroqKey: options.customGroqKey, customGeminiKey: options.customGeminiKey, selectedModel: options.selectedModel, requirements, sources: selected };
@@ -384,6 +385,9 @@ export async function runResearch(query, options = {}, dependencies = {}) {
             }
         }
         if (validation.answerStatus !== 'complete' && options.answer !== false) await generate(true);
+        if (!options.finalOnly && options.answer !== false && validation.facts.length === 0 && validation.answerStatus === 'unavailable' && generations < RESEARCH_LIMITS.MAX_GENERATIONS && ledger.calls < ledger.maxCalls && timeLeft() > 4000 && !ledger.attempts.some(a => a.outcome === 'rate_limited' || a.outcome === 'no_available_credentials')) {
+            await generate(true, true);
+        }
         const finalSources = rankedSources();
         const gaps = validation.gaps || [];
         let content = validation.content || researchFallback(plan.query, finalSources, gaps);
