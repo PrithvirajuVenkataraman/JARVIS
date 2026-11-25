@@ -4,7 +4,7 @@ import { personPhotoQuery } from '../app/person-photo-query.js';
 import { publicAnswer, createAnswerFilter } from './_lib/answer-visibility.js';
 import { normalizeUserInstructions, userPreferenceDirective, conversationalVoiceDirective, contextReferenceDirective, bindServerConversation, bindAnswerConversation } from './_lib/answer-preferences.js';
 import { answerEvidencePolicy, factualAnswer } from './_lib/factual-answer.js';
-import { withRequestLifecycle, fetchWithLifecycle as fetch, runWithSignal, currentRequestSignal } from './_lib/request-lifecycle.js';
+import { withRequestLifecycle, fetchWithLifecycle as fetch, runWithSignal, currentRequestSignal, allowGenerationAttempts } from './_lib/request-lifecycle.js';
 export const config = { maxDuration: 60 };
 import { applyApiSecurity, unsealSecret } from './_lib/security.js';
 import { validateAndRepairCodeAndMath, StreamingSpeculativeGuard } from './_lib/code-math-validator.js';
@@ -627,14 +627,14 @@ async function getInstantFactHelper() {
         }
         const primaryGemini = !userSelected || userSelected === 'auto' ? 'gemini-4-hydrogen' : mappedGemini;
 
-        let geminiList = [];
-        if (tier === 'deep') {
-            geminiList = [primaryGemini, configured, 'gemini-4-hydrogen', 'gemini-3.8-flash', 'gemini-2.5-pro', 'gemini-3.7-flash', 'gemini-2.5-flash'];
-        } else if (preferSpeed || tier === 'instant') {
-            geminiList = [primaryGemini, configured, 'gemini-4-hydrogen', 'gemini-3.8-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-3.7-flash', 'gemini-2.5-pro'];
-        } else {
-            geminiList = [primaryGemini, configured, 'gemini-4-hydrogen', 'gemini-3.8-flash', 'gemini-2.5-flash', 'gemini-3.7-flash', 'gemini-2.5-pro', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-2.5-flash-lite'];
-        }
+        const tierFallbacks = tier === 'deep'
+            ? ['gemini-4-hydrogen', 'gemini-3.8-flash', 'gemini-2.5-pro', 'gemini-3.7-flash', 'gemini-2.5-flash']
+            : (preferSpeed || tier === 'instant')
+                ? ['gemini-4-hydrogen', 'gemini-3.8-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-3.7-flash', 'gemini-2.5-pro']
+                : ['gemini-4-hydrogen', 'gemini-3.8-flash', 'gemini-2.5-flash', 'gemini-3.7-flash', 'gemini-2.5-pro', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-2.5-flash-lite'];
+        const geminiList = !userSelected || userSelected === 'auto'
+            ? ['gemini-4-hydrogen', 'gemini-3.8-flash', configured, ...tierFallbacks]
+            : [primaryGemini, configured, ...tierFallbacks];
         return [...new Set(geminiList.filter(Boolean))];
     }
 
@@ -1303,7 +1303,27 @@ async function handler(req, res) {
                 isAttachmentGrounding,
                 structuredMessages: firstStructured,
                 customGroqKey,
-                customGeminiKey
+                customGeminiKey,
+                prepareGroqContext: buildGroqEntityContextPreparer({
+                    routingMessage,
+                    intent,
+                    needsContextClarification,
+                    images: imagesToPass,
+                    isInternalSummary,
+                    isAttachmentGrounding,
+                    hasRagText: Boolean(preloadedLiveRag.ragText),
+                    systemPrompt,
+                    contextBlock,
+                    effectiveMessage,
+                    lengthGuidance: lengthPolicy.instruction,
+                    selectedModel: preferences?.selectedModel || '',
+                    isWebForced: Boolean(preferences?.isWebForced),
+                    hasStructuredContext,
+                    structuredMessages: request.value.structuredMessages,
+                    context,
+                    retrievedTurns: request.value.retrievedTurns || [],
+                    rollingSummary: request.value.rollingSummary || ''
+                })
             });
             timing.modelMs += Date.now() - modelStartedAt;
 
@@ -2017,6 +2037,26 @@ async function handler(req, res) {
                 minimalThinking: options?.minimalThinking === true || isMultipleChoiceQuestion(effectiveMessage) || (!options?.forceReasoning && options?.tier !== 'deep' && !isExplicitReasoningIntent(intent, effectiveMessage) && !String(selectedModel || '').toLowerCase().includes('r1')),
                 customGroqKey,
                 customGeminiKey,
+                prepareGroqContext: buildGroqEntityContextPreparer({
+                    routingMessage: options?.routingMessage || effectiveMessage,
+                    intent,
+                    needsContextClarification: Boolean(options?.needsContextClarification),
+                    images: streamImages,
+                    isInternalSummary: false,
+                    isAttachmentGrounding: false,
+                    hasRagText: Boolean(liveRag.ragText),
+                    systemPrompt,
+                    contextBlock,
+                    effectiveMessage,
+                    lengthGuidance: lengthPolicy?.instruction || '',
+                    selectedModel,
+                    isWebForced: Boolean(options?.isWebForced),
+                    hasStructuredContext,
+                    structuredMessages,
+                    context,
+                    retrievedTurns,
+                    rollingSummary: options?.rollingSummary || ''
+                }),
                 onReset: () => {
                     streamedText = '';
                     firstTokenReceivedAt = null;
@@ -2775,28 +2815,30 @@ async function handler(req, res) {
         const maxTokens = targetMaxTokens + reasoningAllowance;
         const hasImages = Array.isArray(images) && images.length > 0;
         const failures = [];
+        const isExplicitGroq = Boolean(userSelectedModel && !String(userSelectedModel).toLowerCase().startsWith('gemini-') && userSelectedModel !== 'auto');
         const hasGroq = getAllGroqApiKeys(options?.customGroqKey).length > 0;
         const hasGemini = Boolean(options?.customGeminiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
-        const perProviderLimit = hasGroq && hasGemini ? 1 : 2;
+        const prioritizeGemini = hasImages || (hasGemini && !isExplicitGroq);
+        const allowTwoGeminiAttempts = !hasImages && prioritizeGemini;
+        const providerLimits = {
+            gemini: hasGemini ? (allowTwoGeminiAttempts ? 2 : 1) : 0,
+            groq: hasGroq ? (hasGemini ? 1 : 2) : 0
+        };
 
-        let attemptsRemaining = 2;
+        let attemptsRemaining = (hasGroq && hasGemini) ? (allowTwoGeminiAttempts ? 3 : 2) : 2;
+        if (attemptsRemaining > 2) allowGenerationAttempts(attemptsRemaining);
         const providerCalls = { groq: 0, gemini: 0 };
         let geminiModelMisses = 0;
         const generationFetch = async (url, init, settings) => {
             const provider = url.includes('api.groq.com') ? 'groq' : 'gemini';
-            if (attemptsRemaining <= 0 || providerCalls[provider] >= perProviderLimit) throw Object.assign(new Error('Model attempt budget exhausted'), { code: 'attempt_budget_exhausted' });
+            if (attemptsRemaining <= 0 || providerCalls[provider] >= providerLimits[provider]) throw Object.assign(new Error('Model attempt budget exhausted'), { code: 'attempt_budget_exhausted' });
             attemptsRemaining--; providerCalls[provider]++;
             try {
                 const result = await fetchWithTimeoutRetry(url, init, { ...settings, retries: 0 });
                 if (!result.ok) {
                     const model = provider === 'gemini' ? /\/models\/([^:]+):/.exec(url)?.[1] : JSON.parse(init.body).model;
                     failures.push({ status: result.status, upstream: await describeUpstreamFailure(result, provider, model) });
-                    const canRetryGeminiModel = provider === 'gemini' && geminiModelMisses === 0 && (
-                        result.status === 404 ||
-                        result.status === 410 ||
-                        (!hasImages && result.status === 400 && String(model || '').toLowerCase() === 'gemini-4-hydrogen')
-                    );
-                    if (canRetryGeminiModel) {
+                    if (provider === 'gemini' && providerLimits.gemini === 1 && geminiModelMisses === 0 && (result.status === 404 || result.status === 410)) {
                         geminiModelMisses++;
                         attemptsRemaining++;
                         providerCalls.gemini = Math.max(0, providerCalls.gemini - 1);
@@ -2809,7 +2851,14 @@ async function handler(req, res) {
         const tryRunGroq = async () => {
             const effectiveGroqKey = String(options?.customGroqKey || '').trim();
             const keys = getAllGroqApiKeys(effectiveGroqKey);
-            if (!keys.length) return null;
+            if (!keys.length || attemptsRemaining <= 0 || providerCalls.groq >= providerLimits.groq) return null;
+            let groqPrompt = finalPrompt;
+            let groqStructured = options?.structuredMessages;
+            if (typeof options?.prepareGroqContext === 'function') {
+                const prepared = await options.prepareGroqContext({ finalPrompt, structuredMessages: options?.structuredMessages }).catch(() => null);
+                if (prepared?.finalPrompt) groqPrompt = prepared.finalPrompt;
+                if (Array.isArray(prepared?.structuredMessages) && prepared.structuredMessages.length > 0) groqStructured = prepared.structuredMessages;
+            }
             const groqConfiguredModel = (hasImages ? String(process.env.GROQ_VISION_MODEL || '').trim() : '') || userSelectedModel || String(process.env.GROQ_MODEL || '').trim();
             const groqCandidates = hasImages
                 ? getPreferredGroqVisionCandidates(groqConfiguredModel, userSelectedModel)
@@ -2817,14 +2866,14 @@ async function handler(req, res) {
 
             for (const key of keys) {
                 for (const model of groqCandidates) {
-                    if (attemptsRemaining <= 0 || providerCalls.groq >= perProviderLimit) return null;
-                    let messages = Array.isArray(options?.structuredMessages) && options.structuredMessages.length > 0
-                        ? options.structuredMessages.map(m => ({ ...m }))
-                        : [{ role: 'user', content: finalPrompt }];
+                    if (attemptsRemaining <= 0 || providerCalls.groq >= providerLimits.groq) return null;
+                    let messages = Array.isArray(groqStructured) && groqStructured.length > 0
+                        ? groqStructured.map(m => ({ ...m }))
+                        : [{ role: 'user', content: groqPrompt }];
                     if (hasImages) {
                         const lastUserIdx = [...messages].reverse().findIndex(m => m.role === 'user');
                         const targetIdx = lastUserIdx >= 0 ? messages.length - 1 - lastUserIdx : messages.length - 1;
-                        const targetMsg = messages[targetIdx] || { role: 'user', content: finalPrompt };
+                        const targetMsg = messages[targetIdx] || { role: 'user', content: groqPrompt };
                         const content = [{ type: 'text', text: targetMsg.content }];
                         for (const img of images) {
                             if (img?.base64) {
@@ -2839,13 +2888,13 @@ async function handler(req, res) {
                         max_tokens: getMaxOutputTokensForGroq(model, maxTokens),
                         messages
                     };
-                    if (isSqlQueryGenerationRequest(finalPrompt)) {
+                    if (isSqlQueryGenerationRequest(groqPrompt)) {
                         requestBody.response_format = SQL_QUERY_GENERATION_SCHEMA;
-                    } else if (hasStructuredOutputConstraint(options?.systemPrompt || '', finalPrompt) || options?.response_format) {
+                    } else if (hasStructuredOutputConstraint(options?.systemPrompt || '', groqPrompt) || options?.response_format) {
                         requestBody.response_format = { type: 'json_object' };
                     }
                     if (supportsGroqReasoningFormat(model)) {
-                        const isReasoning = isExplicitReasoningIntent(options?.intent, finalPrompt) || String(userSelectedModel || '').toLowerCase().includes('r1');
+                        const isReasoning = isExplicitReasoningIntent(options?.intent, groqPrompt) || String(userSelectedModel || '').toLowerCase().includes('r1');
                         const shouldSuppress = !isReasoning || options?.minimalThinking === true ||
                             ['fast_simple', 'casual_chat', 'chat_title', 'internal_summary', 'pop_culture_reference', 'chat'].includes(String(options?.intent || ''));
                         if (shouldSuppress) {
@@ -2900,7 +2949,7 @@ async function handler(req, res) {
                 : getPreferredGeminiCandidates(geminiConfiguredModel, userSelectedModel, { preferSpeed: speedPreferred, tier: routingTier });
             const geminiCandidates = filterAvailableModelCandidates('gemini', rawGeminiCandidates);
             for (const model of geminiCandidates) {
-                if (attemptsRemaining <= 0 || providerCalls.gemini >= perProviderLimit) return null;
+                if (attemptsRemaining <= 0 || providerCalls.gemini >= providerLimits.gemini) return null;
                 const parts = [{ text: finalPrompt }];
                 if (hasImages) {
                     for (const img of images) {
@@ -2975,10 +3024,13 @@ async function handler(req, res) {
                         }
                     );
                     let response = await doGeminiRequest(geminiBody);
-                    if (response.status === 400 && geminiGenConfig.mediaResolution && perProviderLimit > 1 && attemptsRemaining > 0) {
+                    if (response.status === 400 && geminiGenConfig.mediaResolution && providerLimits.gemini > 1 && attemptsRemaining > 0) {
                         const fallbackGenConfig = { ...geminiGenConfig };
                         delete fallbackGenConfig.mediaResolution;
                         response = await doGeminiRequest({ ...geminiBody, generationConfig: fallbackGenConfig });
+                    }
+                    if (response.status === 401 || response.status === 403) {
+                        break;
                     }
                     if (response.status === 404 || response.status === 410) {
                         markModelTemporarilyUnavailable('gemini', model, response.status);
@@ -3014,9 +3066,6 @@ async function handler(req, res) {
             return null;
         };
 
-        const isExplicitGroq = Boolean(userSelectedModel && !String(userSelectedModel).toLowerCase().startsWith('gemini-') && userSelectedModel !== 'auto');
-        const hasGeminiKey = Boolean(String(options?.customGeminiKey || '').trim() || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
-        const prioritizeGemini = hasImages || (hasGeminiKey && !isExplicitGroq);
         const providerFns = prioritizeGemini ? [tryRunGemini, tryRunGroq] : [tryRunGroq, tryRunGemini];
 
         let attemptIndex = 0;
@@ -3085,21 +3134,37 @@ async function handler(req, res) {
 
 
         const failures = [];
+        const isExplicitGroqStream = Boolean(userSelectedModel && !String(userSelectedModel).toLowerCase().startsWith('gemini-') && userSelectedModel !== 'auto');
         const hasGroq = getAllGroqApiKeys(options?.customGroqKey).length > 0;
         const hasGemini = Boolean(options?.customGeminiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
-        const perProviderLimit = hasGroq && hasGemini ? 1 : 2;
-        let attemptsRemaining = 2;
+        const prioritizeGemini = hasImages || (hasGemini && !isExplicitGroqStream);
+        const allowTwoGeminiStreamAttempts = !hasImages && prioritizeGemini;
+        const streamProviderLimits = {
+            gemini: hasGemini ? (allowTwoGeminiStreamAttempts ? 2 : 1) : 0,
+            groq: hasGroq ? (hasGemini ? 1 : 2) : 0
+        };
+        let attemptsRemaining = (hasGroq && hasGemini) ? (allowTwoGeminiStreamAttempts ? 3 : 2) : 2;
+        if (attemptsRemaining > 2) allowGenerationAttempts(attemptsRemaining);
         const tryStreamGroq = async () => {
             const effectiveGroqKey = String(options?.customGroqKey || '').trim();
             const keys = getAllGroqApiKeys(effectiveGroqKey);
-            if (!keys.length) return null;
+            if (!keys.length || attemptsRemaining <= 0 || streamProviderLimits.groq <= 0) return null;
+            let groqPrompt = finalPrompt;
+            let groqOptions = options;
+            if (typeof options?.prepareGroqContext === 'function') {
+                const prepared = await options.prepareGroqContext({ finalPrompt, structuredMessages: options?.structuredMessages }).catch(() => null);
+                if (prepared?.finalPrompt) groqPrompt = prepared.finalPrompt;
+                if (Array.isArray(prepared?.structuredMessages) && prepared.structuredMessages.length > 0) {
+                    groqOptions = { ...options, structuredMessages: prepared.structuredMessages };
+                }
+            }
             const groqConfiguredModel = (hasImages ? String(process.env.GROQ_VISION_MODEL || '').trim() : '') || userSelectedModel || String(process.env.GROQ_MODEL || '').trim();
             const groqCandidates = hasImages
                 ? getPreferredGroqVisionCandidates(groqConfiguredModel, userSelectedModel)
                 : getPreferredGroqCandidates(groqConfiguredModel, { preferSpeed: speedPreferred, tier: routingTier, userSelectedModel, isReasoningQuery });
 
             let groqAttempts = 0;
-            const maxGroqAttempts = (options?.customGeminiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY) ? 1 : 2;
+            const maxGroqAttempts = streamProviderLimits.groq;
             for (const key of keys) {
                 for (const model of groqCandidates) {
                     if (groqAttempts >= maxGroqAttempts) break;
@@ -3114,13 +3179,13 @@ async function handler(req, res) {
                     const result = await streamGroqModel({
                         apiKey: key,
                         model,
-                        prompt: finalPrompt,
+                        prompt: groqPrompt,
                         images,
                         temperature: temp,
                         maxTokens,
                         timeoutMs: clampInt(lengthPolicy?.timeoutMs, STREAM_MODEL_FETCH_TIMEOUT_MS, 1000, STREAM_MODEL_FETCH_TIMEOUT_MS),
                         onDelta: perModelDelta,
-                        options
+                        options: groqOptions
                     });
                     if (!result?.ok) failures.push(result || {});
                     if (result?.ok && !isRawToolCallJson(result?.text)) {
@@ -3148,7 +3213,7 @@ async function handler(req, res) {
             let geminiAttempts = 0;
             let geminiModelMisses = 0;
             for (const model of geminiCandidates) {
-                if (geminiAttempts >= perProviderLimit || attemptsRemaining <= 0) return null;
+                if (geminiAttempts >= streamProviderLimits.gemini || attemptsRemaining <= 0) return null;
                 geminiAttempts++;
                 attemptsRemaining--;
                 let currentModelDeltasEmitted = false;
@@ -3157,7 +3222,7 @@ async function handler(req, res) {
                     onDelta(delta);
                 };
                 const geminiStreamTimeoutMs = supportsGeminiThinking(model)
-                    ? clampInt(lengthPolicy?.timeoutMs, 15_000, STREAM_MODEL_FETCH_TIMEOUT_MS, 18_000)
+                    ? clampInt(lengthPolicy?.timeoutMs, 10_000, STREAM_MODEL_FETCH_TIMEOUT_MS, 12_000)
                     : clampInt(lengthPolicy?.timeoutMs, STREAM_MODEL_FETCH_TIMEOUT_MS, 1000, STREAM_MODEL_FETCH_TIMEOUT_MS);
                 const result = await streamGeminiModel({
                     apiKey: geminiApiKey,
@@ -3172,12 +3237,10 @@ async function handler(req, res) {
                 });
                 if (result.ok) return result;
                 failures.push(result);
-                const canRetryGeminiModel = geminiModelMisses === 0 && (
-                    result.status === 404 ||
-                    result.status === 410 ||
-                    (!hasImages && result.status === 400 && String(model || '').toLowerCase() === 'gemini-4-hydrogen')
-                );
-                if (canRetryGeminiModel) {
+                if (result.status === 401 || result.status === 403) {
+                    break;
+                }
+                if (streamProviderLimits.gemini === 1 && geminiModelMisses === 0 && (result.status === 404 || result.status === 410)) {
                     geminiModelMisses++;
                     geminiAttempts = Math.max(0, geminiAttempts - 1);
                     attemptsRemaining++;
@@ -3189,9 +3252,6 @@ async function handler(req, res) {
             return null;
         };
 
-        const isExplicitGroqStream = Boolean(userSelectedModel && !String(userSelectedModel).toLowerCase().startsWith('gemini-') && userSelectedModel !== 'auto');
-        const hasGeminiKeyStream = Boolean(String(options?.customGeminiKey || '').trim() || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
-        const prioritizeGemini = hasImages || (hasGeminiKeyStream && !isExplicitGroqStream);
         const streamFns = prioritizeGemini ? [tryStreamGemini, tryStreamGroq] : [tryStreamGroq, tryStreamGemini];
 
         let streamAttemptIndex = 0;
@@ -4102,6 +4162,111 @@ async function handler(req, res) {
         } catch (_) {
             return '';
         }
+    }
+
+    async function buildSilentEntityGroqContext(message = '', options = {}) {
+        if (!isFactSearchConfigured()) return '';
+        const query = String(personPhotoQuery(message) || message || '').trim();
+        if (!query) return '';
+        const signal = AbortSignal.timeout(2500);
+        try {
+            const { runVerifiedWebSearch } = await getSearchHelpers();
+            const [visualRes, webRes] = await Promise.allSettled([
+                runWithSignal(signal, () => resolveEntityVisuals(query, { timeoutMs: 2200, personPhoto: true, includeNotableWorks: false })),
+                runWithSignal(signal, () => runVerifiedWebSearch(query, { limit: 4, retrievalOnly: true }))
+            ]);
+            const passages = [];
+            const seenUrls = new Set();
+            const entity = visualRes.status === 'fulfilled' ? visualRes.value?.entity : null;
+            if (entity && (entity.description || entity.extract || entity.summary)) {
+                const url = String(entity.url || entity.wikipediaUrl || '').trim();
+                if (url) seenUrls.add(url.toLowerCase());
+                passages.push([
+                    `[1] Title: ${entity.title || entity.name || query}`,
+                    url ? `URL: ${url}` : '',
+                    entity.description ? `Role/Summary: ${entity.description}` : '',
+                    entity.extract || entity.summary ? `Details: ${String(entity.extract || entity.summary).slice(0, 1200)}` : ''
+                ].filter(Boolean).join('\n'));
+            }
+            const results = webRes.status === 'fulfilled' && Array.isArray(webRes.value?.results) ? webRes.value.results : [];
+            for (const item of results) {
+                if (passages.length >= 4) break;
+                const url = String(item?.url || '').trim();
+                if (url && seenUrls.has(url.toLowerCase())) continue;
+                const snippet = String(item?.extract || item?.description || item?.snippet || '').replace(/\s+/g, ' ').trim();
+                if (!snippet) continue;
+                if (url) seenUrls.add(url.toLowerCase());
+                passages.push([
+                    `[${passages.length + 1}] Title: ${String(item?.title || query).trim()}`,
+                    url ? `URL: ${url}` : '',
+                    `Details: ${snippet.slice(0, 900)}`
+                ].filter(Boolean).join('\n'));
+            }
+            if (!passages.length) return '';
+            return [
+                '=== REFERENCE CONTEXT FOR DIRECT ENTITY ANSWER ===',
+                ...passages,
+                'Answer directly and accurately from these reference details and established knowledge without mentioning a web search.'
+            ].join('\n\n');
+        } catch (_) {
+            return '';
+        }
+    }
+
+    function buildGroqEntityContextPreparer(cfg = {}) {
+        return async () => {
+            if (cfg.hasRagText || cfg.isAttachmentGrounding || cfg.isInternalSummary || cfg.needsContextClarification || (Array.isArray(cfg.images) && cfg.images.length > 0)) {
+                return null;
+            }
+            if (!isBareOrVagueEntityLookup(cfg.routingMessage, {
+                intent: cfg.intent,
+                needsContextClarification: cfg.needsContextClarification,
+                hasImages: Boolean(cfg.images?.length),
+                isInternalSummary: cfg.isInternalSummary,
+                isAttachmentGrounding: cfg.isAttachmentGrounding
+            })) {
+                return null;
+            }
+            const silentRagText = await buildSilentEntityGroqContext(cfg.routingMessage, cfg);
+            if (!silentRagText) return null;
+            return {
+                finalPrompt: composeFinalPrompt(
+                    cfg.systemPrompt,
+                    silentRagText,
+                    cfg.contextBlock,
+                    cfg.effectiveMessage,
+                    cfg.lengthGuidance,
+                    cfg.intent,
+                    cfg.selectedModel,
+                    cfg.selectedModel,
+                    {
+                        routingMessage: cfg.routingMessage,
+                        isWebForced: cfg.isWebForced,
+                        needsContextClarification: cfg.needsContextClarification,
+                        hasImages: Boolean(cfg.images?.length)
+                    }
+                ),
+                structuredMessages: composeProviderConversation({
+                    systemPrompt: cfg.systemPrompt,
+                    messages: cfg.hasStructuredContext ? cfg.structuredMessages : null,
+                    ragText: silentRagText,
+                    context: cfg.context,
+                    retrievedTurns: cfg.retrievedTurns || [],
+                    summary: cfg.rollingSummary || '',
+                    message: cfg.effectiveMessage,
+                    routingMessage: cfg.routingMessage,
+                    lengthGuidance: cfg.lengthGuidance,
+                    intent: cfg.intent,
+                    model: cfg.selectedModel,
+                    userSelectedModel: cfg.selectedModel,
+                    isWebForced: cfg.isWebForced,
+                    needsContextClarification: cfg.needsContextClarification,
+                    hasImages: Boolean(cfg.images?.length),
+                    isInternalSummary: cfg.isInternalSummary,
+                    isAttachmentGrounding: cfg.isAttachmentGrounding
+                })
+            };
+        };
     }
 
     async function buildLiveRagContext(message, req, contextTurns = []) {

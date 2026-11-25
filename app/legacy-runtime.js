@@ -5012,6 +5012,7 @@ async function streamChatCompletion(payload, options = {}) {
                 modelUsed: donePayload.modelUsed || streamMeta.modelUsed || streamMeta.model || '',
                 provider: donePayload.provider || streamMeta.provider || '',
                 failover: donePayload.failover || streamMeta.failover || false,
+                upstreamAttempts: Array.isArray(donePayload.upstreamAttempts) ? donePayload.upstreamAttempts : (Array.isArray(streamMeta.upstreamAttempts) ? streamMeta.upstreamAttempts : null),
                 routing: donePayload.routing || null,
                 route: options?.routeDecision?.route || '',
                 routeReason: options?.routeDecision?.reason || '',
@@ -9307,7 +9308,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             const upClass = savedRating === 1 ? ' is-active is-feedback-up' : '';
             const downClass = savedRating === -1 ? ' is-active is-feedback-down' : '';
             const badgeHtml = modelInfo && modelInfo.label
-                ? `<span class="assistant-model-badge ${modelInfo.isFailover ? 'is-failover' : ''}" title="${escapeHtml(modelInfo.label)}">${escapeHtml(modelInfo.label)}</span>`
+                ? `<span class="assistant-model-badge ${modelInfo.isFailover ? 'is-failover' : ''}" title="${escapeHtml(modelInfo.title || modelInfo.label)}">${escapeHtml(modelInfo.label)}</span>`
                 : '';
             return `
                 <div class="assistant-action-row" data-message-id="${safeId}">
@@ -10988,7 +10989,19 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             }
         };
 
-        function formatModelDisplayName(model, provider, failover = false) {
+        function formatFailoverAttemptsTooltip(label, upstreamAttempts = null) {
+            if (!Array.isArray(upstreamAttempts) || !upstreamAttempts.length) return label;
+            const summary = upstreamAttempts.slice(0, 2).map(attempt => {
+                const m = String(attempt?.model || attempt?.provider || 'primary').trim();
+                const status = Number(attempt?.status) ? String(attempt.status) : '';
+                const reason = String(attempt?.reasonCode || '').trim();
+                const detail = [status, reason].filter(Boolean).join(' ');
+                return detail ? `${m} (${detail})` : m;
+            }).filter(Boolean).join(', ');
+            return summary ? `${label} — after ${summary}` : label;
+        }
+
+        function formatModelDisplayName(model, provider, failover = false, upstreamAttempts = null) {
             const raw = String(model || '').trim().toLowerCase();
             const prov = String(provider || '').trim().toLowerCase();
             if (!raw || raw === 'none' || raw === 'auto') return null;
@@ -11001,8 +11014,10 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             const isFailover = Boolean(failover);
             const providerLabel = isGoogle ? 'Google AI' : 'Groq';
             const failoverTag = isFailover ? ' (Failover)' : ` (${providerLabel})`;
+            const label = `${name}${failoverTag}`;
             return {
-                label: `${name}${failoverTag}`,
+                label,
+                title: isFailover ? formatFailoverAttemptsTooltip(label, upstreamAttempts) : label,
                 name,
                 icon,
                 providerLabel,
@@ -11165,7 +11180,8 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 const rawModel = meta?.modelUsed || meta?.model || meta?.routing?.model || '';
                 const rawProvider = meta?.provider || meta?.routing?.provider || '';
                 const rawFailover = meta?.failover || meta?.routing?.failover || false;
-                const modelInfo = typeof formatModelDisplayName === 'function' ? formatModelDisplayName(rawModel, rawProvider, rawFailover) : null;
+                const rawUpstreamAttempts = meta?.upstreamAttempts || meta?.routing?.upstreamAttempts || null;
+                const modelInfo = typeof formatModelDisplayName === 'function' ? formatModelDisplayName(rawModel, rawProvider, rawFailover, rawUpstreamAttempts) : null;
                 const thinkingHtml = ((thoughtContent || thoughtSteps.length > 0 || selfHealing) && !meta?.systemGreeting)
                     ? buildThinkingProcessHtml(thoughtContent, thoughtSteps, elapsedSeconds, isThinkingStreaming, selfHealing, modelInfo)
                     : '';
@@ -11527,7 +11543,8 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             const rawModel = meta?.modelUsed || meta?.model || meta?.routing?.model || '';
             const rawProvider = meta?.provider || meta?.routing?.provider || '';
             const rawFailover = meta?.failover || meta?.routing?.failover || false;
-            const modelInfo = typeof formatModelDisplayName === 'function' ? formatModelDisplayName(rawModel, rawProvider, rawFailover) : null;
+            const rawUpstreamAttempts = meta?.upstreamAttempts || meta?.routing?.upstreamAttempts || null;
+            const modelInfo = typeof formatModelDisplayName === 'function' ? formatModelDisplayName(rawModel, rawProvider, rawFailover, rawUpstreamAttempts) : null;
 
             if (isThinkingStream || thinkingCard) {
                 const isStopped = meta?.stopped === true;
@@ -11555,6 +11572,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                         }
                         tagEl.className = `thinking-model-tag ${modelInfo.isFailover ? 'is-failover' : ''}`;
                         tagEl.textContent = modelInfo.label;
+                        tagEl.title = modelInfo.title || modelInfo.label;
                     }
                     if (isFinished) {
                         if (row.__thinkingTimerInterval) {
@@ -11700,7 +11718,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                     }
                     badge.className = `assistant-model-badge ${safeModelInfo.isFailover ? 'is-failover' : ''}`;
                     badge.textContent = safeModelInfo.label;
-                    badge.title = safeModelInfo.label;
+                    badge.title = safeModelInfo.title || safeModelInfo.label;
                 }
             } catch (_) {
                 // Non-critical badge decoration should never crash text streaming

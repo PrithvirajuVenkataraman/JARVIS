@@ -176,6 +176,78 @@ test('streaming fallback from Gemini to Groq marks failover accurately', async (
         assert.equal(payload.provider, 'groq');
         assert.equal(payload.failover, true);
         assert.equal(payload.upstreamAttempts[0].model, 'gemini-4-hydrogen');
+        assert.equal(payload.upstreamAttempts[1].model, 'gemini-3.8-flash');
+    } finally { globalThis.fetch = original; for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } }
+});
+
+test('429 rate limit or 503 error on gemini-4-hydrogen retries gemini-3.8-flash before Groq failover, while 401/403 fails over immediately', async () => {
+    const original = globalThis.fetch, saved = { GROQ_API_KEY: process.env.GROQ_API_KEY, GEMINI_API_KEY: process.env.GEMINI_API_KEY };
+    process.env.GROQ_API_KEY = 'test-groq'; process.env.GEMINI_API_KEY = 'test-gemini';
+    try {
+        for (const status of [429, 503]) {
+            const calls = [];
+            globalThis.fetch = async (input) => {
+                const url = String(input);
+                if (!/generativelanguage\.googleapis\.com|api\.groq\.com/.test(url)) return Response.json({});
+                calls.push(url);
+                if (url.includes('gemini-4-hydrogen')) return Response.json({ error: { message: 'busy' } }, { status });
+                if (url.includes('generativelanguage.googleapis.com')) return new Response('data: {"candidates":[{"content":{"parts":[{"text":"Jordan Mercer is the CEO of Northbridge."}]},"finishReason":"STOP"}]}\n\n', { headers: { 'content-type': 'text/event-stream' } });
+                assert.fail('Should succeed on gemini-3.8-flash without dropping to Groq');
+            };
+            const req = Object.assign(new EventEmitter(), { method: 'POST', headers: { host: 'localhost', 'content-type': 'application/json' }, socket: { remoteAddress: '127.0.0.1' }, body: { message: 'Explain orbital resonance', stream: true, webMode: 'off', preferences: { selectedModel: 'auto' } } });
+            const res = response(); await handler(req, res);
+            assert.equal(res.statusCode, 200);
+            assert.equal(calls.length, 2);
+            assert.match(calls[0], /gemini-4-hydrogen/);
+            assert.match(calls[1], /gemini-3\.8-flash/);
+        }
+        const authCalls = [];
+        globalThis.fetch = async (input) => {
+            const url = String(input);
+            if (!/generativelanguage\.googleapis\.com|api\.groq\.com/.test(url)) return Response.json({});
+            authCalls.push(url);
+            if (url.includes('generativelanguage.googleapis.com')) return Response.json({ error: { message: 'API key invalid' } }, { status: 403 });
+            return new Response('data: {"choices":[{"delta":{"content":"Ready."},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n', { headers: { 'content-type': 'text/event-stream' } });
+        };
+        const req = Object.assign(new EventEmitter(), { method: 'POST', headers: { host: 'localhost', 'content-type': 'application/json' }, socket: { remoteAddress: '127.0.0.1' }, body: { message: 'Explain orbital resonance', stream: true, webMode: 'off', preferences: { selectedModel: 'auto' } } });
+        const res = response(); await handler(req, res);
+        assert.equal(res.statusCode, 200);
+        assert.equal(authCalls.length, 2);
+        assert.match(authCalls[0], /gemini-4-hydrogen/);
+        assert.match(authCalls[1], /api\.groq\.com/);
+    } finally { globalThis.fetch = original; for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } }
+});
+
+test('bare entity lookups silently enrich Groq 120B (both on failover and explicit selection) without emitting sources when web search is off', async () => {
+    const original = globalThis.fetch, saved = { GROQ_API_KEY: process.env.GROQ_API_KEY, GEMINI_API_KEY: process.env.GEMINI_API_KEY };
+    process.env.GROQ_API_KEY = 'test-groq'; process.env.GEMINI_API_KEY = 'test-gemini';
+    try {
+        for (const [selectedModel, queryName] of [['auto', 'Morgan Vance'], ['openai/gpt-oss-120b', 'Taylor Quinn']]) {
+            let groqSystemPrompt = '';
+            let lookupHit = false;
+            globalThis.fetch = async (input, init = {}) => {
+                const url = String(input);
+                if (url.includes('generativelanguage.googleapis.com')) return Response.json({ error: { message: 'quota' } }, { status: 429 });
+                if (url.includes('en.wikipedia.org/api/rest_v1/page/summary/')) {
+                    lookupHit = true;
+                    return Response.json({ title: queryName, description: 'Co-founder and CEO of Northbridge', extract: `${queryName} is an entrepreneur and the co-founder and CEO of Northbridge.`, content_urls: { desktop: { page: `https://en.wikipedia.org/wiki/${queryName.replace(/\s+/g, '_')}` } } });
+                }
+                if (url.includes('api.groq.com')) {
+                    const body = JSON.parse(init.body);
+                    groqSystemPrompt = body.messages?.find(m => m.role === 'system')?.content || '';
+                    return new Response(`data: {"choices":[{"delta":{"content":"${queryName} is the co-founder and CEO of Northbridge."},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } });
+                }
+                return new Response('', { status: 200 });
+            };
+            const req = Object.assign(new EventEmitter(), { method: 'POST', headers: { host: 'localhost', 'content-type': 'application/json' }, socket: { remoteAddress: '127.0.0.1' }, body: { message: queryName.toLowerCase(), stream: true, webMode: 'off', preferences: { selectedModel } } });
+            const res = response(); await handler(req, res);
+            assert.equal(res.statusCode, 200);
+            assert.equal(lookupHit, true);
+            assert.match(groqSystemPrompt, /Co-founder and CEO of Northbridge/);
+            const events = res.chunks.map(chunk => String(chunk));
+            assert.ok(events.every(chunk => !chunk.includes('event: sources\n')), 'Silent enrichment must not emit search sources UI when web search is off');
+            assert.ok(events.every(chunk => !chunk.includes('"state":"SEARCHING"')), 'Silent enrichment must not emit SEARCHING UI status');
+        }
     } finally { globalThis.fetch = original; for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } }
 });
 
@@ -202,4 +274,25 @@ test('a 404 or 400 miss on gemini-4-hydrogen falls back within Gemini to gemini-
             assert.equal(payload.provider, 'gemini');
         }
     } finally { globalThis.fetch = original; for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } }
+});
+
+test('failover model badge surfaces safe upstreamAttempt reasons in its hover tooltip', async () => {
+    const fs = await import('node:fs');
+    const vm = await import('node:vm');
+    const runtime = fs.readFileSync(new URL('../app/legacy-runtime.js', import.meta.url), 'utf8');
+    const start = runtime.indexOf('function formatFailoverAttemptsTooltip(');
+    const end = runtime.indexOf('function buildThinkingProcessHtml(');
+    assert.ok(start > 0 && end > start, 'Expected failover tooltip helpers in legacy-runtime.js');
+    const ctx = {
+        window: { APP_CONFIG: { models: [{ id: 'openai/gpt-oss-120b', displayName: 'GPT-OSS 120B', icon: '🧠' }] } },
+        APP_CONFIG: { models: [{ id: 'openai/gpt-oss-120b', displayName: 'GPT-OSS 120B', icon: '🧠' }] }
+    };
+    vm.runInNewContext(`${runtime.slice(start, end)}; this.formatModelDisplayName = formatModelDisplayName;`, ctx);
+    const info = ctx.formatModelDisplayName('openai/gpt-oss-120b', 'groq', true, [
+        { provider: 'gemini', model: 'gemini-4-hydrogen', status: 429, reasonCode: 'rate_limited' },
+        { provider: 'gemini', model: 'gemini-3.8-flash', status: 503, reasonCode: 'provider_error' }
+    ]);
+    assert.equal(info.label, 'GPT-OSS 120B (Failover)');
+    assert.equal(info.title, 'GPT-OSS 120B (Failover) — after gemini-4-hydrogen (429 rate_limited), gemini-3.8-flash (503 provider_error)');
+    assert.ok(runtime.includes('badge.title = safeModelInfo.title || safeModelInfo.label'));
 });

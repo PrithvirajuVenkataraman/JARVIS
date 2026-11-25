@@ -20,13 +20,23 @@ export function runWithSignal(signal, task) {
     return requestScope.run({ ...parent, signal: parent?.signal ? AbortSignal.any([parent.signal, signal]) : signal }, task);
 }
 
+export function allowGenerationAttempts(limit = 2) {
+    const scope = requestScope.getStore();
+    if (!scope?.budget) return;
+    const requested = Number(limit);
+    if (Number.isFinite(requested) && requested > 0) {
+        scope.budget.maxGenerationAttempts = Math.max(scope.budget.maxGenerationAttempts || 2, Math.min(4, Math.floor(requested)));
+    }
+}
+
 export function fetchWithLifecycle(input, init = {}) {
     const scope = requestScope.getStore();
     const signal = scope?.signal;
     const composed = signal && init.signal ? AbortSignal.any([signal, init.signal]) : signal || init.signal;
     if (composed?.aborted) return Promise.reject(composed.reason);
     if (scope?.budget && /\/chat\/completions|:(?:streamGenerateContent|generateContent)|\/interactions(?:\?|$)/.test(String(input))) {
-        if (scope.budget.generationAttempts >= 2) return Promise.reject(Object.assign(new Error('The request exhausted its model-attempt budget.'), { code: 'attempt_budget_exhausted' }));
+        const limit = scope.budget.maxGenerationAttempts || 2;
+        if (scope.budget.generationAttempts >= limit) return Promise.reject(Object.assign(new Error('The request exhausted its model-attempt budget.'), { code: 'attempt_budget_exhausted' }));
         scope.budget.generationAttempts++;
     }
     return globalThis.fetch(input, { ...init, signal: composed });
@@ -45,7 +55,7 @@ export function createRequestLifecycle(req, res, timeoutMs = REQUEST_DEADLINE_MS
     if (req?.aborted || req?.signal?.aborted) abort();
     return {
         signal: controller.signal,
-        budget: { generationAttempts: 0 },
+        budget: { generationAttempts: 0, maxGenerationAttempts: 2 },
         deadlineAt: startedAt + timeoutMs,
         remainingMs: () => Math.max(0, startedAt + timeoutMs - Date.now()),
         dispose() {
