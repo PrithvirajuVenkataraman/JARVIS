@@ -4755,6 +4755,7 @@ async function streamChatCompletion(payload, options = {}) {
     const decoder = new TextDecoder();
     let buffer = '';
     let accumulated = isContinuation ? continuationPreviousText : '';
+    let accumulatedThought = '';
     let donePayload = null;
     let assistantMessageId = String(options?.assistantMessageId || '').trim();
     const ensureStreamMessage = () => {
@@ -4867,6 +4868,26 @@ async function streamChatCompletion(payload, options = {}) {
             }
             return;
         }
+        if (event.event === 'thinking') {
+            resetIdleTimer();
+            const thoughtChunk = String(event.data?.text || '');
+            if (!thoughtChunk) return;
+            accumulatedThought += thoughtChunk;
+            hideThinkingIndicator();
+            const id = ensureStreamMessage();
+            updateStreamingAssistantMessage(id, accumulated, {
+                userMessage,
+                streaming: true,
+                thought: accumulatedThought,
+                modelUsed: streamMeta.modelUsed || streamMeta.model || '',
+                provider: streamMeta.provider || '',
+                failover: streamMeta.failover || false,
+                route: options?.routeDecision?.route || '',
+                sources: options?.sources || undefined,
+                minimalThinking: options?.routeDecision?.minimalThinking === true || options?.routeDecision?.route === 'fast_simple'
+            });
+            return;
+        }
         if (event.event === 'delta') {
             resetIdleTimer();
             if (latencyTrace.requestId && window.JarvisInteractionState?.isCurrentRequest && !window.JarvisInteractionState.isCurrentRequest(latencyTrace.requestId)) {
@@ -4904,6 +4925,7 @@ async function streamChatCompletion(payload, options = {}) {
             updateStreamingAssistantMessage(id, accumulated, {
                 userMessage,
                 streaming: true,
+                thought: accumulatedThought,
                 modelUsed: streamMeta.modelUsed || streamMeta.model || '',
                 provider: streamMeta.provider || '',
                 failover: streamMeta.failover || false,
@@ -4915,12 +4937,14 @@ async function streamChatCompletion(payload, options = {}) {
         }
         if (event.event === 'reset') {
             accumulated = '';
+            accumulatedThought = '';
             firstDeltaLogged = false;
             tokenChunkCount = 0;
             const id = ensureStreamMessage();
             updateStreamingAssistantMessage(id, '', {
                 userMessage,
                 streaming: true,
+                thought: '',
                 reset: true
             });
             return;
@@ -5005,6 +5029,7 @@ async function streamChatCompletion(payload, options = {}) {
             updateStreamingAssistantMessage(id, doneResponse, {
                 userMessage,
                 streaming: false,
+                thought: accumulatedThought,
                 sources: finalSources,
                 entity: donePayload.entity || null,
                 notableWorks: donePayload.notableWorks || [],
@@ -10989,6 +11014,24 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             }
         };
 
+        if (typeof document !== 'undefined' && typeof document.addEventListener === 'function' && !document.__thinkingHeaderDelegationBound) {
+            document.__thinkingHeaderDelegationBound = true;
+            document.addEventListener('click', event => {
+                const header = event?.target?.closest?.('.thinking-header');
+                if (header && header.closest('.thinking-process-card') && !header.closest('#chat-thinking-indicator')) {
+                    window.toggleThinkingProcessCard(header, event);
+                }
+            });
+            document.addEventListener('keydown', event => {
+                if (event?.key !== 'Enter' && event?.key !== ' ') return;
+                const header = event?.target?.closest?.('.thinking-header');
+                if (header && header.closest('.thinking-process-card') && !header.closest('#chat-thinking-indicator')) {
+                    event.preventDefault();
+                    window.toggleThinkingProcessCard(header, event);
+                }
+            });
+        }
+
         function formatFailoverAttemptsTooltip(label, upstreamAttempts = null) {
             if (!Array.isArray(upstreamAttempts) || !upstreamAttempts.length) return label;
             const summary = upstreamAttempts.slice(0, 2).map(attempt => {
@@ -11025,11 +11068,23 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             };
         }
 
-        function buildThinkingProcessHtml(_thoughtContent, _steps = [], _elapsedSeconds = 0, _isStreaming = false, _selfHealing = null, _modelInfo = null, telemetry = null) {
-  const labels = { retrieval: 'Context retrieved', sources: 'Sources retrieved', arithmetic: 'Arithmetic checked' };
-  const stages = Array.isArray(telemetry?.completedStages) ? telemetry.completedStages.filter(stage => labels[stage]) : [];
-  return stages.length ? '<details class="answer-checks"><summary>Process</summary><ul>' + stages.map(stage => '<li>' + labels[stage] + '</li>').join('') + '</ul></details>' : '';
- }
+        function buildThinkingProcessHtml(thoughtContent, _steps = [], elapsedSeconds = 0, isStreaming = false, selfHealing = null, modelInfo = null, telemetry = null) {
+            const esc = v => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+            const thought = String(thoughtContent || '').trim();
+            const labels = { retrieval: 'Context retrieved', sources: 'Sources retrieved', arithmetic: 'Arithmetic checked' };
+            const stages = Array.isArray(telemetry?.completedStages) ? telemetry.completedStages.filter(stage => labels[stage]) : [];
+            const checksHtml = stages.length ? '<details class="answer-checks"><summary>Process</summary><ul>' + stages.map(stage => '<li>' + labels[stage] + '</li>').join('') + '</ul></details>' : '';
+            if (!thought && !selfHealing) return checksHtml;
+            const safeElapsed = esc(elapsedSeconds || '0.0');
+            const labelText = isStreaming ? `Thinking... ${safeElapsed}s` : `Thought for ${safeElapsed}s`;
+            const cardState = isStreaming ? 'is-active is-expanded' : 'is-finished';
+            const modelTagHtml = modelInfo?.label
+                ? `<span class="thinking-model-tag ${modelInfo.isFailover ? 'is-failover' : ''}" title="${esc(modelInfo.title || modelInfo.label)}">${esc(modelInfo.label)}</span>`
+                : '';
+            const recoveryHtml = selfHealing?.thought ? `<div class="thinking-recovery-note">${esc(selfHealing.thought)}</div>` : '';
+            const bodyContent = `${recoveryHtml}${thought ? `<div class="thinking-raw-content">${esc(thought)}</div>` : ''}${checksHtml}`;
+            return `<div class="thinking-process-card ${cardState}"><div class="thinking-header" role="button" tabindex="0" aria-expanded="${isStreaming ? 'true' : 'false'}"><div class="thinking-header-left"><span class="thinking-pulse-dot"></span><span class="thinking-timer">${labelText}</span>${modelTagHtml}</div><svg class="thinking-chevron w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></div><div class="thinking-body">${bodyContent}</div></div>`;
+        }
 
         function addChatMessage(text, isUser = true, typewriter = null, meta = {}) {
             const renderStartedAt = performance.now();
@@ -11496,7 +11551,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             }
             const parsed = extractThoughtAndAnswer(text);
             const cleanAnswer = parsed.answer;
-            const thoughtText = parsed.thought;
+            const thoughtText = parsed.thought || String(meta?.thought || '');
 
             // Trigger Streamed Image Action Tag on the fly (<250ms when closed tag arrives)
             if (!row.__imageActionTriggered) {

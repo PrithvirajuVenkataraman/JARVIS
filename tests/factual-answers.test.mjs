@@ -434,3 +434,114 @@ test('image chat failover extracts OCR text and falls back to text-only Groq mod
         }
     }
 });
+
+test('simple casual chat routes directly to Groq gpt-oss-20b while normal chat streams chain-of-thought via thinking SSE events', async () => {
+    const original = globalThis.fetch;
+    const saved = {
+        GROQ_API_KEY: process.env.GROQ_API_KEY,
+        GEMINI_API_KEY: process.env.GEMINI_API_KEY
+    };
+    process.env.GROQ_API_KEY = 'test-groq';
+    process.env.GEMINI_API_KEY = 'test-gemini';
+    try {
+        const fastCalls = [];
+        globalThis.fetch = async (input, init = {}) => {
+            const url = String(input);
+            const body = JSON.parse(init.body || '{}');
+            fastCalls.push({ url, model: body.model });
+            if (url.includes('api.groq.com')) {
+                return new Response('data: {"choices":[{"delta":{"content":"Hello! How can I help?"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n', { headers: { 'content-type': 'text/event-stream' } });
+            }
+            assert.fail(`Casual greeting should not wait on Gemini: ${url}`);
+        };
+        const fastReq = Object.assign(new EventEmitter(), {
+            method: 'POST',
+            headers: { host: 'localhost', 'content-type': 'application/json' },
+            socket: { remoteAddress: '127.0.0.1' },
+            body: { message: 'hi', stream: true, webMode: 'off', preferences: { selectedModel: 'auto' } }
+        });
+        const fastRes = response();
+        await handler(fastReq, fastRes);
+        assert.equal(fastRes.statusCode, 200);
+        assert.equal(fastCalls[0].model, 'openai/gpt-oss-20b');
+
+        // Normal chat falling back to Groq emits separate thinking SSE events cleanly
+        globalThis.fetch = async (input, init = {}) => {
+            const url = String(input);
+            if (url.includes('generativelanguage.googleapis.com')) {
+                return Response.json({ error: { message: 'busy' } }, { status: 403 });
+            }
+            if (url.includes('api.groq.com')) {
+                const body = JSON.parse(init.body || '{}');
+                if (String(body.model || '').includes('safety')) {
+                    return Response.json({ choices: [{ message: { content: 'SAFE' } }] });
+                }
+                return new Response(
+                    'data: {"choices":[{"delta":{"reasoning":"Step 1: check orbital mechanics."}}]}\n\n' +
+                    'data: {"choices":[{"delta":{"content":"Resonance occurs when orbital periods form a ratio."},"finish_reason":"stop"}]}\n\n' +
+                    'data: [DONE]\n\n',
+                    { headers: { 'content-type': 'text/event-stream' } }
+                );
+            }
+            return Response.json({}, { status: 404 });
+        };
+        const cotReq = Object.assign(new EventEmitter(), {
+            method: 'POST',
+            headers: { host: 'localhost', 'content-type': 'application/json' },
+            socket: { remoteAddress: '127.0.0.1' },
+            body: { message: 'Explain orbital resonance', stream: true, webMode: 'off', preferences: { selectedModel: 'auto' } }
+        });
+        const cotRes = response();
+        await handler(cotReq, cotRes);
+        assert.equal(cotRes.statusCode, 200);
+        const sseRaw = cotRes.chunks.join('');
+        assert.match(sseRaw, /event: thinking[\s\S]*Step 1: check orbital mechanics\./);
+        assert.match(sseRaw, /event: delta[\s\S]*Resonance occurs when orbital periods form a ratio\./);
+        assert.ok(!/event: delta[\s\S]*<think>/.test(sseRaw), 'delta SSE events must never leak raw <think> tags');
+    } finally {
+        globalThis.fetch = original;
+        for (const [key, value] of Object.entries(saved)) {
+            if (value === undefined) delete process.env[key];
+            else process.env[key] = value;
+        }
+    }
+});
+
+test('repeated 503 or timeouts cool down degraded Gemini models and promote gemini-2.5-flash', async () => {
+    const { __test: chatApi } = await import('../api/chat-groq.js');
+    chatApi.resetModelAvailabilityCache();
+    const original = globalThis.fetch;
+    const saved = { GROQ_API_KEY: process.env.GROQ_API_KEY, GEMINI_API_KEY: process.env.GEMINI_API_KEY };
+    process.env.GROQ_API_KEY = 'test-groq';
+    process.env.GEMINI_API_KEY = 'test-gemini';
+    try {
+        // 3 consecutive 503s on gemini-4-hydrogen and gemini-3.8-flash put both into transient cooldown
+        for (let i = 0; i < 3; i++) {
+            globalThis.fetch = async (input) => {
+                const url = String(input);
+                if (url.includes('gemini-4-hydrogen') || url.includes('gemini-3.8-flash')) {
+                    return Response.json({ error: { message: 'unavailable' } }, { status: 503 });
+                }
+                return new Response('data: {"choices":[{"delta":{"content":"Fallback ok."},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n', { headers: { 'content-type': 'text/event-stream' } });
+            };
+            await chatApi.streamModelWithFallback('Compare TCP and UDP', {}, () => {}, 'auto');
+        }
+        const nextCalls = [];
+        globalThis.fetch = async (input) => {
+            const url = String(input);
+            nextCalls.push(url);
+            return new Response('data: {"candidates":[{"content":{"parts":[{"text":"TCP is connection-oriented."}]},"finishReason":"STOP"}]}\n\n', { headers: { 'content-type': 'text/event-stream' } });
+        };
+        const res = await chatApi.streamModelWithFallback('Compare TCP and UDP', {}, () => {}, 'auto');
+        assert.equal(res.ok, true);
+        assert.equal(res.modelUsed, 'gemini-2.5-flash');
+        assert.match(nextCalls[0], /models\/gemini-2\.5-flash:/);
+    } finally {
+        chatApi.resetModelAvailabilityCache();
+        globalThis.fetch = original;
+        for (const [key, value] of Object.entries(saved)) {
+            if (value === undefined) delete process.env[key];
+            else process.env[key] = value;
+        }
+    }
+});

@@ -284,15 +284,22 @@ console.log('=== All Modern AI Workspace UI Architecture Tests PASSED ===');
 
 });
 
-test('Reasoning display contains only completed operations', () => {
+test('Reasoning display renders escaped chain-of-thought and completed operations safely', () => {
  const source = readAppSource();
- const start = source.indexOf('function buildThinkingProcessHtml('); const end = source.indexOf('\n }', start) + 3;
+ const start = source.indexOf('function buildThinkingProcessHtml(');
+ const end = source.indexOf('\n        function addChatMessage(', start);
  const sandbox = vm.createContext({}); vm.runInContext(source.slice(start, end), sandbox);
  const build = sandbox.buildThinkingProcessHtml;
- assert.equal(build('private <script>payload</script>', ['Invented source check'], 2, true), '');
- const result = build('private reasoning', [], 0, false, null, null, { completedStages: ['retrieval','arithmetic','<script>bad</script>'] });
+ assert.equal(build('', ['Invented source check'], 2, true), '');
+ const escapedOnly = build('private <script>payload</script>', ['Invented source check'], 2, true);
+ assert.match(escapedOnly, /thinking-process-card/);
+ assert.match(escapedOnly, /&lt;script&gt;payload&lt;\/script&gt;/);
+ assert.ok(!escapedOnly.includes('<script>'));
+ const result = build('step 1 reasoning', [], 1.4, false, null, { label: 'GPT-OSS 20B (Groq)', isFailover: false }, { completedStages: ['retrieval','arithmetic','<script>bad</script>'] });
  assert.match(result, /Context retrieved/); assert.match(result, /Arithmetic checked/);
- assert.ok(!result.includes('private reasoning') && !result.includes('<script>'));
+ assert.match(result, /step 1 reasoning/);
+ assert.match(result, /Thought for 1\.4s/);
+ assert.ok(!result.includes('<script>'));
 });
 
 test('Prompt keywords never fabricate a thinking narrative', () => {

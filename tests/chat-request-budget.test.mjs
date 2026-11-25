@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import handler from '../api/chat-groq.js';
+import handler, { __test as chatApi } from '../api/chat-groq.js';
 import { upstreamAttemptSummary } from '../api/_lib/model-failure.js';
 
 function response() {
@@ -9,6 +9,7 @@ function response() {
 }
 
 test('chat reserves both model attempts for the answer instead of consuming them on search planning', async () => {
+    chatApi.resetModelAvailabilityCache();
     const names = ['GROQ_API_KEY', 'GEMINI_API_KEY', 'LIVE_RETRIEVAL_ENABLED', 'CHAT_ROUTER_MODE', 'SEARCH_GEMINI_GROUNDING_FREE_ALLOWANCE'];
     const saved = Object.fromEntries(names.map(name => [name, process.env[name]]));
     const original = globalThis.fetch;
@@ -28,7 +29,7 @@ test('chat reserves both model attempts for the answer instead of consuming them
                 lookups.push(url.hostname);
                 return Response.json({});
             };
-            const req = Object.assign(new EventEmitter(), { method: 'POST', headers: { host: 'localhost', 'content-type': 'application/json' }, socket: { remoteAddress: '127.0.0.1' }, body: { message: 'Reply with the single word ready.', intent: 'fast_simple', stream, webMode, preferences: { selectedModel: 'auto' } } });
+            const req = Object.assign(new EventEmitter(), { method: 'POST', headers: { host: 'localhost', 'content-type': 'application/json' }, socket: { remoteAddress: '127.0.0.1' }, body: { message: webMode === 'force' ? 'Reply with the single word ready.' : 'Write a short haiku about autumn rain.', intent: 'chat', stream, webMode, preferences: { selectedModel: 'auto' } } });
             const res = response(); await handler(req, res);
             assert.equal(res.statusCode, 200);
             if (webMode === 'force') {
@@ -50,6 +51,7 @@ test('chat reserves both model attempts for the answer instead of consuming them
             assert.equal(payload.upstreamAttempts[0].status, 503);
         }
     } finally {
+        chatApi.resetModelAvailabilityCache();
         globalThis.fetch = original;
         for (const name of names) { if (saved[name] === undefined) delete process.env[name]; else process.env[name] = saved[name]; }
     }

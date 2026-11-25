@@ -414,7 +414,11 @@ async function getInstantFactHelper() {
     }
 
     const UNAVAILABLE_MODEL_TTL_MS = 10 * 60 * 1000;
+    const TRANSIENT_DEGRADED_MODEL_TTL_MS = 90 * 1000;
+    const TRANSIENT_FAILURE_WINDOW_MS = 120 * 1000;
+    const TRANSIENT_FAILURE_THRESHOLD = 3;
     const UNAVAILABLE_MODEL_CACHE = new Map();
+    const TRANSIENT_MODEL_FAILURE_CACHE = new Map();
 
     function isModelTemporarilyUnavailable(provider, model) {
         const key = `${provider}:${String(model || '').trim().toLowerCase()}`;
@@ -427,10 +431,39 @@ async function getInstantFactHelper() {
         return true;
     }
 
-    function markModelTemporarilyUnavailable(provider, model, status = 404) {
-        if (status !== 404 && status !== 410) return;
+    function markModelTemporarilyUnavailable(provider, model, status = 404, ttlMs = UNAVAILABLE_MODEL_TTL_MS) {
+        if (status !== 404 && status !== 410 && status !== 'transient') return;
         const key = `${provider}:${String(model || '').trim().toLowerCase()}`;
-        UNAVAILABLE_MODEL_CACHE.set(key, Date.now() + UNAVAILABLE_MODEL_TTL_MS);
+        UNAVAILABLE_MODEL_CACHE.set(key, Date.now() + ttlMs);
+    }
+
+    function recordTransientModelFailure(provider, model, statusOrReason = 503) {
+        const status = Number(statusOrReason) || 0;
+        const reason = String(statusOrReason || '');
+        const isTransient = status === 502 || status === 503 || status === 504 ||
+            reason === 'AbortError' || reason === 'TimeoutError' || reason === 'timeout';
+        if (!isTransient) return;
+        const key = `${provider}:${String(model || '').trim().toLowerCase()}`;
+        const now = Date.now();
+        const prev = TRANSIENT_MODEL_FAILURE_CACHE.get(key);
+        const count = (prev && (now - prev.firstAt) <= TRANSIENT_FAILURE_WINDOW_MS) ? prev.count + 1 : 1;
+        const firstAt = (prev && (now - prev.firstAt) <= TRANSIENT_FAILURE_WINDOW_MS) ? prev.firstAt : now;
+        if (count >= TRANSIENT_FAILURE_THRESHOLD) {
+            TRANSIENT_MODEL_FAILURE_CACHE.delete(key);
+            markModelTemporarilyUnavailable(provider, model, 'transient', TRANSIENT_DEGRADED_MODEL_TTL_MS);
+        } else {
+            TRANSIENT_MODEL_FAILURE_CACHE.set(key, { count, firstAt });
+        }
+    }
+
+    function clearTransientModelFailure(provider, model) {
+        const key = `${provider}:${String(model || '').trim().toLowerCase()}`;
+        TRANSIENT_MODEL_FAILURE_CACHE.delete(key);
+    }
+
+    function resetModelAvailabilityCache() {
+        UNAVAILABLE_MODEL_CACHE.clear();
+        TRANSIENT_MODEL_FAILURE_CACHE.clear();
     }
 
     function filterAvailableModelCandidates(provider, candidates = []) {
@@ -631,7 +664,7 @@ async function getInstantFactHelper() {
         const tierFallbacks = tier === 'deep'
             ? ['gemini-4-hydrogen', 'gemini-3.8-flash', 'gemini-2.5-pro', 'gemini-3.7-flash', 'gemini-2.5-flash']
             : (preferSpeed || tier === 'instant')
-                ? ['gemini-4-hydrogen', 'gemini-3.8-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-3.7-flash', 'gemini-2.5-pro']
+                ? ['gemini-4-hydrogen', 'gemini-3.8-flash', 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-3.7-flash', 'gemini-2.5-pro']
                 : ['gemini-4-hydrogen', 'gemini-3.8-flash', 'gemini-2.5-flash', 'gemini-3.7-flash', 'gemini-2.5-pro', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-2.5-flash-lite'];
         const geminiList = !userSelected || userSelected === 'auto'
             ? ['gemini-4-hydrogen', 'gemini-3.8-flash', configured, ...tierFallbacks]
@@ -2034,10 +2067,16 @@ async function handler(req, res) {
                 systemPrompt,
                 intent,
                 effectiveMessage,
+                webMode: options?.webMode,
                 tier: options?.tier,
                 forceReasoning: options?.forceReasoning,
                 userSelectedModel: selectedModel,
-                minimalThinking: options?.minimalThinking === true || isMultipleChoiceQuestion(effectiveMessage) || (!options?.forceReasoning && options?.tier !== 'deep' && !isExplicitReasoningIntent(intent, effectiveMessage) && !String(selectedModel || '').toLowerCase().includes('r1')),
+                minimalThinking: options?.minimalThinking === true || isMultipleChoiceQuestion(effectiveMessage) || ['fast_simple', 'casual_chat', 'chat_title'].includes(String(intent || '')),
+                onThought: thoughtDelta => {
+                    if (!thoughtDelta) return;
+                    lastSseWriteAt = Date.now();
+                    writeSse(res, 'thinking', { text: thoughtDelta });
+                },
                 customGroqKey,
                 customGeminiKey,
                 prepareGroqContext: buildGroqEntityContextPreparer({
@@ -2821,9 +2860,13 @@ async function handler(req, res) {
         const hasImages = Array.isArray(images) && images.length > 0;
         const failures = [];
         const isExplicitGroq = Boolean(userSelectedModel && !String(userSelectedModel).toLowerCase().startsWith('gemini-') && userSelectedModel !== 'auto');
+        const isExplicitGemini = Boolean(userSelectedModel && String(userSelectedModel).toLowerCase().startsWith('gemini-'));
+        const isSimpleFastChat = ['fast_simple', 'casual_chat', 'chat_title', 'internal_summary'].includes(String(options?.intent || '')) ||
+            (routingTier === 'instant' && queryComplexity.reason === 'instant_fast_path' && !isStableDefinitionQuery(effectiveMsg));
         const hasGroq = getAllGroqApiKeys(options?.customGroqKey).length > 0;
         const hasGemini = Boolean(options?.customGeminiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
-        const prioritizeGemini = hasImages || (hasGemini && !isExplicitGroq);
+        const preferFastGroq20b = !hasImages && hasGroq && !isExplicitGemini && (!userSelectedModel || userSelectedModel === 'auto') && isSimpleFastChat;
+        const prioritizeGemini = hasImages || (hasGemini && !isExplicitGroq && !preferFastGroq20b);
         const allowTwoGeminiAttempts = !hasImages && prioritizeGemini;
         const providerLimits = {
             gemini: hasGemini ? (allowTwoGeminiAttempts ? 2 : 1) : 0,
@@ -2911,11 +2954,13 @@ async function handler(req, res) {
                         requestBody.response_format = { type: 'json_object' };
                     }
                     if (supportsGroqReasoningFormat(model)) {
-                        const isReasoning = isExplicitReasoningIntent(options?.intent, groqPrompt) || String(userSelectedModel || '').toLowerCase().includes('r1');
-                        const shouldSuppress = !isReasoning || options?.minimalThinking === true ||
-                            ['fast_simple', 'casual_chat', 'chat_title', 'internal_summary', 'pop_culture_reference', 'chat'].includes(String(options?.intent || ''));
+                        const isReasoning = isExplicitReasoningIntent(options?.intent, groqPrompt) || String(userSelectedModel || '').toLowerCase().includes('r1') || options?.tier === 'deep' || options?.forceReasoning === true;
+                        const isSuppressedIntent = ['fast_simple', 'casual_chat', 'chat_title', 'internal_summary'].includes(String(options?.intent || ''));
+                        const shouldSuppress = options?.minimalThinking === true || (isSuppressedIntent && !isReasoning);
                         if (shouldSuppress) {
                             requestBody.reasoning_format = 'hidden';
+                        } else {
+                            requestBody.reasoning_format = 'parsed';
                         }
                     }
 
@@ -3053,6 +3098,11 @@ async function handler(req, res) {
                         markModelTemporarilyUnavailable('gemini', model, response.status);
                         continue;
                     }
+                    if (response.status >= 500) {
+                        recordTransientModelFailure('gemini', model, response.status);
+                        continue;
+                    }
+                    clearTransientModelFailure('gemini', model);
                     if (response.ok) {
                         const geminiData = await response.json();
                         const geminiParts = Array.isArray(geminiData?.candidates?.[0]?.content?.parts)
@@ -3077,6 +3127,7 @@ async function handler(req, res) {
                         }
                     }
                 } catch (error) {
+                    recordTransientModelFailure('gemini', model, error?.name || error?.code || 'timeout');
                     logUpstreamModelFailure('gemini', model, error);
                 }
             }
@@ -3152,9 +3203,13 @@ async function handler(req, res) {
 
         const failures = [];
         const isExplicitGroqStream = Boolean(userSelectedModel && !String(userSelectedModel).toLowerCase().startsWith('gemini-') && userSelectedModel !== 'auto');
+        const isExplicitGeminiStream = Boolean(userSelectedModel && String(userSelectedModel).toLowerCase().startsWith('gemini-'));
+        const isSimpleFastChatStream = ['fast_simple', 'casual_chat', 'chat_title', 'internal_summary'].includes(String(options?.intent || '')) ||
+            (routingTier === 'instant' && queryComplexity.reason === 'instant_fast_path' && !isStableDefinitionQuery(effectiveMsg));
         const hasGroq = getAllGroqApiKeys(options?.customGroqKey).length > 0;
         const hasGemini = Boolean(options?.customGeminiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
-        const prioritizeGemini = hasImages || (hasGemini && !isExplicitGroqStream);
+        const preferFastGroq20bStream = !hasImages && hasGroq && !isExplicitGeminiStream && (!userSelectedModel || userSelectedModel === 'auto') && isSimpleFastChatStream;
+        const prioritizeGemini = hasImages || (hasGemini && !isExplicitGroqStream && !preferFastGroq20bStream);
         const allowTwoGeminiStreamAttempts = !hasImages && prioritizeGemini;
         const streamProviderLimits = {
             gemini: hasGemini ? (allowTwoGeminiStreamAttempts ? 2 : 1) : 0,
@@ -3251,9 +3306,12 @@ async function handler(req, res) {
                     currentModelDeltasEmitted = true;
                     onDelta(delta);
                 };
-                const geminiStreamTimeoutMs = supportsGeminiThinking(model)
+                const isDeepOrReasoning = routingTier === 'deep' || isReasoningQuery || options?.forceReasoning === true;
+                const geminiStreamTimeoutMs = (isDeepOrReasoning && supportsGeminiThinking(model))
                     ? clampInt(lengthPolicy?.timeoutMs, 10_000, STREAM_MODEL_FETCH_TIMEOUT_MS, 12_000)
-                    : clampInt(lengthPolicy?.timeoutMs, STREAM_MODEL_FETCH_TIMEOUT_MS, 1000, STREAM_MODEL_FETCH_TIMEOUT_MS);
+                    : (supportsGeminiThinking(model)
+                        ? clampInt(lengthPolicy?.timeoutMs, 8_000, STREAM_MODEL_FETCH_TIMEOUT_MS, 9_000)
+                        : clampInt(lengthPolicy?.timeoutMs, STREAM_MODEL_FETCH_TIMEOUT_MS, 1000, STREAM_MODEL_FETCH_TIMEOUT_MS));
                 const result = await streamGeminiModel({
                     apiKey: geminiApiKey,
                     model,
@@ -3265,8 +3323,16 @@ async function handler(req, res) {
                     onDelta: perModelDelta,
                     options: { ...options, visionLane, allowCompatibilityRetry: false }
                 });
-                if (result.ok) return result;
+                if (result.ok) {
+                    clearTransientModelFailure('gemini', model);
+                    return result;
+                }
                 failures.push(result);
+                if (result.status >= 500 || ['AbortError', 'TimeoutError'].includes(result.name)) {
+                    recordTransientModelFailure('gemini', model, result.status || result.name);
+                } else if (result.status && result.status < 500 && result.status !== 404 && result.status !== 410) {
+                    clearTransientModelFailure('gemini', model);
+                }
                 if (result.status === 401 || result.status === 403) {
                     break;
                 }
@@ -3325,7 +3391,7 @@ async function handler(req, res) {
     }
 
     async function streamGroqModel({ apiKey, model, prompt, images = [], temperature, maxTokens, timeoutMs, onDelta, options = {} }) {
- const answerFilter = createAnswerFilter(); const emitAnswer = onDelta; onDelta = text => { const visible = answerFilter.push(text); if (visible) emitAnswer(visible); };
+ const answerFilter = createAnswerFilter(typeof options?.onThought === 'function' ? options.onThought : null); const emitAnswer = onDelta; onDelta = text => { const visible = answerFilter.push(text); if (visible) emitAnswer(visible); };
 
         const controller = new AbortController();
         const effectiveTimeoutMs = Math.max(Number(timeoutMs) || 0, STREAM_MODEL_FETCH_TIMEOUT_MS);
@@ -3365,8 +3431,12 @@ async function handler(req, res) {
                 messages[targetIdx] = { ...targetMsg, content };
             }
             const isUserChosenR1 = String(options?.userSelectedModel || '').toLowerCase().includes('r1');
-            const isReasoning = isExplicitReasoningIntent(options?.intent, prompt) || isUserChosenR1;
-            const shouldSuppressReasoning = true;
+            const isMathOrDeep = isMathematicalOrQuantitativeQuery(prompt, { hasImages: Array.isArray(images) && images.length > 0 }) ||
+                options?.tier === 'deep' ||
+                options?.forceReasoning === true;
+            const isReasoning = isMathOrDeep || isExplicitReasoningIntent(options?.intent, prompt) || isUserChosenR1;
+            const isSuppressedIntent = ['fast_simple', 'casual_chat', 'chat_title', 'internal_summary'].includes(String(options?.intent || ''));
+            const shouldSuppressReasoning = options?.minimalThinking === true || (isSuppressedIntent && !isReasoning);
             const groqPayload = {
                 model,
                 temperature,
@@ -3483,7 +3553,7 @@ async function handler(req, res) {
     }
 
     async function streamGeminiModel({ apiKey, model, prompt, images = [], temperature, maxTokens, timeoutMs, onDelta, options = {} }) {
- const answerFilter = createAnswerFilter(); const emitAnswer = onDelta; onDelta = text => { const visible = answerFilter.push(text); if (visible) emitAnswer(visible); };
+ const answerFilter = createAnswerFilter(typeof options?.onThought === 'function' ? options.onThought : null); const emitAnswer = onDelta; onDelta = text => { const visible = answerFilter.push(text); if (visible) emitAnswer(visible); };
 
         const controller = new AbortController();
         const effectiveTimeoutMs = Math.max(Number(timeoutMs) || 0, STREAM_MODEL_FETCH_TIMEOUT_MS);
@@ -3535,8 +3605,9 @@ async function handler(req, res) {
             const isUserChosenR1 = String(options?.userSelectedModel || '').toLowerCase().includes('r1');
             const isMathStream = isMathematicalOrQuantitativeQuery(prompt, { hasImages: hasStreamImages });
             const isFineGrainedVision = hasStreamImages && visionLane === 'fine_grained_id';
-            const isReasoning = isMathStream || isFineGrainedVision || isExplicitReasoningIntent(options?.intent, prompt) || isUserChosenR1;
-            const shouldSuppressReasoning = true;
+            const isReasoning = isMathStream || isFineGrainedVision || isExplicitReasoningIntent(options?.intent, prompt) || isUserChosenR1 || options?.tier === 'deep' || options?.forceReasoning === true;
+            const isSuppressedIntent = ['fast_simple', 'casual_chat', 'chat_title', 'internal_summary'].includes(String(options?.intent || ''));
+            const shouldSuppressReasoning = options?.minimalThinking === true || (isSuppressedIntent && !isReasoning);
             const effectiveTemp = hasStreamImages
                 ? (isMathStream ? 0.1 : (isFineGrainedVision ? 0.12 : 0.15))
                 : temperature;
@@ -3564,7 +3635,12 @@ async function handler(req, res) {
             if (systemInstruction) {
                 reqBody.system_instruction = systemInstruction;
             }
-            const isExplicitSearchQuery = isTimeSensitiveInfoRequest(prompt) || isMutableEntityFactQuery(prompt) || Boolean(options?.needsWebSearch || options?.forceLiveSearch || options?.webMode === 'force');
+            const userQueryForSearch = String(options?.effectiveMessage || prompt || '');
+            const isExplicitSearchQuery = options?.webMode !== 'off' && (
+                isTimeSensitiveInfoRequest(userQueryForSearch) ||
+                isMutableEntityFactQuery(userQueryForSearch) ||
+                Boolean(options?.needsWebSearch || options?.forceLiveSearch || options?.webMode === 'force')
+            );
             if (process.env.SEARCH_GEMINI_GROUNDING_FREE_ALLOWANCE === 'true' && isExplicitSearchQuery && !options?.minimalThinking && !generationConfig.thinkingConfig?.thinkingBudget) {
                 reqBody.tools = [{ googleSearch: {} }];
             }
@@ -6032,6 +6108,9 @@ export const __test = {
         isMathematicalOrQuantitativeQuery,
         filterAvailableModelCandidates,
         markModelTemporarilyUnavailable,
+        recordTransientModelFailure,
+        clearTransientModelFailure,
+        resetModelAvailabilityCache,
         getPreferredGroqCandidates,
         getPreferredGroqVisionCandidates,
         getPreferredGeminiCandidates,
