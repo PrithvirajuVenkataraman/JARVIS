@@ -23470,22 +23470,24 @@ function isWakeGreetingText(text) {
                 if (handled) return;
             }
 
-            const stableFactAnswer = getStableBrowserFactAnswer(cleanText);
-            if (stableFactAnswer) {
-                const assistantMessageId = addModelAssistantMessage(stableFactAnswer, 'Model answer');
-                saveToHistory(text, stableFactAnswer);
-                addFeedbackButtons(text, stableFactAnswer, assistantMessageId);
-                return;
-            }
+            if (_activeWebMode !== 'force') {
+                const stableFactAnswer = getStableBrowserFactAnswer(cleanText);
+                if (stableFactAnswer) {
+                    const assistantMessageId = addModelAssistantMessage(stableFactAnswer, 'Model answer');
+                    saveToHistory(text, stableFactAnswer);
+                    addFeedbackButtons(text, stableFactAnswer, assistantMessageId);
+                    return;
+                }
 
-            if (isStableHowExplainerQuery(cleanText) &&
-                !requiresAutoFormula(cleanText) &&
-                !isChemistryReactionQuery(cleanText)) {
-                logRoutingDebug('processCommand -> fast_explainer', cleanText, {
-                    selectedHandler: 'handleFastExplainerQuery'
-                });
-                const handled = await handleFastExplainerQuery(cleanText, text);
-                if (handled) return;
+                if (isStableHowExplainerQuery(cleanText) &&
+                    !requiresAutoFormula(cleanText) &&
+                    !isChemistryReactionQuery(cleanText)) {
+                    logRoutingDebug('processCommand -> fast_explainer', cleanText, {
+                        selectedHandler: 'handleFastExplainerQuery'
+                    });
+                    const handled = await handleFastExplainerQuery(cleanText, text);
+                    if (handled) return;
+                }
             }
 
             // Authoritative bounded live research dispatch — only when live Web Search is not OFF

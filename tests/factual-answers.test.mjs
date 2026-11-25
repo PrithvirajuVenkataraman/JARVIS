@@ -556,3 +556,34 @@ test('repeated 503 or timeouts cool down degraded deep Gemini models and promote
         }
     }
 });
+
+test('trivial greetings suppress Chain-of-Thought deltas while explanatory prompts preserve CoT and vision candidates include working Gemini Flash fallbacks', async () => {
+    const original = globalThis.fetch;
+    const savedGroq = process.env.GROQ_API_KEY;
+    const savedGemini = process.env.GEMINI_API_KEY;
+    process.env.GROQ_API_KEY = 'test-groq';
+    delete process.env.GEMINI_API_KEY;
+    try {
+        globalThis.fetch = async () => new Response(
+            'data: {"choices":[{"delta":{"reasoning":"The user greeted me casually."}}]}\n\n' +
+            'data: {"choices":[{"delta":{"content":"Hello! How can I help?"},"finish_reason":"stop"}]}\n\n' +
+            'data: [DONE]\n\n',
+            { headers: { 'content-type': 'text/event-stream' } }
+        );
+        const { __test: chatTest } = await import('../api/chat-groq.js');
+        chatTest.resetModelAvailabilityCache();
+        const greetingChunks = [];
+        await chatTest.streamModelWithFallback('hi', {}, d => greetingChunks.push(d), 'auto', undefined, { effectiveMessage: 'hi', intent: 'chat' });
+        assert.equal(greetingChunks.join('').includes('<think>'), false, 'Trivial greeting must not emit <think> deltas');
+        assert.match(greetingChunks.join(''), /Hello! How can I help\?/);
+        const fastVision = chatTest.getPreferredGeminiVisionCandidates('gemini-3.5-flash', null, { visionLane: 'fast_ocr_scene' });
+        assert.ok(fastVision.includes('gemini-3.5-flash'));
+        assert.ok(fastVision.indexOf('gemini-3.5-flash') < fastVision.indexOf('gemini-4-hydrogen'));
+    } finally {
+        globalThis.fetch = original;
+        if (savedGroq === undefined) delete process.env.GROQ_API_KEY;
+        else process.env.GROQ_API_KEY = savedGroq;
+        if (savedGemini === undefined) delete process.env.GEMINI_API_KEY;
+        else process.env.GEMINI_API_KEY = savedGemini;
+    }
+});

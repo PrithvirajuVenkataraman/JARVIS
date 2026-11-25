@@ -664,10 +664,10 @@ async function getInstantFactHelper() {
             : mappedGemini;
 
         const tierFallbacks = tier === 'deep'
-            ? ['gemini-4-hydrogen', 'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-3.7-flash']
+            ? ['gemini-4-hydrogen', 'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-3.5-flash', 'gemini-3.7-flash']
             : (preferSpeed || tier === 'instant')
-                ? ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.5-flash-lite', 'gemini-4-hydrogen', 'gemini-3.7-flash']
-                : ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-4-hydrogen', 'gemini-3.7-flash', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-2.5-flash-lite'];
+                ? ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.5-flash-lite', 'gemini-3.5-flash', 'gemini-4-hydrogen', 'gemini-3.7-flash']
+                : ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.5-flash-lite', 'gemini-3.5-flash', 'gemini-4-hydrogen', 'gemini-3.7-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
         const geminiList = !userSelected || userSelected === 'auto'
             ? [primaryGemini, ...tierFallbacks, configured]
             : [primaryGemini, configured, ...tierFallbacks];
@@ -678,6 +678,7 @@ async function getInstantFactHelper() {
         'gemini-4-hydrogen',
         'gemini-3.8-flash',
         'gemini-3.7-flash',
+        'gemini-3.5-flash',
         'gemini-2.5-pro',
         'gemini-2.5-flash',
         'gemini-2.0-flash',
@@ -697,19 +698,21 @@ async function getInstantFactHelper() {
                 'gemini-4-hydrogen',
                 'gemini-2.5-pro',
                 'gemini-2.5-flash',
+                'gemini-3.5-flash',
+                'gemini-2.5-flash-lite',
                 'gemini-3.7-flash',
                 'gemini-2.0-flash',
-                'gemini-1.5-flash',
-                'gemini-2.5-flash-lite'
+                'gemini-1.5-flash'
             ]
             : [
                 'gemini-2.5-flash',
+                'gemini-3.5-flash',
+                'gemini-2.5-flash-lite',
                 'gemini-2.5-pro',
                 'gemini-4-hydrogen',
                 'gemini-3.7-flash',
                 'gemini-2.0-flash',
-                'gemini-1.5-flash',
-                'gemini-2.5-flash-lite'
+                'gemini-1.5-flash'
             ];
         return [...new Set([userSelected, configured, ...visionModels].filter(Boolean))];
     }
@@ -1336,7 +1339,7 @@ async function handler(req, res) {
                 intent,
                 tier: req.body?.tier || preferences?.tier,
                 forceReasoning: req.body?.forceReasoning === true || preferences?.forceReasoning === true,
-                minimalThinking: req.body?.minimalThinking === true || preferences?.minimalThinking === true || isMultipleChoiceQuestion(effectiveMessage) || ['fast_simple', 'casual_chat', 'chat_title'].includes(String(intent || '')),
+                minimalThinking: req.body?.minimalThinking === true || preferences?.minimalThinking === true || isMultipleChoiceQuestion(effectiveMessage) || ['fast_simple', 'casual_chat', 'chat_title'].includes(String(intent || '')) || scoreChatIntent(String(effectiveMessage || '').toLowerCase(), 'trivial_greeting') >= 0.28,
                 isAttachmentGrounding,
                 structuredMessages: firstStructured,
                 customGroqKey,
@@ -1460,7 +1463,7 @@ async function handler(req, res) {
                         userMessage: effectiveMessage,
                         effectiveMessage,
                         intent,
-                        minimalThinking: req.body?.minimalThinking === true || preferences?.minimalThinking === true || ['fast_simple', 'casual_chat', 'chat_title'].includes(String(intent || '')),
+                        minimalThinking: req.body?.minimalThinking === true || preferences?.minimalThinking === true || isMultipleChoiceQuestion(effectiveMessage) || ['fast_simple', 'casual_chat', 'chat_title'].includes(String(intent || '')) || scoreChatIntent(String(effectiveMessage || '').toLowerCase(), 'trivial_greeting') >= 0.28,
                         isAttachmentGrounding,
                         structuredMessages: secondStructured,
                         customGroqKey,
@@ -2074,7 +2077,7 @@ async function handler(req, res) {
                 tier: options?.tier,
                 forceReasoning: options?.forceReasoning,
                 userSelectedModel: selectedModel,
-                minimalThinking: options?.minimalThinking === true || isMultipleChoiceQuestion(effectiveMessage) || ['fast_simple', 'casual_chat', 'chat_title'].includes(String(intent || '')),
+                minimalThinking: options?.minimalThinking === true || isMultipleChoiceQuestion(effectiveMessage) || ['fast_simple', 'casual_chat', 'chat_title'].includes(String(intent || '')) || scoreChatIntent(String(effectiveMessage || '').toLowerCase(), 'trivial_greeting') >= 0.28,
                 onThought: thoughtDelta => {
                     if (!thoughtDelta) return;
                     lastSseWriteAt = Date.now();
@@ -2955,8 +2958,9 @@ async function handler(req, res) {
                         requestBody.response_format = { type: 'json_object' };
                     }
                     if (supportsGroqReasoningFormat(model)) {
+                        const isTrivialGreeting = scoreChatIntent(String(options?.effectiveMessage || groqPrompt || '').toLowerCase(), 'trivial_greeting') >= 0.28;
                         const isReasoning = isExplicitReasoningIntent(options?.intent, groqPrompt) || String(userSelectedModel || '').toLowerCase().includes('r1') || options?.tier === 'deep' || options?.forceReasoning === true;
-                        const isSuppressedIntent = ['fast_simple', 'casual_chat', 'chat_title', 'internal_summary'].includes(String(options?.intent || ''));
+                        const isSuppressedIntent = ['fast_simple', 'casual_chat', 'chat_title', 'internal_summary'].includes(String(options?.intent || '')) || isTrivialGreeting;
                         const shouldSuppress = options?.minimalThinking === true || (isSuppressedIntent && !isReasoning);
                         if (shouldSuppress) {
                             requestBody.reasoning_format = 'hidden';
@@ -3433,8 +3437,9 @@ async function handler(req, res) {
             const isMathOrDeep = isMathematicalOrQuantitativeQuery(prompt, { hasImages: Array.isArray(images) && images.length > 0 }) ||
                 options?.tier === 'deep' ||
                 options?.forceReasoning === true;
+            const isTrivialGreeting = scoreChatIntent(String(options?.effectiveMessage || prompt || '').toLowerCase(), 'trivial_greeting') >= 0.28;
             const isReasoning = isMathOrDeep || isExplicitReasoningIntent(options?.intent, prompt) || isUserChosenR1;
-            const isSuppressedIntent = ['fast_simple', 'casual_chat', 'chat_title', 'internal_summary'].includes(String(options?.intent || ''));
+            const isSuppressedIntent = ['fast_simple', 'casual_chat', 'chat_title', 'internal_summary'].includes(String(options?.intent || '')) || isTrivialGreeting;
             const shouldSuppressReasoning = options?.minimalThinking === true || (isSuppressedIntent && !isReasoning);
             const groqPayload = {
                 model,
@@ -3604,8 +3609,9 @@ async function handler(req, res) {
             const isUserChosenR1 = String(options?.userSelectedModel || '').toLowerCase().includes('r1');
             const isMathStream = isMathematicalOrQuantitativeQuery(prompt, { hasImages: hasStreamImages });
             const isFineGrainedVision = hasStreamImages && visionLane === 'fine_grained_id';
+            const isTrivialGreetingStream = scoreChatIntent(String(options?.effectiveMessage || prompt || '').toLowerCase(), 'trivial_greeting') >= 0.28;
             const isReasoning = isMathStream || isFineGrainedVision || isExplicitReasoningIntent(options?.intent, prompt) || isUserChosenR1 || options?.tier === 'deep' || options?.forceReasoning === true;
-            const isSuppressedIntent = ['fast_simple', 'casual_chat', 'chat_title', 'internal_summary'].includes(String(options?.intent || ''));
+            const isSuppressedIntent = ['fast_simple', 'casual_chat', 'chat_title', 'internal_summary'].includes(String(options?.intent || '')) || isTrivialGreetingStream;
             const shouldSuppressReasoning = options?.minimalThinking === true || (isSuppressedIntent && !isReasoning);
             const effectiveTemp = hasStreamImages
                 ? (isMathStream ? 0.1 : (isFineGrainedVision ? 0.12 : 0.15))

@@ -776,11 +776,11 @@ test('Automatic research uses Hydrogen first and recovers through Groq within it
     };
     try {
         const providers = researchModelProviders({ ...keys, selectedModel: 'auto' });
-        assert.equal(providers[0].name, 'gemini'); assert.equal(providers[0].model, 'gemini-4-hydrogen');
+        assert.equal(providers[0].name, 'gemini'); assert.equal(providers[0].model, 'gemini-2.5-flash');
         assert.equal(researchModelProviders({ ...keys, selectedModel: 'openai/gpt-oss-120b' })[0].name, 'groq');
         assert.deepEqual(await invoke({ selectedModel: 'auto', budget: { calls: 0, maxCalls: 2 } }), body);
-        assert.equal(calls.length, 2); assert.match(calls[0].url, /gemini-4-hydrogen/); assert.match(calls[1].url, /groq\.com/);
-        assert.equal(calls[0].body.generationConfig.thinkingConfig.thinkingLevel, 'LOW'); assert.equal(calls[0].body.tools, undefined);
+        assert.equal(calls.length, 2); assert.match(calls[0].url, /gemini-2\.5-flash/); assert.match(calls[1].url, /groq\.com/);
+        assert.equal(calls[0].body.generationConfig.thinkingConfig.thinkingBudget, 0); assert.equal(calls[0].body.tools, undefined);
     } finally { globalThis.fetch = original; clearResearchModelHealth(); }
 });
 
@@ -902,8 +902,56 @@ test('already-cancelled request starts no provider work', async () => {
 
 test('paid/unknown selected models never replace the allowed existing text models', () => {
     const providers = researchModelProviders({ ...keys, selectedModel: 'gemini-unrecognized-pro' });
-    assert.equal(providers[0].model, 'gemini-4-hydrogen');
+    assert.equal(providers[0].model, 'gemini-2.5-flash');
     assert.ok(providers.every(provider => !provider.model.includes('unrecognized')));
+});
+
+test('503 transient failure puts failing research model on cooldown and retries healthy Gemini/Groq fallbacks with generous timeout', async () => {
+    clearResearchModelHealth();
+    const original = globalThis.fetch;
+    const calledModels = [];
+    globalThis.fetch = async (url, init) => {
+        const u = String(url);
+        const model = u.includes('googleapis.com') ? (/\/models\/([^:]+):/.exec(u)?.[1] || 'gemini') : JSON.parse(init.body).model;
+        calledModels.push(model);
+        if (model === 'gemini-2.5-flash' || model === 'openai/gpt-oss-120b') {
+            return Response.json({}, { status: 503 });
+        }
+        return Response.json({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify({ facts: [], gaps: [] }) }] } }] });
+    };
+    try {
+        const result = await callResearchModel({
+            system: 'Extract facts JSON.',
+            prompt: 'Status update',
+            json: true,
+            maxAttempts: 4,
+            budget: { calls: 0, maxCalls: 6 },
+            customGeminiKey: 'gem-key',
+            customGroqKey: 'groq-key'
+        });
+        assert.deepEqual(result, { facts: [], gaps: [] });
+        assert.ok(calledModels.includes('gemini-2.5-flash'));
+        assert.ok(calledModels.includes('openai/gpt-oss-120b'));
+        assert.ok(calledModels.some(m => m === 'gemini-2.5-flash-lite' || m === 'gemini-3.5-flash'));
+        const afterCooldown = researchModelProviders({ customGeminiKey: 'gem-key', customGroqKey: 'groq-key' });
+        assert.ok(!afterCooldown.some(p => p.model === 'gemini-2.5-flash'), '503 failing Gemini model must stay in cooldown');
+        assert.ok(!afterCooldown.some(p => p.model === 'openai/gpt-oss-120b'), '503 failing Groq model must stay in cooldown');
+    } finally { globalThis.fetch = original; clearResearchModelHealth(); }
+});
+
+test('deterministicResearchPlan preserves root subject across unlimited follow-up turns', () => {
+    const context = [
+        { role: 'user', content: 'Latest NASA Artemis mission status' },
+        { role: 'assistant', content: 'Artemis II is scheduled as a crewed lunar flyby.' },
+        { role: 'user', content: 'Who are the assigned crew members?' },
+        { role: 'assistant', content: 'Reid Wiseman, Victor Glover, Christina Koch, and Jeremy Hansen.' },
+        { role: 'user', content: 'Why was it delayed earlier?' },
+        { role: 'assistant', content: 'Heat shield and life-support hardware reviews pushed the schedule.' }
+    ];
+    const followUp = deterministicResearchPlan('Any upcoming launch updates?', context);
+    assert.match(followUp.query, /NASA Artemis/i);
+    assert.ok(followUp.queries.some(q => /NASA Artemis/i.test(q) && /launch/i.test(q)));
+    assert.equal(followUp.ambiguous, false);
 });
 
 });

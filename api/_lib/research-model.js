@@ -4,25 +4,66 @@ import { createHash } from 'node:crypto';
 import { researchTimeoutSignal, RESEARCH_LIMITS } from '../../app/search/research-contract.mjs';
 
 const cooldowns = new Map();
+const TRANSIENT_COOLDOWN_MS = 90_000;
+const DEPRECATED_COOLDOWN_MS = 10 * 60_000;
 const firstKey = value => String(value || '').split(/[,;\s]+/).find(Boolean) || '';
-const healthKey = provider => createHash('sha256').update(`${provider.name}:${provider.model}:${provider.key}`).digest('hex');
+const providerHealthKey = provider => createHash('sha256').update(`provider:${provider.name}:${provider.key}`).digest('hex');
+const modelHealthKey = provider => createHash('sha256').update(`model:${provider.name}:${provider.model}:${provider.key}`).digest('hex');
+
+function isCoolingDown(key) {
+    const until = cooldowns.get(key) || 0;
+    if (until <= Date.now()) {
+        cooldowns.delete(key);
+        return false;
+    }
+    return true;
+}
+
+function recordCooldown(key, durationMs) {
+    if (!key || !Number.isFinite(durationMs) || durationMs <= 0) return;
+    if (cooldowns.size >= 200) cooldowns.delete(cooldowns.keys().next().value);
+    cooldowns.set(key, Date.now() + durationMs);
+}
 
 export function clearResearchModelHealth() { cooldowns.clear(); }
 
 export function researchModelProviders(options = {}) {
     const groq = firstKey(options.customGroqKey || process.env.GROQ_API_KEY || process.env.GROQ_API_KEYS || process.env.GROQ_KEY);
     const gemini = String(options.customGeminiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '').trim();
-    const selected = String(options.selectedModel || '');
+    const selected = String(options.selectedModel || '').trim();
+    const configuredGemini = String(process.env.GEMINI_MODEL || '').trim();
+    const allowedGroq = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b'];
+    const allowedGemini = ['gemini-2.5-flash', 'gemini-3.5-flash', 'gemini-2.5-flash-lite', 'gemini-4-hydrogen', 'gemini-3.8-flash', 'gemini-2.5-pro'];
+
+    const geminiModels = gemini
+        ? [...new Set([
+            allowedGemini.includes(selected) ? selected : '',
+            configuredGemini.startsWith('gemini-') && allowedGemini.includes(configuredGemini) ? configuredGemini : '',
+            'gemini-2.5-flash',
+            'gemini-2.5-flash-lite',
+            'gemini-3.5-flash',
+            'gemini-4-hydrogen'
+        ].filter(Boolean))]
+        : [];
+    const groqModels = groq
+        ? [...new Set([
+            allowedGroq.includes(selected) ? selected : '',
+            'openai/gpt-oss-120b',
+            'openai/gpt-oss-20b'
+        ].filter(Boolean))]
+        : [];
+
     const providers = [];
-    if (groq) providers.push({ name: 'groq', key: groq, model: ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b'].includes(selected) ? selected : 'openai/gpt-oss-120b' });
-    if (gemini) providers.push({ name: 'gemini', key: gemini, model: ['gemini-4-hydrogen', 'gemini-3.8-flash', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'].includes(selected) ? selected : 'gemini-4-hydrogen' });
+    if (groqModels.length && !isCoolingDown(providerHealthKey({ name: 'groq', key: groq }))) {
+        const activeGroq = groqModels.find(model => !isCoolingDown(modelHealthKey({ name: 'groq', key: groq, model })));
+        if (activeGroq) providers.push({ name: 'groq', key: groq, model: activeGroq });
+    }
+    if (geminiModels.length && !isCoolingDown(providerHealthKey({ name: 'gemini', key: gemini }))) {
+        const activeGemini = geminiModels.find(model => !isCoolingDown(modelHealthKey({ name: 'gemini', key: gemini, model })));
+        if (activeGemini) providers.push({ name: 'gemini', key: gemini, model: activeGemini });
+    }
     if (!selected || selected === 'auto' || selected.startsWith('gemini-')) providers.reverse();
-    return providers.filter(provider => {
-        const key = healthKey(provider);
-        const until = cooldowns.get(key) || 0;
-        if (until <= Date.now()) { cooldowns.delete(key); return true; }
-        return false;
-    });
+    return providers;
 }
 
 export async function consumeResearchSse(body, onEvent, signal) {
@@ -69,15 +110,27 @@ export async function callResearchModel({ system, prompt, json = false, onToken,
     const allowance = Math.min(maxAttempts, Math.max(0, ledger.maxCalls - ledger.calls - reserveAttempts));
     if (!allowance || signal?.aborted) return null;
     const deadline = Date.now() + Math.max(1, timeoutMs);
-    const providers = researchModelProviders(options).slice(0, allowance);
-    if (!providers.length) ledger.attempts.push({ stage, outcome: 'no_available_credentials', durationMs: 0 });
-    for (let index = 0; index < providers.length; index++) {
+    const initialProviders = researchModelProviders(options);
+    if (!initialProviders.length) {
+        ledger.attempts.push({ stage, outcome: 'no_available_credentials', durationMs: 0 });
+        return null;
+    }
+    const tried = new Set();
+    let lastProviderName = '';
+    for (let index = 0; index < allowance; index++) {
         if (signal?.aborted || ledger.calls >= ledger.maxCalls - reserveAttempts) break;
         const available = deadline - Date.now();
         if (available <= 0) break;
-        const provider = providers[index];
-        const fallbackReserve = index === 0 && providers.length > 1 ? Math.min(4000, Math.max(1, Math.floor(timeoutMs / 3))) : 0;
-        const attemptMs = Math.max(1, Math.min(index === 0 ? 8000 : 4000, available - fallbackReserve));
+        const candidates = researchModelProviders(options).filter(p => !tried.has(`${p.name}:${p.model}:${p.key}`));
+        if (!candidates.length) break;
+        const alternate = lastProviderName ? candidates.find(p => p.name !== lastProviderName) : null;
+        const provider = alternate || candidates[0];
+        tried.add(`${provider.name}:${provider.model}:${provider.key}`);
+        lastProviderName = provider.name;
+
+        const hasRemainingAlternative = candidates.length > 1;
+        const fallbackReserve = hasRemainingAlternative ? Math.min(3500, Math.max(1, Math.floor(available / 3))) : 0;
+        const attemptMs = Math.max(1, Math.min(9000, available - fallbackReserve));
         const scope = researchTimeoutSignal(attemptMs, signal);
         const attempt = { stage, provider: provider.name, model: provider.model, outcome: 'network_error', durationMs: 0 };
         const started = Date.now();
@@ -90,7 +143,7 @@ export async function callResearchModel({ system, prompt, json = false, onToken,
                 const endpoint = provider.name === 'groq'
                     ? 'https://api.groq.com/openai/v1/chat/completions'
                     : `https://generativelanguage.googleapis.com/v1beta/models/${provider.model}:${streaming ? 'streamGenerateContent?alt=sse&' : 'generateContent?'}key=${encodeURIComponent(provider.key)}`;
-                const tokens = maxOutputTokens || (json ? 2400 : 3000);
+                const tokens = maxOutputTokens || (json ? 4096 : 6000);
                 const body = provider.name === 'groq'
                     ? { model: provider.model, messages: [{ role: 'system', content: system }, { role: 'user', content: prompt }], temperature: 0.1, max_tokens: tokens, stream: streaming, ...(provider.model.startsWith('openai/gpt-oss') ? { reasoning_effort: 'low' } : {}), ...(json ? { response_format: { type: 'json_object' } } : {}) }
                     : { system_instruction: { parts: [{ text: system }] }, contents: [{ parts: [{ text: prompt }] }], generationConfig: normalizeGeminiGenerationConfig(provider.model, { temperature: 0.1, maxOutputTokens: tokens, thinkingConfig: { thinkingBudget: 0 }, ...(json ? { responseMimeType: 'application/json' } : {}) }) };
@@ -99,8 +152,11 @@ export async function callResearchModel({ system, prompt, json = false, onToken,
                 if (!response.ok) {
                     attempt.outcome = response.status === 429 ? 'rate_limited' : `http_${response.status}`;
                     if (response.status === 429) {
-                        if (cooldowns.size >= 200) cooldowns.delete(cooldowns.keys().next().value);
-                        cooldowns.set(healthKey(provider), Date.now() + retryDelay(response));
+                        recordCooldown(providerHealthKey(provider), retryDelay(response));
+                    } else if (response.status === 404 || response.status === 410) {
+                        recordCooldown(modelHealthKey(provider), DEPRECATED_COOLDOWN_MS);
+                    } else if (response.status >= 500) {
+                        recordCooldown(modelHealthKey(provider), TRANSIENT_COOLDOWN_MS);
                     }
                     await response.body?.cancel().catch(() => {});
                     return null;
@@ -113,10 +169,12 @@ export async function callResearchModel({ system, prompt, json = false, onToken,
                         const token = provider.name === 'groq' ? data.choices?.[0]?.delta?.content : (data.candidates?.[0]?.content?.parts || []).filter(p => !p.thought).map(p => p.text || '').join('');
                         if (token && !scope.signal.aborted) { text += token; emitted = true; onToken(token); }
                         const reason = provider.name === 'groq' ? data.choices?.[0]?.finish_reason : data.candidates?.[0]?.finishReason;
-                        if (reason === 'stop' || reason === 'STOP') finished = true;
+                        if (reason && ['stop', 'STOP'].includes(reason)) finished = true;
                     }, scope.signal);
-                    attempt.outcome = finished && text.trim() ? 'success' : 'incomplete_response';
-                    return finished && text.trim() ? text : null;
+                    if (!finished) { attempt.outcome = 'incomplete_stream'; return null; }
+                    if (!text) { attempt.outcome = 'empty_response'; return null; }
+                    attempt.outcome = 'success';
+                    return text;
                 }
                 const data = await response.json();
                 if (scope.signal.aborted) return null;
@@ -140,6 +198,7 @@ export async function callResearchModel({ system, prompt, json = false, onToken,
             if (emitted) return null;
         } catch {
             attempt.outcome = signal?.aborted ? 'cancelled' : scope.signal.aborted ? 'timeout' : 'network_error';
+            if (!signal?.aborted) recordCooldown(modelHealthKey(provider), TRANSIENT_COOLDOWN_MS);
             if (emitted) return null;
         } finally {
             attempt.durationMs = Date.now() - started;

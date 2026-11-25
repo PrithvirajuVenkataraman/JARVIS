@@ -1,9 +1,9 @@
 // Shared by the server orchestrator and its browser client. Keep below Vercel's 60s limit.
 export const RESEARCH_LIMITS = Object.freeze({
     TOTAL_MS: 45000,
-    RETRIEVAL_MS: 33000,
-    SYNTHESIS_MS: 12000,
-    FINAL_RESERVE_MS: 12000,
+    RETRIEVAL_MS: 30000,
+    SYNTHESIS_MS: 15000,
+    FINAL_RESERVE_MS: 15000,
     INITIAL_GENERATION_MIN_REMAINING_MS: 30000,
     MAX_GENERATIONS: 2,
     MAX_ATTEMPTS_PER_GENERATION: 2,

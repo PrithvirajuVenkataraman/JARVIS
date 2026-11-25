@@ -210,7 +210,7 @@ export function buildResearchRequirements(query, _context = []) {
                 add('explanation', `Notable works, career milestones, contributions, and achievements of ${q}`);
                 add('explanation', `Awards, recognition, life status, and recent developments for ${q}`);
             } else {
-                add('explanation', `Explain or verify: ${q}`, { expectedCount: /^(?:reasons|ways|steps)$/i.test(count?.[2] || '') ? expectedCount : undefined });
+                add('explanation', `Details explaining ${q}`, { expectedCount: /^(?:reasons|ways|steps)$/i.test(count?.[2] || '') ? expectedCount : undefined });
             }
         }
     }

@@ -25,7 +25,7 @@ export function allowGenerationAttempts(limit = 2) {
     if (!scope?.budget) return;
     const requested = Number(limit);
     if (Number.isFinite(requested) && requested > 0) {
-        scope.budget.maxGenerationAttempts = Math.max(scope.budget.maxGenerationAttempts || 2, Math.min(5, Math.floor(requested)));
+        scope.budget.maxGenerationAttempts = Math.max(scope.budget.maxGenerationAttempts || 2, Math.min(8, Math.floor(requested)));
     }
 }
 
