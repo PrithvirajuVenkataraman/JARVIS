@@ -70,8 +70,23 @@ test('streaming balances real equations without adding dollars after prices or d
         'Let $t = x^2$. The price is $50 each.',
         '$$x^2$$',
         String.raw`Let \(x_1^2 + \text{cost: \$50}\) be the expression.`,
-        '```js\nconst price = "$50";\n```'
+        '```js\nconst price = "$50";\n```',
+        '```python\narr = "\\[x\\]"\n```\nDone.'
     ]) assert.equal(balanceDelimitersForStreaming(source), source);
     assert.equal(balanceDelimitersForStreaming('Let $x^2'), 'Let $x^2$');
     assert.equal(balanceDelimitersForStreaming('Let $2 + 2 = 4'), 'Let $2 + 2 = 4$');
+    const strayCloseRendered = renderMarkdown('Running this code returns the solutions.\n\\]\n\\]\n\\]');
+    assert.ok(!strayCloseRendered.includes('\\]'), 'Orphan \\] lines outside code/math must be stripped');
+});
+
+test('inline bold stays scoped within blocks and avoids literal ** corruption', () => {
+    const bleedRendered = renderMarkdown('**First unclosed heading\n\nSecond**: normal paragraph with **Winner**.');
+    assert.match(bleedRendered, /First unclosed heading<\/p>/);
+    assert.ok(!bleedRendered.includes('<strong>First unclosed heading</p>'), 'Bold must never span across paragraph tags');
+    assert.ok(!bleedRendered.includes('Second**'), 'Dangling ** tokens must not render literally');
+    assert.match(bleedRendered, /<strong>Winner<\/strong>/);
+
+    const mixedRendered = renderMarkdown('**Composer A (*Film One*)**: score details.\n**Composer B**: *Film Two* and x**2.');
+    assert.match(mixedRendered, /<strong>Composer A \(<em>Film One<\/em>\)<\/strong>: score details\./);
+    assert.match(mixedRendered, /<strong>Composer B<\/strong>: <em>Film Two<\/em> and x\*\*2\./);
 });

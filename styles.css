@@ -8048,8 +8048,9 @@ body:not(.dark) .assistant-followup-chip:hover {
 .scroll-to-bottom-pill {
     position: fixed;
     bottom: calc(var(--input-bar-safe-height, 100px) + 16px);
-    left: 50%;
-    transform: translateX(-50%) translateY(8px);
+    right: 16px;
+    left: auto;
+    transform: translateY(8px);
     background: rgba(24, 24, 27, 0.94);
     border: 1px solid rgba(255, 255, 255, 0.18);
     backdrop-filter: blur(16px);
@@ -8075,13 +8076,13 @@ body:not(.dark) .assistant-followup-chip:hover {
     opacity: 1;
     visibility: visible;
     pointer-events: auto;
-    transform: translateX(-50%) translateY(0);
+    transform: translateY(0);
 }
 
 .scroll-to-bottom-pill:hover {
     background: rgba(39, 39, 42, 0.98);
     border-color: rgba(56, 189, 248, 0.5);
-    transform: translateX(-50%) translateY(-2px);
+    transform: translateY(-2px);
     box-shadow: 0 10px 28px -4px rgba(14, 165, 233, 0.3), 0 2px 8px rgba(0, 0, 0, 0.4);
 }
 

@@ -299,7 +299,7 @@ function isMathCodeBlock(lang = '', code = '') {
  * @param {string} rawText
  * @returns {string} Balanced text
  */
-export function balanceDelimitersForStreaming(rawText = '') {
+export function balanceDelimitersForStreaming(rawText = '', options = {}) {
     let text = String(rawText || '');
     if (!text) return '';
 
@@ -309,12 +309,17 @@ export function balanceDelimitersForStreaming(rawText = '') {
         text += '\n```\n';
     }
 
+    // Analyze LaTeX delimiters strictly outside fenced/inline code so code literals like
+    // Python slices or regexes containing \[ or $ never append trailing math closures.
+    const nonCode = text
+        .replace(/```[\s\S]*?```/g, ' ')
+        .replace(/`[^`\n]+`/g, ' ');
+
     // 2. Balance unclosed display math $$
-    const displayMathMatches = text.match(/(?<!\\)\$\$/g) || [];
+    const displayMathMatches = nonCode.match(/(?<!\\)\$\$/g) || [];
     if (displayMathMatches.length % 2 === 1) {
-        // Also check if there's an unclosed LaTeX environment inside the display math block
-        const envOpenMatches = [...text.matchAll(/\\begin\{([a-zA-Z*]+)\}/g)];
-        const envCloseMatches = [...text.matchAll(/\\end\{([a-zA-Z*]+)\}/g)];
+        const envOpenMatches = [...nonCode.matchAll(/\\begin\{([a-zA-Z*]+)\}/g)];
+        const envCloseMatches = [...nonCode.matchAll(/\\end\{([a-zA-Z*]+)\}/g)];
         const openStack = [];
         for (const m of envOpenMatches) {
             openStack.push(m[1]);
@@ -329,9 +334,9 @@ export function balanceDelimitersForStreaming(rawText = '') {
         }
         text += '\n$$\n';
     } else {
-        // Even if $$ is balanced, check for open LaTeX environments
-        const envOpenMatches = [...text.matchAll(/\\begin\{([a-zA-Z*]+)\}/g)];
-        const envCloseMatches = [...text.matchAll(/\\end\{([a-zA-Z*]+)\}/g)];
+        const nonDoubleDollar = nonCode.replace(/(?<!\\)\$\$[\s\S]*?(?<!\\)\$\$/g, ' ');
+        const envOpenMatches = [...nonDoubleDollar.matchAll(/\\begin\{([a-zA-Z*]+)\}/g)];
+        const envCloseMatches = [...nonDoubleDollar.matchAll(/\\end\{([a-zA-Z*]+)\}/g)];
         const openStack = [];
         for (const m of envOpenMatches) {
             openStack.push(m[1]);
@@ -346,23 +351,30 @@ export function balanceDelimitersForStreaming(rawText = '') {
         }
     }
 
-    // 3. Balance unclosed display math \[ and \]
-    const openDisplay = (text.match(/\\\[/g) || []).length;
-    const closeDisplay = (text.match(/\\\]/g) || []).length;
-    if (openDisplay > closeDisplay) {
-        text += '\n\\]\n'.repeat(openDisplay - closeDisplay);
+    // 3. Balance unclosed display math \[ and \] (display blocks do not nest: close at most once)
+    const openDisplay = (nonCode.match(/\\\[/g) || []).length;
+    const closeDisplay = (nonCode.match(/\\\]/g) || []).length;
+    if (options?.streaming !== false && openDisplay > closeDisplay) {
+        const lastOpenIdx = nonCode.lastIndexOf('\\[');
+        const lastCloseIdx = nonCode.lastIndexOf('\\]');
+        if (lastOpenIdx > lastCloseIdx && nonCode.slice(lastOpenIdx + 2).trim().length > 0) {
+            text += '\n\\]\n';
+        }
     }
 
     // 4. Balance unclosed inline math \( and \)
-    const openInline = (text.match(/\\\(/g) || []).length;
-    const closeInline = (text.match(/\\\)/g) || []).length;
-    if (openInline > closeInline) {
-        text += '\\)'.repeat(openInline - closeInline);
+    const openInline = (nonCode.match(/\\\(/g) || []).length;
+    const closeInline = (nonCode.match(/\\\)/g) || []).length;
+    if (options?.streaming !== false && openInline > closeInline) {
+        const lastOpenIdx = nonCode.lastIndexOf('\\(');
+        const lastCloseIdx = nonCode.lastIndexOf('\\)');
+        if (lastOpenIdx > lastCloseIdx && nonCode.slice(lastOpenIdx + 2).trim().length > 0) {
+            text += '\\)';
+        }
     }
 
     // 5. Balance unclosed inline math $
-    const inlineSource = replaceCurrencyAmounts(text
-        .replace(/```[\s\S]*?```/g, '')
+    const inlineSource = replaceCurrencyAmounts(nonCode
         .replace(/(?<!\\)\$\$[\s\S]*?(?<!\\)\$\$/g, '')
         .replace(/\\\([\s\S]*?\\\)/g, '')
         .replace(/\\\[[\s\S]*?\\\]/g, ''));
@@ -372,17 +384,18 @@ export function balanceDelimitersForStreaming(rawText = '') {
     }
 
     // 6. Balance dangling LaTeX commands (e.g. truncated mid-token like \frac{1 or \sqrt{x)
-    if (/\\(?:frac|dfrac|tfrac)\s*\{[^{}]*\}\s*$/.test(text)) {
+    const nonCodeTail = nonCode.trimEnd();
+    if (/\\(?:frac|dfrac|tfrac)\s*\{[^{}]*\}\s*$/.test(nonCodeTail)) {
         text += '{}';
-    } else if (/\\(?:frac|dfrac|tfrac)\s*\{[^{}]*$/.test(text)) {
+    } else if (/\\(?:frac|dfrac|tfrac)\s*\{[^{}]*$/.test(nonCodeTail)) {
         text += '}{}';
-    } else if (/\\(?:frac|dfrac|tfrac)\s*$/.test(text)) {
+    } else if (/\\(?:frac|dfrac|tfrac)\s*$/.test(nonCodeTail)) {
         text += '{}{}';
     }
-    if (/\\sqrt\s*\{[^{}]*$/.test(text)) {
+    if (/\\sqrt\s*\{[^{}]*$/.test(nonCodeTail)) {
         text += '}';
     }
-    if (/\\boxed\s*\{[^{}]*$/.test(text)) {
+    if (/\\boxed\s*\{[^{}]*$/.test(nonCodeTail)) {
         text += '}';
     }
 
@@ -466,7 +479,7 @@ export function renderMarkdown(rawText = '', options = {}) {
     if (!text) return '';
 
     // Automatically balance unclosed code fences and math blocks during streaming
-    text = balanceDelimitersForStreaming(text);
+    text = balanceDelimitersForStreaming(text, { streaming: options?.streaming !== false });
 
     // Auto-wrap bare un-delimited LaTeX display equations and math clauses for KaTeX
     text = autoWrapBareLatexMath(text);
@@ -506,6 +519,9 @@ export function renderMarkdown(rawText = '', options = {}) {
         mathBlocks.push(math.trim());
         return `\n\n@@JARVIS_MATH_BLOCK_${mathIdx}@@\n\n`;
     });
+
+    // Remove stray orphan delimiter-only lines (\[ or \]) outside extracted code/math blocks
+    text = text.replace(/^[ \t]*(?:\\\[|\\\])[ \t]*$/gm, '');
 
     // 1d. Standalone environments; skip environments already inside inline math.
     text = text.replace(/(?<!\\)\$(?!\$)(?:\\[^\n]|[^$\\\n])+?(?<!\\)\$|\\begin\s*\{([a-zA-Z*]+)\}([\s\S]*?)\\end\s*\{\1\}/g, (match) => {
@@ -718,20 +734,43 @@ export function renderMarkdown(rawText = '', options = {}) {
 
     const sources = Array.isArray(options?.sources) ? options.sources : (Array.isArray(options?.meta?.sources) ? options.meta.sources : []);
 
-    // Bold + Italic (*** or ___)
-    html = html.replace(/\*\*\*([^*]+)\*\*\*/g, '<strong><em>$1</em></strong>');
-    html = html.replace(/___([^_]+)___/g, '<strong><em>$1</em></strong>');
+    const formatInlineEmphasis = (inputHtml) => {
+        const chunks = String(inputHtml || '').split(/(<\/?(?:p|div|li|ul|ol|blockquote|h[1-6]|table|thead|tbody|tr|th|td|br)\b[^>]*>)/gi);
+        for (let idx = 0; idx < chunks.length; idx += 2) {
+            let chunk = chunks[idx];
+            if (!chunk || (!chunk.includes('*') && !chunk.includes('_') && !chunk.includes('~'))) continue;
 
-    // Bold (** or __)
-    html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-    html = html.replace(/__([^_]+)__/g, '<strong>$1</strong>');
+            const savedCode = [];
+            chunk = chunk.replace(/<code\b[^>]*>[\s\S]*?<\/code>/gi, (m) => `@@JARVIS_EMPH_CODE_${savedCode.push(m) - 1}@@`);
 
-    // Strikethrough (~~)
-    html = html.replace(/~~([^~]+)~~/g, '<del>$1</del>');
+            // Bold + Italic (*** or ___) scoped to a single block/line segment with flanking boundaries
+            chunk = chunk.replace(/(?<=^|[\s(>\[{"'/,;-])\*\*\*(\S[^\n]*?\S|\S)\*\*\*(?=$|[\s.,;:!?)\]}>"'/,-]|<)/g, '<strong><em>$1</em></strong>');
+            chunk = chunk.replace(/(?<=^|[\s(>\[{"'/,;-])___(\S[^\n]*?\S|\S)___(?=$|[\s.,;:!?)\]}>"'/,-]|<)/g, '<strong><em>$1</em></strong>');
 
-    // Italics (*italic* and _italic_)
-    html = html.replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '<em>$1</em>');
-    html = html.replace(/(?<![\w\\])_(?![\s_])([^\n_]+?)(?<![\s_])_(?![\w])/g, '<em>$1</em>');
+            // Bold (** or __) scoped strictly within a single block/line using flanking rules
+            // so stray closing tokens like "Rahman**:" cannot open bold across subsequent words.
+            chunk = chunk.replace(/(?<=^|[\s(>\[{"'/,;-])\*\*(\S(?:[^*\n]|(?<!\*)\*(?!\*))*?\S|\S)\*\*(?=$|[\s.,;:!?)\]}>"'/,-]|<)/g, '<strong>$1</strong>');
+            chunk = chunk.replace(/(?<=^|[\s(>\[{"'/,;-])__(\S(?:[^_\n]|(?<!_)_(?!_))*?\S|\S)__(?=$|[\s.,;:!?)\]}>"'/,-]|<)/g, '<strong>$1</strong>');
+
+            // Strikethrough (~~)
+            chunk = chunk.replace(/~~([^~\n]+?)~~/g, '<del>$1</del>');
+
+            // Italics (*italic* and _italic_)
+            chunk = chunk.replace(/(?<!\*)\*([^*\n]+?)\*(?!\*)/g, '<em>$1</em>');
+            chunk = chunk.replace(/(?<![\w\\])_(?![\s_])([^\n_]+?)(?<![\s_])_(?![\w])/g, '<em>$1</em>');
+
+            // Strip any dangling/unpaired ** tokens (e.g., "Rahman**:") while keeping code exponents like x**2
+            chunk = chunk.replace(/\*\*(?=[^\w]|$)|(?<=^|[^\w])\*\*/g, '');
+
+            if (savedCode.length) {
+                chunk = chunk.replace(/@@JARVIS_EMPH_CODE_(\d+)@@/g, (_, ci) => savedCode[Number(ci)] ?? '');
+            }
+            chunks[idx] = chunk;
+        }
+        return chunks.join('');
+    };
+
+    html = formatInlineEmphasis(html);
     html = html.replace(/\[\^(\d+)\]\((https?:\/\/[^)]+)\)/g, (match, id, url) => {
         const source = findSourceById(sources, id);
         if (source) {

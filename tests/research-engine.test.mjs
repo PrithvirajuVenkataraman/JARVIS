@@ -1611,6 +1611,14 @@ test('N-way comparisons, compound tokenizer, contextual substitution, and recent
     const followUpCompPlan = deterministicResearchPlan('Compare it with Orbit-2.5 and Pulse-3.0', [{ role: 'user', text: 'Tell me about Vertex-1.0' }]);
     assert.match(followUpCompPlan.query, /vertex-1\.0/i);
     assert.equal(followUpCompPlan.facets.length >= 3, true);
+
+    const { formatResearchEvidence } = await import('../api/_lib/research-evidence.js');
+    const formatted = formatResearchEvidence([
+        { id: 1, title: 'Artist One Discography', url: 'https://a.example/1', evidenceKind: 'page', extractionStatus: 'ok', text: 'Artist One composed Symphony Alpha and Concerto Beta in 2005.' },
+        { id: 2, title: 'Artist Two Discography', url: 'https://b.example/2', evidenceKind: 'page', extractionStatus: 'ok', text: 'Artist Two composed Raga Gamma and Melody Delta in 2013.' }
+    ], 'Compare Artist One and Artist Two');
+    assert.match(formatted, /Subject Scope: Artist One only/);
+    assert.match(formatted, /Subject Scope: Artist Two only/);
 });
 
 });

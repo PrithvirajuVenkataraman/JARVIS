@@ -8508,11 +8508,18 @@ function showHelpModal(...args) { return globalThis.JarvisLazy.loadClassic('sett
                 updateJumpToLatestButton();
                 return;
             }
-            if (chatMain) {
-                chatMain.scrollTop = chatMain.scrollHeight;
-            }
-            if (targetContainer && targetContainer !== chatMain) {
-                targetContainer.scrollTop = targetContainer.scrollHeight;
+            const applyScroll = () => {
+                if (!force && autoScrollLocked) return;
+                if (chatMain) {
+                    chatMain.scrollTop = chatMain.scrollHeight;
+                }
+                if (targetContainer && targetContainer !== chatMain) {
+                    targetContainer.scrollTop = targetContainer.scrollHeight;
+                }
+            };
+            applyScroll();
+            if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+                window.requestAnimationFrame(() => applyScroll());
             }
             chatUnreadWhileScrolledUp = false;
             updateJumpToLatestButton();
@@ -18049,23 +18056,25 @@ function extractComparisonEntities(text) {
     const normalized = String(text || '').replace(/\s+/g, ' ').trim();
     if (!normalized) return null;
 
-    // Concise comparison query structure
-    const isExplicitComparison = /^(?:compare|what is the difference between|difference between|which is better|who is better)\b/i.test(normalized);
+    const isExplicitComparison = /^(?:compare|comparing|what\s+(?:is|are)\s+the\s+differences?\s+between|differences?\s+between|comparison\s+(?:of|between)|which\s+(?:is|are|one\s+is)\s+(?:better|faster|cheaper|safer|best)|who\s+is\s+better)\b/i.test(normalized)
+        || /\b(?:vs\.?|versus)\b/i.test(normalized);
     const wordCount = normalized.split(/\s+/).length;
-    if (!isExplicitComparison && wordCount > 10) {
+    if (!isExplicitComparison && wordCount > 12) {
         return null;
     }
 
-    const vsMatches = [...normalized.matchAll(/([A-Za-z][A-Za-z0-9.&'\- ]{1,60})\s+(?:vs|versus|or)\s+([A-Za-z][A-Za-z0-9.&'\- ]{1,60})/gi)];
-    if (!vsMatches.length) return null;
+    let subject = normalized
+        .replace(/^(?:please\s+)?(?:compare|comparing|what\s+(?:is|are)\s+the\s+differences?\s+between|differences?\s+between|comparison\s+(?:of|between)|which\s+(?:is|are|one\s+is)\s+(?:better|faster|cheaper|safer|best)(?:\s+between|\s+among)?|who\s+is\s+better(?:\s+between)?)\s*:?\s*/i, '')
+        .split(/\s+(?:in terms of|with respect to|based on|regarding|for|on)\s+/i)[0]
+        .replace(/[?.!,;]+$/g, '')
+        .trim();
 
-    const last = vsMatches[vsMatches.length - 1];
-    const left = String(last[1] || '').replace(/\b(who is|who's|which is|best|better|between|among|compare)\b/gi, '').trim();
-    const right = String(last[2] || '').replace(/[?.!,;]+$/g, '').trim();
+    if (!subject) return null;
 
-    if (!left || !right) return null;
-    if (left.length < 2 || right.length < 2) return null;
-    if (left.split(/\s+/).length > 4 || right.split(/\s+/).length > 4) return null;
+    const rawParts = subject
+        .split(/\s*,\s*(?:and|or)\s+|\s+(?:versus|vs\.?)\s+|\s*,\s*|\s+(?:and|or)\s+/i)
+        .map(p => String(p || '').replace(/^(?:the|between|among)\s+/i, '').replace(/[?.!,;]+$/g, '').trim())
+        .filter(Boolean);
 
     const genericTerms = new Set([
         'something', 'anything', 'everything', 'nothing',
@@ -18073,106 +18082,144 @@ function extractComparisonEntities(text) {
         'this', 'that', 'these', 'those',
         'it', 'they', 'them', 'stuff', 'things', 'thing'
     ]);
-    const leftNorm = left.toLowerCase().trim();
-    const rightNorm = right.toLowerCase().trim();
-    if (genericTerms.has(leftNorm) || genericTerms.has(rightNorm)) return null;
 
-    return { left, right };
+    const entities = [];
+    for (const part of rawParts.slice(0, 5)) {
+        const cleanPart = part.trim();
+        const norm = cleanPart.toLowerCase();
+        if (cleanPart.length < 2 || cleanPart.split(/\s+/).length > 5 || genericTerms.has(norm)) continue;
+        if (!entities.some(e => e.toLowerCase() === norm)) {
+            entities.push(cleanPart);
+        }
+    }
+
+    if (entities.length < 2) return null;
+    return { left: entities[0], right: entities[1], entities };
 }
 
 function isComparisonQuery(text) {
     const t = String(text || '').toLowerCase();
-    const hasStrongComparisonSignal = /\b(best|better|vs|versus|compare|comparison)\b/.test(t);
+    const hasStrongComparisonSignal = /\b(best|better|vs|versus|compare|comparing|comparison|difference|differences)\b/.test(t);
     const hasOr = /\bor\b/.test(t);
     return (hasStrongComparisonSignal || hasOr) && !!extractComparisonEntities(text);
 }
 
 function getComparisonDomainHint(text) {
     const t = String(text || '').toLowerCase();
+    if (/\b(composer|music\s+director|musician|singer|lyricist|songwriter|album|song|soundtrack|discography|ost)\b/.test(t)) return 'music discography filmography notable works awards';
     if (/\b(actor|actress|director|movie|film|cinema|box office|star)\b/.test(t)) return 'movies cinema';
     if (/\b(player|cricketer|footballer|batsman|bowler|athlete|sport|goal|run|match)\b/.test(t)) return 'sports statistics';
     if (/\b(phone|laptop|gpu|cpu|camera|car|bike|gadget|processor)\b/.test(t)) return 'specs reviews benchmarks';
     if (/\b(college|university|iit|nit|iim|institute|course)\b/.test(t)) return 'ranking placement academics';
     if (/\b(stock|crypto|coin|share|market cap|roi)\b/.test(t)) return 'financial metrics market data';
-    return 'reviews performance facts';
+    return 'overview notable works awards achievements facts';
 }
 
 async function handleComparisonWithReliableSources(userText) {
     if (!isFactSearchEnabled()) return false;
 
-    const entities = extractComparisonEntities(userText);
-    if (!entities) return false;
+    const parsed = extractComparisonEntities(userText);
+    if (!parsed) return false;
 
-    const left = entities.left;
-    const right = entities.right;
+    if (typeof handleBoundedLiveResearchQuery === 'function') {
+        try {
+            const handledResearch = await handleBoundedLiveResearchQuery(userText, userText, { comparisonMode: true });
+            if (handledResearch) return true;
+        } catch (_) {
+            // Fall through to structured per-entity comparison backup
+        }
+    }
+
+    const entities = Array.isArray(parsed.entities) && parsed.entities.length >= 2
+        ? parsed.entities
+        : [parsed.left, parsed.right];
     const domain = getComparisonDomainHint(userText);
-    showThinkingIndicator('Checking reliable sources...');
+    showThinkingIndicator('Checking reliable sources per subject...');
 
     try {
-        const queries = [
-            `${left} vs ${right} ${domain}`,
-            `${left} achievements awards reviews`,
-            `${right} achievements awards reviews`
-        ];
+        const fetchEntityResults = async (query) => {
+            try {
+                const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.search, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query, maxResults: 4 })
+                });
+                if (!response.ok) return [];
+                const data = await response.json();
+                return Array.isArray(data?.results) ? data.results : [];
+            } catch (e) {
+                return [];
+            }
+        };
 
-        const searchResults = await Promise.all(
-            queries.map(async (query) => {
-                try {
-                    const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.search, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ query, maxResults: 4 })
-                    });
-                    if (!response.ok) return [];
-                    const data = await response.json();
-                    return Array.isArray(data?.results) ? data.results : [];
-                } catch (e) {
-                    return [];
-                }
-            })
+        const perEntityLists = await Promise.all(
+            entities.map(entity => fetchEntityResults(`${entity} ${domain}`))
         );
+        const headToHead = await fetchEntityResults(`${entities.slice(0, 3).join(' vs ')} ${domain}`);
 
-        const deduped = [];
         const seen = new Set();
-        for (const item of searchResults.flat()) {
+        const deduped = [];
+        const groupedSections = [];
+
+        entities.forEach((entity, idx) => {
+            const entityItems = [];
+            for (const item of perEntityLists[idx] || []) {
+                const url = String(item?.url || '').trim();
+                if (!url || seen.has(url)) continue;
+                seen.add(url);
+                deduped.push(item);
+                entityItems.push(item);
+                if (entityItems.length >= 3) break;
+            }
+            if (entityItems.length) {
+                groupedSections.push(
+                    `[Sources strictly about "${entity}"]\n` +
+                    entityItems.map(r => `- ${r.title}\n  Snippet: ${r.description}\n  URL: ${r.url}`).join('\n')
+                );
+            }
+        });
+
+        const sharedItems = [];
+        for (const item of headToHead || []) {
             const url = String(item?.url || '').trim();
             if (!url || seen.has(url)) continue;
             seen.add(url);
             deduped.push(item);
-            if (deduped.length >= 8) break;
+            sharedItems.push(item);
+            if (sharedItems.length >= 2) break;
+        }
+        if (sharedItems.length) {
+            groupedSections.push(
+                `[Head-to-head comparison sources]\n` +
+                sharedItems.map(r => `- ${r.title}\n  Snippet: ${r.description}\n  URL: ${r.url}`).join('\n')
+            );
         }
 
         if (!deduped.length) {
             return false;
         }
 
-        const snippets = deduped
-            .map((r, i) => `${i + 1}. ${r.title}\nSnippet: ${r.description}\nURL: ${r.url}`)
-            .join('\n\n');
+        const groupedSnippets = groupedSections.join('\n\n');
+        const subjectsLabel = entities.map(e => `"${e}"`).join(', ');
 
         const compareResponse = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.chatGroq, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                message: `Compare "${left}" and "${right}" using ONLY the snippets below.
+                factualQuery: true,
+                message: `Compare ${subjectsLabel} using ONLY the verified per-subject sources below.
 
 Question: "${userText}"
 Domain: ${domain}
 
-Output format:
-Conclusion: <one-line verdict>
-Why:
-- <point 1>
-- <point 2>
-- <point 3>
+Critical Attribution & Grounding Rules:
+- Keep every entity strictly separate: NEVER attribute works, albums, songs, films, awards, or dates from one subject's section to another subject.
+- Mention a title, album, song, film, award, or date ONLY if it is explicitly present in that entity's sources below; if absent, omit it instead of guessing from memory.
+- Structure clearly per subject using clean Markdown (do not leave unclosed ** bold tags).
+- No political commentary. No made-up claims.
 
-Rules:
-- If evidence is mixed, explicitly say it is close.
-- No political commentary.
-- No made-up claims.
-
-Snippets:
-${snippets}`
+Sources:
+${groupedSnippets}`
             })
         });
 
@@ -30493,8 +30540,9 @@ async function runPythonBlockInBrowser(btn, blockId) {
             await py.loadPackagesFromImports(code);
         } catch (_) {}
 
+        const pySourceLiteral = JSON.stringify(String(code || ''));
         const wrappedCode = `
-import sys, io as _io
+import sys, io as _io, ast as _ast
 _output_buf = _io.StringIO()
 _orig_stdout = sys.stdout
 _orig_stderr = sys.stderr
@@ -30510,10 +30558,27 @@ except Exception:
     _has_mpl = False
 
 _chart_b64 = None
+_jarvis_user_code = ${pySourceLiteral}
 
 try:
-${code.split('\n').map(l => '    ' + l).join('\n')}
-except Exception as _e:
+    _ns = globals()
+    _tree = _ast.parse(_jarvis_user_code, mode='exec')
+    _tail_expr = None
+    if _tree.body and isinstance(_tree.body[-1], _ast.Expr):
+        _tail_expr = _ast.Expression(_tree.body.pop().value)
+        _ast.fix_missing_locations(_tail_expr)
+    if _tree.body:
+        exec(compile(_tree, '<jarvis-wasm>', 'exec'), _ns)
+    if _tail_expr is not None:
+        _expr_val = eval(compile(_tail_expr, '<jarvis-wasm>', 'eval'), _ns)
+        if _expr_val is not None:
+            _val_mod = str(getattr(type(_expr_val), '__module__', '') or '')
+            _is_mpl_artist = _val_mod.startswith('matplotlib') or (
+                isinstance(_expr_val, (list, tuple)) and len(_expr_val) > 0 and str(getattr(type(_expr_val[0]), '__module__', '') or '').startswith('matplotlib')
+            )
+            if not _is_mpl_artist:
+                print(repr(_expr_val))
+except Exception:
     import traceback
     print(traceback.format_exc(), file=_output_buf)
 
@@ -30556,6 +30621,7 @@ _stdout_text = _output_buf.getvalue()
             </div>
             ${outputContent}
         `;
+        maybeAutoScroll(document.getElementById('chat-container'));
     } catch (err) {
         const errEscaped = String(err?.message || err).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         outputEl.innerHTML = `

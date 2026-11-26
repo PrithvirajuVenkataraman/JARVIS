@@ -202,7 +202,8 @@ body #app-root { min-height:0 !important; height:var(--app-viewport-height,100dv
 body #chat-main { min-height:0 !important; flex:1 1 auto; overscroll-behavior-y:contain; }
 body #chat-main:has(#chat-container:empty) #chat-center-column,
 body #chat-container:empty { padding-bottom:16px !important; }
-body #chat-main:has(#chat-container:not(:empty)) #chat-center-column { padding-bottom:calc(var(--input-bar-safe-height,120px) + 28px + env(safe-area-inset-bottom)) !important; }
+body #chat-main:has(#chat-container:not(:empty)) #chat-center-column { padding-bottom:calc(var(--input-bar-safe-height,120px) + 56px + env(safe-area-inset-bottom)) !important; }
+body #chat-container > .chat-row:last-child, body #chat-container > :last-child { margin-bottom:12px; }
 body #input-bar-inner #text-input { color:var(--core-text) !important; -webkit-text-fill-color:var(--core-text) !important; max-height:min(180px,25dvh); }
 @media(min-width:1024px) {
     body.sidebar-docked .chat-sidebar-panel { width:var(--sidebar-docked-width,280px); }

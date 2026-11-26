@@ -529,5 +529,15 @@ export function selectResearchExcerpt(text, query, limit = 1600) {
 export function formatResearchEvidence(sources, query = '') {
     // Bound prompt size independently of crawl depth so free text-model quotas remain usable.
     const perSource = Math.min(2400, Math.floor(12000 / Math.max(1, sources.length)));
-    return sources.map((s, i) => `[${s.id || i + 1}] ${s.title}\nURL: ${s.url}\nEvidence: ${s.evidenceKind}; extraction: ${s.extractionStatus}${s.date ? `; published: ${s.date}` : ''}\n${selectResearchExcerpt(evidenceText(s), query || s.query || s.title, perSource)}`).join('\n\n');
+    const comparedEntities = comparisonParts(query).entities;
+    return sources.map((s, i) => {
+        const excerpt = selectResearchExcerpt(evidenceText(s), query || s.query || s.title, perSource);
+        let subjectTag = '';
+        if (comparedEntities.length >= 2) {
+            const hay = normalizedText(`${s.title || ''} ${excerpt}`);
+            const matched = comparedEntities.filter(entity => hay.includes(normalizedText(entity)));
+            subjectTag = `\nSubject Scope: ${matched.length === 1 ? `${matched[0]} only` : (matched.length > 1 ? `Multiple (${matched.join(', ')})` : 'Unassigned')}`;
+        }
+        return `[${s.id || i + 1}] ${s.title}\nURL: ${s.url}\nEvidence: ${s.evidenceKind}; extraction: ${s.extractionStatus}${s.date ? `; published: ${s.date}` : ''}${subjectTag}\n${excerpt}`;
+    }).join('\n\n');
 }

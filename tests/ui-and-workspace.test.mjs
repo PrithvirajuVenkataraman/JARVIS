@@ -945,8 +945,10 @@ console.log('\n--- Test 5: Groq Model Candidate Realness & Non-Llama Assurance -
     const coreUxCss = fs.readFileSync(path.resolve('app/core-ux.css'), 'utf8');
     const slashCtrl = fs.readFileSync(path.resolve('app/slash-command-controller.js'), 'utf8');
     assert.ok(stylesCssText.includes('var(--keyboard-offset, 0px)'), 'Input bar must track visualViewport keyboard offset');
-    assert.ok(coreUxCss.includes('--app-viewport-height') && coreUxCss.includes('#chat-container:empty'), 'Empty chat collapses bottom padding and bounds app-root to visualViewport');
+    assert.ok(stylesCssText.includes('right: 16px;') && !/\.scroll-to-bottom-pill\s*\{[^}]*left:\s*50%/s.test(stylesCssText), 'Scroll-to-bottom pill must sit at the right edge instead of overlapping centered reading prose');
+    assert.ok(coreUxCss.includes('--app-viewport-height') && coreUxCss.includes('#chat-container:empty') && coreUxCss.includes('+ 56px + env(safe-area-inset-bottom)'), 'Empty chat collapses bottom padding, non-empty gives full bottom clearance, and app-root bounds to visualViewport');
     assert.ok(indexHtml.includes('function deduplicateChatSessions('), 'Sidebar session deduplicator must prevent duplicated recent chats');
+    assert.ok(indexHtml.includes('isinstance(_tree.body[-1], _ast.Expr)'), 'Pyodide runner must evaluate trailing bare expressions into stdout');
     assert.ok(!slashCtrl.includes('scrollIntoView'), 'Slash picker must scroll internally instead of calling scrollIntoView on the viewport');
 }
 
