@@ -114,7 +114,7 @@ assert.equal(modelConfig.findings.length, 0,
 
 // 2.3 System Commands & Slash Contracts
 const slashCommands = scanContent(`
-export const SLASH_COMMANDS = ['/agent', '/workflow', '/image', '/weather', '/search', '/clear', '/export'];
+export const SLASH_COMMANDS = ['/agent', '/workflow', '/weather', '/search', '/clear', '/export'];
 `, { relativePath: 'app/frontend-routing.js' });
 assert.equal(slashCommands.findings.length, 0,
     'Must NOT flag slash command contract arrays');

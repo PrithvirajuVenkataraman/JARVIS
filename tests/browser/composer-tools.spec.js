@@ -32,15 +32,6 @@ test('minimal workspace keeps visible sidebar access beside JARVIS and retains t
     await page.locator('#chat-sidebar-panel').getByRole('button', { name: 'Settings', exact: true }).click();
     await expect(page.locator('#help-modal')).toBeVisible();
     await page.keyboard.press('Escape');
-    let generations = 0; page.on('request', request => { if (request.url().includes('/api/image-proxy')) generations++; });
-    await page.locator('#text-input').fill('A quiet mountain lake'); await page.locator('#composer-plus-btn').click();
-    await page.locator('#composer-image-btn').click();
-    await expect(page.locator('#composer-image-chip')).toBeVisible();
-    await expect(page.locator('#text-input')).toHaveValue('A quiet mountain lake'); expect(generations).toBe(0);
-    await page.evaluate(() => window.JarvisCapabilities.applyCapabilities(Object.fromEntries(['chat', 'search', 'vision', 'images', 'byok'].map(name => [name, { available: name !== 'images', reasonCode: 'fixture' }]))));
-    await expect(page.locator('#composer-image-btn')).toBeHidden(); await expect(page.locator('#composer-image-chip')).toHaveCount(0);
-    await page.reload(); await page.waitForFunction(() => window.__jarvisModernReady);
-    await page.locator('#composer-plus-btn').click(); await expect(page.locator('#composer-image-btn')).toBeVisible();
 });
 
 test('sidebar shortcuts remain reachable on all widths and open their working features', async ({ page }, info) => {
@@ -48,7 +39,7 @@ test('sidebar shortcuts remain reachable on all widths and open their working fe
     const toggle = page.getByRole('button', { name: 'Open sidebar', exact: true });
     const sidebar = page.locator('#chat-sidebar-panel');
     const actions = sidebar.getByRole('navigation', { name: 'Main chat actions' });
-    const labels = ['New chat', 'Search', 'Memory', 'Custom instructions', 'Image library', 'Settings'];
+    const labels = ['New chat', 'Search', 'Memory', 'Custom instructions', 'Settings'];
     await expect(page.locator('#sidebar-vision-btn')).toHaveCount(0);
     for (const [width, height] of [[320, 568], [390, 844], [768, 1024], [1024, 768], [1440, 900], [844, 390]]) {
         await page.setViewportSize({ width, height });
@@ -98,9 +89,6 @@ test('sidebar shortcuts remain reachable on all widths and open their working fe
     await expect(page.locator('#settings-view-custom-instructions')).toBeVisible();
     await expect(page.locator('#custom-system-prompt-input')).toBeVisible();
     await page.keyboard.press('Escape'); await expect(page.locator('#help-modal')).toHaveCount(0);
-    await toggle.click(); await actions.getByRole('button', { name: 'Image library', exact: true }).click();
-    await expect(page.locator('#image-gallery-modal')).toHaveClass(/is-open/);
-    await page.keyboard.press('Escape'); await expect(page.locator('#image-gallery-modal')).not.toHaveClass(/is-open/);
     await toggle.click();
     await actions.getByRole('button', { name: 'Settings', exact: true }).click();
     await expect(page.locator('#settings-view-main')).toBeVisible(); await page.keyboard.press('Escape');
@@ -164,10 +152,6 @@ test('picker navigation preserves drafts, composition, payloads, and changing ca
     await input.fill('/study'); await input.dispatchEvent('keydown', { key: 'Enter', isComposing: true, keyCode: 229 }); await expect(input).toHaveValue('/study');
     await input.press('Shift+Enter'); await expect(input).toHaveValue('/study\n'); await expect(page.locator('#slash-command-picker')).toHaveCount(0);
     await input.fill('/summarize already supplied text'); await expect(page.locator('#slash-command-picker')).toHaveCount(0);
-    await input.fill('/image');
-    await page.evaluate(() => window.JarvisCapabilities.applyCapabilities(Object.fromEntries(['chat', 'search', 'vision', 'images', 'byok'].map(name => [name, { available: name !== 'images', reasonCode: 'fixture' }]))));
-    await expect(page.locator('.slash-command-empty')).toHaveText('No matching commands');
-    await expect(page.locator('#composer-image-btn')).toBeHidden();
     await input.fill('/pro'); await page.locator('[data-command=professional]').click(); await expect(input).toHaveValue('make this professional: ');
 });
 

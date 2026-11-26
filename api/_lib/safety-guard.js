@@ -203,26 +203,6 @@ export function inspectInputSafety(input = '', options = {}) {
 }
 
 /**
- * Inspects image generation prompts (`:::image[prompt]:::`) with strict NSFW/gore/hate enforcement.
- */
-export function inspectImagePromptSafety(prompt = '') {
-    const text = String(prompt || '').trim();
-    if (!text) return { safe: true, blocked: false, category: 'clean', refusalMessage: '' };
-    const base = inspectInputSafety(text, { channel: 'image', checkPromptInjection: false });
-    if (!base.safe) return base;
-    if (/\b(?:nude|naked|topless|lingerie\s+sex|explicit\s+body|bloody\s+corpse|dismembered|decapitated|tortured\s+animal|swastika\s+propaganda)\b/i.test(text)) {
-        return {
-            safe: false,
-            blocked: true,
-            category: 'adult_nsfw',
-            reason: 'unsafe_image_prompt',
-            refusalMessage: 'I cannot generate images depicting explicit adult content, graphic violence, cruelty, or hate symbols.'
-        };
-    }
-    return { safe: true, blocked: false, category: 'clean', refusalMessage: '' };
-}
-
-/**
  * Checks whether a URL or hostname belongs to a known NSFW / gore / hate domain.
  */
 export function isBlockedSafetyDomain(urlOrDomain = '') {
@@ -280,23 +260,17 @@ export function filterSearchResultsSafety(results = []) {
 
 /**
  * Post-generation output safety pass:
- * - Strips/blocks any unsafe `:::image[...]:::` tags.
- * - Blocks severe accidental CSAM / explicit slur / cruelty leakage.
+ * - Strips legacy action tags and blocks severe accidental CSAM / explicit slur / cruelty leakage.
  */
 export function inspectOutputSafety(outputText = '') {
     let text = String(outputText || '');
     if (!text) return { safe: true, modified: false, text: '' };
 
     let modified = false;
-    // Scrub any unsafe :::image[prompt]::: tags inline
-    text = text.replace(/:::image\[([\s\S]*?)\](?::::)?/gi, (full, prompt) => {
-        const imgCheck = inspectImagePromptSafety(prompt);
-        if (!imgCheck.safe) {
-            modified = true;
-            return '';
-        }
-        return full;
-    });
+    if (/:::image\[/i.test(text)) {
+        text = text.replace(/:::image\[[\s\S]*?(?:\](?::::)?|$)/gi, '').trim();
+        modified = true;
+    }
 
     for (const p of CSAM_PATTERNS) {
         if (p.test(text)) {

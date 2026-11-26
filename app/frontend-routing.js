@@ -480,114 +480,6 @@ export function isStableGeographyOrGeneralFactQuery(text, context = {}) {
     return false;
 }
 
-const IMAGE_NEGATIVE_REGEX = /\b(?:how\s+(?:to|can\s+i|do\s+(?:i|we|cameras|lenses|computers|eyes))\s+(?:draw|create|make|generate|paint|render)|explain\s+how\b|tell\s+me\s+how\b|tutorial\s+on\b|guide\s+to\b|learn\s+how\s+to\b|chart|graph|diagram|table|conclusion|flowchart|comparison|schema|wireframe|architecture|uml|draw\s+a\s+(?:conclusion|parallel|distinction|comparison|boundary|line\s+between)|(?:paint|paints|painted)\s+a\s+(?:grim|bleak|rosy|clearer)\s+picture|how\s+(?:cameras|lenses|mirrors|eyes|telescopes)\s+form\s+(?:an?\s+)?image|explain\s+image\s+formation)\b/i;
-
-const CONVERSATIONAL_PREFIX = '^(?:(?:hey|hi|hello)\\s+)?(?:(?:bot|jarvis|ai|assistant)\\s*,?\\s+)?(?:can\\s+you\\s+(?:please\\s+)?|could\\s+you\\s+(?:please\\s+)?|would\\s+you\\s+(?:please\\s+)?|please\\s+|i\\s+(?:want|need)\\s+(?:you\\s+to\\s+)?(?:to\\s+)?|help\\s+me\\s+(?:to\\s+)?|kindly\\s+)?';
-
-const IMAGE_POSITIVE_PATTERNS = [
-    /^\/(?:image|img|draw|art)\b/i,
-    new RegExp(`${CONVERSATIONAL_PREFIX}(?:generate|create|render|make|draw|paint|sketch|produce)\\s+(?:me\\s+)?(?:an?\\s+)?(?:ai\\s+)?(?:image|picture|photo|photograph|drawing|painting|illustration|artwork|wallpaper|portrait|graphic|visual)(?:\\s+(?:of|showing|depicting|with|for|about|featuring)|\\s*[:-])\\s*`, 'i'),
-    new RegExp(`${CONVERSATIONAL_PREFIX}(?:show\\s+me|display|give\\s+me)\\s+(?:an?\\s+)?(?:image|picture|photo|photograph|drawing|painting|illustration|artwork)\\s+(?:of|showing|depicting|with|for|about|featuring)\\s+`, 'i'),
-    new RegExp(`${CONVERSATIONAL_PREFIX}(?:draw|paint|sketch)\\s+(?:me\\s+)?`, 'i'),
-    new RegExp(`${CONVERSATIONAL_PREFIX}(?:an?\\s+)?(?:image|picture|photo|drawing|illustration|artwork)\\s+(?:of|showing|depicting)\\s+`, 'i'),
-    new RegExp(`^(?:(?:hey|hi|hello)\\s+)?(?:(?:bot|jarvis|ai|assistant)\\s*,?\\s+)?i\\s+(?:want|need)\\s+(?:an?\\s+)?(?:image|picture|photo|illustration|drawing|artwork)\\s+(?:of|showing|depicting|with)\\s+`, 'i')
-];
-
-export function isImageGenerationIntent(text) {
-    const raw = String(text || '').trim();
-    if (!raw) return false;
-    if (isCurrentPersonPhotoLookup(raw)) return false;
-    if (/^\/(?:image|img|draw|art)\b/i.test(raw)) return true;
-    if (IMAGE_NEGATIVE_REGEX.test(raw)) return false;
-    return IMAGE_POSITIVE_PATTERNS.some(pat => pat.test(raw));
-}
-
-export function extractImagePrompt(text) {
-    let raw = String(text || '').trim();
-    if (!raw) return '';
-
-    if (/^\/(?:image|img|draw|art)\s*/i.test(raw)) {
-        return raw.replace(/^\/(?:image|img|draw|art)\s*/i, '').replace(/[?!.]+$/, '').trim();
-    }
-
-    for (const pat of IMAGE_POSITIVE_PATTERNS.slice(1)) {
-        if (pat.test(raw)) {
-            return raw.replace(pat, '').replace(/[?!.]+$/, '').trim();
-        }
-    }
-
-    return raw.replace(/[?!.]+$/, '').trim();
-}
-
-/**
- * Automatically enriches and grounds image prompts for maximum accuracy,
- * resolving abbreviations (e.g. LA -> Los Angeles, California), adding authentic
- * architectural & environmental details, and avoiding deserted ghost-town renders.
- * Preserves user-specified artistic styles (anime, oil painting, sketch, etc.).
- * @param {string} prompt
- * @returns {string}
- */
-export function enhanceImagePromptForAccuracy(prompt) {
-    let clean = String(prompt || '').trim();
-    if (!clean) return '';
-
-    // Strip common conversational prompt filler
-    clean = clean.replace(/^(?:a\s+)?(?:pic(?:ture)?|photo(?:graph)?|image)\s+(?:of|for)\s+/i, '').trim();
-
-    // Check if user requested an explicitly non-photorealistic artistic style
-    const isArtistic = /\b(?:anime|manga|oil\s+painting|watercolor|pencil\s+sketch|sketch|drawing|cartoon|illustration|pixel\s+art|cyberpunk|fantasy\s+art|3d\s+render|cgi|surreal)\b/i.test(clean);
-
-    // Standard geographic acronym & abbreviation expansion
-    clean = clean
-        .replace(/\b(?:la|l\.a\.)\b/gi, 'Los Angeles')
-        .replace(/\b(?:nyc|n\.y\.c\.)\b/gi, 'New York City')
-        .replace(/\b(?:sf|s\.f\.)\b/gi, 'San Francisco')
-        .replace(/\b(?:dc|d\.c\.)\b/gi, 'Washington, D.C.');
-
-    if (!isArtistic) {
-        // For brief prompts (< 50 chars), ground with authentic photographic textures, lighting, and detail
-        if (clean.length < 50 && !/\b(?:photograph|photorealistic|detailed|cinematic|lighting|8k|4k)\b/i.test(clean)) {
-            return `Photograph of ${clean}, authentic natural lighting, high detail, sharp focus, photorealistic 8k`;
-        }
-    }
-
-    return clean;
-}
-
-/**
- * Parses and extracts an image prompt from a streamed or static LLM action tag.
- * Matches :::image[detailed visual description]:::
- * @param {string} text
- * @param {boolean} [requireClosed=true]
- * @returns {{ prompt: string, isClosed: boolean } | null}
- */
-export function extractStreamedImageTag(text, requireClosed = true) {
-    if (!text || typeof text !== 'string') return null;
-    const closedRegex = /:::image\[([\s\S]*?)\](?:[ \t]*:::)?/i;
-    const closedMatch = text.match(closedRegex);
-    if (closedMatch && closedMatch[1].trim()) {
-        return { prompt: closedMatch[1].trim(), isClosed: true };
-    }
-    if (!requireClosed) {
-        const partialRegex = /:::image\[([\s\S]*?)(?:\]:::|\]|$)/i;
-        const partialMatch = text.match(partialRegex);
-        if (partialMatch && partialMatch[1].trim()) {
-            return { prompt: partialMatch[1].trim(), isClosed: false };
-        }
-    }
-    return null;
-}
-
-/**
- * Strips all :::image[...]::: tags from assistant response text for clean display.
- * @param {string} text
- * @returns {string}
- */
-export function stripStreamedImageTags(text) {
-    if (!text || typeof text !== 'string') return '';
-    return text.replace(/:::image\[[\s\S]*?(?:\](?:[ \t]*:::)?|$)/gi, '').trim();
-}
-
 
 function formatName(str) {
     return String(str || '')
@@ -1271,12 +1163,6 @@ export function normalizeSlashCommand(text) {
             if (!payload) return { isSlashCommand: true, command, payload: '', normalizedText: 'teach me this topic: ' };
             return { isSlashCommand: true, command, payload, normalizedText: `Teach me the key concepts of this topic clearly with examples and a short quiz:\n${payload}` };
         }
-        case 'image':
-        case 'img':
-        case 'draw':
-        case 'art': {
-            return { isSlashCommand: true, command: 'image', payload, normalizedText: payload };
-        }
         default:
             return { isSlashCommand: true, command, payload, normalizedText: payload || raw };
     }
@@ -1313,8 +1199,8 @@ export function isFastSimpleQuery(text, context = {}) {
  *                         e.g. "iPhone 16 release date", "Tesla stock today"
  *   'conceptual'        - Explanation/definition request; best handled by normal LLM.
  *                         e.g. "Explain what a transformer is", "How does photosynthesis work?"
- *   'command'           - Explicit action; handled by image, transform, study, etc. routers.
- *                         e.g. "Create an image of...", "Translate this to French"
+ *   'command'           - Explicit action; handled by transform, study, etc. routers.
+ *                         e.g. "Translate this to French", "Summarize this..."
  *   'conversational'    - Social/casual phrase; handled by fast_simple.
  *                         e.g. "Hi", "Thanks", "How are you?"
  *
@@ -1461,22 +1347,6 @@ export function decideFrontendRoute(text, context = {}) {
         };
     }
 
-    if (isImageGenerationIntent(raw)) {
-        const prompt = extractImagePrompt(raw);
-        const res = {
-            ...base,
-            route: 'image_generation',
-            reason: 'image_generation_intent',
-            prompt,
-            risk: 'low_risk',
-            requiresSources: false,
-            minimalThinking: true,
-            sourcePolicy: 'none'
-        };
-        FRONTEND_ROUTE_CACHE.set(cacheKey, res);
-        return res;
-    }
-
     if (!isWebOff && isVerifyCommand(raw)) {
         const res = {
             ...base,
@@ -1526,7 +1396,7 @@ export function decideFrontendRoute(text, context = {}) {
     //   "Inception"              → entity_bare     → live_required
     //   "Billie Eilish"          → entity_bare     → live_required
     //   "Who sang Nenjukkul Peidhidum?" → entity_question + media → live_required
-    // Does NOT affect: "Why?", "Explain photosynthesis", "Hi", "Create an image..."
+    // Does NOT affect: "Why?", "Explain photosynthesis", "Hi", "Translate this..."
     if (!isWebOff && !isStableGeographyOrGeneralFactQuery(raw, context)) {
         const qShape = classifyQueryShape(raw);
         if (qShape.shape === 'entity_bare') {

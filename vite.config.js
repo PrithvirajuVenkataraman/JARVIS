@@ -59,7 +59,7 @@ export default defineConfig({
                 for (const file of [...(entry.css || []), ...(entry.assets || [])]) if (isLightweightAsset(file)) core.add('/' + file);
                 for (const dependency of entry.imports || []) visit(dependency);
                 for (const dynDependency of entry.dynamicImports || []) {
-                    if (/app\/(?:attachments|image-generator)\.js$/i.test(dynDependency) || /browser|request-payload|file-format|image-decoder/i.test(dynDependency)) {
+                    if (/app\/attachments\.js$/i.test(dynDependency) || /browser|request-payload|file-format|image-decoder/i.test(dynDependency)) {
                         visit(dynDependency);
                     }
                 }

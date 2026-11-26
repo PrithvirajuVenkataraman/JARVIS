@@ -251,9 +251,10 @@ test('persistence coalesces writes and avoids repeated hot-cache serialization w
     assert.equal(hotWrites, 1);
 });
 
-test('unavailable free-image and saved-key capabilities are reported without secrets', () => {
+test('diagnostics capabilities and saved-key readiness are reported without secrets', () => {
     const value = buildDiagnosticsStatus();
-    assert.equal(typeof value.capabilities.images.available, 'boolean');
+    assert.equal(typeof value.capabilities.vision.available, 'boolean');
+    assert.equal(value.capabilities.images, undefined);
     assert.equal(value.model.byokSupported, isPersistentByokConfigured());
     assert.ok(!JSON.stringify(value).includes('PRIVATE KEY'));
 });

@@ -1,7 +1,6 @@
 import { positionPopover } from './composer-tools-controller.js';
 
 export const commands = Object.freeze([
-    { id: 'image', label: 'Image', hint: 'Describe an image', template: '' },
     { id: 'translate', label: 'Translate', hint: 'Translate text to another language', template: 'Translate this text to [language]: ' },
     { id: 'verify', label: 'Verify', hint: 'Check a claim or answer', template: 'verify this: ' },
     { id: 'summarize', label: 'Summarize', hint: 'Summarize text or a document', template: 'summarize this: ' },
@@ -9,13 +8,13 @@ export const commands = Object.freeze([
     { id: 'study', label: 'Study', hint: 'Learn or review a topic', template: 'teach me this topic: ' }
 ]);
 
-export function filterCommands(query, imageAvailable = false) {
+export function filterCommands(query) {
     const term = String(query || '').toLowerCase();
     const rank = command => {
         const names = [command.id, command.label.toLowerCase()];
         return names.includes(term) ? 0 : names.some(name => name.startsWith(term)) ? 1 : 2;
     };
-    return commands.filter(command => (command.id !== 'image' || imageAvailable) && [command.id, command.label.toLowerCase()].some(name => name.includes(term)))
+    return commands.filter(command => [command.id, command.label.toLowerCase()].some(name => name.includes(term)))
         .sort((a, b) => rank(a) - rank(b));
 }
 
@@ -29,7 +28,6 @@ function select(id = activeId) {
     if (!command) return;
     close();
     input.value = command.template; input.dataset.inputSource = 'slash';
-    if (command.id === 'image') window.activateComposerImageMode?.({ aspectRatio: '1:1' });
     input.focus();
     const placeholder = input.value.indexOf('[language]');
     input.setSelectionRange(placeholder < 0 ? input.value.length : placeholder, placeholder < 0 ? input.value.length : placeholder + 10);
@@ -53,7 +51,7 @@ export function sync() {
     if (!input || composing) return;
     const match = input.value.match(/^\/([a-z]*)$/i);
     if (!match) { close(); return; }
-    results = filterCommands(match[1], window.JarvisCapabilities?.isAvailable('images'));
+    results = filterCommands(match[1]);
     if (!results.some(row => row.id === activeId)) activeId = results[0]?.id || '';
     if (!picker) {
         window.closeComposerActionsMenu?.();

@@ -15,7 +15,6 @@ export const DLP_CHANNELS = Object.freeze([
     'search_query',
     'feedback_comment',
     'history',
-    'image_prompt',
     'llm_dispatch',
     'web_fetch'
 ]);

@@ -39,7 +39,6 @@ Every place where user-originated text leaves the device or is passed to externa
 | **SearXNG Instances** | `api/_lib/free-live/providers.js` | Public SearXNG pool endpoints | Live search query | `search_query` (server) |
 | **DuckDuckGo Search** | `api/_lib/free-live/providers.js` | `html.duckduckgo.com` | Live search query | `search_query` (server) |
 | **LLM Chat Synthesis** | `api/chat-groq.js` | Groq API / Gemini API | Full prompt, history, citations | `llm_dispatch` (server) |
-| **Image Generation** | `app/image-generator.js` | `api/image-proxy.js` (Imagen/Pollinations)| Image generation prompt | `image_prompt` |
 | **URL Content Extract** | `api/extract-url.js` | Crawl4AI Docker | Target URL | `web_fetch` (server) |
 | **Feedback Comments** | `index.html` (Feedback Popover) | `api/_lib/feedback-handler.js` (routed via `api/diagnostics`) | User review commentary | `feedback_comment` |
 

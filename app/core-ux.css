@@ -155,16 +155,6 @@ body #help-modal .settings-row:has(.settings-switch) { flex-wrap:nowrap; }
     body #help-modal .settings-permissions-row > button { justify-self:start; margin-inline-start:46px; max-width:calc(100% - 46px); }
     body #input-bar-inner.is-voice-active .composer-voice-visualizer { grid-area:input; }
 }
-.image-gen-card.free-image-card { width: 100%; max-width: 36rem; color: #eee; }
-.free-image-card .image-gen-viewport { background: #111; border: 1px solid #333; border-radius: 16px; overflow: hidden; }
-.free-image-loading { padding: clamp(20px, 5vw, 36px); }
-.free-image-loading .image-gen-status-text { position: static; color: #eee; font-size: 1rem; line-height: 1.5; }
-.free-image-note { color: #aaa; font-size: .875rem; line-height: 1.6; margin: 12px 0 16px; }
-.free-image-card button { min-height: 44px; padding: 8px 16px; background: #222; border: 1px solid #444; border-radius: 10px; color: #eee; font: inherit; cursor: pointer; }
-.free-image-card button:hover { background: #303030; }
-.free-image-card button:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
-.free-image-card [hidden], .free-image-card .hidden { display: none; }
-.free-image-card .image-gen-img { width: 100%; height: auto; object-fit: contain; }
 
 /* Keep sidebar access visible while centering the title independently. */
 body #app-header { display:grid; grid-template-columns:44px minmax(0,1fr) 44px; align-items:center; }
@@ -213,26 +203,6 @@ body #input-bar-inner #text-input { color:var(--core-text) !important; -webkit-t
     body.sidebar-docked #input-bar-container { left:var(--sidebar-docked-width,280px); }
 }
 body #chat-empty-state:empty { display:none; }
-.free-image-card img.image-gen-img { cursor:zoom-in; }
-:is(.free-image-card img.image-gen-img,#image-lightbox-img[data-generated-card-id]) { -webkit-touch-callout:none; user-select:none; touch-action:pan-y pinch-zoom; }
-.image-lightbox-container:has(#image-lightbox-img[data-generated-card-id]) .image-lightbox-toolbar { display:none; }
-.free-image-card img.image-gen-img:focus-visible { outline:2px solid #eee; outline-offset:3px; }
-.chat-row:has(.free-image-card) :is(.assistant-action-bar,.assistant-action-row) { display:none; }
-body #generated-image-menu { position:fixed; z-index:10000; width:168px; max-width:calc(100vw - 16px); padding:4px; background:#1c1c1c; color:#eee; border:1px solid #363636; border-radius:8px; box-shadow:0 8px 24px #0006; }
-body #generated-image-menu[hidden] { display:none; }
-body #generated-image-menu button { display:flex; align-items:center; gap:10px; width:100%; min-height:44px; border:0; border-radius:4px; padding:10px 12px; background:transparent; color:inherit; text-align:left; font:400 14px/1.4 var(--app-font-family); cursor:pointer; box-shadow:none; }
-body #generated-image-menu button svg { width:16px; height:16px; flex:none; color:#bbb; }
-body #generated-image-menu button:hover { background:#292929; }
-body #generated-image-menu button:focus-visible { background:#292929; outline:1px solid #888; outline-offset:-2px; }
-
-/* Status messages use the answer column, not an empty image placeholder. */
-body .free-image-card:not([data-image-state="complete"]) .image-gen-viewport { display:block; min-height:0; aspect-ratio:auto; height:auto; padding:0; border:0; border-radius:0; background:transparent; box-shadow:none; }
-body .free-image-card:not([data-image-state="complete"]) .free-image-loading { padding:8px 0; text-align:left; }
-body .free-image-loading .image-gen-status-text { margin:0; text-align:left; font-size:15px; font-weight:400; line-height:1.6; }
-body .free-image-loading .free-image-note { margin:4px 0 8px; color:#999; font-size:13px; line-height:1.6; }
-body .free-image-card :is(.free-image-stop,.free-image-retry) { min-width:44px; min-height:44px; padding:8px 0; border:0; border-radius:3px; background:transparent; color:#d4d4d4; font:500 13px/1.4 var(--app-font-family); box-shadow:none; text-align:left; }
-body .free-image-card :is(.free-image-stop,.free-image-retry):hover:not(:disabled) { color:#fff; text-decoration:underline; text-underline-offset:3px; }
-body .free-image-card :is(.free-image-stop,.free-image-retry):disabled { color:#888; cursor:default; }
 body #help-modal .settings-routing-card { margin:0 0 16px; padding:18px; border-radius:10px; }
 .settings-routing-card h4 { margin:0 0 8px; color:#eee; font-size:15px; line-height:1.5; font-weight:600; }
 .settings-routing-card p { margin:0; color:#aaa; font-size:13px; line-height:1.7; }
@@ -265,7 +235,6 @@ body #help-modal :is(.help-modal-back-btn,.settings-subview-back-btn) { min-widt
 body #help-modal .help-modal-ok-btn { min-height:var(--core-hit-area); border-radius:var(--core-radius); background:#f5f5f5; color:#111; font-size:13px; font-weight:600; box-shadow:none; padding:10px 18px; }
 body #help-modal .settings-action-danger { color:#efb1b1; border-color:#593333; background:transparent; }
 body :where(button, a, input, textarea, select):focus-visible { outline:2px solid #d8d8d8; outline-offset:3px; }
-.image-storage-notice { color:var(--core-muted); font-size:13px; line-height:1.5; margin:12px 0 0; }
 .person-photo { width:fit-content; max-width:min(100%,360px); margin:0 0 20px; }
 .person-photo-image { display:block; width:auto; height:auto; max-width:100%; max-height:320px; object-fit:contain; border-radius:10px; }
 .person-photo figcaption { max-width:360px; margin-top:8px; color:var(--core-muted); font-size:12px; line-height:1.5; overflow-wrap:anywhere; }

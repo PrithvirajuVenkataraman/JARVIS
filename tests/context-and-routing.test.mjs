@@ -861,12 +861,6 @@ test('5. MCQs, Multimodal, and Topic Change Invariants: Never incorrectly rewrit
     assert.equal(needsContextualReformulation(mcq, turns), false);
     assert.equal(reformulateSearchQuery(mcq, { turns }), mcq);
 
-    // Image prompt: must not be rewritten
-    const img = ':::image[a vintage camera sitting on a wooden desk]:::';
-    assert.equal(isStandaloneQuery(img, turns), true);
-    assert.equal(needsContextualReformulation(img, turns), false);
-    assert.equal(reformulateSearchQuery(img, { turns }), img);
-
     // Explicit topic change: must not be rewritten
     const topicChange1 = 'new topic: tell me about Mars exploration';
     assert.equal(isStandaloneQuery(topicChange1, turns), true);

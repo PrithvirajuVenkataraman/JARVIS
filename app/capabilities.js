@@ -4,7 +4,6 @@ let lastRefreshAt = 0;
 const selectors = {
     search: '#web-search-toggle-btn, [data-capability="live_search"], [data-capability="live-search"]',
     vision: '#composer-camera-btn, [data-capability="vision"], [data-capability="document_ocr"]',
-    images: '#composer-image-btn, [data-capability="image_generation"], [data-capability="image"], [data-action="generate-image"], [data-creation-id="image"]',
     byok: '#settings-row-byok'
 };
 
@@ -33,7 +32,6 @@ export function applyCapabilities(value) {
         }
     }
     if (!isAvailable('search') && (previous?.search?.available || document.getElementById('web-search-toggle-btn')?.dataset.webMode === 'force')) window.setWebSearchMode?.('off', { persist: false });
-    if (!isAvailable('images') && previous?.images?.available) window.deactivateComposerImageMode?.();
     if (JSON.stringify(previous) !== JSON.stringify(value)) window.dispatchEvent(new Event('jarvis:capabilities'));
 }
 
@@ -45,7 +43,7 @@ export async function refreshCapabilities() {
         const data = await response.json();
         applyCapabilities(data.diagnostics?.capabilities);
     } catch {
-        if (!capabilities) applyCapabilities(Object.fromEntries(['chat', 'search', 'vision', 'images', 'byok'].map(name => [name, { available: false, state: 'unknown', reasonCode: 'status_unavailable' }])));
+        if (!capabilities) applyCapabilities(Object.fromEntries(['chat', 'search', 'vision', 'byok'].map(name => [name, { available: false, state: 'unknown', reasonCode: 'status_unavailable' }])));
         clearTimeout(retryTimer);
         if (navigator.onLine && !document.hidden) retryTimer = setTimeout(refreshCapabilities, 60000);
     }
@@ -58,7 +56,7 @@ export function installCapabilityVisibility() {
     window.fetch = async function (input, init) {
         const response = await originalFetch.call(this, input, init);
         const url = String(typeof input === 'string' ? input : input?.url || '');
-        const feature = url.includes('/api/image-proxy') ? 'images' : url.includes('/api/vision') ? 'vision' : url.includes('/api/search') ? 'search' : null;
+        const feature = url.includes('/api/vision') ? 'vision' : url.includes('/api/search') ? 'search' : null;
         if (feature && capabilities && [429, 503].includes(response.status)) {
             setRuntimeStatus(feature, response.status === 429 ? 'busy' : 'unavailable', response.status === 429 ? 'quota_exhausted' : 'temporarily_unavailable');
             clearTimeout(retryTimer);

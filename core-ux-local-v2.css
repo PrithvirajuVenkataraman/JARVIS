@@ -171,7 +171,6 @@ body #help-modal .settings-row:has(.settings-switch) { flex-wrap:nowrap!importan
 }
 @media(max-width:767px) {
     body .empty-state-capabilities[data-action-count="3"] { grid-template-columns:repeat(2,minmax(0,1fr)); width:min(100%,456px); }
-    body .empty-state-capabilities[data-action-count="3"] > [data-capability="image_generation"] { grid-column:1 / -1; }
 }
 @media(max-width:480px) {
     body .empty-state-capabilities { gap:10px; }
@@ -179,9 +178,6 @@ body #help-modal .settings-row:has(.settings-switch) { flex-wrap:nowrap!importan
     body .empty-state-pill .capability-icon { grid-column:1; grid-row:1; }
     body .empty-state-pill .capability-arrow { grid-column:2; grid-row:1; }
     body .empty-state-pill .capability-copy { grid-column:1 / -1; grid-row:2; }
-    body .empty-state-capabilities[data-action-count="3"] > [data-capability="image_generation"] { grid-template-columns:32px minmax(0,1fr) 14px; min-height:64px; }
-    body .empty-state-capabilities[data-action-count="3"] > [data-capability="image_generation"] .capability-copy { grid-column:2; grid-row:1; }
-    body .empty-state-capabilities[data-action-count="3"] > [data-capability="image_generation"] .capability-arrow { grid-column:3; }
 }
 @media(max-width:480px) and (max-height:650px) {
     body .chat-empty-state:has(.empty-state-capabilities[data-action-count="3"]) .empty-state-emblem-wrap { display:none; }

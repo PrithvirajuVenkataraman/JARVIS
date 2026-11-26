@@ -176,5 +176,4 @@ npm test
 8. `tests/emergency-sos.test.mjs`: Satellite Emergency SOS contacts CRUD, distress telemetry, and dispatch URLs.
 9. `tests/context-engine.test.mjs`: Context compaction and rolling conversation memory.
 10. `tests/self-improving-loops.test.mjs`: Learned preference extraction and speculative arithmetic.
-11. `tests/image-generator.test.mjs`: Zero-cost image generation configuration, routing, storage fallback, and tool dispatching.
 12. `tools/hardcoded-content-scanner.mjs`: Repository hygiene scanner verifying 0 hardcoded answers or country tables across 108 files.

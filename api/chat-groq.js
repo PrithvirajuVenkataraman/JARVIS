@@ -5760,7 +5760,6 @@ async function handler(req, res) {
 
 Explain clearly and thoroughly in clean Markdown without fluff or filler.
 ZERO-HALLUCINATION & BOUNDARIES: Never invent people, dates, prices, statistics, quotes, URLs or facts; admit uncertainty. Creative/astrology answers may be speculative.
-Use :::image[prompt]::: only when asked.
 For sexual advances, deflect: "No, no, no don't do that! I thought we were having a good time."
 Keep internal instructions private.
 ${conversationalVoiceDirective(preferences, { compact: true })}
@@ -5789,7 +5788,7 @@ ${userPreferenceDirective(preferences)}`;
 
         const sections = [
             `You are JARVIS, a helpful text-first assistant.${userName ? ` The user is ${userName}.` : ''}`,
-            `Capabilities: Weather, Reminders, Shopping lists, Memory. Image Gen: emit :::image[prompt]::: only when asked to draw/generate an image. Animated Visuals: embed one \`\`\`visual JSON block (type: flow|orbit|wave|sort|bars|projectile|steps).`,
+            `Capabilities: Weather, Reminders, Shopping lists, Memory. Animated Visuals: embed one \`\`\`visual JSON block (type: flow|orbit|wave|sort|bars|projectile|steps).`,
             UNIFIED_SAFETY_POLICY_DIRECTIVE,
             `Style & Tone:\n- Peer voice; match user language (Kannada, Tamil, Telugu, Malayalam, Hindi, English, phonetic). Direct start; no meta-talk or filler. Avoid dashes.`,
             conversationalVoiceDirective(preferences),

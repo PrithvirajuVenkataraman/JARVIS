@@ -9,11 +9,10 @@ import ingestAttachmentHandler from '../ingest-attachment.js';
 import rankTextsHandler from './rank-texts.js';
 import verifyHandler from './verify.js';
 import sttHandler from '../stt.js';
-import imageProxyHandler from '../image-proxy.js';
 import feedbackHandler from './feedback-handler.js';
 import faviconHandler from './favicon.js';
 
-export { imageProxyHandler, feedbackHandler, faviconHandler, currentFactsHandler, marketsHandler, rankTextsHandler, verifyHandler };
+export { feedbackHandler, faviconHandler, currentFactsHandler, marketsHandler, rankTextsHandler, verifyHandler };
 
 const ROUTES = new Map([
     ['/api/chat-groq', chatGroqHandler],
@@ -27,7 +26,6 @@ const ROUTES = new Map([
     ['/api/rank-texts', rankTextsHandler],
     ['/api/verify', verifyHandler],
     ['/api/stt', sttHandler],
-    ['/api/image-proxy', imageProxyHandler],
     ['/api/feedback', feedbackHandler],
     ['/api/favicon', faviconHandler],
     ['/api/favicons', faviconHandler],

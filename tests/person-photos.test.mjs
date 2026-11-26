@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { personPhotoQuery, personPhotoSubject, extractPersonFromAnswer, resolvePersonPhotoRequest } from '../app/person-photo-query.js';
-import { isImageGenerationIntent } from '../app/frontend-routing.js';
 import { imageDate, commonsImage, resolvePersonPhoto, resolveWebPersonPhoto } from '../api/_lib/person-photos.js';
 
 function file(title, date, extra = {}) {
@@ -15,8 +14,6 @@ test('person queries accept explicit names and photo requests without treating v
     for (const query of ['What was it?', 'his latest photo', 'Describe this picture', 'Explain the above']) assert.equal(personPhotoQuery(query), '');
     assert.equal(personPhotoQuery('Example Person', { status: 'ambiguous' }), '');
     assert.equal(personPhotoQuery('Example Person', { evidenceIds: ['earlier-turn'] }), '');
-    assert.equal(isImageGenerationIntent('Show me the latest photo of Example Person'), false);
-    assert.equal(isImageGenerationIntent('Create a portrait of Example Person'), true);
     assert.equal(personPhotoQuery('Actor Example Person', { status: 'missing' }), 'Actor Example Person');
     assert.deepEqual(personPhotoSubject('Who is actress Example Person?'), { query: 'actress Example Person', name: 'Example Person', role: 'actor' });
     assert.equal(personPhotoSubject('Example Person (actor)').role, 'actor');

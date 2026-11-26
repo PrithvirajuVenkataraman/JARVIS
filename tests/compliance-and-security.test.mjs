@@ -54,7 +54,6 @@ import diagnosticsHandler, { buildDiagnosticsStatus } from '../api/diagnostics.j
 import chatGroqHandler, { __test as chatGroqTest } from '../api/chat-groq.js';
 const chatHandler = chatGroqHandler;
 import searchHandler from '../api/search.js';
-import { generateImage } from '../app/image-generator.js';
 import { inspectPromptSecurity } from '../api/_lib/prompt-guard.js';
 import { redactSensitiveData } from '../api/_lib/pii-redactor.js';
 import { __test as visionTest } from '../api/vision.js';
@@ -781,18 +780,6 @@ test('Memory Extraction 10.1: Utterances with credentials are never extracted in
     assert.equal(shouldIgnore, true, 'Utterance with credential must be ignored for memory extraction');
 });
 
-test('Image Generator 10.2: Prompts with credentials throw and are blocked', async () => {
-    await assert.rejects(
-        async () => {
-            await generateImage({
-                prompt: 'A painting of AKIAIOSFODNN7EXAMPLE on a canvas'
-            });
-        },
-        /blocked by policy|credentials/i,
-        'Prompt with credential must be rejected'
-    );
-});
-
 // =========================================================================
 // Suite 11: UI and CSS Structure Verification
 // =========================================================================
@@ -934,7 +921,8 @@ assert.equal(csp, APPLICATION_CSP);
 const scriptPolicy = csp.split(';').find(part => part.trim().startsWith('script-src'));
 assert.ok(!scriptPolicy.includes("'unsafe-inline'") && !scriptPolicy.includes("'unsafe-eval'"));
 assert.ok(!/connect-src[^;]*(?:^|\s)(?:https:|wss:)(?:\s|;)/.test(csp));
-assert.ok(csp.includes("connect-src 'self' blob: https://aihorde.net"));
+assert.ok(csp.includes("connect-src 'self' blob:"));
+assert.ok(!csp.includes('aihorde.net'));
 assert.ok(csp.includes("worker-src 'self' blob:"));
 assert.ok(SANDBOX_CSP.includes("connect-src 'none'"));
 assert.ok(csp.includes("object-src 'none'"), 'CSP must block object-src');
@@ -1554,9 +1542,9 @@ assert.ok(indexHtml.includes('PERSONALIZATION &amp; BEHAVIOR'), 'PERSONALIZATION
 assert.ok(indexHtml.includes('TOOLS &amp; ARCHIVES'), 'TOOLS & ARCHIVES section header must exist');
 assert.ok(indexHtml.includes('SAFETY &amp; DATA'), 'SAFETY & DATA section header must exist');
 
-// Verify Saved Memories, Image Gallery, Export Conversation, Local Storage (Emergency SOS removed)
+// Verify Saved Memories, Export Conversation, Local Storage (Emergency SOS removed)
 assert.ok(indexHtml.includes('Saved Memories'), 'Saved Memories row must exist');
-assert.ok(indexHtml.includes('Image Gallery'), 'Image Gallery row must exist');
+assert.equal(indexHtml.includes('Image Gallery'), false, 'Image Gallery row must be removed');
 assert.ok(indexHtml.includes('Export Conversation'), 'Export Conversation row must exist');
 assert.equal(indexHtml.includes('id="sos-contact-modal"'), false, 'Emergency SOS modal must be removed');
 assert.ok(indexHtml.includes('Local Storage & Privacy'), 'Local Storage & Privacy row must exist');

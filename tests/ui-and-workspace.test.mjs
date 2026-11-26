@@ -828,8 +828,6 @@ test('Settings preserve semantic controls while component styles own their appea
     assert.ok(css.includes('--core-text'));
     assert.ok(css.includes('@layer static-interface'), 'Application motion has one explicit owner rather than feature-specific animations');
     assert.ok(fs.readFileSync('styles.css', 'utf8').includes('@layer legacy'));
-    assert.ok(fs.readFileSync('app/image-generator.js', 'utf8').includes('await saveGeneratedImage(result, { signal: controller.signal })'));
-    assert.ok(source.includes('if (!result.persisted)'));
     // Geometry, contrast, focus and label clipping are measured in the browser
     // suite at five sizes rather than inferred from obsolete CSS string literals.
 });

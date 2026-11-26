@@ -43,9 +43,6 @@ import * as JarvisInteractiveIllustrations from './interactive-illustrations.js?
 import * as JarvisAgentOrchestrator from './agent-orchestrator.js?v=2.4.1';
 import * as JarvisLocationSuite from './location-suite.js?v=2.4.3';
 
-import * as JarvisImageConfig from './image-generation-config.js?v=2.4.1';
-import * as JarvisImageStorage from './image-storage.js?v=2.4.1';
-const JarvisImageGenerator = lazyModule(() => import('./image-generator.js'));
 import { selfImprovingMemory } from './self-improving-memory.js?v=2.4.3';
 import * as JarvisLiveResearch from './bounded-live-research.js?v=2.4.1';
 import * as JarvisQueryNormalizer from './query-normalizer.js?v=2.4.1';
@@ -92,9 +89,6 @@ globalThis.JarvisInteractiveIllustrations = Object.freeze({ ...JarvisInteractive
 globalThis.JarvisAgentOrchestrator = Object.freeze({ ...JarvisAgentOrchestrator });
 globalThis.JarvisLocationSuite = Object.freeze({ ...JarvisLocationSuite });
 
-globalThis.JarvisImageConfig = Object.freeze({ ...JarvisImageConfig });
-globalThis.JarvisImageStorage = Object.freeze({ ...JarvisImageStorage });
-globalThis.JarvisImageGenerator = JarvisImageGenerator;
 globalThis.JarvisSelfImprovingMemory = selfImprovingMemory;
 globalThis.JarvisLiveResearch = { ...JarvisLiveResearch, ...(globalThis.JarvisLiveResearch || {}) };
 globalThis.JarvisQueryNormalizer = Object.freeze({ ...JarvisQueryNormalizer });

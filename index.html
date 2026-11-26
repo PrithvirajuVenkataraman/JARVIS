@@ -90,10 +90,6 @@
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16M8 3v6M16 9v6M10 15v6"></path></svg>
                 <span>Custom instructions</span>
             </button>
-            <button type="button" class="chat-sidebar-nav-item" data-ui-static="shell-43">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"></rect><circle cx="8" cy="8" r="1.5"></circle><path d="m3 17 6-6 5 5 3-3 4 4"></path></svg>
-                <span>Image library</span>
-            </button>
             <button type="button" class="chat-sidebar-nav-item" data-ui-static="shell-5" >
                 <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" aria-hidden="true">
                     <circle cx="12" cy="12" r="3"></circle>
@@ -154,7 +150,7 @@
             <img id="image-lightbox-img" class="image-lightbox-img" src="" alt="Full view">
             <div id="image-lightbox-caption" class="image-lightbox-caption" style="display: none;"></div>
             <div class="image-lightbox-toolbar">
-                <button type="button" class="image-gen-action-btn"  aria-label="Download image" data-ui-static="shell-23">
+                <button type="button" class="image-lightbox-download-btn"  aria-label="Download image" data-ui-static="shell-23">
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
                     <span>Download</span>
                 </button>
@@ -162,22 +158,6 @@
         </div>
     </div>
 
-    <!-- AI Image History Gallery Modal -->
-    <div id="image-gallery-modal" class="image-gallery-modal"  role="dialog" aria-modal="true" aria-label="Generated Images Gallery" data-ui-static="shell-24">
-        <div class="image-gallery-panel" data-ui-static="shell-25" >
-            <div class="image-gallery-header">
-                <div class="image-gallery-title">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
-                    <span>Generated Images</span>
-                    <span id="image-gallery-count" class="image-gallery-count">0</span>
-                </div>
-                <button type="button" class="image-gallery-close-btn"  aria-label="Close gallery" data-ui-static="shell-26">&times;</button>
-            </div>
-            <div id="image-gallery-body" class="image-gallery-body">
-                <div id="image-gallery-grid" class="image-gallery-grid"></div>
-            </div>
-        </div>
-    </div>
 
         <!-- Full-Height Edge-to-Edge AI Workspace Container -->
     <div id="app-root" class="app-root flex flex-col min-h-screen">
@@ -296,10 +276,6 @@
                                 <button type="button" class="composer-action-item" data-composer-action="file-browse" role="menuitem">
                                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m8 12 6-6a3 3 0 0 1 4 4l-8 8a5 5 0 0 1-7-7l9-9"/></svg>
                                     <span class="composer-menu-label">Add photos &amp; files</span><small>Upload from your device</small>
-                                </button>
-                                <button id="composer-image-btn" type="button" class="composer-action-item" data-capability="image_generation"  role="menuitem" title="Create an image with the configured provider" data-ui-static="shell-33">
-                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.5"/><path d="m3 17 6-6 5 5 3-3 4 4"/></svg>
-                                    <span class="composer-menu-label">Create image</span><small>Describe an image</small>
                                 </button>
                                 <button
                                     id="web-search-toggle-btn"

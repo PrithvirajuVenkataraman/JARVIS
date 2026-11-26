@@ -1,5 +1,5 @@
 /* Trusted shell actions; assistant content cannot register these bindings. */
-/* global closeChatSidebar, startNewChatSession, focusChatSidebarSearch, openSidebarQuickAction, onChatSidebarSearchInput, handleChatSessionMenuAction, closeChatDeleteDialog, confirmChatDeleteDialog, closeConfirmActionDialog, handleTextInputDialogBackdropClick, handleTextInputDialogCardClick, closeTextInputDialog, submitTextInputDialog, handleImageLightboxBackdropClick, closeImageLightbox, downloadLightboxImage, closeImageGalleryModal, toggleChatSidebar, toggleForecast, setEnterprisePersona, jumpToLatest, scrollToBottom, toggleComposerActionsMenu, triggerImageGenerationPrompt, cycleWebSearchMode, handleComposerKeydown, handleComposerInput, toggleDeepReasoningMode, toggleVoiceToText, handlePrimaryActionButtonClick, openImportantInfoModal */
+/* global closeChatSidebar, startNewChatSession, focusChatSidebarSearch, openSidebarQuickAction, onChatSidebarSearchInput, handleChatSessionMenuAction, closeChatDeleteDialog, confirmChatDeleteDialog, closeConfirmActionDialog, handleTextInputDialogBackdropClick, handleTextInputDialogCardClick, closeTextInputDialog, submitTextInputDialog, handleImageLightboxBackdropClick, closeImageLightbox, downloadLightboxImage, toggleChatSidebar, toggleForecast, setEnterprisePersona, jumpToLatest, scrollToBottom, toggleComposerActionsMenu, cycleWebSearchMode, handleComposerKeydown, handleComposerInput, toggleDeepReasoningMode, toggleVoiceToText, handlePrimaryActionButtonClick, openImportantInfoModal */
 export const staticActions = {
     "shell-1": [["click", function(event) { closeChatSidebar() }]],
     "shell-2": [["click", function(event) { closeChatSidebar() }]],
@@ -24,16 +24,12 @@ export const staticActions = {
     "shell-21": [["click", function(event) { handleImageLightboxBackdropClick(event) }]],
     "shell-22": [["click", function(event) { closeImageLightbox() }]],
     "shell-23": [["click", function(event) { downloadLightboxImage() }]],
-    "shell-24": [["click", function(event) { if (event.target === this) closeImageGalleryModal() }]],
-    "shell-25": [["click", function(event) { event.stopPropagation() }]],
-    "shell-26": [["click", function(event) { closeImageGalleryModal() }]],
     "shell-27": [["click", function(event) { toggleChatSidebar() }]],
     "shell-28": [["click", function(event) { toggleForecast() }]],
     "shell-29": [["change", function(event) { setEnterprisePersona(this.value) }]],
     "shell-30": [["click", function(event) { jumpToLatest() }]],
     "shell-31": [["click", function(event) { scrollToBottom() }]],
     "shell-32": [["click", function(event) { toggleComposerActionsMenu() }]],
-    "shell-33": [["click", function(event) { triggerImageGenerationPrompt() }]],
     "shell-34": [["click", function(event) { cycleWebSearchMode() }]],
     "shell-35": [["keydown", function(event) { handleComposerKeydown(event) }], ["input", function(event) { handleComposerInput() }]],
     "shell-36": [["click", function(event) { toggleDeepReasoningMode() }]],
@@ -41,6 +37,5 @@ export const staticActions = {
     "shell-38": [["click", function(event) { handlePrimaryActionButtonClick() }]],
     "shell-39": [["click", function(event) { openImportantInfoModal() }]],
     "shell-41": [["click", function(event) { openSidebarQuickAction('memory') }]],
-    "shell-42": [["click", function(event) { openSidebarQuickAction('system') }]],
-    "shell-43": [["click", function(event) { openSidebarQuickAction('images') }]]
+    "shell-42": [["click", function(event) { openSidebarQuickAction('system') }]]
 };

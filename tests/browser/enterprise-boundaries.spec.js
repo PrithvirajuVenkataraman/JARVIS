@@ -109,31 +109,12 @@ test('saved-memory export remains bound when its control is rendered conditional
     expect(await page.evaluate(() => window.__memoryExports)).toBe(1);
 });
 
-test('decoded images remain usable when saving fails without claiming persistence', async ({ page }) => {
-    await page.evaluate(() => Object.defineProperty(window, 'indexedDB', { configurable: true, value: undefined }));
-    await page.route('https://aihorde.net/api/v2/**', route => route.fulfill({ json: route.request().url().endsWith('/async') ? { id: job } : route.request().url().includes('/check/') ? { done: true } : { generations: [{ img: png }] } }));
-    await page.evaluate(() => { window.__imageTask = window.handleImageGenerationRequest('Draw a quiet forest'); });
-    const card = page.locator('.free-image-card').last();
-    await expect(card.locator('img')).toBeVisible();
-    await expect(card.locator('.image-storage-notice')).toHaveText('Image available for this session. Download to keep it.');
-    expect(await page.evaluate(async () => (await window.JarvisImageStorage.getRecentGeneratedImages()).length)).toBe(0);
-});
-
-test('corrupt image output is rejected before persistence', async ({ page }) => {
-    await page.route('https://aihorde.net/api/v2/**', route => route.fulfill({ json: route.request().url().endsWith('/async') ? { id: job } : route.request().url().includes('/check/') ? { done: true } : { generations: [{ img: 'iVBORw0KGgo=' }] } }));
-    await page.evaluate(() => { window.__imageTask = window.handleImageGenerationRequest('Draw a quiet forest'); });
-    const card = page.locator('.free-image-card').last();
-    await expect(card).toHaveAttribute('data-image-state', 'error');
-    await expect(card.locator('img')).toBeHidden();
-    expect(await page.evaluate(async () => (await window.JarvisImageStorage.getRecentGeneratedImages()).length)).toBe(0);
-});
-
 test('temporary capability failures preserve tools and drafts and recover on reconnect', async ({ page }) => {
-    await page.waitForFunction(() => window.JarvisCapabilities.isAvailable('images'));
+    await page.waitForFunction(() => window.JarvisCapabilities.isAvailable('chat'));
     await page.locator('#text-input').fill('Keep this draft.');
     await page.route('**/api/diagnostics', route => route.fulfill({ status: 503, json: { error: 'unavailable' } }));
     await page.evaluate(() => window.JarvisCapabilities.refreshCapabilities());
-    expect(await page.evaluate(() => window.JarvisCapabilities.isAvailable('images'))).toBe(true);
+    expect(await page.evaluate(() => window.JarvisCapabilities.isAvailable('chat'))).toBe(true);
     await expect(page.locator('#text-input')).toHaveValue('Keep this draft.');
     await page.unroute('**/api/diagnostics');
     const request = page.waitForRequest('**/api/diagnostics');

@@ -21,7 +21,6 @@ test('slash names filter locally with capability isolation and deterministic ran
     assert.deepEqual(filterCommands('mar').map(row => row.id), ['summarize']);
     assert.deepEqual(filterCommands('unavailable'), []);
     assert.deepEqual(filterCommands('image'), []);
-    assert.deepEqual(filterCommands('image', true).map(row => row.id), ['image']);
     assert.equal(filterCommands('').length, 5);
 });
 

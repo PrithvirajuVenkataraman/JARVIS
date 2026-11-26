@@ -14,7 +14,7 @@ export function installDialogController() {
         const style = getComputedStyle(el);
         // These overlays fade with opacity. Their explicit state must govern focus and
         // background inactivity before the first frame and during the closing animation.
-        if (el.matches('.image-lightbox-overlay, .image-gallery-modal')) {
+        if (el.matches('.image-lightbox-overlay')) {
             return el.classList.contains('is-open') && style.display !== 'none' && el.getBoundingClientRect().width > 0;
         }
         return el.getBoundingClientRect().width > 0 && style.visibility !== 'hidden' && style.display !== 'none' && Number(style.opacity) !== 0;
@@ -76,7 +76,7 @@ export function installDialogController() {
             const close = current.querySelector('[data-dialog-close], [aria-label="Close"], .help-modal-close');
             if (close) { event.preventDefault(); close.click(); }
             else {
-                const closers = { 'chat-delete-dialog': 'closeChatDeleteDialog', 'confirm-action-dialog': 'closeConfirmActionDialog', 'image-gallery-modal': 'closeImageGalleryModal', 'image-lightbox-overlay': 'closeImageLightbox' };
+                const closers = { 'chat-delete-dialog': 'closeChatDeleteDialog', 'confirm-action-dialog': 'closeConfirmActionDialog', 'image-lightbox-overlay': 'closeImageLightbox' };
                 const method = closers[current.id];
                 if (method && typeof window[method] === 'function') { event.preventDefault(); window[method](false); }
             }

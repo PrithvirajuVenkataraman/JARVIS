@@ -198,28 +198,6 @@ function showHelpModal() {
                             <!-- Section 2: TOOLS & ARCHIVES -->
                             <div class="settings-section-label">TOOLS &amp; ARCHIVES</div>
                             <div class="settings-group-card">
-                                <!-- Image Gallery Row -->
-                                <div class="settings-row">
-                                    <div class="settings-row-left">
-                                        <div class="settings-icon-badge settings-icon-amber" aria-hidden="true">
-                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-                                                <circle cx="8.5" cy="8.5" r="1.5"/>
-                                                <polyline points="21 15 16 10 5 21"/>
-                                            </svg>
-                                        </div>
-                                        <div class="settings-row-text">
-                                            <h3 class="settings-row-title">Image Gallery</h3>
-                                            <p class="settings-row-desc">Browse all AI-generated diagrams and artwork</p>
-                                        </div>
-                                    </div>
-                                    <div class="settings-row-right">
-                                        <button type="button" class="settings-action-btn" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { closeHelpModal(); openImageGalleryModal(); })}>
-                                            <span>Open &rarr;</span>
-                                        </button>
-                                    </div>
-                                </div>
-
                                 <!-- Export Conversation Row -->
                                 <div class="settings-row">
                                     <div class="settings-row-left">
