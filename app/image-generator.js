@@ -26,6 +26,47 @@ export async function validateGeneratedImage(dataUrl, signal) {
         throw Object.assign(new Error('The image worker returned an unreadable image.', { cause: error }), { code: 'image_decode_failed' });
     } finally { clearTimeout(timer); signal?.removeEventListener('abort', abort); image.src = ''; }
 }
+function shouldTryFastProxy(opts) {
+    if (typeof opts?.preferServerProxy === 'boolean') return opts.preferServerProxy;
+    const capApi = globalThis.JarvisCapabilities;
+    if (capApi?.hasLoaded?.()) {
+        return capApi.getCapability?.('images')?.fastProxy === true;
+    }
+    return typeof window !== 'undefined';
+}
+
+async function generateFastProxyImage(prompt, { signal, width = 512, height = 512, steps, seed, onProgress } = {}) {
+    signal?.throwIfAborted();
+    onProgress?.({ phase: 'generating', provider: 'fast_proxy', message: 'Creating your image…' });
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    const timer = setTimeout(abort, 45000);
+    signal?.addEventListener('abort', abort, { once: true });
+    try {
+        const payload = { prompt, width, height };
+        if (Number.isFinite(Number(steps))) payload.steps = Number(steps);
+        if (Number.isInteger(Number(seed)) && Number(seed) >= 0) payload.seed = Number(seed);
+        const response = await fetch('/api/image-proxy', {
+            method: 'POST',
+            signal: controller.signal,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const data = await response.json().catch(() => null);
+        if (!response.ok || !data || typeof data.dataUrl !== 'string' || !/^data:image\/(?:png|jpeg|webp);base64,/i.test(data.dataUrl)) {
+            throw Object.assign(new Error(data?.error?.message || 'Fast free-tier image generation unavailable.'), {
+                code: data?.error?.code || 'image_fast_proxy_failed',
+                fallbackEligible: data?.error?.fallbackEligible !== false,
+                status: response.status
+            });
+        }
+        return data;
+    } finally {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', abort);
+    }
+}
+
 export async function generateImage(promptOrOptions, options = {}, onProgress = null) {
     const opts = typeof promptOrOptions === 'object' ? { ...promptOrOptions, ...options } : options;
     let prompt = String((promptOrOptions && typeof promptOrOptions === 'object' ? promptOrOptions.prompt : promptOrOptions) || '').trim();
@@ -41,9 +82,22 @@ export async function generateImage(promptOrOptions, options = {}, onProgress = 
     jobs.set(id, controller);
     latestJobId = id;
     const reportStatus = (state, reason = state) => { if (latestJobId === id) globalThis.JarvisCapabilities?.setRuntimeStatus?.('images', state, reason); };
+    const forwardProgress = event => { reportStatus(event.phase); (opts.onProgress || onProgress)?.(event); };
     const start = performance.now();
     try {
-        const image = await generateFreeImage(prompt, { ...opts, signal: controller.signal, onProgress: event => { reportStatus(event.phase); (opts.onProgress || onProgress)?.(event); } });
+        let image = null;
+        if (shouldTryFastProxy(opts)) {
+            try {
+                image = await generateFastProxyImage(prompt, { ...opts, signal: controller.signal, onProgress: forwardProgress });
+            } catch (proxyError) {
+                if (controller.signal.aborted) throw proxyError;
+                if (proxyError?.fallbackEligible === false) throw proxyError;
+                forwardProgress({ phase: 'queued', provider: 'ai_horde_free', message: 'Switching to the free community queue…' });
+            }
+        }
+        if (!image) {
+            image = await generateFreeImage(prompt, { ...opts, signal: controller.signal, onProgress: forwardProgress });
+        }
         if (controller.signal.aborted) throw new DOMException('Image generation canceled.', 'AbortError');
         const dimensions = await validateGeneratedImage(image.dataUrl, controller.signal);
         const result = { ...image, ...dimensions, id, success: true, prompt, durationMs: Math.round(performance.now() - start) };

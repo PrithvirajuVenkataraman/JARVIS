@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { generateFreeImage } from '../app/horde-client.js';
 import { generateImage, cancelAllImageGeneration } from '../app/image-generator.js';
+import { imageProxyHandler } from '../api/image-proxy.js';
+import { buildDiagnosticsStatus } from '../api/diagnostics.js';
 
 const job = '12345678-1234-1234-1234-123456789abc';
 const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
@@ -80,4 +82,188 @@ test('capacity errors carry the server cooldown and forbidden requests remain di
             assert.equal(calls, 1);
         }
     } finally { globalThis.fetch = original; }
+});
+
+function createMockRes() {
+    return {
+        statusCode: 200,
+        headers: {},
+        body: null,
+        setHeader(name, value) { this.headers[name] = value; },
+        status(code) { this.statusCode = code; return this; },
+        json(payload) { this.body = payload; return this; },
+        end() { return this; }
+    };
+}
+
+test('POST /api/image-proxy uses Cloudflare Workers AI fast free-tier when configured', async () => {
+    const original = globalThis.fetch;
+    const saved = {
+        CLOUDFLARE_ACCOUNT_ID: process.env.CLOUDFLARE_ACCOUNT_ID,
+        CLOUDFLARE_API_TOKEN: process.env.CLOUDFLARE_API_TOKEN,
+        HF_TOKEN: process.env.HF_TOKEN
+    };
+    process.env.CLOUDFLARE_ACCOUNT_ID = 'cf-account-test';
+    process.env.CLOUDFLARE_API_TOKEN = 'cf-token-test';
+    process.env.HF_TOKEN = 'hf-token-test';
+    const calls = [];
+    globalThis.fetch = async (url, init) => {
+        calls.push({ url: String(url), init });
+        return {
+            ok: true,
+            status: 200,
+            headers: { get: () => 'application/json' },
+            json: async () => ({ success: true, result: { image: png } })
+        };
+    };
+    try {
+        const res = createMockRes();
+        await imageProxyHandler({
+            method: 'POST',
+            headers: { host: 'localhost', 'content-type': 'application/json' },
+            socket: { remoteAddress: '127.0.0.1' },
+            body: { prompt: 'Sunset mountains', width: 512, height: 512, steps: 4 }
+        }, res);
+        assert.equal(res.statusCode, 200);
+        assert.equal(res.body.provider, 'cloudflare_workers_ai');
+        assert.ok(res.body.dataUrl.startsWith('data:image/png;base64,'));
+        assert.equal(calls.length, 1);
+        assert.ok(calls[0].url.includes('/ai/run/@cf/black-forest-labs/flux-1-schnell'));
+        const diag = buildDiagnosticsStatus();
+        assert.equal(diag.capabilities.images.fastProxy, true);
+        assert.equal(diag.capabilities.images.provider, 'cloudflare_workers_ai');
+        assert.ok(!JSON.stringify(diag).includes('cf-token-test'));
+    } finally {
+        globalThis.fetch = original;
+        for (const [k, v] of Object.entries(saved)) v === undefined ? delete process.env[k] : process.env[k] = v;
+    }
+});
+
+test('POST /api/image-proxy fails over from Cloudflare to Hugging Face free router on quota limit', async () => {
+    const original = globalThis.fetch;
+    const saved = {
+        CLOUDFLARE_ACCOUNT_ID: process.env.CLOUDFLARE_ACCOUNT_ID,
+        CLOUDFLARE_API_TOKEN: process.env.CLOUDFLARE_API_TOKEN,
+        HF_TOKEN: process.env.HF_TOKEN
+    };
+    process.env.CLOUDFLARE_ACCOUNT_ID = 'cf-account-test';
+    process.env.CLOUDFLARE_API_TOKEN = 'cf-token-test';
+    process.env.HF_TOKEN = 'hf-token-test';
+    const pngBytes = Buffer.from(png, 'base64');
+    const calls = [];
+    globalThis.fetch = async (url, init) => {
+        calls.push({ url: String(url), init });
+        if (String(url).includes('api.cloudflare.com')) {
+            return { ok: false, status: 429, headers: { get: () => 'application/json' } };
+        }
+        return {
+            ok: true,
+            status: 200,
+            headers: { get: () => 'image/png' },
+            arrayBuffer: async () => pngBytes.buffer.slice(pngBytes.byteOffset, pngBytes.byteOffset + pngBytes.byteLength)
+        };
+    };
+    try {
+        const res = createMockRes();
+        await imageProxyHandler({
+            method: 'POST',
+            headers: { host: 'localhost', 'content-type': 'application/json' },
+            socket: { remoteAddress: '127.0.0.2' },
+            body: { prompt: 'Neon city', width: 512, height: 512 }
+        }, res);
+        assert.equal(res.statusCode, 200);
+        assert.equal(res.body.provider, 'huggingface_inference');
+        assert.ok(res.body.dataUrl.startsWith('data:image/png;base64,'));
+        assert.equal(calls.length, 2);
+        assert.ok(calls[1].url.startsWith('https://router.huggingface.co/hf-inference/models/'));
+    } finally {
+        globalThis.fetch = original;
+        for (const [k, v] of Object.entries(saved)) v === undefined ? delete process.env[k] : process.env[k] = v;
+    }
+});
+
+test('POST /api/image-proxy rejects unreadable non-image upstream payloads safely', async () => {
+    const original = globalThis.fetch;
+    const saved = {
+        CLOUDFLARE_ACCOUNT_ID: process.env.CLOUDFLARE_ACCOUNT_ID,
+        CLOUDFLARE_API_TOKEN: process.env.CLOUDFLARE_API_TOKEN,
+        HF_TOKEN: process.env.HF_TOKEN
+    };
+    process.env.CLOUDFLARE_ACCOUNT_ID = 'cf-account-test';
+    process.env.CLOUDFLARE_API_TOKEN = 'cf-token-test';
+    delete process.env.HF_TOKEN;
+    globalThis.fetch = async () => ({
+        ok: true,
+        status: 200,
+        headers: { get: () => 'application/json' },
+        json: async () => ({ success: true, result: { image: Buffer.from('<svg></svg>').toString('base64') } })
+    });
+    try {
+        const res = createMockRes();
+        await imageProxyHandler({
+            method: 'POST',
+            headers: { host: 'localhost', 'content-type': 'application/json' },
+            socket: { remoteAddress: '127.0.0.4' },
+            body: { prompt: 'Safe format test' }
+        }, res);
+        assert.equal(res.statusCode, 502);
+        assert.equal(res.body.error.fallbackEligible, true);
+    } finally {
+        globalThis.fetch = original;
+        for (const [k, v] of Object.entries(saved)) v === undefined ? delete process.env[k] : process.env[k] = v;
+    }
+});
+
+test('generateImage falls back seamlessly to AI Horde when server fast proxy is unconfigured', async () => {
+    const original = globalThis.fetch;
+    const originalImage = globalThis.Image;
+    const saved = {
+        CLOUDFLARE_ACCOUNT_ID: process.env.CLOUDFLARE_ACCOUNT_ID,
+        CLOUDFLARE_API_TOKEN: process.env.CLOUDFLARE_API_TOKEN,
+        HF_TOKEN: process.env.HF_TOKEN,
+        HUGGINGFACE_API_KEY: process.env.HUGGINGFACE_API_KEY,
+        HUGGINGFACE_TOKEN: process.env.HUGGINGFACE_TOKEN
+    };
+    delete process.env.CLOUDFLARE_ACCOUNT_ID;
+    delete process.env.CLOUDFLARE_API_TOKEN;
+    delete process.env.HF_TOKEN;
+    delete process.env.HUGGINGFACE_API_KEY;
+    delete process.env.HUGGINGFACE_TOKEN;
+    globalThis.Image = class {
+        constructor() { this.naturalWidth = 512; this.naturalHeight = 512; this.src = ''; }
+        decode() { return Promise.resolve(); }
+    };
+    const calls = [];
+    let checks = 0;
+    globalThis.fetch = async (url, init) => {
+        calls.push(String(url));
+        if (String(url) === '/api/image-proxy') {
+            const mockRes = createMockRes();
+            await imageProxyHandler({
+                method: 'POST',
+                headers: { host: 'localhost', 'content-type': 'application/json' },
+                socket: { remoteAddress: '127.0.0.3' },
+                body: JSON.parse(init.body)
+            }, mockRes);
+            return {
+                ok: mockRes.statusCode >= 200 && mockRes.statusCode < 300,
+                status: mockRes.statusCode,
+                json: async () => mockRes.body
+            };
+        }
+        if (String(url).endsWith('/async')) return response({ id: job });
+        if (String(url).includes('/check/')) return response({ done: ++checks > 0 });
+        return response({ generations: [{ img: png, model: 'community' }] });
+    };
+    try {
+        const result = await generateImage('Alpine lake', { preferServerProxy: true, pollMs: 1 });
+        assert.equal(result.provider, 'ai_horde_free');
+        assert.ok(result.dataUrl.startsWith('data:image/png;base64,'));
+        assert.equal(calls[0], '/api/image-proxy');
+        assert.ok(calls.some(u => u.startsWith('https://aihorde.net/api/v2/')));
+    } finally {
+        globalThis.fetch = original;
+        globalThis.Image = originalImage;
+        for (const [k, v] of Object.entries(saved)) v === undefined ? delete process.env[k] : process.env[k] = v;
+    }
 });

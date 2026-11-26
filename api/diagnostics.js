@@ -30,13 +30,29 @@ export function buildDiagnosticsStatus() {
   const byok = isPersistentByokConfigured();
   const liveSearch = isEnabled('LIVE_RETRIEVAL_ENABLED');
   const images = !/^(false|0|off)$/i.test(String(process.env.JARVIS_IMAGE_GENERATION_ENABLED || process.env.JARVIS_IMAGE_FREE_TIER_ENABLED || 'true'));
+  const cloudflareImagesConfigured = hasEnv('CLOUDFLARE_ACCOUNT_ID') && (hasEnv('CLOUDFLARE_API_TOKEN') || hasEnv('CLOUDFLARE_AI_TOKEN'));
+  const huggingfaceImagesConfigured = hasEnv('HF_TOKEN') || hasEnv('HUGGINGFACE_API_KEY') || hasEnv('HUGGINGFACE_TOKEN');
+  const fastImageProxy = cloudflareImagesConfigured || huggingfaceImagesConfigured;
   const capability = (available, reasonCode) => ({ available, configured: available, state: available ? 'unverified' : 'disabled', reasonCode: available ? 'available' : reasonCode });
     return {
         capabilities: {
             chat: capability(chat, 'provider_not_configured'),
             search: capability(liveSearch, 'retrieval_disabled'),
             vision: capability(chat, 'provider_not_configured'),
-            images: { ...capability(images, 'image_generation_disabled'), provider: 'ai_horde_free', requiresAccount: false, queueBased: true, freeOnly: true, supportsEditing: false },
+            images: {
+                ...capability(images, 'image_generation_disabled'),
+                provider: cloudflareImagesConfigured ? 'cloudflare_workers_ai' : huggingfaceImagesConfigured ? 'huggingface_inference' : 'ai_horde_free',
+                fastProxy: fastImageProxy,
+                providers: {
+                    cloudflare: cloudflareImagesConfigured,
+                    huggingface: huggingfaceImagesConfigured,
+                    aiHorde: true
+                },
+                requiresAccount: false,
+                queueBased: !fastImageProxy,
+                freeOnly: true,
+                supportsEditing: false
+            },
             byok: capability(byok, 'persistent_keypair_required')
         },
         model: {

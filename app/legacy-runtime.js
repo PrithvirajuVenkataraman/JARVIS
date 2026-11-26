@@ -13034,7 +13034,11 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             const dimensions = { '1:1': [512, 512], '16:9': [768, 448], '9:16': [448, 768], '4:3': [640, 512], '3:4': [512, 640] };
             const [width, height] = dimensions[aspectRatio] || dimensions['1:1'];
             const cardId = 'img-card-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
-            addChatMessage(`<div id="${cardId}" class="image-gen-card free-image-card" data-image-state="pending" data-prompt="${escapeHtml(rawPrompt)}" data-aspect-ratio="${escapeHtml(aspectRatio)}"><div class="image-gen-viewport" data-ratio="${escapeHtml(aspectRatio)}"><img class="image-gen-img hidden" alt="${escapeHtml(rawPrompt)}"><div class="free-image-loading"><p class="image-gen-status-text" role="status">Preparing image creation…</p><p class="free-image-note">Free community workers process your prompt. Availability varies.</p><button type="button" class="free-image-stop">Stop</button><button type="button" class="free-image-retry hidden">Retry</button></div></div></div>`, false, null, { sourceType: 'tool', allowEmpty: false, skipRecord: true });
+            const hasFastImageProxy = window.JarvisCapabilities?.getCapability?.('images')?.fastProxy === true;
+            const initialImageNote = hasFastImageProxy
+                ? 'Using fast free-tier image generation (with automatic community fallback if busy).'
+                : 'Free community workers process your prompt. Availability varies.';
+            addChatMessage(`<div id="${cardId}" class="image-gen-card free-image-card" data-image-state="pending" data-prompt="${escapeHtml(rawPrompt)}" data-aspect-ratio="${escapeHtml(aspectRatio)}"><div class="image-gen-viewport" data-ratio="${escapeHtml(aspectRatio)}"><img class="image-gen-img hidden" alt="${escapeHtml(rawPrompt)}"><div class="free-image-loading"><p class="image-gen-status-text" role="status">Preparing image creation…</p><p class="free-image-note">${escapeHtml(initialImageNote)}</p><button type="button" class="free-image-stop">Stop</button><button type="button" class="free-image-retry hidden">Retry</button></div></div></div>`, false, null, { sourceType: 'tool', allowEmpty: false, skipRecord: true });
             const card = document.getElementById(cardId); if (!card) return;
             const status = card.querySelector('.image-gen-status-text');
             const stop = card.querySelector('.free-image-stop');

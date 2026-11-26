@@ -9,6 +9,7 @@ const selectors = {
 };
 
 export function isAvailable(name) { return capabilities?.[name]?.available === true; }
+export function getCapability(name) { return capabilities?.[name] || null; }
 export function hasLoaded() { return capabilities !== null; }
 export function setRuntimeStatus(name, state, reasonCode = state) {
     if (!capabilities?.[name]) return;
