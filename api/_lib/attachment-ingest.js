@@ -181,12 +181,17 @@ export async function ingestAttachmentPayload(payload = {}) {
     }
 
     // 2. Native lightweight structured extractors FIRST for text-based formats (free, zero API credits!)
+    const ingestDeadlineAt = Date.now() + 52000;
     // 2a. Text-based & Mixed (Text + Image) PDFs via server pdfjs-dist
     let localPdfExtract = null;
     if (isPdf(mimeType, filename)) {
-        localPdfExtract = await extractPdfTextServer(buffer).catch(() => ({
-            text: '', rawText: '', pageCount: 0, dense: false, imagePages: 0, sparseImagePages: 0
-        }));
+        let localPdfError = '';
+        localPdfExtract = await extractPdfTextServer(buffer).catch(err => {
+            localPdfError = String(err?.message || err || '');
+            return {
+                text: '', rawText: '', pageCount: 0, dense: false, imagePages: 0, sparseImagePages: 0
+            };
+        });
         const fallbackBasicText = !localPdfExtract.rawText ? extractPdfTextBasic(buffer) : '';
         const rawPdfText = localPdfExtract.rawText || fallbackBasicText;
         const pageCount = localPdfExtract.pageCount || 1;
@@ -200,7 +205,8 @@ export async function ingestAttachmentPayload(payload = {}) {
             method: localPdfExtract.text ? 'pdf_text_server' : 'pdf_text_layer',
             pageCount,
             imagePages: localPdfExtract.imagePages || 0,
-            sparseImagePages: localPdfExtract.sparseImagePages || 0
+            sparseImagePages: localPdfExtract.sparseImagePages || 0,
+            error: localPdfError || undefined
         });
         if (isPureDigitalTextPdf) {
             return buildResult({
@@ -285,12 +291,13 @@ export async function ingestAttachmentPayload(payload = {}) {
     // 3. Advanced / Scanned Document Parsers (LlamaParse -> Gemini PDF / Files API) ONLY when native extraction wasn't sufficient
     const llamaApiKey = resolveLlamaCloudApiKey(payload.customKeys);
     if (llamaApiKey && isLlamaParseSupportedDocument(mimeType, filename)) {
+        const lpBudgetMs = Math.min(18000, Math.max(8000, ingestDeadlineAt - Date.now() - 22000));
         const lp = await parseDocumentWithLlamaParse({
             buffer,
             filename,
             mimeType,
             apiKey: llamaApiKey,
-            timeoutMs: 28000
+            timeoutMs: lpBudgetMs
         }).catch(error => ({ ok: false, text: '', error: String(error?.message || error) }));
         const lpUseful = Boolean(lp?.ok && hasUsefulServerText(lp.text));
         attempts.push({
@@ -319,6 +326,7 @@ export async function ingestAttachmentPayload(payload = {}) {
             'Include every heading, paragraph, bullet point, table (formatted in Markdown), and OCR ALL text visible inside embedded images or scanned pages.',
             'Preserve exact page order with "--- Page N ---" markers.'
         ].join(' ');
+        const geminiBudgetMs = Math.max(12000, ingestDeadlineAt - Date.now());
         const geminiPdf = buffer.byteLength > GEMINI_INLINE_MAX_BYTES
             ? await extractLargeDocumentWithGeminiFilesApi({ buffer, mimeType: 'application/pdf', filename, customKeys: payload.customKeys })
                 .catch(error => ({ ok: false, text: '', error: String(error?.message || error) }))
@@ -327,6 +335,7 @@ export async function ingestAttachmentPayload(payload = {}) {
                 base64: ensureBase64(),
                 filename,
                 prompt: mixedPrompt,
+                timeoutMs: geminiBudgetMs,
                 customKeys: payload.customKeys
             }).catch(error => ({ ok: false, text: '', error: String(error?.message || error) }));
         const geminiUseful = Boolean(geminiPdf?.ok && hasUsefulServerText(geminiPdf.text));
@@ -652,9 +661,15 @@ function normalizeImageMimeFromBuffer(mimeType, filename = '', buffer = null) {
 
 async function extractPdfTextServer(buffer) {
     const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+    if (!globalThis.pdfjsWorker) {
+        const workerMod = await import('pdfjs-dist/legacy/build/pdf.worker.mjs').catch(() => null);
+        if (workerMod) globalThis.pdfjsWorker = workerMod;
+    }
     const loadingTask = pdfjs.getDocument({
         data: new Uint8Array(buffer),
         useSystemFonts: true,
+        useWorkerFetch: false,
+        disableFontFace: true,
         isEvalSupported: false,
         verbosity: 0
     });

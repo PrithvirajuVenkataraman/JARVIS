@@ -2252,25 +2252,7 @@ body:not(.dark) .composer-think-btn[aria-pressed="true"] {
     text-overflow: ellipsis;
 }
 
-.composer-attachment-footer {
-    width: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    font-size: 11px;
-    opacity: 0.72;
-    padding: 0.1rem 0.25rem 0;
-}
 
-.composer-attachment-clear-cache {
-    border: 0;
-    background: transparent;
-    color: inherit;
-    text-decoration: underline;
-    cursor: pointer;
-    font-size: 11px;
-    padding: 0;
-}
 
 body.dark .composer-attachment-chip {
     background: rgba(255, 255, 255, 0.05);

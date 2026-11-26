@@ -423,14 +423,16 @@ async function prepareDocumentAttachment(attachment, options = {}) {
         }
     }
 
-    // Stage 2: Extract via unified pipeline (local plain-text -> binary FormData -> Vercel Blob)
+    // Stage 2: Extract via unified pipeline (local plain-text -> binary FormData -> Vercel Blob -> visual page snapshot fallback)
     const res = await ingestAttachmentWithFallback(attachment, options.query || '');
-    if (res?.ok && res.text) {
-        const cleanText = clipText(res.text);
+    const hasExtractedImages = Array.isArray(res?.images) && res.images.length > 0;
+    if (res?.ok && (res.text || hasExtractedImages)) {
+        const cleanText = res.text ? clipText(res.text) : '';
         const sections = Array.isArray(res.sections) && res.sections.length
             ? res.sections
-            : parseDocumentSections(cleanText, { name: attachment.name });
+            : (cleanText ? parseDocumentSections(cleanText, { name: attachment.name }) : []);
         attachment.extractedText = cleanText;
+        attachment.extractedImages = hasExtractedImages ? res.images : undefined;
         attachment.sections = sections;
         attachment.pageCount = res.pageCount || sections.length || undefined;
         attachment.ocrMethod = res.method || 'server';
@@ -538,8 +540,8 @@ export async function ingestAllForMessage(attachments = [], userText = '') {
             return { attachment, isImg, isPdfNative: false, imagePayload, result };
         }
 
-        // Reuse pre-prepared / cached result when ready; otherwise run controlled queue pipeline
-        if (attachment.extractedText && ['cached', 'ready'].includes(attachment.status)) {
+        // Reuse pre-prepared / cached result (text and/or visual page images) when ready
+        if ((attachment.extractedText || (Array.isArray(attachment.extractedImages) && attachment.extractedImages.length)) && ['cached', 'ready'].includes(attachment.status)) {
             return {
                 attachment,
                 isImg: false,
@@ -547,7 +549,8 @@ export async function ingestAllForMessage(attachments = [], userText = '') {
                 imagePayload: null,
                 result: {
                     ok: true,
-                    text: attachment.extractedText,
+                    text: attachment.extractedText || '',
+                    images: attachment.extractedImages,
                     sections: attachment.sections,
                     pageCount: attachment.pageCount,
                     method: attachment.ocrMethod || 'cached',
@@ -764,17 +767,19 @@ export async function ingestAttachmentWithFallback(attachment, query = '') {
         return { ...server, ok: false, attempts };
     }
     const hasServerImages = Array.isArray(server?.images) && server.images.length > 0;
-    const hasServerText = Boolean(server?.text && (hasUsefulExtractedText(server.text) || String(server.text).trim().length >= 10));
-    if ((hasServerText && !isMetadataOnlyExtract(server.text)) || hasServerImages) {
+    const hasServerText = Boolean(server?.text && (hasUsefulExtractedText(server.text) || (server.ok && String(server.text).trim().length >= 10)));
+    if ((hasServerText && (!isMetadataOnlyExtract(server.text) || server.ok)) || hasServerImages) {
         return { ...server, ok: true, attempts };
     }
 
-    // Avoid redundant browser pdfjs worker work when server pdfjs-dist already inspected the PDF text layer
-    const serverAlreadyTriedPdf = isPdfFile(file) && Array.isArray(server?.attempts) && server.attempts.some(a => a?.stage === 'pdf_text_server');
+    // Avoid redundant browser pdfjs text worker work only if server pdfjs-dist succeeded without throwing
+    const serverPdfStage = Array.isArray(server?.attempts) ? server.attempts.find(a => a?.stage === 'pdf_text_server') : null;
+    const serverAlreadyInspectedPdfCleanly = isPdfFile(file) && serverPdfStage && !serverPdfStage.error && serverPdfStage.pageCount > 0;
 
-    // 3. Offline / transient local parser fallback (zero canvas OCR loops, zero online Tesseract)
+    // 3. Local parser fallback (zero /api/vision loops, zero online Tesseract)
     const isOffline = typeof navigator !== 'undefined' && navigator.onLine === false;
-    if (!serverAlreadyTriedPdf && rawSize <= 20 * 1024 * 1024) {
+    let partialLocalText = '';
+    if (!serverAlreadyInspectedPdfCleanly && rawSize <= 20 * 1024 * 1024) {
         const localText = await extractLocally(attachment, query, { allowPdfVisionFallback: false }).catch(error => {
             if (error.name === 'AbortError') throw error;
             return ({
@@ -793,6 +798,25 @@ export async function ingestAttachmentWithFallback(attachment, query = '') {
         if (localText.fatalPdfError) return { ...localText, ok: false, attempts };
         if (hasUsefulExtractedText(localText?.text)) {
             return { ...localText, ok: true, attempts };
+        }
+        partialLocalText = String(localText?.text || '').trim();
+    }
+
+    // 4. Visual / mixed-PDF fallback: render up to 6 key page snapshots directly for multimodal chat (no /api/vision or Tesseract)
+    if (isPdfFile(file) && file && typeof document !== 'undefined' && rawSize <= 25 * 1024 * 1024) {
+        const snap = await renderPdfKeyPageSnapshots(file, attachment, { maxPages: 6, maxTotalBytes: 1_400_000 }).catch(() => null);
+        if (snap && Array.isArray(snap.images) && snap.images.length > 0) {
+            attempts.push({ stage: 'pdf_client_page_snapshots', ok: true, pagesRendered: snap.images.length, pageCount: snap.pageCount });
+            return {
+                ok: true,
+                partial: snap.pageCount > snap.images.length,
+                text: partialLocalText || `[Attached visual/mixed PDF "${attachment.name}" (${snap.pageCount} pages; rendered ${snap.images.length} key page image(s) for direct visual reading)]`,
+                images: snap.images,
+                pageCount: snap.pageCount,
+                method: 'pdf_client_page_snapshots',
+                provider: 'client_visual',
+                attempts
+            };
         }
     }
 
@@ -1200,8 +1224,15 @@ async function ingestOnServer(attachment, localResult = {}) {
 
     const hasImages = Array.isArray(data?.images) && data.images.length > 0;
     const hasText = hasUsefulExtractedText(data?.text) || (Boolean(data?.ok || data?.success) && String(data?.text || '').trim().length >= 10);
+    const serverOk = Boolean(data?.ok || data?.success) && (hasText || hasImages);
+    const attemptErrs = Array.isArray(data?.attempts)
+        ? data.attempts.map(a => a?.error).filter(Boolean)
+        : [];
+    const diagMsg = !serverOk && attemptErrs.length
+        ? `${String(data?.message || data?.error?.message || '').trim()} (${attemptErrs.slice(0, 2).join('; ')})`.trim()
+        : String(data?.message || data?.error?.message || '');
     return {
-        ok: Boolean(data?.ok || data?.success) && (hasText || hasImages),
+        ok: serverOk,
         text: String(data?.text || ''),
         sections: Array.isArray(data?.sections) ? data.sections : undefined,
         pageCount: data?.pageCount,
@@ -1209,9 +1240,61 @@ async function ingestOnServer(attachment, localResult = {}) {
         partial: data?.partial === true,
         method: String(data?.method || 'server'),
         provider: String(data?.provider || 'server'),
-        message: String(data?.message || data?.error?.message || ''),
+        message: diagMsg,
         attempts: Array.isArray(data?.attempts) ? data.attempts : []
     };
+}
+
+async function renderPdfKeyPageSnapshots(file, attachment, { maxPages = 6, maxTotalBytes = 1_400_000 } = {}) {
+    if (!file || typeof document === 'undefined') return null;
+    const pdfjs = await loadPdfJs();
+    const buffer = await file.arrayBuffer();
+    const doc = await pdfjs.getDocument({ data: buffer, verbosity: 0 }).promise;
+    const totalPages = Number(doc.numPages || 0);
+    if (!totalPages) return null;
+
+    const indices = [];
+    if (totalPages <= maxPages) {
+        for (let p = 1; p <= totalPages; p += 1) indices.push(p);
+    } else {
+        const step = (totalPages - 1) / (maxPages - 1);
+        for (let i = 0; i < maxPages; i += 1) {
+            indices.push(Math.min(totalPages, Math.max(1, Math.round(1 + i * step))));
+        }
+    }
+
+    const images = [];
+    let totalBytes = 0;
+    for (const pageNum of [...new Set(indices)]) {
+        const page = await doc.getPage(pageNum);
+        let viewport = page.getViewport({ scale: 1.2 });
+        const maxDim = 1100;
+        if (viewport.width > maxDim || viewport.height > maxDim) {
+            const s = (maxDim / Math.max(viewport.width, viewport.height)) * 1.2;
+            viewport = page.getViewport({ scale: s });
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.floor(viewport.width));
+        canvas.height = Math.max(1, Math.floor(viewport.height));
+        const ctx = canvas.getContext('2d', { alpha: false });
+        if (!ctx) continue;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        await page.render({ canvasContext: ctx, viewport }).promise;
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
+        canvas.width = 0;
+        canvas.height = 0;
+        const b64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : '';
+        if (!b64) continue;
+        if (totalBytes + b64.length > maxTotalBytes && images.length > 0) break;
+        totalBytes += b64.length;
+        images.push({
+            name: `${attachment?.name || 'document'}-page-${pageNum}.jpg`,
+            mimeType: 'image/jpeg',
+            base64: b64
+        });
+    }
+    return { images, pageCount: totalPages };
 }
 async function ingestViaVision(attachment) {
     const base64 = await resolveAttachmentBase64(attachment);
@@ -2505,11 +2588,7 @@ export function renderAttachmentTray(container, attachments, onRemove, options =
         `;
     }).join('');
 
-    const footerHtml = items.length > 0
-        ? `<div class="composer-attachment-footer"><span>${items.length} file${items.length === 1 ? '' : 's'} attached</span><button type="button" class="composer-attachment-clear-cache" data-clear-doc-cache title="Clear saved document extraction cache">Clear doc cache</button></div>`
-        : '';
-
-    container.innerHTML = chipsHtml + footerHtml;
+    container.innerHTML = chipsHtml;
 
     container.querySelectorAll('[data-remove-attachment]').forEach(button => {
         button.addEventListener('click', () => {
@@ -2535,10 +2614,7 @@ export function renderAttachmentTray(container, attachments, onRemove, options =
             }
         });
     });
-    container.querySelector('[data-clear-doc-cache]')?.addEventListener('click', async () => {
-        await clearDocumentCacheStorage();
-        globalThis.showTemporaryMessage?.('Document cache cleared.');
-    });
+
 }
 
 export function setAttachmentTrayReading(container, reading = true) {

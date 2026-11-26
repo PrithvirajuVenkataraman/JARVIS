@@ -198,6 +198,7 @@ export async function extractDocumentWithGemini({
     base64 = '',
     filename = 'document.pdf',
     prompt = '',
+    timeoutMs = 26_000,
     customKeys = null
 } = {}) {
     const { clean: cleanBase64, mime: parsedMime } = cleanIncomingBase64(base64, mimeType);
@@ -224,6 +225,7 @@ export async function extractDocumentWithGemini({
         imageBase64: cleanBase64,
         allowCompatibilityRetry: true,
         retryOnNonAuthFailure: true,
+        timeoutMs,
         failures
     });
     if (text && String(text).trim()) {
@@ -271,11 +273,13 @@ async function callGroqVisionText({ apiKey, configuredModel, systemPrompt, mimeT
     return '';
 }
 
-async function callGeminiVision({ apiKey, configuredModel = '', systemPrompt, mimeType, imageBase64, allowCompatibilityRetry, retryOnNonAuthFailure = false, failures }) {
+async function callGeminiVision({ apiKey, configuredModel = '', systemPrompt, mimeType, imageBase64, allowCompatibilityRetry, retryOnNonAuthFailure = false, timeoutMs = PROVIDER_TIMEOUT_MS, failures }) {
     const modelFallbacks = filterAvailableExtractModels('gemini', [String(configuredModel || '').trim(), ...GEMINI_MODEL_FALLBACKS]);
-    const maxModels = retryOnNonAuthFailure ? 6 : 3;
+    const maxModels = retryOnNonAuthFailure ? 3 : 3;
+    const deadlineAt = Date.now() + Math.max(8000, Math.min(Number(timeoutMs) || PROVIDER_TIMEOUT_MS, 38_000));
     for (const apiVersion of GEMINI_API_VERSIONS.slice(0, 2)) {
         for (const model of modelFallbacks.slice(0, maxModels)) {
+            if (Date.now() >= deadlineAt - 1000) return '';
             if (apiVersion === 'v1' && /^gemini-(?:4|3\.|2\.5)/i.test(model)) continue;
             try {
                 const genConfig = {
@@ -290,11 +294,13 @@ async function callGeminiVision({ apiKey, configuredModel = '', systemPrompt, mi
                         genConfig.thinkingConfig = { thinkingBudget: 0 };
                     }
                 }
+                const remaining = Math.max(4000, deadlineAt - Date.now());
                 const makeReq = (gc) => fetchWithTimeout(
-                    `https://generativelanguage.googleapis.com/${apiVersion}/models/${model}:generateContent?key=${apiKey}`,
+                    `https://generativelanguage.googleapis.com/${apiVersion}/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
                     {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
+                        timeoutMs: remaining,
                         body: JSON.stringify({
                             contents: [{
                                 parts: [
@@ -338,10 +344,12 @@ async function callGeminiVision({ apiKey, configuredModel = '', systemPrompt, mi
 
 async function fetchWithTimeout(url, init = {}) {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS);
+    const timeoutMs = Math.max(3000, Math.min(Number(init.timeoutMs || PROVIDER_TIMEOUT_MS), 40_000));
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const { timeoutMs: _discard, ...fetchInit } = init;
     try {
-        const signal = init.signal ? AbortSignal.any([init.signal, controller.signal]) : controller.signal;
-        return await fetch(url, { ...init, signal });
+        const signal = fetchInit.signal ? AbortSignal.any([fetchInit.signal, controller.signal]) : controller.signal;
+        return await fetch(url, { ...fetchInit, signal });
     } finally {
         clearTimeout(timeout);
     }
