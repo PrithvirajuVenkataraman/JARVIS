@@ -477,7 +477,7 @@ export async function ingestAttachmentWithFallback(attachment, query = '') {
     }
 
     // 3. Local extraction fallback (for offline use or oversize > 2.6MB files)
-    const localText = await extractLocally(attachment, query).catch(error => {
+    const localText = await extractLocally(attachment, query, { allowPdfVisionFallback: !(isPdf && rawSize > 0 && rawSize <= NATIVE_PDF_DIRECT_MAX_BYTES && (typeof navigator === 'undefined' || navigator.onLine !== false)) }).catch(error => {
         if (error.name === 'AbortError') throw error;
         return ({
             ok: false,
@@ -494,6 +494,20 @@ export async function ingestAttachmentWithFallback(attachment, query = '') {
     if (localText.blocked) return { ...localText, message: 'The text could not be read safely on this device. No server upload was attempted.' };
     if (localText.fatalPdfError) return { ...localText, ok: false, attempts };
     if (isPdf) {
+        const canSendNativePdfToChat = rawSize > 0 && rawSize <= NATIVE_PDF_DIRECT_MAX_BYTES && (typeof navigator === 'undefined' || navigator.onLine !== false);
+        if (hasUsefulExtractedText(localText?.text)) {
+            return { ...localText, ok: true, attempts };
+        }
+        if (canSendNativePdfToChat) {
+            return {
+                ok: false,
+                text: '',
+                method: 'defer_native_pdf',
+                provider: 'none',
+                message: 'Deferring PDF directly to multimodal chat API.',
+                attempts
+            };
+        }
         return await ingestPdfAttachmentWithVisuals(attachment, localText, attempts);
     }
     if (hasUsefulExtractedText(localText?.text)) {
@@ -601,7 +615,7 @@ function localResultSafe(localText) {
     return { text: '', method: localText?.method || 'client' };
 }
 
-async function extractLocally(attachment, query = '') {
+async function extractLocally(attachment, query = '', options = {}) {
     const attempts = [];
     const file = attachment?.file;
     if (!file) {
@@ -622,7 +636,7 @@ async function extractLocally(attachment, query = '') {
     }
 
     if (isPdfFile(file)) {
-        const pdfText = await extractPdfTextClient(file, attachment);
+        const pdfText = await extractPdfTextClient(file, attachment, options);
         const useful = hasUsefulExtractedText(pdfText);
         attempts.push({ stage: 'client_pdf', ok: useful, method: 'client_pdf' });
         if (useful) {
@@ -1488,7 +1502,7 @@ function isRateLimitError(err) {
         message.includes('rate limit');
 }
 
-async function extractPdfTextClient(file, attachment = null) {
+async function extractPdfTextClient(file, attachment = null, options = {}) {
     const pdfjs = await loadPdfJs();
     const buffer = await file.arrayBuffer();
     let doc;
@@ -1520,7 +1534,7 @@ async function extractPdfTextClient(file, attachment = null) {
             if (rawLength >= 15) {
                 // High-fidelity 2D Spatial Reconstruction (multi-column, tables, paragraphs)
                 pageText = reconstructPdfPageLayout(content.items, viewport);
-            } else if (doc.numPages <= 30 || visionPagesAttempted < 15) {
+            } else if (options?.allowPdfVisionFallback !== false && (doc.numPages <= 30 || visionPagesAttempted < 15)) {
                 // Hybrid Per-Page Fallback: page is sparse/scanned, run vision OCR for this specific page
                 visionPagesAttempted++;
                 try {
