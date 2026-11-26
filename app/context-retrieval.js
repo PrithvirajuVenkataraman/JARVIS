@@ -13,7 +13,7 @@ function dispose(role) {
     for (const [id, request] of pending) if (!role || request.role === role) { clearTimeout(request.timer); request.reject(new Error('Context worker stopped')); pending.delete(id); }
 }
 export function callWorker(operation, payload = {}, timeout = 10000) {
-    const role = operation === 'initialize' || operation === 'search' && state === 'ready' ? 'semantic' : 'text';
+    const role = ['initialize', 'pause'].includes(operation) || (operation === 'search' && state === 'ready') ? 'semantic' : 'text';
     let worker = workers.get(role);
     if (!worker) {
         worker = new Worker(new URL('./recall-worker.js', import.meta.url), { type: 'module' });
@@ -82,9 +82,10 @@ export async function buildContext(engine, options = {}) {
     const sessionId = globalThis.getActiveChatSession?.()?.id || 'current';
     let sources = [];
     if (typeof Worker !== 'undefined') {
+        const searchTimeoutMs = state === 'ready' ? 2500 : 600;
         const results = await Promise.allSettled([
-            records.length || state === 'ready' ? callWorker('search', { records, query, sessionId }, 250) : Promise.resolve([]),
-            callWorker('sources', { sessionId, query }, 250)
+            records.length || state === 'ready' ? callWorker('search', { records, query, sessionId }, searchTimeoutMs) : Promise.resolve([]),
+            callWorker('sources', { sessionId, query }, 800)
         ]);
         if (results[0].status === 'fulfilled') {
             const rows = Array.isArray(results[0].value) ? results[0].value : results[0].value.records;

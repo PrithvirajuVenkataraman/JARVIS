@@ -944,9 +944,16 @@ console.log('\n--- Test 5: Groq Model Candidate Realness & Non-Llama Assurance -
     const stylesCssText = fs.readFileSync(path.resolve('styles.css'), 'utf8');
     const coreUxCss = fs.readFileSync(path.resolve('app/core-ux.css'), 'utf8');
     const slashCtrl = fs.readFileSync(path.resolve('app/slash-command-controller.js'), 'utf8');
+    const settingsCtrl = fs.readFileSync(path.resolve('app/settings-controller.js'), 'utf8');
+    const recallWorker = fs.readFileSync(path.resolve('app/recall-worker.js'), 'utf8');
+    const contextRetrieval = fs.readFileSync(path.resolve('app/context-retrieval.js'), 'utf8');
     assert.ok(stylesCssText.includes('var(--keyboard-offset, 0px)'), 'Input bar must track visualViewport keyboard offset');
     assert.ok(stylesCssText.includes('right: 16px;') && !/\.scroll-to-bottom-pill\s*\{[^}]*left:\s*50%/s.test(stylesCssText), 'Scroll-to-bottom pill must sit at the right edge instead of overlapping centered reading prose');
     assert.ok(coreUxCss.includes('--app-viewport-height') && coreUxCss.includes('#chat-container:empty') && coreUxCss.includes('+ 56px + env(safe-area-inset-bottom)'), 'Empty chat collapses bottom padding, non-empty gives full bottom clearance, and app-root bounds to visualViewport');
+    assert.ok(coreUxCss.includes('.settings-danger-btn') && coreUxCss.includes('--chat-message-font-size:15px'), 'Mobile typography scale and settings-danger-btn styling must stay consistent');
+    assert.ok(settingsCtrl.includes('On-Device Semantic Memory') && !settingsCtrl.includes('Enhanced local recall'), 'Settings must use refined professional copy for on-device semantic memory');
+    assert.ok(recallWorker.includes('env.backends.onnx.wasm.proxy = false') && recallWorker.includes('loadCachedVector'), 'Recall worker must disable nested worker proxy for mobile Safari and hydrate cached IndexedDB vectors');
+    assert.ok(contextRetrieval.includes("state === 'ready' ? 2500 : 600"), 'Semantic recall worker search must allow mobile WASM budget without 250ms premature timeout');
     assert.ok(indexHtml.includes('function deduplicateChatSessions('), 'Sidebar session deduplicator must prevent duplicated recent chats');
     assert.ok(indexHtml.includes('isinstance(_tree.body[-1], _ast.Expr)'), 'Pyodide runner must evaluate trailing bare expressions into stdout');
     assert.ok(!slashCtrl.includes('scrollIntoView'), 'Slash picker must scroll internally instead of calling scrollIntoView on the viewport');

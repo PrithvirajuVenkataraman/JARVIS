@@ -19,6 +19,7 @@ async function initialize() {
         env.allowLocalModels = false; env.useBrowserCache = false; env.useCustomCache = false; env.useWasmCache = false;
         env.fetch = verifiedModelFetch;
         env.backends.onnx.wasm.numThreads = 1;
+        env.backends.onnx.wasm.proxy = false;
         env.backends.onnx.wasm.wasmPaths = { wasm: wasmUrl, mjs: wasmModuleUrl };
         extractor = await pipeline('feature-extraction', MODEL_ID, { revision: MODEL_REVISION, dtype: 'q8', device: 'wasm' });
         status('ready'); return true;
@@ -55,16 +56,39 @@ async function indexRecords(records) {
     for (const row of saved.slice(0, Math.max(0, saved.length - 4096))) await cacheOperation('vectors', 'delete', row.id).catch(() => {});
 }
 
+async function loadCachedVector(id) {
+    if (vectors.has(id)) return vectors.get(id);
+    try {
+        const cached = (await cacheOperation('vectors', 'get', id))?.vector;
+        if (cached) {
+            vectors.set(id, cached);
+            if (vectors.size > 4096) vectors.delete(vectors.keys().next().value);
+            return cached;
+        }
+    } catch { /* Memory-only fallback when IndexedDB is unavailable. */ }
+    return null;
+}
+
 async function rankWithSemantic(records, queryText) {
     const ranked = rankChunks(records, queryText);
     if (!extractor || !mostlyEnglish(queryText)) return ranked;
     const query = await embed(queryText), hits = [];
-    for (const record of records) {
+    if (!query) return ranked;
+    const rankedByScore = new Map(ranked.map((row, idx) => [row.id, idx]));
+    const prioritized = [...records].sort((a, b) => (rankedByScore.get(a.id) ?? 9999) - (rankedByScore.get(b.id) ?? 9999));
+    let inlineComputed = 0;
+    for (const record of prioritized) {
         if (!mostlyEnglish(record.text)) continue;
         const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(record.text))), x => x.toString(16).padStart(2, '0')).join('');
-        const vector = vectors.get(MODEL_REVISION + ':' + hash); if (!vector) continue;
+        const id = MODEL_REVISION + ':' + hash;
+        let vector = await loadCachedVector(id);
+        if (!vector && inlineComputed < 8) {
+            vector = await embed(record.text);
+            inlineComputed++;
+        }
+        if (!vector) continue;
         const similarity = query.reduce((sum, value, i) => sum + value * vector[i], 0);
-        if (similarity >= 0.4) hits.push({ ...record, similarity });
+        if (similarity >= 0.36) hits.push({ ...record, similarity });
     }
     hits.sort((a, b) => b.similarity - a.similarity);
     const scores = new Map();
