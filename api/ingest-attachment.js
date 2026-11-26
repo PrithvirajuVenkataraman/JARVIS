@@ -34,9 +34,19 @@ export default async function handler(req, res) {
     ).trim();
     const customGemini = unsealSecret(rawGemini);
 
+    const rawLlamaCloud = String(
+        req?.headers?.['x-llamacloud-api-key'] ||
+        req?.headers?.['x-llama-cloud-api-key'] ||
+        req?.body?.customKeys?.llamaCloudKey ||
+        req?.body?.customKeys?.llamaParseKey ||
+        ''
+    ).trim();
+    const customLlamaCloud = unsealSecret(rawLlamaCloud);
+
     const customKeys = {
         groqKey: customGroq,
-        geminiKey: customGemini
+        geminiKey: customGemini,
+        llamaCloudKey: customLlamaCloud
     };
 
     const filename = String(req.body?.filename || 'attachment').trim() || 'attachment';

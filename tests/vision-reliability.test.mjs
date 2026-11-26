@@ -8,9 +8,9 @@ const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQU
 function response() { const res = new EventEmitter(); return Object.assign(res, { headers: {}, statusCode: 200, setHeader(k, v) { this.headers[k] = v; }, status(code) { this.statusCode = code; return this; }, json(data) { this.data = data; this.writableEnded = true; return this; }, end() { this.writableEnded = true; } }); }
 function request(body) { return Object.assign(new EventEmitter(), { method: 'POST', headers: { host: 'localhost', 'content-type': 'application/json' }, socket: { remoteAddress: '127.0.0.1' }, body }); }
 async function environment(run) {
-    const keys = ['GEMINI_API_KEY', 'GOOGLE_API_KEY', 'GROQ_API_KEY', 'GROQ_KEY', 'GEMINI_MODEL', 'GEMINI_VISION_MODEL', 'GROQ_VISION_MODEL', 'DISABLE_VISION_PREPASS'];
+    const keys = ['GEMINI_API_KEY', 'GOOGLE_API_KEY', 'GROQ_API_KEY', 'GROQ_KEY', 'GEMINI_MODEL', 'GEMINI_VISION_MODEL', 'GROQ_VISION_MODEL', 'DISABLE_VISION_PREPASS', 'LLAMA_CLOUD_API_KEY', 'LLAMACLOUD_API_KEY', 'LLAMAPARSE_TIER'];
     const saved = Object.fromEntries(keys.map(key => [key, process.env[key]])); const original = globalThis.fetch;
-    Object.assign(process.env, { GEMINI_API_KEY: 'test-gemini', GROQ_API_KEY: 'test-groq', GEMINI_VISION_MODEL: 'gemini-4-hydrogen', GEMINI_MODEL: 'text-only-model', GROQ_VISION_MODEL: 'qwen/qwen3.8-27b', DISABLE_VISION_PREPASS: 'false' });
+    Object.assign(process.env, { GEMINI_API_KEY: 'test-gemini', GROQ_API_KEY: 'test-groq', GEMINI_VISION_MODEL: 'gemini-4-hydrogen', GEMINI_MODEL: 'text-only-model', GROQ_VISION_MODEL: 'qwen/qwen3.8-27b', DISABLE_VISION_PREPASS: 'false', LLAMA_CLOUD_API_KEY: '' });
     try { await run(); } finally { globalThis.fetch = original; for (const key of keys) { if (saved[key] === undefined) delete process.env[key]; else process.env[key] = saved[key]; } }
 }
 
@@ -241,4 +241,62 @@ test('API ingest reads PDFs via Gemini inlineData plus Word/PPT/RTF/XLSX and emb
     assert.equal(xlsxRes.ok, true);
     assert.match(xlsxRes.text, /\| Product \| Units \|/);
     assert.match(xlsxRes.text, /\| Widget \| 45 \|/);
+}));
+
+test('LlamaParse v2 upload/poll runs before Gemini/local OCR when configured and falls back cleanly on error', async () => environment(async () => {
+    const { ingestAttachmentPayload } = await import('../api/_lib/attachment-ingest.js');
+    process.env.LLAMA_CLOUD_API_KEY = 'llx-test-key';
+    process.env.LLAMAPARSE_TIER = 'agentic';
+
+    const calls = [];
+    let pollCount = 0;
+    globalThis.fetch = async (url, init) => {
+        const u = String(url);
+        calls.push({ url: u, method: init?.method || 'GET', auth: init?.headers?.Authorization || init?.headers?.authorization });
+        if (u.endsWith('/api/v2/parse/upload')) {
+            assert.equal(init.headers.Authorization, 'Bearer llx-test-key');
+            assert.equal(init.body instanceof FormData, true);
+            assert.match(String(init.body.get('configuration')), /"tier":"agentic"/);
+            return Response.json({ id: 'pjb-test-42', status: 'PENDING' });
+        }
+        if (u.includes('/api/v2/parse/pjb-test-42')) {
+            pollCount++;
+            if (pollCount === 1) return Response.json({ job: { id: 'pjb-test-42', status: 'PENDING' } });
+            return Response.json({
+                job: { id: 'pjb-test-42', status: 'SUCCESS' },
+                markdown: { pages: [{ page: 1, markdown: '# Invoice Summary\n\n| Item | Total |\n| --- | --- |\n| Widget | $199.00 |' }] }
+            });
+        }
+        throw new Error(`Unexpected upstream call when LlamaParse succeeded: ${u}`);
+    };
+
+    const res = await ingestAttachmentPayload({
+        filename: 'scanned-report.pdf',
+        mimeType: 'application/pdf',
+        base64: Buffer.from('%PDF-1.4 binary', 'utf8').toString('base64')
+    });
+    assert.equal(res.ok, true);
+    assert.equal(res.method, 'llamaparse_api');
+    assert.equal(res.provider, 'llamaparse');
+    assert.match(res.text, /Invoice Summary/);
+    assert.match(res.text, /\$199\.00/);
+    assert.equal(pollCount, 2);
+
+    // Fallback check: when LlamaParse returns HTTP 402/error, Gemini native PDF fallback seamlessly handles it
+    globalThis.fetch = async (url) => {
+        if (String(url).includes('llamaindex.ai')) {
+            return Response.json({ detail: 'Credit limit exceeded' }, { status: 402 });
+        }
+        return Response.json({
+            candidates: [{ content: { parts: [{ text: 'Fallback Gemini PDF content verified.' }] } }]
+        });
+    };
+    const fallbackRes = await ingestAttachmentPayload({
+        filename: 'scanned-report.pdf',
+        mimeType: 'application/pdf',
+        base64: Buffer.from('%PDF-1.4 binary', 'utf8').toString('base64')
+    });
+    assert.equal(fallbackRes.ok, true);
+    assert.equal(fallbackRes.method, 'gemini_pdf_api');
+    assert.match(fallbackRes.text, /Fallback Gemini PDF content verified/);
 }));

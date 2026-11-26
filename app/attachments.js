@@ -278,20 +278,23 @@ export async function ingestAllForMessage(attachments = [], userText = '') {
                 return { attachment, isImg, isPdfNative: false, imagePayload, result };
             }
 
-            // Direct native PDF pass-through: send PDF bytes straight to the Gemini API without client canvas/Tesseract
+            // Route PDF, Word, PPT, Excel, and other documents through /api/ingest-attachment (LlamaParse -> Gemini/Office extractors).
+            // For small PDFs (<= 2.6MB) where server extraction returned empty text, fall back to direct native PDF media on /api/chat-groq.
             const rawFile = attachment?.file;
             const rawPdfSize = Number(rawFile?.size || attachment?.size || 0);
-            if (isPdfFile(rawFile || attachment) && rawFile && rawPdfSize > 0 && rawPdfSize <= NATIVE_PDF_DIRECT_MAX_BYTES && (totalNativeMediaBytes + rawPdfSize) <= NATIVE_PDF_DIRECT_MAX_BYTES) {
-                totalNativeMediaBytes += rawPdfSize;
-                const pdfBase64 = await fileToBase64(rawFile).catch(() => '');
+            const serverOrLocal = await ingestAttachmentWithFallback(attachment, userText);
+            if (!serverOrLocal?.ok && !serverOrLocal?.fatalPdfError && isPdfFile(rawFile || attachment) && rawFile && rawPdfSize > 0 && rawPdfSize <= NATIVE_PDF_DIRECT_MAX_BYTES && (totalNativeMediaBytes + rawPdfSize) <= NATIVE_PDF_DIRECT_MAX_BYTES) {
+                const pdfBase64 = attachment.base64 || await fileToBase64(rawFile).catch(() => '');
                 if (pdfBase64) {
+                    totalNativeMediaBytes += rawPdfSize;
                     attachment.mimeType = 'application/pdf';
+                    attachment.base64 = pdfBase64;
                     imagePayload = {
                         name: attachment.preparedName || attachment.name || 'document.pdf',
                         mimeType: 'application/pdf',
                         base64: pdfBase64
                     };
-                    const result = {
+                    const nativePdfRes = {
                         ok: true,
                         text: '',
                         method: 'single_pass_native_pdf',
@@ -299,14 +302,12 @@ export async function ingestAllForMessage(attachments = [], userText = '') {
                     };
                     attachment.extractedText = '';
                     attachment.ocrMethod = 'single_pass_native_pdf';
-                    return { attachment, isImg: false, isPdfNative: true, imagePayload, result };
+                    return { attachment, isImg: false, isPdfNative: true, imagePayload, result: nativePdfRes };
                 }
             }
-
-            const result = await ingestAttachmentWithFallback(attachment, userText);
-            attachment.extractedText = String(result.text || '').trim();
-            attachment.ocrMethod = result.method || '';
-            return { attachment, isImg, isPdfNative: false, imagePayload, result };
+            attachment.extractedText = String(serverOrLocal?.text || '').trim();
+            attachment.ocrMethod = serverOrLocal?.method || '';
+            return { attachment, isImg, isPdfNative: false, imagePayload, result: serverOrLocal };
         } finally {
             release();
         }

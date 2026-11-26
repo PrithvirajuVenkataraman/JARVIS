@@ -1,4 +1,5 @@
 import { extractTextFromImage, extractDocumentWithGemini } from './vision-extract.js';
+import { parseDocumentWithLlamaParse, isLlamaParseSupportedDocument, resolveLlamaCloudApiKey } from './llama-parse.js';
 
 const MAX_EXTRACT_CHARS = 500000;
 const TEXT_EXTENSIONS = /\.(txt|md|markdown|json|jsonl|csv|tsv|xml|html|htm|css|js|mjs|cjs|ts|tsx|jsx|py|java|cpp|c|h|hpp|cs|go|rs|rb|php|sh|bash|zsh|ps1|yaml|yml|toml|ini|cfg|conf|env|log|sql|tex|bib|svg)$/i;
@@ -104,7 +105,37 @@ export async function ingestAttachmentPayload(payload = {}) {
         });
     }
 
-    // 2. PDF: Use Gemini native PDF reader first (reads scanned PDFs, compressed streams, tables & math in one API call)
+    // 2. LlamaParse v2 API (primary multi-format parser when LLAMA_CLOUD_API_KEY is configured — before Gemini/XML/Tesseract)
+    const llamaApiKey = resolveLlamaCloudApiKey(payload.customKeys);
+    if (llamaApiKey && isLlamaParseSupportedDocument(mimeType, filename)) {
+        const lp = await parseDocumentWithLlamaParse({
+            buffer,
+            filename,
+            mimeType,
+            apiKey: llamaApiKey,
+            timeoutMs: 24000
+        }).catch(error => ({ ok: false, text: '', error: String(error?.message || error) }));
+        const lpUseful = Boolean(lp?.ok && hasUsefulServerText(lp.text));
+        attempts.push({
+            stage: 'llamaparse_api',
+            ok: lpUseful,
+            method: 'llamaparse_api',
+            error: lp?.error || ''
+        });
+        if (lpUseful) {
+            return buildResult({
+                ok: true,
+                text: clipText(lp.text),
+                method: 'llamaparse_api',
+                provider: 'llamaparse',
+                filename,
+                mimeType,
+                attempts
+            });
+        }
+    }
+
+    // 3. PDF fallback: Gemini native PDF reader -> uncompressed literal text layer
     if (isPdf(mimeType, filename)) {
         const geminiPdf = await extractDocumentWithGemini({
             mimeType: 'application/pdf',
