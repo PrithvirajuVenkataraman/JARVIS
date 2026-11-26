@@ -328,13 +328,14 @@ export async function ingestAllForMessage(attachments = [], userText = '') {
     if (anyReadable && readableSections && shouldRankAttachmentText(prompt)) {
         readableSections = await rankAttachmentTextForQuery(prompt, readableSections).catch(() => readableSections);
     }
+    const attachmentText = String(readableSections || combined || '').slice(0, 180000);
     return {
         grounding: anyReadable
             ? {
                 kind: 'attachment',
-                selectedText: readableSections || combined,
+                selectedText: attachmentText.slice(0, 60000),
                 images: imagePayloads.length ? imagePayloads : undefined,
-                sourceAnswer: readableSections || combined,
+                sourceAnswer: '',
                 originalRequest: prompt,
                 customInstruction: [
                     'The user has attached image(s)/document(s).',
@@ -346,7 +347,7 @@ export async function ingestAllForMessage(attachments = [], userText = '') {
             : null,
 
         methods,
-        combinedText: readableSections || combined,
+        combinedText: attachmentText,
         anyReadable
     };
 }

@@ -49,34 +49,63 @@ function setDefaultSecurityHeaders(res) {
     res.setHeader('Content-Security-Policy', csp);
 }
 
+function stripInlineImageMedia(img) {
+    if (!img || typeof img !== 'object') return img;
+    const copy = { ...img, base64: '', data: '', inlineData: undefined };
+    if (typeof copy.url === 'string' && /^data:/i.test(copy.url.trim())) {
+        copy.url = '';
+    }
+    return copy;
+}
+
 function looksLikeAbusivePayload(body, base64Fields = []) {
     let sanitized = body;
     if (body && typeof body === 'object') {
         const copy = { ...body };
         for (const field of base64Fields) {
-            const encoded = typeof copy[field] === 'string' ? copy[field].replace(/^data:audio\/[a-z0-9.+-]+;base64,/i, '').trim() : '';
+            const encoded = typeof copy[field] === 'string' ? copy[field].replace(/^data:[^;]+;base64,/i, '').trim() : '';
             if (encoded && encoded.length % 4 === 0 && /^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) copy[field] = '';
         }
         if (Array.isArray(copy.images)) {
-            copy.images = copy.images.map(img => ({ ...img, base64: '', data: '', inlineData: undefined }));
+            copy.images = copy.images.map(stripInlineImageMedia);
         }
-        if (copy.grounding && typeof copy.grounding === 'object' && Array.isArray(copy.grounding.images)) {
+        if (copy.grounding && typeof copy.grounding === 'object') {
             copy.grounding = {
                 ...copy.grounding,
-                images: copy.grounding.images.map(img => ({ ...img, base64: '', data: '', inlineData: undefined }))
+                images: Array.isArray(copy.grounding.images)
+                    ? copy.grounding.images.map(stripInlineImageMedia)
+                    : copy.grounding.images
             };
         }
-        sanitized = copy;
+        if (copy.grounding?.kind === 'attachment') {
+            sanitized = {
+                originalRequest: String(copy.grounding?.originalRequest || ''),
+                routingMessage: String(copy.routingMessage || ''),
+                displayUserMessage: String(copy.displayUserMessage || '')
+            };
+        } else {
+            delete copy.context;
+            delete copy.retrievedTurns;
+            delete copy.continuationPreviousText;
+            if (copy.grounding && typeof copy.grounding === 'object') {
+                copy.grounding = {
+                    ...copy.grounding,
+                    selectedText: '',
+                    sourceAnswer: '',
+                    customInstruction: ''
+                };
+            }
+            sanitized = copy;
+        }
     }
     const text = JSON.stringify(sanitized || {});
-    if (text.length > 500000) return true;
+    if (text.length > 2000000) return true;
     if (/(?:\b(?:ignore|forget)\s+(?:all|previous)\s+instructions\b|\bact as\b|\bsystem prompt\b)/i.test(text) && text.length > 12000) {
         return true;
     }
     if (/(?:<script|javascript:|onerror=|onload=)/i.test(text)) return true;
     return false;
 }
-
 function applyCors(req, res) {
     const allowedOrigins = parseAllowedOrigins();
     const requestOrigin = String(req?.headers?.origin || '').trim();

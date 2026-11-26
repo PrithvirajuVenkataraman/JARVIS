@@ -97,3 +97,35 @@ test('remote renderers need an explicit verified public-only egress policy', asy
     try { await assert.rejects(extractWithCrawl4Ai({ url: 'https://example.com', crawl4aiUrl: 'https://renderer.example' }), { code: 'crawl4ai_egress_unverified' }); }
     finally { old === undefined ? delete process.env.CRAWL4AI_PUBLIC_EGRESS_VERIFIED : process.env.CRAWL4AI_PUBLIC_EGRESS_VERIFIED = old; }
 });
+
+test('document attachments containing code/legal phrases pass security while direct XSS payloads still reject', () => {
+    const mockRes = () => ({ statusCode: 200, payload: null, setHeader() {}, status(c) { this.statusCode = c; return this; }, json(d) { this.payload = d; return this; }, end() {} });
+    const req = (body) => ({ method: 'POST', headers: { host: 'localhost', 'content-type': 'application/json' }, socket: { remoteAddress: '127.0.0.1' }, body });
+
+    const largeDoc = `${'Contract clause: the agent shall act as representative. <script>example()</script> '.repeat(350)}system prompt`;
+    const allowed = mockRes();
+    const okGuard = applyApiSecurity(req({
+        message: `Analyze the attached file\n\n${largeDoc}`,
+        grounding: {
+            kind: 'attachment',
+            originalRequest: 'Summarize the attached contract.',
+            selectedText: largeDoc.slice(0, 60000),
+            sourceAnswer: ''
+        },
+        displayUserMessage: 'Attached 1 file'
+    }), allowed, { routeKey: 'test-attachment-ok', maxBodyBytes: 8 * 1024 * 1024 });
+    assert.equal(okGuard.handled, false);
+
+    const directXss = mockRes();
+    const badGuard = applyApiSecurity(req({
+        message: 'Analyze this',
+        grounding: {
+            kind: 'attachment',
+            originalRequest: '<script>alert(1)</script>',
+            selectedText: 'Normal text'
+        }
+    }), directXss, { routeKey: 'test-attachment-xss', maxBodyBytes: 8 * 1024 * 1024 });
+    assert.equal(badGuard.handled, true);
+    assert.equal(directXss.statusCode, 400);
+    assert.equal(directXss.payload?.error?.code, 'abusive_payload');
+});

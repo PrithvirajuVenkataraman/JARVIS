@@ -7527,6 +7527,19 @@ function showHelpModal(...args) { return globalThis.JarvisLazy.loadClassic('sett
         }
         const resetPrimaryActionButtonWhenIdle = toggleSendButton;
 
+        function dismissMobileKeyboardAfterSubmit(inputElement = null) {
+            const input = inputElement || (typeof document !== 'undefined' ? document.getElementById('text-input') : null);
+            const active = typeof document !== 'undefined' ? document.activeElement : null;
+            if (input && active === input) {
+                try { input.blur(); } catch (_) {}
+            } else if (active && active !== document.body && typeof active.blur === 'function' && active.closest?.('#input-bar-container')) {
+                try { active.blur(); } catch (_) {}
+            }
+            if (typeof window !== 'undefined' && typeof window.scheduleJarvisViewportSync === 'function') {
+                window.scheduleJarvisViewportSync();
+            }
+        }
+
         function handlePrimaryActionButtonClick() {
             const btn = document.getElementById('send-message-btn');
             const input = document.getElementById('text-input');
@@ -7538,6 +7551,7 @@ function showHelpModal(...args) { return globalThis.JarvisLazy.loadClassic('sett
             const hasInput = !!(input && hasSearchableContent(input.value));
             const hasAttachments = window.JarvisAttachments?.hasPendingAttachments?.() === true;
             if (hasInput || hasAttachments) {
+                dismissMobileKeyboardAfterSubmit(input);
                 void sendTextInput();
             } else {
                 input?.focus?.();
@@ -14516,6 +14530,7 @@ ${code}
                     return;
                 }
                 event.preventDefault();
+                dismissMobileKeyboardAfterSubmit(input);
                 sendTextInput();
             }
         }
@@ -14622,7 +14637,7 @@ ${code}
                         </div>
                     </div>
                     <div class="flex items-center gap-2 shrink-0">
-                        <button type="button" class="dlp-banner-cancel-btn px-2.5 py-1 rounded bg-white/10 hover:bg-white/20 text-white font-medium transition-colors" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { hideComposerDlpBanner() })}>Cancel</button>
+                        <button type="button" class="dlp-banner-cancel-btn px-2.5 py-1 rounded bg-white/10 hover:bg-white/20 text-white font-medium transition-colors" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { hideComposerDlpBanner({ refocus: true }) })}>Cancel</button>
                         <button type="button" class="dlp-banner-redact-btn px-2.5 py-1 rounded bg-red-600 hover:bg-red-500 text-white font-medium transition-colors shadow" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { redactAndSendComposer() })}>Redact &amp; Send</button>
                     </div>
                 </div>
@@ -14630,14 +14645,17 @@ ${code}
             tray.classList.remove('hidden');
         }
 
-        function hideComposerDlpBanner() {
+        function hideComposerDlpBanner(options = {}) {
             const tray = document.getElementById('composer-dlp-tray');
+            const hadDlpState = Boolean(currentComposerDlpState || (tray && !tray.classList.contains('hidden')));
             if (tray) {
                 tray.classList.add('hidden');
                 tray.innerHTML = '';
             }
             currentComposerDlpState = null;
-            document.getElementById('text-input')?.focus();
+            if (options?.refocus === true && hadDlpState) {
+                document.getElementById('text-input')?.focus();
+            }
         }
 
         function redactAndSendComposer() {
@@ -14646,7 +14664,7 @@ ${code}
                 return;
             }
             const state = currentComposerDlpState;
-            hideComposerDlpBanner();
+            hideComposerDlpBanner({ refocus: false });
             const input = document.getElementById('text-input');
             const redactedText = state.redactedText || (window.JarvisDlp?.scanDlp
                 ? window.JarvisDlp.scanDlp(state.rawText || input?.value || '', { redactCredentials: true }).sanitizedText
@@ -14654,6 +14672,7 @@ ${code}
             if (input) {
                 input.value = redactedText;
             }
+            dismissMobileKeyboardAfterSubmit(input);
             void sendTextInput({ text: redactedText, source: 'redacted_send' });
         }
 
@@ -14718,6 +14737,7 @@ async function sendTextInput(submission = {}) {
                         input.style.height = '';
                         autoResizeComposerTextarea();
                     }
+                    dismissMobileKeyboardAfterSubmit(input);
                     toggleSendButton();
                     addChatMessage(imgPrompt, true);
                     await handleImageGenerationRequest(imgPrompt, { aspectRatio: ratio });
@@ -14735,6 +14755,7 @@ async function sendTextInput(submission = {}) {
                     toggleSendButton();
                     return;
                 }
+                dismissMobileKeyboardAfterSubmit(input);
                 if (hasText && handleLocalVoiceCommand(text, inputSource)) {
                     input.value = '';
                     delete input.dataset.inputSource;
@@ -15067,7 +15088,7 @@ async function sendTextInput(submission = {}) {
                         }
 
                         const nonImageDocText = (attachmentContext.combinedText && !attachmentContext.combinedText.startsWith('[Attached Image:'))
-                            ? String(attachmentContext.combinedText).slice(0, 500000)
+                            ? String(attachmentContext.combinedText).slice(0, 180000)
                             : '';
 
                         const attachmentPrompt = hasImageAttachments
@@ -15085,7 +15106,7 @@ async function sendTextInput(submission = {}) {
                                 'GROUNDING RULE: Base all extracted data strictly on the provided document text. Do not hallucinate line items, amounts, or facts not present in the text.',
                                 webSearchContext ? `\nVerified external facts to compare/verify against:\n${webSearchContext}\nSynthesize external facts cleanly in natural prose without bracket citations.` : '',
                                 '',
-                                String(attachmentContext.combinedText || '').slice(0, 500000)
+                                String(attachmentContext.combinedText || '').slice(0, 180000)
                             ].filter(Boolean).join('\n');
                         if (hasImageAttachments) showThinkingIndicator('Analyzing image...');
                         window.JarvisInteractionState?.transition?.('THINKING', {
@@ -15134,7 +15155,7 @@ async function sendTextInput(submission = {}) {
                                         'Do not ask for the file, paste, upload, or text again.',
                                         `User request: ${attachmentRequest}`,
                                         '',
-                                        String(attachmentContext.combinedText || '').slice(0, 500000)
+                                        String(attachmentContext.combinedText || '').slice(0, 180000)
                                     ].join('\n');
                                 result = await askGeminiAI(retryPrompt, {
                                     intent: 'selection_custom',
@@ -32631,17 +32652,50 @@ function initDynamicComposerHeightObserver() {
     }
 }
 
+let baselineViewportHeight = 0;
+let lastViewportWidth = 0;
+let wasKeyboardOpen = false;
+let viewportSyncTimers = [];
+
 const setVH = () => {
     const vv = window.visualViewport;
     const height = vv ? vv.height : window.innerHeight;
+    const width = vv ? vv.width : window.innerWidth;
     const offsetTop = vv ? vv.offsetTop : 0;
-    const kbOffset = vv ? Math.max(0, Math.round(window.innerHeight - (height + offsetTop))) : 0;
+    const layoutHeight = Math.max(
+        Number(document.documentElement?.clientHeight || 0),
+        Number(window.innerHeight || 0),
+        Math.round(height)
+    );
+    const activeEl = document.activeElement;
+    const isEditableFocused = Boolean(
+        activeEl && (
+            activeEl.id === 'text-input' ||
+            activeEl.matches?.('textarea, input, [contenteditable="true"]')
+        )
+    );
+    if (Math.abs(width - lastViewportWidth) > 40) {
+        baselineViewportHeight = Math.max(layoutHeight, Math.round(height));
+        lastViewportWidth = width;
+    } else if (!isEditableFocused) {
+        baselineViewportHeight = Math.max(baselineViewportHeight, layoutHeight, Math.round(height));
+        lastViewportWidth = width;
+    }
+    const heightGap = Math.max(
+        Math.max(0, Math.round(layoutHeight - height)),
+        Math.max(0, Math.round(window.innerHeight - height)),
+        isEditableFocused && baselineViewportHeight > 0 ? Math.max(0, Math.round(baselineViewportHeight - height)) : 0
+    );
+    const kbOffset = vv ? Math.max(0, Math.round(layoutHeight - (height + offsetTop))) : 0;
     const vh = height * 0.01;
     document.documentElement.style.setProperty('--vh', `${vh}px`);
     document.documentElement.style.setProperty('--app-viewport-height', `${Math.round(height)}px`);
     document.documentElement.style.setProperty('--app-viewport-top', `${Math.round(offsetTop)}px`);
     document.documentElement.style.setProperty('--keyboard-offset', `${kbOffset}px`);
-    const kbOpen = kbOffset > 90;
+    const kbOpen = heightGap > 90 || kbOffset > 90;
+    const justOpenedKeyboard = kbOpen && !wasKeyboardOpen;
+    const justClosedKeyboard = !kbOpen && wasKeyboardOpen;
+    wasKeyboardOpen = kbOpen;
     document.body.classList.toggle('is-keyboard-open', kbOpen);
     const headerEl = document.querySelector('.header') || document.querySelector('.app-header');
     const inputEl = document.querySelector('.chat-input') || document.querySelector('.floating-input-bar');
@@ -32654,13 +32708,13 @@ const setVH = () => {
         const measuredSafeH = Math.max(90, Math.ceil(barEl.offsetHeight || barEl.getBoundingClientRect().height || 120));
         document.documentElement.style.setProperty('--input-bar-safe-height', `${measuredSafeH}px`);
     }
-    if (kbOpen || window.scrollY > 0) {
+    if (kbOpen || justClosedKeyboard || window.scrollY > 0) {
         try { window.scrollTo(0, 0); } catch (_) {}
         const chatMain = document.getElementById('chat-main');
         const chatContainer = document.getElementById('chat-container');
         if (chatMain && chatContainer && chatContainer.children.length > 0) {
             const nearBottom = chatMain.scrollHeight - chatMain.scrollTop - chatMain.clientHeight < 140;
-            if (nearBottom || kbOpen) {
+            if (nearBottom || justOpenedKeyboard) {
                 chatMain.scrollTop = chatMain.scrollHeight;
             }
         }
@@ -32675,15 +32729,56 @@ const setVH = () => {
         }
     }
 };
+function scheduleJarvisViewportSync() {
+    while (viewportSyncTimers.length > 0) {
+        clearTimeout(viewportSyncTimers.pop());
+    }
+    setVH();
+    if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(() => setVH());
+    }
+    for (const delay of [60, 180, 340]) {
+        viewportSyncTimers.push(setTimeout(setVH, delay));
+    }
+}
+if (typeof window !== 'undefined') {
+    window.scheduleJarvisViewportSync = scheduleJarvisViewportSync;
+}
+function bindComposerEntryTapFocus() {
+    const entry = document.getElementById('composer-entry');
+    if (!entry || entry.dataset.tapFocusBound === 'true') return;
+    entry.dataset.tapFocusBound = 'true';
+    entry.addEventListener('click', (event) => {
+        if (event.target?.closest?.('button, a, [role="option"]')) return;
+        const input = document.getElementById('text-input');
+        if (input && !input.disabled && !input.readOnly && document.activeElement !== input) {
+            try { input.focus(); } catch (_) {}
+        }
+        scheduleJarvisViewportSync();
+    });
+}
+document.addEventListener('focusin', (event) => {
+    if (event.target?.id === 'text-input' || event.target?.matches?.('#input-bar-container textarea, #input-bar-container input')) {
+        scheduleJarvisViewportSync();
+    }
+});
+document.addEventListener('focusout', (event) => {
+    if (event.target?.id === 'text-input' || event.target?.matches?.('#input-bar-container textarea, #input-bar-container input')) {
+        scheduleJarvisViewportSync();
+    }
+});
 window.addEventListener('DOMContentLoaded', () => {
     setVH();
     initDynamicComposerHeightObserver();
+    bindComposerEntryTapFocus();
 });
 window.addEventListener('resize', setVH);
 window.addEventListener('orientationchange', setVH);
+window.addEventListener('orientationchange', scheduleJarvisViewportSync);
 if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', setVH);
     window.visualViewport.addEventListener('scroll', setVH);
 }
 setVH();
 initDynamicComposerHeightObserver();
+bindComposerEntryTapFocus();
