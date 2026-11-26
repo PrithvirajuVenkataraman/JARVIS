@@ -181,26 +181,33 @@ export async function ingestAttachmentPayload(payload = {}) {
     }
 
     // 2. Native lightweight structured extractors FIRST for text-based formats (free, zero API credits!)
-    // 2a. Text-based PDFs via server pdfjs-dist -> uncompressed literal text layer
+    // 2a. Text-based & Mixed (Text + Image) PDFs via server pdfjs-dist
+    let localPdfExtract = null;
     if (isPdf(mimeType, filename)) {
-        const localPdf = await extractPdfTextServer(buffer).catch(() => ({ text: '', pageCount: 0, dense: false }));
-        const fallbackBasicText = !localPdf.text ? extractPdfTextBasic(buffer) : '';
-        const candidatePdfText = localPdf.text || fallbackBasicText;
-        const pageCount = localPdf.pageCount || 1;
-        const avgCharsPerPage = candidatePdfText.replace(/\s+/g, ' ').trim().length / Math.max(1, pageCount);
-        const isDenseTextPdf = hasUsefulServerText(candidatePdfText) && (localPdf.dense || avgCharsPerPage >= 35);
+        localPdfExtract = await extractPdfTextServer(buffer).catch(() => ({
+            text: '', rawText: '', pageCount: 0, dense: false, imagePages: 0, sparseImagePages: 0
+        }));
+        const fallbackBasicText = !localPdfExtract.rawText ? extractPdfTextBasic(buffer) : '';
+        const rawPdfText = localPdfExtract.rawText || fallbackBasicText;
+        const pageCount = localPdfExtract.pageCount || 1;
+        const avgCharsPerPage = rawPdfText.replace(/\s+/g, ' ').trim().length / Math.max(1, pageCount);
+        const isPureDigitalTextPdf = hasUsefulServerText(rawPdfText) &&
+            (localPdfExtract.dense || avgCharsPerPage >= 35) &&
+            Number(localPdfExtract.sparseImagePages || 0) === 0;
         attempts.push({
             stage: 'pdf_text_server',
-            ok: isDenseTextPdf,
-            method: localPdf.text ? 'pdf_text_server' : 'pdf_text_layer',
-            pageCount
+            ok: isPureDigitalTextPdf,
+            method: localPdfExtract.text ? 'pdf_text_server' : 'pdf_text_layer',
+            pageCount,
+            imagePages: localPdfExtract.imagePages || 0,
+            sparseImagePages: localPdfExtract.sparseImagePages || 0
         });
-        if (isDenseTextPdf) {
+        if (isPureDigitalTextPdf) {
             return buildResult({
                 ok: true,
-                text: clipText(candidatePdfText),
+                text: clipText(localPdfExtract.text || rawPdfText),
                 pageCount,
-                method: localPdf.text ? 'pdf_text_server' : 'pdf_text_layer',
+                method: localPdfExtract.text ? 'pdf_text_server' : 'pdf_text_layer',
                 provider: 'server',
                 filename,
                 mimeType,
@@ -209,10 +216,10 @@ export async function ingestAttachmentPayload(payload = {}) {
         }
     }
 
-    // 2b. Word (.docx): native XML extraction + embedded media images FIRST (free)
+    // 2b. Word (.docx): native XML extraction + embedded media images FIRST (free + Vision OCR for embedded images)
     if (isDocx(mimeType, filename)) {
         const { text: docxText, images: embeddedImages } = await extractDocxContent(buffer).catch(() => ({ text: '', images: [] }));
-        const imageOcrBlocks = (!hasUsefulServerText(docxText) || (embeddedImages.length > 0 && docxText.length < 400))
+        const imageOcrBlocks = embeddedImages.length > 0
             ? await ocrEmbeddedImages(embeddedImages, filename, payload.customKeys)
             : [];
         const combinedDocx = [docxText, ...imageOcrBlocks].filter(Boolean).join('\n\n').trim();
@@ -232,10 +239,10 @@ export async function ingestAttachmentPayload(payload = {}) {
         }
     }
 
-    // 2c. PowerPoint (.pptx): slide-level extraction + speaker notes + diagrams FIRST (free)
+    // 2c. PowerPoint (.pptx): slide-level extraction + speaker notes + diagrams + embedded image OCR FIRST
     if (isPptx(mimeType, filename)) {
         const { text: pptxText, images: embeddedImages, slideCount } = await extractPptxContent(buffer).catch(() => ({ text: '', images: [], slideCount: 0 }));
-        const imageOcrBlocks = (!hasUsefulServerText(pptxText) || (embeddedImages.length > 0 && pptxText.length < 400))
+        const imageOcrBlocks = embeddedImages.length > 0
             ? await ocrEmbeddedImages(embeddedImages, filename, payload.customKeys)
             : [];
         const combinedPptx = [pptxText, ...imageOcrBlocks].filter(Boolean).join('\n\n').trim();
@@ -305,8 +312,13 @@ export async function ingestAttachmentPayload(payload = {}) {
         }
     }
 
-    // 4. Scanned / Complex PDF fallback via Gemini (inlineData <= 18 MB, Gemini Files API with delete cleanup > 18 MB)
+    // 4. Scanned / Mixed (Image + Text) PDF fallback via Gemini (inlineData <= 18 MB, Gemini Files API with delete cleanup > 18 MB)
     if (isPdf(mimeType, filename)) {
+        const mixedPrompt = [
+            `Extract ALL readable content from "${filename}" (which may contain both digital text pages AND scanned/embedded images, infographics, or photos).`,
+            'Include every heading, paragraph, bullet point, table (formatted in Markdown), and OCR ALL text visible inside embedded images or scanned pages.',
+            'Preserve exact page order with "--- Page N ---" markers.'
+        ].join(' ');
         const geminiPdf = buffer.byteLength > GEMINI_INLINE_MAX_BYTES
             ? await extractLargeDocumentWithGeminiFilesApi({ buffer, mimeType: 'application/pdf', filename, customKeys: payload.customKeys })
                 .catch(error => ({ ok: false, text: '', error: String(error?.message || error) }))
@@ -314,6 +326,7 @@ export async function ingestAttachmentPayload(payload = {}) {
                 mimeType: 'application/pdf',
                 base64: ensureBase64(),
                 filename,
+                prompt: mixedPrompt,
                 customKeys: payload.customKeys
             }).catch(error => ({ ok: false, text: '', error: String(error?.message || error) }));
         const geminiUseful = Boolean(geminiPdf?.ok && hasUsefulServerText(geminiPdf.text));
@@ -327,6 +340,7 @@ export async function ingestAttachmentPayload(payload = {}) {
             return buildResult({
                 ok: true,
                 text: clipText(geminiPdf.text),
+                pageCount: localPdfExtract?.pageCount || undefined,
                 method: geminiPdf?.method === 'gemini_files_api' ? 'gemini_files_api' : 'gemini_pdf_api',
                 provider: 'gemini',
                 filename,
@@ -335,14 +349,26 @@ export async function ingestAttachmentPayload(payload = {}) {
             });
         }
 
-        const pdfText = extractPdfTextBasic(buffer);
-        const useful = hasUsefulServerText(pdfText);
+        // Preserve any selectable text extracted from mixed image+text PDFs even if cloud OCR is unavailable/failed
+        const partialSelectableText = String(localPdfExtract?.rawText || '').trim();
+        const fallbackBasicText = extractPdfTextBasic(buffer);
+        const bestLocalPdfText = partialSelectableText.length >= fallbackBasicText.length
+            ? (localPdfExtract?.text || partialSelectableText)
+            : fallbackBasicText;
+        const lettersCount = (partialSelectableText.match(/[A-Za-z0-9\u00C0-\u024F]/g) || []).length;
+        const useful = hasUsefulServerText(bestLocalPdfText) || lettersCount >= 12;
         attempts.push({ stage: 'pdf_text_layer', ok: useful, method: 'pdf_text_layer' });
         if (useful) {
+            const hasUnocrImages = Number(localPdfExtract?.imagePages || 0) > 0;
+            const suffix = hasUnocrImages
+                ? '\n\n[Note: Visual/scanned pages or embedded images in this PDF could not be OCR-processed without an active OCR key; all selectable text pages are preserved above.]'
+                : '';
             return buildResult({
                 ok: true,
-                text: clipText(pdfText),
-                method: 'pdf_text_layer',
+                partial: hasUnocrImages,
+                text: clipText(`${bestLocalPdfText}${suffix}`),
+                pageCount: localPdfExtract?.pageCount || undefined,
+                method: hasUnocrImages ? 'pdf_text_server_partial' : 'pdf_text_layer',
                 provider: 'server',
                 filename,
                 mimeType,
@@ -459,6 +485,10 @@ export async function ingestAttachmentPayload(payload = {}) {
     }
 
     const metadata = describeBinaryFile(buffer, filename, mimeType);
+    const pdfHadImagePages = isPdf(mimeType, filename) && Number(localPdfExtract?.imagePages || 0) > 0;
+    const message = pdfHadImagePages
+        ? `Could not extract readable text from "${filename}" because its pages contain images/scans without a selectable text layer and no OCR provider succeeded (set GEMINI_API_KEY or LLAMA_CLOUD_API_KEY).`
+        : (metadata || `Could not extract readable text from ${filename}.`);
     return buildResult({
         ok: false,
         text: '',
@@ -467,7 +497,7 @@ export async function ingestAttachmentPayload(payload = {}) {
         filename,
         mimeType,
         partial: true,
-        message: metadata || `Could not extract readable text from ${filename}.`,
+        message,
         attempts
     });
 }
@@ -631,7 +661,15 @@ async function extractPdfTextServer(buffer) {
     const pdf = await loadingTask.promise;
     const totalPages = Number(pdf.numPages || 0);
     const pageBlocks = [];
+    const rawPageTexts = [];
     let usefulPages = 0;
+    let imagePages = 0;
+    let sparseImagePages = 0;
+
+    const OPS = pdfjs.OPS || {};
+    const imageOpCodes = new Set(
+        [OPS.paintImageXObject, OPS.paintInlineImageXObject, OPS.paintImageMaskXObject, OPS.paintImageXObjectRepeat].filter(Boolean)
+    );
 
     for (let pageNum = 1; pageNum <= totalPages; pageNum += 1) {
         const page = await pdf.getPage(pageNum);
@@ -653,13 +691,42 @@ async function extractPdfTextServer(buffer) {
         }
         if (currentLine.length) lines.push(currentLine.join(' ').trim());
         const pageText = lines.filter(Boolean).join('\n').trim();
-        if (pageText.replace(/\s+/g, '').length >= 25) usefulPages += 1;
-        pageBlocks.push(pageText ? `--- Page ${pageNum} ---\n${pageText}` : `--- Page ${pageNum} ---\n[No selectable text on page ${pageNum}]`);
+        const compactLen = pageText.replace(/\s+/g, '').length;
+
+        let pageHasImages = false;
+        try {
+            const opList = await page.getOperatorList();
+            if (Array.isArray(opList?.fnArray)) {
+                pageHasImages = opList.fnArray.some(op => imageOpCodes.has(op));
+            }
+        } catch (_) {}
+
+        if (pageHasImages) imagePages += 1;
+        if (compactLen >= 25) {
+            usefulPages += 1;
+            rawPageTexts.push(`--- Page ${pageNum} ---\n${pageText}`);
+        } else if (compactLen > 0) {
+            rawPageTexts.push(`--- Page ${pageNum} ---\n${pageText}`);
+        }
+        if (pageHasImages && compactLen < 40) {
+            sparseImagePages += 1;
+        }
+        pageBlocks.push(pageText
+            ? `--- Page ${pageNum} ---\n${pageText}`
+            : `--- Page ${pageNum} ---\n[${pageHasImages ? 'Image/scanned content' : 'No selectable text'} on page ${pageNum}]`);
     }
 
     const joined = pageBlocks.join('\n\n').trim();
+    const rawText = rawPageTexts.join('\n\n').trim();
     const dense = totalPages > 0 && usefulPages >= Math.max(1, Math.ceil(totalPages * 0.35));
-    return { text: joined, pageCount: totalPages, dense };
+    return {
+        text: joined,
+        rawText,
+        pageCount: totalPages,
+        dense,
+        imagePages,
+        sparseImagePages
+    };
 }
 
 async function extractLargeDocumentWithGeminiFilesApi({ buffer, mimeType = 'application/pdf', filename = 'document.pdf', customKeys = null }) {

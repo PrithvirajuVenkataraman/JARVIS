@@ -1,16 +1,16 @@
 import { fetchWithLifecycle as fetch } from './request-lifecycle.js';
 import { normalizeGeminiGenerationConfig, visionFailurePayload } from './model-failure.js';
-const PROVIDER_TIMEOUT_MS = 20_000;
+const PROVIDER_TIMEOUT_MS = 28_000;
 const GEMINI_API_VERSIONS = ['v1beta', 'v1'];
 const GEMINI_MODEL_FALLBACKS = [
-    'gemini-4-hydrogen',
-    'gemini-3.8-flash',
     'gemini-2.5-flash',
-    'gemini-3.5-flash',
     'gemini-2.5-flash-lite',
+    'gemini-2.0-flash',
     'gemini-2.5-pro',
     'gemini-3.7-flash',
-    'gemini-2.0-flash',
+    'gemini-3.5-flash',
+    'gemini-3.8-flash',
+    'gemini-4-hydrogen',
     'gemini-2.0-flash-lite',
     'gemini-1.5-flash',
     'gemini-flash-latest'
@@ -59,7 +59,7 @@ function normalizeMimeForProvider(mimeType, base64 = '') {
     return 'image/jpeg'; // HEIC, HEIF, AVIF, BMP, TIFF → jpeg (client re-encodes via canvas)
 }
 
-const MAX_EXTRACT_BASE64_CHARS = 8 * 1024 * 1024;
+const MAX_EXTRACT_BASE64_CHARS = 24 * 1024 * 1024; // ~18 MB binary PDF/image inlineData cap
 const LLM_DIRECT_IMAGE_MIMES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 
 function detectBinaryImageMime(base64 = '') {
@@ -223,6 +223,7 @@ export async function extractDocumentWithGemini({
         mimeType: effectiveMime,
         imageBase64: cleanBase64,
         allowCompatibilityRetry: true,
+        retryOnNonAuthFailure: true,
         failures
     });
     if (text && String(text).trim()) {
@@ -270,10 +271,11 @@ async function callGroqVisionText({ apiKey, configuredModel, systemPrompt, mimeT
     return '';
 }
 
-async function callGeminiVision({ apiKey, configuredModel = '', systemPrompt, mimeType, imageBase64, allowCompatibilityRetry, failures }) {
+async function callGeminiVision({ apiKey, configuredModel = '', systemPrompt, mimeType, imageBase64, allowCompatibilityRetry, retryOnNonAuthFailure = false, failures }) {
     const modelFallbacks = filterAvailableExtractModels('gemini', [String(configuredModel || '').trim(), ...GEMINI_MODEL_FALLBACKS]);
+    const maxModels = retryOnNonAuthFailure ? 6 : 3;
     for (const apiVersion of GEMINI_API_VERSIONS.slice(0, 2)) {
-        for (const model of modelFallbacks.slice(0, 3)) {
+        for (const model of modelFallbacks.slice(0, maxModels)) {
             if (apiVersion === 'v1' && /^gemini-(?:4|3\.|2\.5)/i.test(model)) continue;
             try {
                 const genConfig = {
@@ -316,8 +318,13 @@ async function callGeminiVision({ apiKey, configuredModel = '', systemPrompt, mi
                     markExtractModelUnavailable('gemini', model, response.status);
                     continue;
                 }
+                if (response.status === 401 || response.status === 403) {
+                    failures.push({ status: response.status });
+                    return '';
+                }
                 if (!response.ok) {
                     failures.push({ status: response.status });
+                    if (retryOnNonAuthFailure || allowCompatibilityRetry) continue;
                     return '';
                 }
                 const data = await response.json();

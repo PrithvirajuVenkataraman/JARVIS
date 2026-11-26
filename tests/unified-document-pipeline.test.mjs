@@ -457,4 +457,50 @@ describe('JARVIS Unified Document Pipeline & Large File Architecture', () => {
         assert.ok(prompt.includes('<attached_document_data>'), 'Untrusted document boundary must be present');
         assert.ok(prompt.includes('passive source data'), 'Prompt injection defense wording must be present');
     });
+
+    test('Mixed image + text documents extract both digital text AND embedded images, and Gemini continues across 429/400 fallback models', async () => {
+        const origFetch = globalThis.fetch;
+        const savedGeminiKey = process.env.GEMINI_API_KEY;
+        const savedGroqKey = process.env.GROQ_API_KEY;
+        const png1x1 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
+
+        process.env.GEMINI_API_KEY = 'synthetic-gemini-test-key';
+        delete process.env.GROQ_API_KEY;
+        try {
+            let modelCalls = 0;
+            globalThis.fetch = async (url) => {
+                modelCalls += 1;
+                if (modelCalls === 1 && String(url).includes('gemini-2.5-flash')) {
+                    return Response.json({ error: { message: 'Quota exceeded for model 1' } }, { status: 429 });
+                }
+                return Response.json({
+                    candidates: [{ content: { parts: [{ text: JSON.stringify({ fullText: 'Chart Caption: Havelock Ferry Schedule 08:30 AM', textDetected: ['Havelock Ferry Schedule'] }) }] } }]
+                });
+            };
+
+            const longText = 'Port Blair & Havelock Island complete travel itinerary covering cellular jail light show, Radhanagar beach, Elephant beach water sports, Ross Island heritage ruins, and ferry timings across all days. '.repeat(4);
+            const mixedDocx = buildStoredZip([
+                { name: 'word/document.xml', data: `<w:document><w:body><w:p><w:r><w:t>${longText}</w:t></w:r></w:p></w:body></w:document>` },
+                { name: 'word/media/ferry_chart.png', data: png1x1 }
+            ]);
+            const res = await ingestAttachmentPayload({
+                filename: 'Best Of Port Blair & Have.docx',
+                mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                buffer: mixedDocx
+            });
+
+            assert.equal(res.ok, true);
+            assert.equal(res.method, 'docx_xml_and_ocr');
+            assert.match(res.text, /Radhanagar beach/);
+            assert.match(res.text, /Havelock Ferry Schedule 08:30 AM/);
+            assert.equal(res.images?.length, 1);
+            assert.ok(modelCalls >= 2, 'Should advance to next Gemini fallback model after HTTP 429 instead of aborting early');
+        } finally {
+            globalThis.fetch = origFetch;
+            if (savedGeminiKey === undefined) delete process.env.GEMINI_API_KEY;
+            else process.env.GEMINI_API_KEY = savedGeminiKey;
+            if (savedGroqKey === undefined) delete process.env.GROQ_API_KEY;
+            else process.env.GROQ_API_KEY = savedGroqKey;
+        }
+    });
 });

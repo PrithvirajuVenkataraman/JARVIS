@@ -563,7 +563,8 @@ export async function ingestAllForMessage(attachments = [], userText = '') {
             ? await queuedPromise
             : await ingestAttachmentWithFallback(attachment, userText);
 
-        if (!serverOrLocal?.ok && !serverOrLocal?.cancelled && !serverOrLocal?.fatalPdfError && isPdfFile(rawFile || attachment) && rawFile && rawPdfSize > 0 && rawPdfSize <= NATIVE_PDF_DIRECT_MAX_BYTES && (totalNativeMediaBytes + rawPdfSize) <= NATIVE_PDF_DIRECT_MAX_BYTES) {
+        const needsPdfMediaSupplement = !serverOrLocal?.ok || serverOrLocal?.partial === true;
+        if (needsPdfMediaSupplement && !serverOrLocal?.cancelled && !serverOrLocal?.fatalPdfError && isPdfFile(rawFile || attachment) && rawFile && rawPdfSize > 0 && rawPdfSize <= NATIVE_PDF_DIRECT_MAX_BYTES && (totalNativeMediaBytes + rawPdfSize) <= NATIVE_PDF_DIRECT_MAX_BYTES) {
             const pdfBase64 = attachment.base64 || await fileToBase64(rawFile).catch(() => '');
             if (pdfBase64) {
                 totalNativeMediaBytes += rawPdfSize;
@@ -573,16 +574,18 @@ export async function ingestAllForMessage(attachments = [], userText = '') {
                     mimeType: 'application/pdf',
                     base64: pdfBase64
                 };
-                const nativePdfRes = {
-                    ok: true,
-                    text: '',
-                    method: 'single_pass_native_pdf',
-                    provider: 'native'
-                };
-                attachment.extractedText = '';
-                attachment.ocrMethod = 'single_pass_native_pdf';
-                setAttachmentStatus(attachment, 'ready', { progress: 100, errorMessage: '' });
-                return { attachment, isImg: false, isPdfNative: true, imagePayload, result: nativePdfRes };
+                if (!serverOrLocal?.ok) {
+                    const nativePdfRes = {
+                        ok: true,
+                        text: '',
+                        method: 'single_pass_native_pdf',
+                        provider: 'native'
+                    };
+                    attachment.extractedText = '';
+                    attachment.ocrMethod = 'single_pass_native_pdf';
+                    setAttachmentStatus(attachment, 'ready', { progress: 100, errorMessage: '' });
+                    return { attachment, isImg: false, isPdfNative: true, imagePayload, result: nativePdfRes };
+                }
             }
         }
         attachment.extractedText = String(serverOrLocal?.text || '').trim();
