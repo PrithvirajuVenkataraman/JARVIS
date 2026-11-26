@@ -36,7 +36,7 @@ export async function prepareRequestPayload(payload, { signal, resizeImage = res
         holder[key] = '';
     };
     const imageList = (list) => list.map(image => {
-        const copy = { ...image };
+        const copy = { ...image }; if (String(copy.mimeType || '').toLowerCase() === 'application/pdf') return copy;
         if (copy.base64 || copy.data || /^data:image\//i.test(copy.url || '')) {
             copy.base64 = copy.base64 || copy.data || copy.url;
             delete copy.data;

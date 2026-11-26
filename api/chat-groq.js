@@ -41,7 +41,8 @@ import {
     synthesizeSelfCritiqueMetadata
 } from './_lib/self-critique-loop.js';
 import { resolveEntityVisuals, discoverNotableWorks } from './_lib/visual-answer-engine.js';
-import { extractTextFromImage } from './_lib/vision-extract.js';
+import { extractTextFromImage, extractDocumentWithGemini } from './_lib/vision-extract.js';
+import { ingestAttachmentPayload } from './_lib/attachment-ingest.js';
 
 /* ── Image MIME normalizer ────────────────────────────────── */
 // Gemini and Groq only accept jpeg/png/webp/gif.
@@ -60,6 +61,15 @@ function normalizeImageMimeType(mimeType, base64 = '') {
     if (m === 'image/webp') return 'image/webp';
     if (m === 'image/gif') return 'image/gif';
     return 'image/jpeg'; // jpeg, jpg, heic, heif, avif, bmp, tiff → jpeg
+}
+
+function normalizeGeminiMediaMimeType(mimeType, base64 = '') {
+    const raw = String(base64 || '').trim();
+    const cleanMime = String(mimeType || '').trim().toLowerCase();
+    if (cleanMime === 'application/pdf' || raw.startsWith('JVBERi0')) {
+        return 'application/pdf';
+    }
+    return normalizeImageMimeType(mimeType, base64);
 }
 
 function textToEmbeddingVector(text, dim = 512) {
@@ -2593,10 +2603,12 @@ async function handler(req, res) {
 
         if (hasImages) {
             const userRequest = String(originalRequest || msg || '').trim();
+            const hasPdfDoc = attachedImages.some(img => normalizeGeminiMediaMimeType(img?.mimeType, img?.base64) === 'application/pdf');
             const isMeaningfulOcrText = (t) => {
                 const s = String(t || '').trim();
                 if (!s) return false;
                 if (s.startsWith('[Attached Image:') && s.endsWith(']')) return false;
+                if (s.startsWith('[Attached Document:') && s.endsWith(']')) return false;
                 const statusScore = scoreChatIntent(s, 'ocr_status_diagnostic');
                 const contentScore = scoreChatIntent(s, 'substantive_content');
                 if (statusScore >= 0.25 && statusScore > contentScore) return false;
@@ -2606,8 +2618,10 @@ async function handler(req, res) {
             const hasMeaningfulText = isMeaningfulOcrText(extractedText);
 
             return [
-                `The user attached ${attachedImages.length} image(s) with this request.`,
-                'Inspect the attached image(s) directly using your visual capabilities.',
+                hasPdfDoc
+                    ? `The user attached ${attachedImages.length} document/media file(s) with this request. Inspect the attached document(s) and visual content directly.`
+                    : `The user attached ${attachedImages.length} image(s) with this request.`,
+                'Inspect the attached file(s) directly using your visual and document understanding capabilities.',
                 'CORE IMAGE UNDERSTANDING & REASONING RULES:',
                 '1. USER INTENT FIRST & EMBEDDED INSTRUCTION EXECUTION:',
                 '   - Multimodal images frequently contain explicit questions, exercises, problems, assignments, or instructions printed directly inside the image itself (such as "Solve for x", math/physics problems, code errors, worksheets, exams, or form prompts).',
@@ -2852,7 +2866,7 @@ async function handler(req, res) {
                     if (img?.base64) {
                         normalized[targetIdx].parts.push({
                             inlineData: {
-                                mimeType: normalizeImageMimeType(img.mimeType, img.base64),
+                                mimeType: normalizeGeminiMediaMimeType(img.mimeType, img.base64),
                                 data: img.base64
                             }
                         });
@@ -2951,16 +2965,17 @@ async function handler(req, res) {
                         ? groqStructured.map(m => ({ ...m }))
                         : [{ role: 'user', content: groqPrompt }];
                     if (hasImages && KNOWN_GROQ_VISION_MODELS.has(model)) {
-                        const lastUserIdx = [...messages].reverse().findIndex(m => m.role === 'user');
-                        const targetIdx = lastUserIdx >= 0 ? messages.length - 1 - lastUserIdx : messages.length - 1;
-                        const targetMsg = messages[targetIdx] || { role: 'user', content: groqPrompt };
-                        const content = [{ type: 'text', text: targetMsg.content }];
-                        for (const img of images) {
-                            if (img?.base64) {
+                        const groqImages = images.filter(img => img?.base64 && normalizeGeminiMediaMimeType(img.mimeType, img.base64) !== 'application/pdf');
+                        if (groqImages.length > 0) {
+                            const lastUserIdx = [...messages].reverse().findIndex(m => m.role === 'user');
+                            const targetIdx = lastUserIdx >= 0 ? messages.length - 1 - lastUserIdx : messages.length - 1;
+                            const targetMsg = messages[targetIdx] || { role: 'user', content: groqPrompt };
+                            const content = [{ type: 'text', text: targetMsg.content }];
+                            for (const img of groqImages) {
                                 content.push({ type: 'image_url', image_url: { url: `data:${normalizeImageMimeType(img.mimeType, img.base64)};base64,${img.base64}` } });
                             }
+                            messages[targetIdx] = { ...targetMsg, content };
                         }
-                        messages[targetIdx] = { ...targetMsg, content };
                     }
                     const requestBody = {
                         model,
@@ -3040,7 +3055,7 @@ async function handler(req, res) {
                 if (hasImages) {
                     for (const img of images) {
                         if (img?.base64) {
-                            parts.push({ inlineData: { mimeType: normalizeImageMimeType(img.mimeType, img.base64), data: img.base64 } });
+                            parts.push({ inlineData: { mimeType: normalizeGeminiMediaMimeType(img.mimeType, img.base64), data: img.base64 } });
                         }
                     }
                 }
@@ -3077,7 +3092,8 @@ async function handler(req, res) {
                     topP: hasImages ? 0.9 : 0.95,
                     maxOutputTokens: getMaxOutputTokensForGemini(model, maxTokens)
                 };
-                if (hasImages) {
+                const hasPdfMedia = hasImages && images.some(img => normalizeGeminiMediaMimeType(img?.mimeType, img?.base64) === 'application/pdf');
+                if (hasImages && !hasPdfMedia) {
                     geminiGenConfig.mediaResolution = 'MEDIA_RESOLUTION_HIGH';
                 }
                 if (shouldSuppressGeminiReasoning && supportsGeminiThinking(model)) {
@@ -3471,16 +3487,17 @@ async function handler(req, res) {
                 ? options.structuredMessages.map(m => ({ ...m }))
                 : [{ role: 'user', content: prompt }];
             if (Array.isArray(images) && images.length && KNOWN_GROQ_VISION_MODELS.has(model)) {
-                const lastUserIdx = [...messages].reverse().findIndex(m => m.role === 'user');
-                const targetIdx = lastUserIdx >= 0 ? messages.length - 1 - lastUserIdx : messages.length - 1;
-                const targetMsg = messages[targetIdx] || { role: 'user', content: prompt };
-                const content = [{ type: 'text', text: targetMsg.content }];
-                for (const img of images) {
-                    if (img?.base64) {
+                const groqImages = images.filter(img => img?.base64 && normalizeGeminiMediaMimeType(img.mimeType, img.base64) !== 'application/pdf');
+                if (groqImages.length > 0) {
+                    const lastUserIdx = [...messages].reverse().findIndex(m => m.role === 'user');
+                    const targetIdx = lastUserIdx >= 0 ? messages.length - 1 - lastUserIdx : messages.length - 1;
+                    const targetMsg = messages[targetIdx] || { role: 'user', content: prompt };
+                    const content = [{ type: 'text', text: targetMsg.content }];
+                    for (const img of groqImages) {
                         content.push({ type: 'image_url', image_url: { url: `data:${normalizeImageMimeType(img.mimeType, img.base64)};base64,${img.base64}` } });
                     }
+                    messages[targetIdx] = { ...targetMsg, content };
                 }
-                messages[targetIdx] = { ...targetMsg, content };
             }
             const isUserChosenR1 = String(options?.userSelectedModel || '').toLowerCase().includes('r1');
             const isMathOrDeep = isMathematicalOrQuantitativeQuery(prompt, { hasImages: Array.isArray(images) && images.length > 0 }) ||
@@ -3647,7 +3664,7 @@ async function handler(req, res) {
             if (Array.isArray(images) && images.length) {
                 for (const img of images) {
                     if (img?.base64) {
-                        parts.push({ inlineData: { mimeType: normalizeImageMimeType(img.mimeType, img.base64), data: img.base64 } });
+                        parts.push({ inlineData: { mimeType: normalizeGeminiMediaMimeType(img.mimeType, img.base64), data: img.base64 } });
                     }
                 }
             }
@@ -3687,7 +3704,8 @@ async function handler(req, res) {
                 topP: hasStreamImages ? 0.9 : 0.95,
                 maxOutputTokens: getMaxOutputTokensForGemini(model, maxTokens)
             };
-            if (hasStreamImages) {
+            const hasStreamPdf = hasStreamImages && images.some(img => normalizeGeminiMediaMimeType(img?.mimeType, img?.base64) === 'application/pdf');
+            if (hasStreamImages && !hasStreamPdf) {
                 generationConfig.mediaResolution = 'MEDIA_RESOLUTION_HIGH';
             }
             if (!isReasoning && supportsGeminiThinking(model)) {
@@ -4409,14 +4427,32 @@ async function handler(req, res) {
         const validImages = (Array.isArray(images) ? images : []).filter(img => img?.base64).slice(0, 2);
         if (!validImages.length) return '';
         allowGenerationAttempts(5);
-        const signal = AbortSignal.timeout(7500);
+        const signal = AbortSignal.timeout(12000);
         try {
             const extractions = await Promise.allSettled(
-                validImages.map(img => runWithSignal(signal, () => extractTextFromImage({
-                    mimeType: normalizeImageMimeType(img.mimeType, img.base64),
-                    imageBase64: img.base64,
-                    customKeys: { groqKey: options.customGroqKey, geminiKey: options.customGeminiKey }
-                })))
+                validImages.map(img => runWithSignal(signal, async () => {
+                    const mediaMime = normalizeGeminiMediaMimeType(img.mimeType, img.base64);
+                    if (mediaMime === 'application/pdf') {
+                        const pdfRes = await extractDocumentWithGemini({
+                            mimeType: 'application/pdf',
+                            base64: img.base64,
+                            filename: img.name || 'document.pdf',
+                            customKeys: { groqKey: options.customGroqKey, geminiKey: options.customGeminiKey }
+                        }).catch(() => null);
+                        if (pdfRes?.ok && pdfRes.text) return pdfRes;
+                        return await ingestAttachmentPayload({
+                            filename: img.name || 'document.pdf',
+                            mimeType: 'application/pdf',
+                            base64: img.base64,
+                            customKeys: { groqKey: options.customGroqKey, geminiKey: options.customGeminiKey }
+                        });
+                    }
+                    return await extractTextFromImage({
+                        mimeType: normalizeImageMimeType(img.mimeType, img.base64),
+                        imageBase64: img.base64,
+                        customKeys: { groqKey: options.customGroqKey, geminiKey: options.customGeminiKey }
+                    });
+                }))
             );
             const blocks = [];
             extractions.forEach((res, idx) => {
@@ -4426,13 +4462,16 @@ async function handler(req, res) {
                 const guard = inspectPromptSecurity(rawText);
                 if (!guard.safe) return;
                 const summaryLine = res.value.summary ? `Summary: ${String(res.value.summary).trim()}\n` : '';
-                blocks.push(`[Image ${idx + 1} Extracted Text]\n${summaryLine}${rawText.slice(0, 4000)}`);
+                const label = normalizeGeminiMediaMimeType(validImages[idx]?.mimeType, validImages[idx]?.base64) === 'application/pdf'
+                    ? `[PDF ${idx + 1} Extracted Content]`
+                    : `[Image ${idx + 1} Extracted Text]`;
+                blocks.push(`${label}\n${summaryLine}${rawText.slice(0, 12000)}`);
             });
             if (!blocks.length) return '';
             return [
-                '=== EXTRACTED IMAGE TEXT ===',
+                '=== EXTRACTED ATTACHMENT CONTENT ===',
                 ...blocks,
-                'Use this extracted text as an exact reference alongside any visible details. Do not guess unreadable characters or fabricate text not present in the image.'
+                'Use this extracted content as an exact reference alongside any visible details. Do not guess unreadable characters or fabricate text not present in the file.'
             ].join('\n\n');
         } catch (_) {
             return '';
@@ -4480,7 +4519,11 @@ async function handler(req, res) {
         });
 
         return async () => {
-            if (cfg.isInternalSummary || cfg.isAttachmentGrounding) {
+            if (cfg.isInternalSummary) {
+                return null;
+            }
+            const hasPdfInMedia = Array.isArray(cfg.images) && cfg.images.some(img => normalizeGeminiMediaMimeType(img?.mimeType, img?.base64) === 'application/pdf');
+            if (cfg.isAttachmentGrounding && !hasPdfInMedia) {
                 return null;
             }
             if (Array.isArray(cfg.images) && cfg.images.length > 0) {

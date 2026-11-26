@@ -121,3 +121,124 @@ test('vision endpoint rate limit accommodates multi-page PDF OCR batches without
         assert.equal(res.statusCode, 200, `Expected 200 on PDF OCR page ${page}, got ${res.statusCode}`);
     }
 }));
+
+function buildStoredZip(entries) {
+    const localChunks = [];
+    const centralChunks = [];
+    let offset = 0;
+
+    for (const { name, data } of entries) {
+        const nameBuf = Buffer.from(name, 'utf8');
+        const bodyBuf = Buffer.isBuffer(data) ? data : Buffer.from(data, 'utf8');
+
+        const local = Buffer.alloc(30 + nameBuf.length);
+        local.writeUInt32LE(0x04034b50, 0);
+        local.writeUInt16LE(20, 4);
+        local.writeUInt16LE(0, 8);
+        local.writeUInt32LE(bodyBuf.length, 18);
+        local.writeUInt32LE(bodyBuf.length, 22);
+        local.writeUInt16LE(nameBuf.length, 26);
+        nameBuf.copy(local, 30);
+        localChunks.push(local, bodyBuf);
+
+        const central = Buffer.alloc(46 + nameBuf.length);
+        central.writeUInt32LE(0x02014b50, 0);
+        central.writeUInt16LE(20, 4);
+        central.writeUInt16LE(20, 6);
+        central.writeUInt16LE(0, 10);
+        central.writeUInt32LE(bodyBuf.length, 20);
+        central.writeUInt32LE(bodyBuf.length, 24);
+        central.writeUInt16LE(nameBuf.length, 28);
+        central.writeUInt32LE(offset, 42);
+        nameBuf.copy(central, 46);
+        centralChunks.push(central);
+
+        offset += local.length + bodyBuf.length;
+    }
+
+    const centralDir = Buffer.concat(centralChunks);
+    const eocd = Buffer.alloc(22);
+    eocd.writeUInt32LE(0x06054b50, 0);
+    eocd.writeUInt16LE(entries.length, 8);
+    eocd.writeUInt16LE(entries.length, 10);
+    eocd.writeUInt32LE(centralDir.length, 12);
+    eocd.writeUInt32LE(offset, 16);
+
+    return Buffer.concat([...localChunks, centralDir, eocd]);
+}
+
+test('API ingest reads PDFs via Gemini inlineData plus Word/PPT/RTF/XLSX and embedded images', async () => environment(async () => {
+    const { ingestAttachmentPayload } = await import('../api/_lib/attachment-ingest.js');
+
+    globalThis.fetch = async (_url, init) => {
+        const body = JSON.parse(init.body);
+        const inline = body?.contents?.[0]?.parts?.[1]?.inlineData;
+        if (inline?.mimeType === 'application/pdf') {
+            return Response.json({
+                candidates: [{ content: { parts: [{ text: 'Scanned PDF Invoice #9042 Total: $420.00' }] } }]
+            });
+        }
+        return Response.json({
+            candidates: [{ content: { parts: [{ text: JSON.stringify({ fullText: 'Embedded diagram text: Velocity = 12 m/s', summary: 'Diagram' }) }] } }]
+        });
+    };
+
+    const pdfRes = await ingestAttachmentPayload({
+        filename: 'scanned-bill.pdf',
+        mimeType: 'application/pdf',
+        base64: Buffer.from('%PDF-1.4 scanned content', 'utf8').toString('base64')
+    });
+    assert.equal(pdfRes.ok, true);
+    assert.equal(pdfRes.method, 'gemini_pdf_api');
+    assert.match(pdfRes.text, /9042/);
+
+    const docxZip = buildStoredZip([
+        { name: 'word/document.xml', data: '<w:document><w:body><w:p><w:r><w:t>Short header</w:t></w:r></w:p></w:body></w:document>' },
+        { name: 'word/media/image1.png', data: Buffer.from(png, 'base64') }
+    ]);
+    const docxRes = await ingestAttachmentPayload({
+        filename: 'notes.docx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        base64: docxZip.toString('base64')
+    });
+    assert.equal(docxRes.ok, true);
+    assert.match(docxRes.text, /Short header/);
+    assert.match(docxRes.text, /Velocity = 12 m\/s/);
+    assert.equal(docxRes.images?.length, 1);
+
+    const pptxZip = buildStoredZip([
+        { name: 'ppt/slides/slide1.xml', data: '<p:sld><p:cSld><p:spTree><p:sp><p:txBody><a:p><a:r><a:t>Q4 Revenue Slide</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>' },
+        { name: 'ppt/notesSlides/notesSlide1.xml', data: '<p:notes><a:t>Speaker note: margin up 8%</a:t></p:notes>' },
+        { name: 'ppt/media/chart1.png', data: Buffer.from(png, 'base64') }
+    ]);
+    const pptxRes = await ingestAttachmentPayload({
+        filename: 'deck.pptx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        base64: pptxZip.toString('base64')
+    });
+    assert.equal(pptxRes.ok, true);
+    assert.match(pptxRes.text, /Q4 Revenue Slide/);
+    assert.match(pptxRes.text, /margin up 8%/);
+    assert.equal(pptxRes.images?.length, 1);
+
+    const rtfRes = await ingestAttachmentPayload({
+        filename: 'memo.rtf',
+        mimeType: 'application/rtf',
+        base64: Buffer.from('{\\rtf1\\ansi Action items for Sprint 4:\\par Complete OCR verification test.}', 'utf8').toString('base64')
+    });
+    assert.equal(rtfRes.ok, true);
+    assert.match(rtfRes.text, /Complete OCR verification test/);
+
+    const xlsxZip = buildStoredZip([
+        { name: 'xl/sharedStrings.xml', data: '<sst><si><t>Product</t></si><si><t>Units</t></si><si><t>Widget</t></si></sst>' },
+        { name: 'xl/worksheets/sheet1.xml', data: '<worksheet><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c></row><row r="2"><c r="A2" t="s"><v>2</v></c><c r="B2"><v>45</v></c></row></sheetData></worksheet>' }
+    ]);
+    const xlsxRes = await ingestAttachmentPayload({
+        filename: 'sales.xlsx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        base64: xlsxZip.toString('base64')
+    });
+    assert.equal(xlsxRes.ok, true);
+    assert.match(xlsxRes.text, /\| Product \| Units \|/);
+    assert.match(xlsxRes.text, /\| Widget \| 45 \|/);
+}));

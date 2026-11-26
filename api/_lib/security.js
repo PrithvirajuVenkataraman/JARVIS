@@ -103,7 +103,7 @@ function looksLikeAbusivePayload(body, base64Fields = []) {
     if (/(?:\b(?:ignore|forget)\s+(?:all|previous)\s+instructions\b|\bact as\b|\bsystem prompt\b)/i.test(text) && text.length > 12000) {
         return true;
     }
-    if (/(?:<script|javascript:|onerror=|onload=)/i.test(text)) return true;
+    if (body?.grounding?.kind !== 'attachment' && /(?:<script|javascript:|onerror=|onload=)/i.test(text)) return true;
     return false;
 }
 function applyCors(req, res) {

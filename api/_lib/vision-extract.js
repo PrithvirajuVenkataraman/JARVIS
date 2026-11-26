@@ -193,6 +193,45 @@ async function callVisionText({ providers, systemPrompt, mimeType, imageBase64 }
     throw Object.assign(new Error(failure.response), { code: failure.code });
 }
 
+export async function extractDocumentWithGemini({
+    mimeType = 'application/pdf',
+    base64 = '',
+    filename = 'document.pdf',
+    prompt = '',
+    customKeys = null
+} = {}) {
+    const { clean: cleanBase64, mime: parsedMime } = cleanIncomingBase64(base64, mimeType);
+    if (!cleanBase64 || cleanBase64.length > MAX_EXTRACT_BASE64_CHARS || !/^[A-Za-z0-9+/]+={0,2}$/.test(cleanBase64)) {
+        return { ok: false, text: '', error: 'Invalid or oversized document payload.' };
+    }
+    const geminiApiKey = String(customKeys?.geminiKey || '').trim() || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '';
+    if (!geminiApiKey) {
+        return { ok: false, text: '', error: 'Gemini API key is not configured.' };
+    }
+    const effectiveMime = parsedMime || (cleanBase64.startsWith('JVBERi0') ? 'application/pdf' : mimeType) || 'application/pdf';
+    const configuredModel = String(process.env.GEMINI_VISION_MODEL || process.env.GEMINI_MODEL || '').trim();
+    const extractionPrompt = String(prompt || '').trim() || [
+        `Extract and transcribe ALL readable content from "${filename}" (${effectiveMime}) verbatim.`,
+        'Preserve document structure, headings, bullet points, slide/page markers, equations in LaTeX ($...$ / $$...$$), and render tables cleanly in Markdown table syntax.',
+        'Read scanned pages, images, handwriting, stamps, and labels inside the document thoroughly. Return only the extracted content.'
+    ].join(' ');
+    const failures = [];
+    const text = await callGeminiVision({
+        apiKey: geminiApiKey,
+        configuredModel,
+        systemPrompt: extractionPrompt,
+        mimeType: effectiveMime,
+        imageBase64: cleanBase64,
+        allowCompatibilityRetry: true,
+        failures
+    });
+    if (text && String(text).trim()) {
+        return { ok: true, text: String(text).trim(), provider: 'gemini', method: 'gemini_document_api' };
+    }
+    const failure = visionFailurePayload(true, failures);
+    return { ok: false, text: '', error: failure.response || 'Could not extract document via Gemini API.', code: failure.code };
+}
+
 async function callGroqVisionText({ apiKey, configuredModel, systemPrompt, mimeType, imageBase64, failures }) {
     const candidates = filterAvailableExtractModels('groq', [String(configuredModel || '').trim(), ...GROQ_VISION_MODEL_FALLBACKS]);
     const dataUrl = `data:${mimeType || 'image/jpeg'};base64,${imageBase64}`;
@@ -242,7 +281,9 @@ async function callGeminiVision({ apiKey, configuredModel = '', systemPrompt, mi
                     maxOutputTokens: 8192
                 };
                 if (apiVersion === 'v1beta') {
-                    genConfig.mediaResolution = 'MEDIA_RESOLUTION_HIGH';
+                    if (mimeType !== 'application/pdf') {
+                        genConfig.mediaResolution = 'MEDIA_RESOLUTION_HIGH';
+                    }
                     if (/gemini-(?:4|3\.|2\.5-(?:flash|pro))/i.test(model) && !/flash-lite/i.test(model)) {
                         genConfig.thinkingConfig = { thinkingBudget: 0 };
                     }

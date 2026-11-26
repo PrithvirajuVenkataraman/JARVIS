@@ -231,6 +231,8 @@ export function restorePendingAttachments(items = []) {
     }
 }
 
+const NATIVE_PDF_DIRECT_MAX_BYTES = 2_600_000;
+
 export async function ingestAllForMessage(attachments = [], userText = '') {
     const items = Array.isArray(attachments) ? attachments : [];
     if (!items.length) return null;
@@ -246,6 +248,8 @@ export async function ingestAllForMessage(attachments = [], userText = '') {
         tryAcquire();
     });
     const release = () => { semaphore.count--; };
+
+    let totalNativeMediaBytes = 0;
 
     const processOne = async (attachment) => {
         await acquire();
@@ -263,9 +267,6 @@ export async function ingestAllForMessage(attachments = [], userText = '') {
                         base64
                     };
                 }
-                // High-performance single-pass native vision:
-                // Multimodal LLM (Gemini 2.5 Flash / Groq Vision) receives the image base64 directly in a single pass.
-                // Bypasses 45s heavy OCR preprocessing and Tesseract fallback.
                 const result = {
                     ok: Boolean(base64),
                     text: '',
@@ -274,12 +275,38 @@ export async function ingestAllForMessage(attachments = [], userText = '') {
                 };
                 attachment.extractedText = '';
                 attachment.ocrMethod = 'single_pass_native_image';
-                return { attachment, isImg, imagePayload, result };
+                return { attachment, isImg, isPdfNative: false, imagePayload, result };
             }
+
+            // Direct native PDF pass-through: send PDF bytes straight to the Gemini API without client canvas/Tesseract
+            const rawFile = attachment?.file;
+            const rawPdfSize = Number(rawFile?.size || attachment?.size || 0);
+            if (isPdfFile(rawFile || attachment) && rawFile && rawPdfSize > 0 && rawPdfSize <= NATIVE_PDF_DIRECT_MAX_BYTES && (totalNativeMediaBytes + rawPdfSize) <= NATIVE_PDF_DIRECT_MAX_BYTES) {
+                totalNativeMediaBytes += rawPdfSize;
+                const pdfBase64 = await fileToBase64(rawFile).catch(() => '');
+                if (pdfBase64) {
+                    attachment.mimeType = 'application/pdf';
+                    imagePayload = {
+                        name: attachment.preparedName || attachment.name || 'document.pdf',
+                        mimeType: 'application/pdf',
+                        base64: pdfBase64
+                    };
+                    const result = {
+                        ok: true,
+                        text: '',
+                        method: 'single_pass_native_pdf',
+                        provider: 'native'
+                    };
+                    attachment.extractedText = '';
+                    attachment.ocrMethod = 'single_pass_native_pdf';
+                    return { attachment, isImg: false, isPdfNative: true, imagePayload, result };
+                }
+            }
+
             const result = await ingestAttachmentWithFallback(attachment, userText);
             attachment.extractedText = String(result.text || '').trim();
             attachment.ocrMethod = result.method || '';
-            return { attachment, isImg, imagePayload, result };
+            return { attachment, isImg, isPdfNative: false, imagePayload, result };
         } finally {
             release();
         }
@@ -295,27 +322,45 @@ export async function ingestAllForMessage(attachments = [], userText = '') {
 
     for (const outcome of settled) {
         if (outcome.status === 'rejected') continue;
-        const { attachment, isImg, imagePayload, result } = outcome.value;
+        const { attachment, isImg, isPdfNative, imagePayload, result } = outcome.value;
 
         if (imagePayload) {
             anyReadable = true;
             imagePayloads.push(imagePayload);
-            recordActiveSessionImage(imagePayload);
+            if (isImg) recordActiveSessionImage(imagePayload);
         }
+
+        if (Array.isArray(result?.images) && result.images.length > 0) {
+            for (const embeddedImg of result.images.slice(0, 4)) {
+                if (embeddedImg?.base64 && imagePayloads.length < 6) {
+                    imagePayloads.push(embeddedImg);
+                    anyReadable = true;
+                }
+            }
+        }
+
+        const hasResultImages = Array.isArray(result?.images) && result.images.length > 0;
+        const hasUsefulText = Boolean(result.text && (hasUsefulExtractedText(result.text) || (result.ok && String(result.text).trim().length >= 4)));
 
         methods.push({
             name: attachment.name,
             method: result.method || (isImg ? 'single_pass_native_image' : 'none'),
-            provider: result.provider || (isImg ? 'native' : 'none'),
-            ok: Boolean(result.ok || (isImg && imagePayload))
+            provider: result.provider || (isImg || isPdfNative ? 'native' : 'none'),
+            ok: Boolean(result.ok || ((isImg || isPdfNative) && imagePayload) || hasResultImages)
         });
         const header = `### ${attachment.name} (${attachment.mimeType || 'unknown'})`;
-        if (result.text && hasUsefulExtractedText(result.text)) {
+        if (hasUsefulText) {
             anyReadable = true;
             sections.push(`${header}\nExtraction: ${result.method}\n\n${clipText(result.text)}`);
+        } else if (isPdfNative && imagePayload) {
+            anyReadable = true;
+            sections.push(`[Attached Document: ${attachment.name}]`);
         } else if (isImg && imagePayload) {
             anyReadable = true;
             sections.push(`[Attached Image: ${attachment.name}]`);
+        } else if (hasResultImages) {
+            anyReadable = true;
+            sections.push(`[Attached Document Images: ${attachment.name}]`);
         } else {
             if (result?.message) extractionErrors.push(result.message);
             sections.push(`${header}\nExtraction failed or returned too little readable text. ${result.message || 'No readable text found.'}`);
@@ -343,7 +388,7 @@ export async function ingestAllForMessage(attachments = [], userText = '') {
                     'The user has attached image(s)/document(s).',
                     'Describe and answer directly about what is depicted, including text, diagrams, mathematical expressions, equations, or geometric figures.',
                     'For mathematical or quantitative problems: identify all given values and unknowns from the image; define each variable explicitly before using it; state the relevant formula or theorem; show every calculation step clearly on its own line; verify the answer by substituting back into the original equation; format equations using $...$ (inline) and $$...$$ (display); include appropriate units.',
-                    'Do not write meta-commentary about vision algorithms. Do not state that you cannot see the image. Answer directly from the visual evidence.'
+                    'Do not write meta-commentary about vision algorithms. Do not state that you cannot see the attachment. Answer directly from the evidence.'
                 ].join(' ')
             }
             : null,
@@ -354,7 +399,6 @@ export async function ingestAllForMessage(attachments = [], userText = '') {
         anyReadable
     };
 }
-
 async function rankAttachmentTextForQuery(query, text) {
     const source = String(text || '').trim();
     if (!source || source.length < 35000) return source;
@@ -387,40 +431,72 @@ function shouldRankAttachmentText(query) {
 
 export async function ingestAttachmentWithFallback(attachment, query = '') {
     const attempts = [];
+    const file = attachment?.file || attachment;
+    const isPlainText = Boolean(file && isTextLikeFile(file));
+    const isPdf = isPdfFile(file);
 
+    // 1. Plain text / code files: read locally first so DLP/credential checks run strictly on-device
+    if (isPlainText) {
+        const localText = await extractLocally(attachment, query).catch(error => {
+            if (error.name === 'AbortError') throw error;
+            return ({
+                ok: false,
+                blocked: isTextLikeFile(file || {}) || error.code === 'document_credentials',
+                text: '',
+                method: error.code || 'client',
+                provider: 'client',
+                message: String(error?.message || error),
+                attempts: [{ stage: 'client', ok: false, method: error.code || 'client_error', error: String(error?.message || error) }]
+            });
+        });
+        attempts.push(...(localText.attempts || []));
+        if (localText.blocked) return { ...localText, message: 'The text could not be read safely on this device. No server upload was attempted.' };
+        if (hasUsefulExtractedText(localText?.text) || (localText?.ok && String(localText.text || '').trim())) {
+            return { ...localText, ok: true, attempts };
+        }
+    }
+
+    // 2. API-first for Word (.docx/.doc), PPT (.pptx/.ppt), Excel, RTF, PDF, and any other document format
+    const rawSize = Number(file?.size || attachment?.size || 0);
+    if (!isPdf || rawSize <= NATIVE_PDF_DIRECT_MAX_BYTES) {
+        const server = await ingestOnServer(attachment, { text: '', method: 'api_first' }).catch(error => ({
+            ok: false,
+            text: '',
+            method: 'server',
+            provider: 'server',
+            message: String(error?.message || error),
+            attempts: [{ stage: 'server', ok: false, method: 'server_error', error: String(error?.message || error) }]
+        }));
+        attempts.push(...(server.attempts || []));
+        const hasServerImages = Array.isArray(server?.images) && server.images.length > 0;
+        const hasServerText = Boolean(server?.text && (hasUsefulExtractedText(server.text) || String(server.text).trim().length >= 10));
+        if ((hasServerText && !isMetadataOnlyExtract(server.text)) || hasServerImages) {
+            return { ...server, ok: true, attempts };
+        }
+    }
+
+    // 3. Local extraction fallback (for offline use or oversize > 2.6MB files)
     const localText = await extractLocally(attachment, query).catch(error => {
         if (error.name === 'AbortError') throw error;
         return ({
-        ok: false,
-        blocked: isTextLikeFile(attachment?.file || {}) || error.code === 'document_credentials',
-        fatalPdfError: error.code === 'pdf_encrypted' || error.code === 'pdf_corrupt',
-        text: '',
-        method: error.code || 'client',
-        provider: 'client',
-        message: String(error?.message || error),
-        attempts: [{ stage: 'client', ok: false, method: error.code || 'client_error', error: String(error?.message || error) }]
-    }); });
+            ok: false,
+            blocked: error.code === 'document_credentials',
+            fatalPdfError: error.code === 'pdf_encrypted' || error.code === 'pdf_corrupt',
+            text: '',
+            method: error.code || 'client',
+            provider: 'client',
+            message: String(error?.message || error),
+            attempts: [{ stage: 'client', ok: false, method: error.code || 'client_error', error: String(error?.message || error) }]
+        });
+    });
     attempts.push(...(localText.attempts || []));
     if (localText.blocked) return { ...localText, message: 'The text could not be read safely on this device. No server upload was attempted.' };
     if (localText.fatalPdfError) return { ...localText, ok: false, attempts };
-    if (isPdfFile(attachment?.file || attachment)) {
+    if (isPdf) {
         return await ingestPdfAttachmentWithVisuals(attachment, localText, attempts);
     }
     if (hasUsefulExtractedText(localText?.text)) {
         return { ...localText, ok: true, attempts };
-    }
-
-    const server = await ingestOnServer(attachment, localResultSafe(localText)).catch(error => ({
-        ok: false,
-        text: '',
-        method: 'server',
-        provider: 'server',
-        message: String(error?.message || error),
-        attempts: [{ stage: 'server', ok: false, method: 'server_error', error: String(error?.message || error) }]
-    }));
-    attempts.push(...(server.attempts || []));
-    if (hasUsefulExtractedText(server?.text) && !isMetadataOnlyExtract(server?.text)) {
-        return { ...server, ok: true, attempts };
     }
 
     if (isImageAttachment(attachment)) {
@@ -440,22 +516,6 @@ export async function ingestAttachmentWithFallback(attachment, query = '') {
         if (hasVisualText) {
             return { ...vision, ok: true, attempts };
         }
-    } else if (isPdfFile(attachment?.file || attachment)) {
-        const vision = await extractPdfViaVision(attachment).catch(error => ({
-            ok: false,
-            text: '',
-            method: 'pdf_vision_ocr',
-            provider: 'vision',
-            message: String(error?.message || error)
-        }));
-        attempts.push({
-            stage: vision?.method || 'pdf_vision_ocr',
-            ok: hasUsefulExtractedText(vision?.text),
-            method: vision?.method || 'pdf_vision_ocr'
-        });
-        if (hasUsefulExtractedText(vision?.text)) {
-            return { ...vision, ok: true, attempts };
-        }
     }
 
     return {
@@ -464,11 +524,10 @@ export async function ingestAttachmentWithFallback(attachment, query = '') {
         partial: false,
         method: 'none',
         provider: 'none',
-        message: server?.message || localText?.message || `Could not extract readable content from ${attachment.name}.`,
+        message: localText?.message || `Could not extract readable content from ${attachment?.name || 'file'}.`,
         attempts
     };
 }
-
 async function ingestPdfAttachmentWithVisuals(attachment, localText, attempts) {
     // Fast-path: If the PDF already has a readable digital text layer (resumes, documents, reports),
     // return it in milliseconds without running 60+ seconds of heavy visual OCR.
@@ -647,10 +706,13 @@ async function ingestOnServer(attachment, localResult = {}) {
             attempts: [{ stage: 'server', ok: false, method: 'server_skipped_large_file', error: 'Encoded request exceeds transfer budget' }]
         };
     }
-    const data = await postJson('/api/ingest-attachment', serverPayload, { timeoutMs: 8000 });
+    const data = await postJson('/api/ingest-attachment', serverPayload, { timeoutMs: 35000 });
+    const hasImages = Array.isArray(data?.images) && data.images.length > 0;
+    const hasText = hasUsefulExtractedText(data?.text) || (Boolean(data?.ok || data?.success) && String(data?.text || '').trim().length >= 10);
     return {
-        ok: Boolean(data?.ok || data?.success) && hasUsefulExtractedText(data?.text),
+        ok: Boolean(data?.ok || data?.success) && (hasText || hasImages),
         text: String(data?.text || ''),
+        images: hasImages ? data.images : undefined,
         partial: data?.partial === true,
         method: String(data?.method || 'server'),
         provider: String(data?.provider || 'server'),
@@ -658,7 +720,6 @@ async function ingestOnServer(attachment, localResult = {}) {
         attempts: Array.isArray(data?.attempts) ? data.attempts : []
     };
 }
-
 async function ingestViaVision(attachment) {
     const base64 = await resolveAttachmentBase64(attachment);
     const mimeType = normalizeImageMime(attachment.mimeType, attachment.name, base64);

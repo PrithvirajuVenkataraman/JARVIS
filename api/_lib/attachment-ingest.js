@@ -1,7 +1,8 @@
-import { extractTextFromImage } from './vision-extract.js';
+import { extractTextFromImage, extractDocumentWithGemini } from './vision-extract.js';
 
 const MAX_EXTRACT_CHARS = 500000;
-const TEXT_EXTENSIONS = /\.(txt|md|markdown|json|jsonl|csv|tsv|xml|html|htm|css|js|mjs|cjs|ts|tsx|jsx|py|java|cpp|c|h|cs|go|rs|rb|php|sh|yaml|yml|toml|ini|log|sql|rtf)$/i;
+const TEXT_EXTENSIONS = /\.(txt|md|markdown|json|jsonl|csv|tsv|xml|html|htm|css|js|mjs|cjs|ts|tsx|jsx|py|java|cpp|c|h|hpp|cs|go|rs|rb|php|sh|bash|zsh|ps1|yaml|yml|toml|ini|cfg|conf|env|log|sql|tex|bib|svg)$/i;
+const BINARY_EXTENSIONS = /\.(pdf|docx?|pptx?|xlsx?|xlsm|ods|odt|odp|rtf|epub|zip|gz|tar|rar|7z|png|jpe?g|pjpeg|gif|webp|bmp|dib|tiff?|heic|heif|heics|heifs|avif|avifs|dng|raw|cr[23]|nef|nrw|arw|srf|sr2|raf|rw2|orf|pef|jp2|j2k|jpf|jpx|jpm|pict?|pct|pic|psd|ico|cur|mp3|mp4|wav|webm|ogg|mov|avi|exe|dll|so|wasm|bin)$/i;
 const IMAGE_MIMES = new Set([
     'image/jpeg', 'image/jpg', 'image/pjpeg', 'image/png', 'image/x-png', 'image/x-apple-ios-png',
     'image/webp', 'image/gif',
@@ -88,6 +89,7 @@ export async function ingestAttachmentPayload(payload = {}) {
         });
     }
 
+    // 1. Plain text, code, markup, CSV, JSON, UTF-16, or printable text files
     const utf8Text = tryUtf8Extract(buffer, mimeType, filename);
     attempts.push({ stage: 'utf8_decode', ok: Boolean(utf8Text), method: 'utf8_decode' });
     if (utf8Text) {
@@ -102,7 +104,33 @@ export async function ingestAttachmentPayload(payload = {}) {
         });
     }
 
+    // 2. PDF: Use Gemini native PDF reader first (reads scanned PDFs, compressed streams, tables & math in one API call)
     if (isPdf(mimeType, filename)) {
+        const geminiPdf = await extractDocumentWithGemini({
+            mimeType: 'application/pdf',
+            base64,
+            filename,
+            customKeys: payload.customKeys
+        }).catch(error => ({ ok: false, text: '', error: String(error?.message || error) }));
+        const geminiUseful = Boolean(geminiPdf?.ok && hasUsefulServerText(geminiPdf.text));
+        attempts.push({
+            stage: 'pdf_gemini_api',
+            ok: geminiUseful,
+            method: geminiPdf?.method || 'gemini_document_api',
+            error: geminiPdf?.error || ''
+        });
+        if (geminiUseful) {
+            return buildResult({
+                ok: true,
+                text: clipText(geminiPdf.text),
+                method: 'gemini_pdf_api',
+                provider: 'gemini',
+                filename,
+                mimeType: 'application/pdf',
+                attempts
+            });
+        }
+
         const pdfText = extractPdfTextBasic(buffer);
         const useful = hasUsefulServerText(pdfText);
         attempts.push({ stage: 'pdf_text_layer', ok: useful, method: 'pdf_text_layer' });
@@ -119,15 +147,22 @@ export async function ingestAttachmentPayload(payload = {}) {
         }
     }
 
+    // 3. Word (.docx): Extract text across body, headers, footers, footnotes, math (<m:t>), plus embedded media images
     if (isDocx(mimeType, filename)) {
-        const docxText = await extractDocxText(buffer).catch(() => '');
-        attempts.push({ stage: 'docx_xml', ok: Boolean(docxText), method: 'docx_xml' });
-        if (docxText) {
+        const { text: docxText, images: embeddedImages } = await extractDocxContent(buffer).catch(() => ({ text: '', images: [] }));
+        const imageOcrBlocks = (!hasUsefulServerText(docxText) || (embeddedImages.length > 0 && docxText.length < 400))
+            ? await ocrEmbeddedImages(embeddedImages, filename, payload.customKeys)
+            : [];
+        const combinedDocx = [docxText, ...imageOcrBlocks].filter(Boolean).join('\n\n').trim();
+        const okDocx = hasUsefulServerText(combinedDocx) || Boolean(combinedDocx.length >= 4) || embeddedImages.length > 0;
+        attempts.push({ stage: 'docx_xml_and_media', ok: okDocx, method: 'docx_xml_and_media' });
+        if (okDocx) {
             return buildResult({
                 ok: true,
-                text: clipText(docxText),
-                method: 'docx_xml',
-                provider: 'server',
+                text: clipText(combinedDocx || `[Word document contains ${embeddedImages.length} embedded image(s)]`),
+                images: embeddedImages.length ? embeddedImages : undefined,
+                method: embeddedImages.length && imageOcrBlocks.length ? 'docx_xml_and_ocr' : 'docx_xml',
+                provider: imageOcrBlocks.length ? 'vision' : 'server',
                 filename,
                 mimeType,
                 attempts
@@ -135,14 +170,38 @@ export async function ingestAttachmentPayload(payload = {}) {
         }
     }
 
+    // 4. PowerPoint (.pptx): Extract slides, speaker notes, diagrams, plus embedded slide images
     if (isPptx(mimeType, filename)) {
-        const pptxText = await extractPptxText(buffer).catch(() => '');
-        attempts.push({ stage: 'pptx_xml', ok: Boolean(pptxText), method: 'pptx_xml' });
-        if (pptxText) {
+        const { text: pptxText, images: embeddedImages } = await extractPptxContent(buffer).catch(() => ({ text: '', images: [] }));
+        const imageOcrBlocks = (!hasUsefulServerText(pptxText) || (embeddedImages.length > 0 && pptxText.length < 400))
+            ? await ocrEmbeddedImages(embeddedImages, filename, payload.customKeys)
+            : [];
+        const combinedPptx = [pptxText, ...imageOcrBlocks].filter(Boolean).join('\n\n').trim();
+        const okPptx = hasUsefulServerText(combinedPptx) || Boolean(combinedPptx.length >= 4) || embeddedImages.length > 0;
+        attempts.push({ stage: 'pptx_xml_and_media', ok: okPptx, method: 'pptx_xml_and_media' });
+        if (okPptx) {
             return buildResult({
                 ok: true,
-                text: clipText(pptxText),
-                method: 'pptx_xml',
+                text: clipText(combinedPptx || `[Presentation contains ${embeddedImages.length} slide image(s)]`),
+                images: embeddedImages.length ? embeddedImages : undefined,
+                method: embeddedImages.length && imageOcrBlocks.length ? 'pptx_xml_and_ocr' : 'pptx_xml',
+                provider: imageOcrBlocks.length ? 'vision' : 'server',
+                filename,
+                mimeType,
+                attempts
+            });
+        }
+    }
+
+    // 5. Excel / Spreadsheets (.xlsx, .xlsm, .ods)
+    if (isXlsxOrOds(mimeType, filename)) {
+        const sheetText = await extractSpreadsheetText(buffer, mimeType, filename).catch(() => '');
+        attempts.push({ stage: 'spreadsheet_xml', ok: Boolean(sheetText), method: 'spreadsheet_xml' });
+        if (sheetText) {
+            return buildResult({
+                ok: true,
+                text: clipText(sheetText),
+                method: 'spreadsheet_xml',
                 provider: 'server',
                 filename,
                 mimeType,
@@ -151,6 +210,81 @@ export async function ingestAttachmentPayload(payload = {}) {
         }
     }
 
+    // 6. Rich Text Format (.rtf)
+    if (isRtf(mimeType, filename)) {
+        const rtfText = extractRtfText(buffer);
+        attempts.push({ stage: 'rtf_decode', ok: Boolean(rtfText), method: 'rtf_decode' });
+        if (rtfText) {
+            return buildResult({
+                ok: true,
+                text: clipText(rtfText),
+                method: 'rtf_decode',
+                provider: 'server',
+                filename,
+                mimeType,
+                attempts
+            });
+        }
+    }
+
+    // 7. OpenDocument (.odt, .odp) & Legacy binary Word / PowerPoint (.doc, .ppt)
+    if (isOdtOrOdp(mimeType, filename)) {
+        const odfText = await extractOdfText(buffer).catch(() => '');
+        attempts.push({ stage: 'odf_xml', ok: Boolean(odfText), method: 'odf_xml' });
+        if (odfText) {
+            return buildResult({
+                ok: true,
+                text: clipText(odfText),
+                method: 'odf_xml',
+                provider: 'server',
+                filename,
+                mimeType,
+                attempts
+            });
+        }
+    }
+
+    if (isLegacyDocOrPpt(mimeType, filename)) {
+        const legacyText = extractLegacyBinaryDocText(buffer);
+        const embeddedImages = extractEmbeddedImagesFromBinary(buffer, filename);
+        const imageOcrBlocks = embeddedImages.length && (!legacyText || legacyText.length < 300)
+            ? await ocrEmbeddedImages(embeddedImages, filename, payload.customKeys)
+            : [];
+        const combinedLegacy = [legacyText, ...imageOcrBlocks].filter(Boolean).join('\n\n').trim();
+        const okLegacy = Boolean(combinedLegacy && (hasUsefulServerText(combinedLegacy) || combinedLegacy.length >= 20)) || embeddedImages.length > 0;
+        attempts.push({ stage: 'legacy_binary_extract', ok: okLegacy, method: 'legacy_binary_extract' });
+        if (okLegacy) {
+            return buildResult({
+                ok: true,
+                text: clipText(combinedLegacy || `[Document contains ${embeddedImages.length} embedded image(s)]`),
+                images: embeddedImages.length ? embeddedImages : undefined,
+                method: imageOcrBlocks.length ? 'legacy_binary_and_ocr' : 'legacy_binary',
+                provider: imageOcrBlocks.length ? 'vision' : 'server',
+                filename,
+                mimeType,
+                attempts
+            });
+        }
+    }
+
+    // 8. EPUB & ZIP Archives
+    if (isEpub(mimeType, filename)) {
+        const epubText = await extractEpubTextServer(buffer).catch(() => '');
+        attempts.push({ stage: 'epub_xml', ok: Boolean(epubText), method: 'epub_xml' });
+        if (epubText) {
+            return buildResult({ ok: true, text: clipText(epubText), method: 'epub_xml', provider: 'server', filename, mimeType, attempts });
+        }
+    }
+
+    if (isZip(mimeType, filename)) {
+        const zipText = await extractZipTextServer(buffer, filename).catch(() => '');
+        attempts.push({ stage: 'zip_extract', ok: Boolean(zipText), method: 'zip_extract' });
+        if (zipText) {
+            return buildResult({ ok: true, text: clipText(zipText), method: 'zip_extract', provider: 'server', filename, mimeType, attempts });
+        }
+    }
+
+    // 9. Image files (direct Vision OCR)
     if (isImage(mimeType, filename)) {
         const visionMime = normalizeImageMime(mimeType, filename, base64);
         const vision = await extractTextFromImage({
@@ -202,6 +336,7 @@ function buildResult(fields) {
         success: Boolean(fields.ok),
         ok: Boolean(fields.ok),
         text: String(fields.text || ''),
+        images: Array.isArray(fields.images) && fields.images.length ? fields.images : undefined,
         method: String(fields.method || 'none'),
         provider: String(fields.provider || 'none'),
         filename: String(fields.filename || 'attachment'),
@@ -234,20 +369,44 @@ function hasUsefulServerText(text) {
         return false;
     }
     if (isMathematicalOrFormulaContent(value)) return true;
-    if (value.length < 40) return false;
-    const letters = (value.match(/[A-Za-z\u00C0-\u024F]/g) || []).length;
-    return letters >= 24;
+    if (value.length < 20) return false;
+    const lettersOrDigits = (value.match(/[A-Za-z0-9\u00C0-\u024F]/g) || []).length;
+    return lettersOrDigits >= 12;
 }
 
 function tryUtf8Extract(buffer, mimeType, filename) {
-    if (TEXT_EXTENSIONS.test(filename) || /^text\//i.test(mimeType) || ['application/json', 'application/xml', 'application/javascript'].includes(mimeType)) {
-        const text = buffer.toString('utf8');
-        if (!text.trim()) return '';
-        const replacementRatio = (text.match(/\uFFFD/g) || []).length / Math.max(text.length, 1);
-        if (replacementRatio > 0.02) return '';
-        return text;
+    if (buffer.length >= 2) {
+        if (buffer[0] === 0xFF && buffer[1] === 0xFE) {
+            const txt = buffer.subarray(2).toString('utf16le').replace(/\u0000/g, '').trim();
+            if (txt) return txt;
+        }
+        if (buffer[0] === 0xFE && buffer[1] === 0xFF) {
+            const swapped = Buffer.from(buffer.subarray(2));
+            for (let i = 0; i + 1 < swapped.length; i += 2) {
+                const b = swapped[i];
+                swapped[i] = swapped[i + 1];
+                swapped[i + 1] = b;
+            }
+            const txt = swapped.toString('utf16le').replace(/\u0000/g, '').trim();
+            if (txt) return txt;
+        }
     }
-    return '';
+
+    const isKnownText = TEXT_EXTENSIONS.test(filename) ||
+        /^text\//i.test(mimeType) ||
+        ['application/json', 'application/xml', 'application/javascript'].includes(mimeType);
+    if (!isKnownText) {
+        if (BINARY_EXTENSIONS.test(filename)) return '';
+        const sample = buffer.subarray(0, Math.min(buffer.length, 4096)).toString('utf8');
+        if (!sample.trim()) return '';
+        const badChars = (sample.match(/[\uFFFD\x00-\x08\x0B\x0C\x0E-\x1F]/g) || []).length;
+        if (badChars / Math.max(sample.length, 1) > 0.02) return '';
+    }
+    const text = buffer.toString('utf8');
+    if (!text.trim()) return '';
+    const replacementRatio = (text.match(/\uFFFD/g) || []).length / Math.max(text.length, 1);
+    if (replacementRatio > 0.02) return '';
+    return text;
 }
 
 function isPdf(mimeType, filename) {
@@ -258,8 +417,36 @@ function isDocx(mimeType, filename) {
     return mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || /\.docx$/i.test(filename);
 }
 
+function isLegacyDocOrPpt(mimeType, filename) {
+    return mimeType === 'application/msword' ||
+        mimeType === 'application/vnd.ms-powerpoint' ||
+        /\.(?:doc|ppt)$/i.test(filename);
+}
+
 function isPptx(mimeType, filename) {
     return mimeType === 'application/vnd.openxmlformats-officedocument.presentationml.presentation' || /\.pptx$/i.test(filename);
+}
+
+function isXlsxOrOds(mimeType, filename) {
+    return /\.(?:xlsx?|xlsm|ods)$/i.test(filename) ||
+        mimeType.includes('spreadsheet') ||
+        mimeType.includes('ms-excel');
+}
+
+function isRtf(mimeType, filename) {
+    return /\.rtf$/i.test(filename) || mimeType === 'application/rtf' || mimeType === 'text/rtf';
+}
+
+function isOdtOrOdp(mimeType, filename) {
+    return /\.(?:odt|odp)$/i.test(filename) || mimeType.includes('opendocument.text') || mimeType.includes('opendocument.presentation');
+}
+
+function isEpub(mimeType, filename) {
+    return /\.epub$/i.test(filename) || mimeType === 'application/epub+zip';
+}
+
+function isZip(mimeType, filename) {
+    return /\.zip$/i.test(filename) || mimeType === 'application/zip' || mimeType === 'application/x-zip-compressed';
 }
 
 function isImage(mimeType, filename) {
@@ -289,7 +476,12 @@ function guessMimeFromName(filename) {
     const lower = String(filename || '').toLowerCase();
     if (lower.endsWith('.pdf')) return 'application/pdf';
     if (lower.endsWith('.docx')) return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    if (lower.endsWith('.doc')) return 'application/msword';
     if (lower.endsWith('.pptx')) return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+    if (lower.endsWith('.ppt')) return 'application/vnd.ms-powerpoint';
+    if (/\.(xlsx|xlsm)$/.test(lower)) return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    if (lower.endsWith('.xls')) return 'application/vnd.ms-excel';
+    if (lower.endsWith('.rtf')) return 'application/rtf';
     if (lower.endsWith('.json')) return 'application/json';
     if (/\.(jpe?g|pjpeg)$/.test(lower)) return 'image/jpeg';
     if (lower.endsWith('.png')) return 'image/png';
@@ -305,7 +497,7 @@ function guessMimeFromName(filename) {
     if (lower.endsWith('.psd')) return 'image/vnd.adobe.photoshop';
     if (/\.(ico|cur)$/.test(lower)) return 'image/x-icon';
     if (/\.svgz?$/.test(lower)) return 'image/svg+xml';
-    if (/\.(txt|md|csv|xml|html|js|ts|py)$/.test(lower)) return 'text/plain';
+    if (/\.(txt|md|csv|tsv|xml|html|js|ts|py)$/.test(lower)) return 'text/plain';
     return 'application/octet-stream';
 }
 
@@ -329,31 +521,307 @@ function extractPdfTextBasic(buffer) {
     return text.length >= 20 ? text : '';
 }
 
+function extractWordXmlParagraphs(xml = '') {
+    const paragraphs = String(xml || '').split(/<\/w:p>|<w:br[^>]*\/>/i);
+    const lines = [];
+    for (const p of paragraphs) {
+        const pieces = Array.from(p.matchAll(/<(?:w:t|m:t)(?:\s[^>]*)?>([\s\S]*?)<\/(?:w:t|m:t)>/gi))
+            .map(match => decodeXmlEntities(match[1] || ''))
+            .filter(Boolean);
+        const line = pieces.join('').replace(/[ \t]+/g, ' ').trim();
+        if (line) lines.push(line);
+    }
+    return lines.join('\n').trim();
+}
+
 async function extractDocxText(buffer) {
-    const entry = await readZipEntry(buffer, 'word/document.xml');
-    if (!entry) return '';
-    const xml = entry.toString('utf8');
-    const pieces = Array.from(xml.matchAll(/<w:t[^>]*>([\s\S]*?)<\/w:t>/g))
-        .map(match => decodeXmlEntities(match[1] || ''))
-        .filter(Boolean);
-    return pieces.join(' ').replace(/\s+/g, ' ').trim();
+    const { text } = await extractDocxContent(buffer);
+    return text;
+}
+
+async function extractDocxContent(buffer) {
+    const xmlEntries = await listNamedZipEntries(buffer, /^word\/(?:document|header\d*|footer\d*|footnotes|endnotes|comments)\.xml$/i);
+    const priority = (name) => name === 'word/document.xml' ? 0 : (/header/i.test(name) ? 1 : (/footer/i.test(name) ? 3 : 2));
+    xmlEntries.sort((a, b) => priority(a.name) - priority(b.name) || a.name.localeCompare(b.name));
+
+    const parts = [];
+    for (const entry of xmlEntries) {
+        const extracted = extractWordXmlParagraphs(entry.data.toString('utf8'));
+        if (extracted) parts.push(extracted);
+    }
+
+    const mediaEntries = await listNamedZipEntries(buffer, /^word\/media\/.+\.(?:png|jpe?g|webp|gif)$/i);
+    const images = collectSupportedEmbeddedImages(mediaEntries, 'word_image');
+    return {
+        text: parts.join('\n\n').trim(),
+        images
+    };
 }
 
 async function extractPptxText(buffer) {
-    const slides = await listZipEntries(buffer, /^ppt\/slides\/slide\d+\.xml$/i);
+    const { text } = await extractPptxContent(buffer);
+    return text;
+}
+
+async function extractPptxContent(buffer) {
+    const slides = await listNamedZipEntries(buffer, /^ppt\/slides\/slide\d+\.xml$/i);
+    const notes = await listNamedZipEntries(buffer, /^ppt\/notesSlides\/notesSlide\d+\.xml$/i);
+    const diagrams = await listNamedZipEntries(buffer, /^ppt\/diagrams\/data\d+\.xml$/i);
+
+    const sortByNum = (list, re) => [...list].sort((a, b) => {
+        const na = Number((a.name.match(re) || [])[1] || 0);
+        const nb = Number((b.name.match(re) || [])[1] || 0);
+        return na - nb;
+    });
+
     const parts = [];
-    for (const slide of slides.slice(0, 30)) {
-        const xml = slide.toString('utf8');
-        const pieces = Array.from(xml.matchAll(/<a:t[^>]*>([\s\S]*?)<\/a:t>/g))
-            .map(match => decodeXmlEntities(match[1] || ''))
-            .filter(Boolean);
-        const text = pieces.join(' ').replace(/\s+/g, ' ').trim();
-        if (text) parts.push(text);
+    for (const slide of sortByNum(slides, /slide(\d+)/i).slice(0, 50)) {
+        const num = (slide.name.match(/slide(\d+)/i) || [])[1] || '';
+        const xml = slide.data.toString('utf8');
+        const paragraphs = xml.split(/<\/a:p>/i).map(p =>
+            Array.from(p.matchAll(/<a:t[^>]*>([\s\S]*?)<\/a:t>/gi))
+                .map(m => decodeXmlEntities(m[1] || ''))
+                .filter(Boolean)
+                .join('')
+                .replace(/\s+/g, ' ')
+                .trim()
+        ).filter(Boolean);
+        if (paragraphs.length) {
+            parts.push(`Slide ${num}:\n${paragraphs.join('\n')}`);
+        }
+    }
+
+    for (const note of sortByNum(notes, /notesSlide(\d+)/i).slice(0, 50)) {
+        const num = (note.name.match(/notesSlide(\d+)/i) || [])[1] || '';
+        const text = Array.from(note.data.toString('utf8').matchAll(/<a:t[^>]*>([\s\S]*?)<\/a:t>/gi))
+            .map(m => decodeXmlEntities(m[1] || ''))
+            .filter(Boolean)
+            .join(' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+        if (text && !/^\d+$/.test(text)) parts.push(`Slide ${num} Notes:\n${text}`);
+    }
+
+    for (const diag of diagrams.slice(0, 15)) {
+        const text = Array.from(diag.data.toString('utf8').matchAll(/<a:t[^>]*>([\s\S]*?)<\/a:t>/gi))
+            .map(m => decodeXmlEntities(m[1] || ''))
+            .filter(Boolean)
+            .join(' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+        if (text) parts.push(`Diagram:\n${text}`);
+    }
+
+    const mediaEntries = await listNamedZipEntries(buffer, /^ppt\/media\/.+\.(?:png|jpe?g|webp|gif)$/i);
+    const images = collectSupportedEmbeddedImages(mediaEntries, 'slide_image');
+    return {
+        text: parts.join('\n\n').trim(),
+        images
+    };
+}
+
+function collectSupportedEmbeddedImages(entries = [], prefix = 'embedded') {
+    const out = [];
+    let totalBytes = 0;
+    for (const item of entries.slice(0, 6)) {
+        if (!item?.data?.length) continue;
+        if (item.data.length > 900 * 1024 || totalBytes + item.data.length > 2 * 1024 * 1024) continue;
+        const lower = String(item.name || '').toLowerCase();
+        const mimeType = lower.endsWith('.png')
+            ? 'image/png'
+            : (lower.endsWith('.webp') ? 'image/webp' : (lower.endsWith('.gif') ? 'image/gif' : 'image/jpeg'));
+        totalBytes += item.data.length;
+        out.push({
+            name: item.name.split('/').pop() || `${prefix}_${out.length + 1}`,
+            mimeType,
+            base64: Buffer.from(item.data).toString('base64')
+        });
+    }
+    return out;
+}
+
+async function ocrEmbeddedImages(images = [], parentName = 'document', customKeys = null) {
+    if (!images.length) return [];
+    const results = [];
+    for (let i = 0; i < images.length && i < 4; i++) {
+        const img = images[i];
+        try {
+            const res = await extractTextFromImage({
+                mimeType: img.mimeType,
+                imageBase64: img.base64,
+                prompt: `Extract all readable text, headings, equations, and labels from embedded image ${i + 1} inside "${parentName}".`,
+                customKeys
+            });
+            if (res?.ok && res.text && hasUsefulServerText(res.text)) {
+                results.push(`[Embedded Image ${i + 1} OCR]\n${String(res.text).trim()}`);
+            }
+        } catch (_) {
+            // Retain image in result.images so downstream multimodal chat sees it directly
+        }
+    }
+    return results;
+}
+
+async function extractSpreadsheetText(buffer, mimeType, filename) {
+    if (/\.ods$/i.test(filename) || mimeType.includes('opendocument')) {
+        return await extractOdfText(buffer);
+    }
+    const sharedEntry = await readZipEntry(buffer, 'xl/sharedStrings.xml');
+    const sharedStrings = [];
+    if (sharedEntry) {
+        const sXml = sharedEntry.toString('utf8');
+        for (const si of sXml.matchAll(/<si\b[^>]*>([\s\S]*?)<\/si>/gi)) {
+            const val = Array.from(si[1].matchAll(/<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/gi))
+                .map(m => decodeXmlEntities(m[1] || ''))
+                .join('');
+            sharedStrings.push(val);
+        }
+    }
+    const sheets = await listNamedZipEntries(buffer, /^xl\/worksheets\/sheet\d+\.xml$/i);
+    sheets.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+    const parts = [];
+    for (const sheet of sheets.slice(0, 15)) {
+        const sXml = sheet.data.toString('utf8');
+        const rows = [];
+        for (const rowMatch of sXml.matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/gi)) {
+            const cells = [];
+            for (const cMatch of rowMatch[1].matchAll(/<c\b([^>]*)>([\s\S]*?)<\/c>/gi)) {
+                const attrs = cMatch[1] || '';
+                const body = cMatch[2] || '';
+                const typeMatch = attrs.match(/\bt="([^"]+)"/i);
+                const cellType = typeMatch?.[1] || '';
+                let val = '';
+                if (cellType === 'inlineStr') {
+                    val = Array.from(body.matchAll(/<t[^>]*>([\s\S]*?)<\/t>/gi)).map(m => decodeXmlEntities(m[1] || '')).join('');
+                } else {
+                    const vMatch = body.match(/<v[^>]*>([\s\S]*?)<\/v>/i);
+                    const rawVal = vMatch ? decodeXmlEntities(vMatch[1] || '') : '';
+                    val = cellType === 's' ? (sharedStrings[Number(rawVal)] ?? rawVal) : rawVal;
+                }
+                cells.push(String(val || '').replace(/\|/g, '\\|').trim());
+            }
+            if (cells.some(Boolean)) rows.push(cells);
+            if (rows.length >= 250) break;
+        }
+        if (!rows.length) continue;
+        const header = rows[0];
+        const md = [
+            '| ' + header.join(' | ') + ' |',
+            '| ' + header.map(() => '---').join(' | ') + ' |',
+            ...rows.slice(1).map(r => '| ' + header.map((_, idx) => r[idx] || '').join(' | ') + ' |')
+        ].join('\n');
+        parts.push(`### Sheet ${sheet.name.split('/').pop()}\n\n${md}`);
+    }
+    return parts.join('\n\n---\n\n').trim();
+}
+
+function extractRtfText(buffer) {
+    const rtf = buffer.toString('latin1');
+    if (!rtf.includes('{\\rtf')) return '';
+    return rtf
+        .replace(/\{\\\*(?:\\[a-z]+[^}]*|[^}])*\}/gi, ' ')
+        .replace(/\{\\(?:fonttbl|colortbl|stylesheet|info|pict|object|header|footer)[^}]*(?:\{[^}]*\}[^}]*)*\}/gi, ' ')
+        .replace(/\\'([0-9a-f]{2})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+        .replace(/\\u(-?\d+)\??/g, (_, code) => {
+            const n = Number(code);
+            return String.fromCharCode(n < 0 ? n + 65536 : n);
+        })
+        .replace(/\\(?:par|line)\b/gi, '\n')
+        .replace(/\\tab\b/gi, '\t')
+        .replace(/\\[a-z]+-?\d*\s?/gi, '')
+        .replace(/[{}]/g, '')
+        .replace(/[ \t]+\n/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+}
+
+async function extractOdfText(buffer) {
+    const content = await readZipEntry(buffer, 'content.xml');
+    if (!content) return '';
+    const xml = content.toString('utf8');
+    return xml
+        .replace(/<text:line-break[^>]*\/>/gi, '\n')
+        .replace(/<\/(?:text:p|text:h|table:table-row)>/gi, '\n')
+        .replace(/<\/table:table-cell>/gi, ' | ')
+        .replace(/<[^>]+>/g, '')
+        .replace(/[ \t]+/g, ' ')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+}
+
+function extractLegacyBinaryDocText(buffer) {
+    const chunks = [];
+    const utf16 = buffer.toString('utf16le');
+    for (const m of utf16.matchAll(/[\u0020-\u007E\u00A0-\u024F\r\n\t]{12,}/g)) {
+        const s = String(m[0] || '').trim();
+        if (/[A-Za-z]{3,}/.test(s) && !/^Root Entry|WordDocument|PowerPoint Document|SummaryInformation/i.test(s)) {
+            chunks.push(s);
+        }
+    }
+    const ascii = buffer.toString('latin1');
+    for (const m of ascii.matchAll(/[A-Za-z0-9 ,.;:!?'"()\[\]\-\/+=%]{20,}/g)) {
+        const s = String(m[0] || '').trim();
+        if (/[A-Za-z]{3,}/.test(s) && !/^Root Entry|WordDocument|PowerPoint Document|Times New Roman|Calibri|Arial|Microsoft/i.test(s)) {
+            chunks.push(s);
+        }
+    }
+    return Array.from(new Set(chunks)).join('\n').slice(0, MAX_EXTRACT_CHARS).trim();
+}
+
+function extractEmbeddedImagesFromBinary(buffer, prefix = 'legacy') {
+    const out = [];
+    const buf = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
+    const pngSig = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+    const pngEnd = Buffer.from('IEND');
+    let idx = 0;
+    while (out.length < 3 && idx < buf.length) {
+        const start = buf.indexOf(pngSig, idx);
+        if (start < 0) break;
+        const iendPos = buf.indexOf(pngEnd, start + 8);
+        if (iendPos < 0 || iendPos + 8 - start > 900 * 1024) break;
+        const slice = buf.subarray(start, iendPos + 8);
+        out.push({ name: `${prefix}_${out.length + 1}.png`, mimeType: 'image/png', base64: slice.toString('base64') });
+        idx = iendPos + 8;
+    }
+    return out;
+}
+
+async function extractEpubTextServer(buffer) {
+    const htmlEntries = await listNamedZipEntries(buffer, /\.(?:xhtml|html|htm)$/i);
+    const parts = [];
+    for (const entry of htmlEntries.slice(0, 40)) {
+        const stripped = entry.data.toString('utf8')
+            .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+            .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+            .replace(/<\/(?:p|div|h[1-6]|li|tr|br)>/gi, '\n')
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/[ \t]+/g, ' ')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
+        if (stripped) parts.push(decodeXmlEntities(stripped));
     }
     return parts.join('\n\n').trim();
 }
 
+async function extractZipTextServer(buffer, filename) {
+    const entries = await listNamedZipEntries(buffer, /./);
+    const manifest = entries.slice(0, 100).map(e => `- ${e.name} (${e.data.length} bytes)`).join('\n');
+    const parts = [`## ZIP Contents: ${filename}\n\n${manifest}`];
+    for (const entry of entries) {
+        if (TEXT_EXTENSIONS.test(entry.name) && entry.data.length > 0 && entry.data.length <= 200 * 1024) {
+            const text = entry.data.toString('utf8').trim();
+            if (text) parts.push(`### File: ${entry.name}\n\n${text.slice(0, 20000)}`);
+        }
+        if (parts.length >= 12) break;
+    }
+    return parts.join('\n\n---\n\n').trim();
+}
+
 async function listZipEntries(buffer, namePattern) {
+    return (await listNamedZipEntries(buffer, namePattern)).map(item => item.data);
+}
+
+async function listNamedZipEntries(buffer, namePattern) {
     const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
     const eocdOffset = findEndOfCentralDirectory(buffer);
     if (eocdOffset < 0) return [];
@@ -389,8 +857,7 @@ async function listZipEntries(buffer, namePattern) {
             const na = Number((a.name.match(/slide(\d+)/i) || [])[1] || 0);
             const nb = Number((b.name.match(/slide(\d+)/i) || [])[1] || 0);
             return na - nb;
-        })
-        .map(item => item.data);
+        });
 }
 
 async function readZipEntry(buffer, targetName) {
@@ -404,7 +871,6 @@ async function readZipEntry(buffer, targetName) {
         if (view.getUint32(offset, true) !== 0x02014b50) break;
         const compression = view.getUint16(offset + 10, true);
         const compressedSize = view.getUint32(offset + 20, true);
-        const uncompressedSize = view.getUint32(offset + 24, true);
         const nameLength = view.getUint16(offset + 28, true);
         const extraLength = view.getUint16(offset + 30, true);
         const commentLength = view.getUint16(offset + 32, true);
@@ -453,7 +919,10 @@ export const __test = {
     tryUtf8Extract,
     guessMimeFromName,
     isImage,
-    isPdf,
-    isDocx,
-    isPptx
+    extractDocxText,
+    extractPptxText,
+    extractRtfText,
+    extractSpreadsheetText,
+    extractLegacyBinaryDocText,
+    listZipEntries
 };

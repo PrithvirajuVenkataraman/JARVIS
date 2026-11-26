@@ -5566,6 +5566,9 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
                 if (direct && Array.isArray(direct)) {
                     return direct;
                 }
+                if (requestOptions?.skipSessionImages === true || requestOptions?.grounding?.kind === 'attachment') {
+                    return undefined;
+                }
                 const activeSession = window.JarvisAttachments?.getActiveSessionImages?.();
                 return (Array.isArray(activeSession) && activeSession.length > 0) ? activeSession : undefined;
             })(),
@@ -5573,7 +5576,11 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
             displayUserMessage: String(requestOptions?.displayUserMessage || '').trim() || undefined
         };
         requestPayload = await window.JarvisApi.prepareRequestPayload(requestPayload, { signal: controller.signal });
-        for (const image of requestPayload.images || []) window.JarvisAttachments?.recordActiveSessionImage?.(image);
+        for (const image of requestPayload.images || []) {
+            if (/^image\//i.test(String(image?.mimeType || ''))) {
+                window.JarvisAttachments?.recordActiveSessionImage?.(image);
+            }
+        }
         latencyTrace.apiStartedAt = performance.now();
         logLatencyTrace('chat_api_start', {
             requestId: latencyTrace.requestId,
@@ -15177,16 +15184,21 @@ async function sendTextInput(submission = {}) {
                             }
                         }
 
-                        const nonImageDocText = (attachmentContext.combinedText && !attachmentContext.combinedText.startsWith('[Attached Image:'))
+                        const hasMediaPayloads = Array.isArray(attachmentContext?.grounding?.images) && attachmentContext.grounding.images.length > 0;
+                        const hasOnlyPdfMedia = hasMediaPayloads && attachmentContext.grounding.images.every(item => String(item?.mimeType || '').toLowerCase() === 'application/pdf');
+
+                        const nonImageDocText = (attachmentContext.combinedText && !/^\[Attached (?:Image|Document):/.test(attachmentContext.combinedText))
                             ? String(attachmentContext.combinedText).slice(0, 180000)
                             : '';
 
-                        const attachmentPrompt = hasImageAttachments
+                        const attachmentPrompt = hasMediaPayloads
                             ? [
                                 attachmentRequest,
                                 '',
-                                'An image is attached to this request. Inspect the visible pixels directly and answer the user\'s request based on visual evidence.',
-                                webSearchContext ? `\nUse both the image content and the verified web sources below to answer accurately in clean, natural prose.\n${webSearchContext}` : '',
+                                hasOnlyPdfMedia
+                                    ? 'A PDF document is attached directly to this request. Read all pages, text, tables, formulas, and visual figures directly from the attached document and answer the user\'s request thoroughly.'
+                                    : 'An image or visual document is attached to this request. Inspect the visible content directly and answer the user\'s request based on what is shown.',
+                                webSearchContext ? `\nUse both the attachment content and the verified web sources below to answer accurately in clean, natural prose.\n${webSearchContext}` : '',
                                 nonImageDocText ? `\n${nonImageDocText}` : ''
                             ].filter(Boolean).join('\n')
                             : [
@@ -15198,18 +15210,19 @@ async function sendTextInput(submission = {}) {
                                 '',
                                 String(attachmentContext.combinedText || '').slice(0, 180000)
                             ].filter(Boolean).join('\n');
-                        if (hasImageAttachments) showThinkingIndicator('Analyzing image...');
+                        if (hasMediaPayloads) showThinkingIndicator(hasOnlyPdfMedia ? 'Reading document...' : 'Analyzing image...');
                         window.JarvisInteractionState?.transition?.('THINKING', {
                             requestId: sendTrace.requestId,
                             turnId: turn.id,
-                            metadata: { task: hasImageAttachments ? 'image_analysis' : 'document_analysis' }
+                            metadata: { task: hasMediaPayloads && !hasOnlyPdfMedia ? 'image_analysis' : 'document_analysis' }
                         });
                         let result = await askGeminiAI(attachmentPrompt, {
                             intent: 'selection_custom',
                             grounding: attachmentContext.grounding,
-                            images: hasImageAttachments ? attachmentContext.grounding.images : undefined,
+                            images: hasMediaPayloads ? attachmentContext.grounding.images : undefined,
+                            skipSessionImages: !hasMediaPayloads,
                             displayUserMessage: displayOutgoingText,
-                            timeoutMs: hasImageAttachments ? 60000 : 30000,
+                            timeoutMs: hasMediaPayloads ? 60000 : 35000,
                             stream: true
                         });
                         if (result?.aborted) return;

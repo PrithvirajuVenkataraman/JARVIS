@@ -81,7 +81,7 @@ export default async function handler(req, res) {
             customKeys
         });
         return res.status(200).json({
-            success: result.success || result.partial === true,
+            success: result.success || result.partial === true || (Array.isArray(result.images) && result.images.length > 0),
             ...result
         });
     } catch (error) {
