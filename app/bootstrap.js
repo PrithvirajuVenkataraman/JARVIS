@@ -28,7 +28,9 @@ const JarvisAttachments = lazyModule(() => import('./attachments.js'), {
     formatBytes,
     getPendingAttachments: () => [], hasPendingAttachments: () => false, clearPendingAttachments: () => {},
     getActiveSessionImages: () => [], clearActiveSessionImages: () => {}, takePendingForSend: () => [],
-    buildChatAttachmentMeta: () => [], renderAttachmentTray: () => {}, setAttachmentTrayReading: () => {}
+    buildChatAttachmentMeta: () => [], renderAttachmentTray: () => {}, setAttachmentTrayReading: () => {},
+    cancelAttachment: () => false, retryAttachment: () => null, clearDocumentCacheStorage: async () => {},
+    getDocumentStorageStats: async () => ({ count: 0, bytes: 0 })
 });
 import * as JarvisAgentWorkflows from './agent-workflows.js?v=2.4.1';
 import JarvisDataVerification from './data-tracking-verification.js?v=2.4.1';

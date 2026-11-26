@@ -32,10 +32,25 @@ function resolveClientIp(req) {
 
 function parseBodyBytes(req) {
     try {
+        if (Buffer.isBuffer(req?.rawBody)) return req.rawBody.byteLength;
+        if (Buffer.isBuffer(req?.body)) return req.body.byteLength;
+        const headerLen = Number(req?.headers?.['content-length'] || 0);
+        if (Number.isFinite(headerLen) && headerLen > 0) return headerLen;
         const body = req?.body ?? {};
         return Buffer.byteLength(JSON.stringify(body), 'utf8');
     } catch (_) {
         return 0;
+    }
+}
+
+export function isTrustedVercelBlobUrl(rawUrl) {
+    try {
+        const parsed = new URL(String(rawUrl || '').trim());
+        if (parsed.protocol !== 'https:' || parsed.username || parsed.password) return false;
+        const host = parsed.hostname.toLowerCase();
+        return host === 'blob.vercel-storage.com' || /^[a-z0-9-]+\.(?:public\.|private\.)?blob\.vercel-storage\.com$/.test(host);
+    } catch (_) {
+        return false;
     }
 }
 
@@ -213,8 +228,16 @@ export function applyApiSecurity(req, res, options = {}) {
     }
 
     const contentType = String(req?.headers?.['content-type'] || '').toLowerCase();
-    if (req.method === 'POST' && !contentType.includes('application/json')) {
-        sendSecurityError(res, 415, 'unsupported_media_type', 'Content-Type must be application/json.');
+    const isMultipart = contentType.includes('multipart/form-data');
+    if (req.method === 'POST' && !contentType.includes('application/json') && !(options.allowMultipart && isMultipart)) {
+        sendSecurityError(
+            res,
+            415,
+            'unsupported_media_type',
+            options.allowMultipart
+                ? 'Content-Type must be application/json or multipart/form-data.'
+                : 'Content-Type must be application/json.'
+        );
         return { handled: true };
     }
 
@@ -225,7 +248,7 @@ export function applyApiSecurity(req, res, options = {}) {
         return { handled: true };
     }
 
-    const skipAbusiveCheck = Boolean(options.skipAbusiveCheck);
+    const skipAbusiveCheck = Boolean(options.skipAbusiveCheck) || isMultipart || Buffer.isBuffer(req?.rawBody);
     if (!skipAbusiveCheck && looksLikeAbusivePayload(req?.body, options.base64Fields || [])) {
         sendSecurityError(res, 400, 'abusive_payload', 'Request payload was rejected.');
         return { handled: true };

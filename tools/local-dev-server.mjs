@@ -124,7 +124,9 @@ if (isDirectRun) {
 }
 
 async function handleApiRequest(nodeReq, nodeRes, requestUrl) {
-    const body = await readJsonBody(nodeReq);
+    const contentType = String(nodeReq.headers['content-type'] || '').toLowerCase();
+    const rawBody = await readRawBody(nodeReq);
+    const body = contentType.includes('multipart/form-data') ? {} : parseJsonBuffer(rawBody);
     const headers = Object.fromEntries(
         Object.entries(nodeReq.headers).map(([key, value]) => [key.toLowerCase(), Array.isArray(value) ? value.join(', ') : String(value || '')])
     );
@@ -133,6 +135,7 @@ async function handleApiRequest(nodeReq, nodeRes, requestUrl) {
         url: `${requestUrl.pathname}${requestUrl.search}`,
         headers,
         body,
+        rawBody,
         socket: nodeReq.socket,
         connection: nodeReq.connection,
         on: nodeReq.on.bind(nodeReq),
@@ -163,13 +166,18 @@ async function handleStaticRequest(nodeRes, pathname, directory = rootDir) {
     }
 }
 
-async function readJsonBody(req) {
-    if (!['POST', 'PUT', 'PATCH'].includes(String(req.method || '').toUpperCase())) return {};
+async function readRawBody(req) {
+    if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(String(req.method || '').toUpperCase())) return Buffer.alloc(0);
     const chunks = [];
     for await (const chunk of req) {
         chunks.push(Buffer.from(chunk));
     }
-    const raw = Buffer.concat(chunks).toString('utf8').trim();
+    return Buffer.concat(chunks);
+}
+
+function parseJsonBuffer(rawBuffer) {
+    if (!rawBuffer || !rawBuffer.byteLength) return {};
+    const raw = rawBuffer.toString('utf8').trim();
     if (!raw) return {};
     try {
         return JSON.parse(raw);

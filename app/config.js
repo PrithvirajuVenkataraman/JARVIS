@@ -14,6 +14,7 @@ export const APP_CONFIG = Object.freeze({
     currentFacts: '/api/current-facts',
     rankTexts: '/api/rank-texts',
     vision: '/api/vision',
+    ingestAttachment: '/api/ingest-attachment',
     diagnostics: '/api/diagnostics',
     verify: '/api/verify',
     serviceWorker: '/sw.js'
@@ -56,7 +57,10 @@ export const APP_CONFIG = Object.freeze({
     maxSavedSessions: 80,
     historyLimit: 50,
     memoryLimit: 3,
-    candidateLimit: 40
+    candidateLimit: 40,
+    directUploadMaxBytes: 4404019,
+    blobUploadMaxBytes: 104857600,
+    uploadConcurrency: 3
   }),
   storage: Object.freeze({
     dbName: 'jarvis_database_v1',

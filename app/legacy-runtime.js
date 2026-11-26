@@ -5538,7 +5538,8 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
                         (sessionImages.length > 0);
                     const isUnsupportedMedia = hasImages && (window.APP_CONFIG || APP_CONFIG)?.models?.find(m => m.id === selectedModel)?.supportsMedia === false;
                     const textLen = String(requestOptions?.grounding?.selectedText || requestOptions?.grounding?.sourceAnswer || '').length;
-                    const isHeavyDocument = textLen > 30000 && (selectedModel === 'auto' || !selectedModel);
+                    const docCount = Array.isArray(requestOptions?.grounding?.attachments) ? requestOptions.grounding.attachments.length : 0;
+                    const isHeavyDocument = (textLen > 18000 || docCount > 1) && (selectedModel === 'auto' || !selectedModel);
                     if (isUnsupportedMedia || isHeavyDocument) {
                         return undefined;
                     }
@@ -14047,6 +14048,10 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 showThinkingIndicator(msg);
             }
         });
+        window.addEventListener('jarvis-attachment-queue-updated', () => {
+            refreshComposerAttachmentTray();
+            toggleSendButton();
+        });
 
         function initComposerActionsMenu() {
             if (window.__composerActionsMenuInit) return;
@@ -15186,41 +15191,88 @@ async function sendTextInput(submission = {}) {
 
                         const hasMediaPayloads = Array.isArray(attachmentContext?.grounding?.images) && attachmentContext.grounding.images.length > 0;
                         const hasOnlyPdfMedia = hasMediaPayloads && attachmentContext.grounding.images.every(item => String(item?.mimeType || '').toLowerCase() === 'application/pdf');
+                        const docList = Array.isArray(attachmentContext?.docs) ? attachmentContext.docs : [];
+                        const activeModelSelection = typeof selectedModel === 'string' ? selectedModel : 'auto';
+                        const routePlan = window.JarvisAttachments?.selectLlmProviderRoute?.({
+                            docs: docList,
+                            images: attachmentContext?.grounding?.images || [],
+                            query: attachmentRequest,
+                            selectedModel: activeModelSelection
+                        }) || { provider: 'gemini' };
+                        const docBudget = window.JarvisAttachments?.buildDocumentGroundingBudget?.({
+                            query: attachmentRequest,
+                            docs: docList,
+                            provider: routePlan.provider,
+                            model: activeModelSelection === 'auto' ? '' : activeModelSelection,
+                            imageCount: attachmentContext?.grounding?.images?.length || 0
+                        }) || { coverage: 'full', text: attachmentContext.combinedText || '', batches: [] };
 
-                        const nonImageDocText = (attachmentContext.combinedText && !/^\[Attached (?:Image|Document):/.test(attachmentContext.combinedText))
-                            ? String(attachmentContext.combinedText).slice(0, 180000)
-                            : '';
+                        let finalGroundedText = docBudget.text || attachmentContext.combinedText || '';
 
-                        const attachmentPrompt = hasMediaPayloads
-                            ? [
-                                attachmentRequest,
-                                '',
-                                hasOnlyPdfMedia
-                                    ? 'A PDF document is attached directly to this request. Read all pages, text, tables, formulas, and visual figures directly from the attached document and answer the user\'s request thoroughly.'
-                                    : 'An image or visual document is attached to this request. Inspect the visible content directly and answer the user\'s request based on what is shown.',
-                                webSearchContext ? `\nUse both the attachment content and the verified web sources below to answer accurately in clean, natural prose.\n${webSearchContext}` : '',
-                                nonImageDocText ? `\n${nonImageDocText}` : ''
-                            ].filter(Boolean).join('\n')
-                            : [
-                                attachmentRequest,
-                                '',
-                                'The attached document text is already provided below. Analyze it now. Do not ask me to share, paste, or upload it again.',
-                                'GROUNDING RULE: Base all extracted data strictly on the provided document text. Do not hallucinate line items, amounts, or facts not present in the text.',
-                                webSearchContext ? `\nVerified external facts to compare/verify against:\n${webSearchContext}\nSynthesize external facts cleanly in natural prose without bracket citations.` : '',
-                                '',
-                                String(attachmentContext.combinedText || '').slice(0, 180000)
-                            ].filter(Boolean).join('\n');
+                        // Controlled map-reduce pass when massive multi-page documents exceed the routed context window on exhaustive prompts
+                        if (docBudget.coverage === 'map_reduce' && Array.isArray(docBudget.batches) && docBudget.batches.length > 1) {
+                            const maxMapBatches = Math.min(docBudget.batches.length, 6);
+                            const mapNotes = [];
+                            for (let bIdx = 0; bIdx < maxMapBatches; bIdx++) {
+                                const batch = docBudget.batches[bIdx];
+                                showThinkingIndicator(`Synthesizing section ${bIdx + 1} of ${maxMapBatches}...`);
+                                const mapRes = await askGeminiAI(
+                                    `Extract key facts, entities, numbers, and cite exact Page/Slide/Sheet references relevant to: ${attachmentRequest}`,
+                                    {
+                                        intent: 'selection_custom',
+                                        skipSessionImages: true,
+                                        skipLiveSearch: true,
+                                        grounding: {
+                                            kind: 'attachment',
+                                            selectedText: batch.text,
+                                            originalRequest: attachmentRequest,
+                                            customInstruction: 'Extract concise, faithful notes preserving Page/Slide/Sheet labels from this document segment.'
+                                        },
+                                        timeoutMs: 30000,
+                                        stream: false
+                                    }
+                                ).catch(() => null);
+                                const note = String(mapRes?.response || mapRes?.text || '').trim();
+                                if (note) mapNotes.push(`[Synthesized Segment ${bIdx + 1}/${maxMapBatches}]\n${note}`);
+                            }
+                            if (mapNotes.length) {
+                                finalGroundedText = mapNotes.join('\n\n---\n\n');
+                            }
+                        }
+
+                        // Pass query CLEANLY without duplicating the entire extracted text inside body.message!
+                        const cleanAttachmentQuery = webSearchContext
+                            ? `${attachmentRequest}\n\nVerified external facts to corroborate against:\n${webSearchContext}`
+                            : attachmentRequest;
+
+                        const deduplicatedGrounding = attachmentContext.grounding
+                            ? {
+                                ...attachmentContext.grounding,
+                                attachments: docList.map(d => ({
+                                    name: d.name,
+                                    mimeType: d.mimeType,
+                                    size: d.size,
+                                    pageCount: d.pageCount,
+                                    parser: d.parser
+                                })),
+                                selectedText: finalGroundedText,
+                                coverage: docBudget.coverage,
+                                originalRequest: attachmentRequest
+                            }
+                            : null;
+
                         if (hasMediaPayloads) showThinkingIndicator(hasOnlyPdfMedia ? 'Reading document...' : 'Analyzing image...');
                         window.JarvisInteractionState?.transition?.('THINKING', {
                             requestId: sendTrace.requestId,
                             turnId: turn.id,
                             metadata: { task: hasMediaPayloads && !hasOnlyPdfMedia ? 'image_analysis' : 'document_analysis' }
                         });
-                        let result = await askGeminiAI(attachmentPrompt, {
+                        let result = await askGeminiAI(cleanAttachmentQuery, {
                             intent: 'selection_custom',
-                            grounding: attachmentContext.grounding,
+                            grounding: deduplicatedGrounding,
                             images: hasMediaPayloads ? attachmentContext.grounding.images : undefined,
                             skipSessionImages: !hasMediaPayloads,
+                            routingMessage: attachmentRequest,
                             displayUserMessage: displayOutgoingText,
                             timeoutMs: hasMediaPayloads ? 60000 : 35000,
                             stream: true
@@ -15239,7 +15291,7 @@ async function sendTextInput(submission = {}) {
                         if (answerAsksForMissingAttachment(answer)) {
                             const hasValidImageData = hasImageAttachments && Array.isArray(attachmentContext?.grounding?.images) &&
                                 attachmentContext.grounding.images.some(img => typeof img?.base64 === 'string' && img.base64.trim().length > 50);
-                            const hasValidTextData = !hasImageAttachments && Boolean(String(attachmentContext?.combinedText || '').trim());
+                            const hasValidTextData = !hasImageAttachments && Boolean(String(finalGroundedText || '').trim());
                             const shouldRetry = hasValidImageData || hasValidTextData;
                             if (shouldRetry) {
                                 showThinkingIndicator(hasImageAttachments ? 'Analyzing the image directly...' : 'Re-reading the document...');
@@ -15248,32 +15300,21 @@ async function sendTextInput(submission = {}) {
                                     turnId: turn.id,
                                     metadata: { task: hasImageAttachments ? 'retry_image_analysis' : 'retry_document_analysis' }
                                 });
-                                const retryPrompt = hasImageAttachments
-                                    ? [
-                                        `Inspect the attached image to answer: ${attachmentRequest}`,
-                                        'The image data is attached directly to this multimodal request. Analyze what is visible in the image pixels and execute the user\'s task directly.'
-                                    ].join('\n')
-                                    : [
-                                        'Analyze the attached document now using only the content below.',
-                                        'Do not ask for the file, paste, upload, or text again.',
-                                        `User request: ${attachmentRequest}`,
-                                        '',
-                                        String(attachmentContext.combinedText || '').slice(0, 180000)
-                                    ].join('\n');
-                                result = await askGeminiAI(retryPrompt, {
+                                result = await askGeminiAI(attachmentRequest, {
                                     intent: 'selection_custom',
                                     grounding: hasImageAttachments
                                         ? {
-                                            ...attachmentContext.grounding,
+                                            ...deduplicatedGrounding,
                                             customInstruction: 'Inspect the attached image directly and answer the user question based on visible image evidence.'
                                         }
                                         : {
-                                            ...attachmentContext.grounding,
-                                            customInstruction: 'The document text is already present. Produce the analysis immediately. Never ask the user to provide the document. Ground all extracted data strictly on the visible text; if text is unreadable or absent, explicitly flag missing items rather than guessing.'
+                                            ...deduplicatedGrounding,
+                                            customInstruction: 'The document text is already present in this turn. Answer immediately and never ask the user to paste or upload the file again.'
                                         },
                                     images: hasImageAttachments ? attachmentContext.grounding.images : undefined,
+                                    routingMessage: attachmentRequest,
                                     displayUserMessage: displayOutgoingText,
-                                timeoutMs: 15000,
+                                    timeoutMs: 15000,
                                 stream: true
                                 });
                                 if (result?.aborted) return;

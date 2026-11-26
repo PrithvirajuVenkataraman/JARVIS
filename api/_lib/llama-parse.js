@@ -114,7 +114,7 @@ export async function parseDocumentWithLlamaParse({
     }
 
     const resolvedTier = resolveLlamaParseTier(tier);
-    const safeFilename = String(filename || 'document').replace(/[\/\\]/g, '_').trim() || 'document';
+    const safeFilename = String(filename || 'document').replace(/[/\\]/g, '_').trim() || 'document';
     const deadline = Date.now() + Math.max(5000, Math.min(Number(timeoutMs) || 25000, 45000));
 
     try {

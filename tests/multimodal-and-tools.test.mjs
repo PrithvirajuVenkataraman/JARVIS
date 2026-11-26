@@ -1374,17 +1374,15 @@ assert.ok(apiVisionCode.includes('image/heif'), 'Should accept HEIF images');
 assert.ok(apiVisionCode.includes('normalizeVisionMimeType'), 'Should normalize non-standard mime types to jpeg for AI providers');
 console.log('  [PASS] 2. API vision text extraction, HEIC/HEIF support, and mime normalization verified');
 
-// 3. Verify App Attachments Config & Logic
+// 3. Verify App Attachments Config & Unified Queue Architecture
 const attachmentsCode = fs.readFileSync(path.resolve('app/attachments.js'), 'utf8');
-assert.ok(attachmentsCode.includes('MAX_ATTACHMENTS = 12'), 'File cap should be raised to 12');
-assert.ok(attachmentsCode.includes('MAX_FILE_BYTES = 50') || attachmentsCode.includes('MAX_FILE_BYTES = 25'), 'File size limit should be 25MB or 50MB');
-assert.ok(attachmentsCode.includes('PDF_VISUAL_PAGE_LIMIT = 100') || attachmentsCode.includes('PDF_VISUAL_PAGE_LIMIT = 25') || attachmentsCode.includes('PDF_VISUAL_PAGE_LIMIT = 10'), 'PDF visual page limit should be 10, 25 or 100');
-assert.ok(attachmentsCode.includes('tesseract.min.js'), 'Should include lazy-loaded Tesseract.js fallback CDN');
+assert.ok(attachmentsCode.includes('DIRECT_UPLOAD_LIMIT_BYTES = 4404019'), 'Conservative ~4.2 MB direct upload threshold must be set');
+assert.ok(attachmentsCode.includes('BLOB_MAX_FILE_BYTES = 100 * 1024 * 1024'), 'Large file limit via Vercel Blob should be 100MB');
+assert.ok(attachmentsCode.includes('UPLOAD_CONCURRENCY = 3'), 'Controlled queue concurrency should be configured');
+assert.ok(attachmentsCode.includes("import('@vercel/blob/client')"), 'Should support direct @vercel/blob/client uploads for large files');
 assert.ok(attachmentsCode.includes('jarvis-attachment-progress'), 'Should dispatch attachment progress events');
-assert.ok(attachmentsCode.includes('scale: 2.0') || attachmentsCode.includes('scale = 2.0') || attachmentsCode.includes('2.0'), 'Should render PDF pages at 2.0x DPI scale');
 assert.ok(attachmentsCode.includes('extractedText'), 'Should store extractedText on attachment objects');
 assert.ok(attachmentsCode.includes('ocrMethod'), 'Should store ocrMethod on attachment objects');
-// Phase 1: new format support
 assert.ok(attachmentsCode.includes("import('read-excel-file/browser')"), 'Should lazy-load the locally bundled spreadsheet parser');
 assert.ok(attachmentsCode.includes('isXlsxFile'), 'Should include XLSX file detector');
 assert.ok(attachmentsCode.includes('isZipFile'), 'Should include ZIP file detector');
@@ -1393,8 +1391,8 @@ assert.ok(attachmentsCode.includes('extractXlsxTextClient'), 'Should include XLS
 assert.ok(attachmentsCode.includes('extractZipTextClient'), 'Should include ZIP text extractor');
 assert.ok(attachmentsCode.includes('extractEpubTextClient'), 'Should include EPUB text extractor');
 assert.ok(attachmentsCode.includes('Promise.allSettled'), 'Should parallelize attachment processing');
-assert.ok(attachmentsCode.includes('CONCURRENCY'), 'Should use concurrency semaphore for parallel processing');
-console.log('  [PASS] 3. Attachment processing: 12-file cap, 50MB limit, parallel processing, XLSX/ZIP/EPUB support verified');
+assert.ok(attachmentsCode.includes('UPLOAD_CONCURRENCY'), 'Should use controlled queue concurrency');
+console.log('  [PASS] 3. Unified Attachment Pipeline verified');
 
 // 4. Verify Index.html Camera Retirement & OCR Details UI
 const indexHtml = readAppSource();
