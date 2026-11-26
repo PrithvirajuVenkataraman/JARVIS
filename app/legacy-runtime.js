@@ -9423,12 +9423,21 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             feedback_down: (messageId, button) => handleAssistantNegativeFeedbackClick(messageId, button)
         };
 
+        function clearPointerActionButtonFocus(event, button) {
+            if (!button || typeof button.blur !== 'function') return;
+            const isKeyboardActivation = Boolean(event && event.detail === 0 && !event.pointerType);
+            if (!isKeyboardActivation) {
+                button.blur();
+            }
+        }
+
         function handleAssistantActionInline(event, messageId, action) {
             if (event?.__jarvisAssistantActionHandled) return false;
             if (event) event.__jarvisAssistantActionHandled = true;
             event?.preventDefault?.();
             event?.stopPropagation?.();
             const button = event?.currentTarget || event?.target?.closest?.('[data-assistant-action]');
+            clearPointerActionButtonFocus(event, button);
             void dispatchAssistantAction(messageId, action, button);
             return false;
         }
@@ -9699,6 +9708,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             event.__jarvisAssistantActionHandled = true;
             event.preventDefault();
             event.stopPropagation();
+            clearPointerActionButtonFocus(event, button);
             void dispatchAssistantAction(messageId, action, button);
         }
 
@@ -9879,7 +9889,10 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             speakNext();
         }
 
-        function toggleTtsSpeak(messageId) {
+        function toggleTtsSpeak(messageId, button = null) {
+            if (button && typeof document !== 'undefined' && document.activeElement === button) {
+                button.blur?.();
+            }
             if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
                 showTemporaryMessage('Text-to-speech is not supported in this browser.');
                 return;
@@ -13861,6 +13874,9 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
         }
 
         function toggleSpeakAssistantMessage(button, text) {
+            if (button && typeof document !== 'undefined' && document.activeElement === button) {
+                button.blur?.();
+            }
             if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
                 if (typeof showTemporaryMessage === 'function') showTemporaryMessage('Text-to-speech is not supported in this browser.');
                 return;

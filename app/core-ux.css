@@ -273,7 +273,11 @@ body :where(button, a, input, textarea, select):focus-visible { outline:2px soli
 .person-photo-credit { display:block; margin-top:3px; }
 body .assistant-model-badge { grid-column:1/-1; margin:0 0 4px; margin-inline-start:13px; padding:0; background:transparent; border:0; border-radius:0; color:var(--core-muted); font-size:12px; line-height:1.5; font-weight:400; white-space:normal; overflow-wrap:anywhere; }
 body .assistant-action-row { display:grid; grid-template-columns:repeat(8,44px); gap:0; width:max-content; max-width:100%; margin-inline-start:-13px; padding:4px 0 0; }
-body .assistant-action-icon { width:44px; height:44px; min-width:44px; min-height:44px; padding:0; }
+body .assistant-action-icon { width:44px; height:44px; min-width:44px; min-height:44px; padding:0; -webkit-tap-highlight-color:transparent; }
+body .assistant-action-icon:focus,
+body .assistant-action-icon:focus:not(:focus-visible),
+body .assistant-action-icon:active { outline:none; box-shadow:none; }
+body .assistant-action-icon:focus-visible { outline:1.5px solid rgba(255,255,255,0.28); outline-offset:-6px; border-radius:10px; }
 body .assistant-action-icon svg { width:18px; height:18px; }
 body .assistant-action-menu-wrap { width:44px; }
 body .composer-disclaimer { font-size:12px; line-height:1.5; color:var(--core-muted); }
