@@ -8,6 +8,31 @@
   },
   "headers": [
     {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "no-referrer"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "camera=(self), microphone=(self), geolocation=(self)"
+        },
+        {
+          "key": "Content-Security-Policy",
+          "value": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https:; media-src 'self' blob: data:; connect-src 'self' blob: https://aihorde.net https://cdn.jsdelivr.net https://tessdata.projectnaptha.com https://huggingface.co https://cas-bridge.xethub.hf.co https://cas-server.xethub.hf.co https://cdn-lfs.huggingface.co https://cdn-lfs-us-1.hf.co https://api.open-meteo.com https://air-quality-api.open-meteo.com https://geocoding-api.open-meteo.com https://nominatim.openstreetmap.org https://overpass-api.de https://ipapi.co https://ipwho.is https://freeipapi.com https://api.coingecko.com https://query1.finance.yahoo.com https://api.dictionaryapi.dev https://en.wikipedia.org; worker-src 'self' blob:; frame-src 'self' https://maps.google.com https://www.google.com https://www.openstreetmap.org; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+        }
+      ]
+    },
+    {
       "source": "/",
       "headers": [
         {
@@ -40,31 +65,6 @@
         {
           "key": "Cache-Control",
           "value": "public, max-age=31536000, immutable"
-        }
-      ]
-    },
-    {
-      "source": "/(.*)",
-      "headers": [
-        {
-          "key": "X-Content-Type-Options",
-          "value": "nosniff"
-        },
-        {
-          "key": "X-Frame-Options",
-          "value": "DENY"
-        },
-        {
-          "key": "Referrer-Policy",
-          "value": "no-referrer"
-        },
-        {
-          "key": "Permissions-Policy",
-          "value": "camera=(self), microphone=(self), geolocation=(self)"
-        },
-        {
-          "key": "Content-Security-Policy",
-          "value": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https:; media-src 'self' blob: data:; connect-src 'self' blob: https://aihorde.net https://cdn.jsdelivr.net https://huggingface.co https://cas-bridge.xethub.hf.co https://cas-server.xethub.hf.co https://cdn-lfs.huggingface.co https://cdn-lfs-us-1.hf.co https://api.open-meteo.com https://air-quality-api.open-meteo.com https://geocoding-api.open-meteo.com https://nominatim.openstreetmap.org https://overpass-api.de https://ipapi.co https://ipwho.is https://freeipapi.com https://api.coingecko.com https://query1.finance.yahoo.com https://api.dictionaryapi.dev https://en.wikipedia.org; worker-src 'self' blob:; frame-src 'self' https://maps.google.com https://www.google.com https://www.openstreetmap.org; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
         }
       ]
     },

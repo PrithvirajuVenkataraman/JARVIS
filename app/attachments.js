@@ -1923,7 +1923,7 @@ async function loadTesseractJs() {
 async function extractTextViaTesseract(imageSource, onProgress) {
     try {
         const Tesseract = await loadTesseractJs();
-        const worker = await Tesseract.createWorker('eng', 1, {
+        const worker = await Tesseract.createWorker('eng', 1, { workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js', corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5', langPath: 'https://tessdata.projectnaptha.com/4.0.0', workerBlobURL: true,
             logger: m => {
                 if (typeof onProgress === 'function' && m.status === 'recognizing text' && typeof m.progress === 'number') {
                     onProgress(Math.round(m.progress * 100));
