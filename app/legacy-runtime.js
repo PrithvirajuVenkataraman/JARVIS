@@ -14043,6 +14043,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
         }
 
         window.addEventListener('jarvis-attachment-progress', event => {
+            if (!isAssistantProcessing() || activeRequestControllers.size === 0) return;
             const msg = event?.detail?.message;
             if (msg) {
                 showThinkingIndicator(msg);
@@ -14959,15 +14960,8 @@ async function sendTextInput(submission = {}) {
                         /^image\//i.test(a.mimeType || '') ||
                         /\.(jpe?g|pjpeg|png|gif|webp|bmp|dib|tiff?|heic|heif|heics|heifs|avif|avifs|dng|raw|cr[23]|nef|nrw|arw|srf|sr2|raf|rw2|orf|pef|jp2|j2k|jpf|jpx|jpm|pict?|pct|pic|psd|ico|cur|svgz?)$/i.test(a.name || '')
                     );
-                    const initialBlinkerLabel = attachmentsForSend.length
-                        ? (hasImageFiles ? 'Reading image...' : 'Reading document...')
-                        : 'Thinking...';
-                    if (typeof showSynthesizingBlinker === 'function') {
-                        if (initialBlinkerLabel) {
-                            showSynthesizingBlinker(initialBlinkerLabel);
-                        } else {
-                            showSynthesizingBlinker();
-                        }
+                    if (!attachmentsForSend.length && typeof showSynthesizingBlinker === 'function') {
+                        showSynthesizingBlinker('Thinking...');
                     }
                     const chatContainer = document.getElementById('chat-container');
                     if (chatContainer) maybeAutoScroll(chatContainer, true);
@@ -14990,12 +14984,14 @@ async function sendTextInput(submission = {}) {
 
                     beginAssistantProcessing();
                     const hasAttachmentsForSend = attachmentsForSend && attachmentsForSend.length > 0;
-                    window.JarvisInteractionState?.transition?.(hasAttachmentsForSend ? 'THINKING' : 'ROUTING', {
-                        requestId: sendTrace.requestId,
-                        turnId: turn.id,
-                        metadata: hasAttachmentsForSend ? { task: 'attachments', count: attachmentsForSend.length } : {}
-                    });
-                    showThinkingIndicator(attachmentsForSend.length ? (hasImageFiles ? 'Reading image...' : 'Reading document...') : 'Thinking...');
+                    if (!hasAttachmentsForSend) {
+                        window.JarvisInteractionState?.transition?.('ROUTING', {
+                            requestId: sendTrace.requestId,
+                            turnId: turn.id,
+                            metadata: {}
+                        });
+                        showThinkingIndicator('Thinking...');
+                    }
                     if (attachmentsForSend.length) {
                         // ── Python script attachment path: silent Pyodide WASM execution ─
                         const hasRunnablePyScript = Boolean(
@@ -15071,7 +15067,7 @@ async function sendTextInput(submission = {}) {
                         }
                         // ── End data-file path ──────────────────────────────────────
 
-                        showThinkingIndicator(hasImageFiles ? 'Analyzing image...' : 'Reading attachments...');
+                        hideThinkingIndicator();
                         const tray = document.getElementById('composer-attachment-tray');
                         if (tray) {
                             tray.innerHTML = '';
@@ -15132,6 +15128,7 @@ async function sendTextInput(submission = {}) {
                         }
 
                         if (!attachmentContext?.anyReadable || !attachmentContext?.grounding) {
+                            hideThinkingIndicator();
                             addChatMessage(
                                 attachmentContext?.errorMessage || 'I could not read that file. For images, try a clearer photo or JPG/PNG. For documents, try a DOCX or TXT version.',
                                 false
@@ -15261,12 +15258,13 @@ async function sendTextInput(submission = {}) {
                             }
                             : null;
 
-                        if (hasMediaPayloads) showThinkingIndicator(hasOnlyPdfMedia ? 'Reading document...' : 'Analyzing image...');
                         window.JarvisInteractionState?.transition?.('THINKING', {
                             requestId: sendTrace.requestId,
                             turnId: turn.id,
                             metadata: { task: hasMediaPayloads && !hasOnlyPdfMedia ? 'image_analysis' : 'document_analysis' }
                         });
+                        if (typeof showSynthesizingBlinker === 'function') showSynthesizingBlinker('Thinking...');
+                        showThinkingIndicator('Thinking...');
                         let result = await askGeminiAI(cleanAttachmentQuery, {
                             intent: 'selection_custom',
                             grounding: deduplicatedGrounding,

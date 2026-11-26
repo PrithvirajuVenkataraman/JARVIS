@@ -757,7 +757,7 @@ export async function ingestAttachmentWithFallback(attachment, query = '') {
         });
     });
     attempts.push(...(server.attempts || []));
-    if (server?.code === 'blob_not_configured' || server?.code === 'request_too_large') {
+    if (server?.code === 'blob_not_configured' || server?.code === 'request_too_large' || server?.method === 'signature_rejected') {
         return { ...server, ok: false, attempts };
     }
     const hasServerImages = Array.isArray(server?.images) && server.images.length > 0;
@@ -766,9 +766,12 @@ export async function ingestAttachmentWithFallback(attachment, query = '') {
         return { ...server, ok: true, attempts };
     }
 
-    // 3. Offline / transient local parser fallback for non-PDF / digital PDF (zero canvas OCR loops, zero online Tesseract)
+    // Avoid redundant browser pdfjs worker work when server pdfjs-dist already inspected the PDF text layer
+    const serverAlreadyTriedPdf = isPdfFile(file) && Array.isArray(server?.attempts) && server.attempts.some(a => a?.stage === 'pdf_text_server');
+
+    // 3. Offline / transient local parser fallback (zero canvas OCR loops, zero online Tesseract)
     const isOffline = typeof navigator !== 'undefined' && navigator.onLine === false;
-    if (rawSize <= 20 * 1024 * 1024) {
+    if (!serverAlreadyTriedPdf && rawSize <= 20 * 1024 * 1024) {
         const localText = await extractLocally(attachment, query, { allowPdfVisionFallback: false }).catch(error => {
             if (error.name === 'AbortError') throw error;
             return ({
@@ -981,15 +984,38 @@ async function sleepWithAbort(ms, signal) {
     });
 }
 
+function readByokHeaders() {
+    const headers = {};
+    try {
+        if (typeof localStorage === 'undefined') return headers;
+        const groqKey = String(localStorage.getItem('jarvis_byok_groq_sealed') || '').trim();
+        const geminiKey = String(localStorage.getItem('jarvis_byok_gemini_sealed') || '').trim();
+        const llamaKey = String(localStorage.getItem('jarvis_byok_llamacloud_sealed') || '').trim();
+        if (groqKey) {
+            headers['x-groq-api-key'] = groqKey;
+            headers['x-byok-groq'] = groqKey;
+        }
+        if (geminiKey) {
+            headers['x-gemini-api-key'] = geminiKey;
+            headers['x-byok-gemini'] = geminiKey;
+        }
+        if (llamaKey) {
+            headers['x-llamacloud-api-key'] = llamaKey;
+        }
+    } catch (_) {}
+    return headers;
+}
+
 async function uploadMultipartFormData(attachment, formData, signal) {
     const MAX_ATTEMPTS = 3;
+    const byokHeaders = readByokHeaders();
     let attempt = 0;
     while (attempt < MAX_ATTEMPTS) {
         if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
         try {
             const response = await new Promise((resolve, reject) => {
                 if (typeof XMLHttpRequest !== 'function') {
-                    fetch('/api/ingest-attachment', { method: 'POST', body: formData, signal })
+                    fetch('/api/ingest-attachment', { method: 'POST', headers: byokHeaders, body: formData, signal })
                         .then(async res => resolve({ status: res.status, headers: res.headers, json: await res.json().catch(() => ({})) }))
                         .catch(reject);
                     return;
@@ -997,6 +1023,9 @@ async function uploadMultipartFormData(attachment, formData, signal) {
                 const xhr = new XMLHttpRequest();
                 attachment.xhr = xhr;
                 xhr.open('POST', '/api/ingest-attachment');
+                for (const [hdr, val] of Object.entries(byokHeaders)) {
+                    try { xhr.setRequestHeader(hdr, val); } catch (_) {}
+                }
                 xhr.timeout = 55000;
                 xhr.upload.onprogress = (ev) => {
                     if (ev.lengthComputable && ev.total > 0) {
@@ -1957,7 +1986,7 @@ async function extractPdfTextClient(file, attachment = null, options = {}) {
     const buffer = await file.arrayBuffer();
     let doc;
     try {
-        doc = await pdfjs.getDocument({ data: buffer }).promise;
+        doc = await pdfjs.getDocument({ data: buffer, verbosity: 0 }).promise;
     } catch (err) {
         const classified = classifyPdfError(err, file?.name || attachment?.name);
         if (classified) throw classified;
@@ -1966,8 +1995,6 @@ async function extractPdfTextClient(file, attachment = null, options = {}) {
     const parts = [];
     const pageCount = Math.min(doc.numPages || 0, PDF_DIGITAL_PAGE_LIMIT);
     const CHUNK_SIZE = 5;
-    let visionPagesAttempted = 0;
-    const ocrState = createPdfOcrState();
 
     for (let i = 1; i <= pageCount; i += CHUNK_SIZE) {
         const chunkEnd = Math.min(i + CHUNK_SIZE - 1, pageCount);
