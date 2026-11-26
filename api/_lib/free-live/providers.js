@@ -45,15 +45,70 @@ const WIKIPEDIA_SEARCH_URL = 'https://en.wikipedia.org/w/api.php';
 const WIKIPEDIA_SUMMARY_URL = 'https://en.wikipedia.org/api/rest_v1/page/summary';
 const NOMINATIM_SEARCH_URL = 'https://nominatim.openstreetmap.org/search';
 
-const CRYPTO_IDS = Object.freeze({
-    bitcoin: 'bitcoin',
-    btc: 'bitcoin',
-    ethereum: 'ethereum',
-    eth: 'ethereum',
-    solana: 'solana',
-    dogecoin: 'dogecoin',
-    doge: 'dogecoin'
-});
+const CRYPTO_CACHE = new Map();
+const COINGECKO_SEARCH_URL = 'https://api.coingecko.com/api/v3/search';
+
+const CRYPTO_STOPWORDS = new Set([
+    'what', 'whats', 'is', 'the', 'current', 'latest', 'live', 'today', 'now',
+    'price', 'value', 'worth', 'rate', 'rates', 'cost', 'market', 'cap', 'cap?',
+    'crypto', 'cryptocurrency', 'coin', 'token', 'usd', 'inr', 'eur', 'of', 'for',
+    'in', 'per', 'a', 'an', 'check', 'show', 'me', 'tell', 'give', 'how', 'much'
+]);
+
+function extractCryptoQueryTerm(query) {
+    const raw = String(query || '').trim();
+    const cleaned = raw
+        .replace(/[?!.,;:()[\]{}'"]/g, ' ')
+        .split(/\s+/)
+        .map(w => w.trim())
+        .filter(w => w && !CRYPTO_STOPWORDS.has(w.toLowerCase()));
+    return cleaned.slice(0, 3).join(' ').trim();
+}
+
+async function resolveDynamicCryptoAsset(query, options = {}) {
+    const candidate = extractCryptoQueryTerm(query);
+    if (!candidate) return null;
+    const cacheKey = candidate.toLowerCase();
+    const cached = CRYPTO_CACHE.get(cacheKey);
+    if (cached && Date.now() - cached.at < 30 * 60 * 1000) return cached.asset;
+
+    try {
+        const searchUrl = `${COINGECKO_SEARCH_URL}?query=${encodeURIComponent(candidate)}`;
+        const resp = await fetchWithTimeout(searchUrl, {
+            signal: options.signal,
+            headers: { Accept: 'application/json' }
+        }, Math.min(Number(options.timeoutMs) || 2500, 3000));
+        if (resp?.ok) {
+            const payload = await resp.json();
+            const coins = Array.isArray(payload?.coins) ? payload.coins : [];
+            const lower = candidate.toLowerCase();
+            const exact = coins.find(c =>
+                String(c?.symbol || '').toLowerCase() === lower ||
+                String(c?.id || '').toLowerCase() === lower ||
+                String(c?.name || '').toLowerCase() === lower
+            ) || coins[0];
+            if (exact?.id) {
+                const asset = {
+                    id: String(exact.id).toLowerCase(),
+                    symbol: String(exact.symbol || candidate).toUpperCase(),
+                    name: String(exact.name || exact.id)
+                };
+                if (CRYPTO_CACHE.size >= 200) CRYPTO_CACHE.delete(CRYPTO_CACHE.keys().next().value);
+                CRYPTO_CACHE.set(cacheKey, { asset, at: Date.now() });
+                return asset;
+            }
+        }
+    } catch (_) {
+        // Fall through to normalized candidate slug
+    }
+
+    const fallbackSlug = candidate.toLowerCase().replace(/\s+/g, '-');
+    return {
+        id: fallbackSlug,
+        symbol: candidate.toUpperCase().slice(0, 10),
+        name: formatCryptoName(fallbackSlug)
+    };
+}
 
 export function resolveDateFilter(options = {}, query = '') {
     if (options.dateFilter) {
@@ -1830,8 +1885,9 @@ export async function searchWeather(query, options = {}) {
 }
 
 export async function searchCrypto(query, options = {}) {
-    const id = extractCryptoId(query);
-    if (!id) return unsupportedFreeLive(query, 'crypto', 'Crypto price lookup needs a supported asset such as bitcoin, ethereum, solana, or dogecoin.');
+    const asset = await resolveDynamicCryptoAsset(query, options);
+    const id = asset?.id || '';
+    if (!id) return unsupportedFreeLive(query, 'crypto', 'Crypto price lookup needs an asset name or ticker symbol.');
     const source = FREE_LIVE_SOURCES.coingecko;
     const url = new URL(COINGECKO_SIMPLE_PRICE_URL);
     url.searchParams.set('ids', id);
@@ -1842,6 +1898,7 @@ export async function searchCrypto(query, options = {}) {
     let change = NaN;
     try {
         const response = await fetchWithTimeout(url.toString(), {
+            signal: options.signal,
             headers: { Accept: 'application/json' }
         }, source.timeoutMs);
         if (response.ok) {
@@ -1857,9 +1914,9 @@ export async function searchCrypto(query, options = {}) {
 
     if (!Number.isFinite(usd) && !Number.isFinite(inr)) {
         try {
-            const symbolMap = { bitcoin: 'BTC', btc: 'BTC', ethereum: 'ETH', eth: 'ETH', solana: 'SOL', dogecoin: 'DOGE', doge: 'DOGE' };
-            const sym = symbolMap[id] || id.toUpperCase();
-            const fallbackResp = await fetchWithTimeout(`https://api.coinbase.com/v2/prices/${sym}-USD/spot`, {
+            const sym = asset?.symbol || id.toUpperCase();
+            const fallbackResp = await fetchWithTimeout(`https://api.coinbase.com/v2/prices/${encodeURIComponent(sym)}-USD/spot`, {
+                signal: options.signal,
                 headers: { Accept: 'application/json' }
             }, source.timeoutMs);
             if (fallbackResp.ok) {
@@ -1873,7 +1930,7 @@ export async function searchCrypto(query, options = {}) {
 
     if (!Number.isFinite(usd) && !Number.isFinite(inr)) return emptyProvider('coingecko', 'CoinGecko public price lookup failed.');
     return oneResult({
-        title: `${formatCryptoName(id)} public price`,
+        title: `${asset?.name || formatCryptoName(id)} public price`,
         description: [
             Number.isFinite(usd) ? `USD ${usd}` : '',
             Number.isFinite(inr) ? `INR ${inr}` : '',
@@ -2193,17 +2250,13 @@ export function inferCategory(query) {
 }
 
 function extractLocation(query) {
-    const text = String(query || '').replace(/[?.!]+$/g, '').trim();
+    const text = String(query || '')
+        .replace(/[?.!]+$/g, '')
+        .replace(/\b(?:right\s+now|today|tonight|tomorrow|currently|this\s+(?:week|weekend|month)|forecast|weather|temperature)\b/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
     const match = text.match(/\b(?:in|at|for|near|around)\s+([a-zA-Z][a-zA-Z\s.,'-]{1,80})$/i);
     if (match?.[1]) return cleanQueryTarget(match[1]);
-    return '';
-}
-
-function extractCryptoId(query) {
-    const t = String(query || '').toLowerCase();
-    for (const [name, id] of Object.entries(CRYPTO_IDS)) {
-        if (new RegExp(`\\b${name}\\b`, 'i').test(t)) return id;
-    }
     return '';
 }
 
@@ -2293,7 +2346,8 @@ function clampInt(value, fallback, min, max) {
 export const __test = {
     cleanQueryTarget,
     extractQueryTargetMetadata,
-    extractCryptoId,
+    extractCryptoId: (q) => extractCryptoQueryTerm(q).toLowerCase().replace(/\s+/g, '-'),
+    resolveDynamicCryptoAsset,
     extractLocation,
     extractPlaceTopic,
     extractSportsLeague,

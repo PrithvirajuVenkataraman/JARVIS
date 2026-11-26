@@ -625,3 +625,108 @@ test('trivial greetings suppress Chain-of-Thought deltas while explanatory promp
         else process.env.GEMINI_API_KEY = savedGemini;
     }
 });
+
+test('hybrid live web search + normal LLM policy, N-turn persistence, and zero-hardcoding generalization', async () => {
+    const { isHybridLiveAndReasoningQuery } = await import('../api/_lib/factual-answer.js');
+    const { expandQueryDeterministically } = await import('../api/_lib/query-rewriter.js');
+    const { isConceptualSoftwareQuery } = await import('../api/_lib/research-retrieval.js');
+    const { __test: providerTest } = await import('../api/_lib/free-live/providers.js');
+    const { deriveEpistemicLedger, resolveContextualFollowUpQuery } = await import('../api/search.js');
+
+    // 1. Hybrid prompts run simultaneous live retrieval + LLM reasoning even under forced webMode
+    assert.equal(isHybridLiveAndReasoningQuery('Search the latest Python 3.13 release changes and write a migration checklist + starter code'), true);
+    assert.equal(isHybridLiveAndReasoningQuery('Check today weather in Tokyo and build a 3-day itinerary'), true);
+    assert.equal(isHybridLiveAndReasoningQuery('Compare React 19 vs Vue 3.5 and recommend the best fit for my dashboard', { webMode: 'force' }), true);
+    assert.equal(isHybridLiveAndReasoningQuery('/verify Who won the latest tournament?'), false);
+    assert.equal(isHybridLiveAndReasoningQuery('Fact check whether this quote is true'), false);
+
+    const hybridPolicy = answerEvidencePolicy({
+        message: 'Look up latest FastAPI 0.115 changes and refactor my router code',
+        webMode: 'force'
+    });
+    assert.equal(hybridPolicy.required, false);
+    assert.equal(hybridPolicy.mode, 'hybrid_grounded_llm');
+    assert.equal(hybridPolicy.hybrid, true);
+
+    // Ambiguous follow-ups under forced webMode stay web-grounded instead of silently turning web search off
+    assert.equal(answerEvidencePolicy({ message: 'What awards did she win?', webMode: 'force', referenceStatus: 'ambiguous' }).required, true);
+    assert.equal(answerEvidencePolicy({ message: 'What is the current RBI repo rate?', webMode: 'force' }).required, true);
+
+    // 2. Zero-hardcoding generalizers
+    const expanded = expandQueryDeterministically('Octopuses have three hearts.');
+    assert.ok(expanded.some(item => /do octopuses have three hearts/i.test(item.query)));
+    assert.equal(providerTest.extractLocation('weather in Tokyo today'), 'Tokyo');
+    assert.equal(providerTest.extractLocation('forecast for Bengaluru right now'), 'Bengaluru');
+    assert.equal(providerTest.extractCryptoId('current price of cardano'), 'cardano');
+    assert.equal(providerTest.extractCryptoId('check avalanche market cap'), 'avalanche');
+    assert.equal(isConceptualSoftwareQuery('FastAPI dependency injection documentation'), true);
+    assert.equal(isConceptualSoftwareQuery('latest FastAPI security advisory CVE-2025-1234'), false);
+
+    // 3. Domain-agnostic N-turn ledger across 6 turns without hardcoded topic templates
+    const turns = [
+        { role: 'user', text: 'Helios BioLabs CRISPR clinical trial results' },
+        { role: 'assistant', text: 'Helios BioLabs published Phase 2 results led by **Dr Mira Solis** in Geneva.' },
+        { role: 'user', text: 'What did she say about dosing efficacy?' },
+        { role: 'assistant', text: 'She reported a 42% improvement in response durability.' },
+        { role: 'user', text: 'When is Phase 3 scheduled?' },
+        { role: 'assistant', text: 'Phase 3 enrollment opens in Q4 2026.' }
+    ];
+    const ledger = deriveEpistemicLedger(turns);
+    assert.match(ledger.rootTopic, /Helios BioLabs/i);
+    assert.equal(ledger.turnCount, 3);
+    const followUp = resolveContextualFollowUpQuery('What about safety endpoints?', turns, ledger);
+    assert.match(followUp, /Helios BioLabs/i);
+    assert.match(followUp, /safety endpoints/i);
+    const ordinalBack = resolveContextualFollowUpQuery('Back to the 1st question pricing', turns, ledger);
+    assert.match(ordinalBack, /Helios BioLabs/i);
+
+    // 4. End-to-end /api/chat-groq hybrid streaming with preloaded live sources + ambiguous follow-up safety
+    const originalFetch = globalThis.fetch;
+    const savedGroq = process.env.GROQ_API_KEY;
+    const savedGemini = process.env.GEMINI_API_KEY;
+    process.env.GROQ_API_KEY = 'test-groq-hybrid';
+    delete process.env.GEMINI_API_KEY;
+    let capturedBody = null;
+    try {
+        globalThis.fetch = async (url, init) => {
+            if (String(url).includes('groq.com')) {
+                capturedBody = JSON.parse(init.body);
+                return new Response(
+                    'data: {"choices":[{"delta":{"content":"Using the latest release [1], here is your refactored code."},"finish_reason":"stop"}]}\n\n' +
+                    'data: [DONE]\n\n',
+                    { headers: { 'content-type': 'text/event-stream' } }
+                );
+            }
+            return Response.json({});
+        };
+        chatApi.resetModelAvailabilityCache();
+        const req = Object.assign(new EventEmitter(), {
+            method: 'POST',
+            headers: { host: 'localhost', 'content-type': 'application/json' },
+            socket: { remoteAddress: '127.0.0.1' },
+            body: {
+                message: 'Compare it and write a starter snippet',
+                stream: true,
+                webMode: 'force',
+                isWebForced: true,
+                hybridLiveGrounded: true,
+                contextReference: { status: 'ambiguous' },
+                context: [{ role: 'user', text: 'Helios SDK v2.4' }, { role: 'assistant', text: 'Helios SDK v2.4 added async streaming.' }],
+                sources: [{ id: 1, title: 'Helios SDK Release Notes', url: 'https://docs.example.test/helios', fullArticleText: 'Helios SDK v2.4 introduces createClient() async iterable streams.' }]
+            }
+        });
+        const res = response();
+        await handler(req, res);
+        const sseOutput = res.chunks.join('');
+        assert.match(sseOutput, /event: sources/);
+        assert.match(sseOutput, /docs\.example\.test\/helios/);
+        assert.match(sseOutput, /refactored code/);
+        assert.ok(capturedBody && JSON.stringify(capturedBody.messages).includes('createClient()'));
+    } finally {
+        globalThis.fetch = originalFetch;
+        if (savedGroq === undefined) delete process.env.GROQ_API_KEY;
+        else process.env.GROQ_API_KEY = savedGroq;
+        if (savedGemini === undefined) delete process.env.GEMINI_API_KEY;
+        else process.env.GEMINI_API_KEY = savedGemini;
+    }
+});

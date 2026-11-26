@@ -23,7 +23,11 @@ export function syncSearchState() {
     const active = window.getWebSearchMode?.() === 'force';
     shell?.classList.toggle('has-web-search', active);
     const button = document.getElementById('composer-web-search-active');
-    if (button) { button.hidden = !active; button.setAttribute('aria-pressed', String(active)); }
+    if (button) {
+        button.hidden = !active;
+        button.setAttribute('aria-pressed', String(active));
+        button.title = active ? 'Web search stays active across turns — click to complete and turn off' : '';
+    }
     const menuItem = document.getElementById('web-search-toggle-btn');
     menuItem?.setAttribute('aria-checked', String(active));
 }

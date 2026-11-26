@@ -274,8 +274,13 @@ export function buildResearchRequirements(query, _context = []) {
             }
         }
     }
-    if (/\btravel\b/i.test(q) && /\b(?:worldwide|world|every country|all countries|anywhere)\b/i.test(q)) {
-        add('qualification', 'Verify whether the evidence establishes unrestricted worldwide travel, including the limits of the stated passport exemption', { searchQuery: q.replace(/^.*?\b(?:travel|passport)\b/i, 'passport exemption international entry restrictions ') });
+    const hasUniversalScopeClaim = /\b(?:worldwide|every\s+country|all\s+countries|everywhere|anywhere|without\s+exception)\b/i.test(q)
+        || (/\b(?:in|on|around)\s+the\s+world\b/i.test(q) && /\b(?:can|may|allow\w*|permit\w*|exempt\w*|without)\b/i.test(q));
+    if (hasUniversalScopeClaim) {
+        const subjectTerms = researchTerms(q).slice(0, 6).join(' ') || q;
+        add('qualification', 'Whether unrestricted scope is limited by restrictions, permission, or requirements', {
+            searchQuery: `${subjectTerms} restrictions exceptions conditions`
+        });
     }
     return requirements;
 }
@@ -317,8 +322,9 @@ function valueFitsRequirement(value, quote, requirement, source = {}) {
     const quoteSupported = quoteContiguous || (requirement.type === 'explanation' && valueFitsExplanationEvidence(val, quote, source));
     if (!val || val.length > 1800 || !quoteSupported) return false;
     if (normalizedText(val) === normalizedText(requirement.query) || /^[\s\W]*$/.test(val)) return false;
-    const relevanceTarget = requirement.type === 'qualification' ? requirement.description : requirement.query;
-    const quoteRelevant = assessSourceRelevance(relevanceTarget, { title: source.title, snippet: quote, url: source.url, domain: source.domain }).relevant;
+    const relevanceTarget = requirement.type === 'qualification' ? `${requirement.query} ${requirement.description}` : requirement.query;
+    const quoteRelevant = assessSourceRelevance(relevanceTarget, { title: source.title, snippet: quote, url: source.url, domain: source.domain }).relevant
+        || (requirement.type === 'qualification' && researchTerms(requirement.query).some(t => researchTerms(`${source.title || ''} ${quote}`).includes(t)));
     const fullSourceRelevant = assessSourceRelevance(relevanceTarget, source).relevant;
     if (!quoteRelevant && !(requirement.type === 'explanation' && fullSourceRelevant && researchTerms(relevanceTarget).some(t => researchTerms(`${source.title || ''} ${quote}`).includes(t)))) return false;
     if (requirement.entities?.some(entity => !normalizedText(normalizeResearchAliases(quote)).includes(normalizedText(normalizeResearchAliases(entity))))) return false;
@@ -336,8 +342,10 @@ function valueFitsRequirement(value, quote, requirement, source = {}) {
     } else if (requirement.type === 'value') {
         if (!/\d|\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|hundred|thousand|million|billion|trillion)\b/i.test(val)) return false;
     } else if (requirement.type === 'qualification') {
-        if (!/\b(?:entry|enter|visa|permission|restrictions?|countries|every|all)\b/i.test(val)) return false;
-        if (!/\b(?:not|only|require|requires|required|subject|arrangements?|permission|restricted|restrictions?|exempt|exemption|every|all|any)\b/i.test(val)) return false;
+        if (!/\b(?:not|only|require|requires|required|subject|arrangements?|permission|restricted|restrictions?|exempt|exemption|exceptions?|except|limits?|limited|condition|conditions|unless|however|every|all|any)\b/i.test(val)) return false;
+        const queryTerms = researchTerms(requirement.query).slice(0, 8);
+        const words = new Set(researchTerms(`${source.title || ''} ${quote} ${val}`));
+        if (queryTerms.length && !queryTerms.some(t => words.has(t))) return false;
     } else if (requirement.type === 'comparison' && /\b(?:population|area|price|cost|speed|latency|GDP|life expectancy|literacy|tax|fees)\b/i.test(requirement.attribute || '')) {
         if (!/\d|\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|hundred|thousand|million|billion|trillion)\b/i.test(val)) return false;
     } else {

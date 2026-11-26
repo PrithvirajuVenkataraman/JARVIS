@@ -1170,24 +1170,26 @@ async function handler(req, res) {
                     preferences
                 });
             }
-            if (needsContextClarification) { preferences.webMode = 'off'; preferences.isWebForced = false; }
+            const hadForcedWebMode = req.body?.webMode === 'force' || req.body?.isWebForced === true || preferences?.webMode === 'force' || /^\/(?:search|live|web)\b/i.test(routingMessage);
+            if (needsContextClarification && !hadForcedWebMode) { preferences.webMode = 'off'; preferences.isWebForced = false; }
             const prefersStreamGeneration = req.body?.stream === true &&
                 !isAttachmentGrounding &&
+                !hadForcedWebMode &&
                 (
                     isStreamPreferredGenerationRequest(clientRoutingProbe) ||
                     isStreamPreferredGenerationRequest(effectiveMessage)
                 );
             const hasRequestImages = Array.isArray(images) && images.length > 0;
-            const routeDecision = (prefersStreamGeneration || (hasRequestImages && req.body?.webMode !== 'force' && req.body?.isWebForced !== true && !/^\/(?:search|live|web)\b/i.test(routingMessage)))
+            const routeDecision = (prefersStreamGeneration || (hasRequestImages && !hadForcedWebMode))
                 ? { strategy: 'direct', reason: hasRequestImages ? 'multimodal_vision_direct' : 'stream_preferred_generation', webEligible: false }
                 : classifyRoutingDecision(routingMessage, '', {
                     intent,
                     isInternalSummary,
                     isAttachmentGrounding
                 });
-            if (needsContextClarification) {
+            if (needsContextClarification && !hadForcedWebMode) {
                 routeDecision.webEligible = false; routeDecision.strategy = 'direct'; routeDecision.reason = 'context_clarification';
-            } else if (req.body?.webMode === 'force' || req.body?.isWebForced === true || /^\/(?:search|live|web)\b/i.test(routingMessage)) {
+            } else if (hadForcedWebMode) {
                 routeDecision.webEligible = true;
                 routeDecision.strategy = 'search';
                 routeDecision.reason = 'forced_by_user';
@@ -1196,7 +1198,21 @@ async function handler(req, res) {
                 routeDecision.strategy = 'direct';
                 routeDecision.reason = 'offline_forced_by_user';
             }
-            const evidencePolicy = answerEvidencePolicy({ message: routingMessage, intent, route: routeDecision, webMode: preferences.webMode, grounded: isAttachmentGrounding || Boolean(images?.length), internal: isInternalSummary, referenceStatus: reference?.status });
+            const hasPreloadedHybridEvidence = Boolean(req.body?.hybridLiveGrounded) || (Array.isArray(req.body?.sources) && req.body.sources.length > 0);
+            const evidencePolicy = answerEvidencePolicy({
+                message: routingMessage,
+                intent,
+                route: routeDecision,
+                webMode: preferences.webMode,
+                grounded: isAttachmentGrounding || Boolean(images?.length),
+                internal: isInternalSummary,
+                referenceStatus: reference?.status,
+                hybridLiveGrounded: hasPreloadedHybridEvidence
+            });
+            if (evidencePolicy.hybrid) {
+                routeDecision.webEligible = true;
+                if (req.body?.webMode !== 'off') routeDecision.strategy = 'search';
+            }
             if (evidencePolicy.required) {
                 const streaming = req.body?.stream === true;
                 if (streaming) {
@@ -1259,6 +1275,8 @@ async function handler(req, res) {
                     selectedModel: preferences?.selectedModel || null,
                     sources: Array.isArray(req.body?.sources) ? req.body.sources : (Array.isArray(grounding?.sources) ? grounding.sources : null),
                     ragText: typeof req.body?.ragText === 'string' ? req.body.ragText : null,
+                    hybridLiveGrounded: Boolean(req.body?.hybridLiveGrounded || evidencePolicy?.hybrid),
+                    liveSourcesEmpty: Boolean(req.body?.liveSourcesEmpty),
                     isContinuation: Boolean(request.value.isContinuation),
                     continuationPreviousText: request.value.continuationPreviousText || '',
                     customGroqKey,
@@ -2009,6 +2027,11 @@ async function handler(req, res) {
                 ragText: options.ragText || options.sources.map((s, idx) => `[${s.id || idx + 1}] ${s.title || ''}: ${s.fullArticleText || s.extract || s.snippet || s.text || s.description || ''} (${s.url || ''})`).join('\n\n')
             };
             writeSse(res, 'sources', { sources: liveRag.sources });
+        } else if (options?.liveSourcesEmpty) {
+            liveRag = {
+                sources: [],
+                ragText: '[HYBRID LIVE SEARCH NOTICE: Live web retrieval returned 0 verified external sources for this query. Explicitly state which live/recent facts cannot be verified from retrieved sources—never invent unverified stats, dates, prices, or URLs—while completing any code, math, planning, analysis, or creative tasks requested.]'
+            };
         } else if (requiresLiveRetrievalBeforeStream) {
             const searchStartedAt = Date.now();
             writeSse(res, 'status', { state: 'SEARCHING', label: 'Searching...' });

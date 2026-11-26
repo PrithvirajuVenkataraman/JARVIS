@@ -29,35 +29,19 @@ export function matchesComparisonAttribute(query, source) {
     return attributes.some(attribute => (COMPARISON_ATTRIBUTE_ALIASES[attribute] || [attribute]).some(alias => text.includes(alias)));
 }
 
-const SOFTWARE_DOCUMENTATION = [
-    [/\bnext\.js\b/i, 'nextjs.org'],
-    [/\breact(?:\.js)?\b|react server components/i, 'react.dev'],
-    [/\bnode\.js\b/i, 'nodejs.org'],
-    [/\btypescript\b/i, 'typescriptlang.org'],
-    [/\bpython\b/i, 'docs.python.org'],
-    [/\bvue(?:\.js)?\b/i, 'vuejs.org'],
-    [/\bsvelte\b/i, 'svelte.dev'],
-    [/\bangular\b/i, 'angular.dev'],
-    [/\brust\b/i, 'doc.rust-lang.org'],
-    [/\bkubernetes\b/i, 'kubernetes.io'],
-    [/\bdocker\b/i, 'docs.docker.com'],
-    [/\bpostgres(?:ql)?\b/i, 'postgresql.org'],
-    [/\b(?:javascript|css|html)\b/i, 'developer.mozilla.org']
-];
+const SOFTWARE_CONCEPT_SIGNAL = /\b(?:what|how|why|explain|understand|compare|comparison|vs|versus|difference|documentation|docs?|guide|api|sdk|cli|library|libraries|framework|package|module|runtime|compiler|components?|routing|router|hooks?|rendering|streams?|performance|deployment|syntax|types?|install|configure|tutorial|migration|upgrade|changelog|release\s+notes?)\b/i;
+const SOFTWARE_TECH_CONTEXT = /\b(?:server\s+components?|app\s+router|dependency\s+injection|middleware|endpoints?|api|sdk|cli|framework|library|package|module|runtime|compiler|router|routing|hooks?|streams?|deployment|memory\s+management|type\s+system|async|wasm|webassembly|components?|syntax|database|orm|sql|graphql)\b|[a-z0-9_-]+\.(?:js|ts|py|rs|go|io|dev|org)\b|\b[A-Z][a-z]+[A-Z][A-Za-z]+\b|c\+\+|\.net\b/i;
 
 export function isConceptualSoftwareQuery(query) {
     const text = String(query || '');
     if (/\b(?:news|headlines?|vulnerabilit(?:y|ies)|exploit|breach|attack|cve-\d+)\b/i.test(text)
         && !/\b(?:explain|how|why|documentation|docs?|guide)\b/i.test(text)) return false;
-    return SOFTWARE_DOCUMENTATION.some(([pattern]) => pattern.test(text))
-        && /\b(?:what|how|why|explain|understand|compare|comparison|vs|versus|difference|documentation|docs?|guide|api|components?|routing|router|hooks?|rendering|streams?|performance|deployment|syntax|types?|install|configure|tutorial)\b/i.test(text);
+    return SOFTWARE_CONCEPT_SIGNAL.test(text) && SOFTWARE_TECH_CONTEXT.test(text);
 }
 
 export function buildOfficialDocumentationQuery(query) {
     const text = String(query || '').trim();
-    const domains = SOFTWARE_DOCUMENTATION.filter(([pattern]) => pattern.test(text)).map(([, domain]) => domain);
-    // The framework's own documentation takes precedence over a constituent library.
-    return domains.length ? `${text} site:${domains[0]}` : `${text} official documentation`;
+    return `${text} official documentation`;
 }
 
 export function isUnrelatedSoftwareIncident(query, source) {

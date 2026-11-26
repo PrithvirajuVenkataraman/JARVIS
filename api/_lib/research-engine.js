@@ -162,18 +162,7 @@ export function deterministicResearchPlan(query, context = []) {
         || /\b[A-Z][\p{L}\p{N}.-]{1,}(?:\s+[A-Z][\p{L}\p{N}.-]{1,}){0,3}\b/.test(q)
     );
     if (isTopicLookup) {
-        if (/\b(?:movies?|films?|cinemas?)\b/i.test(resolved)) {
-            const cleanSubj = resolved.replace(/\b(?:movies?|films?|cinemas?)\b/gi, '').trim();
-            queries = unique([resolved, `${cleanSubj} film release cast plot synopsis`]).slice(0, 2);
-        } else if (/\b(?:songs?|albums?|soundtracks?|tracks?)\b/i.test(resolved)) {
-            const cleanSubj = resolved.replace(/\b(?:songs?|albums?|soundtracks?|tracks?)\b/gi, '').trim();
-            queries = unique([resolved, `${cleanSubj} song release artist lyrics`]).slice(0, 2);
-        } else if (/\b(?:books?|novels?)\b/i.test(resolved)) {
-            const cleanSubj = resolved.replace(/\b(?:books?|novels?)\b/gi, '').trim();
-            queries = unique([resolved, `${cleanSubj} book author synopsis overview`]).slice(0, 2);
-        } else {
-            queries = unique([resolved, `${resolved} latest news updates`]).slice(0, 2);
-        }
+        queries = unique([resolved, `${resolved} overview latest updates`]).slice(0, 2);
     } else if (queries.length < 2 && isNamedEntityQuestion && !/\b(?:latest|recent|news|updates|today)\b/i.test(resolved)) {
         const subjectTerms = researchTerms(resolved).slice(0, 4).join(' ');
         if (subjectTerms) {
@@ -367,19 +356,39 @@ export async function runResearch(query, options = {}, dependencies = {}) {
     };
     try {
         status('searching', 'Searching for the specific facts you asked for…');
+        const isProductionRetrieval = !dependencies.search && !dependencies.generate && !dependencies.synthesize && !dependencies.extract;
+        if (dependencies.plan) {
+            plan = await bounded(signal => dependencies.plan(query, context, { signal }), Math.min(500, timeLeft()), scope.signal).catch(() => plan);
+        } else if (isProductionRetrieval && (context.length > 0 || query.length >= 28) && timeLeft() > 6000) {
+            const planned = await bounded(signal => planResearch(query, context, {
+                signal,
+                customGroqKey: options.customGroqKey,
+                customGeminiKey: options.customGeminiKey,
+                selectedModel: options.selectedModel,
+                timeoutMs: 1400
+            }), 1500, scope.signal).catch(() => null);
+            if (planned && planned.query && Array.isArray(planned.queries) && planned.queries.length) {
+                plan = {
+                    ...plan,
+                    ...planned,
+                    query: planned.query || plan.query,
+                    queries: unique([...(planned.queries || []), ...(plan.queries || [])]).slice(0, 6)
+                };
+            }
+        }
+        plan = resolveResearchAmbiguity(plan, query, context);
         const enrichment = new AbortController();
         const enrichmentSignal = AbortSignal.any([scope.signal, enrichment.signal]);
         let completedVisuals = null;
-        const visualPromise = resolveEntityVisuals(query, { signal: enrichmentSignal, timeoutMs: 4500 }).catch(() => null);
+        const visualPromise = plan.ambiguous
+            ? Promise.resolve(null)
+            : resolveEntityVisuals(plan.query || query, { signal: enrichmentSignal, timeoutMs: 4500 }).catch(() => null);
         visualPromise.then(visualData => {
             completedVisuals = visualData;
             if (visualData?.entity && !enrichmentSignal.aborted) {
                 emit('entity', { entity: visualData.entity, notableWorks: visualData.notableWorks || [] });
             }
         }).catch(() => {});
-        // Planning is deterministic on the production path. Optional injected plans support regression tests.
-        if (dependencies.plan) plan = await bounded(signal => dependencies.plan(query, context, { signal }), Math.min(500, timeLeft()), scope.signal).catch(() => plan);
-        plan = resolveResearchAmbiguity(plan, query, context);
         if (plan.ambiguous) {
             const result = { success: true, content: plan.clarification || 'Which event or subject are you referring to?', results: [], sources: [], answerStatus: 'clarification', verified: false, provenance: 'clarification', clarification: true, research: { plan, rounds: 0, modelCalls: 0, modelGenerations: 0, modelAttempts: [], warnings: [], diagnostics, events, elapsedMs: Date.now() - start } };
             emit('sources', { sources: [] }); emit('done', result); return result;

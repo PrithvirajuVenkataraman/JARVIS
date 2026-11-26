@@ -2782,7 +2782,12 @@ async function callAIWithTyping(message, loadingMessage = 'Thinking...', options
                 displayUserMessage: options?.displayUserMessage || '',
                 routingMessage: options?.routingMessage || options?.displayUserMessage || '',
                 minimalThinking: options?.minimalThinking === true,
-                routeDecision: options?.routeDecision || null
+                routeDecision: options?.routeDecision || null,
+                sources: Array.isArray(options?.sources) ? options.sources : undefined,
+                ragText: typeof options?.ragText === 'string' ? options.ragText : undefined,
+                hybridLiveGrounded: Boolean(options?.hybridLiveGrounded),
+                liveSourcesEmpty: Boolean(options?.liveSourcesEmpty),
+                skipLiveSearch: Boolean(options?.skipLiveSearch)
             })
             : processUserQuery(message, options));
         if (response?.aborted) {
@@ -5500,6 +5505,10 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
                 const activeSession = window.JarvisAttachments?.getActiveSessionImages?.();
                 return (Array.isArray(activeSession) && activeSession.length > 0) ? activeSession : undefined;
             })(),
+            sources: Array.isArray(requestOptions?.sources) ? requestOptions.sources : undefined,
+            ragText: typeof requestOptions?.ragText === 'string' ? requestOptions.ragText : undefined,
+            hybridLiveGrounded: Boolean(requestOptions?.hybridLiveGrounded),
+            liveSourcesEmpty: Boolean(requestOptions?.liveSourcesEmpty),
             routingMessage: String(requestOptions?.routingMessage || requestOptions?.displayUserMessage || '').trim() || undefined,
             displayUserMessage: String(requestOptions?.displayUserMessage || '').trim() || undefined
         };
@@ -14887,28 +14896,66 @@ Answer the user directly and conversationally based on the quoted context.`;
                         });
                     } else {
                         sendTrace.routeStartedAt = performance.now();
-                        const reference = window.JarvisConversation?.resolveReference?.(normalizedOutgoingText);
-                        if (['ambiguous', 'missing'].includes(reference?.status)) {
-                            await processCommand(normalizedOutgoingText);
+                        const isWebForced = (typeof getWebSearchMode === 'function' ? getWebSearchMode() === 'force' : _composerWebMode === 'force') || Boolean(submission?.forceWebSearch);
+                        const completionCheck = isWebForced ? parseWebSearchCompletionCommand(normalizedOutgoingText) : null;
+                        if (completionCheck?.completed) {
+                            if (typeof setWebSearchMode === 'function') setWebSearchMode('off');
+                            if (!completionCheck.remainder) {
+                                await publishResolvedModelMessage(outgoingText, 'Live web search completed and turned off. Ask me anything in standard chat mode, or re-enable Web search anytime.', {
+                                    label: 'Web search',
+                                    recordContext: false
+                                });
+                                sendTrace.routeEndedAt = performance.now();
+                                return;
+                            }
+                        }
+                        const queryForRoute = completionCheck?.remainder || normalizedOutgoingText;
+                        const effectiveWebForced = !completionCheck?.completed && isWebForced;
+                        const activeHistoryTurns = getActiveResearchContext(queryForRoute);
+                        const reference = window.JarvisConversation?.resolveReference?.(queryForRoute);
+                        if (!effectiveWebForced && ['ambiguous', 'missing'].includes(reference?.status) && activeHistoryTurns.length === 0) {
+                            await processCommand(queryForRoute);
                             sendTrace.routeEndedAt = performance.now();
                             return;
                         }
-                        const isWebForced = (typeof getWebSearchMode === 'function' ? getWebSearchMode() === 'force' : _composerWebMode === 'force') || Boolean(submission?.forceWebSearch);
-                        if (isWebForced && isFactSearchEnabled()) {
-                            const webHandled = await handleBoundedLiveResearchQuery(normalizedOutgoingText, outgoingText, { submission, isWebForced });
-                            if (webHandled) {
+                        const hasExplicitSearchCue = typeof isExplicitWebSearchRequest === 'function' && isExplicitWebSearchRequest(queryForRoute);
+                        if ((effectiveWebForced || hasExplicitSearchCue) && isFactSearchEnabled(queryForRoute)) {
+                            const execMode = classifyClientWebExecutionMode(queryForRoute, {
+                                isWebForced: effectiveWebForced,
+                                hasExplicitSearchCue,
+                                hasHistory: activeHistoryTurns.length > 0
+                            });
+                            if (execMode === 'hybrid_live_and_llm') {
+                                const hybridHandled = await handleHybridWebAndLlmQuery(queryForRoute, completionCheck?.remainder || outgoingText, { submission, isWebForced: true });
+                                if (hybridHandled) {
+                                    sendTrace.routeEndedAt = performance.now();
+                                    return;
+                                }
+                            } else if (execMode === 'pure_llm' && effectiveWebForced && !submission?.forceWebSearch) {
+                                await callAIWithTyping(outgoingText, 'Thinking...', {
+                                    directModel: true,
+                                    stream: true,
+                                    skipLiveSearch: true,
+                                    displayUserMessage: outgoingText
+                                });
                                 sendTrace.routeEndedAt = performance.now();
                                 return;
+                            } else {
+                                const webHandled = await handleBoundedLiveResearchQuery(queryForRoute, outgoingText, { submission, isWebForced: effectiveWebForced });
+                                if (webHandled) {
+                                    sendTrace.routeEndedAt = performance.now();
+                                    return;
+                                }
                             }
                         }
                         if (submission?.forceWebSearch) {
-                            const webHandled = await handleLiveRetrievalQuery(normalizedOutgoingText);
+                            const webHandled = await handleLiveRetrievalQuery(queryForRoute);
                             if (webHandled) {
                                 sendTrace.routeEndedAt = performance.now();
                                 return;
                             }
                         }
-                        await processCommand(normalizedOutgoingText);
+                        await processCommand(queryForRoute);
                         sendTrace.routeEndedAt = performance.now();
                     }
                 } catch (error) {
@@ -21950,6 +21997,26 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                         }
                     }
 
+                    if (answerStatus === 'unavailable' && hasSources && !replacement?.requiresEvidenceValidation && typeof askGeminiAI === 'function') {
+                        const isStrictClaim = /^\/(?:verify|fact-?check)\b|\b(?:is\s+(?:that|this|it)\s+true|fact[- ]?check)\b/i.test(effectiveCleanText);
+                        if (!isStrictClaim) {
+                            row?.remove();
+                            const ragText = typeof window !== 'undefined' && window.JarvisLiveResearch?.formatSourcesForPrompt
+                                ? window.JarvisLiveResearch.formatSourcesForPrompt(sources)
+                                : sources.map((s, idx) => `[${s.id || idx + 1}] ${s.title || ''}: ${s.fullArticleText || s.snippet || s.description || ''} (${s.url || ''})`).join('\n\n');
+                            void askGeminiAI(effectiveRawUserText || effectiveCleanText, {
+                                stream: true,
+                                sources,
+                                ragText,
+                                hybridLiveGrounded: true,
+                                webMode: 'force',
+                                displayUserMessage: effectiveRawUserText || effectiveCleanText,
+                                intent: 'hybrid_grounded'
+                            }).then(() => resolve(true)).catch(() => resolve(false));
+                            return;
+                        }
+                    }
+
                     updateStreamingAssistantMessage(assistantMessageId, content, {
                         turnId: controller.turnId,
                         streaming: false,
@@ -21988,6 +22055,100 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
             resolve(false);
         });
     });
+}
+
+function parseWebSearchCompletionCommand(text) {
+    const raw = String(text || '').trim();
+    if (!raw) return null;
+    const match = raw.match(/^(?:\/(?:web|search|live)\s+off\b|(?:(?:ok|okay|thanks|thank\s+you)[,\s]*)?(?:turn\s+off|disable|stop|exit|end|finish|complete)\s+(?:the\s+)?(?:live\s+)?(?:web\s+)?search(?:ing|\s+mode)?)(?:\s*[,.:;-]?\s*(.*))?$/i);
+    if (!match) return null;
+    return { completed: true, remainder: String(match[1] || '').trim() };
+}
+
+function classifyClientWebExecutionMode(text, { isWebForced = false, hasExplicitSearchCue = false } = {}) {
+    const raw = String(text || '').trim();
+    if (!raw || /^\/verify\b/i.test(raw) || /^verify\s+this\s*:/i.test(raw)) return 'pure_factual_research';
+    if (/\b(?:fact[- ]?check|is\s+(?:that|this|it)\s+true|are\s+you\s+sure)\b/i.test(raw)) return 'pure_factual_research';
+
+    const hasGenerativeOrAnalyticalTask = /\b(?:write|draft|compose|create|build|implement|code|refactor|debug|fix|optimize|convert|translate|format|design|architect|plan|itinerary|schedule|roadmap|checklist|email|letter|post|essay|script|function|class|component|module|api|sql|regex|formula|calculate|compute|estimate|simulate|recommend|suggest|advise|compare\s+and\s+recommend|pros?\s+and\s+cons|table|spreadsheet|quiz|study\s+guide|strategy|workflow|analyze|analyse)\b/i.test(raw)
+        || /```/.test(raw);
+    const hasLiveOrExternalSignals = hasExplicitSearchCue
+        || /\b(?:latest|current|currently|today|tonight|recent|recently|news|price|prices|rate|rates|weather|forecast|release\s+notes?|changelog|breaking\s+changes?|deprecat\w*|version\s+\d|202[5-9]|who\s+is|scores?|stock|crypto|bitcoin|schedule)\b/i.test(raw);
+
+    if (hasGenerativeOrAnalyticalTask && (hasLiveOrExternalSignals || isWebForced)) {
+        return 'hybrid_live_and_llm';
+    }
+    const isSelfContainedPureTask = /^(?:translate|rewrite|paraphrase|fix\s+grammar|summarize\s+this|refactor|debug|solve|calculate|compute|explain\s+(?:what\s+is|how\s+does)|write\s+(?:a\s+)?(?:poem|story|haiku|function|script|sql|regex|algorithm|sort))\b/i.test(raw)
+        && !hasLiveOrExternalSignals && !hasExplicitSearchCue;
+    if (isSelfContainedPureTask) return 'pure_llm';
+    return 'pure_factual_research';
+}
+
+async function handleHybridWebAndLlmQuery(cleanText, rawUserText, options = {}) {
+    const query = String(cleanText || rawUserText || '').trim();
+    if (!query) return false;
+    const researchContext = getActiveResearchContext(query);
+    const selectedModel = typeof getSelectedModel === 'function' ? getSelectedModel() : 'auto';
+    const timeZone = (() => {
+        try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch { return ''; }
+    })();
+
+    const searchAbort = typeof beginAbortableRequest === 'function' ? beginAbortableRequest() : new AbortController();
+    window.JarvisInteractionState?.transition?.('SEARCHING', { metadata: { query } });
+    showThinkingIndicator('Searching live web & synthesizing...');
+
+    let sources = [];
+    const searchEndpoint = (typeof window !== 'undefined' && (window.APP_CONFIG || APP_CONFIG)?.endpoints?.search) || '/api/search';
+    const timer = setTimeout(() => { try { searchAbort.abort('search_timeout'); } catch (_) {} }, 15000);
+    try {
+        const res = await fetch(searchEndpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            signal: searchAbort.signal,
+            body: JSON.stringify({
+                query,
+                originalQuery: query,
+                context: researchContext,
+                mode: 'rag',
+                answer: false,
+                limit: 8,
+                timeZone,
+                selectedModel: selectedModel && selectedModel !== 'auto' ? selectedModel : undefined
+            })
+        });
+        if (res.ok) {
+            const data = await res.json();
+            const rawResults = Array.isArray(data?.results) ? data.results : (Array.isArray(data?.sources) ? data.sources : []);
+            sources = typeof window !== 'undefined' && window.JarvisLiveResearch?.normalizeResearchSources
+                ? window.JarvisLiveResearch.normalizeResearchSources(rawResults, query)
+                : rawResults;
+        }
+    } catch (_) {
+        if (searchAbort.signal.aborted && searchAbort.signal.reason !== 'search_timeout') {
+            hideThinkingIndicator();
+            return true;
+        }
+    } finally {
+        clearTimeout(timer);
+    }
+
+    const ragText = sources.length > 0
+        ? (typeof window !== 'undefined' && window.JarvisLiveResearch?.formatSourcesForPrompt
+            ? window.JarvisLiveResearch.formatSourcesForPrompt(sources)
+            : sources.map((s, idx) => `[${s.id || idx + 1}] ${s.title || ''}: ${s.fullArticleText || s.snippet || s.description || ''} (${s.url || ''})`).join('\n\n'))
+        : '';
+
+    await askGeminiAI(rawUserText || query, {
+        stream: true,
+        sources,
+        ragText,
+        hybridLiveGrounded: true,
+        liveSourcesEmpty: sources.length === 0,
+        webMode: 'force',
+        displayUserMessage: rawUserText || query,
+        intent: 'hybrid_grounded'
+    });
+    return true;
 }
 
 async function handleLiveRetrievalQuery(userText, options = {}) {
@@ -23041,17 +23202,27 @@ function isWakeGreetingText(text) {
                 }
             }
 
-            // Authoritative bounded live research dispatch — only when live Web Search is not OFF
+            // Authoritative bounded live research / hybrid dispatch — only when live Web Search is not OFF
             if (_activeWebMode !== 'off' && (_activeWebMode === 'force' || frontendRoute?.route === 'live_required' || frontendRoute?.requiresSources || frontendRoute?.explicitWeb) && isFactSearchEnabled(cleanText)) {
-                logRoutingDebug('processCommand -> bounded live research', cleanText, {
-                    selectedHandler: 'handleBoundedLiveResearchQuery',
-                    frontendRoute
+                const execMode = classifyClientWebExecutionMode(cleanText, {
+                    isWebForced: _activeWebMode === 'force' || Boolean(frontendRoute?.explicitWeb),
+                    hasExplicitSearchCue: Boolean(frontendRoute?.explicitWeb)
                 });
-                const handled = await handleBoundedLiveResearchQuery(cleanText, text, {
-                    routeDecision: frontendRoute,
-                    isWebForced: _activeWebMode === 'force' || Boolean(frontendRoute?.explicitWeb)
-                });
-                if (handled) return;
+                if (execMode === 'hybrid_live_and_llm') {
+                    logRoutingDebug('processCommand -> hybrid live web + LLM', cleanText, { frontendRoute });
+                    const handled = await handleHybridWebAndLlmQuery(cleanText, text, { isWebForced: true });
+                    if (handled) return;
+                } else {
+                    logRoutingDebug('processCommand -> bounded live research', cleanText, {
+                        selectedHandler: 'handleBoundedLiveResearchQuery',
+                        frontendRoute
+                    });
+                    const handled = await handleBoundedLiveResearchQuery(cleanText, text, {
+                        routeDecision: frontendRoute,
+                        isWebForced: _activeWebMode === 'force' || Boolean(frontendRoute?.explicitWeb)
+                    });
+                    if (handled) return;
+                }
             }
 
             if (frontendRoute?.route === 'chat_direct') {

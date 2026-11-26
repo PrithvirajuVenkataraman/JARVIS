@@ -259,44 +259,37 @@ export function expandQueryDeterministically(rawQuery, intentResult = null) {
     const generated = [];
 
     if (intent.isClaim || intent.intentCategory === 'declarative_claim_verification') {
-        // Form 1: Direct entity question
-        // e.g. "Three persons in the world can travel without the passport" -> "who are the three persons who can travel without passport"
+        // Universal grammatical claim-to-question inversion (zero domain/trivia hardcoding):
+        // Handles quantified group assertions ("Three persons ... can ...", "Five countries ...")
+        // and general Subject + Auxiliary/Verb assertions ("X is Y", "X never strikes Y", etc.).
         let transformedWh = query;
-        if (/^(?:three|two|four|five|\d+)\s+persons?\b/i.test(query)) {
-            transformedWh = query.replace(/^(?:three|two|four|five|\d+)\s+persons?\b/i, 'who are the people');
-        } else if (/^humans?\s+use\b/i.test(query)) {
-            transformedWh = 'what percentage of brain do humans use';
-        } else if (/^the\s+great\s+wall\s+of\s+china\s+is\s+visible\b/i.test(query)) {
-            transformedWh = 'can the great wall of china be seen from space';
-        } else if (/^bananas?\s+share\b/i.test(query)) {
-            transformedWh = 'do bananas share DNA with humans';
-        } else if (/^sharks?\s+cannot\b/i.test(query)) {
-            transformedWh = 'do sharks get cancer';
-        } else if (/^lightning\s+never\s+strikes\b/i.test(query)) {
-            transformedWh = 'can lightning strike the same place twice';
-        } else if (/^carrots?\s+dramatically\s+improve\b/i.test(query)) {
-            transformedWh = 'do carrots improve night vision';
-        } else if (/^albert\s+einstein\s+failed\b/i.test(query)) {
-            transformedWh = 'did Albert Einstein fail mathematics';
-        } else if (/^napoleon\s+bonaparte\s+was\b/i.test(query)) {
-            transformedWh = 'how tall was Napoleon Bonaparte in reality';
-        } else if (/^waking\s+a\s+sleepwalker\b/i.test(query)) {
-            transformedWh = 'is it dangerous to wake a sleepwalker';
-        } else if (/^glass\s+is\s+a\s+slow\s+flowing\s+liquid\b/i.test(query)) {
-            transformedWh = 'is glass a liquid or solid';
-        } else if (/^bulls\s+become\s+enraged\b/i.test(query)) {
-            transformedWh = 'are bulls enraged by the color red';
-        } else if (/^goldfish\s+have\s+a\s+memory\b/i.test(query)) {
-            transformedWh = 'what is the memory span of a goldfish';
-        } else if (/^mount\s+everest\s+is\s+the\s+highest\b/i.test(query)) {
-            transformedWh = 'what is the tallest mountain on Earth measured base to peak';
-        } else if (/^the\s+vatican\s+city\s+is\s+the\s+smallest\b/i.test(query)) {
-            transformedWh = 'what is the smallest independent state in the world';
+        const quantifiedSubject = query.match(/^(?:the\s+)?(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|only\s+\d+|only\s+(?:one|two|three|four|five))\s+([a-z][a-z\s'-]{1,40}?)\b\s*(.+)$/i);
+        const copulaOrModal = query.match(/^([^,]+?)\s+(is|are|can|could|may|might|was|were|has|have|had|will|would|should|do|does|did)\s+(?:not|never|always|only|roughly|dramatically)?\s*(.+)$/i);
+        const negativeModal = query.match(/^([^,]+?)\s+(cannot|can't|couldn't|never|doesn't|don't|didn't|won't|isn't|aren't)\s+(.+)$/i);
+
+        if (quantifiedSubject) {
+            const noun = quantifiedSubject[1].trim();
+            const rest = quantifiedSubject[2].trim();
+            const interrogative = /\b(?:people|persons?|individuals?|citizens?|royals?|leaders?|humans?|workers?|members?)\b/i.test(noun) ? 'who are the' : 'which';
+            transformedWh = `${interrogative} ${noun} ${rest}`.replace(/\s+/g, ' ').trim();
+        } else if (negativeModal) {
+            const [, subj, neg, rest] = negativeModal;
+            const posAux = /^c/i.test(neg) ? 'can' : /^(?:is|are)/i.test(neg) ? neg.replace(/n't$/i, '') : 'do';
+            transformedWh = `${posAux} ${subj.trim()} ${rest.trim()}`;
+        } else if (copulaOrModal) {
+            const [, subj, aux, rest] = copulaOrModal;
+            const auxLow = aux.toLowerCase();
+            if ((auxLow === 'has' || auxLow === 'have') && !/^(?:been|had|got|made|done|seen|won|found|lost|taken|given|become|[a-z]+ed)\b/i.test(rest.trim())) {
+                transformedWh = `${auxLow === 'has' ? 'does' : 'do'} ${subj.trim()} have ${rest.trim()}`;
+            } else {
+                transformedWh = `${auxLow} ${subj.trim()} ${rest.trim()}`;
+            }
         } else {
-            // General rule-based inversion: "X is Y" -> "is X Y", "X can Y" -> "can X Y"
-            const match = query.match(/^([^,]+?)\s+(is|are|can|was|were|has|have)\s+(.+)$/i);
-            if (match) {
-                transformedWh = `${match[2]} ${match[1]} ${match[3]}`;
+            const simpleVerb = query.match(/^([^,]+?)\s+([a-z]{3,}(?:s|es|ed)?)\s+(.+)$/i);
+            if (simpleVerb) {
+                const [, subj, verb, rest] = simpleVerb;
+                const cleanRest = rest.replace(/\b(?:dramatically|actually|really|only|roughly|never|always)\b/gi, '').replace(/\s+/g, ' ').trim();
+                transformedWh = `does ${subj.trim()} ${verb.replace(/s$/i, '')} ${cleanRest}`.replace(/\s+/g, ' ').trim();
             } else {
                 transformedWh = `who or what ${query}`;
             }
