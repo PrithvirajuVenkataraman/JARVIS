@@ -16,8 +16,17 @@ const IMAGE_MIMES = new Set([
 
 export async function ingestAttachmentPayload(payload = {}) {
     const filename = String(payload.filename || 'attachment').trim() || 'attachment';
-    const base64 = String(payload.base64 || '').trim();
-    let mimeType = String(payload.mimeType || '').trim().toLowerCase() || guessMimeFromName(filename);
+    const rawBase64 = String(payload.base64 || '').trim();
+    const dataUrlMatch = rawBase64.match(/^data:([^;]+);base64,/i);
+    let base64 = rawBase64
+        .replace(/^data:[^;]+;base64,/i, '')
+        .replace(/\s+/g, '')
+        .replace(/-/g, '+')
+        .replace(/_/g, '/');
+    if (base64 && !base64.endsWith('=')) {
+        while (base64.length % 4 !== 0) base64 += '=';
+    }
+    let mimeType = String(payload.mimeType || dataUrlMatch?.[1] || '').trim().toLowerCase() || guessMimeFromName(filename);
     if (isImage(mimeType, filename) && base64) {
         mimeType = normalizeImageMime(mimeType, filename, base64);
     }

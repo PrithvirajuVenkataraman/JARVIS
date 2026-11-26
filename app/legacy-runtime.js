@@ -584,10 +584,10 @@ function isStepByStepMathRequest(text) {
 function normalizeMathExpression(rawText) {
     let s = String(rawText || '').trim();
     s = s
-        .replace(/[Ã—x]/g, '*')
-        .replace(/Ã·/g, '/')
-        .replace(/âˆ’/g, '-')
-        .replace(/â€“/g, '-')
+        .replace(/[\u00d7]/g, '*')
+        .replace(/(\d|\))\s*[x\u00d7]\s*(\d|\()/gi, '$1 * $2')
+        .replace(/[\u00f7]/g, '/')
+        .replace(/[\u2212\u2013\u2014]/g, '-')
         .replace(/,/g, '')
         .replace(/\s+/g, ' ');
 
@@ -4163,6 +4163,52 @@ async function resolveFinalAssistantAnswer(userMessage, answerText) {
     return "I couldn't retrieve an authoritative answer for that request. Please try again or rephrase.";
 }
 
+async function autoExecutePythonInResponse(userMessage, responseText, options = {}) {
+    const wasm = window.JarvisPythonWasm;
+    if (!wasm || options?.skipPythonAutoExec === true) return null;
+    if (!wasm.shouldAutoExecutePythonResponse(userMessage, responseText, options)) {
+        return null;
+    }
+
+    const blocks = wasm.extractPythonCodeBlocks(responseText);
+    if (!blocks.length) return null;
+
+    if (typeof showThinkingIndicator === 'function') {
+        showThinkingIndicator('Computing final answer...');
+    }
+
+    try {
+        const py = await loadPyodideRuntime(null, { timeoutMs: 25000 });
+        const outputs = [];
+        let lastChartB64 = null;
+        let lastError = '';
+
+        for (const block of blocks) {
+            const res = await runInPyodide(py, block.code);
+            if (res?.hasError) {
+                lastError = res.stdout || 'Python execution error';
+            } else if (res?.stdout) {
+                outputs.push(res.stdout);
+                lastError = '';
+            }
+            if (res?.chartB64) {
+                lastChartB64 = res.chartB64;
+            }
+        }
+
+        const combinedStdout = outputs.join('\n').trim();
+        const formatted = wasm.formatPythonExecutionOnlyFinalAnswer({
+            responseText,
+            stdout: combinedStdout,
+            chartB64: lastChartB64,
+            error: !combinedStdout && lastError ? lastError : ''
+        });
+        return String(formatted || '').trim() || null;
+    } catch (_) {
+        return null;
+    }
+}
+
 async function publishResolvedModelMessage(userMessage, answerText, options = {}) {
     if (typeof hideSynthesizingBlinker === 'function') {
         hideSynthesizingBlinker();
@@ -4176,10 +4222,19 @@ async function publishResolvedModelMessage(userMessage, answerText, options = {}
     const finalized = fastFinalizeStreamed
         ? rawAnswer
         : await resolveFinalAssistantAnswer(userMessage, answerText);
-    const safeText = String(finalized || '').trim();
+    let safeText = String(finalized || '').trim();
     if (!safeText) {
         if (streamedMessageId) discardStreamingAssistantMessage(streamedMessageId);
         return false;
+    }
+    if (options?.skipPythonAutoExec !== true && typeof autoExecutePythonInResponse === 'function') {
+        const autoExecText = await autoExecutePythonInResponse(userMessage, safeText, options);
+        if (autoExecText) {
+            safeText = autoExecText;
+            if (typeof hideSynthesizingBlinker === 'function') {
+                hideSynthesizingBlinker();
+            }
+        }
     }
     if (options?.isFallback === true || (label && /fallback/i.test(String(label))) || /fallback/i.test(String(options?.routing?.intent || ''))) {
         window.__jarvisServiceUnavailable = true;
@@ -14930,7 +14985,32 @@ async function sendTextInput(submission = {}) {
                     });
                     showThinkingIndicator(attachmentsForSend.length ? (hasImageFiles ? 'Reading image...' : 'Reading document...') : 'Thinking...');
                     if (attachmentsForSend.length) {
-                        // ── Data-file path: Python Notebook analysis ────────────────
+                        // ── Python script attachment path: silent Pyodide WASM execution ─
+                        const hasRunnablePyScript = Boolean(
+                            window.JarvisPythonWasm?.shouldAutoExecutePythonAttachment?.(attachmentsForSend, effectiveOutgoingText)
+                        );
+                        if (hasRunnablePyScript && typeof runPythonScriptAttachments === 'function') {
+                            const tray = document.getElementById('composer-attachment-tray');
+                            if (tray) {
+                                tray.innerHTML = '';
+                                tray.classList.add('hidden');
+                            }
+                            const pyScriptAnswer = await runPythonScriptAttachments(
+                                attachmentsForSend,
+                                effectiveOutgoingText
+                            );
+                            if (pyScriptAnswer) {
+                                await publishResolvedModelMessage(displayOutgoingText, pyScriptAnswer, {
+                                    label: 'Python Result',
+                                    skipPythonAutoExec: true,
+                                    fastFinalizeStreamed: true,
+                                    turnId: turn.id
+                                });
+                                return;
+                            }
+                        }
+
+                        // ── Data-file path: silent Python WASM analysis ────────────────
                         const hasDataFiles = attachmentsForSend.some(isDataAnalysisFile);
                         if (hasDataFiles) {
                             const tray = document.getElementById('composer-attachment-tray');
@@ -14943,7 +15023,7 @@ async function sendTextInput(submission = {}) {
                                 effectiveOutgoingText
                             );
                             if (notebookResult) {
-                                // Phase 4: stream final answer from AI using Python output as context
+                                // Stream concise final answer from AI using Python output as context (no raw code exposed)
                                 const answerResult = await askGeminiAI(notebookResult.answerContextPrompt, {
                                     intent: 'general_chat',
                                     timeoutMs: 30000,
@@ -14951,21 +15031,31 @@ async function sendTextInput(submission = {}) {
                                 });
                                 if (answerResult?.aborted) return;
                                 let finalAnswer = String(answerResult?.response || answerResult?.text || '').trim();
-                                if (notebookResult.chartB64) {
-                                    finalAnswer += notebookResult.chartHtml;
+                                const wasm = window.JarvisPythonWasm;
+                                if (finalAnswer && wasm && !wasm.isExplicitCodeAuthoringRequest(effectiveOutgoingText)) {
+                                    const stripped = wasm.stripPythonCodeAndBoilerplate(finalAnswer);
+                                    if (stripped) finalAnswer = stripped;
                                 }
-                                if (finalAnswer) {
-                                    await publishResolvedModelMessage(displayOutgoingText, finalAnswer, {
-                                        label: 'Data Analysis',
-                                        existingAssistantMessageId: answerResult?.assistantMessageId || '',
-                                        routing: answerResult?.routing || null
-                                    });
-                                } else {
-                                    addChatMessage('Analysis complete. ' + (notebookResult.output || 'See the Notebook for results.'), false, null, { turnId: turn.id });
+                                if (notebookResult.chartB64 && !/!\[[^\]]*\]\(data:image\//.test(finalAnswer)) {
+                                    finalAnswer = (finalAnswer ? finalAnswer + notebookResult.chartHtml : `![Generated Chart](data:image/png;base64,${notebookResult.chartB64})`);
                                 }
+                                if (!finalAnswer) {
+                                    finalAnswer = wasm?.formatPythonExecutionOnlyFinalAnswer?.({
+                                        stdout: notebookResult.output,
+                                        chartB64: notebookResult.chartB64
+                                    }) || String(notebookResult.output || '').trim() || 'Computation complete.';
+                                }
+                                await publishResolvedModelMessage(displayOutgoingText, finalAnswer, {
+                                    label: 'Data Analysis',
+                                    existingAssistantMessageId: answerResult?.assistantMessageId || '',
+                                    routing: answerResult?.routing || null,
+                                    skipPythonAutoExec: true,
+                                    fastFinalizeStreamed: true,
+                                    turnId: turn.id
+                                });
                                 return;
                             }
-                            // Fallback to normal attachment path if notebook failed
+                            // Fallback to normal attachment path if Python WASM execution failed
                         }
                         // ── End data-file path ──────────────────────────────────────
 
@@ -15031,7 +15121,7 @@ async function sendTextInput(submission = {}) {
 
                         if (!attachmentContext?.anyReadable || !attachmentContext?.grounding) {
                             addChatMessage(
-                                'I could not read that file. For images, try a clearer photo or JPG/PNG. For documents, try a DOCX or TXT version.',
+                                attachmentContext?.errorMessage || 'I could not read that file. For images, try a clearer photo or JPG/PNG. For documents, try a DOCX or TXT version.',
                                 false
                             );
                             return;
@@ -30386,6 +30476,89 @@ function copyCodeBlock(btn, blockId) {
     }
 }
 
+async function runPythonCodeInPyodide(py, code, options = {}) {
+    const sourceCode = String(code || '').trim();
+    if (!sourceCode) {
+        return { stdout: '', chartB64: null, hasError: false };
+    }
+
+    try {
+        if (typeof py.loadPackagesFromImports === 'function') {
+            await py.loadPackagesFromImports(sourceCode);
+        }
+    } catch (_) {}
+
+    const preamble = String(options?.preamble || '').trim();
+    const pySourceLiteral = JSON.stringify(sourceCode);
+    const wrappedCode = `
+import sys, io as _io, ast as _ast
+${preamble ? preamble + '\n' : ''}_output_buf = _io.StringIO()
+_orig_stdout = sys.stdout
+_orig_stderr = sys.stderr
+sys.stdout = _output_buf
+sys.stderr = _output_buf
+
+try:
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    _has_mpl = True
+except Exception:
+    _has_mpl = False
+
+_chart_b64 = None
+_jarvis_has_error = False
+_jarvis_user_code = ${pySourceLiteral}
+
+try:
+    _ns = globals()
+    _tree = _ast.parse(_jarvis_user_code, mode='exec')
+    _tail_expr = None
+    if _tree.body and isinstance(_tree.body[-1], _ast.Expr):
+        _tail_expr = _ast.Expression(_tree.body.pop().value)
+        _ast.fix_missing_locations(_tail_expr)
+    if _tree.body:
+        exec(compile(_tree, '<jarvis-wasm>', 'exec'), _ns)
+    if _tail_expr is not None:
+        _expr_val = eval(compile(_tail_expr, '<jarvis-wasm>', 'eval'), _ns)
+        if _expr_val is not None:
+            _val_mod = str(getattr(type(_expr_val), '__module__', '') or '')
+            _is_mpl_artist = _val_mod.startswith('matplotlib') or (
+                isinstance(_expr_val, (list, tuple)) and len(_expr_val) > 0 and str(getattr(type(_expr_val[0]), '__module__', '') or '').startswith('matplotlib')
+            )
+            if not _is_mpl_artist:
+                print(repr(_expr_val))
+except Exception:
+    import traceback
+    _jarvis_has_error = True
+    print(traceback.format_exc(), file=_output_buf)
+finally:
+    if _has_mpl:
+        try:
+            fig = plt.gcf()
+            if fig.get_axes():
+                import base64
+                _buf = _io.BytesIO()
+                fig.savefig(_buf, format='png', dpi=110, bbox_inches='tight', facecolor='#0d1117')
+                _chart_b64 = base64.b64encode(_buf.getvalue()).decode()
+                plt.close('all')
+        except Exception:
+            pass
+    sys.stdout = _orig_stdout
+    sys.stderr = _orig_stderr
+    _stdout_text = _output_buf.getvalue()
+`;
+    if (typeof py.runPythonAsync === 'function') {
+        await py.runPythonAsync(wrappedCode);
+    } else {
+        py.runPython(wrappedCode);
+    }
+    const stdout = String(py.globals.get('_stdout_text') || '').trim();
+    const chartB64 = py.globals.get('_chart_b64') || null;
+    const hasError = Boolean(py.globals.get('_jarvis_has_error'));
+    return { stdout, chartB64, hasError };
+}
+
 async function runPythonBlockInBrowser(btn, blockId) {
     const data = window._jarvisCodeBlocks?.[blockId];
     let code = data?.code || '';
@@ -30430,71 +30603,7 @@ async function runPythonBlockInBrowser(btn, blockId) {
         const textEl = outputEl.querySelector('.python-output-text');
         if (textEl) textEl.textContent = 'Executing Python code...';
 
-        try {
-            await py.loadPackagesFromImports(code);
-        } catch (_) {}
-
-        const pySourceLiteral = JSON.stringify(String(code || ''));
-        const wrappedCode = `
-import sys, io as _io, ast as _ast
-_output_buf = _io.StringIO()
-_orig_stdout = sys.stdout
-_orig_stderr = sys.stderr
-sys.stdout = _output_buf
-sys.stderr = _output_buf
-
-try:
-    import matplotlib
-    matplotlib.use('Agg')
-    import matplotlib.pyplot as plt
-    _has_mpl = True
-except Exception:
-    _has_mpl = False
-
-_chart_b64 = None
-_jarvis_user_code = ${pySourceLiteral}
-
-try:
-    _ns = globals()
-    _tree = _ast.parse(_jarvis_user_code, mode='exec')
-    _tail_expr = None
-    if _tree.body and isinstance(_tree.body[-1], _ast.Expr):
-        _tail_expr = _ast.Expression(_tree.body.pop().value)
-        _ast.fix_missing_locations(_tail_expr)
-    if _tree.body:
-        exec(compile(_tree, '<jarvis-wasm>', 'exec'), _ns)
-    if _tail_expr is not None:
-        _expr_val = eval(compile(_tail_expr, '<jarvis-wasm>', 'eval'), _ns)
-        if _expr_val is not None:
-            _val_mod = str(getattr(type(_expr_val), '__module__', '') or '')
-            _is_mpl_artist = _val_mod.startswith('matplotlib') or (
-                isinstance(_expr_val, (list, tuple)) and len(_expr_val) > 0 and str(getattr(type(_expr_val[0]), '__module__', '') or '').startswith('matplotlib')
-            )
-            if not _is_mpl_artist:
-                print(repr(_expr_val))
-except Exception:
-    import traceback
-    print(traceback.format_exc(), file=_output_buf)
-
-if _has_mpl:
-    try:
-        fig = plt.gcf()
-        if fig.get_axes():
-            import base64
-            _buf = _io.BytesIO()
-            fig.savefig(_buf, format='png', dpi=110, bbox_inches='tight', facecolor='#0d1117')
-            _chart_b64 = base64.b64encode(_buf.getvalue()).decode()
-            plt.close('all')
-    except Exception:
-        pass
-
-sys.stdout = _orig_stdout
-sys.stderr = _orig_stderr
-_stdout_text = _output_buf.getvalue()
-`;
-        await py.runPythonAsync(wrappedCode);
-        const stdout = String(py.globals.get('_stdout_text') || '').trim();
-        const chartB64 = py.globals.get('_chart_b64') || null;
+        const { stdout, chartB64 } = await runPythonCodeInPyodide(py, code);
 
         let outputContent = '';
         if (chartB64) {
@@ -30885,36 +30994,74 @@ function isDataAnalysisFile(attachment) {
 
 // ── Pyodide lazy loader (loads WASM once, cached forever) ──────
 let _pyodidePromise = null;
-async function loadPyodideRuntime(onProgress) {
-    if (_pyodidePromise) return _pyodidePromise;
-    _pyodidePromise = (async () => {
-        onProgress?.(0.05, 'Loading Python runtime...');
-        // Inject pyodide script if not already present
-        if (!window.loadPyodide) {
-            await new Promise((resolve, reject) => {
-                const s = document.createElement('script');
-                s.src = 'https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js';
-                s.onload = resolve;
-                s.onerror = reject;
-                document.head.appendChild(s);
-            });
-        }
-        onProgress?.(0.30, 'Initializing Python...');
-        const py = await window.loadPyodide({
-            indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.26.2/full/'
-        });
-        onProgress?.(0.55, 'Loading NumPy, Pandas & Matplotlib...');
+let _pyodidePackagesPreloaded = false;
+async function ensurePyodidePackagesPreloaded(py, onProgress) {
+    if (_pyodidePackagesPreloaded || !py) return;
+    onProgress?.(0.55, 'Loading NumPy, Pandas & Matplotlib...');
+    try {
+        await py.loadPackage(['numpy', 'pandas', 'matplotlib']);
+    } catch (_) {
         try {
-            await py.loadPackage(['numpy', 'pandas', 'matplotlib']);
-        } catch (_) {
             await py.loadPackagesFromImports('import numpy, pandas, matplotlib');
-        }
-        try { await py.loadPackage('sympy'); } catch (_) {}
-        try { await py.loadPackage('openpyxl'); } catch (_) {}
-        onProgress?.(1.0, 'Python ready');
-        return py;
-    })();
-    return _pyodidePromise;
+        } catch (_2) {}
+    }
+    try { await py.loadPackage('sympy'); } catch (_) {}
+    try { await py.loadPackage('openpyxl'); } catch (_) {}
+    _pyodidePackagesPreloaded = true;
+}
+
+async function loadPyodideRuntime(onProgress, options = {}) {
+    const timeoutMs = Number(options?.timeoutMs) > 0 ? Number(options.timeoutMs) : 25000;
+    const shouldPreload = options?.preloadPackages === true;
+
+    if (!_pyodidePromise) {
+        _pyodidePromise = (async () => {
+            onProgress?.(0.05, 'Loading Python runtime...');
+            // Inject pyodide script if not already present
+            if (!window.loadPyodide) {
+                await new Promise((resolve, reject) => {
+                    const s = document.createElement('script');
+                    const timer = setTimeout(() => {
+                        s.remove();
+                        reject(new Error('Pyodide script load timed out'));
+                    }, timeoutMs);
+                    s.src = 'https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js';
+                    s.onload = () => {
+                        clearTimeout(timer);
+                        resolve();
+                    };
+                    s.onerror = err => {
+                        clearTimeout(timer);
+                        s.remove();
+                        reject(err || new Error('Pyodide script load failed'));
+                    };
+                    document.head.appendChild(s);
+                });
+            }
+            onProgress?.(0.30, 'Initializing Python...');
+            const py = await Promise.race([
+                window.loadPyodide({
+                    indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.26.2/full/'
+                }),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Pyodide init timed out')), timeoutMs))
+            ]);
+            if (shouldPreload) {
+                await ensurePyodidePackagesPreloaded(py, onProgress);
+            }
+            onProgress?.(1.0, 'Python ready');
+            return py;
+        })().catch(err => {
+            _pyodidePromise = null;
+            _pyodidePackagesPreloaded = false;
+            throw err;
+        });
+    }
+
+    const py = await _pyodidePromise;
+    if (shouldPreload && !_pyodidePackagesPreloaded) {
+        await ensurePyodidePackagesPreloaded(py, onProgress);
+    }
+    return py;
 }
 
 // ── tqdm-style progress tracker ────────────────────────────────
@@ -31142,98 +31289,120 @@ async function typeCodeIntoNotebook(code, detailsEl, codeEl, progress) {
 
 // ── Run Python code in Pyodide ─────────────────────────────────
 async function runInPyodide(py, code, fileBytes, fileName) {
-    const uint8 = new Uint8Array(fileBytes);
-    const safeName = (fileName || 'data.csv').replace(/[\/\\]/g, '_');
+    let preamble = '';
+    if (fileBytes !== undefined && fileBytes !== null) {
+        const uint8 = new Uint8Array(fileBytes);
+        const safeName = (fileName || 'data.csv').replace(/[\/\\]/g, '_');
 
-    // Write file to Pyodide's virtual filesystem (MEMFS)
-    try {
-        if (py.FS && typeof py.FS.writeFile === 'function') {
-            py.FS.writeFile(safeName, uint8);
-            py.FS.writeFile('data.csv', uint8);
-        }
-    } catch (_) {}
+        // Write file to Pyodide's virtual filesystem (MEMFS)
+        try {
+            if (py.FS && typeof py.FS.writeFile === 'function') {
+                py.FS.writeFile(safeName, uint8);
+                if (!/\.py$/i.test(safeName)) {
+                    py.FS.writeFile('data.csv', uint8);
+                }
+            }
+        } catch (_) {}
 
-    // Inject into Pyodide namespace
-    py.globals.set('_file_bytes', uint8);
-    py.globals.set('_file_name', safeName);
+        // Inject into Pyodide namespace
+        py.globals.set('_file_bytes', uint8);
+        py.globals.set('_file_name', safeName);
+        preamble = [
+            'try:',
+            '    if hasattr(_file_bytes, "to_py"):',
+            '        _file_bytes = bytes(_file_bytes.to_py())',
+            '    else:',
+            '        _file_bytes = bytes(_file_bytes)',
+            'except Exception:',
+            '    pass'
+        ].join('\n');
+    }
 
-    // Wrap code to capture stdout and matplotlib output
-    const wrappedCode = `
-import sys, io as _io, json as _json
-import builtins
-
-# Pre-convert _file_bytes to Python bytes
-try:
-    if hasattr(_file_bytes, 'to_py'):
-        _file_bytes = bytes(_file_bytes.to_py())
-    else:
-        _file_bytes = bytes(_file_bytes)
-except Exception:
-    pass
-
-_output_buf = _io.StringIO()
-_orig_stdout = sys.stdout
-sys.stdout = _output_buf
-
-try:
-    import matplotlib
-    matplotlib.use('Agg')
-    import matplotlib.pyplot as plt
-    _has_mpl = True
-except Exception:
-    _has_mpl = False
-
-_chart_b64 = None
-
-# ── User code ──────────────────────────────────────────────────
-${code}
-# ── End user code ──────────────────────────────────────────────
-
-if _has_mpl:
-    fig = plt.gcf()
-    if fig.get_axes():
-        import base64
-        _buf = _io.BytesIO()
-        fig.savefig(_buf, format='png', dpi=110, bbox_inches='tight', facecolor='#0d1117')
-        _chart_b64 = base64.b64encode(_buf.getvalue()).decode()
-        plt.close('all')
-
-sys.stdout = _orig_stdout
-_stdout_text = _output_buf.getvalue()
-`;
-
-    py.runPython(wrappedCode);
-    const stdout = py.globals.get('_stdout_text') || '';
-    const chartB64 = py.globals.get('_chart_b64') || null;
-    return { stdout: String(stdout).trim(), chartB64 };
+    return await runPythonCodeInPyodide(py, code, { preamble });
 }
 
-// ── Master orchestrator ────────────────────────────────────────
+// ── Master orchestrator (silent headless execution; only final answer shown) ──
+async function runPythonScriptAttachments(attachmentsForSend, userQuery) {
+    const wasm = window.JarvisPythonWasm;
+    if (!wasm) return null;
+    const pyFiles = (attachmentsForSend || []).filter(att => wasm.isPythonScriptAttachment(att));
+    if (!pyFiles.length) return null;
+
+    if (typeof showThinkingIndicator === 'function') {
+        showThinkingIndicator('Running Python script...');
+    }
+
+    try {
+        const py = await loadPyodideRuntime(null, { timeoutMs: 25000 });
+        const companionDataFile = (attachmentsForSend || []).find(att => !wasm.isPythonScriptAttachment(att));
+        let companionBytes = null;
+        let companionName = null;
+        if (companionDataFile) {
+            companionName = companionDataFile.name || 'data.csv';
+            companionBytes = companionDataFile.file
+                ? await companionDataFile.file.arrayBuffer()
+                : (companionDataFile.base64 ? Uint8Array.from(atob(companionDataFile.base64), c => c.charCodeAt(0)).buffer : null);
+        }
+
+        const outputs = [];
+        let lastChartB64 = null;
+        let lastError = '';
+
+        for (const att of pyFiles) {
+            let source = '';
+            if (att.file && typeof att.file.text === 'function') {
+                source = await att.file.text();
+            } else if (att.base64) {
+                const bytes = Uint8Array.from(atob(att.base64), c => c.charCodeAt(0));
+                source = new TextDecoder('utf-8').decode(bytes);
+            }
+            source = String(source || '').trim();
+            if (!source) continue;
+
+            const runResult = await runInPyodide(py, source, companionBytes, companionName);
+            if (runResult?.hasError) {
+                lastError = runResult.stdout || 'Python execution error';
+            } else if (runResult?.stdout) {
+                outputs.push(runResult.stdout);
+                lastError = '';
+            }
+            if (runResult?.chartB64) {
+                lastChartB64 = runResult.chartB64;
+            }
+        }
+
+        if (!outputs.length && !lastChartB64 && !lastError) {
+            return null;
+        }
+
+        return wasm.formatPythonExecutionOnlyFinalAnswer({
+            responseText: '',
+            stdout: outputs.join('\n').trim(),
+            chartB64: lastChartB64,
+            error: lastError
+        });
+    } catch (err) {
+        console.warn('Silent Python script execution failed:', err?.message || err);
+        return null;
+    }
+}
+
 async function runPythonNotebook(attachmentsForSend, userQuery) {
     const dataFile = attachmentsForSend.find(isDataAnalysisFile);
     if (!dataFile) return null;
 
-    // Build the notebook panel
-    const { row, progress } = buildNotebookAnalyzingPanel() || {};
-    if (!row) return null;
-
-    const detailsEl = row.querySelector('#nb-details');
-    const codeEl    = row.querySelector('#nb-code');
-
-    let pyodide = null;
-    let generatedCode = '';
-    let executionOutput = '';
+    if (typeof showThinkingIndicator === 'function') {
+        showThinkingIndicator('Computing final answer...');
+    }
 
     try {
-        // ── Phase 1: Load Pyodide ──────────────────────────────
-        progress.update(0);
-        const pyLoadStart = Date.now();
-        pyodide = await loadPyodideRuntime((frac, label) => {
-            progress.update(frac);
+        // ── Phase 1: Load Pyodide silently with data-science packages ──
+        const pyodide = await loadPyodideRuntime(null, {
+            preloadPackages: true,
+            timeoutMs: 25000
         });
-        progress.nextPhase(); // → codegen
 
-        // ── Phase 2: Generate Python code via AI ───────────────
+        // ── Phase 2: Generate Python code via AI (never rendered to user) ─
         const fileExt = (dataFile.name || '').split('.').pop().toLowerCase();
         const codePrompt = [
             `The user has uploaded a ${fileExt.toUpperCase()} file named "${dataFile.name}".`,
@@ -31247,10 +31416,10 @@ async function runPythonNotebook(attachmentsForSend, userQuery) {
                 : `  import pandas as pd, io\n  df = pd.read_excel(io.BytesIO(bytes(_file_bytes)))`,
             '',
             'Rules:',
-            '- Print the answer clearly using print()',
+            '- Print ONLY the final answer clearly using print() (avoid verbose debug/intermediate logs)',
             '- For tables, use print(df.to_markdown(index=False)) or print(df.to_string())',
             '- For charts, use matplotlib — it will be captured automatically',
-            '- Keep code clean, well-commented, under 60 lines',
+            '- Keep code clean, under 60 lines',
             '- Return ONLY the Python code inside a ```python block, nothing else',
         ].join('\n');
 
@@ -31268,19 +31437,12 @@ async function runPythonNotebook(attachmentsForSend, userQuery) {
         // Extract code from ```python ... ``` block
         const codeMatch = rawCode.match(/```python\n?([\s\S]*?)```/) ||
                           rawCode.match(/```\n?([\s\S]*?)```/);
-        generatedCode = codeMatch ? codeMatch[1].trim() : rawCode.replace(/^```\w*\n?/, '').replace(/\n?```$/, '').trim();
+        let generatedCode = codeMatch ? codeMatch[1].trim() : rawCode.replace(/^```\w*\n?/, '').replace(/\n?```$/, '').trim();
         if (!generatedCode) {
             generatedCode = `import pandas as pd, io\ndf = pd.read_csv(io.BytesIO(bytes(_file_bytes)))\nprint(df.describe().to_markdown())`;
         }
 
-        progress.update(0.8);
-
-        // ── Animate code typing ────────────────────────────────
-        await typeCodeIntoNotebook(generatedCode, detailsEl, codeEl, progress);
-        progress.nextPhase(); // → execute
-
-        // ── Phase 3: Execute in Pyodide ────────────────────────
-        progress.update(0.1);
+        // ── Phase 3: Execute silently in Pyodide ───────────────────────
         const fileBytes = dataFile.file
             ? await dataFile.file.arrayBuffer()
             : (dataFile.base64 ? Uint8Array.from(atob(dataFile.base64), c => c.charCodeAt(0)).buffer : new ArrayBuffer(0));
@@ -31295,48 +31457,32 @@ async function runPythonNotebook(attachmentsForSend, userQuery) {
             stdout = `Error: ${String(pyErr?.message || pyErr)}`;
         }
 
-        executionOutput = stdout;
-        progress.update(1.0);
-        progress.nextPhase(); // → answer
-
-        // ── Transition to Notebook button: analyzing card disappears, Notebook label appears ──
-        transitionToNotebookButton(row, generatedCode, stdout + (chartB64 ? '\n[Chart generated]' : ''), progress);
-
-        // Wait 1 second before returning so the Notebook button displays clearly before answer synthesis begins
-        await new Promise(r => setTimeout(r, 1000));
-
-        // Build chart HTML if available
+        const cleanOutput = window.JarvisPythonWasm?.extractFinalPythonAnswer?.(stdout) || stdout;
         const chartHtml = chartB64
             ? `\n\n![Chart](data:image/png;base64,${chartB64})`
             : '';
 
-        // Return context for answer generation
         return {
             code: generatedCode,
-            output: stdout,
+            output: cleanOutput,
+            rawStdout: stdout,
             chartB64,
             chartHtml,
             answerContextPrompt: [
                 `User question: ${userQuery}`,
                 '',
-                'I ran Python analysis on the uploaded data file and got this output:',
+                'I ran Python computation on the uploaded data file and got this final output:',
                 '```',
-                stdout.slice(0, 6000) || '(no output)',
+                (cleanOutput || stdout).slice(0, 6000) || '(no output)',
                 '```',
-                chartB64 ? '(A chart was also generated and is shown below the answer.)' : '',
+                chartB64 ? '(A chart was also generated and will be attached below the answer.)' : '',
                 '',
-                'Now answer the user\'s question in plain, clear language based on this output.',
-                'Format numbers and tables nicely. Be concise and direct.',
+                'Present ONLY the final answer to the user\'s question in plain, clear language based directly on this output.',
+                'Do NOT include Python code blocks or explain how the code ran. Format numbers and tables cleanly.',
             ].filter(Boolean).join('\n')
         };
     } catch (err) {
-        console.error('Notebook error:', err);
-        if (row) {
-            const tqdm = row.querySelector('#nb-tqdm');
-            if (tqdm) {
-                tqdm.innerHTML = '<span style="color:#f87171">⚠ Analysis failed</span>';
-            }
-        }
+        console.warn('Silent Python computation fallback:', err?.message || err);
         return null;
     }
 }

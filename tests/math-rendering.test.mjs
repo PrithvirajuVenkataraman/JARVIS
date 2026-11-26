@@ -90,3 +90,22 @@ test('inline bold stays scoped within blocks and avoids literal ** corruption', 
     assert.match(mixedRendered, /<strong>Composer A \(<em>Film One<\/em>\)<\/strong>: score details\./);
     assert.match(mixedRendered, /<strong>Composer B<\/strong>: <em>Film Two<\/em> and x\*\*2\./);
 });
+
+test('inline backticks, fenced code delimiters, equation environments, and horizontal rules render cleanly', () => {
+    const codeAndMath = renderMarkdown(
+        'Inline code `price = $50, arr[1], x^2` should stay literal.\n\n' +
+        '```python\n' +
+        'formula = "\\\\(x^2 + y^2\\\\) and \\\\[z = 1\\\\]"\n' +
+        '```\n\n' +
+        '---\n\n' +
+        '\\begin{equation}\nE = mc^2\n\\end{equation}\n\n' +
+        '\\begin{eqnarray*}\na + b &= c\n\\end{eqnarray*}'
+    );
+
+    assert.ok(codeAndMath.includes('<code class="assistant-md-inline-code">price = $50, arr[1], x^2</code>'), 'Inline code with $, [], ^ must stay verbatim');
+    assert.ok(!codeAndMath.includes('citation-badge'), 'Citation [1] inside inline code must not become a citation badge');
+    assert.ok(codeAndMath.includes('assistant-md-code-block') && !codeAndMath.includes('math-inline'), 'Delimiters inside fenced python blocks must not be converted into math');
+    assert.ok(codeAndMath.includes('<hr class="assistant-md-hr">'), 'Standalone --- should render horizontal rule');
+    assert.ok(!codeAndMath.includes('katex-error'), 'equation and eqnarray* environments must render without KaTeX errors');
+    assert.equal((codeAndMath.match(/class="math-display-block"/g) || []).length, 2, 'Both equation and eqnarray* blocks should render as display math');
+});

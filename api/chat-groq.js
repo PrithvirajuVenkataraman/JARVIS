@@ -4409,7 +4409,7 @@ async function handler(req, res) {
         const validImages = (Array.isArray(images) ? images : []).filter(img => img?.base64).slice(0, 2);
         if (!validImages.length) return '';
         allowGenerationAttempts(5);
-        const signal = AbortSignal.timeout(4500);
+        const signal = AbortSignal.timeout(7500);
         try {
             const extractions = await Promise.allSettled(
                 validImages.map(img => runWithSignal(signal, () => extractTextFromImage({

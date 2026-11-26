@@ -411,25 +411,40 @@ export function balanceDelimitersForStreaming(rawText = '', options = {}) {
 export function autoWrapBareLatexMath(rawText = '') {
     if (!rawText || typeof rawText !== 'string') return rawText;
 
-    // Upfront normalization: convert \(...\) and \[...\] delimiters into standard $ and $$ blocks
+    // Protect fenced code blocks and inline code backticks BEFORE normalizing \(...\) or \[...\] delimiters
+    const protectedCode = [];
+    const protectCode = (m) => `@@JARVIS_AUTOWRAP_CODE_${protectedCode.push(m) - 1}@@`;
     let normalized = rawText
+        .replace(/```[\s\S]*?```/g, protectCode)
+        .replace(/`[^`\n]+`/g, protectCode);
+
+    // Upfront normalization: convert \(...\) and \[...\] delimiters into standard $ and $$ blocks
+    normalized = normalized
         .replace(/\\\(([\s\S]+?)\\\)/g, (_, m) => `$${m.trim()}$`)
         .replace(/\\\[([\s\S]+?)\\\]/g, (_, m) => `$$\n${m.trim()}\n$$`);
 
-    const parts = normalized.split(/(```[\s\S]*?```|\$\$[\s\S]*?\$\$)/g);
+    const parts = normalized.split(/(@@JARVIS_AUTOWRAP_CODE_\d+@@|\$\$[\s\S]*?\$\$|\\begin\s*\{([a-zA-Z*]+)\}[\s\S]*?\\end\s*\{\2\})/g);
     for (let p = 0; p < parts.length; p++) {
-        // Skip fenced code blocks or already delimited display math
-        if (p % 2 === 1) continue;
+        const segment = parts[p];
+        if (!segment) continue;
+        // Skip protected code, display math, and multi-line environments (and capture group entries)
+        if (segment.startsWith('@@JARVIS_AUTOWRAP_CODE_') || segment.startsWith('$$') || /^\\begin\s*\{/.test(segment)) {
+            continue;
+        }
+        // Check if this slot is actually the backreference capture group string from split()
+        if (p > 0 && /^\\begin\s*\{/.test(parts[p - 1] || '')) {
+            // parts array with capture group puts group match in parts[p]; keep only empty check harmless
+            continue;
+        }
 
-        let part = parts[p];
-        const lines = part.split('\n');
+        const lines = segment.split('\n');
         for (let l = 0; l < lines.length; l++) {
             let line = lines[l].trim();
             if (!line) continue;
             if (line.startsWith('#') || line.startsWith('>') || line.startsWith('|') || line.startsWith(':::')) continue;
 
-            // If line already contains $ or ` delimiters, it is already delimited — NEVER wrap into $$ or modify
-            if (line.includes('$') || line.includes('`')) {
+            // If line already contains $ or protected code delimiters, never wrap into $$
+            if (line.includes('$') || line.includes('`') || line.includes('@@JARVIS_AUTOWRAP_CODE_')) {
                 lines[l] = line;
                 continue;
             }
@@ -447,11 +462,11 @@ export function autoWrapBareLatexMath(rawText = '') {
 
             const isDisplayMathCandidate = !isProseStart && !hasProseWords && (hasMathCommand && hasMathRel || /^\\(?:int|sum|frac|sqrt|lim|boxed)\b/.test(line));
 
-            // 1. Pure standalone equation line without $$ delimiters: e.g. "\sec^{2}x dx = 2t dt \Longrightarrow dx=\frac{2t dt}{1+\tan^2 x} ..." or "\boxed{\int \tan x dx = ...}"
+            // 1. Pure standalone equation line without $$ delimiters
             if (isDisplayMathCandidate) {
                 lines[l] = `$$\n${line}\n$$`;
             } else {
-                // 2. Inline math inside introductory clause: e.g. "Because tan x = \frac{\sin x}{\cos x}, set" or "Let t = \sqrt{\tan x} \Rightarrow \tan x = t^2,"
+                // 2. Inline math inside introductory clause
                 const introRegex = /^(Let|Where|Since|If|When|So|Thus|Hence|Because|Recall\s+that|Notice\s+that|Using(?:\s+the\s+identity)?|Given|We\s+have|With|Set|Substituting|Substitute)\s+([^,.:;\n]+(?:=|\\(?:Longrightarrow|Rightarrow|to|in))[^\n,.:;]*)/i;
                 if (introRegex.test(line)) {
                     line = line.replace(introRegex, (_, intro, mathClause) => {
@@ -470,7 +485,16 @@ export function autoWrapBareLatexMath(rawText = '') {
         parts[p] = lines.join('\n');
     }
 
-    return parts.join('');
+    const rejoined = parts.filter((seg, idx) => {
+        if (seg === undefined) return false;
+        // Skip the capture-group emission from split() for \begin{env}...\end{env}
+        if (idx > 0 && /^\\begin\s*\{/.test(parts[idx - 1] || '') && /^[a-zA-Z*]+$/.test(seg) && parts[idx - 1].includes(`\\begin{${seg}}`)) {
+            return false;
+        }
+        return true;
+    }).join('');
+
+    return rejoined.replace(/@@JARVIS_AUTOWRAP_CODE_(\d+)@@/g, (_, idx) => protectedCode[Number(idx)] ?? '');
 }
 
 export function renderMarkdown(rawText = '', options = {}) {
@@ -534,11 +558,11 @@ export function renderMarkdown(rawText = '', options = {}) {
     // 1e. For mathematical problems and derivations, bulletins are not required.
     // Strip bullet markers wrapping math display equations, math steps, or math narrative lines.
     if (mathBlocks.length > 0 || /(?:\$|\\frac|\\sqrt|\\int|\\sum|\\approx|\\boxed)/.test(text)) {
-        text = text.replace(/^[\s\-*•+–—]+\s*(@@JARVIS_MATH_BLOCK_\d+@@)/gm, '$1');
-        text = text.replace(/^[\s\-*•+–—]+\s*(Step\s*\d+[\s:.\-])/gmi, '$1');
-        text = text.replace(/^[\s\-*•+–—]+\s*(Substitute\b|Applying\b|Therefore\b|Hence\b|Thus\b|Solving\b|Simplifying\b|Expanding\b|Factoring\b|Divide\b|Multiply\b|Add\b|Subtract\b|Differentiating\b|Integrating\b|We get\b|This gives\b|The (?:final )?(?:answer|result|solution|value|root) is\b)/gmi, '$1');
+        text = text.replace(/^(?!\s*(?:---+|\*\*\*+|___+)\s*$)[ \t]*[\-*•+–—]+[ \t]*(@@JARVIS_MATH_BLOCK_\d+@@)/gm, '$1');
+        text = text.replace(/^(?!\s*(?:---+|\*\*\*+|___+)\s*$)[ \t]*[\-*•+–—]+[ \t]*(Step\s*\d+[\s:.\-])/gmi, '$1');
+        text = text.replace(/^(?!\s*(?:---+|\*\*\*+|___+)\s*$)[ \t]*[\-*•+–—]+[ \t]*(Substitute\b|Applying\b|Therefore\b|Hence\b|Thus\b|Solving\b|Simplifying\b|Expanding\b|Factoring\b|Divide\b|Multiply\b|Add\b|Subtract\b|Differentiating\b|Integrating\b|We get\b|This gives\b|The (?:final )?(?:answer|result|solution|value|root) is\b)/gmi, '$1');
         if (mathBlocks.length >= 2 || (mathBlocks.length >= 1 && /Step\s*\d+/i.test(text))) {
-            text = text.replace(/^[\s\-*•+–—]+\s+/gm, '');
+            text = text.replace(/^(?!\s*(?:---+|\*\*\*+|___+)\s*$)[ \t]*[\-*•+–—]+[ \t]+/gm, '');
         }
     }
 
@@ -570,6 +594,12 @@ export function renderMarkdown(rawText = '', options = {}) {
             const headingText = line.replace(/^#{1,4}\s+/, '');
             const tag = `h${Math.min(level + 1, 5)}`;
             out.push(`<${tag} class="assistant-md-heading">${escapeHtml(headingText)}</${tag}>`);
+            i += 1;
+            continue;
+        }
+
+        if (/^\s*(?:---+|\*\*\*+|___+)\s*$/.test(line)) {
+            out.push('<hr class="assistant-md-hr">');
             i += 1;
             continue;
         }
@@ -689,6 +719,7 @@ export function renderMarkdown(rawText = '', options = {}) {
                 !/^\s*>/.test(String(lines[i] || '')) &&
                 !/^(#{1,4})\s+/.test(String(lines[i] || '')) &&
                 !/^\s*\|.+\|\s*$/.test(String(lines[i] || '')) &&
+                !/^\s*(?:---+|\*\*\*+|___+)\s*$/.test(String(lines[i] || '')) &&
                 !(String(lines[i] || '').trim().startsWith('@@JARVIS_CODE_BLOCK_') && String(lines[i] || '').trim().endsWith('@@')) &&
                 !(String(lines[i] || '').trim().startsWith('@@JARVIS_MATH_BLOCK_') && String(lines[i] || '').trim().endsWith('@@'))
             ) {
@@ -707,21 +738,23 @@ export function renderMarkdown(rawText = '', options = {}) {
 
     let html = out.join('\n');
 
-    // Inline formatting: math, inline code, bold, italics, links & citations
+    // Inline formatting: protect inline code/backticked math BEFORE renderMathInText so `$` or `^` inside code never corrupts math
     const inlineMath = [];
+    const inlineCodes = [];
     const storeInlineMath = (markup) => `@@JARVIS_INLINE_MATH_${inlineMath.push(markup) - 1}@@`;
-    html = renderMathInText(html, { storeMath: storeInlineMath });
+    const storeInlineCode = (markup) => `@@JARVIS_INLINE_CODE_${inlineCodes.push(markup) - 1}@@`;
 
-    // Handle backticked content: route math expressions to inline math instead of code badge boxes
+    // Handle backticked content first: route math expressions to inline math, protect code spans
     html = html.replace(/`([^`\n]+)`/g, (match, inner) => {
         const trimmed = inner.trim();
+        const hasCodeSyntax = /[\[\];"'`$]/.test(trimmed) && !/\\(?:left|right|frac|sqrt|text|begin)/.test(trimmed);
         const isExplicitMath = /^\$[^$]+\$$/.test(trimmed) ||
                                /\\(?:frac|sqrt|boxed|approx|times|cdot|pm|le|ge|neq|alpha|beta|gamma|pi|theta|text|mathrm|mathbf|sum|int|partial|nabla|infty|degree|circ)\b/.test(trimmed);
-        const isEquationOrRelation = /^[a-zA-Z0-9_\(\)]+\s*(?:=|≈|&asymp;|\approx|\+|-|\*|\/|\\times|\\approx|≠|<=|>=|<|>|\\le|\\ge|\\neq)\s*[\d\w\s\\.+*/^_-]+/.test(trimmed);
+        const isEquationOrRelation = !hasCodeSyntax && /^[a-zA-Z0-9_\(\)]+\s*(?:=|≈|&asymp;|≠|<=|>=|<|>|\\approx|\\times|\\le|\\ge|\\neq)\s*[a-zA-Z0-9_.,+\-*/^()\s\\]+$/.test(trimmed);
         const isCoordinate = /^\([a-zA-Z0-9_+-]+,\s*[a-zA-Z0-9_+-]+\)$/.test(trimmed);
-        const isSubSuper = /^[a-zA-Z]\s*[\^_]\{?[\w\d+-]+\}?$/.test(trimmed);
-        const isArithmetic = /^(?:[\d\w_]+\s*[\+\-\*\/\^]\s*)+[\d\w_]+$/.test(trimmed) && /[+\-*/^]/.test(trimmed) && !/[a-zA-Z]{5,}/.test(trimmed);
-        const isDifferentialOrCalculus = /\b(?:d[x-z]|d[u-w]|dt)\b/.test(trimmed) && /\b(?:x|y|z|u|v|w|t|tan|sin|cos|sec|cot|csc|ln|log|\d+)\b/.test(trimmed);
+        const isSubSuper = !hasCodeSyntax && /^[a-zA-Z]\s*[\^_]\{?[\w\d+-]+\}?$/.test(trimmed);
+        const isArithmetic = !hasCodeSyntax && /^(?:[\d\w_]+\s*[\+\-\*\/\^]\s*)+[\d\w_]+$/.test(trimmed) && /[+\-*/^]/.test(trimmed) && !/[a-zA-Z]{5,}/.test(trimmed);
+        const isDifferentialOrCalculus = !hasCodeSyntax && /\b(?:d[x-z]|d[u-w]|dt)\b/.test(trimmed) && /\b(?:x|y|z|u|v|w|t|tan|sin|cos|sec|cot|csc|ln|log|\d+)\b/.test(trimmed);
 
         const isMath = isExplicitMath || isEquationOrRelation || isCoordinate || isSubSuper || isArithmetic || isDifferentialOrCalculus;
 
@@ -729,8 +762,10 @@ export function renderMarkdown(rawText = '', options = {}) {
             const cleanExpr = trimmed.replace(/^\$|\$$/g, '');
             return storeInlineMath(`<span class="math-inline">${formatLatexExpression(cleanExpr, false)}</span>`);
         }
-        return `<code class="assistant-md-inline-code">${inner}</code>`;
+        return storeInlineCode(`<code class="assistant-md-inline-code">${inner}</code>`);
     });
+
+    html = renderMathInText(html, { storeMath: storeInlineMath });
 
     const sources = Array.isArray(options?.sources) ? options.sources : (Array.isArray(options?.meta?.sources) ? options.meta.sources : []);
 
@@ -927,6 +962,7 @@ export function renderMarkdown(rawText = '', options = {}) {
         `;
     });
 
+    html = html.replace(/@@JARVIS_INLINE_CODE_(\d+)@@/g, (_, idx) => inlineCodes[Number(idx)] || '');
     return html.replace(/@@JARVIS_INLINE_MATH_(\d+)@@/g, (_, idx) => inlineMath[Number(idx)] || '');
 }
 

@@ -1,4 +1,4 @@
-import { evaluateArithmetic } from '../api/_lib/arithmetic.js';
+import { evaluateArithmetic } from './arithmetic.js';
 import { callLLM } from './api-client.js';
 import { PartitionedIVFIndex, textToEmbeddingVector, vectorCosineSimilarity } from './storage.js';
 /**

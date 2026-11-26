@@ -3,11 +3,12 @@ import { normalizeGeminiGenerationConfig, visionFailurePayload } from './model-f
 const PROVIDER_TIMEOUT_MS = 20_000;
 const GEMINI_API_VERSIONS = ['v1beta', 'v1'];
 const GEMINI_MODEL_FALLBACKS = [
+    'gemini-4-hydrogen',
+    'gemini-3.8-flash',
     'gemini-2.5-flash',
     'gemini-3.5-flash',
     'gemini-2.5-flash-lite',
     'gemini-2.5-pro',
-    'gemini-4-hydrogen',
     'gemini-3.7-flash',
     'gemini-2.0-flash',
     'gemini-2.0-flash-lite',
@@ -58,7 +59,56 @@ function normalizeMimeForProvider(mimeType, base64 = '') {
     return 'image/jpeg'; // HEIC, HEIF, AVIF, BMP, TIFF → jpeg (client re-encodes via canvas)
 }
 
+const MAX_EXTRACT_BASE64_CHARS = 8 * 1024 * 1024;
+const LLM_DIRECT_IMAGE_MIMES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+
+function detectBinaryImageMime(base64 = '') {
+    if (!base64 || typeof base64 !== 'string') return '';
+    const prefix = base64.slice(0, 32);
+    if (prefix.startsWith('/9j/')) return 'image/jpeg';
+    if (prefix.startsWith('iVBORw0KGgo')) return 'image/png';
+    if (prefix.startsWith('R0lGOD')) return 'image/gif';
+    if (prefix.startsWith('UklGR')) return 'image/webp';
+    if (prefix.startsWith('Qk')) return 'image/bmp';
+    if (prefix.startsWith('SUkq') || prefix.startsWith('TU0A')) return 'image/tiff';
+    try {
+        const buf = Buffer.from(prefix.slice(0, 24), 'base64');
+        if (buf.length >= 12 && buf.toString('ascii', 4, 8) === 'ftyp') {
+            const brand = buf.toString('ascii', 8, 12).toLowerCase();
+            if (['heic', 'heix', 'hevc', 'hevx', 'mif1', 'msf1'].includes(brand)) return 'image/heic';
+            if (['avif', 'avis'].includes(brand)) return 'image/avif';
+        }
+    } catch (_) {}
+    return '';
+}
+
+function cleanIncomingBase64(rawValue = '', rawMime = 'image/jpeg') {
+    let mime = String(rawMime || '').trim().toLowerCase();
+    const rawStr = String(rawValue || '');
+    const dataUrlMatch = rawStr.match(/^data:([^;]+);base64,/i);
+    if (dataUrlMatch?.[1] && (!mime || mime === 'application/octet-stream' || mime === 'image/jpeg')) {
+        mime = dataUrlMatch[1].trim().toLowerCase();
+    }
+    let clean = rawStr
+        .replace(/^data:[^;]+;base64,/i, '')
+        .replace(/\s+/g, '')
+        .replace(/-/g, '+')
+        .replace(/_/g, '/');
+    if (clean && !clean.endsWith('=')) {
+        while (clean.length % 4 !== 0) clean += '=';
+    }
+    return { clean, mime };
+}
+
 export async function extractTextFromImage({ mimeType = 'image/jpeg', imageBase64 = '', prompt = '', customKeys = null }) {
+    const { clean: cleanBase64, mime: parsedMime } = cleanIncomingBase64(imageBase64, mimeType);
+    if (!cleanBase64 || cleanBase64.length > MAX_EXTRACT_BASE64_CHARS || !/^[A-Za-z0-9+/]+={0,2}$/.test(cleanBase64)) {
+        throw Object.assign(new Error('Image data is empty, malformed, or too large.'), { code: 'invalid_image' });
+    }
+    const detectedMime = detectBinaryImageMime(cleanBase64);
+    if (detectedMime && !LLM_DIRECT_IMAGE_MIMES.has(detectedMime)) {
+        throw Object.assign(new Error('This image format requires browser conversion before OCR.'), { code: 'image_conversion_required' });
+    }
     const providers = getVisionProviders(customKeys);
     if (!providers.groqApiKey && !providers.geminiApiKey) {
         throw new Error('Vision provider is not configured.');
@@ -70,6 +120,7 @@ export async function extractTextFromImage({ mimeType = 'image/jpeg', imageBase6
         '- Render tables, grids, and multi-column data as clean Markdown tables with header separators (| Col 1 | Col 2 |).',
         '- For receipts, bills, and invoices: preserve store/vendor names, dates, itemized lines, quantities, unit prices, tax lines, and grand totals accurately.',
         '- For forms and key-value documents: preserve labels and values (e.g. "Name: ...", "Date: ...").',
+        '- For mathematical equations or formulas: transcribe accurately using valid LaTeX notation inside $...$ or $$...$$.',
         '- For handwritten notes: transcribe clearly and do not guess unreadable characters.',
         '- Do not invent, assume, or hallucinate text that is not visible.',
         'Return strict JSON only:',
@@ -77,7 +128,7 @@ export async function extractTextFromImage({ mimeType = 'image/jpeg', imageBase6
         String(prompt || 'Extract all readable text, tables, and data from this image.').trim()
     ].join('\n');
 
-    const result = await callVisionText({ providers, systemPrompt, mimeType: normalizeMimeForProvider(mimeType, imageBase64), imageBase64 });
+    const result = await callVisionText({ providers, systemPrompt, mimeType: normalizeMimeForProvider(parsedMime || mimeType, cleanBase64), imageBase64: cleanBase64 });
     const rawText = result?.text;
     if (!rawText) return { ok: false, text: '', method: 'vision_ocr', provider: 'vision' };
 
@@ -263,21 +314,79 @@ function extractGeminiText(payload) {
     return parts.map(part => (typeof part?.text === 'string' ? part.text : '')).join('\n').trim();
 }
 
-function safeParseJson(value) {
+// Repair unescaped LaTeX backslashes (\frac, \tan, \theta, \sqrt, \right, \begin, \neq) and raw newlines in JSON strings.
+export function repairJsonEscapes(src = '') {
+    let out = '';
+    let inString = false;
+    const s = String(src || '');
+    for (let i = 0; i < s.length; i++) {
+        const ch = s[i];
+        if (!inString) {
+            if (ch === '"') inString = true;
+            out += ch;
+            continue;
+        }
+        if (ch === '"') {
+            inString = false;
+            out += ch;
+            continue;
+        }
+        if (ch === '\n') { out += '\\n'; continue; }
+        if (ch === '\r') { out += '\\r'; continue; }
+        if (ch === '\t') { out += '\\t'; continue; }
+        if (ch === '\\') {
+            const next = s[i + 1];
+            if (next === undefined) { out += '\\\\'; continue; }
+            if (next === '\\' || next === '"' || next === '/') {
+                out += ch + next;
+                i++;
+                continue;
+            }
+            if (next === 'u' && /^[0-9a-fA-F]{4}/.test(s.slice(i + 2, i + 6))) {
+                out += s.slice(i, i + 6);
+                i += 5;
+                continue;
+            }
+            const rest = s.slice(i + 1);
+            const isLatexEscape =
+                (next === 'f' && /^(?:frac|forall|fbox)\b/i.test(rest)) ||
+                (next === 't' && /^(?:tan|tanh|text|textbf|textit|textrm|texttt|theta|tau|tfrac|times|tilde|to|top|triangle|therefore|textstyle)\b/.test(rest)) ||
+                (next === 'r' && /^(?:right|rightarrow|Rightarrow|rho|rceil|rfloor|rangle|rm\b|root)/.test(rest)) ||
+                (next === 'b' && /^(?:begin|beta|binom|boxed|bar|bmod|bot|bullet|big|bigl|bigr|bigcup|bigcap|because)\b/.test(rest)) ||
+                (next === 'n' && /^(?:nabla|neq|ne|nu|notin|nless|ngtr|nleq|ngeq|not|natural|neg|nexists|newline|nonumber)\b/.test(rest));
+            if (isLatexEscape || !/[bfnrt]/.test(next)) {
+                out += '\\\\' + next;
+                i++;
+                continue;
+            }
+            out += ch + next;
+            i++;
+            continue;
+        }
+        out += ch;
+    }
+    return out;
+}
+
+export function safeParseJson(value) {
+    const raw = String(value || '');
     try {
-        return JSON.parse(String(value || ''));
+        return JSON.parse(raw);
     } catch (_) {
-        return null;
+        try {
+            return JSON.parse(repairJsonEscapes(raw));
+        } catch (_) {
+            return null;
+        }
     }
 }
 
-function extractJsonFromText(rawText) {
+export function extractJsonFromText(rawText) {
     const raw = String(rawText || '').trim();
     if (!raw) return null;
-    const unwrapped = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-    try {
-        return JSON.parse(unwrapped);
-    } catch (_) {}
+    const unwrapped = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').replace(/^json\s*/i, '').trim();
+    const direct = safeParseJson(unwrapped);
+    if (direct && typeof direct === 'object') return direct;
     const start = unwrapped.indexOf('{');
     const end = unwrapped.lastIndexOf('}');
     if (start >= 0 && end > start) {

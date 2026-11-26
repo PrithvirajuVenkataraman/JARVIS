@@ -130,14 +130,19 @@ export function formatLatexExpression(expr = '', isDisplay = false) {
     let katexInput = unescapeHtmlInMath(raw).trim();
 
     // KaTeX normalization:
-    // Convert top-level \begin{align} / \begin{align*} to \begin{aligned}
+    // Convert top-level \begin{align} / \begin{align*} / \begin{eqnarray} / \begin{equation} to KaTeX-safe forms
     katexInput = katexInput
         .replace(/\\begin\s*\{align\*?\}/g, '\\begin{aligned}')
         .replace(/\\end\s*\{align\*?\}/g, '\\end{aligned}')
+        .replace(/\\begin\s*\{eqnarray\*?\}/g, '\\begin{aligned}')
+        .replace(/\\end\s*\{eqnarray\*?\}/g, '\\end{aligned}')
         .replace(/\\begin\s*\{gather\*?\}/g, '\\begin{gathered}')
         .replace(/\\end\s*\{gather\*?\}/g, '\\end{gathered}')
+        .replace(/\\begin\s*\{multline\*?\}/g, '\\begin{gathered}')
+        .replace(/\\end\s*\{multline\*?\}/g, '\\end{gathered}')
         .replace(/\\begin\s*\{split\}/g, '\\begin{aligned}')
-        .replace(/\\end\s*\{split\}/g, '\\end{aligned}');
+        .replace(/\\end\s*\{split\}/g, '\\end{aligned}')
+        .replace(/\\(?:begin|end)\s*\{equation\*?\}/g, '');
 
     // Clean up unbalanced or dangling alignment tags that would make KaTeX fail
     if (katexInput.includes('\\end{aligned}') && !katexInput.includes('\\begin{aligned}')) {
@@ -359,13 +364,22 @@ export function formatLatexExpression(expr = '', isDisplay = false) {
 }
 
 export function formatInlineMathPowers(text = '') {
-    let raw = String(text || '');
-    raw = raw.replace(/([a-zA-Z0-9_\)\]\}])\^\{([^{}]+)\}/g, '$1<sup>$2</sup>');
-    raw = raw.replace(/([a-zA-Z0-9_\)\]\}])\^\(([^()]+)\)/g, '$1<sup>$2</sup>');
-    raw = raw.replace(/([a-zA-Z0-9_\)\]\}])\^([a-zA-Z0-9_+-]+)/g, '$1<sup>$2</sup>');
-    raw = raw.replace(/([a-zA-Z0-9_\)\]\}])_\{([^{}]+)\}/g, '$1<sub>$2</sub>');
-    raw = raw.replace(/([a-zA-Z0-9_\)\]\}])_\(([^()]+)\)/g, '$1<sub>$2</sub>');
-    return raw;
+    const raw = String(text || '');
+    if (!raw || (!raw.includes('^') && !raw.includes('_'))) return raw;
+    // Never rewrite attributes or tokens inside HTML tags (<...>) or internal @@JARVIS_...@@ placeholders
+    return raw
+        .split(/(<[^>]+>|@@JARVIS_[A-Z0-9_]+@@)/g)
+        .map((segment, idx) => {
+            if (idx % 2 === 1) return segment;
+            let s = segment;
+            s = s.replace(/([a-zA-Z0-9_\)\]\}])\^\{([^{}]+)\}/g, '$1<sup>$2</sup>');
+            s = s.replace(/([a-zA-Z0-9_\)\]\}])\^\(([^()]+)\)/g, '$1<sup>$2</sup>');
+            s = s.replace(/([a-zA-Z0-9_\)\]\}])\^([a-zA-Z0-9_+-]+)/g, '$1<sup>$2</sup>');
+            s = s.replace(/([a-zA-Z0-9_\)\]\}])_\{([^{}]+)\}/g, '$1<sub>$2</sub>');
+            s = s.replace(/([a-zA-Z0-9_\)\]\}])_\(([^()]+)\)/g, '$1<sub>$2</sub>');
+            return s;
+        })
+        .join('');
 }
 
 // Shared with streaming delimiter balancing so prices never create phantom equations.

@@ -54,3 +54,52 @@ test('unconverted camera bytes are not falsely labelled as JPEG and sent to a vi
     const res = response(); await visionHandler(request({ task: 'text_extract', imageBase64: Buffer.from([0x49, 0x49, 0x2a, 0, 8, 0, 0, 0]).toString('base64'), mimeType: 'image/tiff' }), res);
     assert.equal(res.statusCode, 415); assert.equal(res.data.error.code, 'image_conversion_required'); assert.equal(calls, 0);
 }));
+
+test('vision JSON repair preserves unescaped LaTeX backslashes in OCR and math responses', async () => environment(async () => {
+    const rawJsonWithUnescapedLatex = '{"fullText":"\\int \\sqrt{\\tan \\theta} \\, d\\theta = \\frac{1}{2} \\neq 0","summary":"Integral with \\theta and \\frac"}';
+    globalThis.fetch = async () => Response.json({
+        candidates: [{ content: { parts: [{ text: rawJsonWithUnescapedLatex }] } }]
+    });
+
+    const result = await extractTextFromImage({ imageBase64: `data:image/png;base64,${png.replace(/\+/g, '-').replace(/\//g, '_')}`, mimeType: 'image/png' });
+    assert.equal(result.ok, true);
+    assert.ok(result.text.includes('\\frac{1}{2}'), `Expected preserved \\frac, got: ${result.text}`);
+    assert.ok(result.text.includes('\\tan \\theta'), `Expected preserved \\tan \\theta, got: ${result.text}`);
+    assert.ok(result.text.includes('\\neq'), `Expected preserved \\neq, got: ${result.text}`);
+}));
+
+test('attachment ingest and client OCR helpers handle edge cases (0-byte, encrypted PDF, short math, pptx, data URL base64)', async () => {
+    const { ingestAttachmentPayload } = await import('../api/_lib/attachment-ingest.js');
+    const attachmentsMod = await import('../app/attachments.js');
+    const t = attachmentsMod.__test;
+
+    assert.equal(t.isPptxFile({ name: 'slides.pptx', mimeType: '' }), true);
+    assert.equal(t.isPptxFile({ name: 'slides.txt', mimeType: 'text/plain' }), false);
+
+    assert.equal(t.validateFile({ name: 'empty.pdf', size: 0 }).ok, false);
+    assert.match(t.validateFile({ name: 'empty.pdf', size: 0 }).message, /empty/i);
+
+    assert.equal(t.classifyPdfError(new Error('No password given')).code, 'pdf_encrypted');
+    assert.equal(t.classifyPdfError(new Error('Invalid PDF structure')).code, 'pdf_corrupt');
+
+    assert.equal(t.hasUsefulExtractedText('E = mc^2'), true);
+    assert.equal(t.hasUsefulExtractedText('2x + 5 = 19'), true);
+    assert.equal(t.hasUsefulExtractedText('OCR scanning page 1...'), false);
+
+    const utf8B64UrlSafe = Buffer.from('Sample contract clause 12', 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    const ingestedText = await ingestAttachmentPayload({
+        filename: 'notes.txt',
+        mimeType: 'text/plain',
+        base64: `data:text/plain;base64,${utf8B64UrlSafe}`
+    });
+    assert.equal(ingestedText.ok, true);
+    assert.match(ingestedText.text, /Sample contract clause 12/);
+
+    const emptyPdfIngest = await ingestAttachmentPayload({
+        filename: 'blank.pdf',
+        mimeType: 'application/pdf',
+        base64: Buffer.from('%PDF-1.4 invalid', 'utf8').toString('base64')
+    });
+    assert.equal(emptyPdfIngest.ok, false);
+    assert.match(emptyPdfIngest.message, /no readable|unable|could not|empty/i);
+});

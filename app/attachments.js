@@ -290,6 +290,7 @@ export async function ingestAllForMessage(attachments = [], userText = '') {
     const sections = [];
     const methods = [];
     const imagePayloads = [];
+    const extractionErrors = [];
     let anyReadable = false;
 
     for (const outcome of settled) {
@@ -316,6 +317,7 @@ export async function ingestAllForMessage(attachments = [], userText = '') {
             anyReadable = true;
             sections.push(`[Attached Image: ${attachment.name}]`);
         } else {
+            if (result?.message) extractionErrors.push(result.message);
             sections.push(`${header}\nExtraction failed or returned too little readable text. ${result.message || 'No readable text found.'}`);
         }
     }
@@ -348,6 +350,7 @@ export async function ingestAllForMessage(attachments = [], userText = '') {
 
         methods,
         combinedText: attachmentText,
+        errorMessage: extractionErrors[0] || '',
         anyReadable
     };
 }
@@ -390,14 +393,16 @@ export async function ingestAttachmentWithFallback(attachment, query = '') {
         return ({
         ok: false,
         blocked: isTextLikeFile(attachment?.file || {}) || error.code === 'document_credentials',
+        fatalPdfError: error.code === 'pdf_encrypted' || error.code === 'pdf_corrupt',
         text: '',
-        method: 'client',
+        method: error.code || 'client',
         provider: 'client',
         message: String(error?.message || error),
-        attempts: [{ stage: 'client', ok: false, method: 'client_error', error: String(error?.message || error) }]
+        attempts: [{ stage: 'client', ok: false, method: error.code || 'client_error', error: String(error?.message || error) }]
     }); });
     attempts.push(...(localText.attempts || []));
     if (localText.blocked) return { ...localText, message: 'The text could not be read safely on this device. No server upload was attempted.' };
+    if (localText.fatalPdfError) return { ...localText, ok: false, attempts };
     if (isPdfFile(attachment?.file || attachment)) {
         return await ingestPdfAttachmentWithVisuals(attachment, localText, attempts);
     }
@@ -557,7 +562,7 @@ async function extractLocally(attachment, query = '') {
     }
 
     if (isPdfFile(file)) {
-        const pdfText = await extractPdfTextClient(file, attachment).catch(() => '');
+        const pdfText = await extractPdfTextClient(file, attachment);
         const useful = hasUsefulExtractedText(pdfText);
         attempts.push({ stage: 'client_pdf', ok: useful, method: 'client_pdf' });
         if (useful) {
@@ -673,7 +678,7 @@ async function ingestViaVision(attachment) {
             : '';
         let text = fullText || snippets;
         if (!text && !details?.fullText && (!details?.textDetected || details.textDetected.length === 0)) {
-            const rawCandidate = String(data?.response || '').trim();
+            const rawCandidate = String(data?.response || '').replace(/^Detected text:\s*/i, '').trim();
             if (!isMetadataOnlyExtract(rawCandidate) && !isOcrStatusMessage(rawCandidate)) {
                 text = rawCandidate;
             }
@@ -759,6 +764,9 @@ function logAttachmentIngestDiagnostics(attachment, payload = {}) {
 
 function validateFile(file) {
     if (!file) return { ok: false, message: 'No file selected.' };
+    if (file.size === 0) {
+        return { ok: false, message: `${file.name || 'This file'} is empty (0 bytes) and has no content to read.` };
+    }
     if (file.size > MAX_FILE_BYTES) {
         return { ok: false, message: `${file.name} is too large. Max size is ${formatBytes(MAX_FILE_BYTES)}.` };
     }
@@ -959,14 +967,18 @@ async function compressNativeImage(file, maxDimension = 1600, quality = 0.88) {
             );
             canvas.width = canvasWidth;
             canvas.height = canvasHeight;
-            // Re-apply because applyExifOrientationTransform mutates ctx but we need correct canvas size set first
+            // Fill opaque white before EXIF rotation so transparent OCR/math PNGs keep legible contrast in JPEG
             const ctx2 = canvas.getContext('2d');
+            ctx2.fillStyle = '#ffffff';
+            ctx2.fillRect(0, 0, canvasWidth, canvasHeight);
             ctx2.imageSmoothingEnabled = true;
             ctx2.imageSmoothingQuality = 'high';
             applyExifOrientationTransform(ctx2, exifOrientation, drawWidth, drawHeight);
             ctx2.drawImage(bitmap, 0, 0, drawWidth, drawHeight);
             bitmap.close?.();
             const dataUrl = canvas.toDataURL('image/jpeg', quality);
+            canvas.width = 0;
+            canvas.height = 0;
             const comma = dataUrl.indexOf(',');
             const base64 = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
             if (base64 && base64.length > 50) return base64;
@@ -986,8 +998,14 @@ async function compressNativeImage(file, maxDimension = 1600, quality = 0.88) {
         const img = new Image();
         img.onload = () => {
             try {
-                const srcWidth = img.naturalWidth || img.width;
-                const srcHeight = img.naturalHeight || img.height;
+                const isSvg = rawMime === 'image/svg+xml' || /\.svgz?$/i.test(file?.name || '');
+                const srcWidth = img.naturalWidth || img.width || (isSvg ? 1200 : 0);
+                const srcHeight = img.naturalHeight || img.height || (isSvg ? 1200 : 0);
+                if (!srcWidth || !srcHeight) {
+                    URL.revokeObjectURL(objectUrl);
+                    reject(unsupportedImageError(file.name));
+                    return;
+                }
                 if (isLosslessCandidate && exifOrientation === 1 && srcWidth <= maxDimension && srcHeight <= maxDimension) {
                     URL.revokeObjectURL(objectUrl);
                     fileToBase64(file).then(resolve).catch(reject);
@@ -1013,11 +1031,15 @@ async function compressNativeImage(file, maxDimension = 1600, quality = 0.88) {
                 canvas.width = canvasWidth;
                 canvas.height = canvasHeight;
                 const ctx2 = canvas.getContext('2d');
+                ctx2.fillStyle = '#ffffff';
+                ctx2.fillRect(0, 0, canvasWidth, canvasHeight);
                 ctx2.imageSmoothingEnabled = true;
                 ctx2.imageSmoothingQuality = 'high';
                 applyExifOrientationTransform(ctx2, exifOrientation, drawWidth, drawHeight);
                 ctx2.drawImage(img, 0, 0, drawWidth, drawHeight);
                 const dataUrl = canvas.toDataURL('image/jpeg', quality);
+                canvas.width = 0;
+                canvas.height = 0;
                 const comma = dataUrl.indexOf(',');
                 const base64 = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
                 URL.revokeObjectURL(objectUrl);
@@ -1052,7 +1074,7 @@ function isDocxFile(file) {
 }
 
 function isPptxFile(file) {
-    return file.type === 'application/vnd.openxmlformats-officedocument.presentationml.presentation' || /\\.pptx$/i.test(file.name);
+    return file.type === 'application/vnd.openxmlformats-officedocument.presentationml.presentation' || /\.pptx$/i.test(file.name);
 }
 
 function isXlsxFile(file) {
@@ -1093,10 +1115,21 @@ function isOcrStatusMessage(text) {
     return statusScore >= 0.25 && statusScore > contentScore;
 }
 
+function isMathematicalOrFormulaContent(text) {
+    const str = String(text || '').trim();
+    if (str.length < 5) return false;
+    const hasEquationOrInequality = /[\d\w\p{L}]+\s*(?:=|<|>|<=|>=|≈|\\approx|\\le|\\ge|≠|\\neq)\s*[\d\w\p{L}]/u.test(str);
+    const hasMathOperators = /[\d\w\p{L}]\s*(?:[+\-*/^×÷±]|\\[a-zA-Z]+)\s*[\d\w\p{L}]/u.test(str);
+    const hasMathTerms = /\b(?:solve|evaluate|simplify|calculate|derivative|integral|limit|matrix|vector|triangle|hypotenuse|radius|diameter|perimeter|area|volume|angle|degree|sin|cos|tan|log|ln|sqrt|sum|sigma|mean|median|variance|probability|total|subtotal|tax|price)\b/i.test(str);
+    const hasLatexMath = /\\(?:frac|sqrt|int|sum|prod|lim|alpha|beta|gamma|theta|pi|partial|cdot|times)/i.test(str);
+    return (hasEquationOrInequality || hasMathOperators || hasLatexMath || (hasMathTerms && /\d/.test(str)));
+}
+
 function hasUsefulExtractedText(text) {
     const value = String(text || '').replace(/\s+/g, ' ').trim();
-    if (value.length < 40) return false;
     if (isMetadataOnlyExtract(value) || isOcrStatusMessage(value)) return false;
+    if (isMathematicalOrFormulaContent(value)) return true;
+    if (value.length < 40) return false;
     const letters = (value.match(/[\p{L}]/gu) || []).length;
     return letters >= 24;
 }
@@ -1359,13 +1392,33 @@ function reconstructPdfPageLayout(items = [], viewport = { width: 612, height: 7
     return groupIntoLinesAndParagraphs(normalized);
 }
 
+function classifyPdfError(err, filename = 'This PDF') {
+    const name = String(err?.name || '');
+    const msg = String(err?.message || '');
+    if (name === 'PasswordException' || /password|encrypted/i.test(msg)) {
+        return Object.assign(new Error(`${filename} is password-protected and cannot be read.`), { code: 'pdf_encrypted' });
+    }
+    if (name === 'InvalidPDFException' || /invalid pdf/i.test(msg)) {
+        return Object.assign(new Error(`${filename} appears damaged or is not a valid PDF.`), { code: 'pdf_corrupt' });
+    }
+    return null;
+}
+
 async function extractPdfTextClient(file, attachment = null) {
     const pdfjs = await loadPdfJs();
     const buffer = await file.arrayBuffer();
-    const doc = await pdfjs.getDocument({ data: buffer }).promise;
+    let doc;
+    try {
+        doc = await pdfjs.getDocument({ data: buffer }).promise;
+    } catch (err) {
+        const classified = classifyPdfError(err, file?.name || attachment?.name);
+        if (classified) throw classified;
+        return '';
+    }
     const parts = [];
     const pageCount = Math.min(doc.numPages || 0, PDF_DIGITAL_PAGE_LIMIT);
     const CHUNK_SIZE = 5;
+    let visionPagesAttempted = 0;
 
     for (let i = 1; i <= pageCount; i += CHUNK_SIZE) {
         const chunkEnd = Math.min(i + CHUNK_SIZE - 1, pageCount);
@@ -1382,8 +1435,9 @@ async function extractPdfTextClient(file, attachment = null) {
             if (rawLength >= 15) {
                 // High-fidelity 2D Spatial Reconstruction (multi-column, tables, paragraphs)
                 pageText = reconstructPdfPageLayout(content.items, viewport);
-            } else if (doc.numPages <= 30) {
+            } else if (doc.numPages <= 30 || visionPagesAttempted < 15) {
                 // Hybrid Per-Page Fallback: page is sparse/scanned, run vision OCR for this specific page
+                visionPagesAttempted++;
                 try {
                     pageText = await processPdfPageVision(attachment || { name: file.name, file }, pdfjs, doc, pageNumber, pageCount);
                 } catch (_) {
@@ -1407,7 +1461,19 @@ async function extractPdfViaVision(attachment) {
         return { ok: false, text: '', method: 'pdf_vision_ocr', provider: 'vision', message: 'Missing PDF file.' };
     }
     const pdfjs = await loadPdfJs();
-    const doc = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
+    let doc;
+    try {
+        doc = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
+    } catch (err) {
+        const classified = classifyPdfError(err, file?.name || attachment?.name);
+        return {
+            ok: false,
+            text: '',
+            method: classified?.code || 'pdf_vision_ocr',
+            provider: 'vision',
+            message: classified?.message || 'Could not open this PDF for visual OCR.'
+        };
+    }
     const pageCount = Math.min(doc.numPages || 0, PDF_VISUAL_PAGE_LIMIT);
 
     const parts = [];
@@ -1453,8 +1519,11 @@ async function processPdfPageVision(attachment, pdfjs, doc, pageNumber, totalPag
         canvas.height = Math.max(1, Math.floor(viewport.height));
         const context = canvas.getContext('2d', { alpha: false });
         if (!context) return '';
+        // Fill opaque white so transparent vector/math PDFs stay dark-on-white
+        context.fillStyle = '#ffffff';
+        context.fillRect(0, 0, canvas.width, canvas.height);
         await page.render({ canvasContext: context, viewport }).promise;
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
         // Explicitly clear canvas backbuffer to prevent memory accumulation across 100 pages
         canvas.width = 0;
         canvas.height = 0;
@@ -1464,7 +1533,7 @@ async function processPdfPageVision(attachment, pdfjs, doc, pageNumber, totalPag
         try {
             const data = await postJson('/api/vision', {
                 task: 'text_extract',
-                prompt: `Transcribe all readable text from page ${pageNumber} of PDF "${attachment.name}". Preserve headings, bullet points, and render all tables in clean Markdown table format (| Col 1 | Col 2 |). For line items, capture labels, dates, and amounts accurately.`,
+                prompt: `Transcribe all readable text from page ${pageNumber} of PDF "${attachment.name}". Preserve headings, bullet points, math equations in LaTeX, and render all tables in clean Markdown table format (| Col 1 | Col 2 |). For line items, capture labels, dates, and amounts accurately.`,
                 mimeType: 'image/jpeg',
                 imageBase64: base64
             }, { timeoutMs: 25000 });
@@ -1474,12 +1543,10 @@ async function processPdfPageVision(attachment, pdfjs, doc, pageNumber, totalPag
             const snippets = Array.isArray(details?.textDetected)
                 ? details.textDetected.map(item => String(item || '').trim()).filter(Boolean).join('\n').trim()
                 : '';
-            const pageText = [fullText || snippets, String(data?.response || '').trim()]
-                .filter(Boolean)
-                .join('\n\n')
-                .trim();
+            const cleanedResponse = String(data?.response || '').replace(/^Detected text:\s*/i, '').trim();
+            const pageText = (fullText || snippets || cleanedResponse).trim();
 
-            if (hasUsefulExtractedText(pageText) || pageText.length >= 40) {
+            if (pageText && !isOcrStatusMessage(pageText) && !isMetadataOnlyExtract(pageText) && (hasUsefulExtractedText(pageText) || pageText.length >= 20)) {
                 return `Page ${pageNumber}:\n${pageText}`;
             }
         } catch (cloudErr) {
@@ -1489,7 +1556,7 @@ async function processPdfPageVision(attachment, pdfjs, doc, pageNumber, totalPag
         // Local Tesseract.js fallback for this page if offline or cloud keys missing
         if (typeof window !== 'undefined' && pageNumber <= 2) {
             notifyAttachmentProgress(attachment, `Running local OCR on page ${pageNumber} of ${Math.min(totalPages, 2)}...`);
-            const tess = await extractTextViaTesseract(canvas);
+            const tess = await extractTextViaTesseract(dataUrl);
             if (tess.ok) {
                 return `Page ${pageNumber} (Local OCR):\n${tess.text}`;
             }
@@ -1849,5 +1916,5 @@ export const __test = {
     normalizeImageMime,
     hasUsefulExtractedText,
     isOcrStatusMessage,
-    isMetadataOnlyExtract
+    isMetadataOnlyExtract, classifyPdfError, validateFile, isPptxFile
 };

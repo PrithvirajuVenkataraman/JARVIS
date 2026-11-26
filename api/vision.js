@@ -5,6 +5,7 @@ import { applyApiSecurity, unsealSecret } from './_lib/security.js';
 import { classifyImageLocally } from './_lib/local-vision-classifier.js';
 import { inspectInputSafety } from './_lib/safety-guard.js';
 import { normalizeGeminiGenerationConfig, visionFailurePayload } from './_lib/model-failure.js';
+import { safeParseJson as safeParseVisionJson, extractJsonFromText as extractVisionJson } from './_lib/vision-extract.js';
 
 const ALLOWED_IMAGE_TYPES = new Set([
     'image/jpeg', 'image/jpg', 'image/pjpeg', 'image/png', 'image/x-png', 'image/x-apple-ios-png',
@@ -659,15 +660,7 @@ async function callGeminiText({ apiKey, configuredModel = '', systemPrompt, user
 }
 
 function extractJsonFromText(text) {
-    const parsed = safeParseJson(text);
-    if (parsed) return parsed;
-    const src = String(text || '').trim();
-    const start = src.indexOf('{');
-    const end = src.lastIndexOf('}');
-    if (start >= 0 && end > start) {
-        return safeParseJson(src.slice(start, end + 1));
-    }
-    return null;
+    return extractVisionJson(text);
 }
 
 function normalizeMathOcrText(details = {}) { 
@@ -725,10 +718,14 @@ async function runFastMathOcrSolvePipeline({ providers, mimeType, imageBase64, u
         throw new Error('Fast math OCR could not read and solve the problem clearly');
     }
 
+    const formattedProblem = formatMathProblemLead(problemText);
+    const formattedFinal = formatMathFinalBlock(finalAnswer);
     const lines = [];
-    if (problemText && finalAnswer) {
-        lines.push(`The solution for $${problemText}$ is:`);
-        lines.push(`$$${finalAnswer}$$`);
+    if (formattedProblem && formattedFinal) {
+        lines.push(formattedProblem.isEquation
+            ? `The solution for ${formattedProblem.text} is:`
+            : `Problem: ${formattedProblem.text}`);
+        lines.push(formattedFinal);
         lines.push('---');
     }
     lines.push('### Step-by-Step Solution');
@@ -738,7 +735,7 @@ async function runFastMathOcrSolvePipeline({ providers, mimeType, imageBase64, u
             lines.push(`**${idx + 1}. Step ${idx + 1}**\n\n${stepStr}`);
         });
     }
-    lines.push(`**Final Answer:**\n\n$$${finalAnswer}$$`);
+    lines.push(`**Final Answer:**\n\n${formattedFinal}`);
     if (verification.length) {
         lines.push(`**Verification:** ${verification.join(' | ')}`);
     }
@@ -953,14 +950,20 @@ async function runMathOcrSolvePipeline({ providers, mimeType, imageBase64, userP
         throw new Error('Could not read the math problem clearly from the image');
     }
 
+    const formattedProblem = formatMathProblemLead(problemText);
+    const formattedFinal = formatMathFinalBlock(finalAnswer);
     const lines = [];
-    if (problemText) lines.push(`Problem: ${problemText}`);
+    if (formattedProblem) {
+        lines.push(formattedProblem.isEquation
+            ? `Problem: ${formattedProblem.text}`
+            : `Problem: ${formattedProblem.text}`);
+    }
     if (steps.length) {
-        lines.push('Solution:');
+        lines.push('### Step-by-Step Solution');
         steps.forEach((step, idx) => lines.push(`${idx + 1}. ${step}`));
     }
-    lines.push(`Final answer: ${finalAnswer}`);
-    if (checks.length) lines.push(`Verification: ${checks.join(' | ')}`);
+    lines.push(`**Final Answer:**\n\n${formattedFinal}`);
+    if (checks.length) lines.push(`**Verification:** ${checks.join(' | ')}`);
 
     return {
         response: lines.join('\n\n'),
@@ -1147,6 +1150,49 @@ function extractGroqText(data) {
     return '';
 }
 
+function stripOuterMathDelimiters(value = '') {
+    let s = String(value || '').trim();
+    if (/^\$\$[\s\S]+\$\$$/.test(s)) return s.slice(2, -2).trim();
+    if (/^\\\[[\s\S]+\\\]$/.test(s)) return s.slice(2, -2).trim();
+    if (/^\$[^\n$]+\$$/.test(s)) return s.slice(1, -1).trim();
+    if (/^\\\([\s\S]+\\\)$/.test(s)) return s.slice(2, -2).trim();
+    return s;
+}
+
+function isPureMathExpression(value = '') {
+    const s = String(value || '').trim();
+    if (!s || s.includes('\n')) return false;
+    const withoutLatex = s.replace(/\\[a-zA-Z]+/g, ' ').replace(/\$[\s\S]*?\$/g, ' ');
+    const proseWords = (withoutLatex.match(/\b[a-zA-Z]{4,}\b/g) || [])
+        .filter(w => !/^(?:sqrt|frac|dfrac|tfrac|sin|cos|tan|sec|csc|cot|log|exp|lim|max|min|det|arcsin|arccos|arctan|true|false)$/i.test(w));
+    if (proseWords.length >= 3) return false;
+    return /[=≈≠≤≥+\-*/^]|\\(?:frac|sqrt|int|sum|prod|lim|pi|theta|alpha|beta)/.test(s);
+}
+
+function formatMathProblemLead(problemText = '') {
+    const raw = String(problemText || '').trim();
+    if (!raw) return null;
+    if (/\$|\\\(|\\\[/.test(raw)) return { text: raw, isEquation: false };
+    const unwrapped = stripOuterMathDelimiters(raw);
+    if (isPureMathExpression(unwrapped)) {
+        return { text: `$${unwrapped}$`, isEquation: true };
+    }
+    return { text: raw, isEquation: false };
+}
+
+function formatMathFinalBlock(finalAnswer = '') {
+    const raw = String(finalAnswer || '').trim();
+    if (!raw) return '';
+    if (/\$\$[\s\S]+\$\$|\\\[[\s\S]+\\\]/.test(raw)) return raw;
+    if (/^\$[^\n$]+\$$/.test(raw) || /^\\\([\s\S]+\\\)$/.test(raw)) {
+        return `$$${stripOuterMathDelimiters(raw)}$$`;
+    }
+    if (isPureMathExpression(raw)) {
+        return `$$${raw}$$`;
+    }
+    return raw;
+}
+
 function safeParseJson(text) {
     const cleaned = String(text || '').trim();
     const unwrapped = cleaned
@@ -1154,11 +1200,7 @@ function safeParseJson(text) {
         .replace(/\s*```$/i, '')
         .replace(/^json\s*/i, '')
         .trim();
-    try {
-        return JSON.parse(unwrapped);
-    } catch (e) {
-        return null;
-    }
+    return safeParseVisionJson(unwrapped);
 }
 
 function isTextFocusedVisionQuery(userPrompt = '') {

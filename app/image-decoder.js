@@ -1,4 +1,16 @@
-import { imageFormatForName } from './image-decoder-core.js';
+import { imageFormatForName, RAW_IMAGE_EXTENSIONS } from './image-decoder-core.js';
+import { detectImageMime } from './file-format.js';
+
+const MIME_TO_MAGICK_FORMAT = {
+    'image/jpeg': 'JPEG',
+    'image/png': 'PNG',
+    'image/gif': 'GIF',
+    'image/webp': 'WEBP',
+    'image/bmp': 'BMP',
+    'image/tiff': 'TIFF',
+    'image/heic': 'HEIC',
+    'image/avif': 'AVIF'
+};
 
 const active = new Set();
 let queue = Promise.resolve();
@@ -10,10 +22,16 @@ export function decodeImageFile(file, { maxDimension = 1600, signal } = {}) {
     const generation = epoch;
     const operation = queue.then(async () => {
         if (signal?.aborted || generation !== epoch) throw canceled();
-        const format = imageFormatForName(file.name);
-        if (!format || file.size > 50 * 1024 * 1024) throw new Error('This image format or size is not supported.');
+        if (!file || file.size === 0 || file.size > 50 * 1024 * 1024) throw new Error('This image format or size is not supported.');
         const bytes = await file.arrayBuffer();
         if (signal?.aborted || generation !== epoch) throw canceled();
+        const detectedMime = detectImageMime(new Uint8Array(bytes.slice(0, 32)));
+        const isRawByName = RAW_IMAGE_EXTENSIONS.test(file.name || '');
+        const detectedFormat = (detectedMime && !(isRawByName && detectedMime === 'image/tiff'))
+            ? MIME_TO_MAGICK_FORMAT[detectedMime] || ''
+            : '';
+        const format = detectedFormat || imageFormatForName(file.name);
+        if (!format) throw new Error('This image format or size is not supported.');
         return new Promise((resolve, reject) => {
             const worker = new Worker(new URL('./image-decoder-worker.js', import.meta.url), { type: 'module' });
             const finish = (error, value) => {
