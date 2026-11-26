@@ -3543,92 +3543,19 @@ async function fetchAndDisplayNews(query) {
     }, TRUST_FIRST_RELIABILITY_POLICY.verificationBudgetMs);
 
     try {
-        const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.markets, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            signal: controller.signal,
-            body: JSON.stringify({
-                mode: 'news',
-                query,
-                verificationMode: 'strict',
-                riskLevel: 'high_risk'
-            })
+        const fallbackNews = await buildNewsSearchFallback(query, controller.signal);
+        if (fallbackNews?.answer) {
+            const sourceLines = formatLiveSourceLinks(fallbackNews.sources, 5);
+            const newsMsg = `${fallbackNews.answer}\n\n${buildSourceMetaBlock(fallbackNews.sources)}\n\nSources:\n${sourceLines}`;
+            addVerifiedAssistantMessage(newsMsg, 'Verified live sources');
+            await prepareApiReply('news_summary_ready', {}, 'I checked current sources and summarized the latest update.');
+            saveToHistory(query, newsMsg);
+            return;
+        }
+
+        await deliverApiReply('news_fetch_unavailable', {
+            googleNewsUrl: 'https://news.google.com'
         });
-
-        let data = null;
-        try {
-            data = await response.json();
-        } catch (e) {
-            data = null;
-        }
-
-
-        if (!response.ok) {
-            throw new Error(data?.error || 'News service unavailable');
-        }
-
-        if (!data.success) {
-            const fallbackNews = await buildNewsSearchFallback(query, controller.signal);
-            if (fallbackNews?.answer) {
-                const sourceLines = formatLiveSourceLinks(fallbackNews.sources, 5);
-                const newsMsg = `${fallbackNews.answer}\n\n${buildSourceMetaBlock(fallbackNews.sources)}\n\nSources:\n${sourceLines}`;
-                addVerifiedAssistantMessage(newsMsg, 'Verified live sources');
-                await prepareApiReply('news_summary_ready', {}, 'I checked current sources and summarized the latest update.');
-                saveToHistory(query, newsMsg);
-                return;
-            }
-
-            await deliverApiReply('news_fetch_unavailable', {
-                googleNewsUrl: 'https://news.google.com'
-            });
-            return;
-        }
-
-        const articles = Array.isArray(data.articles) ? data.articles : [];
-        if (!articles.length) {
-            const fallbackNews = await buildNewsSearchFallback(query, controller.signal);
-            if (fallbackNews?.answer) {
-                const sourceLines = formatLiveSourceLinks(fallbackNews.sources, 5);
-                const newsMsg = `${fallbackNews.answer}\n\n${buildSourceMetaBlock(fallbackNews.sources)}\n\nSources:\n${sourceLines}`;
-                addVerifiedAssistantMessage(newsMsg, 'Verified live sources');
-                await prepareApiReply('news_summary_ready', {}, 'I checked current sources and summarized the latest update.');
-                saveToHistory(query, newsMsg);
-                return;
-            }
-
-            await deliverApiReply('news_insufficient_sources', {
-                query
-            });
-            return;
-        }
-
-        if (!hasEnoughNewsEvidence(articles, 'strict')) {
-            const fallbackNews = await buildNewsSearchFallback(query, controller.signal);
-            if (fallbackNews?.answer) {
-                const sourceLines = formatLiveSourceLinks(fallbackNews.sources, 5);
-                const newsMsg = `${fallbackNews.answer}\n\n${buildSourceMetaBlock(fallbackNews.sources)}\n\nSources:\n${sourceLines}`;
-                addVerifiedAssistantMessage(newsMsg, 'Verified live sources');
-                await prepareApiReply('news_summary_ready', {}, 'I checked current sources and summarized the latest update.');
-                saveToHistory(query, newsMsg);
-                return;
-            }
-
-            await deliverApiReply('news_insufficient_sources', {
-                query
-            });
-            return;
-        }
-
-        showThinkingIndicator('Generating answer...');
-        const directAnswer = await buildDirectLiveAnswer(query, articles, controller.signal);
-        const sourceLines = formatLiveSourceLinks(articles, 5);
-        const summaryBlock = directAnswer || 'I found recent coverage, but I could not generate a clean short summary from the current snippets.';
-        const newsMsg = `${summaryBlock}\n\n${buildSourceMetaBlock(articles)}\n\nSources:\n${sourceLines}`;
-
-        addVerifiedAssistantMessage(newsMsg, 'Verified news sources');
-        await prepareApiReply('news_summary_verified', {}, 'I checked verified live sources and summarized the latest update.');
-        saveToHistory(query, newsMsg);
-
     } catch (error) {
         if (isAbortError(error)) {
             return;
@@ -15793,41 +15720,19 @@ async function handleExchangeRateLookup(text) {
 
     showThinkingIndicator('Checking verified exchange sources...');
     try {
-        const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.markets, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ mode: 'exchange', ...parsed })
-        });
-        const data = await response.json();
-        if (!response.ok || !data?.success) {
-            const fallback = await buildVerifiedSearchSummary(
-                `${parsed.from} to ${parsed.to} exchange rate today`,
-                {
-                    badge: 'Verified FX sources',
-                    summary: `I checked live sources for ${parsed.from} to ${parsed.to}.`
-                }
-            );
-            if (fallback?.text) {
-                addVerifiedAssistantMessage(fallback.text, fallback.badge);
-                saveToHistory(text, fallback.text);
-                return true;
+        const fallback = await buildVerifiedSearchSummary(
+            `${parsed.from} to ${parsed.to} exchange rate today`,
+            {
+                badge: 'Verified FX sources',
+                summary: `I checked live sources for ${parsed.from} to ${parsed.to}.`
             }
-            const msg = data?.error || 'I could not verify the exchange rate right now.';
-            addChatMessage(msg, false);
+        );
+        if (fallback?.text) {
+            addVerifiedAssistantMessage(fallback.text, fallback.badge);
+            saveToHistory(text, fallback.text);
             return true;
         }
-
-        const amountLabel = Number(data.amount || 1);
-        const body = `**${amountLabel} ${data.from} = ${Number(data.convertedAmount).toFixed(4)} ${data.to}**\nRate: 1 ${data.from} = ${Number(data.rate).toFixed(6)} ${data.to}\nDate: ${data.date}\n${buildSourceMetaBlock(data.sources)}\nVerified sources checked: ${data.sourceCount} across ${data.distinctDomainCount} domains\n\nSources:\n${formatVerifiedSourcesList(data.sources)}`;
-        addVerifiedAssistantMessage(body, 'Verified FX sources');
-        const rateSummary = await composeApiReply('exchange_rate_verified', {
-            from: data.from,
-            to: data.to,
-            amount: amountLabel
-        }, {
-            fallbackText: `Verified exchange rate found for ${data.from} to ${data.to}.`
-        });
-        saveToHistory(text, body);
+        addChatMessage('I could not verify the exchange rate right now.', false);
         return true;
     } catch (error) {
         const fallback = await buildVerifiedSearchSummary(
@@ -15858,8 +15763,6 @@ async function handleMarketLookup(text) {
     showThinkingIndicator('Checking verified market sources...');
     try {
         const effectiveQuery = await enrichFuelQueryWithLocation(text);
-        const autoAppliedFuelLocation = isFuelPriceQuery(text) && effectiveQuery !== String(text || '').trim();
-        const autoFuelLocationLabel = autoAppliedFuelLocation ? (cachedCurrentLocationLabel || 'current location') : '';
         if (isMarketMoversQuery(text)) {
             const moversFallback = await buildVerifiedSearchSummary(text, {
                 badge: 'Verified market sources',
@@ -15872,46 +15775,16 @@ async function handleMarketLookup(text) {
             }
         }
 
-        const response = await fetch((window.APP_CONFIG || APP_CONFIG).endpoints.markets, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query: effectiveQuery })
+        const fallback = await buildVerifiedSearchSummary(effectiveQuery, {
+            badge: 'Verified market sources',
+            summary: 'I checked live market sources and summarized what I found.'
         });
-        const data = await response.json();
-        if (!response.ok || !data?.success) {
-            const fallback = await buildVerifiedSearchSummary(effectiveQuery, {
-                badge: 'Verified market sources',
-                summary: 'I checked live market sources and summarized what I found.'
-            });
-            if (fallback?.text) {
-                addVerifiedAssistantMessage(fallback.text, fallback.badge);
-                saveToHistory(text, fallback.text);
-                return true;
-            }
-            const msg = data?.error || 'I could not verify market data right now.';
-            addChatMessage(msg, false);
+        if (fallback?.text) {
+            addVerifiedAssistantMessage(fallback.text, fallback.badge);
+            saveToHistory(text, fallback.text);
             return true;
         }
-
-        let body = '';
-        if (data.assetType === 'crypto' && Number.isFinite(data.priceUsd)) {
-            body = `**${data.name} (${data.symbol})**\nPrice: $${Number(data.priceUsd).toFixed(4)} USD\n24h change: ${Number.isFinite(data.change24h) ? Number(data.change24h).toFixed(2) + '%' : 'N/A'}\n${buildSourceMetaBlock(data.sources)}\nVerified sources checked: ${data.sourceCount} across ${data.distinctDomainCount} domains\n\nSources:\n${formatVerifiedSourcesList(data.sources)}`;
-        } else if (data.assetType === 'commodity') {
-            const hasPrice = Number.isFinite(Number(data.price));
-            const quoteLine = hasPrice
-                ? `Price: ${data.currency ? data.currency + ' ' : ''}${Number(data.price).toFixed(2)}${data.unit ? ` (${data.unit})` : ''}`
-                : 'Price: not cleanly extractable from source snippets yet';
-            const locationSuffix = autoFuelLocationLabel ? `\nLocation scope: ${autoFuelLocationLabel}` : '';
-            body = `**${data.name || data.symbol || 'Commodity'}**\n${quoteLine}${locationSuffix}\n${buildSourceMetaBlock(data.sources)}\nVerified sources checked: ${data.sourceCount} across ${data.distinctDomainCount} domains\n\nSources:\n${formatVerifiedSourcesList(data.sources)}`;
-        } else if (data.assetType === 'stock' && Number.isFinite(data.price)) {
-            body = `**${data.symbol}**\nPrice: $${Number(data.price).toFixed(2)}\nChange: ${Number.isFinite(data.change) ? Number(data.change).toFixed(2) : 'N/A'} ${data.changePercent || ''}\nTrading day: ${data.tradingDay || 'N/A'}\n${buildSourceMetaBlock(data.sources)}\nVerified sources checked: ${data.sourceCount} across ${data.distinctDomainCount} domains\n\nSources:\n${formatVerifiedSourcesList(data.sources)}`;
-        } else {
-            body = `I found verified market coverage, but not a clean direct quote.\n${buildSourceMetaBlock(data.sources)}\nVerified sources checked: ${data.sourceCount} across ${data.distinctDomainCount} domains\n\nSources:\n${formatVerifiedSourcesList(data.sources)}`;
-        }
-
-        addVerifiedAssistantMessage(body, 'Verified market sources');
-        await prepareApiReply('market_sources_verified', {}, 'I checked verified market sources.');
-        saveToHistory(text, body);
+        addChatMessage('I could not verify market data right now.', false);
         return true;
     } catch (error) {
         const effectiveQuery = await enrichFuelQueryWithLocation(text);

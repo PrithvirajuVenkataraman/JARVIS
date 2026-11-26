@@ -39,7 +39,14 @@ self.addEventListener('fetch', event => {
         if (!networkFirst) { const hit = await caches.match(request); if (hit) return hit; }
         try {
             const response = await fetch(request);
-            if (response.ok) event.waitUntil(cache.put(request, response.clone()));
+            if (response.ok) {
+                event.waitUntil(cache.put(request, response.clone()));
+                return response;
+            }
+            if (response.status >= 500) {
+                const cachedFallback = (await caches.match(request)) || (appNavigation ? await cache.match('/index.html') : null);
+                if (cachedFallback) return cachedFallback;
+            }
             return response;
         } catch {
             return (await caches.match(request)) || (appNavigation ? await cache.match('/index.html') : null) || new Response('Unavailable offline. Reconnect and retry.', { status: 503 });
