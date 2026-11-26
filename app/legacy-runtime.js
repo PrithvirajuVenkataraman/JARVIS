@@ -32553,7 +32553,10 @@ const setVH = () => {
     const barEl = document.getElementById('input-bar-container');
     const appRootEl = document.getElementById('app-root');
     if (kbOpen && barEl) {
-        const clearance = iosWebKit ? 10 : 0;
+        const isCompactLandscape = height < 360;
+        const isThirdPartyIOSBrowser = typeof navigator !== 'undefined' && /CriOS|EdgiOS|FxiOS/i.test(navigator.userAgent || '');
+        const clearance = iosWebKit ? (isCompactLandscape ? 12 : (isThirdPartyIOSBrowser ? 68 : 56)) : 0;
+        rootStyle.setProperty('--keyboard-clearance', `${clearance}px`);
         const baseTop = Math.round(offsetTop + height - clearance);
         rootStyle.setProperty('--keyboard-composer-top', `${baseTop}px`);
         const barRect = barEl.getBoundingClientRect();
@@ -32573,6 +32576,7 @@ const setVH = () => {
         }
     } else {
         rootStyle.removeProperty('--keyboard-composer-top');
+        rootStyle.removeProperty('--keyboard-clearance');
     }
 
     const headerEl = document.querySelector('.header') || document.querySelector('.app-header');
