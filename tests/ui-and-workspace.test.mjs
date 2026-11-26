@@ -949,7 +949,8 @@ console.log('\n--- Test 5: Groq Model Candidate Realness & Non-Llama Assurance -
     assert.ok(stylesCssText.includes('right: 16px;') && !/\.scroll-to-bottom-pill\s*\{[^}]*left:\s*50%/s.test(stylesCssText), 'Scroll-to-bottom pill must sit at the right edge instead of overlapping centered reading prose');
     assert.ok(coreUxCss.includes('--app-viewport-height') && coreUxCss.includes('#chat-container:empty') && coreUxCss.includes('+ 56px + env(safe-area-inset-bottom)'), 'Empty chat collapses bottom padding, non-empty gives full bottom clearance, and app-root bounds to visualViewport');
     assert.ok(coreUxCss.includes('body.is-keyboard-open #input-bar-container') && coreUxCss.includes('translate3d(0,-100%,0)') && coreUxCss.includes('top:var(--app-viewport-top,0px)'), 'Open virtual keyboard must pin composer directly above visualViewport bottom edge regardless of offsetTop');
-    assert.ok(indexHtml.includes('id="text-input"') && indexHtml.includes('enterkeyhint="send"'), 'Prompt textarea must expose enterkeyhint="send" for mobile soft keyboards');
+    assert.ok(coreUxCss.includes('--keyboard-composer-top') && coreUxCss.includes('body.is-keyboard-open #footer-disclaimer'), 'Open virtual keyboard uses closed-loop --keyboard-composer-top and hides footer disclaimer');
+    assert.ok(indexHtml.includes('id="text-input"') && indexHtml.includes('enterkeyhint="send"') && indexHtml.includes('autocomplete="off"'), 'Prompt textarea must expose enterkeyhint="send" and autocomplete="off" for mobile soft keyboards');
     assert.ok(indexHtml.includes('function dismissMobileKeyboardAfterSubmit(') && indexHtml.includes('options?.refocus === true && hadDlpState') && indexHtml.includes('const heightGap = Math.max('), 'Submitting prompt must blur #text-input without post-send refocus and detect keyboard even when vv.offsetTop > 0');
     assert.ok(coreUxCss.includes('.settings-danger-btn') && coreUxCss.includes('--chat-message-font-size:15px'), 'Mobile typography scale and settings-danger-btn styling must stay consistent');
     assert.ok(coreUxCss.includes('body .chat-sidebar-section-title { margin:14px 0 4px; padding-inline:16px;') && coreUxCss.includes('body .chat-sidebar-empty { margin:6px 12px;'), 'Sidebar section title and empty state must share aligned 16px left edge and override Tailwind p margin reset');
@@ -959,6 +960,30 @@ console.log('\n--- Test 5: Groq Model Candidate Realness & Non-Llama Assurance -
     assert.ok(indexHtml.includes('function deduplicateChatSessions('), 'Sidebar session deduplicator must prevent duplicated recent chats');
     assert.ok(indexHtml.includes('isinstance(_tree.body[-1], _ast.Expr)'), 'Pyodide runner must evaluate trailing bare expressions into stdout');
     assert.ok(!slashCtrl.includes('scrollIntoView'), 'Slash picker must scroll internally instead of calling scrollIntoView on the viewport');
+
+    // Test 7: Assistant Action Row (4 buttons: Copy, Speak, Share, Dots) & Overflow Menu + Polished Text Input Dialog
+    const actionsStart = indexHtml.indexOf('function buildAssistantActionsHtml(');
+    const actionsEnd = indexHtml.indexOf('const assistantActionHandlers =', actionsStart);
+    const actionsFn = indexHtml.slice(actionsStart, actionsEnd);
+    const menuSplit = actionsFn.indexOf('id="assistant-action-menu-');
+    const rowPrefix = actionsFn.slice(0, menuSplit);
+    const menuBody = actionsFn.slice(menuSplit, actionsFn.indexOf('id="assistant-feedback-popover-'));
+    assert.ok(rowPrefix.includes('data-assistant-action="copy"'), 'Action row must include Copy');
+    assert.ok(rowPrefix.includes('data-assistant-action="tts_speak"'), 'Action row must include Speak');
+    assert.ok(rowPrefix.includes('data-assistant-action="share"'), 'Action row must include Share');
+    assert.ok(rowPrefix.includes('data-assistant-action="menu"'), 'Action row must include Three dots menu');
+    assert.ok(!rowPrefix.includes('data-assistant-action="save_memory"')
+        && !rowPrefix.includes('data-assistant-action="regenerate"')
+        && !rowPrefix.includes('data-assistant-action="feedback_up"')
+        && !rowPrefix.includes('data-assistant-action="feedback_down"'),
+        'Save to memory, Regenerate, Thumbs up, and Thumbs down must NOT clutter top-level action row');
+    assert.ok(menuBody.includes('data-assistant-action="save_memory"')
+        && menuBody.includes('data-assistant-action="regenerate"')
+        && menuBody.includes('data-assistant-action="feedback_up"')
+        && menuBody.includes('data-assistant-action="feedback_down"'),
+        'Save to memory, Regenerate, Thumbs up, and Thumbs down must live inside the three dots menu');
+    assert.ok(coreUxCss.includes('body .assistant-action-row { display:grid; grid-template-columns:repeat(4,44px);'), 'Action row must use 4 compact grid columns');
+    assert.ok(coreUxCss.includes('body .text-input-dialog h2') && coreUxCss.includes('body .text-input-dialog textarea') && coreUxCss.includes('body .text-input-dialog-btn.primary'), 'Text input dialog must have unlayered dark styling overriding Tailwind preflight');
 }
 
 console.log('================================================================');

@@ -189,7 +189,13 @@ body #selection-helper-popover button svg { width:16px; height:16px; flex-shrink
 body #selection-helper-popover button:hover { background:#2c2c2c; transform:none; filter:none; }
 body #selection-helper-popover button:focus-visible { outline:2px solid #bdbdbd; outline-offset:-2px; }
 body #input-bar-container { width:auto; bottom:var(--keyboard-offset,0px) !important; }
-body.is-keyboard-open #input-bar-container { top:calc(var(--app-viewport-top,0px) + var(--app-viewport-height,100dvh)) !important; bottom:auto !important; transform:translate3d(0,-100%,0); padding-bottom:6px !important; transition:none !important; }
+body.is-keyboard-open #input-bar-container { top:var(--keyboard-composer-top, calc(var(--app-viewport-top,0px) + var(--app-viewport-height,100dvh))) !important; bottom:auto !important; transform:translate3d(0,-100%,0); padding-bottom:8px !important; transition:none !important; }
+body.is-keyboard-open #footer-disclaimer,
+body.is-keyboard-open .speech-input-meta { display:none !important; }
+@media(max-width:640px) {
+    body.is-keyboard-open #input-bar-inner.composer-shell { padding:6px 8px; }
+    body.is-keyboard-open #input-bar-inner #text-input { padding:6px 10px; min-height:36px; }
+}
 body.is-keyboard-open .scroll-to-bottom-pill { opacity:0; pointer-events:none; }
 body #app-root { position:fixed; top:var(--app-viewport-top,0px); left:0; right:0; min-height:0 !important; height:var(--app-viewport-height,100dvh) !important; max-height:var(--app-viewport-height,100dvh) !important; overflow:hidden !important; }
 body #chat-main { min-height:0 !important; flex:1 1 auto; overscroll-behavior-y:contain; }
@@ -241,7 +247,7 @@ body :where(button, a, input, textarea, select):focus-visible { outline:2px soli
 .person-photo figcaption a { text-decoration:underline; text-underline-offset:2px; }
 .person-photo-credit { display:block; margin-top:3px; }
 body .assistant-model-badge { grid-column:1/-1; margin:0 0 4px; margin-inline-start:13px; padding:0; background:transparent; border:0; border-radius:0; color:var(--core-muted); font-size:12px; line-height:1.5; font-weight:400; white-space:normal; overflow-wrap:anywhere; }
-body .assistant-action-row { display:grid; grid-template-columns:repeat(8,44px); gap:0; width:max-content; max-width:100%; margin-inline-start:-13px; padding:4px 0 0; }
+body .assistant-action-row { display:grid; grid-template-columns:repeat(4,44px); gap:0; width:max-content; max-width:100%; margin-inline-start:-13px; padding:4px 0 0; }
 body .assistant-action-icon { width:44px; height:44px; min-width:44px; min-height:44px; padding:0; -webkit-tap-highlight-color:transparent; }
 body .assistant-action-icon:focus,
 body .assistant-action-icon:focus:not(:focus-visible),
@@ -275,3 +281,179 @@ body .has-web-search .composer-web-outline {
     display:none;
 }
 body #input-bar-inner.has-web-search { border-color:var(--core-border, #555); }
+
+/* Crisp dark modal styling for Save-to-Memory & Edit-Message dialogs (beats preflight reset) */
+body .text-input-dialog-backdrop {
+    position:fixed;
+    top:var(--app-viewport-top, 0px);
+    left:0;
+    right:0;
+    height:var(--app-viewport-height, 100dvh);
+    bottom:auto;
+    z-index:calc(var(--z-chat-sidebar, 100) + 12);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:16px;
+    background:rgba(0, 0, 0, 0.72);
+    backdrop-filter:blur(8px);
+    -webkit-backdrop-filter:blur(8px);
+}
+body .text-input-dialog-backdrop.hidden { display:none; }
+body .text-input-dialog {
+    width:min(440px, calc(100vw - 32px));
+    max-height:calc(var(--app-viewport-height, 100dvh) - 32px);
+    overflow-y:auto;
+    padding:20px;
+    border:1px solid rgba(255, 255, 255, 0.14);
+    border-radius:16px;
+    background:#141518;
+    color:var(--core-text, #f5f5f5);
+    box-shadow:0 24px 64px rgba(0, 0, 0, 0.72);
+}
+body .text-input-dialog h2 {
+    margin:0 0 14px;
+    padding:0;
+    color:var(--core-text, #f5f5f5);
+    font-size:18px;
+    line-height:1.3;
+    font-weight:650;
+    letter-spacing:-0.01em;
+}
+body .text-input-dialog textarea {
+    display:block;
+    box-sizing:border-box;
+    width:100%;
+    min-height:124px;
+    max-height:min(44dvh, 280px);
+    margin:0;
+    padding:12px 14px;
+    border:1px solid rgba(255, 255, 255, 0.18);
+    border-radius:12px;
+    background:#0b0c0e;
+    color:var(--core-text, #f5f5f5);
+    caret-color:var(--core-text, #f5f5f5);
+    font-family:var(--app-font-family);
+    font-size:16px;
+    line-height:1.5;
+    resize:vertical;
+    appearance:none;
+    outline:none;
+    transition:border-color 140ms ease, box-shadow 140ms ease;
+}
+body .text-input-dialog textarea:focus,
+body .text-input-dialog textarea:focus-visible {
+    border-color:rgba(255, 255, 255, 0.5);
+    box-shadow:0 0 0 2px rgba(255, 255, 255, 0.12);
+    outline:none;
+}
+body .text-input-dialog-actions {
+    display:grid;
+    grid-template-columns:repeat(2, minmax(0, 1fr));
+    gap:10px;
+    margin-top:16px;
+}
+body .text-input-dialog-btn {
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-height:44px;
+    margin:0;
+    padding:10px 16px;
+    border-radius:10px;
+    font-size:14px;
+    font-weight:600;
+    line-height:1.2;
+    cursor:pointer;
+    transition:background 140ms ease, border-color 140ms ease;
+}
+body .text-input-dialog-btn.secondary {
+    background:#23252a;
+    border:1px solid rgba(255, 255, 255, 0.14);
+    color:#f5f5f5;
+}
+body .text-input-dialog-btn.secondary:hover,
+body .text-input-dialog-btn.secondary:focus-visible {
+    background:#2d3037;
+    border-color:rgba(255, 255, 255, 0.3);
+    color:#ffffff;
+    outline:none;
+}
+body .text-input-dialog-btn.primary {
+    background:#f5f5f5;
+    border:1px solid #f5f5f5;
+    color:#0a0a0a;
+}
+body .text-input-dialog-btn.primary:hover,
+body .text-input-dialog-btn.primary:focus-visible {
+    background:#ffffff;
+    border-color:#ffffff;
+    color:#000000;
+    outline:none;
+}
+
+/* Assistant overflow menu items (unlayered so button resets cannot strip padding/state) */
+body .assistant-action-menu {
+    min-width:204px;
+    max-width:min(260px, calc(100vw - 16px));
+    max-height:min(72dvh, 480px);
+    overflow-y:auto;
+    overscroll-behavior:contain;
+    padding:6px;
+    border:1px solid rgba(255, 255, 255, 0.14);
+    border-radius:12px;
+    background:#16181d;
+    box-shadow:0 18px 44px rgba(0, 0, 0, 0.55);
+}
+body .assistant-action-menu button {
+    width:100%;
+    display:flex;
+    align-items:center;
+    gap:10px;
+    min-height:40px;
+    margin:0;
+    padding:8px 10px;
+    border:0;
+    border-radius:8px;
+    background:transparent;
+    color:#f5f5f5;
+    font-size:13.5px;
+    font-weight:500;
+    line-height:1.25;
+    text-align:left;
+    cursor:pointer;
+}
+body .assistant-action-menu button:hover,
+body .assistant-action-menu button:focus-visible {
+    background:rgba(255, 255, 255, 0.08);
+    outline:none;
+}
+body .assistant-action-menu button:disabled {
+    opacity:0.4;
+    cursor:not-allowed;
+}
+body .assistant-action-menu button.is-feedback-up,
+body .assistant-action-menu button.is-feedback-up:hover {
+    color:#34d399;
+    background:rgba(16, 185, 129, 0.14);
+}
+body .assistant-action-menu button.is-feedback-up svg,
+body .assistant-action-menu button.is-feedback-up svg * {
+    color:#34d399;
+    stroke:currentColor;
+}
+body .assistant-action-menu button.is-feedback-down,
+body .assistant-action-menu button.is-feedback-down:hover {
+    color:#fb7185;
+    background:rgba(244, 63, 94, 0.14);
+}
+body .assistant-action-menu button.is-feedback-down svg,
+body .assistant-action-menu button.is-feedback-down svg * {
+    color:#fb7185;
+    stroke:currentColor;
+}
+body .assistant-action-menu-divider {
+    height:1px;
+    background:rgba(255, 255, 255, 0.1);
+    margin:5px 4px;
+}

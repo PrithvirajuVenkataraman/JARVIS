@@ -8644,7 +8644,10 @@ function showHelpModal(...args) { return globalThis.JarvisLazy.loadClassic('sett
                     closeAssistantActionMenus();
                 }
             }, true);
-            document.addEventListener('scroll', closeAssistantActionMenus, true);
+            document.addEventListener('scroll', (event) => {
+                if (event.target?.closest?.('.assistant-action-menu')) return;
+                closeAssistantActionMenus();
+            }, true);
             window.addEventListener('resize', closeAssistantActionMenus);
         }
 
@@ -9285,12 +9288,28 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 <div class="assistant-action-row" data-message-id="${safeId}">
                     ${badgeHtml}
                     <button type="button" class="assistant-action-icon" data-assistant-action="copy" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'copy') })} title="Copy" aria-label="Copy">${getActionIconSvg('copy')}</button>
-                    <button type="button" class="assistant-action-icon" data-assistant-action="save_memory" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'save_memory') })} title="Save to memory" aria-label="Save to memory">${getActionIconSvg('memory')}</button>
                     <button type="button" class="assistant-action-icon" data-assistant-action="tts_speak" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'tts_speak') })} title="Read aloud" aria-label="Read aloud">${getActionIconSvg('speaker')}</button>
                     <button type="button" class="assistant-action-icon" data-assistant-action="share" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'share') })} title="Share" aria-label="Share">${getActionIconSvg('share')}</button>
-                    <button type="button" class="assistant-action-icon" data-assistant-action="regenerate" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'regenerate') })} title="Regenerate" aria-label="Regenerate" ${regenAttr}>${getActionIconSvg('retry')}</button>
-                    <button type="button" class="assistant-action-icon${upClass}" data-assistant-action="feedback_up" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'feedback_up') })} title="Helpful" aria-label="Helpful" aria-pressed="${savedRating === 1 ? 'true' : 'false'}">${getActionIconSvg('thumb_up')}</button>
-                    <button type="button" class="assistant-action-icon${downClass}" data-assistant-action="feedback_down" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'feedback_down') })} title="Not helpful" aria-label="Not helpful" aria-pressed="${savedRating === -1 ? 'true' : 'false'}">${getActionIconSvg('thumb_down')}</button>
+                    <div class="assistant-action-menu-wrap">
+                        <button type="button" class="assistant-action-icon assistant-action-dots" data-assistant-action="menu" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'menu') })} title="More" aria-label="More actions" aria-expanded="false">${getActionIconSvg('dots')}</button>
+                        <div id="assistant-action-menu-${safeId}" class="assistant-action-menu hidden" role="menu" data-message-id="${safeId}">
+                            <button type="button" data-assistant-action="save_memory" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'save_memory') })} role="menuitem">${getActionIconSvg('memory')}<span>Save to memory</span></button>
+                            <button type="button" data-assistant-action="regenerate" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'regenerate') })} role="menuitem" ${regenAttr}>${getActionIconSvg('retry')}<span>Regenerate</span></button>
+                            <button type="button" class="${upClass.trim()}" data-assistant-action="feedback_up" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'feedback_up') })} role="menuitem" aria-pressed="${savedRating === 1 ? 'true' : 'false'}">${getActionIconSvg('thumb_up')}<span>Thumbs up</span></button>
+                            <button type="button" class="${downClass.trim()}" data-assistant-action="feedback_down" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'feedback_down') })} role="menuitem" aria-pressed="${savedRating === -1 ? 'true' : 'false'}">${getActionIconSvg('thumb_down')}<span>Thumbs down</span></button>
+                            <div class="assistant-action-menu-divider"></div>
+                            <button type="button" data-assistant-action="ask" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'ask') })} role="menuitem">${getActionIconSvg('ask')}<span>Ask JARVIS</span></button>
+                            <button type="button" data-assistant-action="verify" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'verify') })} role="menuitem">${getActionIconSvg('verify')}<span>Verify this</span></button>
+                            <div class="assistant-action-menu-divider"></div>
+                            <button type="button" data-assistant-action="export_pdf" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'export_pdf') })} role="menuitem">${getActionIconSvg('pdf')}<span>Export as PDF</span></button>
+                            <button type="button" data-assistant-action="export_docx" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'export_docx') })} role="menuitem">${getActionIconSvg('word')}<span>Export as Word (.docx)</span></button>
+                            <button type="button" data-assistant-action="export_csv" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'export_csv') })} role="menuitem">${getActionIconSvg('csv')}<span>Export as Excel / CSV</span></button>
+                            <button type="button" data-assistant-action="export_markdown" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'export_markdown') })} role="menuitem">${getActionIconSvg('file')}<span>Export as Markdown</span></button>
+                            <button type="button" data-assistant-action="export_html" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'export_html') })} role="menuitem">${getActionIconSvg('html')}<span>Export as HTML</span></button>
+                            <button type="button" data-assistant-action="export_json" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'export_json') })} role="menuitem">${getActionIconSvg('json')}<span>Export as JSON</span></button>
+                            <button type="button" data-assistant-action="export_txt" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'export_txt') })} role="menuitem">${getActionIconSvg('txt')}<span>Export as Text</span></button>
+                        </div>
+                    </div>
                     <div id="assistant-feedback-popover-${safeId}" class="assistant-feedback-popover hidden" data-message-id="${safeId}" role="dialog" aria-label="Answer feedback">
                         <div class="feedback-popover-header">
                             <span class="feedback-popover-title">Why wasn't this helpful?</span>
@@ -9311,21 +9330,6 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                             <button type="button" class="feedback-submit-btn" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { submitAssistantNegativeFeedback((String(safeId)), false) })}>Submit</button>
                             ${canRegenerate ? `<button type="button" class="feedback-regen-btn" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { submitAssistantNegativeFeedback((String(safeId)), true) })}>Fix &amp; Regenerate</button>` : ''}
                         </div>
-                    </div>
-                    <div class="assistant-action-menu-wrap">
-                        <button type="button" class="assistant-action-icon assistant-action-dots" data-assistant-action="menu" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'menu') })} title="More" aria-label="More actions" aria-expanded="false">${getActionIconSvg('dots')}</button>
-                        <div id="assistant-action-menu-${safeId}" class="assistant-action-menu hidden" role="menu" data-message-id="${safeId}"> 
-                            <button type="button" data-assistant-action="ask" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'ask') })} role="menuitem">${getActionIconSvg('ask')}<span>Ask JARVIS</span></button>
-                            <button type="button" data-assistant-action="verify" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'verify') })} role="menuitem">${getActionIconSvg('verify')}<span>Verify this</span></button>
-                            <div class="assistant-action-menu-divider"></div>
-                            <button type="button" data-assistant-action="export_pdf" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'export_pdf') })} role="menuitem">${getActionIconSvg('pdf')}<span>Export as PDF</span></button>
-                            <button type="button" data-assistant-action="export_docx" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'export_docx') })} role="menuitem">${getActionIconSvg('word')}<span>Export as Word (.docx)</span></button>
-                            <button type="button" data-assistant-action="export_csv" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'export_csv') })} role="menuitem">${getActionIconSvg('csv')}<span>Export as Excel / CSV</span></button>
-                            <button type="button" data-assistant-action="export_markdown" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'export_markdown') })} role="menuitem">${getActionIconSvg('file')}<span>Export as Markdown</span></button>
-                            <button type="button" data-assistant-action="export_html" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'export_html') })} role="menuitem">${getActionIconSvg('html')}<span>Export as HTML</span></button>
-                            <button type="button" data-assistant-action="export_json" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'export_json') })} role="menuitem">${getActionIconSvg('json')}<span>Export as JSON</span></button>
-                            <button type="button" data-assistant-action="export_txt" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'export_txt') })} role="menuitem">${getActionIconSvg('txt')}<span>Export as Text</span></button>
-                        </div> 
                     </div>
                 </div>
             `;
@@ -9376,10 +9380,17 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             return false;
         }
 
-        function handleAssistantPositiveFeedback(messageId, button = null) {
+        function getFeedbackButtonsForMessage(messageId) {
             const row = document.querySelector(`.assistant-action-row[data-message-id="${messageId}"]`);
-            const btnUp = button || row?.querySelector('[data-assistant-action="feedback_up"]');
-            const btnDown = row?.querySelector('[data-assistant-action="feedback_down"]');
+            const menu = document.getElementById(`assistant-action-menu-${messageId}`);
+            const btnUp = row?.querySelector('[data-assistant-action="feedback_up"]') || menu?.querySelector('[data-assistant-action="feedback_up"]') || null;
+            const btnDown = row?.querySelector('[data-assistant-action="feedback_down"]') || menu?.querySelector('[data-assistant-action="feedback_down"]') || null;
+            return { row, menu, btnUp, btnDown };
+        }
+
+        function handleAssistantPositiveFeedback(messageId, button = null) {
+            const { btnUp: foundUp, btnDown } = getFeedbackButtonsForMessage(messageId);
+            const btnUp = button || foundUp;
             const wasActive = Boolean(btnUp?.classList?.contains('is-feedback-up'));
 
             if (wasActive) {
@@ -9492,7 +9503,11 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             closeAllFeedbackPopovers();
             if (isHidden) {
                 const row = document.querySelector(`.assistant-action-row[data-message-id="${messageId}"]`);
-                const anchor = button || row?.querySelector('[data-assistant-action="feedback_down"]');
+                const candidate = button || row?.querySelector('[data-assistant-action="feedback_down"]');
+                const candidateRect = candidate?.getBoundingClientRect?.();
+                const anchor = (candidateRect && candidateRect.width > 0 && candidateRect.height > 0)
+                    ? candidate
+                    : (row?.querySelector('.assistant-action-dots') || row);
                 if (anchor) {
                     positionFeedbackPopover(popover, anchor);
                 } else {
@@ -9525,9 +9540,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 sanitizedComment = dlpRes.text;
             }
 
-            const row = document.querySelector(`.assistant-action-row[data-message-id="${messageId}"]`);
-            const btnUp = row?.querySelector('[data-assistant-action="feedback_up"]');
-            const btnDown = row?.querySelector('[data-assistant-action="feedback_down"]');
+            const { btnUp, btnDown } = getFeedbackButtonsForMessage(messageId);
             if (btnDown) {
                 btnDown.classList.add('is-active', 'is-feedback-down', 'text-rose-400');
                 btnDown.setAttribute('aria-pressed', 'true');
@@ -9671,6 +9684,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                 menu.classList.add('hidden');
                 menu.style.left = '';
                 menu.style.top = '';
+                menu.style.maxHeight = '';
                 const id = String(menu.dataset?.messageId || '').trim();
                 const row = id
                     ? Array.from(document.querySelectorAll('.assistant-action-row'))
@@ -9687,19 +9701,22 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             if (!menu || !button) return;
             const buttonRect = button.getBoundingClientRect();
             if (menu.parentElement !== document.body) document.body.appendChild(menu);
+            const margin = 8;
+            const vv = window.visualViewport;
+            const viewportTop = vv ? vv.offsetTop : 0;
+            const viewportWidth = vv ? vv.width : (window.innerWidth || document.documentElement.clientWidth || 0);
+            const viewportHeight = vv ? vv.height : (window.innerHeight || document.documentElement.clientHeight || 0);
+            menu.style.maxHeight = `${Math.max(180, Math.round(viewportHeight - margin * 2))}px`;
             menu.classList.remove('hidden');
             const menuRect = menu.getBoundingClientRect();
-            const margin = 8;
-            const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
-            const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
             let left = buttonRect.right - menuRect.width;
             let top = buttonRect.bottom + 8;
             if (left < margin) left = margin;
             if (left + menuRect.width > viewportWidth - margin) {
                 left = Math.max(margin, viewportWidth - menuRect.width - margin);
             }
-            if (top + menuRect.height > viewportHeight - margin) {
-                top = Math.max(margin, buttonRect.top - menuRect.height - 8);
+            if (top + menuRect.height > viewportTop + viewportHeight - margin) {
+                top = Math.max(viewportTop + margin, buttonRect.top - menuRect.height - 8);
             }
             menu.style.left = `${Math.round(left)}px`;
             menu.style.top = `${Math.round(top)}px`;
@@ -32476,11 +32493,18 @@ let lastViewportWidth = 0;
 let wasKeyboardOpen = false;
 let viewportSyncTimers = [];
 
+const isIOSWebKit = () => {
+    if (typeof navigator === 'undefined') return false;
+    return /iPhone|iPad|iPod/i.test(navigator.userAgent || '') ||
+        (navigator.platform === 'MacIntel' && Number(navigator.maxTouchPoints || 0) > 1);
+};
+
 const setVH = () => {
     const vv = window.visualViewport;
     const height = vv ? vv.height : window.innerHeight;
     const width = vv ? vv.width : window.innerWidth;
     const offsetTop = vv ? vv.offsetTop : 0;
+    const iosWebKit = isIOSWebKit();
     const layoutHeight = Math.max(
         Number(document.documentElement?.clientHeight || 0),
         Number(window.innerHeight || 0),
@@ -32506,29 +32530,65 @@ const setVH = () => {
         isEditableFocused && baselineViewportHeight > 0 ? Math.max(0, Math.round(baselineViewportHeight - height)) : 0
     );
     const kbOffset = vv ? Math.max(0, Math.round(layoutHeight - (height + offsetTop))) : 0;
+    const screenH = Number(window.screen?.height || 0);
+    const kbOpen = heightGap > 70 || kbOffset > 70 || Boolean(
+        iosWebKit && isEditableFocused && vv && (
+            (baselineViewportHeight > 0 && height < baselineViewportHeight - 60) ||
+            (screenH > 0 && height < screenH * 0.74)
+        )
+    );
     const vh = height * 0.01;
-    document.documentElement.style.setProperty('--vh', `${vh}px`);
-    document.documentElement.style.setProperty('--app-viewport-height', `${Math.round(height)}px`);
-    document.documentElement.style.setProperty('--app-viewport-top', `${Math.round(offsetTop)}px`);
-    document.documentElement.style.setProperty('--keyboard-offset', `${kbOffset}px`);
-    const kbOpen = heightGap > 90 || kbOffset > 90;
+    const rootStyle = document.documentElement.style;
+    rootStyle.setProperty('--vh', `${vh}px`);
+    rootStyle.setProperty('--app-viewport-height', `${Math.round(height)}px`);
+    rootStyle.setProperty('--app-viewport-top', `${Math.round(offsetTop)}px`);
+    rootStyle.setProperty('--keyboard-offset', `${kbOffset}px`);
+
     const justOpenedKeyboard = kbOpen && !wasKeyboardOpen;
     const justClosedKeyboard = !kbOpen && wasKeyboardOpen;
     wasKeyboardOpen = kbOpen;
     document.body.classList.toggle('is-keyboard-open', kbOpen);
+
+    // Closed-loop verification against iOS WebKit WKWebView fixed-layer offsetTop drift and keyboard clearance
+    const barEl = document.getElementById('input-bar-container');
+    const appRootEl = document.getElementById('app-root');
+    if (kbOpen && barEl) {
+        const clearance = iosWebKit ? 10 : 0;
+        const baseTop = Math.round(offsetTop + height - clearance);
+        rootStyle.setProperty('--keyboard-composer-top', `${baseTop}px`);
+        const barRect = barEl.getBoundingClientRect();
+        if (barRect && barRect.height > 0) {
+            const desiredBottom = Math.round(offsetTop + height - clearance);
+            const drift = barRect.bottom - desiredBottom;
+            if (Math.abs(drift) > 2) {
+                rootStyle.setProperty('--keyboard-composer-top', `${Math.round(baseTop - drift)}px`);
+            }
+        }
+        if (iosWebKit && appRootEl) {
+            const rootRect = appRootEl.getBoundingClientRect();
+            const topDrift = rootRect.top - Math.round(offsetTop);
+            if (Math.abs(topDrift) > 2) {
+                rootStyle.setProperty('--app-viewport-top', `${Math.round(offsetTop - topDrift)}px`);
+            }
+        }
+    } else {
+        rootStyle.removeProperty('--keyboard-composer-top');
+    }
+
     const headerEl = document.querySelector('.header') || document.querySelector('.app-header');
     const inputEl = document.querySelector('.chat-input') || document.querySelector('.floating-input-bar');
     const headerH = headerEl ? headerEl.offsetHeight : 54;
     const inputH = inputEl ? inputEl.offsetHeight : 72;
-    document.documentElement.style.setProperty('--header-height', `${headerH}px`);
-    document.documentElement.style.setProperty('--input-height', `${inputH}px`);
-    const barEl = document.getElementById('input-bar-container');
+    rootStyle.setProperty('--header-height', `${headerH}px`);
+    rootStyle.setProperty('--input-height', `${inputH}px`);
     if (barEl) {
         const measuredSafeH = Math.max(90, Math.ceil(barEl.offsetHeight || barEl.getBoundingClientRect().height || 120));
-        document.documentElement.style.setProperty('--input-bar-safe-height', `${measuredSafeH}px`);
+        rootStyle.setProperty('--input-bar-safe-height', `${measuredSafeH}px`);
     }
     if (kbOpen || justClosedKeyboard || window.scrollY > 0) {
         try { window.scrollTo(0, 0); } catch (_) {}
+        if (document.documentElement) document.documentElement.scrollTop = 0;
+        if (document.body) document.body.scrollTop = 0;
         const chatMain = document.getElementById('chat-main');
         const chatContainer = document.getElementById('chat-container');
         if (chatMain && chatContainer && chatContainer.children.length > 0) {
@@ -32556,7 +32616,7 @@ function scheduleJarvisViewportSync() {
     if (typeof requestAnimationFrame === 'function') {
         requestAnimationFrame(() => setVH());
     }
-    for (const delay of [60, 180, 340]) {
+    for (const delay of [50, 140, 260, 420, 650]) {
         viewportSyncTimers.push(setTimeout(setVH, delay));
     }
 }
