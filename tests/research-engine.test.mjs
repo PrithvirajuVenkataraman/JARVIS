@@ -1619,6 +1619,27 @@ test('N-way comparisons, compound tokenizer, contextual substitution, and recent
     ], 'Compare Artist One and Artist Two');
     assert.match(formatted, /Subject Scope: Artist One only/);
     assert.match(formatted, /Subject Scope: Artist Two only/);
+
+    for (const q of ['Who is Virat Kohli?', 'who is sam altman']) {
+        const personReqs = buildResearchRequirements(q);
+        assert.equal(personReqs.length, 3, `"${q}" must yield 3 comprehensive person overview requirements`);
+        assert.ok(personReqs.every(r => r.type === 'explanation'), `"${q}" must use explanation requirements rather than 16-word names cap`);
+        assert.match(personReqs[2].searchQuery || '', /latest news recent updates/i);
+    }
+    const plannerBioReqs = buildResearchRequirements('Ada Lovelace', [], { answerScope: 'person_bio' });
+    assert.equal(plannerBioReqs.length, 3);
+    assert.ok(plannerBioReqs.every(r => r.type === 'explanation'));
+    for (const generalQ of ['OpenAI', 'bhopal gas tragedy', 'what happened in pahalgam', 'French Revolution', 'tell me about Nvidia']) {
+        const genReqs = buildResearchRequirements(generalQ, [], { answerScope: 'overview' });
+        assert.ok(genReqs.every(r => r.type === 'explanation'), `"${generalQ}" must use explanation requirements rather than capped names trivia`);
+        assert.ok(Boolean(genReqs.at(-1)?.searchQuery), `"${generalQ}" must carry a follow-up searchQuery`);
+        const genPlan = deterministicResearchPlan(generalQ, []);
+        assert.equal(genPlan.queries.length, 2, `"${generalQ}" must expand into 2 complementary search queries`);
+    }
+    const ceoWhoReqs = buildResearchRequirements('Who is the CEO of Apple?');
+    assert.equal(ceoWhoReqs[0].type, 'names', 'Role-holder ask must keep type "names"');
+    const lowerWhoPlan = deterministicResearchPlan('who is virat kohli', []);
+    assert.ok(lowerWhoPlan.queries.some(q => /latest news recent updates/i.test(q)));
 });
 
 });

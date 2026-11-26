@@ -6,7 +6,7 @@ function literalMarkdown(text) {
 }
 
 export async function personProfileReply(message, options = {}) {
-    if (options.images?.length || options.grounding?.kind || options.grounding?.selectedText || options.grounding?.sourceAnswer || !['chat', 'pop_culture_reference', 'fast_simple', ''].includes(String(options.intent || ''))) return null;
+    if (options.isWebForced || options.webMode === 'force' || options.images?.length || options.grounding?.kind || options.grounding?.selectedText || options.grounding?.sourceAnswer || !['chat', 'pop_culture_reference', 'fast_simple', ''].includes(String(options.intent || ''))) return null;
     const subject = personPhotoSubject(message);
     if (!subject.query || !subject.role) return null;
     const profile = await resolvePersonProfile(subject.query, { signal: options.signal });

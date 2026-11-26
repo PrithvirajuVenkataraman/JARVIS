@@ -52,7 +52,7 @@ export async function enrich(row, input, options = {}) {
         if (controller.signal.aborted || stamp !== epoch || !row.isConnected || !image.naturalWidth) return;
         const bubble = row.querySelector('.chat-bubble-assistant');
         const answer = bubble?.querySelector('.assistant-message-text');
-        if (!answer) return;
+        if (!answer || !answer.textContent?.trim()) return;
         const figure = document.createElement('figure'); figure.className = 'person-photo';
         const link = document.createElement('a'); link.href = photo.sourceUrl; link.target = '_blank'; link.rel = 'noopener noreferrer'; link.append(image);
         figure.append(link);

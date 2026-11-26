@@ -4696,6 +4696,7 @@ async function streamChatCompletion(payload, options = {}) {
     let tokenChunkCount = 0;
     let thinkingCapped = false;
     let streamMeta = {};
+    let pendingEntityPayload = null;
     if (isConverseStream) {
         startStreamingConverseSpeech(activeTurnId);
     }
@@ -4751,11 +4752,19 @@ async function streamChatCompletion(payload, options = {}) {
             return;
         }
         if (event.event === 'entity') {
+            const payloadEntity = event.data?.entity || null;
+            const payloadWorks = event.data?.notableWorks || [];
+            if (!accumulated || !accumulated.trim()) {
+                if (payloadEntity) {
+                    pendingEntityPayload = { entity: payloadEntity, notableWorks: payloadWorks };
+                }
+                return;
+            }
             const id = ensureStreamMessage();
             const row = findAssistantMessageRow(id);
             const renderVisualFn = window.JarvisLiveResearch?.renderOrUpdateVisualEntityHeader || globalThis.JarvisLiveResearch?.renderOrUpdateVisualEntityHeader;
             if (row && typeof renderVisualFn === 'function') {
-                renderVisualFn(row, event.data?.entity, event.data?.notableWorks || []);
+                renderVisualFn(row, payloadEntity, payloadWorks);
             }
             return;
         }
@@ -4838,10 +4847,14 @@ async function streamChatCompletion(payload, options = {}) {
                 });
             }
             const id = ensureStreamMessage();
+            const pendingEntity = pendingEntityPayload;
+            pendingEntityPayload = null;
             updateStreamingAssistantMessage(id, accumulated, {
                 userMessage,
                 streaming: true,
                 thought: accumulatedThought,
+                entity: pendingEntity?.entity || undefined,
+                notableWorks: pendingEntity?.notableWorks || undefined,
                 modelUsed: streamMeta.modelUsed || streamMeta.model || '',
                 provider: streamMeta.provider || '',
                 failover: streamMeta.failover || false,
@@ -4853,6 +4866,7 @@ async function streamChatCompletion(payload, options = {}) {
         }
         if (event.event === 'reset') {
             accumulated = '';
+            pendingEntityPayload = null;
             accumulatedThought = '';
             firstDeltaLogged = false;
             tokenChunkCount = 0;
@@ -4942,13 +4956,18 @@ async function streamChatCompletion(payload, options = {}) {
                 tps,
                 cacheHit: !!donePayload.cacheHit
             };
+            const resolvedDoneEntity = donePayload.entity || pendingEntityPayload?.entity || null;
+            const resolvedDoneWorks = (Array.isArray(donePayload.notableWorks) && donePayload.notableWorks.length)
+                ? donePayload.notableWorks
+                : (pendingEntityPayload?.notableWorks || []);
+            pendingEntityPayload = null;
             updateStreamingAssistantMessage(id, doneResponse, {
                 userMessage,
                 streaming: false,
                 thought: accumulatedThought,
                 sources: finalSources,
-                entity: donePayload.entity || null,
-                notableWorks: donePayload.notableWorks || [],
+                entity: resolvedDoneEntity,
+                notableWorks: resolvedDoneWorks,
                 verification: donePayload.verification,
                 modelUsed: donePayload.modelUsed || streamMeta.modelUsed || streamMeta.model || '',
                 provider: donePayload.provider || streamMeta.provider || '',
@@ -21976,16 +21995,15 @@ async function handleBoundedLiveResearchQuery(cleanText, rawUserText, options = 
                     if (label) label.textContent = 'Checking the answer against retrieved evidence…';
                 },
                 onEntityResolved: ({ entity, notableWorks }) => {
-                    if (!isCurrentResearch() || controller.isTerminal) return;
-                    const row = getRow();
-                    if (row && entity) {
-                        row.style.display = '';
-                        if (window.JarvisLiveResearch?.renderOrUpdateVisualEntityHeader) {
-                            window.JarvisLiveResearch.renderOrUpdateVisualEntityHeader(row, entity, notableWorks || []);
-                        }
-                    }
+                    if (!isCurrentResearch() || controller.isTerminal || !entity) return;
+                    controller.__pendingResolvedVisuals = { entity, notableWorks: notableWorks || [] };
                 },
                 onComplete: ({ content, sources, provenance, telemetry, answerStatus, verified, entity, notableWorks }) => {
+                    const bufferedVisuals = controller.__pendingResolvedVisuals || null;
+                    entity = entity || bufferedVisuals?.entity || null;
+                    notableWorks = (Array.isArray(notableWorks) && notableWorks.length)
+                        ? notableWorks
+                        : (bufferedVisuals?.notableWorks || []);
                     if (!isCurrentResearch() || controller.searchAbortController.signal.aborted) { resolve(false); return; }
                     hideThinkingIndicator();
                     const row = getRow();

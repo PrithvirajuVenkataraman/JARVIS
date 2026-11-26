@@ -565,14 +565,11 @@ export async function handleStreamingWebRag(req, res, { rawQuery, limit = 8, cus
     const heartbeat = setInterval(() => { if (!controller.signal.aborted) res.write(': heartbeat\n\n'); }, 10000);
 
     let resolvedVisuals = null;
+    let entityEmitted = false;
     void resolveEntityVisuals(rawQuery, { signal: controller.signal })
         .then(visuals => {
             if (visuals?.entity && !controller.signal.aborted) {
                 resolvedVisuals = visuals;
-                send('entity', {
-                    entity: visuals.entity,
-                    notableWorks: visuals.notableWorks || []
-                });
             }
             return visuals;
         })
@@ -589,12 +586,23 @@ export async function handleStreamingWebRag(req, res, { rawQuery, limit = 8, cus
             signal: controller.signal,
             onEvent: async (event, data) => {
                 if (event === 'entity') {
-                    const sameEntity = resolvedVisuals?.entity && data?.entity && (resolvedVisuals.entity.id === data.entity.id || resolvedVisuals.entity.name === data.entity.name);
-                    const sameWorksCount = (resolvedVisuals?.notableWorks?.length || 0) === (data?.notableWorks?.length || 0);
-                    if (sameEntity && sameWorksCount) {
-                        return; // Drop redundant duplicate entity SSE event
+                    const nextEntity = data?.entity || resolvedVisuals?.entity || null;
+                    const nextWorks = (Array.isArray(data?.notableWorks) && data.notableWorks.length)
+                        ? data.notableWorks
+                        : (resolvedVisuals?.notableWorks || []);
+                    if (nextEntity) {
+                        resolvedVisuals = { entity: nextEntity, notableWorks: nextWorks };
+                        data.entity = nextEntity;
+                        data.notableWorks = nextWorks;
+                        entityEmitted = true;
                     }
-                    resolvedVisuals = data;
+                }
+                if (event === 'token' && !entityEmitted && resolvedVisuals?.entity) {
+                    send('entity', {
+                        entity: resolvedVisuals.entity,
+                        notableWorks: resolvedVisuals.notableWorks || []
+                    });
+                    entityEmitted = true;
                 }
                 if (event === 'done') {
                     const visuals = resolvedVisuals;

@@ -211,8 +211,10 @@ export function rankResearchEvidence(plan, sources, limit = 8) {
     // Ensure non-historical queries retain recent dated developments alongside static overviews.
     if (!isPastQuery && selected.length < limit) {
         const recentCutoff = Date.now() - 120 * 86400000;
-        const recentPick = ranked.find(s => !selected.some(sel => sel.url === s.url) && (s.__publishedMs >= recentCutoff || s.sourceType === 'news' || s.sourceType === 'trusted_news'));
-        if (recentPick) add(recentPick);
+        const recentPicks = ranked.filter(s => !selected.some(sel => sel.url === s.url) && (s.__publishedMs >= recentCutoff || s.sourceType === 'news' || s.sourceType === 'trusted_news'));
+        for (const recentPick of recentPicks.slice(0, 2)) {
+            if (selected.length < limit) add(recentPick);
+        }
     }
     for (const source of ranked) if ((domains.get(source.publisherDomain) || 0) < 2) add(source);
     for (const source of ranked) add(source);
@@ -220,7 +222,7 @@ export function rankResearchEvidence(plan, sources, limit = 8) {
 }
 
 /** Requirements describe the user's requested facts, independently of retrieved headlines. */
-export function buildResearchRequirements(query, _context = []) {
+export function buildResearchRequirements(query, _context = [], options = {}) {
     const q = cleanText(query).slice(0, 1000);
     const focusQ = q.includes('—') ? (q.split('—').pop()?.trim() || q) : q;
     const count = focusQ.match(/\b(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+(people|persons?|individuals?|countries|nations|animals?|species|names|items|reasons|ways|steps|things)\b/i);
@@ -241,7 +243,11 @@ export function buildResearchRequirements(query, _context = []) {
             }
         }
     } else {
-        const explicitNamesAsk = /\b(?:who|name(?:s)?|which (?:people|persons?|individuals?|countries|nations|animals?|teams?|cities|companies|brands?))\b/i.test(focusQ);
+        const isDirectWhoIdentity = !isRole && !isEntityLookup && !count
+            && /^who\s+(?:is|was)\s+(?!the\s|a\s|an\s)[^\s?!]+(?:\s+[^\s?!]+){0,3}\s*[?.,!]*$/i.test(focusQ);
+        const plannerRequestsOverview = options.answerScope === 'overview' || options.answerScope === 'person_bio';
+        const explicitNamesAsk = !plannerRequestsOverview && !isDirectWhoIdentity
+            && /\b(?:who|name(?:s)?|which (?:people|persons?|individuals?|countries|nations|animals?|teams?|cities|companies|brands?))\b/i.test(focusQ);
         const names = (explicitNamesAsk
             || isRole
             || isEntityLookup
@@ -262,15 +268,23 @@ export function buildResearchRequirements(query, _context = []) {
         if (date) add('date', `Establish the requested date or year for ${q}`, { expectedCount: names && /\bdates\b/i.test(q) ? expectedCount : undefined });
         if (value) add('value', `Establish the requested numerical value for ${q}`);
         if (!requirements.length) {
-            const isBiographicalOrCreative = (Array.isArray(_context) && _context.some(c => c?.entityKind === 'person' || c?.type === 'person'))
+            const subjectTerms = researchTerms(focusQ).slice(0, 5).join(' ') || q;
+            const isBiographicalOrCreative = options.answerScope === 'person_bio'
+                || isDirectWhoIdentity
+                || (Array.isArray(_context) && _context.some(c => c?.entityKind === 'person' || c?.type === 'person'))
                 || /\b(?:biography|bio|life\s+of|career\s+of|born|composer|musician|music\s+director|singer|lyricist|songwriter|director|filmmaker|producer|artist|painter|sculptor|actor|actress|author|writer|poet|novelist|scientist|physicist|chemist|biologist|mathematician|astronomer|inventor|architect|philosopher|historian|economist|scholar|athlete|player|coach)\b/i.test(q)
                 || /^(?:dr|prof|mr|mrs|ms|sir|lord)\.?\s+[A-Za-z]/i.test(q);
             if (isBiographicalOrCreative) {
                 add('explanation', `Core identity, background, and significance of ${q}`);
                 add('explanation', `Notable works, career milestones, contributions, and achievements of ${q}`);
-                add('explanation', `Awards, recognition, life status, and recent developments for ${q}`);
+                add('explanation', `Awards, recognition, life status, and recent developments for ${q}`, {
+                    searchQuery: `${subjectTerms} latest news recent updates`
+                });
             } else {
-                add('explanation', `Details explaining ${q}`, { expectedCount: /^(?:reasons|ways|steps)$/i.test(count?.[2] || '') ? expectedCount : undefined });
+                add('explanation', `Comprehensive overview explaining ${q}: background, key details, impact, and latest developments`, {
+                    expectedCount: /^(?:reasons|ways|steps)$/i.test(count?.[2] || '') ? expectedCount : undefined,
+                    searchQuery: `${subjectTerms} overview latest updates`
+                });
             }
         }
     }

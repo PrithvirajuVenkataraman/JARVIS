@@ -79,5 +79,7 @@ test('disconnecting a profile request aborts the lookup without caching a false 
         assert.equal(signal.aborted, true); assert.deepEqual(res.chunks, []); assert.equal(res.data, undefined);
         globalThis.fetch = sourceFetch([], 'Canceled Source Person', 'Canceled Source Person is an actor.');
         assert.equal((await personProfileReply('Actor Canceled Source Person')).sourceBased, true);
+        assert.equal(await personProfileReply('Actor Canceled Source Person', { isWebForced: true }), null);
+        assert.equal(await personProfileReply('Actor Canceled Source Person', { webMode: 'force' }), null);
     } finally { globalThis.fetch = original; }
 });

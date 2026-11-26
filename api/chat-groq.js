@@ -1130,7 +1130,7 @@ async function handler(req, res) {
 
             preferences.webMode = preferences.webMode || String(req.body?.webMode || '').trim().toLowerCase();
             preferences.isWebForced = Boolean(preferences.isWebForced || req.body?.isWebForced || req.body?.webMode === 'force' || preferences.webMode === 'force');
-            const profileReply = await personProfileReply(sanitizedMessage, { intent, grounding, images });
+            const profileReply = await personProfileReply(sanitizedMessage, { intent, grounding, images, webMode: preferences.webMode, isWebForced: preferences.isWebForced });
             if (profileReply) {
                 if (req.aborted || req.signal?.aborted || currentRequestSignal()?.aborted || res.destroyed || res.writableEnded) return;
                 const payload = { ...profileReply, requestId };

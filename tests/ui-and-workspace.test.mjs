@@ -985,6 +985,7 @@ console.log('\n--- Test 5: Groq Model Candidate Realness & Non-Llama Assurance -
         'Save to memory, Regenerate, Thumbs up, and Thumbs down must live inside the three dots menu');
     assert.ok(coreUxCss.includes('body .assistant-action-row { display:grid; grid-template-columns:repeat(4,44px);'), 'Action row must use 4 compact grid columns');
     assert.ok(coreUxCss.includes('body .text-input-dialog h2') && coreUxCss.includes('body .text-input-dialog textarea') && coreUxCss.includes('body .text-input-dialog-btn.primary'), 'Text input dialog must have unlayered dark styling overriding Tailwind preflight');
+    assert.ok(indexHtml.includes('pendingEntityPayload') && indexHtml.includes('controller.__pendingResolvedVisuals'), 'Frontend must synchronize entity visual cards with text generation so media never appears before text');
 }
 
 console.log('================================================================');
