@@ -49,11 +49,20 @@ export default defineConfig({
             const version = buildId.digest('hex').slice(0, 16);
             const manifest = JSON.parse(await readFile('dist/.vite/manifest.json', 'utf8'));
             const core = new Set(['/index.html', '/katex.min.js', '/science-format.js', '/manifest.json', '/404.html', '/code-sandbox.html', '/code-sandbox.js']);
+            const visited = new Set();
+            const isLightweightAsset = (file) => !/(?:settings|vision)-runtime|image-decoder-worker|recall-worker|transformers|ort-wasm|pdf\.worker|magick|\.wasm$/i.test(file);
             const visit = key => {
+                if (visited.has(key)) return;
+                visited.add(key);
                 const entry = manifest[key]; if (!entry) return;
-                core.add('/' + entry.file);
-                for (const file of [...(entry.css || []), ...(entry.assets || [])]) if (!/(?:settings|vision)-runtime|image-decoder-worker|recall-worker|ort-wasm|\.wasm$/.test(file)) core.add('/' + file);
+                if (isLightweightAsset(entry.file)) core.add('/' + entry.file);
+                for (const file of [...(entry.css || []), ...(entry.assets || [])]) if (isLightweightAsset(file)) core.add('/' + file);
                 for (const dependency of entry.imports || []) visit(dependency);
+                for (const dynDependency of entry.dynamicImports || []) {
+                    if (/app\/(?:attachments|image-generator)\.js$/i.test(dynDependency) || /browser|request-payload|file-format|image-decoder/i.test(dynDependency)) {
+                        visit(dynDependency);
+                    }
+                }
             };
             visit('index.html');
             const template = await readFile('sw.js', 'utf8');

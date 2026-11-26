@@ -320,3 +320,44 @@ test('an incomplete offline installation cannot replace the working cache', asyn
     assert.equal(skipped, false);
     assert.deepEqual([...cacheNames], ['jarvis-cache-working']);
 });
+
+test('service worker uses network-first for app navigations so deploys never serve stale index.html', async () => {
+    const listeners = {};
+    const puts = [];
+    const cachedHtml = new Response('<html>stale</html>', { status: 200 });
+    const freshHtml = new Response('<html>fresh</html>', { status: 200 });
+    let failNetwork = false;
+    const context = vm.createContext({
+        URL, Response, Request,
+        self: { addEventListener: (name, cb) => listeners[name] = cb, location: { origin: 'https://jarvisjr.vercel.app' } },
+        caches: {
+            open: async () => ({
+                match: async key => key === '/index.html' ? cachedHtml : null,
+                put: async (key, val) => puts.push({ key, val })
+            }),
+            match: async () => null
+        },
+        fetch: async () => {
+            if (failNetwork) throw new Error('offline');
+            return freshHtml;
+        }
+    });
+    vm.runInContext(readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), context);
+
+    let onlineResponse;
+    listeners.fetch({
+        request: { method: 'GET', mode: 'navigate', url: 'https://jarvisjr.vercel.app/' },
+        respondWith: p => onlineResponse = p,
+        waitUntil: () => {}
+    });
+    assert.equal(await (await onlineResponse).text(), '<html>fresh</html>');
+
+    failNetwork = true;
+    let offlineResponse;
+    listeners.fetch({
+        request: { method: 'GET', mode: 'navigate', url: 'https://jarvisjr.vercel.app/' },
+        respondWith: p => offlineResponse = p,
+        waitUntil: () => {}
+    });
+    assert.equal(await (await offlineResponse).text(), '<html>stale</html>');
+});
