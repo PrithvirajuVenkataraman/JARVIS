@@ -65,7 +65,7 @@ async function handler(req, res) {
         methods: ['POST'],
         routeKey: 'vision',
         maxBodyBytes: 8 * 1024 * 1024,
-        rateLimit: { max: 10, windowMs: 60 * 1000 },
+        rateLimit: { max: 45, windowMs: 60 * 1000 },
         skipAbusiveCheck: true
     });
     if (guard.handled) return;

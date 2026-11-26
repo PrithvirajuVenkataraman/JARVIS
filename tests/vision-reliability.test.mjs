@@ -102,4 +102,22 @@ test('attachment ingest and client OCR helpers handle edge cases (0-byte, encryp
     });
     assert.equal(emptyPdfIngest.ok, false);
     assert.match(emptyPdfIngest.message, /no readable|unable|could not|empty/i);
+
+    assert.equal(t.isRateLimitError({ status: 429, message: 'Too many requests' }), true);
+    assert.equal(t.isRateLimitError({ code: 'vision_rate_limited' }), true);
+    assert.equal(t.isRateLimitError(new Error('Network timeout')), false);
 });
+
+test('vision endpoint rate limit accommodates multi-page PDF OCR batches without premature 429 on page 24', async () => environment(async () => {
+    globalThis.fetch = async () => Response.json({
+        candidates: [{ content: { parts: [{ text: JSON.stringify({ fullText: 'Sample scanned page text content.' }) }] } }]
+    });
+
+    for (let page = 1; page <= 25; page++) {
+        const res = response();
+        const req = request({ task: 'text_extract', prompt: `Page ${page}`, imageBase64: png, mimeType: 'image/png' });
+        req.socket.remoteAddress = '198.51.100.42';
+        await visionHandler(req, res);
+        assert.equal(res.statusCode, 200, `Expected 200 on PDF OCR page ${page}, got ${res.statusCode}`);
+    }
+}));

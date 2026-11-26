@@ -1404,6 +1404,28 @@ function classifyPdfError(err, filename = 'This PDF') {
     return null;
 }
 
+function createPdfOcrState() {
+    return {
+        cloudDisabled: false,
+        consecutiveRateLimits: 0,
+        rateLimitHit: false,
+        cooldownUntil: 0,
+        localPagesAttempted: 0,
+        localOcrFailed: false
+    };
+}
+
+function isRateLimitError(err) {
+    const status = Number(err?.status || 0);
+    const code = String(err?.code || '').toLowerCase();
+    const message = String(err?.message || '').toLowerCase();
+    return status === 429 ||
+        code === 'rate_limited' ||
+        code === 'vision_rate_limited' ||
+        message.includes('too many requests') ||
+        message.includes('rate limit');
+}
+
 async function extractPdfTextClient(file, attachment = null) {
     const pdfjs = await loadPdfJs();
     const buffer = await file.arrayBuffer();
@@ -1419,6 +1441,7 @@ async function extractPdfTextClient(file, attachment = null) {
     const pageCount = Math.min(doc.numPages || 0, PDF_DIGITAL_PAGE_LIMIT);
     const CHUNK_SIZE = 5;
     let visionPagesAttempted = 0;
+    const ocrState = createPdfOcrState();
 
     for (let i = 1; i <= pageCount; i += CHUNK_SIZE) {
         const chunkEnd = Math.min(i + CHUNK_SIZE - 1, pageCount);
@@ -1439,7 +1462,7 @@ async function extractPdfTextClient(file, attachment = null) {
                 // Hybrid Per-Page Fallback: page is sparse/scanned, run vision OCR for this specific page
                 visionPagesAttempted++;
                 try {
-                    pageText = await processPdfPageVision(attachment || { name: file.name, file }, pdfjs, doc, pageNumber, pageCount);
+                    pageText = await processPdfPageVision(attachment || { name: file.name, file }, pdfjs, doc, pageNumber, pageCount, ocrState);
                 } catch (_) {
                     pageText = '';
                 }
@@ -1477,13 +1500,14 @@ async function extractPdfViaVision(attachment) {
     const pageCount = Math.min(doc.numPages || 0, PDF_VISUAL_PAGE_LIMIT);
 
     const parts = [];
-    const BATCH_SIZE = 3;
+    const ocrState = createPdfOcrState();
+    const BATCH_SIZE = 2;
     for (let i = 1; i <= pageCount; i += BATCH_SIZE) {
         const batchEnd = Math.min(i + BATCH_SIZE - 1, pageCount);
         notifyAttachmentProgress(attachment, `Scanning pages ${i}–${batchEnd} of ${pageCount}...`);
         const batchPromises = [];
         for (let pageNumber = i; pageNumber <= batchEnd; pageNumber++) {
-            batchPromises.push(processPdfPageVision(attachment, pdfjs, doc, pageNumber, pageCount));
+            batchPromises.push(processPdfPageVision(attachment, pdfjs, doc, pageNumber, pageCount, ocrState));
         }
         const results = await Promise.allSettled(batchPromises);
         for (const res of results) {
@@ -1491,19 +1515,29 @@ async function extractPdfViaVision(attachment) {
                 parts.push(res.value);
             }
         }
+        // Gentle inter-batch pacing for multi-page documents to stay within vision API RPM limits
+        if (batchEnd < pageCount && pageCount > 4 && !ocrState.cloudDisabled) {
+            await new Promise(r => setTimeout(r, 150));
+        }
     }
 
     const text = clipText(parts.join('\n\n'));
+    const ok = hasUsefulExtractedText(text);
+    const message = ok
+        ? ''
+        : (ocrState.rateLimitHit
+            ? 'Cloud OCR rate limit reached while scanning this document. Wait a moment and retry, or upload a smaller section.'
+            : 'PDF vision OCR found little readable text.');
     return {
-        ok: hasUsefulExtractedText(text),
+        ok,
         text,
-        method: 'pdf_vision_ocr',
+        method: ok && ocrState.rateLimitHit ? 'pdf_vision_partial_ocr' : 'pdf_vision_ocr',
         provider: 'vision',
-        message: hasUsefulExtractedText(text) ? '' : 'PDF vision OCR found little readable text.'
+        message
     };
 }
 
-async function processPdfPageVision(attachment, pdfjs, doc, pageNumber, totalPages = 1) {
+async function processPdfPageVision(attachment, pdfjs, doc, pageNumber, totalPages = 1, ocrState = createPdfOcrState()) {
     try {
         const page = await doc.getPage(pageNumber);
         // High-resolution DPI scale (up to 2.0x) for crystal-clear character and table recognition
@@ -1530,35 +1564,69 @@ async function processPdfPageVision(attachment, pdfjs, doc, pageNumber, totalPag
         const base64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
         if (!base64) return '';
 
-        try {
-            const data = await postJson('/api/vision', {
-                task: 'text_extract',
-                prompt: `Transcribe all readable text from page ${pageNumber} of PDF "${attachment.name}". Preserve headings, bullet points, math equations in LaTeX, and render all tables in clean Markdown table format (| Col 1 | Col 2 |). For line items, capture labels, dates, and amounts accurately.`,
-                mimeType: 'image/jpeg',
-                imageBase64: base64
-            }, { timeoutMs: 25000 });
+        const visionPayload = {
+            task: 'text_extract',
+            prompt: `Transcribe all readable text from page ${pageNumber} of PDF "${attachment.name}". Preserve headings, bullet points, math equations in LaTeX, and render all tables in clean Markdown table format (| Col 1 | Col 2 |). For line items, capture labels, dates, and amounts accurately.`,
+            mimeType: 'image/jpeg',
+            imageBase64: base64
+        };
 
-            const details = data?.details && typeof data.details === 'object' ? data.details : {};
-            const fullText = String(details?.fullText || '').trim();
-            const snippets = Array.isArray(details?.textDetected)
-                ? details.textDetected.map(item => String(item || '').trim()).filter(Boolean).join('\n').trim()
-                : '';
-            const cleanedResponse = String(data?.response || '').replace(/^Detected text:\s*/i, '').trim();
-            const pageText = (fullText || snippets || cleanedResponse).trim();
+        if (!ocrState.cloudDisabled) {
+            for (let attempt = 0; attempt < 2; attempt++) {
+                if (ocrState.cloudDisabled) break;
+                const remainingCooldown = ocrState.cooldownUntil - Date.now();
+                if (remainingCooldown > 0) {
+                    await new Promise(r => setTimeout(r, Math.min(remainingCooldown, 2500)));
+                }
+                try {
+                    const data = await postJson('/api/vision', visionPayload, { timeoutMs: 25000 });
+                    ocrState.consecutiveRateLimits = 0;
 
-            if (pageText && !isOcrStatusMessage(pageText) && !isMetadataOnlyExtract(pageText) && (hasUsefulExtractedText(pageText) || pageText.length >= 20)) {
-                return `Page ${pageNumber}:\n${pageText}`;
+                    const details = data?.details && typeof data.details === 'object' ? data.details : {};
+                    const fullText = String(details?.fullText || '').trim();
+                    const snippets = Array.isArray(details?.textDetected)
+                        ? details.textDetected.map(item => String(item || '').trim()).filter(Boolean).join('\n').trim()
+                        : '';
+                    const cleanedResponse = String(data?.response || '').replace(/^Detected text:\s*/i, '').trim();
+                    const pageText = (fullText || snippets || cleanedResponse).trim();
+
+                    if (pageText && !isOcrStatusMessage(pageText) && !isMetadataOnlyExtract(pageText) && (hasUsefulExtractedText(pageText) || pageText.length >= 20)) {
+                        return `Page ${pageNumber}:\n${pageText}`;
+                    }
+                    break;
+                } catch (cloudErr) {
+                    if (isRateLimitError(cloudErr)) {
+                        ocrState.rateLimitHit = true;
+                        ocrState.cooldownUntil = Date.now() + 1800;
+                        if (attempt === 0) {
+                            notifyAttachmentProgress(attachment, `Rate limit reached on page ${pageNumber}; retrying briefly...`);
+                            await new Promise(r => setTimeout(r, 1500));
+                            continue;
+                        }
+                        ocrState.consecutiveRateLimits += 1;
+                        if (ocrState.consecutiveRateLimits >= 2) {
+                            ocrState.cloudDisabled = true;
+                        }
+                        console.warn(`Cloud vision OCR rate-limited for page ${pageNumber}, switching to local OCR fallback.`);
+                    } else {
+                        console.warn(`Cloud vision OCR failed for page ${pageNumber}, trying Tesseract:`, cloudErr);
+                    }
+                    break;
+                }
             }
-        } catch (cloudErr) {
-            console.warn(`Cloud vision OCR failed for page ${pageNumber}, trying Tesseract:`, cloudErr);
         }
 
-        // Local Tesseract.js fallback for this page if offline or cloud keys missing
-        if (typeof window !== 'undefined' && pageNumber <= 2) {
-            notifyAttachmentProgress(attachment, `Running local OCR on page ${pageNumber} of ${Math.min(totalPages, 2)}...`);
+        // Local Tesseract.js fallback for failed/rate-limited pages (bounded to keep browser responsive)
+        const MAX_LOCAL_OCR_PAGES = 10;
+        if (typeof window !== 'undefined' && !ocrState.localOcrFailed && ocrState.localPagesAttempted < MAX_LOCAL_OCR_PAGES) {
+            ocrState.localPagesAttempted += 1;
+            notifyAttachmentProgress(attachment, `Running local OCR on page ${pageNumber} of ${totalPages}...`);
             const tess = await extractTextViaTesseract(dataUrl);
             if (tess.ok) {
                 return `Page ${pageNumber} (Local OCR):\n${tess.text}`;
+            }
+            if (tess.loadFailed) {
+                ocrState.localOcrFailed = true;
             }
         }
 
@@ -1568,7 +1636,6 @@ async function processPdfPageVision(attachment, pdfjs, doc, pageNumber, totalPag
         return '';
     }
 }
-
 async function extractDocxTextClient(file) {
     const JSZip = await loadJsZip();
     const buffer = await file.arrayBuffer();
@@ -1766,16 +1833,28 @@ async function loadTesseractJs() {
             }
             return new Promise((resolve, reject) => {
                 const script = document.createElement('script');
+                const timer = setTimeout(() => {
+                    script.remove();
+                    reject(new Error('Timed out loading Tesseract.js'));
+                }, 10000);
                 script.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
                 script.async = true;
                 script.onload = () => {
+                    clearTimeout(timer);
                     if (globalThis.Tesseract) resolve(globalThis.Tesseract);
                     else reject(new Error('Tesseract global not available after script load'));
                 };
-                script.onerror = () => reject(new Error('Failed to load Tesseract.js from CDN'));
+                script.onerror = () => {
+                    clearTimeout(timer);
+                    script.remove();
+                    reject(new Error('Failed to load Tesseract.js from CDN'));
+                };
                 document.head.appendChild(script);
             });
-        })();
+        })().catch(err => {
+            tesseractLoaderPromise = null;
+            throw err;
+        });
     }
     return tesseractLoaderPromise;
 }
@@ -1790,21 +1869,26 @@ async function extractTextViaTesseract(imageSource, onProgress) {
                 }
             }
         });
-        const ret = await worker.recognize(imageSource);
-        await worker.terminate();
+        let ret;
+        try {
+            ret = await worker.recognize(imageSource);
+        } finally {
+            await worker.terminate().catch(() => {});
+        }
         const text = String(ret?.data?.text || '').trim();
         return {
-            ok: Boolean(text && text.length >= 10),
+            ok: Boolean(text && (hasUsefulExtractedText(text) || text.length >= 10)),
             text: clipText(text),
             method: 'tesseract_client_ocr',
             provider: 'tesseract'
         };
     } catch (err) {
-        console.warn('Tesseract client OCR fallback failed:', err);
-        return { ok: false, text: '', method: 'tesseract_client_ocr', error: String(err?.message || err) };
+        const msg = String(err?.message || err);
+        const loadFailed = /cdn|load tesseract|dom unavailable|timed out/i.test(msg);
+        console.warn('Tesseract client OCR fallback failed:', msg);
+        return { ok: false, text: '', method: 'tesseract_client_ocr', error: msg, loadFailed };
     }
 }
-
 function decodeXmlEntities(value) {
     return String(value || '')
         .replace(/&lt;/g, '<')
@@ -1916,5 +2000,5 @@ export const __test = {
     normalizeImageMime,
     hasUsefulExtractedText,
     isOcrStatusMessage,
-    isMetadataOnlyExtract, classifyPdfError, validateFile, isPptxFile
+    isMetadataOnlyExtract, classifyPdfError, validateFile, isPptxFile, isRateLimitError
 };
