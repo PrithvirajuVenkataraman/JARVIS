@@ -180,7 +180,8 @@ body .chat-sidebar-nav-item[hidden] { display:none; }
 body .chat-sidebar-nav-item:focus-visible { outline:2px solid #ddd; outline-offset:-2px; }
 body .chat-sidebar-nav-item span, body .chat-session-title { font-size:14px; line-height:1.5; font-weight:500; letter-spacing:normal; }
 body .chat-session-row:focus-visible { outline:2px solid #bdbdbd; outline-offset:-2px; }
-body .chat-sidebar-section-title { font-size:12px; line-height:1.5; font-weight:500; letter-spacing:normal; text-transform:none; color:var(--core-muted); }
+body .chat-sidebar-section-title { margin:14px 0 4px; padding-inline:16px; font-size:12px; line-height:1.5; font-weight:500; letter-spacing:normal; text-transform:none; color:var(--core-muted); }
+body .chat-sidebar-empty { margin:6px 12px; font-size:13px; line-height:1.5; color:var(--core-muted); }
 body .chat-sidebar-close { min-width:44px; min-height:44px; }
 body .chat-sidebar-search-field { display:none; position:relative; margin-inline:4px; padding:4px 0 6px; }
 body .chat-sidebar-panel.search-open .chat-sidebar-search-field { display:block; }
