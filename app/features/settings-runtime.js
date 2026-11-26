@@ -74,7 +74,7 @@ function showHelpModal() {
                                         </div>
                                         <div class="settings-row-text">
                                             <label id="settings-model-label" for="model-selector" class="settings-row-title cursor-pointer">Default AI Model</label>
-                                            <p class="settings-row-desc">Automatic starts with Gemini 4 Hydrogen, with Groq fallback</p>
+                                            <p class="settings-row-desc">Automatically selects the best Gemini or Groq model for each task</p>
                                         </div>
                                     </div>
                                     <div class="settings-row-right">
@@ -760,7 +760,7 @@ function showHelpModal() {
 
                             <section class="settings-group-card settings-routing-card" aria-labelledby="settings-routing-title">
                                 <h4 id="settings-routing-title">Model routing</h4>
-                                <p>Automatic starts with Gemini Hydrogen. Your selected model is used when supported. A configured fallback may handle a request when a provider is unavailable.</p>
+                                <p>Automatic mode selects the best available Gemini or Groq model based on task complexity, media, and provider health, failing over seamlessly when a model is unavailable.</p>
                                 <dl class="settings-routing-details">
                                     <div><dt>Model preference</dt><dd>${escapeHtml(currentSelectedModel === 'auto' ? 'Automatic' : currentSelectedModel)}</dd></div>
                                     <div><dt>Availability</dt><dd>Depends on provider configuration and quotas</dd></div>

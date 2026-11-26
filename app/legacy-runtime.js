@@ -5485,7 +5485,7 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
                     const textLen = String(requestOptions?.grounding?.selectedText || requestOptions?.grounding?.sourceAnswer || '').length;
                     const isHeavyDocument = textLen > 30000 && (selectedModel === 'auto' || !selectedModel);
                     if (isUnsupportedMedia || isHeavyDocument) {
-                        return 'gemini-4-hydrogen';
+                        return undefined;
                     }
                     return requestOptions?.selectedModel || (selectedModel !== 'auto' ? selectedModel : undefined);
                 })(),

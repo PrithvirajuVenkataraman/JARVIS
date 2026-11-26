@@ -276,6 +276,23 @@ test('a 404 or 400 miss on gemini-4-hydrogen falls back within Gemini to gemini-
             const payload = stream ? res.chunks.flatMap(chunk => String(chunk).split('\n').filter(line => line.startsWith('data:')).map(line => JSON.parse(line.slice(5)))).find(row => row.success === true) : res.data;
             assert.equal(payload.provider, 'gemini');
         }
+        // Verify non-streaming Automatic also survives 404 on preview IDs + 429 on 2.5-pro and succeeds on gemini-2.5-flash
+        chatApi.resetModelAvailabilityCache();
+        const cascadeCalls = [];
+        globalThis.fetch = async (input) => {
+            const url = String(input);
+            cascadeCalls.push(url);
+            if (url.includes('gemini-4-hydrogen')) return Response.json({ error: { message: 'Not found' } }, { status: 404 });
+            if (url.includes('gemini-2.5-pro')) return Response.json({ error: { message: 'Quota exceeded' } }, { status: 429 });
+            if (url.includes('gemini-2.5-flash')) return Response.json({ candidates: [{ content: { parts: [{ text: 'Handled cleanly by Gemini 2.5 Flash.' }] } }] });
+            assert.fail(`Unexpected fallback past available Gemini 2.5 Flash: ${url}`);
+        };
+        const cascadeReq = Object.assign(new EventEmitter(), { method: 'POST', headers: { host: 'localhost', 'content-type': 'application/json' }, socket: { remoteAddress: '127.0.0.1' }, body: { message: 'Compare electric cars and hybrid cars in efficiency', stream: false, webMode: 'off', preferences: { selectedModel: 'auto' } } });
+        const cascadeRes = response(); await handler(cascadeReq, cascadeRes);
+        assert.equal(cascadeRes.statusCode, 200);
+        assert.ok(cascadeCalls.some(u => u.includes('gemini-2.5-flash')), 'Automatic mode must reach gemini-2.5-flash after 404 + 429');
+        assert.equal(cascadeRes.data.provider, 'gemini');
+        assert.equal(cascadeRes.data.modelUsed, 'gemini-2.5-flash');
         chatApi.resetModelAvailabilityCache();
         const deepCalls = [];
         globalThis.fetch = async (input) => {

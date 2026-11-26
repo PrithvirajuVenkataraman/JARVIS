@@ -2906,7 +2906,7 @@ async function handler(req, res) {
                 if (!result.ok) {
                     const model = provider === 'gemini' ? /\/models\/([^:]+):/.exec(url)?.[1] : JSON.parse(init.body).model;
                     failures.push({ status: result.status, upstream: await describeUpstreamFailure(result, provider, model) });
-                    if (provider === 'gemini' && providerLimits.gemini === 1 && geminiModelMisses === 0 && (result.status === 404 || result.status === 410)) {
+                    if (provider === 'gemini' && geminiModelMisses < 2 && (result.status === 404 || result.status === 410)) {
                         geminiModelMisses++;
                         attemptsRemaining++;
                         providerCalls.gemini = Math.max(0, providerCalls.gemini - 1);
