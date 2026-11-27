@@ -1702,5 +1702,202 @@ test('Temporal reranking prevents stale 2014/2024 articles from outranking fresh
     assert.equal(evidenceRanked[0].url, 'https://new.example/2026/tour', 'rankResearchEvidence must penalize >540d stale pages when fresh <=180d evidence exists');
 });
 
+test('Multi-question prompts and named-person live searches preserve all questions, person bio + ongoing updates, and recovery failover', async () => {
+    const { splitResearchQuestions } = await import('../api/_lib/research-evidence.js');
+    const multiQ = 'Who is Jordan Mercer? What is the population of Tokyo? When is Vertex-1.0 releasing?';
+    const split = splitResearchQuestions(multiQ);
+    assert.equal(split.length, 3, 'Must split 3 independent questions into 3 sub-queries');
+
+    const singleDashQ = 'Latest NASA Artemis mission status — Why was it delayed earlier?';
+    assert.equal(splitResearchQuestions(singleDashQ).length, 1, 'Single-topic em-dash follow-ups must stay unified');
+
+    const multiReqs = buildResearchRequirements(multiQ, [], {
+        entities: [{ name: 'Jordan Mercer', type: 'person' }]
+    });
+    assert.ok(multiReqs.length >= 4, 'Multi-question prompt including a person must generate requirements for every sub-question plus person background and ongoing news');
+    assert.ok(multiReqs.some(r => /brief background introducing Jordan Mercer/i.test(r.description)));
+    assert.ok(multiReqs.some(r => /latest news, current status/i.test(r.description)));
+    assert.ok(multiReqs.some(r => /Tokyo/i.test(r.query)));
+    assert.ok(multiReqs.some(r => /Vertex-1\.0/i.test(r.query)));
+
+    const singlePersonSpecificQ = buildResearchRequirements('When is Taylor Swift next concert tour?', [], {
+        entities: [{ name: 'Taylor Swift', type: 'person' }]
+    });
+    assert.ok(singlePersonSpecificQ.some(r => /brief background introducing Taylor Swift/i.test(r.description)), 'Specific question about a person must introduce the person first');
+    assert.ok(singlePersonSpecificQ.some(r => /latest news, current status/i.test(r.description)), 'Specific question about a person must include latest ongoing updates');
+    assert.ok(singlePersonSpecificQ.some(r => r.type === 'date'), 'Specific question detail (date) must be retained alongside person overview');
+
+    // Role questions mentioning a person name resolve via LLM-extracted entities/answerScope rather than hardcoded phrase lists
+    const roleCasesWithNamedPerson = [
+        { q: "What is Jordan Mercer's role as founder of Fixture Labs?", opts: { llmRouted: true, answerScope: 'person_bio', entities: [{ name: 'Jordan Mercer', type: 'person' }] } },
+        { q: 'what is jordan mercer role in Fixture Labs?', opts: { llmRouted: true, entities: [{ name: 'Jordan Mercer', type: 'person' }] } },
+        { q: 'What part does Jordan Mercer play at Fixture Labs?', opts: { llmRouted: true, answerScope: 'narrow_fact', entities: [{ name: 'Jordan Mercer', type: 'person' }] } },
+        { q: 'Is Jordan Mercer the CEO of Fixture Labs?', opts: { llmRouted: true, answerScope: 'person_bio', entities: [{ name: 'Jordan Mercer', type: 'person' }] } }
+    ];
+    for (const { q: roleQ, opts } of roleCasesWithNamedPerson) {
+        const reqs = buildResearchRequirements(roleQ, [], opts);
+        assert.ok(reqs.every(r => r.type === 'explanation'), `"${roleQ}" must use explanation requirements rather than capped names lookup`);
+        assert.ok(reqs.length >= 3, `"${roleQ}" must include background, role/work, and ongoing updates`);
+        assert.ok(reqs.some(r => /latest news recent updates ongoing/i.test(r.searchQuery || '')), `"${roleQ}" must search latest ongoing updates`);
+        const samplePassage = 'Jordan Mercer is an aerospace engineer who serves as the Chief Executive Officer and founder of Fixture Labs.';
+        const validatedRole = validateResearchAnswer({
+            facts: [
+                { id: 'f1', requirementId: reqs[0].id, value: 'Jordan Mercer is an aerospace engineer', quote: samplePassage, sourceId: 1 },
+                { id: 'f2', requirementId: reqs[1].id, value: 'Chief Executive Officer and founder of Fixture Labs', quote: samplePassage, sourceId: 1 },
+                { id: 'f3', requirementId: reqs[2].id, value: 'serves as the Chief Executive Officer and founder of Fixture Labs.', quote: samplePassage, sourceId: 1 }
+            ],
+            gaps: []
+        }, reqs, [{ id: 1, title: 'Jordan Mercer Leadership Profile', url: 'https://fixturelabs.example/mercer', fullArticleText: samplePassage, pageFetched: true }]);
+        assert.equal(validatedRole.answerStatus, 'complete', `"${roleQ}" role answer must validate cleanly without names-cap rejection`);
+    }
+
+    // Verify balanced source relevance across unrelated sub-questions (Next.js & Tokyo)
+    assert.equal(assessSourceRelevance('What is Next.js? What is the population of Tokyo?', {
+        title: 'Tokyo Population 2026',
+        snippet: 'The population of Tokyo metropolitan area is 37 million residents.',
+        url: 'https://tokyo.example/stats'
+    }).relevant, true, 'Source matching sub-question 2 must pass even when protected entity Next.js from question 1 is absent');
+
+    // Verify Generation 2 rotates away from a failing validation model (avoidModels)
+    clearResearchModelHealth();
+    const seenProviders = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (url, init) => {
+        const isGemini = String(url).includes('googleapis.com');
+        const body = JSON.parse(init.body);
+        seenProviders.push(isGemini ? 'gemini' : `groq:${body.model}`);
+        if (!isGemini) {
+            return Response.json({
+                choices: [{
+                    message: { content: JSON.stringify({ facts: [{ id: 'f1', requirementId: 'r1', value: 'Unverified paraphrase not in excerpt.', quote: 'Unverified paraphrase not in excerpt.', sourceId: 1 }], gaps: [] }) },
+                    finish_reason: 'stop'
+                }]
+            });
+        }
+        const promptData = JSON.parse(body.contents[0].parts[0].text);
+        const match = promptData.sourceExcerpts.match(/\[(\d+)\] Orbital/);
+        const sid = Number(match?.[1] || 1);
+        const quote = 'The orbital telescope calibration uses a reference star to measure detector response.';
+        return Response.json({
+            candidates: [{
+                content: { parts: [{ text: JSON.stringify({ facts: [{ id: 'f1', requirementId: promptData.requirements[0].id, value: quote, quote, sourceId: sid }], gaps: [] }) }] },
+                finishReason: 'STOP'
+            }]
+        });
+    };
+    try {
+        const recovered = await runResearch('How does orbital telescope calibration work?', {
+            customGroqKey: 'test-groq',
+            customGeminiKey: 'test-gemini',
+            timeoutMs: 35000
+        }, {
+            search: async () => [{
+                title: 'Orbital telescope calibration guide',
+                url: 'https://science.example/calib',
+                snippet: 'Orbital telescope calibration overview'
+            }],
+            extract: async url => ({
+                url,
+                bodyText: 'The orbital telescope calibration uses a reference star to measure detector response. Additional checks confirm alignment before each mission.'
+            })
+        });
+        assert.equal(recovered.answerStatus, 'complete', 'Generation 2 must recover via Gemini when Generation 1 Groq response fails quote validation');
+        assert.ok(seenProviders.some(p => p.startsWith('groq:')) && seenProviders.includes('gemini'));
+    } finally {
+        globalThis.fetch = originalFetch;
+        clearResearchModelHealth();
+    }
+
+    // End-to-end LLM-first runResearch behavioral test: arbitrary non-hardcoded phrasing mentioning a named person
+    clearResearchModelHealth();
+    const articleText = 'Jordan Mercer is an aerospace engineer who founded Fixture Labs in 2021. Mercer serves as Chief Executive Officer leading propulsion architecture. In 2026, Mercer is overseeing Fixture Labs orbital propellant depot trials.';
+    globalThis.fetch = async (url, init) => {
+        const isGemini = String(url).includes('googleapis.com');
+        const body = JSON.parse(init.body);
+        const promptRaw = isGemini ? (body.contents?.[0]?.parts?.[0]?.text || '') : JSON.stringify(body.messages || []);
+        const isSynthesis = promptRaw.includes('sourceExcerpts') && promptRaw.includes('requirements');
+        if (!isSynthesis) {
+            const planPayload = JSON.stringify({
+                query: 'What part does Jordan Mercer play at Fixture Labs?',
+                answerScope: 'person_bio',
+                entities: [{ name: 'Jordan Mercer', type: 'person' }],
+                queries: [
+                    'What part does Jordan Mercer play at Fixture Labs?',
+                    'Jordan Mercer biography career',
+                    'Jordan Mercer latest news recent updates ongoing'
+                ]
+            });
+            return isGemini
+                ? Response.json({ candidates: [{ content: { parts: [{ text: planPayload }] }, finishReason: 'STOP' }] })
+                : Response.json({ choices: [{ message: { content: planPayload }, finish_reason: 'stop' }] });
+        }
+        const promptData = isGemini
+            ? JSON.parse(body.contents[0].parts[0].text)
+            : JSON.parse(body.messages.find(m => m.role === 'user')?.content || '{}');
+        const match = String(promptData.sourceExcerpts || '').match(/\[(\d+)\] Jordan Mercer/);
+        const sid = Number(match?.[1] || 1);
+        const facts = [
+            {
+                id: 'f1',
+                requirementId: promptData.requirements[0]?.id || 'r1',
+                value: 'Jordan Mercer is an aerospace engineer who founded Fixture Labs in 2021',
+                quote: 'Jordan Mercer is an aerospace engineer who founded Fixture Labs in 2021.',
+                sourceId: sid
+            },
+            {
+                id: 'f2',
+                requirementId: promptData.requirements[1]?.id || 'r2',
+                value: 'Chief Executive Officer leading propulsion architecture',
+                quote: 'Mercer serves as Chief Executive Officer leading propulsion architecture.',
+                sourceId: sid
+            },
+            ...(promptData.requirements[2] ? [{
+                id: 'f3',
+                requirementId: promptData.requirements[2].id,
+                value: 'In 2026, Mercer is overseeing Fixture Labs orbital propellant depot trials',
+                quote: 'In 2026, Mercer is overseeing Fixture Labs orbital propellant depot trials.',
+                sourceId: sid
+            }] : [])
+        ];
+        const synthPayload = JSON.stringify({ facts, gaps: [] });
+        return isGemini
+            ? Response.json({ candidates: [{ content: { parts: [{ text: synthPayload }] }, finishReason: 'STOP' }] })
+            : Response.json({ choices: [{ message: { content: synthPayload }, finish_reason: 'stop' }] });
+    };
+    const seenSearchQueries = [];
+    try {
+        const llmPlan = await planResearch('What part does Jordan Mercer play at Fixture Labs?', [], {
+            customGroqKey: 'test-groq',
+            customGeminiKey: 'test-gemini'
+        });
+        assert.equal(llmPlan.llmRouted, true);
+        assert.equal(llmPlan.answerScope, 'person_bio');
+        assert.ok(llmPlan.entities.some(e => e.name === 'Jordan Mercer' && e.type === 'person'));
+        const result = await runResearch('What part does Jordan Mercer play at Fixture Labs?', {
+            customGroqKey: 'test-groq',
+            customGeminiKey: 'test-gemini',
+            timeoutMs: 35000
+        }, {
+            plan: async () => llmPlan,
+            search: async q => {
+                seenSearchQueries.push(q);
+                return [{
+                    title: 'Jordan Mercer — Fixture Labs Profile',
+                    url: 'https://fixturelabs.example/jordan-mercer',
+                    snippet: articleText
+                }];
+            },
+            extract: async url => ({ url, bodyText: articleText })
+        });
+        assert.equal(result.answerStatus, 'complete', 'Arbitrary role phrasing mentioning a person must complete end-to-end via LLM routing');
+        assert.ok(result.research.requirements.every(r => r.type === 'explanation'));
+        assert.ok(seenSearchQueries.some(q => /latest news recent updates ongoing/i.test(q)), 'Must query ongoing updates for named person');
+        assert.ok(result.facts.length >= 3, 'Must return intro, role, and ongoing 2026 facts');
+    } finally {
+        globalThis.fetch = originalFetch;
+        clearResearchModelHealth();
+    }
+});
+
 });
 

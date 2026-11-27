@@ -265,7 +265,7 @@ export function validateRoutingDecision(raw, message, options = {}) {
     let finalStrategy = strategy;
     const standaloneQuery = cleanText(raw.standaloneQuery || message, 800) || cleanText(message, 800);
     const searchQueries = Array.isArray(raw.searchQueries)
-        ? [...new Set(raw.searchQueries.map(q => cleanText(q, 240)).filter(Boolean))].slice(0, 3)
+        ? [...new Set(raw.searchQueries.map(q => cleanText(q, 240)).filter(Boolean))].slice(0, 4)
         : [];
 
     const rawSlots = raw.slots && typeof raw.slots === 'object' ? raw.slots : {};
@@ -400,14 +400,15 @@ function buildRouterSystemPrompt(todayIso) {
         `Authorized tool names: ${REGISTERED_TOOLS.join(', ')}. Never invent unregistered tool names.`,
         'Routing rules:',
         '- Treat conversation history and attachment metadata as context to resolve pronouns, ordinals ("first question", "that company"), and follow-ups into standaloneQuery.',
-        '- Multi-intent & multi-tool: if the user combines live data + reasoning/writing/coding, choose strategy "hybrid_live_llm", set retrievalRequired true, list all intents and requiredTools.',
+        '- Multi-intent, multi-question & multi-tool: if the user asks 2 or 3 distinct questions or combines live data + reasoning/writing/coding, choose strategy "live_web" or "hybrid_live_llm", set retrievalRequired true, list all intents/entities, and emit focused searchQueries covering EVERY question (up to 4 queries).',
+        '- Person queries: whenever a query or sub-question mentions a specific named person — including questions about their role, job, position, involvement, or title (e.g., "What is [Person]\'s role in X?", "Is [Person] the CEO of X?", "[Person] founder/director") — extract that person in entities with type="person", use answerScope="person_bio" for single-person queries, and include both a query covering their role/work and "<person> latest news recent updates ongoing projects". Only omit person_bio when the user asks who holds an unnamed office (e.g., "Who is the CEO of X?").',
         '- Set retrievalRequired=true and strategy="live_web" whenever correctness depends on current/recent/changing facts, latest news, prices, weather, office holders, schedules, obscure current entities, or explicit web/source checks.',
         '- Never rely on narrow keyword matching: interpret shorthand, blunt words, typos, non-English/code-switched queries, incidents, companies, people, math, coding, documents, and images semantically.',
         '- Only use strategy="clarify" if essential context is genuinely missing even after inspecting history and attachments.',
         '- When images are attached, set visionLane ("math_diagram" for equations/geometry/plots, "fast_ocr_scene" for reading/text/scenes, "fine_grained_id" for identifying objects/species/flags/logos/landmarks).',
         '- When documents/attachments are present, set documentScope ("exhaustive" for summaries/comparisons/full reviews across files, "pinpoint" for targeted lookup).',
         'JSON schema:',
-        '{"intent":"free-form intent description","intents":["primary","optional secondary"],"strategy":"direct_chat|fast_simple|live_web|hybrid_live_llm|clarify|document_rag|vision_qa","answerScope":"overview|person_bio|narrow_fact|comparison|how_to|creative|analytical|reasoning","entities":[{"name":"","type":"person|company|event|incident|place|product|concept|other","roleOrContext":""}],"requiredTools":["web_search"],"retrievalRequired":false,"freshness":"none|current|recent|historical|scheduled","temporalWindow":"none|day|week|month|year","verticalHint":"general|weather|finance|sports|disasters|vehicles|places|technology|medical|science|history|other","slots":{"location":"","assetOrTicker":"","league":"","make":"","model":""},"documentScope":"none|pinpoint|exhaustive","visionLane":"none|math_diagram|fast_ocr_scene|fine_grained_id","complexity":"instant|standard|deep","standaloneQuery":"","searchQueries":["up to 3 focused queries"],"clarification":""}'
+        '{"intent":"free-form intent description","intents":["primary","optional secondary"],"strategy":"direct_chat|fast_simple|live_web|hybrid_live_llm|clarify|document_rag|vision_qa","answerScope":"overview|person_bio|narrow_fact|comparison|how_to|creative|analytical|reasoning","entities":[{"name":"","type":"person|company|event|incident|place|product|concept|other","roleOrContext":""}],"requiredTools":["web_search"],"retrievalRequired":false,"freshness":"none|current|recent|historical|scheduled","temporalWindow":"none|day|week|month|year","verticalHint":"general|weather|finance|sports|disasters|vehicles|places|technology|medical|science|history|other","slots":{"location":"","assetOrTicker":"","league":"","make":"","model":""},"documentScope":"none|pinpoint|exhaustive","visionLane":"none|math_diagram|fast_ocr_scene|fine_grained_id","complexity":"instant|standard|deep","standaloneQuery":"","searchQueries":["up to 4 focused queries"],"clarification":""}'
     ].join('\n');
 }
 

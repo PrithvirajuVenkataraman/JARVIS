@@ -94,7 +94,43 @@ export function protectedEntities(query = '') {
     return [...new Set((normalizeResearchAliases(query).match(/\b[\p{L}\p{N}]+(?:\.[\p{L}]+)+\b|\b[\p{L}][\p{L}\p{N}]*(?:\+\+|#)|(?<!\w)\.[A-Za-z]{2,}\b/gu) || []).map(s => s.toLowerCase()))];
 }
 
-export function matchesProtectedEntities(query, text, domain = '') {
+const QUESTION_START_RE = /^(?:who|what|when|where|why|how|which|is|are|was|were|did|do|does|can|could|will|tell\s+me|explain|describe)\b/i;
+
+/** Splits a prompt containing 2-4 independent questions into distinct clauses without breaking comparisons. */
+export function splitResearchQuestions(query = '') {
+    const raw = String(query || '').replace(/\r\n/g, '\n').trim();
+    if (!raw || isComparison(raw)) return raw ? [cleanText(raw)] : [];
+
+    // Do not split single-topic hyphenated/em-dash follow-ups sharing one thread/pronoun.
+    const rawLines = raw.split(/\n+/).map(cleanText).filter(Boolean);
+    let candidates = [];
+    if (rawLines.length >= 2) {
+        candidates = rawLines;
+    } else if (!/\s[—–-]\s/.test(raw)) {
+        const byPunct = raw
+            .split(/(?<=[?])\s+|;\s+/)
+            .map(cleanText)
+            .filter(Boolean);
+        candidates = byPunct.length >= 2
+            ? byPunct
+            : raw
+                .split(/,\s*(?:and\s+|also\s+)?(?=(?:who|what|when|where|why|how|which|tell\s+me|explain|describe)\b)|\s+\band\s+(?=(?:who|what|when|where|why|how|which|tell\s+me|explain|describe)\b)/i)
+                .map(cleanText)
+                .filter(Boolean);
+    }
+
+    const substantive = candidates
+        .map(part => part.replace(/^(?:and|also)\s+/i, '').trim())
+        .filter(part => part.length >= 4 && researchTerms(part).length >= 1);
+    if (substantive.length < 2) return [cleanText(raw)];
+    // Avoid splitting when the 2nd clause only begins with a dependent pronoun referring back to the 1st clause.
+    if (substantive.length === 2 && !QUESTION_START_RE.test(substantive[1])) {
+        return [cleanText(raw)];
+    }
+    return substantive.slice(0, 4);
+}
+
+function matchesSingleProtectedEntities(query, text, domain = '') {
     const hay = String(text).toLowerCase();
     const host = String(domain).toLowerCase();
     const entities = protectedEntities(query);
@@ -114,6 +150,14 @@ export function matchesProtectedEntities(query, text, domain = '') {
     });
 }
 
+export function matchesProtectedEntities(query, text, domain = '') {
+    const subQuestions = splitResearchQuestions(query);
+    if (subQuestions.length >= 2) {
+        return subQuestions.some(subQ => matchesSingleProtectedEntities(subQ, text, domain));
+    }
+    return matchesSingleProtectedEntities(query, text, domain);
+}
+
 export function canonicalResearchUrl(value) {
     try {
         const url = new URL(value);
@@ -126,15 +170,27 @@ export function canonicalResearchUrl(value) {
     } catch { return ''; }
 }
 
-export function assessSourceRelevance(query, source = {}) {
+function assessSingleQueryRelevance(query, source = {}) {
     const text = `${source.title || ''} ${source.description || source.snippet || ''} ${source.fullArticleText || source.text || ''}`;
     const domain = source.domain || (() => { try { return new URL(source.url).hostname; } catch { return ''; } })();
-    if (!matchesProtectedEntities(query, text, domain)) return { relevant: false, score: 0 };
+    if (!matchesSingleProtectedEntities(query, text, domain)) return { relevant: false, score: 0 };
     const terms = researchTerms(query);
     const words = new Set(normalizeResearchAliases(text).toLowerCase().match(/[\p{L}\p{N}]+/gu) || []);
     const hits = terms.filter(t => words.has(t));
     const threshold = Math.min(isComparison(query) ? 2 : 3, Math.max(1, Math.ceil(terms.length * (isComparison(query) ? 0.2 : 0.35))));
     return { relevant: terms.length === 0 || hits.length >= threshold, score: hits.length / Math.max(1, terms.length) };
+}
+
+export function assessSourceRelevance(query, source = {}) {
+    const subQuestions = splitResearchQuestions(query);
+    if (subQuestions.length >= 2) {
+        const evaluated = subQuestions.map(subQ => assessSingleQueryRelevance(subQ, source));
+        return {
+            relevant: evaluated.some(r => r.relevant),
+            score: Math.max(0, ...evaluated.map(r => r.score))
+        };
+    }
+    return assessSingleQueryRelevance(query, source);
 }
 
 export function normalizeEvidence(source, query) {
@@ -215,6 +271,17 @@ export function rankResearchEvidence(plan, sources, limit = 8, options = {}) {
             }
         }
     }
+    // Ensure multi-question queries get balanced coverage across all sub-questions first.
+    const subQuestions = splitResearchQuestions(plan.query);
+    if (subQuestions.length >= 2) {
+        const perQQuota = Math.max(1, Math.floor(limit / subQuestions.length));
+        for (let roundIdx = 0; roundIdx < perQQuota; roundIdx++) {
+            for (const subQ of subQuestions) {
+                const match = ranked.find(s => !selected.some(sel => sel.url === s.url) && assessSingleQueryRelevance(subQ, s).relevant);
+                if (match) add(match);
+            }
+        }
+    }
     // Preserve coverage of separate subjects/facets before filling the remaining positions.
     for (const facet of plan.facets || []) add(ranked.find(s => !selected.some(sel => sel.url === s.url) && assessSourceRelevance(facet, s).relevant));
     // Ensure non-historical queries retain recent dated developments alongside static overviews.
@@ -230,30 +297,62 @@ export function rankResearchEvidence(plan, sources, limit = 8, options = {}) {
     return selected.map(({ __publishedMs: _, ...s }, i) => ({ ...s, id: i + 1 }));
 }
 
-/** Requirements describe the user's requested facts, independently of retrieved headlines. */
-export function buildResearchRequirements(query, _context = [], options = {}) {
+const PERSON_ROLE_PROFESSION_RE = /\b(?:biography|bio|life\s+of|career\s+of|born|composer|musician|music\s+director|singer|lyricist|songwriter|director|filmmaker|producer|artist|painter|sculptor|actor|actress|author|writer|poet|novelist|scientist|physicist|chemist|biologist|mathematician|astronomer|inventor|architect|philosopher|historian|economist|scholar|athlete|player|coach)\b/i;
+
+function buildSingleQuestionRequirements(query, _context = [], options = {}) {
     const q = cleanText(query).slice(0, 1000);
     const focusQ = q.includes('—') ? (q.split('—').pop()?.trim() || q) : q;
     const count = focusQ.match(/\b(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+(people|persons?|individuals?|countries|nations|animals?|species|names|items|reasons|ways|steps|things)\b/i);
     const isExplanationIntent = /\b(?:how|why|explain|describe)\b|\b(?:history|evolution|timeline|overview|summary|mechanism|process|guide|tutorial|causes?|reasons?|future|upcoming|plans?|activities|projects?|careers?|background|achievements?|developments?|updates?)\b|\b(?:tell\s+me\s+about|will\s+\w+(?:\s+\w+)?\s+do|what\s+(?:happened|does|did|will|are\s+(?:the\s+)?(?:latest|recent|upcoming|future)))\b/i.test(focusQ)
         || (/^what\s+(?:is|are)\s+(?:an?\s+)?(?:[a-z\s'-]+[?.,!]*)$/i.test(focusQ) && !/\b(?:price|cost|population|rate|score|temperature|height|weight|depth|distance|revenue|market\s*cap|valuation|number|amount|percentage|figure|date|year)\b/i.test(focusQ));
-    const isRole = !isExplanationIntent && /\b(?:c[efot]o|chief\s+(?:executive|financial|operating|technology|information)\s+officer|managing\s+director|chair(?:person|man|woman)?|(?:prime|chief)\s+minister|[cp]m|president|vice\s+president|vp|governor|mayor|chancellor|premier|minister|director|head\s+of\s+(?:state|government)|leader|civic\s+leader|captain|coach|commander|founder|co-founder|secretary[\s-]+general|monarch|king|queen|emperor|empress|pope|author|writer|novelist|actor|actress|inventor|creator|discoverer|discoverers|winner|champion)\b/i.test(focusQ);
-    const isEntityLookup = !isExplanationIntent && /\b(?:capital|headquarters|hq|birthplace|currency|symbol|mascot|national\s+(?:animal|bird|flower|anthem|tree|fruit|sport|flag)|official\s+language)\b/i.test(focusQ);
+    const routedEntities = Array.isArray(options.entities) ? options.entities : [];
+    const matchingPersonEntity = routedEntities.find(e => e?.type === 'person' && e.name
+        && researchTerms(e.name).some(t => researchTerms(q).includes(t)));
+    const hasLlmPersonSignal = options.answerScope === 'person_bio' || Boolean(matchingPersonEntity);
+    const llmOverviewOverride = options.llmRouted === true && options.answerScope && !['narrow_fact', 'comparison'].includes(options.answerScope);
+    const isRole = !hasLlmPersonSignal && !llmOverviewOverride && !isExplanationIntent && /\b(?:c[efot]o|chief\s+(?:executive|financial|operating|technology|information)\s+officer|managing\s+director|chair(?:person|man|woman)?|(?:prime|chief)\s+minister|[cp]m|president|vice\s+president|vp|governor|mayor|chancellor|premier|minister|director|head\s+of\s+(?:state|government)|leader|civic\s+leader|captain|coach|commander|founder|co-founder|secretary[\s-]+general|monarch|king|queen|emperor|empress|pope|author|writer|novelist|actor|actress|inventor|creator|discoverer|discoverers|winner|champion)\b/i.test(focusQ);
+    const isEntityLookup = !hasLlmPersonSignal && !llmOverviewOverride && !isExplanationIntent && /\b(?:capital|headquarters|hq|birthplace|currency|symbol|mascot|national\s+(?:animal|bird|flower|anthem|tree|fruit|sport|flag)|official\s+language)\b/i.test(focusQ);
     const entityKind = count?.[2]?.toLowerCase() || (/\b(?:who|people|persons?|individuals?)\b/i.test(focusQ) || isRole ? 'person' : /\bcountries|nations\b/i.test(focusQ) ? 'country' : isEntityLookup ? (/\bcapital|headquarters|hq|birthplace\b/i.test(focusQ) ? 'place' : /\bcurrency\b/i.test(focusQ) ? 'currency' : 'entity') : 'entity');
     const expectedCount = count ? countValue(count[1]) : undefined;
     const focusComparison = comparisonParts(focusQ);
     const comparison = focusComparison.entities.length >= 2 ? focusComparison : comparisonParts(q);
     const requirements = [];
     const add = (type, description, extra = {}) => requirements.push({ id: `r${requirements.length + 1}`, type, description, query: q, ...extra });
+
+    const isDirectWhoIdentity = !isRole && !isEntityLookup && !count
+        && /^who\s+(?:is|was)\s+(?!the\s|a\s|an\s)[^\s?!]+(?:\s+[^\s?!]+){0,3}\s*[?.,!]*$/i.test(focusQ);
+    const isNamedPersonSubject = !isRole && !isEntityLookup && !count && comparison.entities.length === 0 && (
+        hasLlmPersonSignal
+        || isDirectWhoIdentity
+        || (Array.isArray(_context) && _context.some(c => c?.entityKind === 'person' || c?.type === 'person'))
+        || PERSON_ROLE_PROFESSION_RE.test(q)
+        || /^(?:dr|prof|mr|mrs|ms|sir|lord)\.?\s+[A-Za-z]/i.test(q)
+    );
+
     if (comparison.entities.length >= 2) {
         for (const entity of comparison.entities) {
             for (const attribute of comparison.attributes.length ? comparison.attributes : ['relevant characteristics']) {
                 add(/\bdate/.test(attribute) ? 'date' : 'comparison', `${attribute} of ${entity}`, { entities: [entity], attribute, searchQuery: `${entity} ${/\bdate/.test(attribute) ? `${comparison.attributes.filter(a => !/\bdate/.test(a)).join(' ')} estimate ` : ''}${attribute}` });
             }
         }
+    } else if (isNamedPersonSubject) {
+        const subjectLabel = matchingPersonEntity?.name || researchTerms(focusQ).slice(0, 4).join(' ') || q;
+        const subjectTerms = researchTerms(matchingPersonEntity?.name || focusQ).slice(0, 5).join(' ') || q;
+        add('explanation', `Core identity, brief background introducing ${subjectLabel}, who they are, and significance`);
+        if (options.compactMultiQuestion !== true || hasLlmPersonSignal) {
+            add('explanation', hasLlmPersonSignal && q.toLowerCase() !== subjectLabel.toLowerCase()
+                ? `Specific role, involvement, notable works, and career details for ${subjectLabel} addressing: ${q}`
+                : `Notable works, career milestones, contributions, and achievements of ${subjectLabel}`, {
+                searchQuery: q
+            });
+        }
+        add('explanation', `Awards, recognition, latest news, current status, and ongoing projects or recent developments for ${subjectLabel}`, {
+            searchQuery: `${subjectTerms} latest news recent updates ongoing`
+        });
+        const specificDate = !/\bwho\s+(?:is|was)\b/i.test(focusQ)
+            && /\bwhen\b|\b(?:what|which)\s+(?:is\s+the\s+)?(?:date|year)|\b(?:release|birth|publication|election|founding|launch|start|end|next|upcoming)?\s*dates?\b/i.test(focusQ);
+        if (specificDate) add('date', `Establish the requested date or timing for ${q}`);
     } else {
-        const isDirectWhoIdentity = !isRole && !isEntityLookup && !count
-            && /^who\s+(?:is|was)\s+(?!the\s|a\s|an\s)[^\s?!]+(?:\s+[^\s?!]+){0,3}\s*[?.,!]*$/i.test(focusQ);
         const plannerRequestsOverview = options.answerScope === 'overview' || options.answerScope === 'person_bio';
         const explicitNamesAsk = !plannerRequestsOverview && !isDirectWhoIdentity
             && /\b(?:who|name(?:s)?|which (?:people|persons?|individuals?|countries|nations|animals?|teams?|cities|companies|brands?))\b/i.test(focusQ);
@@ -278,23 +377,10 @@ export function buildResearchRequirements(query, _context = [], options = {}) {
         if (value) add('value', `Establish the requested numerical value for ${q}`);
         if (!requirements.length) {
             const subjectTerms = researchTerms(focusQ).slice(0, 5).join(' ') || q;
-            const isBiographicalOrCreative = options.answerScope === 'person_bio'
-                || isDirectWhoIdentity
-                || (Array.isArray(_context) && _context.some(c => c?.entityKind === 'person' || c?.type === 'person'))
-                || /\b(?:biography|bio|life\s+of|career\s+of|born|composer|musician|music\s+director|singer|lyricist|songwriter|director|filmmaker|producer|artist|painter|sculptor|actor|actress|author|writer|poet|novelist|scientist|physicist|chemist|biologist|mathematician|astronomer|inventor|architect|philosopher|historian|economist|scholar|athlete|player|coach)\b/i.test(q)
-                || /^(?:dr|prof|mr|mrs|ms|sir|lord)\.?\s+[A-Za-z]/i.test(q);
-            if (isBiographicalOrCreative) {
-                add('explanation', `Core identity, background, and significance of ${q}`);
-                add('explanation', `Notable works, career milestones, contributions, and achievements of ${q}`);
-                add('explanation', `Awards, recognition, life status, and recent developments for ${q}`, {
-                    searchQuery: `${subjectTerms} latest news recent updates`
-                });
-            } else {
-                add('explanation', `Comprehensive overview explaining ${q}: background, key details, impact, and latest developments`, {
-                    expectedCount: /^(?:reasons|ways|steps)$/i.test(count?.[2] || '') ? expectedCount : undefined,
-                    searchQuery: `${subjectTerms} overview latest updates`
-                });
-            }
+            add('explanation', `Comprehensive overview explaining ${q}: background, key details, impact, and latest developments`, {
+                expectedCount: /^(?:reasons|ways|steps)$/i.test(count?.[2] || '') ? expectedCount : undefined,
+                searchQuery: `${subjectTerms} overview latest updates`
+            });
         }
     }
     const hasUniversalScopeClaim = /\b(?:worldwide|every\s+country|all\s+countries|everywhere|anywhere|without\s+exception)\b/i.test(q)
@@ -306,6 +392,32 @@ export function buildResearchRequirements(query, _context = [], options = {}) {
         });
     }
     return requirements;
+}
+
+/** Requirements describe the user's requested facts, independently of retrieved headlines. */
+export function buildResearchRequirements(query, _context = [], options = {}) {
+    const subQuestions = splitResearchQuestions(query);
+    if (subQuestions.length >= 2) {
+        const combined = [];
+        for (const subQ of subQuestions) {
+            const subReqs = buildSingleQuestionRequirements(subQ, _context, {
+                ...options,
+                answerScope: undefined,
+                compactMultiQuestion: true
+            });
+            for (const req of subReqs) {
+                combined.push({
+                    ...req,
+                    id: `r${combined.length + 1}`,
+                    searchQuery: req.searchQuery || subQ
+                });
+                if (combined.length >= 6) break;
+            }
+            if (combined.length >= 6) break;
+        }
+        if (combined.length) return combined;
+    }
+    return buildSingleQuestionRequirements(query, _context, options);
 }
 
 function sourceQuote(source, quote) {
@@ -321,6 +433,8 @@ function sourceQuote(source, quote) {
     // Headlines and title echoes are discovery clues, not evidence of an answer.
     if (text.length <= cleanText(source.title).length + 12 && normText.includes(normTitle)) return '';
     if (normText.includes(normValue)) return value;
+    const stripMd = s => normalizedText(String(s || '').replace(/(\*{1,3}|_{1,3}|`)/g, ''));
+    if (stripMd(text).includes(stripMd(value))) return value;
     return '';
 }
 

@@ -124,15 +124,19 @@ export async function callResearchModel({ system, prompt, json = false, onToken,
         if (signal?.aborted || ledger.calls >= ledger.maxCalls - reserveAttempts) break;
         const available = deadline - Date.now();
         if (available <= 0) break;
-        const candidates = researchModelProviders(options).filter(p => !tried.has(`${p.name}:${p.model}:${p.key}`));
+        const avoidSet = new Set(Array.isArray(options.avoidModels) ? options.avoidModels : []);
+        const rawCandidates = researchModelProviders(options).filter(p => !tried.has(`${p.name}:${p.model}:${p.key}`));
+        const preferredPool = avoidSet.size ? rawCandidates.filter(p => !avoidSet.has(`${p.name}:${p.model}`)) : rawCandidates;
+        const candidates = preferredPool.length ? preferredPool : rawCandidates;
         if (!candidates.length) break;
         const alternate = lastProviderName ? candidates.find(p => p.name !== lastProviderName) : null;
         const provider = alternate || candidates[0];
         tried.add(`${provider.name}:${provider.model}:${provider.key}`);
         lastProviderName = provider.name;
+        if (options.onProviderSelected) options.onProviderSelected(`${provider.name}:${provider.model}`);
 
         const hasRemainingAlternative = candidates.length > 1;
-        const fallbackReserve = hasRemainingAlternative ? Math.min(3500, Math.max(1, Math.floor(available / 3))) : 0;
+        const fallbackReserve = hasRemainingAlternative ? Math.min(4500, Math.max(1, Math.floor(available * 0.42))) : 0;
         const attemptMs = Math.max(1, Math.min(9000, available - fallbackReserve));
         const scope = researchTimeoutSignal(attemptMs, signal);
         const attempt = { stage, provider: provider.name, model: provider.model, outcome: 'network_error', durationMs: 0 };
@@ -146,7 +150,8 @@ export async function callResearchModel({ system, prompt, json = false, onToken,
                 const endpoint = provider.name === 'groq'
                     ? 'https://api.groq.com/openai/v1/chat/completions'
                     : `https://generativelanguage.googleapis.com/v1beta/models/${provider.model}:${streaming ? 'streamGenerateContent?alt=sse&' : 'generateContent?'}key=${encodeURIComponent(provider.key)}`;
-                const tokens = maxOutputTokens || (json ? 4096 : 6000);
+                const baseTokens = maxOutputTokens || (json ? 4096 : 6000);
+                const tokens = provider.name === 'groq' && json ? Math.min(baseTokens, 3072) : baseTokens;
                 const body = provider.name === 'groq'
                     ? { model: provider.model, messages: [{ role: 'system', content: system }, { role: 'user', content: prompt }], temperature: 0.1, max_tokens: tokens, stream: streaming, ...(provider.model.startsWith('openai/gpt-oss') ? { reasoning_effort: 'low' } : {}), ...(json ? { response_format: { type: 'json_object' } } : {}) }
                     : { system_instruction: { parts: [{ text: system }] }, contents: [{ parts: [{ text: prompt }] }], generationConfig: normalizeGeminiGenerationConfig(provider.model, { temperature: 0.1, maxOutputTokens: tokens, thinkingConfig: { thinkingBudget: 0 }, ...(json ? { responseMimeType: 'application/json' } : {}) }) };
@@ -156,6 +161,8 @@ export async function callResearchModel({ system, prompt, json = false, onToken,
                     attempt.outcome = response.status === 429 ? 'rate_limited' : `http_${response.status}`;
                     if (response.status === 429) {
                         recordCooldown(providerHealthKey(provider), retryDelay(response));
+                    } else if (response.status === 413) {
+                        recordCooldown(modelHealthKey(provider), TRANSIENT_COOLDOWN_MS);
                     } else if (response.status === 404 || response.status === 410) {
                         recordCooldown(modelHealthKey(provider), DEPRECATED_COOLDOWN_MS);
                     } else if (response.status >= 500) {
@@ -182,15 +189,15 @@ export async function callResearchModel({ system, prompt, json = false, onToken,
                 const data = await response.json();
                 if (scope.signal.aborted) return null;
                 const reason = provider.name === 'groq' ? data.choices?.[0]?.finish_reason : data.candidates?.[0]?.finishReason;
-                if (reason && !['stop', 'STOP'].includes(reason)) { attempt.outcome = 'incomplete_response'; return null; }
+                if (reason && !['stop', 'STOP'].includes(reason)) { attempt.outcome = 'incomplete_response'; recordCooldown(modelHealthKey(provider), 15000); return null; }
                 const text = provider.name === 'groq' ? data.choices?.[0]?.message?.content : (data.candidates?.[0]?.content?.parts || []).filter(p => !p.thought).map(p => p.text || '').join('');
-                if (!text) { attempt.outcome = 'empty_response'; return null; }
+                if (!text) { attempt.outcome = 'empty_response'; recordCooldown(modelHealthKey(provider), 15000); return null; }
                 if (!json) { attempt.outcome = 'success'; return text; }
                 try {
                     const parsed = JSON.parse(String(text).replace(/^\s*```(?:json)?\s*/i, '').replace(/\s*```\s*$/, ''));
                     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Expected an object');
                     attempt.outcome = 'success'; return parsed;
-                } catch { attempt.outcome = 'invalid_json'; return null; }
+                } catch { attempt.outcome = 'invalid_json'; recordCooldown(modelHealthKey(provider), 15000); return null; }
             };
             const cancelled = new Promise((_, reject) => {
                 abort = () => reject(new Error('Model attempt cancelled'));

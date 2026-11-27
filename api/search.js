@@ -464,13 +464,19 @@ export async function planDynamicSearchQueries(rawQuery) {
     return deterministic;
 }
 
+function hasNamedPersonRoute(route) {
+    if (!route || typeof route !== 'object') return false;
+    if (route.answerScope === 'person_bio') return true;
+    return Array.isArray(route.entities) && route.entities.some(e => e?.type === 'person' && String(e.name || '').trim());
+}
+
 export async function searchResearchSources(query, options = {}) {
     const timeoutMs = Number(options.timeoutMs) || RESEARCH_LIMITS.PROVIDER_MS;
     const scope = researchTimeoutSignal(timeoutMs, options.signal);
     const startedAt = Date.now();
     const results = [];
     const limit = Math.min(8, options.limit || 8);
-    const relevant = () => dedupeSearchResults(results).filter(s => assessSourceRelevance(options.originalQuery || query, s).relevant && !isUnrelatedSoftwareIncident(options.originalQuery || query, s) && matchesComparisonAttribute(options.originalQuery || query, s));
+    const relevant = () => dedupeSearchResults(results).filter(s => (assessSourceRelevance(query, s).relevant || (options.originalQuery && assessSourceRelevance(options.originalQuery, s).relevant)) && !isUnrelatedSoftwareIncident(options.originalQuery || query, s) && matchesComparisonAttribute(options.originalQuery || query, s));
     const stage = async (entries, candidateQuery, budgetMs, stageName) => {
         if (scope.signal.aborted || budgetMs < 50) return;
         const stageScope = researchTimeoutSignal(budgetMs, scope.signal);
@@ -515,7 +521,7 @@ export async function searchResearchSources(query, options = {}) {
                 return res?.results || [];
             }]);
         }
-        if (parseGovernmentRoleQuery(query)) {
+        if (!hasNamedPersonRoute(options.precomputedRoute) && parseGovernmentRoleQuery(query)) {
             generalProviders.push(['government_role', searchGovernmentRole]);
         }
         generalProviders.push(
@@ -1364,7 +1370,7 @@ export async function searchPublicSources(query, options = {}) {
     const normalizedQuery = normalizeSearchQuery(query);
     if (!normalizedQuery) return [];
     const limit = clampInt(options.limit, 8, 1, 20);
-    const roleIntent = parseGovernmentRoleQuery(normalizedQuery);
+    const roleIntent = hasNamedPersonRoute(options.precomputedRoute) ? null : parseGovernmentRoleQuery(normalizedQuery);
     const isLeadership = Boolean(roleIntent && isLeadershipOrRoleTerm(roleIntent.role));
     const isPolitical = isPoliticalOrLeadershipQuery(normalizedQuery);
     const isTechDocs = isTechnicalDocumentationQuery(normalizedQuery);
@@ -2541,7 +2547,7 @@ export async function runEvidenceFirstWebRag(query, options = {}) {
         return buildUnverifiedRagSummary(normalizedQuery, [], ['Empty query.']);
     }
 
-    const roleIntent = parseGovernmentRoleQuery(normalizedQuery);
+    const roleIntent = hasNamedPersonRoute(options.precomputedRoute) ? null : parseGovernmentRoleQuery(normalizedQuery);
     const isFastFactual = Boolean(roleIntent || isCurrentTopicSearchQuery(normalizedQuery) || isDatedChangingFactSearchQuery(normalizedQuery));
     timing.intentMs = Number((performance.now() - intentStart).toFixed(1));
     timing.intentDetectionMs = timing.intentMs;
