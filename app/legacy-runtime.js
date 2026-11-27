@@ -14070,7 +14070,7 @@ ${code}
             input.style.height = 'auto';
             const maxHeight = 180;
             const vpHeight = window.visualViewport?.height || window.innerHeight || 720;
-            const effectiveMaxHeight = vpHeight < 520 ? Math.min(maxHeight, Math.max(72, Math.floor(vpHeight * 0.25))) : maxHeight;
+            const effectiveMaxHeight = vpHeight < 520 ? Math.min(maxHeight, Math.max(88, Math.floor(vpHeight * 0.3))) : maxHeight;
             const next = Math.min(effectiveMaxHeight, Math.max(40, input.scrollHeight));
             input.style.height = `${next}px`;
             input.style.overflowY = input.scrollHeight > effectiveMaxHeight ? 'auto' : 'hidden';
@@ -32318,6 +32318,7 @@ function initDynamicComposerHeightObserver() {
 
 let baselineViewportHeight = 0;
 let lastViewportWidth = 0;
+let lastVisualViewportHeight = 0;
 let wasKeyboardOpen = false;
 let viewportSyncTimers = [];
 
@@ -32328,22 +32329,27 @@ const isIOSWebKit = () => {
 };
 
 const setVH = () => {
-    const vv = window.visualViewport;
-    const height = vv ? vv.height : window.innerHeight;
-    const width = vv ? vv.width : window.innerWidth;
-    const offsetTop = vv ? vv.offsetTop : 0;
     const iosWebKit = isIOSWebKit();
-    const layoutHeight = Math.max(
-        Number(document.documentElement?.clientHeight || 0),
-        Number(window.innerHeight || 0),
-        Math.round(height)
-    );
     const activeEl = document.activeElement;
     const isEditableFocused = Boolean(
         activeEl && (
             activeEl.id === 'text-input' ||
             activeEl.matches?.('textarea, input, [contenteditable="true"]')
         )
+    );
+    if ((isEditableFocused && iosWebKit) || window.scrollY > 0 || document.documentElement?.scrollTop > 0 || document.body?.scrollTop > 0) {
+        try { window.scrollTo(0, 0); } catch (_) {}
+        if (document.documentElement) document.documentElement.scrollTop = 0;
+        if (document.body) document.body.scrollTop = 0;
+    }
+    const vv = window.visualViewport;
+    const height = vv ? vv.height : window.innerHeight;
+    const width = vv ? vv.width : window.innerWidth;
+    const offsetTop = vv ? vv.offsetTop : 0;
+    const layoutHeight = Math.max(
+        Number(document.documentElement?.clientHeight || 0),
+        Number(window.innerHeight || 0),
+        Math.round(height)
     );
     if (Math.abs(width - lastViewportWidth) > 40) {
         baselineViewportHeight = Math.max(layoutHeight, Math.round(height));
@@ -32381,9 +32387,9 @@ const setVH = () => {
     const barEl = document.getElementById('input-bar-container');
     const appRootEl = document.getElementById('app-root');
     if (kbOpen && barEl) {
-        const isCompactLandscape = height < 360;
+        const isCompactLandscape = width > height && height < 360;
         const isThirdPartyIOSBrowser = typeof navigator !== 'undefined' && /CriOS|EdgiOS|FxiOS/i.test(navigator.userAgent || '');
-        const clearance = iosWebKit ? (isCompactLandscape ? 12 : (isThirdPartyIOSBrowser ? 68 : 56)) : 0;
+        const clearance = iosWebKit ? (isCompactLandscape ? 12 : (isThirdPartyIOSBrowser ? 82 : 76)) : 0;
         rootStyle.setProperty('--keyboard-clearance', `${clearance}px`);
         const baseTop = Math.round(offsetTop + height - clearance);
         rootStyle.setProperty('--keyboard-composer-top', `${baseTop}px`);
@@ -32391,7 +32397,7 @@ const setVH = () => {
         if (barRect && barRect.height > 0) {
             const desiredBottom = Math.round(offsetTop + height - clearance);
             const drift = barRect.bottom - desiredBottom;
-            if (Math.abs(drift) > 2) {
+            if (Math.abs(drift) > 2 && Math.abs(drift) < 240) {
                 rootStyle.setProperty('--keyboard-composer-top', `${Math.round(baseTop - drift)}px`);
             }
         }
@@ -32417,6 +32423,12 @@ const setVH = () => {
         const measuredSafeH = Math.max(90, Math.ceil(barEl.offsetHeight || barEl.getBoundingClientRect().height || 120));
         rootStyle.setProperty('--input-bar-safe-height', `${measuredSafeH}px`);
     }
+    if (justOpenedKeyboard || justClosedKeyboard || (kbOpen && Math.abs(lastVisualViewportHeight - height) > 12)) {
+        if (typeof autoResizeComposerTextarea === 'function') {
+            autoResizeComposerTextarea();
+        }
+    }
+    lastVisualViewportHeight = height;
     if (kbOpen || justClosedKeyboard || window.scrollY > 0) {
         try { window.scrollTo(0, 0); } catch (_) {}
         if (document.documentElement) document.documentElement.scrollTop = 0;
