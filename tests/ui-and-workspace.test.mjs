@@ -953,7 +953,7 @@ console.log('\n--- Test 5: Groq Model Candidate Realness & Non-Llama Assurance -
     assert.ok(coreUxCss.includes('--keyboard-composer-top') && coreUxCss.includes('body.is-keyboard-open #footer-disclaimer'), 'Open virtual keyboard uses closed-loop --keyboard-composer-top and hides footer disclaimer');
     assert.ok(indexHtml.includes('id="text-input"') && indexHtml.includes('enterkeyhint="send"') && indexHtml.includes('autocomplete="off"'), 'Prompt textarea must expose enterkeyhint="send" and autocomplete="off" for mobile soft keyboards');
     assert.ok(indexHtml.includes('function dismissMobileKeyboardAfterSubmit(') && indexHtml.includes('options?.refocus === true && hadDlpState') && indexHtml.includes('const heightGap = Math.max('), 'Submitting prompt must blur #text-input without post-send refocus and detect keyboard even when vv.offsetTop > 0');
-    assert.ok(coreUxCss.includes('.settings-danger-btn') && coreUxCss.includes('--chat-message-font-size:15px'), 'Mobile typography scale and settings-danger-btn styling must stay consistent');
+    assert.ok(coreUxCss.includes('.settings-danger-btn') && coreUxCss.includes('--chat-message-font-size:16px'), 'Mobile message text must remain readable and settings danger actions styled');
     assert.ok(coreUxCss.includes('body .chat-sidebar-section-title { margin:14px 0 4px; padding-inline:16px;') && coreUxCss.includes('body .chat-sidebar-empty { margin:6px 12px;'), 'Sidebar section title and empty state must share aligned 16px left edge and override Tailwind p margin reset');
     assert.ok(settingsCtrl.includes('On-Device Semantic Memory') && !settingsCtrl.includes('Enhanced local recall'), 'Settings must use refined professional copy for on-device semantic memory');
     assert.ok(recallWorker.includes('env.backends.onnx.wasm.proxy = false') && recallWorker.includes('loadCachedVector'), 'Recall worker must disable nested worker proxy for mobile Safari and hydrate cached IndexedDB vectors');
@@ -994,7 +994,7 @@ console.log('\n--- Test 5: Groq Model Candidate Realness & Non-Llama Assurance -
     assert.ok(coreUxCss.includes(':has(.settings-export-buttons)'), 'Mobile settings rows with export buttons must stack below 640px');
     assert.ok(coreUxCss.includes('.compliance-badge') && coreUxCss.includes('white-space:nowrap'), 'Compliance policy badge must stay single-line');
     assert.ok(coreUxCss.includes('.compliance-policy-row') && coreUxCss.includes('.compliance-diagnostics-header'), 'Compliance header and diagnostics rows must stack cleanly on narrow viewports');
-    assert.ok(coreUxCss.includes('44px minmax(0,1fr) 68px'), 'Mobile help modal header must center title without wrapping button crowding');
+    assert.ok(coreUxCss.includes('68px minmax(0,1fr) 68px'), 'Mobile help modal header needs equal control columns to center its title');
     assert.ok(coreUxCss.includes('.settings-row-title') && coreUxCss.includes('word-break:normal'), 'Settings row titles must never break mid-word');
     assert.ok(settingsRuntimeJs.includes('compliance-policy-row') && settingsRuntimeJs.includes('compliance-diagnostics-header'), 'Settings runtime must apply responsive compliance row classes');
 

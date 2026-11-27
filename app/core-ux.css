@@ -146,13 +146,13 @@ body #help-modal .settings-row:has(.settings-switch) { flex-wrap:nowrap; }
     body #input-bar-inner .composer-think-label { display:none; }
     body #input-bar-inner :is(.composer-plus-btn,.composer-think-btn,.speech-input-btn,.composer-send-btn) { min-width:44px; min-height:44px; width:44px; height:44px; padding:0; margin:0; }
     .composer-web-search-active { font-size:13px; padding:0 3px; gap:4px; }
-    body #help-modal .help-modal-header { grid-template-columns:44px minmax(0,1fr) 68px; padding:12px 14px; }
+    body #help-modal .help-modal-header { grid-template-columns:68px minmax(0,1fr) 68px; padding:12px 14px; }
     body #help-modal .settings-back-label { display:none; }
     body #help-modal .help-modal-body { padding:16px; }
     body #help-modal .settings-row-left { flex-basis:auto; }
     body #help-modal .settings-row-right { margin-left:0; }
     body #help-modal .settings-row:has(.settings-select), body #help-modal .settings-row:has(.settings-row-right > .settings-action-btn), body #help-modal .settings-row:has(.settings-row-right > .settings-danger-btn), body #help-modal .settings-row:has(.settings-export-buttons), body #help-modal .settings-permissions-row { grid-template-columns:minmax(0,1fr); }
-    body #help-modal .settings-row:has(.settings-select) .settings-row-right, body #help-modal .settings-row:has(.settings-row-right > .settings-action-btn) .settings-row-right, body #help-modal .settings-row:has(.settings-row-right > .settings-danger-btn) .settings-row-right, body #help-modal .settings-row:has(.settings-export-buttons) .settings-row-right { justify-self:stretch; justify-content:flex-start; padding-inline-start:44px; }
+    body #help-modal .settings-row:has(.settings-select) .settings-row-right, body #help-modal .settings-row:has(.settings-row-right > .settings-action-btn) .settings-row-right, body #help-modal .settings-row:has(.settings-row-right > .settings-danger-btn) .settings-row-right, body #help-modal .settings-row:has(.settings-export-buttons) .settings-row-right { justify-self:stretch; justify-content:flex-start; padding-inline-start:46px; }
     body #help-modal .settings-select { width:100%; }
     body #help-modal .settings-permissions-row { align-items:flex-start; }
     body #help-modal .settings-permissions-row > button { justify-self:start; margin-inline-start:46px; max-width:calc(100% - 46px); }
@@ -264,7 +264,7 @@ body .assistant-action-icon svg { width:18px; height:18px; }
 body .assistant-action-menu-wrap { width:44px; }
 body .composer-disclaimer { font-size:12px; line-height:1.5; color:var(--core-muted); }
 @media(max-width:640px) {
-    :root { --chat-message-font-size:15px; --chat-message-line-height:1.6; }
+    :root { --chat-message-font-size:16px; --chat-message-line-height:1.6; }
     body #help-modal .settings-row-desc { font-size:12.5px; line-height:1.45; }
 }
 @media(max-width:480px) {
@@ -276,12 +276,10 @@ body .composer-disclaimer { font-size:12px; line-height:1.5; color:var(--core-mu
 /* Static interface: status is communicated through text and state, not motion. */
 @layer static-interface {
     html { scroll-behavior:auto !important; }
-    @media (prefers-reduced-motion: reduce) {
-        body *, body *::before, body *::after {
-            animation:none !important;
-            transition:none !important;
-            scroll-behavior:auto !important;
-        }
+    body *, body *::before, body *::after {
+        animation:none !important;
+        transition:none !important;
+        scroll-behavior:auto !important;
     }
 }
 body .has-web-search .composer-web-outline {

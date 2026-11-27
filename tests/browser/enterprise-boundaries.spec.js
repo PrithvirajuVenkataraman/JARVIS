@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
 
 const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 const job = '12345678-1234-1234-1234-123456789abc';
@@ -102,11 +103,20 @@ test('owned controls preserve native bubbling without invoking actions twice', a
 });
 
 test('saved-memory export remains bound when its control is rendered conditionally', async ({ page }) => {
-    await page.evaluate(() => { window.__memoryExports = 0; window.exportUnifiedMemoriesJson = () => window.__memoryExports++; window.showMemoryManager(); });
+    await page.evaluate(() => {
+        window.JarvisUnifiedMemory.unifiedMemoryStore.add({ text: 'I prefer concise answers.', category: 'preference' });
+        window.showMemoryManager();
+    });
     const exportButton = page.locator('#memory-manager-btn-export');
     await expect(exportButton).toBeVisible();
+    await expect(exportButton).toHaveText('Export Markdown');
+    const downloaded = page.waitForEvent('download');
     await exportButton.click();
-    expect(await page.evaluate(() => window.__memoryExports)).toBe(1);
+    const file = await downloaded;
+    expect(file.suggestedFilename()).toMatch(/\.md$/);
+    const content = await readFile(await file.path(), 'utf8');
+    expect(content).toMatch(/^# Saved Memories/);
+    expect(content).toContain('I prefer concise answers.');
 });
 
 test('temporary capability failures preserve tools and drafts and recover on reconnect', async ({ page }) => {

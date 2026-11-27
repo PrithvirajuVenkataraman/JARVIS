@@ -15011,10 +15011,16 @@ Answer the user directly and conversationally based on the quoted context.`;
                             }
                         }
                         const queryForRoute = completionCheck?.remainder || normalizedOutgoingText;
+                        // Device tools and unresolved references take precedence over Web mode.
+                        if (isCurrentLocationIntentText(queryForRoute)) {
+                            await handleCurrentLocationRequest(queryForRoute);
+                            sendTrace.routeEndedAt = performance.now();
+                            return;
+                        }
                         const effectiveWebForced = !completionCheck?.completed && isWebForced;
                         const activeHistoryTurns = getActiveResearchContext(queryForRoute);
                         const reference = window.JarvisConversation?.resolveReference?.(queryForRoute);
-                        if (!effectiveWebForced && ['ambiguous', 'missing'].includes(reference?.status) && activeHistoryTurns.length === 0) {
+                        if (['ambiguous', 'missing'].includes(reference?.status)) {
                             await processCommand(queryForRoute);
                             sendTrace.routeEndedAt = performance.now();
                             return;
@@ -22765,6 +22771,10 @@ function detectInputLanguageHint(text) {
 
         async function processCommand(text) {
             const rawCommandText = String(text || '').trim();
+            if (isCurrentLocationIntentText(rawCommandText)) {
+                await handleCurrentLocationRequest(rawCommandText);
+                return;
+            }
             if (String(activeResponseRenderContext?.source || '').toLowerCase() === 'converse') {
                 setConverseUiState('submitting', 'command_received');
             }

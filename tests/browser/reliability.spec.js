@@ -34,11 +34,16 @@ for (const [width, height] of [[320, 568], [390, 844], [768, 1024], [1024, 768],
             expect(style.size).toBeGreaterThanOrEqual(16); expect(style.family).toContain('Inter Variable');
         }
         const actions = page.locator('.assistant-action-row > .assistant-action-icon, .assistant-action-row > .assistant-action-menu-wrap > .assistant-action-icon');
-        await expect(actions).toHaveCount(8);
+        await expect(actions).toHaveCount(4);
+        expect(await actions.evaluateAll(elements => elements.map(element => element.getAttribute('aria-label')))).toEqual(['Copy', 'Read aloud', 'Share', 'More actions']);
         const bounds = await actions.evaluateAll(elements => elements.map(element => { const r = element.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height, right: r.right }; }));
         for (const rect of bounds) { expect(rect.width).toBeGreaterThanOrEqual(44); expect(rect.height).toBeGreaterThanOrEqual(44); expect(rect.right).toBeLessThanOrEqual(width); }
-        const columns = width <= 480 ? 4 : 8;
+        const columns = 4;
         for (let index = 0; index < bounds.length; index++) expect(Math.abs(bounds[index].y - bounds[Math.floor(index / columns) * columns].y)).toBeLessThan(1);
+        await page.getByRole('button', { name: 'More actions', exact: true }).click();
+        await expect(page.getByRole('menuitem', { name: 'Save to memory', exact: true })).toBeVisible();
+        await expect(page.getByRole('menuitem', { name: 'Regenerate', exact: true })).toBeVisible();
+        await page.keyboard.press('Escape');
         await page.screenshot({ path: info.outputPath(`layout-${width}.png`), fullPage: true });
         await info.attach('local-performance', { body: JSON.stringify(await page.evaluate(() => window.JarvisPerformance.getMetrics())), contentType: 'application/json' });
     });
@@ -54,7 +59,7 @@ test('sanitization strips executable attributes while math and trusted actions w
     await page.evaluate(() => {
         const host = document.createElement('div'); host.id = 'action-test'; host.className = 'assistant-message-text';
         host.innerHTML = sanitizeAssistantMarkup(window.JarvisMarkdownRenderer.renderMarkdown('```js\nlet x = 1;\n```'));
-        document.body.append(host);
+        document.getElementById('chat-container').append(host);
     });
     await page.locator('#action-test [data-assistant-action="code-wrap"]').click();
     await expect(page.locator('#action-test [data-assistant-action="code-wrap"]')).toHaveAttribute('aria-pressed', 'true');

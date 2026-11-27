@@ -11,7 +11,8 @@ test.beforeEach(async ({ page }) => {
 test('slash filtering selects on Enter without sending, then sends the completed draft once', async ({ page }) => {
     let sends = 0; page.on('request', request => { if (request.url().endsWith('/api/chat-groq') && request.method() === 'POST' && request.postDataJSON()?.stream) sends++; });
     const input = page.locator('#text-input'); await input.fill('/');
-    await expect(page.locator('#slash-command-results [role=option]')).toHaveCount(6);
+    await expect(page.locator('#slash-command-results [role=option]')).toHaveCount(5);
+    await expect(page.locator('#slash-command-results [role=option] span')).toHaveText(['Translate', 'Verify', 'Summarize', 'Professional', 'Study']);
     await input.press('s'); await expect(page.locator('#slash-command-results [role=option]')).toHaveCount(4);
     await expect(page.locator('#slash-command-results [role=option]').first()).toHaveAttribute('data-command', 'summarize');
     await input.press('u'); await expect(page.locator('#slash-command-results [role=option]')).toHaveText(['SummarizeSummarize text or a document']);
@@ -143,7 +144,10 @@ test('model routing explains the current preference without promotional badges o
 });
 
 test('picker navigation preserves drafts, composition, payloads, and changing capabilities', async ({ page }) => {
-    const input = page.locator('#text-input'); await input.fill('/'); await input.press('ArrowDown'); await input.press('Enter');
+    const input = page.locator('#text-input'); await input.fill('/');
+    await input.press('ArrowUp'); await expect(page.locator('[role=option][aria-selected=true]')).toHaveAttribute('data-command', 'study');
+    await input.press('ArrowDown'); await expect(page.locator('[role=option][aria-selected=true]')).toHaveAttribute('data-command', 'translate');
+    await input.press('Enter');
     await expect(input).toHaveValue('Translate this text to [language]: ');
     expect(await input.evaluate(element => element.value.slice(element.selectionStart, element.selectionEnd))).toBe('[language]');
     await input.fill('/nothing'); await expect(page.locator('.slash-command-empty')).toHaveText('No matching commands');

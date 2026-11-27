@@ -589,6 +589,7 @@ export function createSpeechInputController(options = {}) {
     let explicitlyStopped = false;
     let recognitionVersion = 0;
     let transcribing = false;
+    let whisperTranscribing = false;
     let postStopTimer = null;
 
     function finalizePostStopCleanup() {
@@ -650,6 +651,7 @@ export function createSpeechInputController(options = {}) {
         },
         onState(state) {
             transcribing = Boolean(state.processing);
+            whisperTranscribing = Boolean(state.processing);
             if (state.processing && !state.recording && mode === 'dictation') mode = 'idle';
             emitState();
         }
@@ -903,6 +905,7 @@ export function createSpeechInputController(options = {}) {
             listening: whisperRecorder.isRecording() || Boolean(browserRecognition),
             processing: processing || transcribing,
             transcribing,
+            transcriptionPhase: whisperTranscribing ? 'transcribing' : transcribing ? 'cleanup' : 'idle',
             finishing: Boolean(finishingRecognition),
             interruptible: converseEnabled && processing,
             language
@@ -1594,7 +1597,7 @@ export function installSpeechInputUI(options = {}) {
                 if (!state.supported) {
                     setStatusText('Voice input unavailable in this browser.');
                 } else {
-                    setStatusText(state.transcribing ? (isCleaningUp ? 'Cleaning up transcript...' : 'Transcribing voice...') : '');
+                    setStatusText(state.transcribing ? (state.transcriptionPhase === 'cleanup' ? 'Cleaning up transcript...' : 'Transcribing voice...') : '');
                 }
             }
 
