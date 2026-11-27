@@ -189,8 +189,14 @@ export class UnifiedMemoryStore {
     // Alias used by existing code
     undo() { return this.undoLastChange(); }
 
-    getAll() { return [...this.memories]; }
-    getEnabled() { return this.memories.filter(m => m.enabled !== false); }
+    getAll() {
+        if (!this.isInitialized) this.init();
+        return [...this.memories];
+    }
+    getEnabled() {
+        if (!this.isInitialized) this.init();
+        return this.memories.filter(m => m.enabled !== false);
+    }
     getById(id) { return this.memories.find(m => m.id === id) || null; }
 
     add(candidate) {

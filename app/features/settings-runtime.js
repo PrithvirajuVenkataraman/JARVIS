@@ -903,16 +903,16 @@ function showHelpModal() {
                             </details>
 
                             <details class="settings-group-card mb-3" style="padding:14px;">
-                                <summary class="text-xs font-semibold text-neutral-100 cursor-pointer">Where are my chats, attachments, and saved memories kept?</summary>
+                                <summary class="text-xs font-semibold text-neutral-100 cursor-pointer">Where are my chats, attachments, and saved memories kept — and what is IndexedDB?</summary>
                                 <p class="text-[11px] text-neutral-300 leading-relaxed mt-2">
-                                    All of your conversations, custom instructions, and saved memories stay privately on your own device and browser — we do not store your personal chat history on our servers. You can download the current chat as a Markdown file anytime using <strong>Export Conversation</strong>, or save a password-protected backup under <strong>Backup &amp; storage</strong> to move your chats to another device.
+                                    All of your conversations, custom instructions, and saved memories stay privately on your own device and browser — we do not store your personal chat history on our servers. The <strong>IndexedDB</strong> label shown next to <strong>Backup &amp; storage</strong> is simply your browser&apos;s own built-in private storage space (like a locked digital folder inside Safari or Chrome on your device) that holds your full conversations cleanly on your device. You can download the current chat as a Markdown file anytime using <strong>Export Conversation</strong>, or save a password-protected backup under <strong>Backup &amp; storage</strong> to move your chats to another device.
                                 </p>
                             </details>
 
                             <details class="settings-group-card mb-3" style="padding:14px;">
-                                <summary class="text-xs font-semibold text-neutral-100 cursor-pointer">How do Saved Memories work, and is my private info protected?</summary>
+                                <summary class="text-xs font-semibold text-neutral-100 cursor-pointer">How do Personalized Experience and Saved Memories work, and is my private info protected?</summary>
                                 <p class="text-[11px] text-neutral-300 leading-relaxed mt-2">
-                                    When Personalization is turned on, JARVIS picks up helpful preferences and details you share (like your name, city, or preferred reply style) and rewrites them clearly so they make sense later on. You can view, edit, export, or delete any saved memory anytime. Built-in safety checks also block accidental sharing of passwords, card numbers, and private keys before messages leave your device.
+                                    When <strong>Personalized Experience</strong> is switched on in Settings, JARVIS automatically picks up helpful facts and preferences you share (like your name, city, coding tools, or preferred reply style) and uses them behind the scenes in future chats so you do not have to repeat yourself. Your thumbs-up and thumbs-down feedback on replies also helps JARVIS adapt to what you prefer. Turning <strong>Personalized Experience</strong> off pauses both learning new memories and using saved ones until you switch it back on. You can view, edit, export, or delete any saved memory anytime under <strong>Saved Memories</strong>. Built-in safety checks also block accidental sharing of passwords, card numbers, and private keys before messages leave your device.
                                 </p>
                             </details>
 

@@ -439,6 +439,10 @@ body .assistant-action-menu button:disabled {
     opacity:0.4;
     cursor:not-allowed;
 }
+body .assistant-action-menu button[hidden],
+body .assistant-action-menu button.hidden {
+    display:none !important;
+}
 body .assistant-action-menu button.is-feedback-up,
 body .assistant-action-menu button.is-feedback-up:hover {
     color:#34d399;

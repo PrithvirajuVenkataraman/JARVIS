@@ -756,3 +756,65 @@ test('hybrid live web search + normal LLM policy, N-turn persistence, and zero-h
         else process.env.GEMINI_API_KEY = savedGemini;
     }
 });
+
+test('Personalized Experience forwards savedMemoryContext & learnedDirectives only when enabled', async () => {
+    const originalFetch = globalThis.fetch;
+    const savedGroq = process.env.GROQ_API_KEY;
+    const savedGemini = process.env.GEMINI_API_KEY;
+    process.env.GROQ_API_KEY = 'test-groq-key';
+    delete process.env.GEMINI_API_KEY;
+    const capturedSystems = [];
+    try {
+        globalThis.fetch = async (url, init) => {
+            if (String(url).includes('groq.com')) {
+                const body = JSON.parse(init.body);
+                const sys = String(body.messages?.[0]?.content || '');
+                if (sys.includes("JARVIS's centralized semantic router")) {
+                    return Response.json({ choices: [{ message: { content: JSON.stringify({ intent: 'chat', strategy: 'direct_chat', retrievalRequired: false, requiredTools: [], standaloneQuery: 'Suggest a weekend hackathon project', searchQueries: [] }) } }] });
+                }
+                if (sys.includes('Classify the user message')) {
+                    return Response.json({ choices: [{ message: { content: '{"blocked":false,"reason":"safe","safe_response":""}' } }] });
+                }
+                if (sys.includes('Review this candidate answer')) {
+                    return Response.json({ choices: [{ message: { content: '{"verdict":"pass","issues":[],"correctedResponse":""}' } }] });
+                }
+                capturedSystems.push(sys);
+                return Response.json({ choices: [{ message: { content: 'Recommended Rust tools for Bengaluru.' } }] });
+            }
+            return Response.json({});
+        };
+        for (const enabled of [true, false]) {
+            const req = Object.assign(new EventEmitter(), {
+                method: 'POST',
+                headers: { host: 'localhost', 'content-type': 'application/json' },
+                socket: { remoteAddress: enabled ? '10.0.0.91' : '10.0.0.92' },
+                body: {
+                    message: 'Suggest a weekend hackathon project',
+                    stream: false,
+                    intent: 'chat',
+                    webMode: 'off',
+                    preferences: {
+                        selectedModel: 'openai/gpt-oss-120b',
+                        personalizationEnabled: enabled,
+                        savedMemoryContext: '=== USER SAVED MEMORIES ===\n- Lives in Bengaluru',
+                        learnedDirectives: ['Keep steps numbered']
+                    }
+                }
+            });
+            const res = response();
+            await handler(req, res);
+            assert.equal(res.statusCode, 200);
+        }
+        assert.equal(capturedSystems.length, 2);
+        assert.match(capturedSystems[0], /Lives in Bengaluru/);
+        assert.match(capturedSystems[0], /Keep steps numbered/);
+        assert.doesNotMatch(capturedSystems[1], /Lives in Bengaluru/);
+        assert.doesNotMatch(capturedSystems[1], /Keep steps numbered/);
+    } finally {
+        globalThis.fetch = originalFetch;
+        if (savedGroq === undefined) delete process.env.GROQ_API_KEY;
+        else process.env.GROQ_API_KEY = savedGroq;
+        if (savedGemini === undefined) delete process.env.GEMINI_API_KEY;
+        else process.env.GEMINI_API_KEY = savedGemini;
+    }
+});

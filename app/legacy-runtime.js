@@ -5328,7 +5328,7 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
         const relevantSavedMemoryContext = (!personalizationActive || requestOptions?.grounding)
             ? ''
             : (isUnifiedActive && unifiedMem?.buildRelevantMemoryPrompt && unifiedMem?.unifiedMemoryStore
-                ? unifiedMem.buildRelevantMemoryPrompt(normalizedUserMessage, unifiedMem.unifiedMemoryStore.getEnabled())
+                ? (unifiedMem.unifiedMemoryStore.init?.(), unifiedMem.buildRelevantMemoryPrompt(normalizedUserMessage, unifiedMem.unifiedMemoryStore.getEnabled()))
                 : await buildRelevantSavedMemoryContextAsync(normalizedUserMessage, {
                     intent: requestOptions?.intent || (isFastSimpleRequest ? 'fast_simple' : 'chat'),
                     routeDecision: requestOptions?.routeDecision,
@@ -5448,7 +5448,10 @@ async function askGeminiAI(userMessage, requestOptions = {}) {
                 responseLength: responseMode,
                 responseFormat: formatMode,
                 responseStyle,
-                customSystemPrompt,
+                customSystemPrompt: effectiveCustomPrompt,
+                personalizationEnabled: Boolean(personalizationActive),
+                personaDirective: personaDirective ? String(personaDirective).slice(0, 600) : '',
+                savedMemoryContext: personalizationActive && relevantSavedMemoryContext ? String(relevantSavedMemoryContext).slice(0, 3500) : '',
                 learnedDirectives: (() => {
                     if (!personalizationActive) return [];
                     try {
@@ -9334,8 +9337,10 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             const safeId = escapeHtml(messageId);
             const regenAttr = canRegenerate ? '' : 'disabled aria-disabled="true"';
             const savedRating = getSavedFeedbackRating(messageId);
-            const upClass = savedRating === 1 ? ' is-active is-feedback-up' : '';
-            const downClass = savedRating === -1 ? ' is-active is-feedback-down' : '';
+            const upClass = (savedRating === 1 ? ' is-active is-feedback-up' : '') + (savedRating === -1 ? ' hidden' : '');
+            const downClass = (savedRating === -1 ? ' is-active is-feedback-down' : '') + (savedRating === 1 ? ' hidden' : '');
+            const upHiddenAttr = savedRating === -1 ? 'hidden' : '';
+            const downHiddenAttr = savedRating === 1 ? 'hidden' : '';
             const badgeHtml = modelInfo && modelInfo.label
                 ? `<span class="assistant-model-badge ${modelInfo.isFailover ? 'is-failover' : ''}" title="${escapeHtml(modelInfo.title || modelInfo.label)}">${escapeHtml(modelInfo.label)}</span>`
                 : '';
@@ -9350,8 +9355,8 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
                         <div id="assistant-action-menu-${safeId}" class="assistant-action-menu hidden" role="menu" data-message-id="${safeId}">
                             <button type="button" data-assistant-action="save_memory" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'save_memory') })} role="menuitem">${getActionIconSvg('memory')}<span>Save to memory</span></button>
                             <button type="button" data-assistant-action="regenerate" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'regenerate') })} role="menuitem" ${regenAttr}>${getActionIconSvg('retry')}<span>Regenerate</span></button>
-                            <button type="button" class="${upClass.trim()}" data-assistant-action="feedback_up" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'feedback_up') })} role="menuitem" aria-pressed="${savedRating === 1 ? 'true' : 'false'}">${getActionIconSvg('thumb_up')}<span>Thumbs up</span></button>
-                            <button type="button" class="${downClass.trim()}" data-assistant-action="feedback_down" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'feedback_down') })} role="menuitem" aria-pressed="${savedRating === -1 ? 'true' : 'false'}">${getActionIconSvg('thumb_down')}<span>Thumbs down</span></button>
+                            <button type="button" class="${upClass.trim()}" data-assistant-action="feedback_up" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'feedback_up') })} role="menuitem" aria-pressed="${savedRating === 1 ? 'true' : 'false'}" ${upHiddenAttr}>${getActionIconSvg('thumb_up')}<span>Thumbs up</span></button>
+                            <button type="button" class="${downClass.trim()}" data-assistant-action="feedback_down" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'feedback_down') })} role="menuitem" aria-pressed="${savedRating === -1 ? 'true' : 'false'}" ${downHiddenAttr}>${getActionIconSvg('thumb_down')}<span>Thumbs down</span></button>
                             <div class="assistant-action-menu-divider"></div>
                             <button type="button" data-assistant-action="ask" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'ask') })} role="menuitem">${getActionIconSvg('ask')}<span>Ask JARVIS</span></button>
                             <button type="button" data-assistant-action="verify" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { return handleAssistantActionInline(event, (String(safeId)), 'verify') })} role="menuitem">${getActionIconSvg('verify')}<span>Verify this</span></button>
@@ -9438,9 +9443,35 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
         function getFeedbackButtonsForMessage(messageId) {
             const row = document.querySelector(`.assistant-action-row[data-message-id="${messageId}"]`);
             const menu = document.getElementById(`assistant-action-menu-${messageId}`);
-            const btnUp = row?.querySelector('[data-assistant-action="feedback_up"]') || menu?.querySelector('[data-assistant-action="feedback_up"]') || null;
-            const btnDown = row?.querySelector('[data-assistant-action="feedback_down"]') || menu?.querySelector('[data-assistant-action="feedback_down"]') || null;
+            const btnUp = menu?.querySelector('[data-assistant-action="feedback_up"]') || row?.querySelector('[data-assistant-action="feedback_up"]') || null;
+            const btnDown = menu?.querySelector('[data-assistant-action="feedback_down"]') || row?.querySelector('[data-assistant-action="feedback_down"]') || null;
             return { row, menu, btnUp, btnDown };
+        }
+
+        function syncFeedbackButtonState(messageId, rating = 0, refs = {}) {
+            const resolved = getFeedbackButtonsForMessage(messageId);
+            const btnUp = refs.btnUp || resolved.btnUp;
+            const btnDown = refs.btnDown || resolved.btnDown;
+            if (btnUp) {
+                const upActive = rating === 1;
+                const upHidden = rating === -1;
+                btnUp.classList.toggle('is-active', upActive);
+                btnUp.classList.toggle('is-feedback-up', upActive);
+                btnUp.classList.toggle('text-emerald-400', upActive);
+                btnUp.classList.toggle('hidden', upHidden);
+                btnUp.hidden = upHidden;
+                btnUp.setAttribute('aria-pressed', upActive ? 'true' : 'false');
+            }
+            if (btnDown) {
+                const downActive = rating === -1;
+                const downHidden = rating === 1;
+                btnDown.classList.toggle('is-active', downActive);
+                btnDown.classList.toggle('is-feedback-down', downActive);
+                btnDown.classList.toggle('text-rose-400', downActive);
+                btnDown.classList.toggle('hidden', downHidden);
+                btnDown.hidden = downHidden;
+                btnDown.setAttribute('aria-pressed', downActive ? 'true' : 'false');
+            }
         }
 
         function handleAssistantPositiveFeedback(messageId, button = null) {
@@ -9449,21 +9480,13 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             const wasActive = Boolean(btnUp?.classList?.contains('is-feedback-up'));
 
             if (wasActive) {
-                btnUp?.classList.remove('is-active', 'is-feedback-up', 'text-emerald-400');
-                btnUp?.setAttribute('aria-pressed', 'false');
+                syncFeedbackButtonState(messageId, 0, { btnUp, btnDown });
                 persistFeedbackRating(messageId, 0);
                 if (typeof showTemporaryMessage === 'function') showTemporaryMessage('Rating cleared.');
                 return;
             }
 
-            if (btnUp) {
-                btnUp.classList.add('is-active', 'is-feedback-up', 'text-emerald-400');
-                btnUp.setAttribute('aria-pressed', 'true');
-            }
-            if (btnDown) {
-                btnDown.classList.remove('is-active', 'is-feedback-down', 'text-rose-400');
-                btnDown.setAttribute('aria-pressed', 'false');
-            }
+            syncFeedbackButtonState(messageId, 1, { btnUp, btnDown });
             persistFeedbackRating(messageId, 1);
             closeFeedbackPopover(messageId);
 
@@ -9552,13 +9575,26 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
         }
 
         function handleAssistantNegativeFeedbackClick(messageId, button = null) {
+            const { btnUp, btnDown: foundDown } = getFeedbackButtonsForMessage(messageId);
+            const btnDown = button || foundDown;
+            const wasActive = Boolean(btnDown?.classList?.contains('is-feedback-down'));
+            if (wasActive) {
+                syncFeedbackButtonState(messageId, 0, { btnUp, btnDown });
+                persistFeedbackRating(messageId, 0);
+                closeFeedbackPopover(messageId);
+                if (typeof showTemporaryMessage === 'function') showTemporaryMessage('Rating cleared.');
+                return;
+            }
+            syncFeedbackButtonState(messageId, -1, { btnUp, btnDown });
+            persistFeedbackRating(messageId, -1);
+
             const popover = document.getElementById(`assistant-feedback-popover-${messageId}`);
             if (!popover) return;
             const isHidden = popover.classList.contains('hidden');
             closeAllFeedbackPopovers();
             if (isHidden) {
                 const row = document.querySelector(`.assistant-action-row[data-message-id="${messageId}"]`);
-                const candidate = button || row?.querySelector('[data-assistant-action="feedback_down"]');
+                const candidate = btnDown || row?.querySelector('[data-assistant-action="feedback_down"]');
                 const candidateRect = candidate?.getBoundingClientRect?.();
                 const anchor = (candidateRect && candidateRect.width > 0 && candidateRect.height > 0)
                     ? candidate
@@ -9596,14 +9632,7 @@ window.executeEnterpriseNextStep = async function(encodedPrompt, messageId) {
             }
 
             const { btnUp, btnDown } = getFeedbackButtonsForMessage(messageId);
-            if (btnDown) {
-                btnDown.classList.add('is-active', 'is-feedback-down', 'text-rose-400');
-                btnDown.setAttribute('aria-pressed', 'true');
-            }
-            if (btnUp) {
-                btnUp.classList.remove('is-active', 'is-feedback-up', 'text-emerald-400');
-                btnUp.setAttribute('aria-pressed', 'false');
-            }
+            syncFeedbackButtonState(messageId, -1, { btnUp, btnDown });
             persistFeedbackRating(messageId, -1);
 
             const meta = (typeof getAssistantMessageMeta === 'function' ? getAssistantMessageMeta(messageId) : null) || {};

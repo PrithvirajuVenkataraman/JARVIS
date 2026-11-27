@@ -1014,7 +1014,8 @@ console.log('\n--- Test 5: Groq Model Candidate Realness & Non-Llama Assurance -
     const faqStart = settingsRuntimeJs.indexOf('id="settings-view-faq"');
     const faqEnd = settingsRuntimeJs.indexOf('document.querySelector(\'.page-shell\')', faqStart);
     const faqHtml = settingsRuntimeJs.slice(faqStart, faqEnd);
-    assert.ok(!/IndexedDB|CacheStorage|localStorage|AES-256-GCM|JSON-RPC|LibRaw|ImageMagick|WASM|ONNX|PyTorch|OpenCV|thinkingBudget/i.test(faqHtml), 'Settings FAQ must use layman terms without technical jargon');
+    assert.ok(!/CacheStorage|localStorage|AES-256-GCM|JSON-RPC|LibRaw|ImageMagick|WASM|ONNX|PyTorch|OpenCV|thinkingBudget/i.test(faqHtml), 'Settings FAQ must use layman terms without technical jargon');
+    assert.ok(faqHtml.includes('IndexedDB') && faqHtml.includes('private storage space') && faqHtml.includes('Personalized Experience'), 'Settings FAQ must explain IndexedDB and Personalized Experience in plain English');
     assert.ok(!settingsRuntimeJs.includes("exportCurrentChat('json')"), 'Export Conversation must only support Markdown and must not expose JSON export');
     assert.ok(settingsRuntimeJs.includes("exportCurrentChat('markdown')"), 'Export Conversation must support Markdown');
     assert.ok(indexHtml.includes("else if (viewName === 'faq')") && indexHtml.includes("document.getElementById('settings-view-faq')"), 'Settings view switcher must handle faq view navigation');
@@ -1022,7 +1023,19 @@ console.log('\n--- Test 5: Groq Model Candidate Realness & Non-Llama Assurance -
     assert.ok(coreUxCss.includes('body .memory-manager-toolbar button'), 'Saved Memories toolbar buttons must have unlayered dark pill styling');
     assert.ok(settingsCtrl.includes('On-Device Vision Fallback') && settingsCtrl.includes('id="local-vision-enabled"'), 'Settings controller must expose On-Device Vision Fallback toggle');
     const faqDoc = fs.readFileSync(path.resolve('docs/faq.md'), 'utf8');
-    assert.ok(faqDoc.includes('# FAQ Section in Settings') && !/IndexedDB|JSON-RPC|LibRaw|WASM|ONNX|PyTorch|OpenCV/i.test(faqDoc), 'docs/faq.md must mirror layman-friendly Settings FAQ wording');
+    assert.ok(faqDoc.includes('# FAQ Section in Settings') && faqDoc.includes('IndexedDB') && faqDoc.includes('Personalized Experience') && !/CacheStorage|localStorage|AES-256-GCM|JSON-RPC|LibRaw|WASM|ONNX|PyTorch|OpenCV/i.test(faqDoc), 'docs/faq.md must mirror layman-friendly Settings FAQ wording including IndexedDB & Personalized Experience');
+
+    // Test 10: Symmetrical Thumbs Up / Thumbs Down Mutual Exclusion + Toggle-Off & Lazy UnifiedMemoryStore Hydration
+    assert.ok(coreUxCss.includes('body .assistant-action-menu button[hidden]') && coreUxCss.includes('body .assistant-action-menu button.hidden'), 'Feedback mutual hiding must override assistant menu button display:flex');
+    assert.ok(indexHtml.includes('function syncFeedbackButtonState(') && indexHtml.includes("btnDown?.classList?.contains('is-feedback-down')") && indexHtml.includes('syncFeedbackButtonState(messageId, 0'), 'Feedback handlers must hide opposite thumb when voted and restore both when toggled again');
+    assert.ok(indexHtml.includes('savedMemoryContext: personalizationActive && relevantSavedMemoryContext'), 'Client request must forward savedMemoryContext and effectiveCustomPrompt inside preferences');
+    const { UnifiedMemoryStore, STORAGE_KEY_V1 } = await import('../app/unified-memory.js');
+    const fakeStoreMap = new Map([[STORAGE_KEY_V1, JSON.stringify({ schemaVersion: 1, memories: [{ id: 'm1', text: 'Lives in Bengaluru', category: 'location', enabled: true }] })]]);
+    const memStore = new UnifiedMemoryStore({
+        getItem: k => fakeStoreMap.get(k) ?? null,
+        setItem: (k, v) => { fakeStoreMap.set(k, v); }
+    });
+    assert.equal(memStore.getEnabled().length, 1, 'UnifiedMemoryStore.getEnabled() must lazily hydrate saved memories on first turn without prior init() call');
 }
 
 console.log('================================================================');
