@@ -210,7 +210,7 @@ function showHelpModal() {
                                         </div>
                                         <div class="settings-row-text">
                                             <h3 class="settings-row-title">Export Conversation</h3>
-                                            <p class="settings-row-desc">Save active conversation for offline archives</p>
+                                            <p class="settings-row-desc">Save active conversation as Markdown</p>
                                         </div>
                                     </div>
                                     <div class="settings-row-right settings-export-buttons">
@@ -220,12 +220,6 @@ function showHelpModal() {
                                                 <polyline points="14 2 14 8 20 8"/>
                                             </svg>
                                             <span>Markdown</span>
-                                        </button>
-                                        <button type="button" class="settings-chip-btn" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { exportCurrentChat('json') })}>
-                                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                                <path d="M4 17l6-6-6-6M12 19h8"/>
-                                            </svg>
-                                            <span>JSON</span>
                                         </button>
                                     </div>
                                 </div>
@@ -884,48 +878,48 @@ function showHelpModal() {
                         </div>
                         <div class="help-modal-body custom-scrollbar">
                             <p class="settings-subview-desc">
-                                Frequently asked questions about models, live web search, offline ONNX vision fallback, memory, privacy, and usage limits.
+                                Simple answers to common questions about how JARVIS searches the web, handles images, protects your privacy, and saves your chats.
                             </p>
 
                             <details class="settings-group-card mb-3" style="padding:14px;" open>
-                                <summary class="text-xs font-semibold text-neutral-100 cursor-pointer">How does Live Web Search prioritize recent updates and avoid stale results?</summary>
+                                <summary class="text-xs font-semibold text-neutral-100 cursor-pointer">How does Live Web Search find fresh information?</summary>
                                 <p class="text-[11px] text-neutral-300 leading-relaxed mt-2">
-                                    Live Web Search races public sources (DuckDuckGo, SearXNG, Google News RSS, Wikipedia, Wikidata, GDELT), applies chronological recency scoring with explicit year inference so old archives do not masquerade as current reporting, and synthesizes answers using Groq <code>openai/gpt-oss-120b</code> and <code>qwen/qwen3.8-27b</code> first with automatic Google Gemini failover.
+                                    When Web Search is switched on, JARVIS checks live news, reference pages, and trusted public sources across the internet to bring back the newest facts instead of relying only on older background knowledge. Newer articles are prioritized so outdated pages do not show up as current news, and clickable source links are included so you can verify what was found.
                                 </p>
                             </details>
 
                             <details class="settings-group-card mb-3" style="padding:14px;">
-                                <summary class="text-xs font-semibold text-neutral-100 cursor-pointer">What happens when cloud API or vision quotas run out?</summary>
+                                <summary class="text-xs font-semibold text-neutral-100 cursor-pointer">What happens if free daily limits run out?</summary>
                                 <p class="text-[11px] text-neutral-300 leading-relaxed mt-2">
-                                    You can add your own API keys anytime under <strong>API Keys (BYOK)</strong>. For uploaded images and PDFs, JARVIS automatically cascades from cloud vision to client-side <strong>Tesseract.js WASM OCR</strong> for readable text and <strong>On-Device Vision Fallback (ONNX / Transformers.js)</strong> in a Web Worker for visual descriptions and object classes — without needing PyTorch or OpenCV on Vercel servers.
+                                    You can add your own personal free API keys anytime under <strong>API Keys (BYOK)</strong> to keep going without shared limits. Even when online image limits run out, JARVIS can still read text in screenshots and recognize everyday photos right on your device so you are never left completely stuck.
                                 </p>
                             </details>
 
                             <details class="settings-group-card mb-3" style="padding:14px;">
-                                <summary class="text-xs font-semibold text-neutral-100 cursor-pointer">How does the Think button work on mobile and desktop?</summary>
+                                <summary class="text-xs font-semibold text-neutral-100 cursor-pointer">What does the Think button do?</summary>
                                 <p class="text-[11px] text-neutral-300 leading-relaxed mt-2">
-                                    Tapping the brain icon in the composer enables Deep Reasoning mode (shown as a dismissible <code>Think ×</code> chip above the input box). It pins deeper reasoning allocation (<code>thinkingBudget: 8192</code> / deeper reasoning tier) across the centralized backend LLM router until toggled off.
+                                    Tapping the brain icon next to the message box turns on deeper thinking mode. Use it whenever you want JARVIS to slow down and work carefully through tricky math, coding, or multi-step questions. You can turn it back off anytime by tapping the <strong>Think ×</strong> tag above the input box.
                                 </p>
                             </details>
 
                             <details class="settings-group-card mb-3" style="padding:14px;">
-                                <summary class="text-xs font-semibold text-neutral-100 cursor-pointer">Where are my chats, attachments, and saved memories stored?</summary>
+                                <summary class="text-xs font-semibold text-neutral-100 cursor-pointer">Where are my chats, attachments, and saved memories kept?</summary>
                                 <p class="text-[11px] text-neutral-300 leading-relaxed mt-2">
-                                    All conversations, custom instructions, memories, and optional on-device semantic/vision model caches stay strictly in your browser (IndexedDB, CacheStorage, and localStorage). Use <strong>Export Conversation</strong> or <strong>Backup &amp; storage</strong> (AES-256-GCM encrypted <code>.jarvis.json</code>) to move data across devices.
+                                    All of your conversations, custom instructions, and saved memories stay privately on your own device and browser — we do not store your personal chat history on our servers. You can download the current chat as a Markdown file anytime using <strong>Export Conversation</strong>, or save a password-protected backup under <strong>Backup &amp; storage</strong> to move your chats to another device.
                                 </p>
                             </details>
 
                             <details class="settings-group-card mb-3" style="padding:14px;">
-                                <summary class="text-xs font-semibold text-neutral-100 cursor-pointer">How does Saved Memory normalize follow-up facts, and does JARVIS enforce DLP?</summary>
+                                <summary class="text-xs font-semibold text-neutral-100 cursor-pointer">How do Saved Memories work, and is my private info protected?</summary>
                                 <p class="text-[11px] text-neutral-300 leading-relaxed mt-2">
-                                    Saved memories run self-contained entity normalization (resolving ambiguous pronouns against recent context turns when saved) while blocking secrets and credentials via client and server Data Loss Prevention (<code>DLP Active</code> under Compliance &amp; Observability).
+                                    When Personalization is turned on, JARVIS picks up helpful preferences and details you share (like your name, city, or preferred reply style) and rewrites them clearly so they make sense later on. You can view, edit, export, or delete any saved memory anytime. Built-in safety checks also block accidental sharing of passwords, card numbers, and private keys before messages leave your device.
                                 </p>
                             </details>
 
                             <details class="settings-group-card mb-2" style="padding:14px;">
-                                <summary class="text-xs font-semibold text-neutral-100 cursor-pointer">Which image formats, file sizes, and tools are supported?</summary>
+                                <summary class="text-xs font-semibold text-neutral-100 cursor-pointer">What kinds of photos, documents, and helpers are supported?</summary>
                                 <p class="text-[11px] text-neutral-300 leading-relaxed mt-2">
-                                    Standard images (JPEG, PNG, WebP, GIF) plus HEIC/AVIF, TIFF, PSD, and camera RAW files (up to 50 MB / 64 MP) are decoded locally in-browser via ImageMagick/LibRaw WASM before upload. Tool-capable requests also connect via standard MCP JSON-RPC 2.0 (<code>web_search</code>, <code>web_fetch</code>, <code>datetime_context</code>) and isolated in-browser Python/JS execution.
+                                    You can upload standard photos, iPhone photos, camera RAW pictures, PDFs, Word documents, spreadsheets, and text files (large photos and uncommon formats are automatically prepared on your device first). JARVIS can also check live web results, open web pages, look up the current date and time, and run quick calculations for you.
                                 </p>
                             </details>
                         </div>

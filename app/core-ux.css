@@ -464,3 +464,51 @@ body .assistant-action-menu-divider {
     background:rgba(255, 255, 255, 0.1);
     margin:5px 4px;
 }
+
+/* Saved Memories modal buttons (unlayered so Tailwind button reset cannot flatten borders/padding) */
+body .memory-manager-toolbar {
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+}
+body .memory-manager-toolbar button,
+body .memory-manager-actions button,
+body .memory-manager-search button,
+body .memory-manager-close {
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-height:38px;
+    padding:8px 14px;
+    border:1px solid rgba(255, 255, 255, 0.2);
+    border-radius:10px;
+    background:#1a1c22;
+    color:#f5f5f5;
+    font-size:13px;
+    font-weight:600;
+    cursor:pointer;
+    transition:background 0.15s ease, border-color 0.15s ease;
+}
+body .memory-manager-close,
+body .memory-manager-search button {
+    width:42px;
+    min-width:42px;
+    padding:0;
+}
+body .memory-manager-toolbar button:hover,
+body .memory-manager-actions button:hover,
+body .memory-manager-search button:hover,
+body .memory-manager-close:hover {
+    background:#272a33;
+    border-color:rgba(255, 255, 255, 0.34);
+    color:#ffffff;
+}
+body #memory-manager-btn-clear {
+    color:#fda4af;
+    border-color:rgba(244, 63, 94, 0.32);
+    background:rgba(244, 63, 94, 0.08);
+}
+body #memory-manager-btn-clear:hover {
+    background:rgba(244, 63, 94, 0.18);
+    border-color:rgba(244, 63, 94, 0.5);
+}

@@ -1008,13 +1008,21 @@ console.log('\n--- Test 5: Groq Model Candidate Realness & Non-Llama Assurance -
     assert.ok(!renderedVisualStub.includes('JSON block (type: flow)'), 'Malformed visual placeholder fences must not render as raw VISUAL code blocks');
     assert.ok(!renderedVisualStub.includes('1 line'), 'Suppressed visual stub must not emit a code block header');
 
-    // Test 9: Settings FAQ Sub-view, Docs Mirror, and On-Device ONNX Vision Toggle
+    // Test 9: Settings FAQ Sub-view (Layman Wording), Export Markdown-Only, Memory Button Styling, and Vision Toggle
     assert.ok(settingsRuntimeJs.includes('id="settings-row-faq"') && settingsRuntimeJs.includes("switchSettingsView('faq')"), 'Settings About section must expose FAQ row');
     assert.ok(settingsRuntimeJs.includes('id="settings-view-faq"'), 'Settings modal must include FAQ sub-view container');
+    const faqStart = settingsRuntimeJs.indexOf('id="settings-view-faq"');
+    const faqEnd = settingsRuntimeJs.indexOf('document.querySelector(\'.page-shell\')', faqStart);
+    const faqHtml = settingsRuntimeJs.slice(faqStart, faqEnd);
+    assert.ok(!/IndexedDB|CacheStorage|localStorage|AES-256-GCM|JSON-RPC|LibRaw|ImageMagick|WASM|ONNX|PyTorch|OpenCV|thinkingBudget/i.test(faqHtml), 'Settings FAQ must use layman terms without technical jargon');
+    assert.ok(!settingsRuntimeJs.includes("exportCurrentChat('json')"), 'Export Conversation must only support Markdown and must not expose JSON export');
+    assert.ok(settingsRuntimeJs.includes("exportCurrentChat('markdown')"), 'Export Conversation must support Markdown');
     assert.ok(indexHtml.includes("else if (viewName === 'faq')") && indexHtml.includes("document.getElementById('settings-view-faq')"), 'Settings view switcher must handle faq view navigation');
-    assert.ok(settingsCtrl.includes('On-Device Vision Fallback (ONNX)') && settingsCtrl.includes('id="local-vision-enabled"'), 'Settings controller must expose On-Device Vision Fallback toggle');
+    assert.ok(indexHtml.includes('Export Markdown</button>') && indexHtml.includes('function exportUnifiedMemoriesMarkdown('), 'Saved Memories modal must export readable Markdown cleanly');
+    assert.ok(coreUxCss.includes('body .memory-manager-toolbar button'), 'Saved Memories toolbar buttons must have unlayered dark pill styling');
+    assert.ok(settingsCtrl.includes('On-Device Vision Fallback') && settingsCtrl.includes('id="local-vision-enabled"'), 'Settings controller must expose On-Device Vision Fallback toggle');
     const faqDoc = fs.readFileSync(path.resolve('docs/faq.md'), 'utf8');
-    assert.ok(faqDoc.includes('# FAQ Section in Settings') && faqDoc.includes('On-Device Vision Fallback (ONNX)'), 'docs/faq.md must document Settings FAQ section and ONNX vision fallback');
+    assert.ok(faqDoc.includes('# FAQ Section in Settings') && !/IndexedDB|JSON-RPC|LibRaw|WASM|ONNX|PyTorch|OpenCV/i.test(faqDoc), 'docs/faq.md must mirror layman-friendly Settings FAQ wording');
 }
 
 console.log('================================================================');

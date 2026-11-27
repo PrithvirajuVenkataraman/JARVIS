@@ -22388,10 +22388,6 @@ function showChatExportFormatPicker() {
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
                     <span>HTML Document (.html)</span>
                 </button>
-                <button type="button" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { exportChatHistoryJson(); closeChatExportFormatPicker(); })}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H6a2 2 0 0 0-2 2v3a2 2 0 0 1-2 2 2 2 0 0 1 2 2v3a2 2 0 0 0 2 2h2"></path><path d="M16 3h2a2 2 0 0 1 2 2v3a2 2 0 0 0 2 2 2 2 0 0 0-2 2v3a2 2 0 0 1-2 2h-2"></path></svg>
-                    <span>JSON Data (.json)</span>
-                </button>
                 <button type="button" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { exportChatHistoryText(); closeChatExportFormatPicker(); })}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="6" x2="20" y2="6"></line><line x1="4" y1="12" x2="14" y2="12"></line><line x1="4" y1="18" x2="18" y2="18"></line></svg>
                     <span>Plain Text (.txt)</span>
@@ -26362,7 +26358,7 @@ function showMemoryManager() {
             </div>
             <div class="memory-manager-toolbar">
                 <button id="memory-manager-btn-add" type="button" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { handleMemoryManagerAddClick() })}>Add memory</button>
-                ${isUnified ? ("<button id=\"memory-manager-btn-export\" type=\"button\" " + (window.JarvisTrustedUI.bindUiEvent("click", function(event) { exportUnifiedMemoriesJson() })) + ">Export JSON</button>") : ''}
+                ${isUnified ? ("<button id=\"memory-manager-btn-export\" type=\"button\" " + (window.JarvisTrustedUI.bindUiEvent("click", function(event) { exportUnifiedMemoriesMarkdown() })) + ">Export Markdown</button>") : ''}
                 <button id="memory-manager-btn-clear" type="button" ${window.JarvisTrustedUI.bindUiEvent("click", function(event) { handleMemoryManagerClearClick() })}>Clear all</button>
             </div>
             <div id="memory-manager-list" class="memory-manager-list" role="region" aria-label="Saved memory list"></div>
@@ -26410,6 +26406,24 @@ async function deleteUnifiedMemoryItem(id) {
     renderMemoryManagerList();
 }
 window.deleteUnifiedMemoryItem = deleteUnifiedMemoryItem;
+
+function exportUnifiedMemoriesMarkdown() {
+    if (!window.JarvisUnifiedMemory?.unifiedMemoryStore) return;
+    const items = window.JarvisUnifiedMemory.unifiedMemoryStore.getAll ? window.JarvisUnifiedMemory.unifiedMemoryStore.getAll() : [];
+    if (!items.length) { showTemporaryMessage?.('No saved memories to export.'); return; }
+    const lines = ['# Saved Memories', '*Exported from JARVIS on ' + new Date().toLocaleString() + '*', '', ...items.map(m => '- **' + (m.category || 'general') + '**: ' + String(m.text || '').trim())];
+    const blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `jarvis-memories-${new Date().toISOString().slice(0, 10)}.md`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showTemporaryMessage?.('Saved memories exported as Markdown');
+}
+window.exportUnifiedMemoriesMarkdown = exportUnifiedMemoriesMarkdown;
 
 function exportUnifiedMemoriesJson() {
     if (!window.JarvisUnifiedMemory?.unifiedMemoryStore) return;
@@ -29681,7 +29695,7 @@ function handleChatSessionMenuAction(action) {
     closeChatSessionMenu();
 }
 
-function exportCurrentChat(format = 'markdown') {
+function exportCurrentChat() {
     const session = (typeof getActiveChatSession === 'function' ? getActiveChatSession() : null) || {
         title: 'JARVIS Conversation',
         messages: []
@@ -29704,15 +29718,7 @@ function exportCurrentChat(format = 'markdown') {
     let mimeType = 'text/markdown;charset=utf-8';
     let fileExtension = 'md';
 
-    if (format === 'json') {
-        mimeType = 'application/json;charset=utf-8';
-        fileExtension = 'json';
-        fileContent = JSON.stringify({
-            title,
-            exportedAt: new Date().toISOString(),
-            messages
-        }, null, 2);
-    } else {
+
         const mdLines = [
             `# ${title}`,
             `*Exported from JARVIS on ${new Date().toLocaleString()}*`,
@@ -29730,7 +29736,6 @@ function exportCurrentChat(format = 'markdown') {
             mdLines.push('');
         }
         fileContent = mdLines.join('\n').trim();
-    }
 
     const safeTitle = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40) || 'chat';
     const filename = `jarvis-${safeTitle}-${dateStr}.${fileExtension}`;
@@ -29838,12 +29843,7 @@ if (typeof window !== 'undefined') {
                 e.preventDefault();
                 if (typeof exportCurrentChat === 'function') exportCurrentChat('markdown');
                 else if (typeof exportChatHistoryMarkdown === 'function') exportChatHistoryMarkdown();
-            } else if (key === 'j') {
-                e.preventDefault();
-                if (typeof exportCurrentChat === 'function') exportCurrentChat('json');
-                else if (typeof exportChatHistoryJson === 'function') exportChatHistoryJson();
-                else if (typeof exportChatHistoryJSON === 'function') exportChatHistoryJSON();
-            } else if (e.key === ',' && cmdOrCtrl) {
+                        } else if (e.key === ',' && cmdOrCtrl) {
                 e.preventDefault();
                 if (typeof showHelpModal === 'function') showHelpModal();
                 else if (typeof openSidebarQuickAction === 'function') openSidebarQuickAction('system');
