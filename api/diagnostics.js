@@ -9,6 +9,7 @@ import marketsHandler from './_lib/markets.js';
 import rankTextsHandler from './_lib/rank-texts.js';
 import verifyHandler from './_lib/verify.js';
 import { resolveRequestPath } from './_lib/api-router.js';
+import { getDistributedCacheStatus } from './_lib/distributed-cache.js';
 
 function hasEnv(name) {
     return String(process.env[name] || '').trim().length > 0;
@@ -71,6 +72,7 @@ export function buildDiagnosticsStatus() {
             exporterConfigured: isTelemetryExporterConfigured(),
             feedbackEnabled: process.env.FEEDBACK_ENABLED !== 'false'
         },
+        cache: getDistributedCacheStatus(),
         costControls
     };
 }

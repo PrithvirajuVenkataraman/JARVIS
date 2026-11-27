@@ -325,6 +325,50 @@ test('identical concurrent retrieval is coalesced, and one cancellation does not
     assert.notEqual((await cachedResearchSearch(q, {}, search))[0].title, 'mutated');
 });
 
+test('cachedResearchSearch shares public retrieval via L2 Upstash Redis KV across cold instances', async () => {
+    const { clearL1CacheForTesting } = await import('../api/_lib/distributed-cache.js');
+    const origFetch = globalThis.fetch;
+    const savedUrl = process.env.UPSTASH_REDIS_REST_URL;
+    const savedToken = process.env.UPSTASH_REDIS_REST_TOKEN;
+    process.env.UPSTASH_REDIS_REST_URL = 'https://mock-upstash.example';
+    process.env.UPSTASH_REDIS_REST_TOKEN = 'secret-upstash-token';
+    const kv = new Map();
+    const sharedQuery = `Horizon mission l2 retrieval ${Date.now()}`;
+    const storedRecord = JSON.stringify({
+        data: { results: [{ title: 'Horizon Shared L2 Result', url: 'https://horizon.example/update', snippet: 'Shared update.' }] },
+        storedAt: Date.now(),
+        expiresAt: Date.now() + 120_000
+    });
+    globalThis.fetch = async (url, init = {}) => {
+        const href = String(url);
+        if (href.startsWith('https://mock-upstash.example/get/')) {
+            const rawKey = decodeURIComponent(href.split('/get/')[1]);
+            return Response.json({ result: kv.get(rawKey) || storedRecord });
+        }
+        if (href.startsWith('https://mock-upstash.example/set/')) {
+            const rawKey = decodeURIComponent(href.split('/set/')[1].split('?')[0]);
+            kv.set(rawKey, String(init.body || ''));
+            return Response.json({ result: 'OK' });
+        }
+        return origFetch(url, init);
+    };
+    try {
+        clearL1CacheForTesting();
+        let searchCalls = 0;
+        const rows = await cachedResearchSearch(sharedQuery, { retrievalOnly: true }, async () => {
+            searchCalls++;
+            return [];
+        });
+        assert.equal(searchCalls, 0, 'L2 KV hit must bypass live search providers across cold serverless instances');
+        assert.equal(rows[0].title, 'Horizon Shared L2 Result');
+    } finally {
+        clearL1CacheForTesting();
+        globalThis.fetch = origFetch;
+        if (savedUrl === undefined) delete process.env.UPSTASH_REDIS_REST_URL; else process.env.UPSTASH_REDIS_REST_URL = savedUrl;
+        if (savedToken === undefined) delete process.env.UPSTASH_REDIS_REST_TOKEN; else process.env.UPSTASH_REDIS_REST_TOKEN = savedToken;
+    }
+});
+
 test('private and disguised loopback URLs are rejected before fetching', () => {
     for (const url of ['http://127.1/a', 'http://2130706433/a', 'http://[::1]/', 'http://[::ffff:127.0.0.1]/', 'http://169.254.169.254/', 'http://localhost/', 'http://10.0.0.1/', 'file:///etc/passwd']) assert.equal(isPublicWebUrl(url), false, url);
     assert.equal(isPublicWebUrl('https://example.com/article'), true);

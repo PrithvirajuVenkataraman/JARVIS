@@ -2,6 +2,7 @@ import { userPreferenceDirective } from './answer-preferences.js';
 import { scanDlp } from '../../app/dlp-engine.js';
 import { allowGenerationAttempts, fetchWithLifecycle as fetch } from './request-lifecycle.js';
 import { createHash } from 'node:crypto';
+import { buildCacheKey, getCachedRAGEntry, getKvConfig, setCachedRAGEntry } from './distributed-cache.js';
 import { RESEARCH_LIMITS, researchTimeoutSignal } from '../../app/search/research-contract.mjs';
 import { normalizeEvidence, evidenceText, formatResearchEvidence, researchTerms, canonicalResearchUrl, assessSourceRelevance, rankResearchEvidence, matchesProtectedEntities, protectedEntities, comparisonParts, buildResearchRequirements, validateResearchAnswer, mergeResearchValidation, splitResearchQuestions } from './research-evidence.js';
 import { callResearchModel } from './research-model.js';
@@ -521,25 +522,64 @@ export async function runResearch(query, options = {}, dependencies = {}) {
     } finally { scope.dispose(); }
 }
 
-// Only retrieval is cached: no personal history, credentials, generated answer, or stale live claims.
+function sanitizeKvSearchResults(results = []) {
+    return (Array.isArray(results) ? results : []).slice(0, 12).map(item => {
+        if (!item || typeof item !== 'object') return null;
+        return {
+            title: String(item.title || '').slice(0, 300),
+            url: String(item.url || '').slice(0, 1000),
+            originalUrl: item.originalUrl ? String(item.originalUrl).slice(0, 1000) : undefined,
+            snippet: String(item.snippet || '').slice(0, 800),
+            publisher: item.publisher ? String(item.publisher).slice(0, 160) : undefined,
+            date: item.date ? String(item.date).slice(0, 64) : undefined,
+            sourceType: item.sourceType ? String(item.sourceType).slice(0, 64) : undefined,
+            authorityTier: Number.isFinite(Number(item.authorityTier)) ? Number(item.authorityTier) : undefined,
+            score: Number.isFinite(Number(item.score)) ? Number(item.score) : undefined
+        };
+    }).filter(Boolean);
+}
+
+// Only public retrieval is cached: no personal history, credentials, generated answer, or stale live claims.
 export async function cachedResearchSearch(query, options, search) {
-    const key = createHash('sha256').update(clean(query).toLowerCase()).digest('hex');
-    const ttl = /\b(today|latest|current|news|price|weather|score|now|yesterday)\b/i.test(query) ? 60000 : 300000;
-    const entry = cache.get(key);
-    if (entry && Date.now() < entry.expiresAt) return structuredClone(entry.results);
+    const cleanQuery = clean(query);
+    const key = createHash('sha256').update(cleanQuery.toLowerCase()).digest('hex');
+    const ttl = /\b(today|latest|current|news|price|weather|score|now|yesterday)\b/i.test(cleanQuery) ? 60000 : 300000;
+    const bypassCache = options?.skipCache === true || options?.forceLive === true;
+    if (!bypassCache) {
+        const entry = cache.get(key);
+        if (entry && Date.now() < entry.expiresAt) return structuredClone(entry.results);
+    }
     if (options.signal?.aborted) return [];
-    let work = inFlight.get(key);
+    let work = !bypassCache ? inFlight.get(key) : null;
     if (!work) {
         const scope = researchTimeoutSignal(options.timeoutMs || RESEARCH_LIMITS.PROVIDER_MS);
+        const kvKey = buildCacheKey('research_search', cleanQuery, { retrievalOnly: Boolean(options?.retrievalOnly) });
+        const kvEnabled = !bypassCache && getKvConfig().enabled;
         work = { scope, users: 0, promise: null };
-        work.promise = Promise.resolve().then(() => search(query, { ...options, signal: scope.signal })).then(results => {
-            if (results?.length && !scope.signal.aborted) {
+        work.promise = Promise.resolve().then(async () => {
+            if (kvEnabled && !scope.signal.aborted) {
+                const l2Hit = await getCachedRAGEntry(kvKey, { allowStale: false, timeoutMs: 450, signal: scope.signal }).catch(() => null);
+                const cachedResults = Array.isArray(l2Hit?.data?.results) ? l2Hit.data.results : null;
+                if (cachedResults?.length && !scope.signal.aborted) {
+                    if (cache.size >= 200) cache.delete(cache.keys().next().value);
+                    cache.set(key, { results: structuredClone(cachedResults), expiresAt: Date.now() + ttl });
+                    return cachedResults;
+                }
+            }
+            const results = await search(query, { ...options, signal: scope.signal });
+            if (results?.length && !scope.signal.aborted && !bypassCache) {
                 if (cache.size >= 200) cache.delete(cache.keys().next().value);
                 cache.set(key, { results: structuredClone(results), expiresAt: Date.now() + ttl });
+                if (kvEnabled) {
+                    const compact = sanitizeKvSearchResults(results);
+                    if (compact.length) {
+                        setCachedRAGEntry(kvKey, { results: compact }, ttl, { noSwr: true, maxBytes: 65_536 }).catch(() => {});
+                    }
+                }
             }
             return results || [];
-        }).finally(() => { scope.dispose(); if (inFlight.get(key) === work) inFlight.delete(key); });
-        inFlight.set(key, work);
+        }).finally(() => { scope.dispose(); if (!bypassCache && inFlight.get(key) === work) inFlight.delete(key); });
+        if (!bypassCache) inFlight.set(key, work);
     }
     work.users++;
     let abort;

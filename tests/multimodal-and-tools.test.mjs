@@ -3199,7 +3199,55 @@ await setCachedRAGEntry('swr_key', { verified: true, answer: 'Stale test' }, -10
 const swrHit = await getCachedRAGEntry('swr_key');
 assert.ok(swrHit);
 assert.equal(swrHit.stale, true);
+assert.equal(await getCachedRAGEntry('swr_key', { allowStale: false }), null);
 console.log('  [PASS] 1.2 Stale-While-Revalidate (SWR) grace window verified');
+
+// Section 1.3: L2 Upstash Redis REST KV cross-instance roundtrip (mocked HTTP, single-JSON encoding)
+{
+    const kvBacking = new Map();
+    const origFetch = globalThis.fetch;
+    const savedUrl = process.env.UPSTASH_REDIS_REST_URL;
+    const savedToken = process.env.UPSTASH_REDIS_REST_TOKEN;
+    process.env.UPSTASH_REDIS_REST_URL = 'https://mock-upstash.example';
+    process.env.UPSTASH_REDIS_REST_TOKEN = 'secret-upstash-token';
+    let lastPostBody = '';
+    globalThis.fetch = async (url, init = {}) => {
+        const href = String(url);
+        if (href.startsWith('https://mock-upstash.example/set/')) {
+            const rawKey = decodeURIComponent(href.split('/set/')[1].split('?')[0]);
+            lastPostBody = String(init.body || '');
+            kvBacking.set(rawKey, lastPostBody);
+            return Response.json({ result: 'OK' });
+        }
+        if (href.startsWith('https://mock-upstash.example/get/')) {
+            const rawKey = decodeURIComponent(href.split('/get/')[1]);
+            const stored = kvBacking.get(rawKey) || null;
+            return Response.json({ result: stored });
+        }
+        return origFetch(url, init);
+    };
+    try {
+        clearL1CacheForTesting();
+        const l2Key = buildCacheKey('l2_cross_device', 'What is the status of Horizon?');
+        await setCachedRAGEntry(l2Key, { verified: true, answer: 'Shared L2 answer' }, 30_000);
+        assert.equal(typeof JSON.parse(lastPostBody).data, 'object', 'L2 SET body must be single-encoded JSON (not double-stringified)');
+        clearL1CacheForTesting(); // Simulate Device B hitting a cold Vercel serverless instance
+        const l2Read = await getCachedRAGEntry(l2Key, { allowStale: false });
+        assert.ok(l2Read, 'Device B must hit shared L2 Redis KV after L1 clear');
+        assert.equal(l2Read.tier, 'L2_distributed_kv');
+        assert.equal(l2Read.stale, false);
+        assert.equal(l2Read.data.answer, 'Shared L2 answer');
+        const oversizedKey = buildCacheKey('l2_oversized', 'huge page');
+        await setCachedRAGEntry(oversizedKey, { verified: true, answer: 'x'.repeat(256) }, 30_000, { maxBytes: 64 });
+        assert.equal(kvBacking.has(oversizedKey), false, 'Oversized payloads must skip L2 Redis to protect 250 MB free quota');
+        console.log('  [PASS] 1.3 L2 Upstash Redis REST KV cross-instance serialization & size guard verified');
+    } finally {
+        clearL1CacheForTesting();
+        globalThis.fetch = origFetch;
+        if (savedUrl === undefined) delete process.env.UPSTASH_REDIS_REST_URL; else process.env.UPSTASH_REDIS_REST_URL = savedUrl;
+        if (savedToken === undefined) delete process.env.UPSTASH_REDIS_REST_TOKEN; else process.env.UPSTASH_REDIS_REST_TOKEN = savedToken;
+    }
+}
 
 // Section 2: In-Process Hybrid Reranking (BM25 + Semantic + Date-Aware RRF)
 console.log('\n--- Section 2: In-Process Hybrid Reranking (BM25 + Date-Aware RRF) ---');

@@ -256,6 +256,7 @@ test('diagnostics capabilities and saved-key readiness are reported without secr
     assert.equal(typeof value.capabilities.vision.available, 'boolean');
     assert.equal(value.capabilities.images, undefined);
     assert.equal(value.model.byokSupported, isPersistentByokConfigured());
+    assert.equal(typeof value.cache?.distributedKvConfigured, 'boolean');
     assert.ok(!JSON.stringify(value).includes('PRIVATE KEY'));
 });
 
