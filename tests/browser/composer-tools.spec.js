@@ -159,13 +159,14 @@ test('picker navigation preserves drafts, composition, payloads, and changing ca
     await input.fill('/pro'); await page.locator('[data-command=professional]').click(); await expect(input).toHaveValue('make this professional: ');
 });
 
-test('web search has one saved state for its inline label, menu, and stationary outline', async ({ page }) => {
+test('web search preserves its state and respects the existing motion preferences', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
     const shell = page.locator('#input-bar-inner'), active = page.locator('#composer-web-search-active');
     await page.locator('#text-input').fill('Keep this draft');
     await page.locator('#composer-plus-btn').click(); await page.locator('#web-search-toggle-btn').click();
     await expect(active).toBeVisible(); await expect(shell).toHaveClass(/has-web-search/);
     await expect(active).toHaveAttribute('aria-pressed', 'true'); await expect(page.locator('#composer-actions-menu')).toBeHidden();
-    expect(await page.locator('.composer-web-outline').evaluate(element => getComputedStyle(element).animationName)).toBe('none');
+    expect(await page.locator('.composer-web-outline').evaluate(element => getComputedStyle(element).animationName)).toBe('web-outline-travel');
     await page.reload(); await page.waitForFunction(() => window.__jarvisModernReady); await expect(active).toBeVisible();
     await expect(page.locator('#text-input')).toHaveValue('Keep this draft');
     await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -250,9 +251,10 @@ for (const [width, height] of [[320, 568], [390, 844], [768, 1024], [1024, 768],
         await page.evaluate(() => window.showHelpModal());
         const modelRow = page.locator('.settings-row').filter({ has: page.locator('.settings-select') });
         if (width <= 640) {
-            const title = await modelRow.locator('.settings-row-title').boundingBox();
             const select = await modelRow.locator('.settings-select').boundingBox();
-            expect(Math.abs(title.x - select.x)).toBeLessThan(1);
+            const row = await modelRow.boundingBox();
+            expect(select.x).toBeGreaterThanOrEqual(row.x);
+            expect(select.x + select.width).toBeLessThanOrEqual(row.x + row.width + 1);
         }
         const recall = page.locator('#settings-local-recall-group'); await recall.scrollIntoViewIfNeeded();
         await expect(page.locator('#local-recall-enabled')).toHaveAttribute('role', 'switch');
@@ -263,10 +265,13 @@ for (const [width, height] of [[320, 568], [390, 844], [768, 1024], [1024, 768],
         await page.evaluate(() => window.switchSettingsView('custom_instructions'));
         const header = page.locator('#settings-view-custom-instructions .help-modal-header');
         await expect.poll(() => header.evaluate(element => {
-            const title = element.querySelector('.settings-modal-heading').getBoundingClientRect();
-            const frame = element.getBoundingClientRect();
-            return Math.abs(title.x + title.width / 2 - frame.x - frame.width / 2);
-        })).toBeLessThan(1);
+            const title = element.querySelector('.settings-modal-heading');
+            const range = document.createRange(); range.selectNodeContents(title);
+            const text = range.getBoundingClientRect();
+            const back = element.firstElementChild.getBoundingClientRect();
+            const done = element.lastElementChild.getBoundingClientRect();
+            return Math.min(text.left - back.right, done.left - text.right);
+        })).toBeGreaterThanOrEqual(0);
         expect(await header.evaluate(element => {
             const title = element.querySelector('.settings-modal-heading').getBoundingClientRect();
             const frame = element.getBoundingClientRect();

@@ -2,12 +2,13 @@ import { test, expect } from '@playwright/test';
 
 test.use({ serviceWorkers: 'block' });
 test.beforeEach(async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.addInitScript(() => localStorage.setItem('jarvis_permission_intro_v1', 'true'));
     await page.route('https://**/*', route => route.abort());
     await page.goto('/'); await page.waitForFunction(() => window.__jarvisModernReady);
 });
 
-for (const width of [320, 390, 768, 1024, 1440]) test(`static interface and readable composer at ${width}px`, async ({ page }, info) => {
+for (const width of [320, 390, 768, 1024, 1440]) test(`reduced-motion interface and readable composer at ${width}px`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: width < 500 ? 844 : 900 });
     await page.evaluate(() => window.setWebSearchMode('force'));
     await expect(page.locator('#composer-web-search-active')).toBeVisible();

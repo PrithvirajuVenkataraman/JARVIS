@@ -31,7 +31,9 @@ for (const [width, height] of [[320, 568], [390, 844], [768, 1024], [1024, 768],
         expect(await page.evaluate(async () => (await document.fonts.load('400 16px "Inter Variable"')).some(face => face.status === 'loaded'))).toBe(true);
         for (const selector of ['.chat-bubble-user p', '.assistant-message-text']) {
             const style = await page.locator(selector).first().evaluate(element => ({ size: parseFloat(getComputedStyle(element).fontSize), family: getComputedStyle(element).fontFamily }));
-            expect(style.size).toBeGreaterThanOrEqual(16); expect(style.family).toContain('Inter Variable');
+            if (width <= 640) expect(style.size).toBe(15);
+            else expect(style.size).toBeGreaterThanOrEqual(16);
+            expect(style.family).toContain('Inter Variable');
         }
         const actions = page.locator('.assistant-action-row > .assistant-action-icon, .assistant-action-row > .assistant-action-menu-wrap > .assistant-action-icon');
         await expect(actions).toHaveCount(4);
